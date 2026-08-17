@@ -3730,19 +3730,25 @@ console.log('\n══ 36. VOLATILE CONTEXT STAYS OUT OF THE CACHED PREFIX ══
 console.log('  -- The system prompt is frozen --');
 {
   const sys = asText(await buildSystemPrompt('test-model'));
-  assert(!/Git status/i.test(sys),
-    'Git status is no longer in the system prompt (it moved every time a file was written)');
+  const volatile = await buildVolatileContext();
+
+  // Asserted against the block the volatile builder actually emits, not against
+  // the words appearing anywhere. The loose form matched project memory that
+  // *described* this design — a file explaining "git status rides in the tail"
+  // failed the test proving git status rides in the tail.
+  assert(!sys.includes(volatile),
+    'The volatile block is not in the system prompt (it moved every time a file was written)');
+  assert(!/Git status:/.test(sys), 'nor the git-status heading it is delivered under');
   assert(sys.includes('Working directory'),
     'Genuinely stable environment facts stay in the system prompt');
 
-  const volatile = await buildVolatileContext();
-  assert(/Git status/i.test(volatile), 'Git status moved to the volatile block');
+  assert(/Git status:/.test(volatile), 'Git status moved to the volatile block');
 
   // The date is volatile for the same reason and belongs in the same place: a
   // model reasoning about "recently" from its training cutoff is reasoning from
   // the wrong year.
   assert(/Today's date: \d{4}-\d{2}-\d{2}/.test(volatile), 'The current date rides in the tail');
-  assert(!/Today's date/i.test(sys), 'and never in the cached prefix, where it would go stale daily');
+  assert(!/Today's date:/.test(sys), 'and never in the cached prefix, where it would go stale daily');
 }
 
 console.log('  -- Anthropic: appended behind the last breakpoint --');
