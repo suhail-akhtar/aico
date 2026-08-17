@@ -21,12 +21,13 @@ import path from 'path';
 import { loadMemory } from './memory/index.js';
 import type { MemoryEntry } from './memory/types.js';
 import { PromptDocument } from './prompt/index.js';
+import { currentCwd } from './run-context.js';
 
 const execAsync = promisify(exec);
 
 async function getGitStatus(): Promise<string> {
   try {
-    const { stdout } = await execAsync('git status --short', { cwd: process.cwd() });
+    const { stdout } = await execAsync('git status --short', { cwd: currentCwd() });
     return stdout.trim();
   } catch {
     return '';
@@ -134,7 +135,13 @@ someone's repository.`,
   doc.add({
     id: 'environment',
     order: 10,
-    body: `Working directory: ${process.cwd()}
+    // The *run's* directory, not the process's. These disagreed once the server
+    // could drive several projects at once, and the disagreement was worse than
+    // either answer alone: the tools worked in the folder the user had opened
+    // while the prompt named the folder the server was launched in, so the
+    // model confidently reported the wrong location and reasoned about paths
+    // relative to a directory it was not in.
+    body: `Working directory: ${currentCwd()}
 Platform: ${process.platform}
 OS: ${os.version()}`,
   });
@@ -268,7 +275,7 @@ carries the same information.`,
 
   // One section per memory source rather than one pre-formatted blob, so each
   // is labelled in the active dialect and can be targeted or overridden by id.
-  const cwd = process.cwd();
+  const cwd = currentCwd();
   memory.sections.forEach((entry: MemoryEntry, index: number) => {
     if (!entry.content.trim()) return;
     const { id, title } = memoryLabel(entry, cwd);

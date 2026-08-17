@@ -33,9 +33,13 @@ import path from 'path';
 import { EventHub } from './events.js';
 import { RunManager } from './runs.js';
 import { deriveMessages } from '../session/derive.js';
-import { forkSession, listSessionSummaries } from '../session/persistence.js';
+import { forkSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
+import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
-import { addProject, browse, isKnownProject, listProjects, normalizeProjectPath, removeProject } from './projects.js';
+import {
+  addProject, browse, isKnownProject, listProjects,
+  normalizeProjectPath, removeProject, renameProject,
+} from './projects.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
@@ -130,6 +134,25 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
    * check is the difference between "drive the folder the user opened" and
    * "start an agent anywhere on the filesystem, chosen by the caller".
    */
+  /**
+   * A session's run, but only if one already exists.
+   *
+   * Reading a transcript must not *open* a session. `ensure` fixes a run's
+   * directory for its whole life, so any request that creates one is deciding
+   * which folder the agent will work in — and a metadata read has no idea. The
+   * client fires `GET /api/session` concurrently with the event subscription,
+   * so whichever arrived first won that decision, and the read had no `project`
+   * to go on. A session opened in a folder the user had just chosen was filed
+   * under the directory the server was launched in, roughly half the time.
+   *
+   * Returns null when nothing is open, and callers answer from the log on disk
+   * or with an empty snapshot — which is the honest answer for a session that
+   * has never run anything.
+   */
+  function peek(sessionId: string): ReturnType<typeof runs.get> {
+    return runs.get(sessionId);
+  }
+
   async function resolveCwd(sessionId: string, requested?: string | null): Promise<string> {
     if (requested && await isKnownProject(cwd, requested)) {
       const target = normalizeProjectPath(requested);
@@ -254,7 +277,12 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     if (route === 'trajectory' && req.method === 'GET') {
       const sessionId = url.searchParams.get('id');
       if (!sessionId) { send(res, 400, { error: 'id required' }); return; }
-      await runs.ensure(sessionId, cwd);
+      if (!peek(sessionId)) {
+        const stored = await loadEventLog(sessionId, await resolveCwd(sessionId)).catch(() => null);
+        if (!stored) { send(res, 404, { error: 'no such session' }); return; }
+        send(res, 200, projectTrajectory(stored));
+        return;
+      }
       const view = runs.trajectoryOf(sessionId);
       if (!view) { send(res, 404, { error: 'no such session' }); return; }
 
@@ -282,16 +310,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       const sessionId = url.searchParams.get('id');
       if (!sessionId) { send(res, 400, { error: 'id required' }); return; }
       const format = url.searchParams.get('format') === 'txt' ? 'txt' : 'md';
-      const run = await runs.ensure(sessionId, cwd);
+      const opened = peek(sessionId)?.session
+        ?? await loadEventLog(sessionId, await resolveCwd(sessionId)).catch(() => null);
+      if (!opened) { send(res, 404, { error: 'no such session' }); return; }
       const { toMarkdown, toPlainText, exportFilename } = await import('../session/export.js');
-      const body = format === 'txt' ? toPlainText(run.session) : toMarkdown(run.session);
+      const body = format === 'txt' ? toPlainText(opened) : toMarkdown(opened);
       // Content-Disposition makes the browser save it rather than render it,
       // which is the whole point of an export rather than a view.
       res.writeHead(200, {
         'Content-Type': format === 'txt'
           ? 'text/plain; charset=utf-8'
           : 'text/markdown; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${exportFilename(run.session, format)}"`,
+        'Content-Disposition': `attachment; filename="${exportFilename(opened, format)}"`,
       });
       res.end(body);
       return;
@@ -300,7 +330,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     if (route === 'session/rename' && req.method === 'POST') {
       const { sessionId, title } = await readJson(req) as { sessionId?: string; title?: string };
       if (!sessionId || !title) { send(res, 400, { error: 'sessionId and title required' }); return; }
-      await runs.ensure(sessionId, cwd);
+      await runs.ensure(sessionId, await resolveCwd(sessionId));
       send(res, 200, { renamed: runs.rename(sessionId, title) });
       return;
     }
@@ -342,7 +372,20 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     if (route === 'session' && req.method === 'GET') {
       const sessionId = url.searchParams.get('id');
       if (!sessionId) { send(res, 400, { error: 'id required' }); return; }
-      const run = await runs.ensure(sessionId, cwd);
+      const run = peek(sessionId);
+      if (!run) {
+        // Never opened in this process. Read the log if there is one; a session
+        // that has never run reports nothing, which is what it has.
+        const stored = await loadEventLog(sessionId, await resolveCwd(sessionId)).catch(() => null);
+        send(res, 200, {
+          sessionId,
+          seq: stored?.length ?? 0,
+          busy: false,
+          messages: stored ? deriveMessages(stored.events) : [],
+          usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+        });
+        return;
+      }
       send(res, 200, {
         sessionId,
         seq: run.session.length,
@@ -379,6 +422,12 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         }
         return;
       }
+      case 'projects/rename': {
+        const { path: dir, name } = body as { path?: string; name?: string };
+        if (!dir) { send(res, 400, { error: 'path required' }); return; }
+        send(res, 200, { renamed: await renameProject(dir, name ?? '') });
+        return;
+      }
       case 'projects/remove': {
         const { path: dir } = body as { path?: string };
         if (!dir) { send(res, 400, { error: 'path required' }); return; }
@@ -412,7 +461,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           send(res, 400, { error: 'text required unless clearing' });
           return;
         }
-        await runs.ensure(sessionId, cwd);
+        await runs.ensure(sessionId, await resolveCwd(sessionId));
         send(res, 200, { ok: runs.setGoal(sessionId, text?.trim() ?? '', next) });
         return;
       }
@@ -428,7 +477,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           send(res, 400, { error: 'rating must be up, down or none' });
           return;
         }
-        await runs.ensure(sessionId, cwd);
+        await runs.ensure(sessionId, await resolveCwd(sessionId));
         send(res, 200, { ok: runs.rate(sessionId, targetSeq, rating, note) });
         return;
       }

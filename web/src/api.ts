@@ -146,6 +146,10 @@ export const api = {
 
   removeProject: (path: string) => post<{ removed: boolean }>('projects/remove', { path }),
 
+  /** Relabel a project. The path stays its identity; only the label moves. */
+  renameProject: (path: string, name: string) =>
+    post<{ renamed: boolean }>('projects/rename', { path, name }),
+
   /** Subdirectories of one directory, for the picker. */
   browse: (path?: string) =>
     request<BrowseResult>(`fs/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),

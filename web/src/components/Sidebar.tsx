@@ -20,6 +20,7 @@ import type { SessionSummary } from '../api';
 import { groupByAge, groupByProject, relativeAge } from '../grouping';
 import { Icon, type Glyph } from './Icon';
 import { SessionRowMenu } from './SessionRowMenu';
+import { ProjectGroupHeader } from './ProjectGroupHeader';
 
 export type View = 'chat' | 'trajectory' | 'system';
 
@@ -42,6 +43,8 @@ export function Sidebar(
   const newSession = useStore(s => s.newSession);
   const [filter, setFilter] = useState('');
   const [searching, setSearching] = useState(false);
+  /** Folded groups, by path. A view preference about right now, not stored. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const showArchived = useStore(s => s.showArchived);
   const toggleArchived = useStore(s => s.toggleArchived);
 
@@ -153,30 +156,40 @@ export function Sidebar(
             <p className="px-3 py-3 text-[13px] text-aico-muted">Nothing matches that.</p>
           )}
 
-          {groups.map(group => (byProject || group.items.length > 0) && (
-            <section key={group.label + (group.path ?? '')} className="mb-1">
-              <h2
-                className={`flex items-center gap-1.5 px-3 pb-1 pt-3 text-[11px] font-medium
-                            tracking-wider text-aico-muted ${byProject ? '' : 'uppercase'}`}
-                {...(group.path ? { title: group.path } : {})}
-              >
-                {byProject && <Icon name="folder" size={12} />}
-                <span className="min-w-0 truncate">{group.label}</span>
-              </h2>
-              {group.items.length === 0 && (
-                <p className="px-3 pb-1 text-[12px] text-aico-muted">No sessions here yet.</p>
-              )}
-              {group.items.map(session => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  running={session.running === true || activeSessions.includes(session.id)}
-                  current={session.id === sessionId}
-                  onSelect={() => select(session.id)}
+          {groups.map(group => {
+            const path = group.path ?? '';
+            const known = projects.some(p => p.path === path);
+            const isFolded = collapsed.has(path);
+            return (
+              <section key={group.label + path} className="mb-1">
+                <ProjectGroupHeader
+                  label={group.label}
+                  path={path}
+                  known={known}
+                  isLaunch={projects.some(p => p.path === path && p.isLaunch)}
+                  collapsed={isFolded}
+                  count={group.items.length}
+                  onToggle={() => setCollapsed(current => {
+                    const next = new Set(current);
+                    if (next.has(path)) next.delete(path); else next.add(path);
+                    return next;
+                  })}
                 />
-              ))}
-            </section>
-          ))}
+                {!isFolded && group.items.length === 0 && (
+                  <p className="px-3 pb-1 text-[12px] text-aico-muted">No sessions here yet.</p>
+                )}
+                {!isFolded && group.items.map(session => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    running={session.running === true || activeSessions.includes(session.id)}
+                    current={session.id === sessionId}
+                    onSelect={() => select(session.id)}
+                  />
+                ))}
+              </section>
+            );
+          })}
         </nav>
 
         {/*

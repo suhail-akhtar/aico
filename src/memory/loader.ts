@@ -5,6 +5,7 @@ import os from 'os';
 import type { MemoryType, MemoryEntry, MemoryReadOptions, MemoryReadResult } from './types.js';
 import { getCached, setCached, getCacheStats } from './cache.js';
 import { watchMemoryFile } from './watcher.js';
+import { currentCwd } from '../run-context.js';
 
 const DEFAULT_MAX_SIZE = 50_000;
 
@@ -112,7 +113,7 @@ function formatSections(sections: MemoryEntry[], cwd: string): string {
 }
 
 export async function loadMemory(opts: MemoryReadOptions = {}): Promise<MemoryReadResult> {
-  const cwd = process.cwd();
+  const cwd = currentCwd();
   const watchFiles = true; // always watch when loading
   const allowedTypes = new Set<MemoryType>(opts.types ?? ['user', 'parent', 'rules', 'project', 'local']);
 
@@ -173,7 +174,7 @@ export async function appendToMemory(content: string, type: 'user' | 'project'):
     await mkdir(dir, { recursive: true });
     filePath = path.join(dir, 'AICO.md');
   } else {
-    filePath = path.join(process.cwd(), 'AICO.md');
+    filePath = path.join(currentCwd(), 'AICO.md');
   }
   await appendFile(filePath, `\n${content}\n`);
 }

@@ -134,6 +134,26 @@ export async function addProject(dir: string, name?: string): Promise<ProjectSum
 }
 
 /**
+ * Give a project a different display name.
+ *
+ * Only the label changes. The path is the identity — sessions are filed under
+ * it — so renaming is a note to yourself about a folder, not a move.
+ */
+export async function renameProject(dir: string, name: string): Promise<boolean> {
+  const target = normalizeProjectPath(dir);
+  const settings = await loadSettings();
+  const existing = settings.projects ?? [];
+  const trimmed = name.trim();
+  if (!existing.some(entry => normalizeProjectPath(entry.path) === target)) return false;
+  await saveUserSetting('projects', existing.map(entry =>
+    (normalizeProjectPath(entry.path) === target
+      // Blank clears the override and the directory's own name comes back.
+      ? { ...entry, ...(trimmed ? { name: trimmed } : { name: undefined }) }
+      : entry)));
+  return true;
+}
+
+/**
  * Forget a project.
  *
  * Removes it from the list and nothing else. Sessions recorded for that

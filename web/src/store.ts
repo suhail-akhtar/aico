@@ -117,6 +117,9 @@ interface AppState {
   selectProject: (path: string) => void;
   addProject: (path: string, name?: string) => Promise<void>;
   removeProject: (path: string) => Promise<void>;
+  renameProject: (path: string, name: string) => Promise<void>;
+  /** Start a session in a specific folder, whatever is currently selected. */
+  newSessionIn: (path: string) => void;
   refreshProviders: () => Promise<void>;
   refreshSystem: () => Promise<void>;
   refreshSettings: () => Promise<void>;
@@ -315,6 +318,21 @@ export const useStore = create<AppState>((set, get) => ({
       await get().refreshProjects();
       get().selectProject(project.path);
     } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  renameProject: async (path, name) => {
+    try {
+      await api.renameProject(path, name);
+      await get().refreshProjects();
+    } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  newSessionIn: (path) => {
+    // Selecting the folder is the same act as starting a session in it — a new
+    // session belongs to exactly one directory for its whole life, so there is
+    // no meaningful "new session here while I am looking at somewhere else".
+    set({ project: path });
+    get().newSession();
   },
 
   removeProject: async (path) => {
