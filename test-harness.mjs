@@ -424,8 +424,19 @@ const asText = (doc, dialect = DEFAULT_DIALECT, id = 'test') =>
 
 const p0 = asText(await buildSystemPrompt('test'));
 assert(p0.includes('aico'), 'Mentions aico');
-assert(p0.includes('WorkspaceInfo'), 'Mentions workspace tools');
+assert(/workspace/i.test(p0), 'Says the scratch workspace exists — the one surrounding fact tools cannot convey');
 assert(!p0.includes('EFFORT'), 'No effort tag default');
+
+// The prompt states judgement, not inventory. A capability list is what the
+// tool schemas are for; spending cached prefix on "you can CREATE agents" told
+// the model nothing about when, and biased it toward doing so.
+assert(/not less, and not more/i.test(p0), 'Scope is stated: do what was asked');
+assert(/cannot be undone|undone/i.test(p0), 'Irreversible actions need asking first');
+assert(/do not inherit/i.test(p0), 'The one hard constraint on delegation is stated');
+assert(/wide rather than deep/i.test(p0), 'Delegation is framed as a decision, not a feature');
+assert(!/You can CREATE|You can DEFINE|You can SPAWN/.test(p0),
+  'No capability catalogue: that was prefix tokens restating the tool schemas');
+assert(/never invent one|have not read/i.test(p0), 'Navigation says do not act on an unread path');
 
 assert(asText(await buildSystemPrompt('test', 'high')).includes('HIGH'), 'High effort');
 assert(asText(await buildSystemPrompt('test', 'max')).includes('MAX'), 'Max effort');
@@ -3697,6 +3708,12 @@ console.log('  -- The system prompt is frozen --');
 
   const volatile = await buildVolatileContext();
   assert(/Git status/i.test(volatile), 'Git status moved to the volatile block');
+
+  // The date is volatile for the same reason and belongs in the same place: a
+  // model reasoning about "recently" from its training cutoff is reasoning from
+  // the wrong year.
+  assert(/Today's date: \d{4}-\d{2}-\d{2}/.test(volatile), 'The current date rides in the tail');
+  assert(!/Today's date/i.test(sys), 'and never in the cached prefix, where it would go stale daily');
 }
 
 console.log('  -- Anthropic: appended behind the last breakpoint --');
@@ -4831,7 +4848,22 @@ console.log('  -- A timeout actually stops the work --');
   const elapsed = Date.now() - started;
 
   assert(result.exit_code !== 0, 'a timed-out command does not report success');
+  // Intermittent for two independent reasons, both now fixed. The explanation
+  // was *substituted* for stderr rather than appended, so a process killed
+  // mid-write had its own output displace the reason it died. And the grace
+  // path — taken when a killed tree does not close in time — called finish()
+  // with no message at all, so which of the two exits won the race decided
+  // whether the caller was told anything.
   assert(/timed out/i.test(result.stderr), `and says why (${result.stderr.slice(0, 60)})`);
+  assert(new RegExp(String(2) + 's').test(result.stderr), 'and names the limit that was hit');
+
+  // The case the substitution bug hid: output of its own, *and* a timeout.
+  const noisy = process.platform === 'win32'
+    ? 'echo talking 1>&2 && ping -n 8 127.0.0.1'
+    : 'echo talking 1>&2; sleep 8';
+  const both = await bash({ command: noisy, timeout: 2 });
+  assert(/talking/.test(both.stderr), 'what the command said survives');
+  assert(/timed out/i.test(both.stderr), 'and so does why it stopped saying it');
   assert(elapsed < 6000,
     `it returns near its deadline rather than when the child felt like it (${elapsed}ms)`);
   assert(elapsed >= 1800, `but not before the deadline (${elapsed}ms)`);

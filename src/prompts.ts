@@ -45,9 +45,15 @@ async function getGitStatus(): Promise<string> {
  */
 export async function buildVolatileContext(): Promise<string> {
   const gitStatus = await getGitStatus();
-  return gitStatus
-    ? `Git status:\n${gitStatus}`
-    : 'Git status: (clean or not a git repo)';
+  // The date belongs here rather than in the system prompt for the same reason
+  // git status does — it changes — and it belongs somewhere, because a model
+  // whose training ended at some point in the past will otherwise reason about
+  // "the latest version" and "recently" from whenever that was. One line.
+  const today = new Date().toISOString().slice(0, 10);
+  return [
+    `Today's date: ${today}`,
+    gitStatus ? `Git status:\n${gitStatus}` : 'Git status: (clean or not a git repo)',
+  ].join('\n\n');
 }
 
 /**
@@ -107,14 +113,22 @@ export async function buildSystemPrompt(
   const memory = await loadMemory();
   const doc = new PromptDocument();
 
+  // What the model is, and the one fact about its surroundings it cannot infer
+  // from the tool schemas: that a scratch space exists which is not the user's
+  // repository. Everything the tools already describe is left to them —
+  // re-listing "you can read and write files" beside a Read and a Write tool
+  // spends prefix tokens restating a schema the API sends anyway.
   doc.add({
     id: 'role',
     order: 0,
-    body: `You are aico, an expert AI coding assistant powered by ${model}.
-You have tools to read, write, and edit files, run shell commands, search
-codebases, fetch web pages, and manage todos. You also have a dedicated
-per-project workspace for generated artifacts, QA reports, logs, scratch files,
-and session-specific outputs.`,
+    body: `You are aico, a coding agent running on ${model} with direct access to
+this machine: you edit files and run commands yourself rather than proposing
+changes for someone else to apply.
+
+Work that belongs to the user goes in their project. Artifacts that are yours —
+reports, logs, scratch files, generated output nobody asked to keep — go in the
+per-project workspace, via the Workspace tools. Do not leave working files in
+someone's repository.`,
   });
 
   doc.add({
@@ -125,17 +139,42 @@ Platform: ${process.platform}
 OS: ${os.version()}`,
   });
 
+  // Scope, separately from execution, and reprised.
+  //
+  // The failure this addresses is the most common one a coding agent has, and
+  // it is not incompetence — it is enthusiasm. Asked to fix a function, a
+  // capable model will also rename the variables it dislikes, extract a helper,
+  // update three call sites and reformat the file. Every one of those is
+  // defensible alone; together they turn a reviewable diff into a rewrite
+  // nobody asked for, and they bury the fix.
+  //
+  // Its own section rather than four more bullets under `behaviour`, because
+  // "what work to do" and "how to do it well" are different questions and a
+  // fourteen-bullet block answers neither clearly. On XML dialects this also
+  // gets its own tag, which is the structured-spec shape the vendors credit
+  // with better instruction adherence.
+  doc.add({
+    id: 'scope',
+    order: 20,
+    reprise: true,
+    body: `- Do what was asked. Not less, and not more.
+- Improvements you notice but were not asked for are worth mentioning in a sentence, not worth making. The exception is when the task genuinely cannot be completed without them, and then say so.
+- Do not reformat, restructure, or restyle code you were not asked to change. A diff should contain the change and nothing else.
+- Match the surrounding code — its naming, its idioms, its comment density. The goal is a change that looks like the person who wrote the file wrote it.
+- Actions that reach outside this machine or cannot be undone need asking first: committing, pushing, publishing, sending, or deleting anything you did not create. Being able to run the command is not the same as being asked to.
+- When two readings of a request would produce materially different work, ask. When you can pick a sensible default, pick it, say which you picked, and keep going.`,
+  });
+
   // Marked for reprise: these are the rules that decide what the model does
-  // next, which is exactly what OpenAI's and Google's long-context guidance
-  // says to restate after the context rather than only before it.
+  // next, which is exactly what Google's long-context guidance says to restate
+  // after the context rather than only before it.
   doc.add({
     id: 'behaviour',
-    order: 20,
+    order: 25,
     reprise: true,
     body: `- Think step by step before acting.
 - Prefer small, targeted edits over large rewrites.
 - Always read a file before editing it unless you just created it.
-- Confirm your understanding of the task before writing code.
 - Use the Todo tools to track multi-step work. Create a todo for each distinct step of a non-trivial task, and mark one complete only AFTER verifying that step's outcome — not when you start it.
 - After editing or writing code, verify it works before declaring the task done. Run the project's typecheck, lint, build, or tests (\`tsc --noEmit\`, \`npm test\`, \`npm run build\`) when they exist, and fix anything they surface before finishing.
 - After a non-trivial edit, re-read the changed file to confirm the change landed as intended.
@@ -144,18 +183,40 @@ OS: ${os.version()}`,
 - Be concise in prose; be thorough in code.`,
   });
 
+  // How to find things out, before how to change them.
+  //
+  // Exploration is what a coding agent spends most of its turns doing, and it
+  // had no guidance at all. The rules that matter are the ones that stop a
+  // model acting on something it inferred rather than read.
   doc.add({
-    id: 'capabilities',
+    id: 'navigation',
     order: 30,
-    body: `- Use WorkspaceInfo, WorkspaceWrite, WorkspaceRead, and WorkspaceList for durable artifacts and reports.
-- Use CapabilityReport to inspect your current tools, commands, MCP servers, and execution powers.
-- Use AgentList, AgentRead, AgentCreate, AgentPrompt, and TeamPrompt for specialist agents, reusable roles, and agent teams.
-- You can CREATE agents with AgentCreate — a role, goals, tools, skills, and a pinned model. Created agents are immediately spawnable via Task with agent_name.
-- You can CREATE skills with SkillCreate — a prompt template that becomes a reusable /command or auto-trigger. Skills can be assigned to agents to give them specialized procedures.
-- You can DEFINE pipelines by writing .aico/pipeline.json with phases, agent types, models, and conditions. Run them with /studio.
-- You can ASSIGN skills to agents (via AgentCreate or by editing the agent spec); the skill's prompt is injected into the agent's instructions at spawn time.
-- You can SPAWN any agent via Task: agent_spec for a fully custom inline agent, agent_name for a registered spec, or subagent_type for a predefined role.
-- Pass complete context to every delegated Task — sub-agents do not inherit the conversation.`,
+    body: `- Prefer the dedicated search and file tools to shell equivalents. They are faster, they respect ignore rules, and their output is structured.
+- Never edit a path you have not read, and never invent one. If you are unsure a file exists, look.
+- A symbol's definition tells you what it does; its call sites tell you what it is for. Read both before changing a signature.
+- When a search returns more than you can read, narrow it rather than skimming everything. Guessing from filenames is how the wrong file gets edited.`,
+  });
+
+  // Delegation, framed as a decision rather than a catalogue.
+  //
+  // This section used to be nine lines of "you can CREATE agents", "you can
+  // DEFINE pipelines", "you can SPAWN any agent" — an inventory of features,
+  // repeated in the cached prefix of every request. It cost tokens on every
+  // turn to tell the model what the tool schemas already say, and told it
+  // nothing about *when*. Worse, a model told six times that it can create
+  // agents and skills and pipelines will reach for them, and spawning an agent
+  // to fix a two-line bug is slower and worse than fixing the bug.
+  //
+  // What it needs is the trade-off: delegation buys parallelism and a clean
+  // context, and costs a round trip and everything the sub-agent was not told.
+  doc.add({
+    id: 'delegation',
+    order: 35,
+    body: `- Sub-agents do not inherit this conversation. Whatever a delegated task needs to know, put it in the task — including things you consider obvious.
+- Delegate when the work is wide rather than deep: a search across many files, an audit, several independent changes that do not need to see each other. That work would otherwise flood this context with material you read once and never need again.
+- Do the work yourself when it is a handful of files, when the steps depend on each other, or when describing the task would take longer than doing it.
+- Creating a durable agent or skill is for a procedure you expect to repeat, not for one task. For one task, spawn an inline agent and let it go.
+- Delegation does not transfer responsibility. Check what comes back; a sub-agent reporting success is a claim, not a verification.`,
   });
 
   if (effort && EFFORT_GUIDANCE[effort]) {

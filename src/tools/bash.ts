@@ -146,6 +146,11 @@ export async function bash(input: BashInput): Promise<BashResult> {
     child.stdout?.on('data', (chunk: Buffer) => append(chunk, false));
     child.stderr?.on('data', (chunk: Buffer) => append(chunk, true));
 
+    // One wording, used by both exits below. There are two of them and they are
+    // the same event — which is how they came to disagree.
+    const timeoutMessage =
+      `Command timed out after ${rawTimeout}s. Use timeout=0 for unlimited or increase the timeout.`;
+
     const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
       timedOut = true;
       killTree(child.pid);
@@ -153,7 +158,14 @@ export async function bash(input: BashInput): Promise<BashResult> {
       // `close` may arrive long after the deadline — or never. Waiting for it
       // would make a timeout advisory rather than real: a 2s limit took five
       // seconds to return because `ping` outlived the shell that spawned it.
-      graceTimer = setTimeout(() => finish(1), KILL_GRACE_MS);
+      //
+      // This raced with the `close` handler below, and which one won decided
+      // whether the caller was told anything: `close` explains the timeout,
+      // this used to pass `finish(1)` with no message, so a process stubborn
+      // enough to outlive the grace window produced a bare non-zero exit with
+      // no reason given. Intermittently, since it depended on how fast the OS
+      // reaped a tree it had just been told to kill.
+      graceTimer = setTimeout(() => finish(1, timeoutMessage), KILL_GRACE_MS);
       graceTimer.unref?.();
     }, timeoutMs);
     timer?.unref?.();
@@ -169,9 +181,15 @@ export async function bash(input: BashInput): Promise<BashResult> {
       if (timer) clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
       report(true);
+      // Appended, not substituted. This read `stderr || error`, so the
+      // explanation was kept only when the command had said nothing itself —
+      // and a command killed mid-write usually has. The result was a run that
+      // timed out, reported whatever partial stderr existed, and never
+      // mentioned the timeout: a non-zero exit with no reason, intermittently,
+      // depending on whether the doomed process got a write in first.
       resolve({
         stdout,
-        stderr: stderr || (error ?? ''),
+        stderr: [stderr, error].filter(Boolean).join('\n').trim(),
         exit_code: exitCode,
       });
     };
@@ -182,8 +200,7 @@ export async function bash(input: BashInput): Promise<BashResult> {
 
     child.on('close', (code) => {
       if (timedOut) {
-        finish(code ?? 1,
-          `Command timed out after ${rawTimeout}s. Use timeout=0 for unlimited or increase the timeout.`);
+        finish(code ?? 1, timeoutMessage);
         return;
       }
       finish(code ?? 0);
