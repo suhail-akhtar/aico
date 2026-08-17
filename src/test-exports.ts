@@ -109,6 +109,7 @@ export {
   titleFromId,
   ANTHROPIC_DIALECT,
   OPENAI_DIALECT,
+  DEEPSEEK_DIALECT,
   GEMINI_DIALECT,
   DEFAULT_DIALECT,
 } from './prompt/index.js';

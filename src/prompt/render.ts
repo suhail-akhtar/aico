@@ -23,7 +23,7 @@ export function renderPrompt(
   dialect: PromptDialect,
   providerId: string,
 ): RenderedPrompt {
-  const sections = doc.forProvider(providerId);
+  const sections = doc.forProvider(providerId, dialect.style);
   const system = sections
     .map((section) => renderSection(section, dialect.style))
     .filter(Boolean)
@@ -67,7 +67,7 @@ export function renderTail(
   providerId: string,
 ): string {
   const parts = volatile
-    .forProvider(providerId)
+    .forProvider(providerId, dialect.style)
     .map((section) => renderSection(section, dialect.style))
     .filter(Boolean);
   if (reprise) parts.push(reprise);

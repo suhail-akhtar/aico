@@ -9,14 +9,21 @@
  *
  * The vendors genuinely disagree, so this is not over-engineering:
  *
- * | Vendor    | Structure                        | Long-context instructions |
- * |-----------|----------------------------------|---------------------------|
- * | Anthropic | XML tags, explicitly recommended  | before the documents      |
- * | OpenAI    | Markdown first; XML also fine;    | at BOTH ends; if only one, |
- * |           | JSON measured as poor             | above the context         |
- * | Gemini    | XML or Markdown — pick one and    | context first, instructions |
- * |           | stay consistent                   | at the very end           |
- * | DeepSeek  | no published guidance             | —                         |
+ * | Vendor    | Structure                          | Instructions in long context |
+ * |-----------|------------------------------------|------------------------------|
+ * | Anthropic | XML tags, explicitly recommended    | before the documents         |
+ * | OpenAI    | structured XML specs, credited with | re-ground mid-task; the       |
+ * |           | better instruction adherence        | bookend rule was retired     |
+ * | Gemini    | XML or Markdown — pick one and      | context first, instructions  |
+ * |           | stay consistent                     | at the very end              |
+ * | DeepSeek  | none published; its own injected    | —                            |
+ * |           | tool block is a Markdown heading    |                              |
+ *
+ * They also disagree *over time*, which is the harder problem. OpenAI's row
+ * above is the second one it has had: Markdown-first with a tail reprise, on
+ * the GPT-4.1 guide, until the GPT-5.x guides replaced both halves. Every row
+ * therefore carries a `rationale` naming its source, so the next reader can
+ * check whether it still holds rather than inheriting it as fact.
  *
  * One Anthropic finding shapes the default: the format of the prompt leaks into
  * the format of the reply — "removing markdown from your prompt can reduce the
@@ -41,11 +48,14 @@ export interface PromptDialect {
   /**
    * Repeat sections marked `reprise` at the tail of the request.
    *
-   * OpenAI's long-context guidance is to place instructions at both the
-   * beginning and the end; Gemini's is to put them at the end outright. An
-   * agent conversation is long context by the second turn, so for those
-   * dialects the key rules are echoed after the transcript, where they are
-   * closest to the model's next decision.
+   * Gemini's long-context guidance is to put instructions at the very end, and
+   * an agent conversation is long context by the second turn — so its key rules
+   * are echoed after the transcript, closest to the model's next decision.
+   *
+   * Only Gemini asks for this now. OpenAI did, under the GPT-4.1 bookend rule;
+   * GPT-5.x asks instead for summarization and re-grounding *during* the task,
+   * which is a different mechanism and not one a tail echo implements. The flag
+   * stays because one vendor still wants it, not because it is generally good.
    */
   repeatKeyInstructions: boolean;
   /**
@@ -81,6 +91,22 @@ export interface PromptSection {
   only?: readonly string[];
   /** Never render for these provider ids. Takes precedence over `only`. */
   except?: readonly string[];
+  /**
+   * Render only under these dialect styles. Omitted means every style.
+   *
+   * The distinction from `only` matters more than it looks. Some sections are
+   * about a *vendor* — a quirk of one API. Others are about the *shape of the
+   * prompt they sit in*, and those must key on the shape, because the set of
+   * vendors using a given shape changes: instructions about restraining
+   * markdown in the reply make sense inside an XML prompt and contradict a
+   * Markdown one, whoever is serving it.
+   *
+   * Keying those to a provider id was a latent bug rather than a style
+   * preference. It silently excluded a Claude model routed through OpenRouter —
+   * XML dialect, provider id `openrouter` — from a section written for exactly
+   * that prompt.
+   */
+  styles?: readonly PromptStyle[];
   /**
    * Echo this section at the tail of the request on dialects whose vendor
    * recommends repeating instructions in long context. Reserve it for rules

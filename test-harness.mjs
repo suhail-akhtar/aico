@@ -58,6 +58,7 @@ import {
   ANTHROPIC_DIALECT,
   OPENAI_DIALECT,
   GEMINI_DIALECT,
+  DEEPSEEK_DIALECT,
   DEFAULT_DIALECT,
   dialectForRoutedModel,
   toResponsesInput,
@@ -4058,7 +4059,7 @@ console.log('  -- One document, two shapes --');
     .add({ id: 'tool_use', body: 'Read before you edit.' });
 
   const xml = renderPrompt(doc, ANTHROPIC_DIALECT, 'anthropic').system;
-  const md = renderPrompt(doc, OPENAI_DIALECT, 'openai').system;
+  const md = renderPrompt(doc, DEEPSEEK_DIALECT, 'deepseek').system;
 
   assert(xml.includes('<role>\nYou are aico.\n</role>'), 'XML dialect wraps sections in tags');
   assert(xml.includes('<tool_use>'), 'XML tag name is the section id');
@@ -4138,31 +4139,57 @@ console.log('  -- Ordering --');
 
 console.log('  -- The reprise follows the vendor that asks for it --');
 {
-  // OpenAI: "place your instructions at both the beginning and end of the
-  // provided context". Gemini: instructions at the very end. Anthropic: no.
+  // Gemini: instructions at the very end, and it is the last vendor still
+  // saying so. Anthropic: no — instructions go before the context. OpenAI used
+  // to want one; GPT-5.x replaced the bookend rule with mid-task re-grounding,
+  // which a tail echo does not implement, so it no longer gets one either.
   const doc = new PromptDocument()
     .add({ id: 'role', body: 'You are aico.' })
     .add({ id: 'behaviour', body: 'Verify before claiming done.', reprise: true });
 
-  const openai = renderPrompt(doc, OPENAI_DIALECT, 'openai');
   const gemini = renderPrompt(doc, GEMINI_DIALECT, 'gemini');
   const anthropic = renderPrompt(doc, ANTHROPIC_DIALECT, 'anthropic');
+  const openai = renderPrompt(doc, OPENAI_DIALECT, 'openai');
+  const deepseek = renderPrompt(doc, DEEPSEEK_DIALECT, 'deepseek');
 
-  assert(openai.reprise.includes('Verify before claiming done.'),
-    'OpenAI gets the key instruction echoed for the tail');
   assert(gemini.reprise.includes('Verify before claiming done.'),
-    'Gemini gets it too — its guidance is even stronger about the tail');
+    'Gemini gets the key instruction echoed — its guidance is explicit about the tail');
   assert(anthropic.reprise === '',
     'Anthropic gets none: its guidance puts instructions before the context');
-  assert(!openai.reprise.includes('You are aico.'),
+  assert(openai.reprise === '',
+    'Nor OpenAI: the GPT-4.1 bookend rule this once implemented has been retired');
+  assert(deepseek.reprise === '',
+    'Nor DeepSeek: no source recommends a reprise for it and it costs tokens');
+  assert(!gemini.reprise.includes('You are aico.'),
     'Only sections marked reprise are echoed — repeating everything dilutes the signal');
-  assert(/reminder/i.test(openai.reprise),
+  assert(/reminder/i.test(gemini.reprise),
     'The echo is labelled a reminder, so it does not read as a second rule set');
 
   // A reprise-wanting dialect with nothing opted in produces nothing.
   const plain = new PromptDocument().add({ id: 'x', body: 'y' });
-  assert(renderPrompt(plain, OPENAI_DIALECT, 'openai').reprise === '',
+  assert(renderPrompt(plain, GEMINI_DIALECT, 'gemini').reprise === '',
     'No opted-in section means no reprise, even on a dialect that wants one');
+}
+
+console.log('  -- Every dialect is a considered row, not a copy of the default --');
+{
+  // The failure this guards against is silent: a vendor added to the table by
+  // pasting the default, so the row exists, looks researched, and encodes
+  // nothing. A rationale is the cheapest evidence that somebody looked.
+  for (const [name, dialect] of Object.entries({
+    ANTHROPIC_DIALECT, OPENAI_DIALECT, GEMINI_DIALECT, DEEPSEEK_DIALECT, DEFAULT_DIALECT,
+  })) {
+    assert(typeof dialect.rationale === 'string' && dialect.rationale.length > 40,
+      `${name} states why it is what it is`);
+    assert(dialect.style === 'xml' || dialect.style === 'markdown',
+      `${name} names a style the renderer implements`);
+  }
+
+  assert(OPENAI_DIALECT.style === 'xml',
+    'OpenAI is XML: the GPT-5.x guides are themselves written in structured XML specs');
+  assert(DEEPSEEK_DIALECT.style === 'markdown',
+    'DeepSeek is Markdown: it writes its own tool block into the system message as ## Tools, '
+    + 'and reserves tag markup for protocol');
 }
 
 console.log('  -- The tail block follows the dialect too --');
@@ -4174,13 +4201,13 @@ console.log('  -- The tail block follows the dialect too --');
     'XML dialect gets an XML tail wrapper');
   assert(!xmlTail.includes('##'), 'No markdown leaks into an XML prompt');
 
-  const mdTail = renderTail(volatile, '', OPENAI_DIALECT, 'openai');
+  const mdTail = renderTail(volatile, '', DEEPSEEK_DIALECT, 'deepseek');
   assert(mdTail.startsWith('# System reminder') && mdTail.includes('## Working tree'),
     'Markdown dialect gets a markdown tail wrapper');
   assert(!mdTail.includes('<system_reminder>'),
     'No XML leaks into a markdown prompt — Google asks for one consistent style');
 
-  assert(renderTail(new PromptDocument(), '', OPENAI_DIALECT, 'openai') === '',
+  assert(renderTail(new PromptDocument(), '', DEEPSEEK_DIALECT, 'deepseek') === '',
     'Nothing to say means an empty tail, not an empty wrapper');
 
   const withReprise = renderTail(volatile, '## Key instructions (reminder)\n\nx', OPENAI_DIALECT, 'openai');
@@ -4199,12 +4226,12 @@ console.log('  -- Providers declare their own dialect --');
 
     assert(selectProvider('claude-sonnet-5', {}).promptDialect.style === 'xml',
       'Anthropic provider declares the XML dialect');
-    assert(selectProvider('gpt-4o-mini', { model: 'gpt-4o-mini' }).promptDialect.style === 'markdown',
-      'OpenAI provider declares the Markdown dialect');
-    assert(selectProvider('gpt-4o-mini', { model: 'gpt-4o-mini' }).promptDialect.repeatKeyInstructions,
-      'OpenAI asks for the tail reprise');
+    assert(selectProvider('gpt-4o-mini', { model: 'gpt-4o-mini' }).promptDialect.style === 'xml',
+      'OpenAI provider declares the XML dialect');
+    assert(!selectProvider('gpt-4o-mini', { model: 'gpt-4o-mini' }).promptDialect.repeatKeyInstructions,
+      'and asks for no tail reprise — the bookend rule it once implemented is retired');
     assert(!selectProvider('claude-sonnet-5', {}).promptDialect.repeatKeyInstructions,
-      'Anthropic does not');
+      'Anthropic does not either');
   } finally {
     for (const k of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY']) {
       if (prev[k] === undefined) delete process.env[k]; else process.env[k] = prev[k];
@@ -4214,9 +4241,11 @@ console.log('  -- Providers declare their own dialect --');
   // OpenRouter fronts several vendors, so the dialect comes from the routed id.
   assert(dialectForRoutedModel('anthropic/claude-sonnet-4.5').style === 'xml',
     'A Claude model routed via OpenRouter still gets XML');
-  assert(dialectForRoutedModel('openai/gpt-4o').style === 'markdown',
-    'A GPT model routed via OpenRouter gets Markdown');
-  assert(dialectForRoutedModel('deepseek/deepseek-v4-flash').style === DEFAULT_DIALECT.style,
+  assert(dialectForRoutedModel('openai/gpt-4o').style === 'xml',
+    'A GPT model routed via OpenRouter gets XML too');
+  assert(dialectForRoutedModel('deepseek/deepseek-v4-flash').style === 'markdown',
+    'A DeepSeek route gets the DeepSeek row, not the default it happens to match');
+  assert(dialectForRoutedModel('meta-llama/llama-4').style === DEFAULT_DIALECT.style,
     'An unrecognized route takes the default rather than guessing');
 }
 
@@ -4225,15 +4254,23 @@ console.log('  -- Real prompt renders per provider --');
   const doc = await buildSystemPrompt('claude-sonnet-5');
   const forAnthropic = renderPrompt(doc, ANTHROPIC_DIALECT, 'anthropic');
   const forOpenAI = renderPrompt(doc, OPENAI_DIALECT, 'openai');
+  const forDeepSeek = renderPrompt(doc, DEEPSEEK_DIALECT, 'deepseek');
+  const forGemini = renderPrompt(doc, GEMINI_DIALECT, 'gemini');
 
   assert(forAnthropic.system.includes('<behaviour>'), 'Real prompt renders as XML for Anthropic');
-  assert(forOpenAI.system.includes('## Behaviour'), 'Real prompt renders as Markdown for OpenAI');
-  assert(forAnthropic.system.includes('<output_style>'),
-    'The anthropic-only markdown-restraint section is present for Anthropic');
-  assert(!forOpenAI.system.includes('output_style') && !forOpenAI.system.includes('Output style'),
-    'and absent for OpenAI, where it would contradict the prompt it sits in');
-  assert(forOpenAI.reprise.length > 0 && forAnthropic.reprise === '',
-    'The reprise appears only where the vendor recommends it');
+  assert(forOpenAI.system.includes('<behaviour>'), 'and as XML for OpenAI');
+  assert(forDeepSeek.system.includes('## Behaviour'), 'and as Markdown for DeepSeek');
+
+  // The markdown-restraint section is gated on the shape of the prompt it sits
+  // in, not on the vendor serving it.
+  assert(forAnthropic.system.includes('<output_style>') && forOpenAI.system.includes('<output_style>'),
+    'Both XML dialects get the markdown-restraint section');
+  assert(!forDeepSeek.system.includes('output_style') && !forDeepSeek.system.includes('Output style'),
+    'and no Markdown dialect does, where it would contradict its own instructions');
+  assert(!forGemini.system.includes('Output style'),
+    'including Gemini, which is Markdown for consistency reasons of its own');
+  assert(forGemini.reprise.length > 0 && forAnthropic.reprise === '' && forOpenAI.reprise === '',
+    'The reprise appears only where the vendor still recommends it');
 }
 
 console.log('  -- Rendering is deterministic (it heads every cache prefix) --');

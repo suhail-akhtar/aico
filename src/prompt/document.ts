@@ -16,7 +16,7 @@
  * @module prompt/document
  */
 
-import type { PromptSection } from './types.js';
+import type { PromptSection, PromptStyle } from './types.js';
 
 export class PromptDocument {
   /** Insertion-ordered; Map preserves it, which is what makes `order` optional. */
@@ -82,11 +82,17 @@ export class PromptDocument {
    *
    * `except` beats `only` so a broad opt-in can still be denied for one vendor
    * without rewriting the opt-in list.
+   *
+   * `style` is optional so that callers who only want the vendor view — tests,
+   * introspection — need not invent one. Omitting it keeps every style-gated
+   * section, which is the honest answer to "what could this document contain"
+   * as distinct from "what will this request send".
    */
-  forProvider(providerId: string): PromptSection[] {
+  forProvider(providerId: string, style?: PromptStyle): PromptSection[] {
     const applicable = [...this.sections.values()].filter((s) => {
       if (s.except?.includes(providerId)) return false;
       if (s.only && !s.only.includes(providerId)) return false;
+      if (style && s.styles && !s.styles.includes(style)) return false;
       return true;
     });
     // Stable sort: equal `order` keeps insertion order, so most sections can

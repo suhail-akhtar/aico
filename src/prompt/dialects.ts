@@ -33,22 +33,34 @@ export const ANTHROPIC_DIALECT: PromptDialect = {
 };
 
 /**
- * OpenAI: Markdown, with a tail reprise.
+ * OpenAI: XML, no reprise.
  *
- * The GPT-4.1 guide names Markdown as the starting point — title hierarchy for
- * sections, backticks for code — while noting XML also performs well and JSON
- * measurably poorly. Markdown is taken as the default precisely because it is
- * the documented one; XML's advantages there are for wrapping documents, which
- * is not what a system prompt is.
+ * This row used to say Markdown with a tail reprise, on the GPT-4.1 guide's
+ * advice. Both halves of that have since been superseded, and a dialect table
+ * whose citations have expired is worse than none — it looks researched.
  *
- * The reprise implements the long-context rule verbatim: "place your
- * instructions at both the beginning and end of the provided context".
+ * **Structure.** The GPT-5.x guides are themselves written in structured XML
+ * specs — `<output_verbosity_spec>`, `<tool_usage_rules>`,
+ * `<long_context_handling>` — and say so explicitly: specs of that shape
+ * "improved instruction adherence" and let one section reference another by
+ * name elsewhere in the prompt. Markdown is now scoped to where it is
+ * *semantically* correct — code fences, lists, tables — rather than being the
+ * skeleton. A section id is a name, not a heading, so it belongs in a tag.
+ *
+ * **No reprise.** The bookend rule is gone. Where GPT-4.1 asked for
+ * instructions at both ends of long context, GPT-5.x asks for summarization and
+ * re-grounding *during* the task — active recall rather than passive repetition
+ * at the boundaries. Nothing in the tail-echo mechanism implements that, so
+ * emitting one now just spends tokens restating what the head already said.
+ *
+ * @see https://developers.openai.com/cookbook/examples/gpt-5/gpt-5-2_prompting_guide
  */
 export const OPENAI_DIALECT: PromptDialect = {
-  style: 'markdown',
-  repeatKeyInstructions: true,
-  rationale: 'OpenAI GPT-4.1 guide recommends Markdown headers, and instructions '
-    + 'at both the beginning and end of long context.',
+  style: 'xml',
+  repeatKeyInstructions: false,
+  rationale: 'The GPT-5.x prompting guides are written in structured XML specs and '
+    + 'credit them with better instruction adherence; the GPT-4.1 bookend rule was '
+    + 'replaced by mid-task re-grounding, which a tail echo does not implement.',
 };
 
 /**
@@ -71,9 +83,49 @@ export const GEMINI_DIALECT: PromptDialect = {
 };
 
 /**
+ * DeepSeek: Markdown, no reprise — and deliberately *not* XML.
+ *
+ * DeepSeek publishes no prose-structure guidance; the API docs show a bare
+ * "You are a helpful assistant" and nothing about sections at all. So this row
+ * is argued from the one authoritative structural artifact that does exist: the
+ * V4 encoding format, and specifically what DeepSeek itself puts into the
+ * system message.
+ *
+ * **Markdown, because DeepSeek writes Markdown into this very message.** When
+ * tools are present the runtime injects its own tool block into the system
+ * message, and that block opens with a Markdown heading — `## Tools`, followed
+ * by prose. A prompt whose harness-authored half is `## Tools` and whose
+ * product-authored half is `<tool_use>` is a prompt in two structural styles,
+ * which is the one thing every vendor with an opinion warns against.
+ *
+ * **Not XML, because on V4 tags are protocol rather than prose.** The model
+ * speaks a tag language of its own: `<think>` delimits reasoning, and tool calls
+ * are DSML — `<｜DSML｜invoke name="...">`, `<｜DSML｜parameter string="true">`.
+ * Those tags *mean* something to the decoder. Wrapping our sections in ordinary
+ * XML places invented tags directly beside load-bearing ones and invites the
+ * model to read `<tool_use>` as a malformed instruction to call a tool rather
+ * than as a heading. The risk is small and entirely avoidable, and the upside
+ * over a Markdown heading is unmeasured.
+ *
+ * This lands on the same two values the default carries. That is the finding,
+ * not an oversight: what changes is that DeepSeek now has a row with a reason,
+ * so the next person to touch it argues with the evidence rather than assuming
+ * nobody looked.
+ *
+ * @see https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/blob/main/encoding/README.md
+ */
+export const DEEPSEEK_DIALECT: PromptDialect = {
+  style: 'markdown',
+  repeatKeyInstructions: false,
+  rationale: 'DeepSeek injects its own tool block into the system message under a '
+    + 'Markdown heading, so Markdown keeps the prompt in one style; V4 reserves tag '
+    + 'markup for protocol (<think>, DSML), which our own tags should not sit beside.',
+};
+
+/**
  * Default for vendors with no published prompt-structure guidance.
  *
- * DeepSeek, Z.AI and Ollama models publish nothing specific, so this picks the
+ * Z.AI and Ollama models publish nothing specific, so this picks the
  * option with the broadest evidence rather than inventing a preference:
  * Markdown is recommended by OpenAI, accepted by Google, and is what most
  * instruction-tuned models saw most of in training. The reprise stays off

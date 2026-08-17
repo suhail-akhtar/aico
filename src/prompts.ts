@@ -167,14 +167,21 @@ OS: ${os.version()}`,
     });
   }
 
-  // Anthropic only: the format of the prompt influences the format of the
-  // reply, and their guidance says so outright. On an XML dialect this nudges
-  // output away from reflexive bullet lists; on Markdown dialects it would be
-  // asking the model to contradict the shape of its own instructions.
+  // XML dialects only, whoever is serving them. The format of the prompt leaks
+  // into the format of the reply — Anthropic says so outright, and OpenAI's
+  // GPT-5 guidance independently asks for Markdown "only where semantically
+  // correct" and stops formatting answers in it by default. Inside an XML
+  // prompt this nudges output away from reflexive bullet lists; inside a
+  // Markdown one it would ask the model to contradict the shape of its own
+  // instructions.
+  //
+  // Keyed to the style rather than to `only: ['anthropic']`, which is what it
+  // used to say. That spelling excluded OpenAI the moment its dialect became
+  // XML, and had always excluded a Claude model routed through OpenRouter.
   doc.add({
     id: 'output_style',
     order: 50,
-    only: ['anthropic'],
+    styles: ['xml'],
     body: `Write prose in plain paragraphs. Reserve markdown for code, file paths,
 and genuinely tabular data. Do not reach for bullet lists when a sentence
 carries the same information.`,

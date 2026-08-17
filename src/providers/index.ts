@@ -18,6 +18,7 @@ import { AnthropicProvider } from './anthropic.js';
 import { DeepSeekProvider } from './deepseek.js';
 import {
   ANTHROPIC_DIALECT,
+  DEEPSEEK_DIALECT,
   DEFAULT_DIALECT,
   GEMINI_DIALECT,
   OPENAI_DIALECT,
@@ -96,6 +97,7 @@ export function dialectForRoutedModel(model: string): PromptDialect {
   if (/^anthropic\//i.test(model)) return ANTHROPIC_DIALECT;
   if (/^(openai|azure)\//i.test(model)) return OPENAI_DIALECT;
   if (/^google\//i.test(model)) return GEMINI_DIALECT;
+  if (/^deepseek\//i.test(model)) return DEEPSEEK_DIALECT;
   return DEFAULT_DIALECT;
 }
 

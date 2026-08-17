@@ -63,7 +63,7 @@
 
 import OpenAI, { APIError } from 'openai';
 import { normalizeUsage } from './usage.js';
-import { DEFAULT_DIALECT } from '../prompt/dialects.js';
+import { DEEPSEEK_DIALECT } from '../prompt/dialects.js';
 import type {
   AicoMessage,
   ChatEvent,
@@ -126,8 +126,10 @@ function normalizeFinishReason(reason: string): FinishReason {
 export class DeepSeekProvider implements ProviderAPI {
   readonly id = 'deepseek';
   readonly displayName = 'DeepSeek';
-  // No published prompt-structure guidance from DeepSeek; take the default.
-  readonly promptDialect = DEFAULT_DIALECT;
+  // Markdown, and specifically not XML — DeepSeek writes its own tool block into
+  // the system message under a Markdown heading, and reserves tag markup for
+  // protocol. See DEEPSEEK_DIALECT for the argument.
+  readonly promptDialect = DEEPSEEK_DIALECT;
   private readonly client: OpenAI;
   private readonly thinking: DeepSeekThinking;
   private readonly maxOutputTokens: number;
