@@ -237,6 +237,22 @@ export interface SessionEventMap {
   };
 
   /**
+   * RECORD. Whether this session is filed away.
+   *
+   * An event rather than a flag, for the same reason the title is one: the log
+   * is the only durable state a session has, so recording it here means
+   * archiving survives a restart with nothing to keep in sync and nothing to
+   * migrate. The current state is simply the last one logged, which also makes
+   * un-archiving an ordinary append rather than a deletion.
+   *
+   * Archiving is not deleting. The transcript stays on disk and stays
+   * replayable; it is only hidden from the list, because "I am done with this"
+   * and "destroy this" are different intentions and the destructive one should
+   * never be the easy click.
+   */
+  'session/archived': { archived: boolean };
+
+  /**
    * RECORD. A rating on one assistant message.
    *
    * Keyed by the seq of the message it judges rather than carried on that

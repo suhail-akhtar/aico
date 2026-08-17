@@ -196,6 +196,13 @@ export const api = {
   rename: (sessionId: string, title: string) =>
     post<{ renamed: boolean }>('session/rename', { sessionId, title }),
 
+  archive: (sessionId: string, archived: boolean) =>
+    post<{ archived: boolean }>('session/archive', { sessionId, archived }),
+
+  /** Branch a session: same history so far, a new id to continue from. */
+  fork: (sessionId: string) =>
+    post<{ id: string; title?: string; project?: string }>('session/fork', { sessionId }),
+
   // ── providers ──────────────────────────────────────────────────────
   providers: () => request<{
     instances: ProviderInstance[];
@@ -286,6 +293,8 @@ export interface SessionSummary {
   id: string;
   /** Absolute path of the project this session belongs to. */
   project?: string;
+  /** Filed away — still on disk, just not in the list. */
+  archived?: boolean;
   title?: string;
   titleSource?: 'fallback' | 'model' | 'user';
   updatedAt: number;

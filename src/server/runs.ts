@@ -205,6 +205,37 @@ export class RunManager {
   }
 
   /**
+   * Flush a session's log and let go of it.
+   *
+   * `close` detaches persistence, so a run left in the map afterwards would
+   * look open and silently stop recording. Dropping it means the next `ensure`
+   * reopens from disk, which is the same path a reconnect takes.
+   */
+  async release(sessionId: string): Promise<boolean> {
+    const run = this.runs.get(sessionId);
+    if (!run) return false;
+    if (run.busy) return false;
+    await run.close();
+    this.runs.delete(sessionId);
+    return true;
+  }
+
+  /**
+   * File a session away, or bring it back.
+   *
+   * Appended to the log rather than written to a side table, so the state
+   * survives a restart with nothing to keep in sync. The transcript is
+   * untouched — archiving hides a row, it does not destroy a conversation.
+   */
+  setArchived(sessionId: string, archived: boolean): boolean {
+    const run = this.runs.get(sessionId);
+    if (!run) return false;
+    run.session.append('session/archived', { archived });
+    this.hub.publish({ type: 'archived', sessionId, data: { archived } });
+    return true;
+  }
+
+  /**
    * The session's current title record, if it has one.
    *
    * The whole record, not just the text: a listing that took the name from
@@ -214,6 +245,26 @@ export class RunManager {
   titleOf(sessionId: string): ReturnType<typeof currentTitle> {
     const run = this.runs.get(sessionId);
     return run ? currentTitle(run.session) : undefined;
+  }
+
+  /**
+   * Whether an open session is archived, according to memory.
+   *
+   * The same freshness problem the title has, and the same answer. Archiving
+   * appends an event, persistence flushes it asynchronously, and the listing
+   * reads the file — so a listing fetched immediately after the click reports
+   * the state from before it and the row reappears.
+   */
+  archivedOf(sessionId: string): boolean | undefined {
+    const run = this.runs.get(sessionId);
+    if (!run) return undefined;
+    let archived: boolean | undefined;
+    for (const event of run.session.events) {
+      if (event.type === 'session/archived') {
+        archived = (event.data as { archived?: boolean }).archived === true;
+      }
+    }
+    return archived;
   }
 
   /** Set, pause, resume or clear the session's standing objective. */

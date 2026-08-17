@@ -122,6 +122,13 @@ interface AppState {
   refreshSettings: () => Promise<void>;
   setModel: (model: string) => void;
   rename: (title: string) => Promise<void>;
+  /** Rename any session, not only the open one. */
+  renameSession: (id: string, title: string) => Promise<void>;
+  archiveSession: (id: string, archived: boolean) => Promise<void>;
+  forkSession: (id: string) => Promise<void>;
+  /** Whether filed-away sessions are listed. */
+  showArchived: boolean;
+  toggleArchived: () => void;
   setGoal: (text: string, status: 'active' | 'paused' | 'cleared') => Promise<void>;
   rate: (seq: number, rating: 'up' | 'down' | 'none', note?: string) => Promise<void>;
   clearError: () => void;
@@ -134,6 +141,7 @@ export const useStore = create<AppState>((set, get) => ({
   lastSeq: 0,
   projects: [],
   project: null,
+  showArchived: false,
   sessions: [],
   activeSessions: [],
   sessionId: initialSessionId(),
@@ -333,6 +341,45 @@ export const useStore = create<AppState>((set, get) => ({
       }));
     } catch (err) { set({ error: (err as Error).message }); }
   },
+
+  renameSession: async (id, title) => {
+    try {
+      await api.rename(id, title);
+      if (get().sessionId === id) set({ title });
+      set(state => ({
+        sessions: state.sessions.map(s =>
+          (s.id === id ? { ...s, title, titleSource: 'user' as const } : s)),
+      }));
+    } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  archiveSession: async (id, archived) => {
+    // Applied locally first: the row should leave the list on the click, not
+    // after a round trip, and the server call is the durable record of it.
+    set(state => ({ sessions: state.sessions.map(s => (s.id === id ? { ...s, archived } : s)) }));
+    try {
+      await api.archive(id, archived);
+    } catch (err) {
+      set(state => ({
+        error: (err as Error).message,
+        sessions: state.sessions.map(s => (s.id === id ? { ...s, archived: !archived } : s)),
+      }));
+    }
+  },
+
+  forkSession: async (id) => {
+    try {
+      const forked = await api.fork(id);
+      if (forked.project) set({ project: forked.project });
+      await get().refreshSessions();
+      // Opened immediately: forking is something you do in order to keep
+      // going, so leaving the user on the original is a second click nobody
+      // wanted.
+      await get().openSession(forked.id);
+    } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  toggleArchived: () => set(state => ({ showArchived: !state.showArchived })),
 
   rename: async (title) => {
     const { sessionId } = get();

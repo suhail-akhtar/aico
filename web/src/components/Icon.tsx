@@ -20,7 +20,8 @@ import type { IconName } from '../settings-schema';
 export type Glyph =
   | IconName
   | 'search' | 'close' | 'plus' | 'check' | 'chevron-down' | 'chevron-right'
-  | 'trash' | 'edit' | 'bolt' | 'undo' | 'folder' | 'folder-plus' | 'arrow-up';
+  | 'trash' | 'edit' | 'bolt' | 'undo' | 'folder' | 'folder-plus' | 'arrow-up'
+  | 'ellipsis' | 'fork' | 'archive';
 
 const PATHS: Record<Glyph, React.ReactNode> = {
   sliders: <><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></>,
@@ -48,6 +49,9 @@ const PATHS: Record<Glyph, React.ReactNode> = {
   folder: <path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.5.7L11.5 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,
   'folder-plus': <><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.5.7L11.5 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /><path d="M12 11v5M9.5 13.5h5" /></>,
   'arrow-up': <><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></>,
+  ellipsis: <><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></>,
+  fork: <><path d="M6 4v6a3 3 0 0 0 3 3h9" /><path d="m14 9 4 4-4 4" /></>,
+  archive: <><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" /><path d="M10 12h4" /></>,
 };
 
 export function Icon(

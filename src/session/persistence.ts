@@ -192,6 +192,8 @@ export interface SessionSummary {
   title?: string;
   /** How the name was decided, so a UI can mark a provisional one. */
   titleSource?: 'fallback' | 'model' | 'user';
+  /** Filed away: still on disk and still replayable, just not in the list. */
+  archived?: boolean;
   /**
    * Timestamp of the session's last *event*, for recency ordering.
    *
@@ -215,6 +217,76 @@ export interface SessionSummary {
  * and the scan is a plain substring test before any JSON parsing, so lines that
  * cannot be titles cost almost nothing.
  */
+/**
+ * Copy a session's log into a new session.
+ *
+ * A fork is a *branch point*, not a duplicate: you keep the conversation that
+ * got you here and try a different next step without losing the one you had.
+ * That matters most exactly when a session is expensive — a long investigation
+ * you want to take two ways.
+ *
+ * Implemented as a file copy because the log is the session. There is no
+ * derived state to rebuild and nothing to keep in sync; the new id is simply a
+ * new name for the same history, and everything downstream — replay, titles,
+ * ratings, the transcript — works on it unchanged.
+ *
+ * The title is not copied blindly. Two identical rows in the sidebar is the one
+ * outcome that would make forking useless, so the copy is marked.
+ */
+export async function forkSession(
+  sourceId: string,
+  cwd: string,
+  newId: string,
+): Promise<{ id: string; title?: string }> {
+  const from = eventLogPath(sourceId, cwd);
+  const to = eventLogPath(newId, cwd);
+
+  let text: string;
+  try {
+    text = await readFile(from, 'utf8');
+  } catch {
+    throw new Error(`No session log to fork: ${sourceId}`);
+  }
+
+  // The header has to be rewritten, not copied. It carries the session id, and
+  // persistence writes back to the path that id names — a fork whose header
+  // still said `sourceId` would, on its first turn, append its events to the
+  // session it was forked from.
+  let maxSeq = 0;
+  const lines = text.split(NEWLINE).filter(line => line.trim() !== '').map(line => {
+    let record: Record<string, unknown>;
+    try { record = JSON.parse(line) as Record<string, unknown>; } catch { return line; }
+    if (record.type === '__header__') {
+      return JSON.stringify({ ...record, id: newId, startedAt: Date.now() });
+    }
+    if (typeof record.seq === 'number' && record.seq > maxSeq) maxSeq = record.seq;
+    return line;
+  });
+
+  // Name it after the original so the pair reads as a pair, and do it as an
+  // ordinary title event so the fork's own log explains its name.
+  //
+  // The seq matters: events are restored in seq order regardless of file order,
+  // so a title appended at seq 0 lands *before* the copied history and the
+  // original name wins as the most recent. It has to be past the end.
+  const source = (await listSessionSummaries(cwd)).find(s => s.id === sourceId);
+  const base = source?.title?.replace(/ \(fork\)$/, '');
+  const title = base ? `${base} (fork)` : undefined;
+  if (title) {
+    lines.push(JSON.stringify({
+      seq: maxSeq + 1, type: 'session/title', timestamp: Date.now(),
+      data: { title, source: 'user' },
+    }));
+  }
+
+  const dir = getSessionDir(cwd);
+  await mkdir(dir, { recursive: true });
+  const LF = String.fromCharCode(10);
+  await writeFile(to, lines.join(LF) + LF, 'utf8');
+
+  return { id: newId, ...(title ? { title } : {}) };
+}
+
 export async function listSessionSummaries(cwd: string): Promise<SessionSummary[]> {
   const dir = getSessionDir(cwd);
   let files: string[];
@@ -229,6 +301,7 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
     const full = path.join(dir, file);
 
     let title: string | undefined;
+    let archived = false;
     let titleSource: SessionSummary['titleSource'];
     let updatedAt = 0;
     let turns = 0;
@@ -240,17 +313,22 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
         // Cheap rejects first: most lines in a busy log are chunks and results,
         // and none of them need parsing to be skipped.
         const isTitle = line.includes('"session/title"');
+        const isArchive = line.includes('"session/archived"');
         const isUser = line.includes('"user/message"');
         const hasStamp = line.includes('"timestamp"');
-        if (!isTitle && !isUser && !hasStamp) continue;
+        if (!isTitle && !isUser && !isArchive && !hasStamp) continue;
         try {
           const event = JSON.parse(line) as {
-            type?: string; timestamp?: number; data?: { title?: string; source?: string };
+            type?: string; timestamp?: number;
+            data?: { title?: string; source?: string; archived?: boolean };
           };
           if (typeof event.timestamp === 'number' && event.timestamp > updatedAt) {
             updatedAt = event.timestamp;
           }
           if (event.type === 'user/message') turns++;
+          // Last one wins, exactly like the title: the log records the whole
+          // history and the current state is the most recent decision in it.
+          if (event.type === 'session/archived') archived = event.data?.archived === true;
           if (event.type === 'session/title' && event.data?.title) {
             // Later lines win: the log records the title's whole history, and
             // the current name is simply the last decision in it.
@@ -273,6 +351,7 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
       turns,
       ...(title ? { title } : {}),
       ...(titleSource ? { titleSource } : {}),
+      ...(archived ? { archived } : {}),
     };
   }));
 

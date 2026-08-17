@@ -34,6 +34,8 @@ import {
   MISSING_RESULT_TEXT,
   checkSessionInvariants,
   initEventLog,
+  currentTitle,
+  listSessionSummaries,
   loadEventLog,
   persistSession,
   eventLogPath,
@@ -106,6 +108,7 @@ import {
   isDirectVendor,
   runInContext,
   currentCwd,
+  forkSession,
   resolveApiKey,
   resolveBaseUrl,
   keySourceOf,
@@ -3816,6 +3819,89 @@ console.log('  -- A run carries its own directory --');
     runInContext({ cwd: here }, async () => currentCwd()),
   ]);
   assert(a === tmp && b === here, "Concurrent runs do not see each other's directory");
+}
+
+console.log('  -- A fork is a branch point, not a duplicate --');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-fork-'));
+  const source = new Session({ id: 'src-1', cwd: dir, startedAt: Date.now() });
+  await initEventLog(source.header);
+  const attached = persistSession(source);
+  source.append('turn/start', { turn: 1 });
+  source.append('user/message', { content: 'the original question' });
+  source.append('session/title', { title: 'Investigation', source: 'user' });
+  source.append('assistant/message', { content: 'the original answer' });
+  await attached.detach();
+
+  const forked = await forkSession('src-1', dir, 'fork-1');
+  assert(forked.title === 'Investigation (fork)', `named after the original (${forked.title})`);
+
+  const copy = await loadEventLog('fork-1', dir);
+  assert(copy !== null, 'the fork has a log of its own');
+  assert(copy.events.some(e => e.data?.content === 'the original question'),
+    'carrying the history that got you here');
+  assert(copy.events.some(e => e.data?.content === 'the original answer'), 'both sides of it');
+
+  // The header has to be rewritten. Persistence writes back to the path the id
+  // names, so a fork still claiming to be its source would append its next turn
+  // to the session it was forked from.
+  assert(copy.header.id === 'fork-1',
+    `the fork's header names the fork (got ${copy.header.id})`);
+
+  // Events restore in seq order regardless of file order, so a title appended
+  // at seq 0 would land before the copied history and lose to the original.
+  assert(currentTitle(copy)?.title === 'Investigation (fork)',
+    `and the new name is the one that wins (got ${currentTitle(copy)?.title})`);
+
+  // Writing to the fork must not touch the original.
+  const reopened = await loadEventLog('fork-1', dir);
+  const writing = persistSession(reopened);
+  reopened.append('user/message', { content: 'a different next step' });
+  await writing.detach();
+  const original = await loadEventLog('src-1', dir);
+  assert(!original.events.some(e => e.data?.content === 'a different next step'),
+    'the original is untouched by what happens in the fork');
+
+  // Forking a fork does not stack suffixes forever.
+  const again = await forkSession('fork-1', dir, 'fork-2');
+  assert(again.title === 'Investigation (fork)', `no "(fork) (fork)" (got ${again.title})`);
+
+  let threw = '';
+  try { await forkSession('no-such-session', dir, 'fork-3'); }
+  catch (err) { threw = err.message; }
+  assert(/No session log to fork/.test(threw), 'forking nothing says so');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- Archiving hides a row and destroys nothing --');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-archive-'));
+  const session = new Session({ id: 'arch-1', cwd: dir, startedAt: Date.now() });
+  await initEventLog(session.header);
+  const attached = persistSession(session);
+  session.append('user/message', { content: 'still here' });
+  session.append('session/title', { title: 'Filed away', source: 'user' });
+  session.append('session/archived', { archived: true });
+  await attached.detach();
+
+  let listed = await listSessionSummaries(dir);
+  assert(listed[0].archived === true, 'the listing reports it as archived');
+  assert(listed[0].title === 'Filed away', 'and still knows its name');
+
+  const still = await loadEventLog('arch-1', dir);
+  assert(still.events.some(e => e.data?.content === 'still here'),
+    'the transcript is untouched — archiving is not deleting');
+
+  // Last one wins, exactly like the title.
+  const reopened = await loadEventLog('arch-1', dir);
+  const writing = persistSession(reopened);
+  reopened.append('session/archived', { archived: false });
+  await writing.detach();
+  listed = await listSessionSummaries(dir);
+  assert(!listed[0].archived, 'un-archiving is an ordinary append, not a deletion');
+
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log('  -- The system prompt is frozen --');

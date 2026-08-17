@@ -19,6 +19,7 @@ import { useStore } from '../store';
 import type { SessionSummary } from '../api';
 import { groupByAge, groupByProject, relativeAge } from '../grouping';
 import { Icon, type Glyph } from './Icon';
+import { SessionRowMenu } from './SessionRowMenu';
 
 export type View = 'chat' | 'trajectory' | 'system';
 
@@ -40,17 +41,25 @@ export function Sidebar(
   const openSession = useStore(s => s.openSession);
   const newSession = useStore(s => s.newSession);
   const [filter, setFilter] = useState('');
+  const [searching, setSearching] = useState(false);
+  const showArchived = useStore(s => s.showArchived);
+  const toggleArchived = useStore(s => s.toggleArchived);
 
   const projects = useStore(s => s.projects);
 
-  // Which axis the list is organised on. Where beats when once there is more
-  // than one where.
-  const byProject = projects.length > 1;
+  // Always grouped by folder now. The date axis was better when a folder was
+  // not a thing you could choose, but a header that says Projects above a list
+  // that shows none of them is a screen disagreeing with itself.
+  const byProject = true;
+  const visible = useMemo(
+    () => (showArchived ? sessions : sessions.filter(s => !s.archived)),
+    [sessions, showArchived],
+  );
   // One shape for both axes, so the renderer below does not have to know which
   // it got. `path` is simply absent on the date buckets.
   const groups: Array<{ label: string; path?: string; items: SessionSummary[] }> = useMemo(
-    () => (byProject ? groupByProject(sessions, projects, filter) : groupByAge(sessions, filter)),
-    [byProject, sessions, projects, filter],
+    () => (byProject ? groupByProject(visible, projects, filter) : groupByAge(visible, filter)),
+    [byProject, visible, projects, filter],
   );
 
   const select = (id: string): void => {
@@ -91,19 +100,9 @@ export function Sidebar(
           >
             <Icon name="plus" size={15} className="text-aico-muted" /> New session
           </button>
-          {projects.length <= 1 && (
-            <button
-              onClick={onAddProject}
-              className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-1.5
-                         text-[12px] text-aico-secondary transition-colors hover:bg-aico-hover
-                         hover:text-aico-primary"
-            >
-              <Icon name="folder-plus" size={14} className="text-aico-muted" /> Open a folder
-            </button>
-          )}
         </div>
 
-        {sessions.length > 8 && (
+        {searching && (
           <div className="px-3 pb-1">
             <div className="flex items-center gap-2 rounded-lg border border-aico-border-subtle bg-aico-bg
                             px-2.5 py-1.5 transition-colors focus-within:border-aico-accent/40">
@@ -112,6 +111,8 @@ export function Sidebar(
                 value={filter}
                 onChange={e => setFilter(e.target.value)}
                 placeholder="Search sessions"
+                autoFocus
+                onKeyDown={e => { if (e.key === 'Escape') { setFilter(''); setSearching(false); } }}
                 className="w-full min-w-0 bg-transparent text-[13px] text-aico-primary
                            placeholder:text-aico-muted focus:outline-none"
               />
@@ -120,26 +121,29 @@ export function Sidebar(
         )}
 
         {/*
-          The projects header only earns its space once there is a choice to
-          make. With one directory open it is a label over a list of everything
-          there is, which is the definition of chrome.
+          Always present. It was gated on having more than one folder open,
+          which meant the controls on it — search, archived, add — were missing
+          exactly when someone was looking for how to open their first one.
         */}
-        {projects.length > 1 && (
-          <div className="flex items-center gap-1 px-4 pb-1 pt-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-aico-muted">
-              Projects
-            </span>
-            <div className="flex-1" />
-            <button
-              onClick={onAddProject}
-              title="Open another folder"
-              aria-label="Open another folder"
-              className="rounded p-1 text-aico-muted transition-colors hover:bg-aico-hover hover:text-aico-primary"
-            >
-              <Icon name="folder-plus" size={15} />
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-0.5 px-4 pb-1 pt-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-aico-muted">
+            Projects
+          </span>
+          <div className="flex-1" />
+          <HeaderButton
+            icon="search"
+            label="Search sessions"
+            active={searching}
+            onClick={() => { setSearching(v => !v); if (searching) setFilter(''); }}
+          />
+          <HeaderButton
+            icon="archive"
+            label={showArchived ? 'Hide archived sessions' : 'Show archived sessions'}
+            active={showArchived}
+            onClick={toggleArchived}
+          />
+          <HeaderButton icon="folder-plus" label="Add workspace" onClick={onAddProject} />
+        </div>
 
         <nav className="mt-1 flex-1 overflow-y-auto px-2 pb-2">
           {sessions.length === 0 && (
@@ -212,9 +216,9 @@ function SessionRow(
     session: SessionSummary; running: boolean; current: boolean; onSelect: () => void;
   },
 ): React.ReactElement {
-  const rename = useStore(s => s.rename);
-  const openSession = useStore(s => s.openSession);
-  const sessionId = useStore(s => s.sessionId);
+  const renameSession = useStore(s => s.renameSession);
+  const archiveSession = useStore(s => s.archiveSession);
+  const forkSession = useStore(s => s.forkSession);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title ?? '');
 
@@ -222,10 +226,11 @@ function SessionRow(
     setEditing(false);
     const next = draft.trim();
     if (!next || next === session.title) return;
-    // Renaming a session you are not in has to open it first: the rename is
-    // applied to the run the server holds, and there is no run until then.
-    if (sessionId !== session.id) await openSession(session.id);
-    await rename(next);
+    // No longer has to open the session first. Renaming used to be defined only
+    // for the session you were in, so renaming any other row silently switched
+    // you into it — a destination change nobody asked for from a menu item that
+    // says "Rename".
+    await renameSession(session.id, next);
   };
 
   if (editing) {
@@ -247,27 +252,70 @@ function SessionRow(
 
   const label = session.title ?? session.id;
   return (
-    <button
-      onClick={onSelect}
-      onDoubleClick={() => { setDraft(session.title ?? ''); setEditing(true); }}
-      title={`${label}\n${session.id}\nDouble-click to rename`}
-      className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left
+    // A row, not a button: the ellipsis is interactive and a button inside a
+    // button is invalid markup that browsers resolve by dropping one of them.
+    <div
+      className={`group/row mb-0.5 flex w-full items-center gap-2 rounded-lg pr-1.5 text-left
                   text-[13px] transition-colors ${current
                     ? 'bg-aico-hover text-aico-primary'
-                    : 'text-aico-secondary hover:bg-aico-hover'}`}
+                    : 'text-aico-secondary hover:bg-aico-hover'} ${session.archived ? 'opacity-55' : ''}`}
     >
-      {running && (
-        <span className="aico-thinking shrink-0 text-aico-success" title="Running on the server">
-          ●
+      <button
+        onClick={onSelect}
+        onDoubleClick={() => { setDraft(session.title ?? ''); setEditing(true); }}
+        title={`${label}\n${session.id}\nDouble-click to rename`}
+        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3 text-left"
+      >
+        {running && (
+          <span className="aico-thinking shrink-0 text-aico-success" title="Running on the server">
+            ●
+          </span>
+        )}
+        <span className={`min-w-0 flex-1 truncate ${session.title ? '' : 'font-mono opacity-70'}`}>
+          {label}
         </span>
-      )}
-      <span className={`min-w-0 flex-1 truncate ${session.title ? '' : 'font-mono opacity-70'}`}>
-        {label}
-      </span>
-      <span className="shrink-0 text-[11px] text-aico-muted">
+      </button>
+
+      {/* The age gives way to the menu on hover: both on one row would either
+          crowd the title or leave a permanent gap where a control might be. */}
+      <span className="shrink-0 text-[11px] text-aico-muted group-hover/row:hidden">
         {session.titleSource === 'fallback' ? '~' : ''}
         {relativeAge(session.updatedAt)}
       </span>
+
+      <SessionRowMenu
+        archived={session.archived === true}
+        onRename={() => { setDraft(session.title ?? ''); setEditing(true); }}
+        onFork={() => void forkSession(session.id)}
+        onArchive={() => void archiveSession(session.id, !session.archived)}
+      />
+    </div>
+  );
+}
+
+/**
+ * One icon in the projects header.
+ *
+ * The label is a `title` *and* an `aria-label`: the tooltip is the only thing
+ * that says what an unlabelled glyph does, and a screen reader gets nothing
+ * from a tooltip.
+ */
+function HeaderButton(
+  { icon, label, onClick, active = false }: {
+    icon: Glyph; label: string; onClick: () => void; active?: boolean;
+  },
+): React.ReactElement {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      className={`rounded-md p-1.5 transition-colors hover:bg-aico-hover ${
+        active ? 'bg-aico-hover text-aico-accent' : 'text-aico-muted hover:text-aico-primary'
+      }`}
+    >
+      <Icon name={icon} size={15} />
     </button>
   );
 }

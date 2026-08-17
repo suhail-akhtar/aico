@@ -175,3 +175,4 @@ export { bash, setBashProgressSink } from './tools/bash.js';
 export { summarizeLastTurn } from './session/summary.js';
 export { vendorForModel, isDirectVendor } from './providers/model-vendor.js';
 export { runInContext, currentCwd, currentRunContext } from './run-context.js';
+export { forkSession } from './session/persistence.js';

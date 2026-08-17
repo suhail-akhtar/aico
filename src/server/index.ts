@@ -33,7 +33,7 @@ import path from 'path';
 import { EventHub } from './events.js';
 import { RunManager } from './runs.js';
 import { deriveMessages } from '../session/derive.js';
-import { listSessionSummaries } from '../session/persistence.js';
+import { forkSession, listSessionSummaries } from '../session/persistence.js';
 import { loadSettings } from '../settings.js';
 import { addProject, browse, isKnownProject, listProjects, normalizeProjectPath, removeProject } from './projects.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
@@ -236,9 +236,11 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           // The in-process record is fresher than the log scan: a title written
           // moments ago may not have been flushed to disk yet.
           const live = runs.titleOf(summary.id);
+          const archived = runs.archivedOf(summary.id);
           return {
             ...summary,
             ...(live ? { title: live.title, titleSource: live.source } : {}),
+            ...(archived === undefined ? {} : { archived }),
             running: open.get(summary.id)?.busy === true,
             open: open.has(summary.id),
           };
@@ -300,6 +302,40 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       if (!sessionId || !title) { send(res, 400, { error: 'sessionId and title required' }); return; }
       await runs.ensure(sessionId, cwd);
       send(res, 200, { renamed: runs.rename(sessionId, title) });
+      return;
+    }
+
+    if (route === 'session/archive' && req.method === 'POST') {
+      const { sessionId, archived } = await readJson(req) as
+        { sessionId?: string; archived?: boolean };
+      if (!sessionId) { send(res, 400, { error: 'sessionId required' }); return; }
+      await runs.ensure(sessionId, await resolveCwd(sessionId));
+      send(res, 200, { archived: runs.setArchived(sessionId, archived !== false) });
+      return;
+    }
+
+    if (route === 'session/fork' && req.method === 'POST') {
+      const { sessionId } = await readJson(req) as { sessionId?: string };
+      if (!sessionId) { send(res, 400, { error: 'sessionId required' }); return; }
+      const sourceCwd = await resolveCwd(sessionId);
+      // A running turn is still writing the history being copied, so the fork
+      // would be a transcript cut off mid-sentence. Refused rather than
+      // silently snapshotted.
+      if (runs.get(sessionId)?.busy) {
+        send(res, 409, { error: 'Wait for the current turn to finish before forking' });
+        return;
+      }
+      // Flushed and released first: the log on disk is what gets copied, and a
+      // session with events still in memory would fork a transcript missing its
+      // own last words.
+      await runs.release(sessionId);
+      try {
+        const forked = await forkSession(sessionId, sourceCwd, `fork-${Date.now().toString(36)}`);
+        sessionCwd.set(forked.id, sourceCwd);
+        send(res, 200, { ...forked, project: sourceCwd });
+      } catch (err) {
+        send(res, 400, { error: (err as Error).message });
+      }
       return;
     }
 
