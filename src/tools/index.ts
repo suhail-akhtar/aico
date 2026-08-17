@@ -1,0 +1,529 @@
+import { bash, bashDefinition } from './bash.js';
+import { readFile, readDefinition } from './read.js';
+import { writeFile, writeDefinition } from './write.js';
+import { editFile, editDefinition } from './edit.js';
+import { globFiles, globDefinition } from './glob.js';
+import { grepFiles, grepDefinition } from './grep.js';
+import { listDirectory, lsDefinition } from './ls.js';
+import { webFetch, webFetchDefinition } from './webfetch.js';
+import { webSearch, webSearchDefinition } from './websearch.js';
+import { notebookEdit, notebookEditDefinition } from './notebook.js';
+import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
+import { askUser, askUserDefinition } from './askuser.js';
+import { getWorkingDirectory, pwdDefinition } from './pwd.js';
+// ── New feature tool imports ─────────────────────────────────────────
+import {
+  backgroundTaskToolDefinition,
+  spawnBackgroundAgent,
+  getBackgroundAgentOpts,
+} from '../background/index.js';
+import {
+  pushNotificationToolDefinition,
+  executePushNotification,
+} from '../background/notifications.js';
+import {
+  listMcpResourcesToolDefinition,
+  readMcpResourceToolDefinition,
+  executeListMcpResources,
+  executeReadMcpResource,
+} from '../mcp/resources.js';
+import {
+  mcpAddServerToolDefinition,
+  mcpRemoveServerToolDefinition,
+  mcpReloadServersToolDefinition,
+  addMcpServer,
+  removeMcpServer,
+  reloadMcpServers,
+} from '../mcp/manage.js';
+import {
+  enterWorktreeToolDefinition,
+  exitWorktreeToolDefinition,
+  executeEnterWorktree,
+  executeExitWorktree,
+} from '../worktree/tools.js';
+import {
+  cronCreateToolDefinition,
+  cronDeleteToolDefinition,
+  cronListToolDefinition,
+  cronPauseToolDefinition,
+  cronResumeToolDefinition,
+  executeCronCreate,
+  executeCronDelete,
+  executeCronList,
+  executeCronPause,
+  executeCronResume,
+} from '../cron/tools.js';
+import {
+  capabilityReportToolDefinition,
+  executeWorkspaceInfo,
+  executeWorkspaceList,
+  executeWorkspaceRead,
+  executeWorkspaceSetPath,
+  executeWorkspaceWrite,
+  workspaceInfoToolDefinition,
+  workspaceListToolDefinition,
+  workspaceReadToolDefinition,
+  workspaceSetPathToolDefinition,
+  workspaceWriteToolDefinition,
+} from './workspace.js';
+import {
+  agentCreateToolDefinition,
+  agentListToolDefinition,
+  agentPromptToolDefinition,
+  agentReadToolDefinition,
+  executeAgentCreate,
+  executeAgentList,
+  executeAgentPrompt,
+  executeAgentRead,
+  executeTeamPrompt,
+  teamPromptToolDefinition,
+} from './agents.js';
+import { skillCreateToolDefinition, executeSkillCreate } from '../skills/create.js';
+import { buildCapabilityReport } from '../capabilities.js';
+import { getWorkspaceInfo, getWorkspaceRuntime } from '../workspace.js';
+import { mcpRegistry } from '../mcp/registry.js';
+import { listAgentSpecs } from '../agents/registry.js';
+import { skillRegistry } from '../skills/index.js';
+import { cronScheduler } from '../cron/scheduler.js';
+import { getBackgroundAgents } from '../background/index.js';
+import { getAgentRegistry } from './task.js';
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  /** Whether this tool is safe to run concurrently with other safe tools */
+  isConcurrencySafe?: boolean;
+  /** Maximum result size in characters before truncation (default: 50000) */
+  maxResultSizeChars?: number;
+}
+
+/** Sub-agent types restrict which tools are available */
+export type SubAgentType =
+  // Core types
+  | 'general' | 'explore' | 'plan' | 'verification' | 'security-audit'
+  | 'project' | 'devops' | 'devsecops' | 'review'
+  // Studio pipeline types
+  | 'frontend' | 'backend' | 'qa' | 'architect'
+  | 'tech-writer' | 'product-owner' | 'healer' | 'studio-orchestrator';
+
+/** Tool sets by sub-agent type */
+const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
+  // Core
+  general: 'all',
+  explore: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd']),
+  plan: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  verification: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd']),
+  'security-audit': new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  // Project orchestrator — full access (it spawns specialists)
+  project: 'all',
+  // DevOps — full access to create IaC files + run infrastructure commands
+  devops: 'all',
+  // DevSecOps — read-only + Bash for running scanners (no file modification)
+  devsecops: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  // Code review — read-only + Bash for running linters/tests
+  review: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'TodoRead', 'TodoWrite']),
+  // Studio — implementation agents (full access)
+  frontend: 'all',
+  backend: 'all',
+  healer: 'all',
+  'studio-orchestrator': 'all',
+  'tech-writer': 'all',
+  // Studio — constrained agents
+  qa: new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'TodoRead', 'TodoWrite', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers', 'ListMcpResources', 'ReadMcpResource', 'WorkspaceInfo', 'WorkspaceWrite', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead']),
+  architect: new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite']),
+  'product-owner': new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch']),
+};
+
+export const toolDefinitions: ToolDefinition[] = [
+  { ...bashDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
+  { ...readDefinition, isConcurrencySafe: true, maxResultSizeChars: 200_000 },
+  { ...writeDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...editDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...globDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
+  { ...grepDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
+  { ...lsDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
+  { ...webFetchDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
+  { ...webSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
+  { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
+  { ...todoReadDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
+  { ...todoWriteDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...askUserDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...pwdDefinition, isConcurrencySafe: true, maxResultSizeChars: 1_000 },
+  // ── New feature tools ─────────────────────────────────────────────
+  { ...backgroundTaskToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 1_000 },
+  { ...pushNotificationToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 500 },
+  { ...listMcpResourcesToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
+  { ...readMcpResourceToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
+  { ...mcpAddServerToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 2_000 },
+  { ...mcpRemoveServerToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 1_000 },
+  { ...mcpReloadServersToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...enterWorktreeToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 2_000 },
+  { ...exitWorktreeToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 2_000 },
+  { ...cronCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 1_000 },
+  { ...cronDeleteToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 500 },
+  { ...cronListToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
+  { ...cronPauseToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 500 },
+  { ...cronResumeToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 500 },
+  { ...workspaceInfoToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 5_000 },
+  { ...workspaceSetPathToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 2_000 },
+  { ...workspaceWriteToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 2_000 },
+  { ...workspaceReadToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
+  { ...workspaceListToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
+  { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
+  { ...agentCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...agentListToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
+  { ...agentReadToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
+  { ...agentPromptToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
+  { ...teamPromptToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 120_000 },
+  { ...skillCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+];
+
+/** Get tool definitions filtered for a specific sub-agent type */
+export function getToolsForAgent(agentType: SubAgentType = 'general'): ToolDefinition[] {
+  const allowedSet = SUBAGENT_TOOL_SETS[agentType];
+  if (allowedSet === 'all') return toolDefinitions;
+  return toolDefinitions.filter(t => allowedSet.has(t.name));
+}
+
+/** Readonly tool preset (same as the 'explore' agent set) */
+const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd']);
+
+/**
+ * Resolve a custom tool whitelist to actual ToolDefinitions.
+ * Used by the dynamic agent_spec system — lets the orchestrator define exactly
+ * which tools an inline-created agent gets.
+ *
+ * @param tools - 'all' for everything, 'readonly' for read-only, or an explicit
+ *                array of tool names (e.g. ['Read', 'Write', 'Bash'])
+ */
+export function getToolsForSpec(tools: string[] | 'all' | 'readonly'): ToolDefinition[] {
+  if (tools === 'all') return toolDefinitions;
+  if (tools === 'readonly') return toolDefinitions.filter(t => READONLY_TOOLS.has(t.name));
+  const toolSet = new Set(tools);
+  return toolDefinitions.filter(t => toolSet.has(t.name));
+}
+
+/** Default bash timeout from settings (injected at startup) */
+let _bashDefaultTimeout = 120;
+export function setBashDefaultTimeout(secs: number): void {
+  _bashDefaultTimeout = secs;
+}
+
+// ── Tool result cache (LRU, TTL-based) ──────────────────────────────
+const CACHE_TTL = 30_000;  // 30 seconds
+const CACHE_MAX = 50;
+const _resultCache = new Map<string, { result: unknown; timestamp: number }>();
+const CACHEABLE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Pwd', 'WorkspaceInfo', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead', 'AgentPrompt', 'TeamPrompt']);
+
+function getCachedResult(toolName: string, args: Record<string, unknown>): unknown | undefined {
+  if (!CACHEABLE_TOOLS.has(toolName)) return undefined;
+  const key = toolName + '\0' + JSON.stringify(args);
+  const entry = _resultCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.timestamp > CACHE_TTL) {
+    _resultCache.delete(key);
+    return undefined;
+  }
+  return entry.result;
+}
+
+function setCachedResult(toolName: string, args: Record<string, unknown>, result: unknown): void {
+  if (!CACHEABLE_TOOLS.has(toolName)) return;
+  const key = toolName + '\0' + JSON.stringify(args);
+  _resultCache.set(key, { result, timestamp: Date.now() });
+  // Evict oldest entries if over limit
+  if (_resultCache.size > CACHE_MAX) {
+    const firstKey = _resultCache.keys().next().value;
+    if (firstKey) _resultCache.delete(firstKey);
+  }
+}
+
+/** Invalidate cache when any write/edit/bash operation happens */
+function invalidateCache(): void {
+  _resultCache.clear();
+}
+
+const WRITE_TOOLS = new Set([
+  'Write',
+  'Edit',
+  'Bash',
+  'NotebookEdit',
+  'McpAddServer',
+  'McpRemoveServer',
+  'McpReloadServers',
+  'WorkspaceSetPath',
+  'WorkspaceWrite',
+  'AgentCreate',
+]);
+
+// ── Concurrency control ─────────────────────────────────────────────
+// Enforces mutual exclusion: non-concurrent tools get exclusive access,
+// concurrent-safe tools run in parallel only with other safe tools.
+let _activeConcurrentCount = 0;
+let _exclusiveLock: Promise<void> | null = null;
+let _exclusiveRelease: (() => void) | null = null;
+const _waitQueue: Array<() => void> = [];
+
+async function acquireToolLock(toolName: string): Promise<void> {
+  const def = toolDefinitions.find(d => d.name === toolName);
+  const isSafe = def?.isConcurrencySafe ?? false;
+
+  if (isSafe) {
+    // Wait if an exclusive (non-safe) tool is running
+    while (_exclusiveLock) {
+      await _exclusiveLock;
+    }
+    _activeConcurrentCount++;
+  } else {
+    // Wait for all concurrent tools to finish
+    while (_activeConcurrentCount > 0 || _exclusiveLock) {
+      if (_exclusiveLock) {
+        await _exclusiveLock;
+      } else {
+        await new Promise<void>(r => _waitQueue.push(r));
+      }
+    }
+    // Acquire exclusive lock
+    _exclusiveLock = new Promise<void>(resolve => {
+      _exclusiveRelease = resolve;
+    });
+  }
+}
+
+function releaseToolLock(toolName: string): void {
+  const def = toolDefinitions.find(d => d.name === toolName);
+  const isSafe = def?.isConcurrencySafe ?? false;
+
+  if (isSafe) {
+    _activeConcurrentCount--;
+    // Wake up any exclusive waiters
+    if (_activeConcurrentCount === 0 && _waitQueue.length > 0) {
+      const next = _waitQueue.shift();
+      next?.();
+    }
+  } else {
+    // Release exclusive lock
+    _exclusiveLock = null;
+    _exclusiveRelease?.();
+    _exclusiveRelease = null;
+    // Wake up all waiters
+    while (_waitQueue.length > 0) {
+      _waitQueue.shift()?.();
+    }
+  }
+}
+
+/** Truncate tool result to maxResultSizeChars, returning truncation notice */
+export function truncateResult(result: unknown, maxChars: number): unknown {
+  if (typeof result === 'string') {
+    if (result.length > maxChars) {
+      const removedKB = Math.round((result.length - maxChars) / 1024);
+      return result.slice(0, maxChars) + `\n\n... [output truncated - ${removedKB}KB removed]`;
+    }
+    return result;
+  }
+  if (result && typeof result === 'object') {
+    const str = JSON.stringify(result);
+    if (str.length > maxChars) {
+      // For objects, try to truncate string fields
+      const copy = { ...result } as Record<string, unknown>;
+      for (const [key, val] of Object.entries(copy)) {
+        if (typeof val === 'string' && val.length > maxChars / 2) {
+          const removedKB = Math.round((val.length - maxChars / 2) / 1024);
+          copy[key] = val.slice(0, maxChars / 2) + `\n... [${key} truncated - ${removedKB}KB removed]`;
+        }
+      }
+      return copy;
+    }
+  }
+  return result;
+}
+
+export async function executeTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  // Check cache for read-only tools
+  const cached = getCachedResult(name, args);
+  if (cached !== undefined) return cached;
+
+  // Invalidate cache if this is a write operation
+  if (WRITE_TOOLS.has(name)) invalidateCache();
+
+  // Acquire concurrency lock
+  await acquireToolLock(name);
+
+  let result: unknown;
+  try {
+  switch (name) {
+    case 'Bash':
+      result = await bash({ ...(args as unknown as Parameters<typeof bash>[0]), _defaultTimeout: _bashDefaultTimeout });
+      break;
+    case 'Read':
+      result = await readFile(args as unknown as Parameters<typeof readFile>[0]);
+      break;
+    case 'Write':
+      result = await writeFile(args as unknown as Parameters<typeof writeFile>[0]);
+      break;
+    case 'Edit':
+      result = await editFile(args as unknown as Parameters<typeof editFile>[0]);
+      break;
+    case 'Glob':
+      result = await globFiles(args as unknown as Parameters<typeof globFiles>[0]);
+      break;
+    case 'Grep':
+      result = await grepFiles(args as unknown as Parameters<typeof grepFiles>[0]);
+      break;
+    case 'LS':
+      result = await listDirectory(args as unknown as Parameters<typeof listDirectory>[0]);
+      break;
+    case 'WebFetch':
+      result = await webFetch(args as unknown as Parameters<typeof webFetch>[0]);
+      break;
+    case 'WebSearch':
+      result = await webSearch(args as unknown as Parameters<typeof webSearch>[0]);
+      break;
+    case 'NotebookEdit':
+      result = await notebookEdit(args as unknown as Parameters<typeof notebookEdit>[0]);
+      break;
+    case 'TodoRead':
+      result = await todoRead();
+      break;
+    case 'TodoWrite':
+      result = await todoWrite(args as unknown as Parameters<typeof todoWrite>[0]);
+      break;
+    case 'AskUserQuestion':
+      result = await askUser(args as unknown as Parameters<typeof askUser>[0]);
+      break;
+    case 'Pwd':
+      result = await getWorkingDirectory(args as unknown as Parameters<typeof getWorkingDirectory>[0]);
+      break;
+    // ── New feature tools ─────────────────────────────────────────
+    case 'BackgroundTask': {
+      const bgArgs = args as { description: string; prompt: string; model?: string };
+      const bgOpts = getBackgroundAgentOpts();
+      if (!bgOpts) throw new Error('BackgroundTask: runtime options not initialized. Ensure startREPL() has been called.');
+      result = { agentId: spawnBackgroundAgent(bgArgs, bgOpts), status: 'spawned' };
+      break;
+    }
+    case 'PushNotification':
+      result = executePushNotification(args as { title: string; body: string; level?: 'info' | 'success' | 'warning' | 'error' });
+      break;
+    case 'ListMcpResources':
+      result = await executeListMcpResources(args as { server_name?: string });
+      break;
+    case 'ReadMcpResource':
+      result = await executeReadMcpResource(args as { server_name: string; uri: string });
+      break;
+    case 'McpAddServer':
+      result = await addMcpServer(args as {
+        name: string;
+        preset?: 'playwright';
+        type?: 'stdio' | 'http' | 'sse';
+        command?: string;
+        args?: string[];
+        url?: string;
+        env?: Record<string, string>;
+        headers?: Record<string, string>;
+      });
+      break;
+    case 'McpRemoveServer':
+      result = await removeMcpServer((args as { name: string }).name);
+      break;
+    case 'McpReloadServers':
+      result = await reloadMcpServers();
+      break;
+    case 'EnterWorktree':
+      result = await executeEnterWorktree(args as { agent_id: string; cwd?: string });
+      break;
+    case 'ExitWorktree':
+      result = await executeExitWorktree(args as { worktree_id: string; keep_branch?: boolean });
+      break;
+    case 'CronCreate':
+      result = await executeCronCreate(args as { name: string; schedule: string; prompt: string; model?: string; cwd?: string });
+      break;
+    case 'CronDelete':
+      result = await executeCronDelete(args as { job_id: string });
+      break;
+    case 'CronList':
+      result = executeCronList();
+      break;
+    case 'CronPause':
+      result = await executeCronPause(args as { job_id: string });
+      break;
+    case 'CronResume':
+      result = await executeCronResume(args as { job_id: string });
+      break;
+    case 'WorkspaceInfo':
+      result = await executeWorkspaceInfo();
+      break;
+    case 'WorkspaceSetPath':
+      result = await executeWorkspaceSetPath(args as { path?: string });
+      break;
+    case 'WorkspaceWrite':
+      result = await executeWorkspaceWrite(args as { path: string; content: string; scope?: 'session' | 'common' });
+      break;
+    case 'WorkspaceRead':
+      result = await executeWorkspaceRead(args as { path: string; scope?: 'session' | 'common' });
+      break;
+    case 'WorkspaceList':
+      result = await executeWorkspaceList(args as { path?: string; scope?: 'session' | 'common' });
+      break;
+    case 'CapabilityReport':
+      {
+        const runtime = getWorkspaceRuntime();
+        result = buildCapabilityReport({
+          sessionId: runtime.sessionId,
+          settings: runtime.settings,
+          cwd: process.cwd(),
+          tools: toolDefinitions.map((t) => ({ name: t.name, description: t.description })),
+          mcpServers: mcpRegistry.getServerInfos(),
+          workspace: getWorkspaceInfo(),
+          agents: await listAgentSpecs(),
+          skills: skillRegistry.list(),
+          cronJobs: cronScheduler.getJobs(),
+          backgroundAgents: getBackgroundAgents(),
+          subAgents: getAgentRegistry(),
+        });
+      }
+      break;
+    case 'AgentCreate':
+      result = await executeAgentCreate(args as unknown as Parameters<typeof executeAgentCreate>[0]);
+      break;
+    case 'AgentList':
+      result = await executeAgentList();
+      break;
+    case 'AgentRead':
+      result = await executeAgentRead(args as { name: string });
+      break;
+    case 'AgentPrompt':
+      result = await executeAgentPrompt(args as { name: string; task: string });
+      break;
+    case 'TeamPrompt':
+      result = await executeTeamPrompt(args as { requirements: string; agents?: string[] });
+      break;
+    case 'SkillCreate':
+      result = await executeSkillCreate(args as {
+        name: string; description: string; prompt: string;
+        aliases?: string[]; trigger?: string; scope?: 'user' | 'project';
+      });
+      break;
+    default:
+      throw new Error(`Unknown tool: ${name}`);
+  }
+  } finally {
+    releaseToolLock(name);
+  }
+
+  // Apply result truncation based on tool's maxResultSizeChars
+  const def = toolDefinitions.find(d => d.name === name);
+  if (def?.maxResultSizeChars) {
+    result = truncateResult(result, def.maxResultSizeChars);
+  }
+
+  // Cache read-only tool results
+  setCachedResult(name, args, result);
+
+  return result;
+}

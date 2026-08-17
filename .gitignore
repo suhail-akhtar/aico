@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-test/
+*.tsbuildinfo
+
+# Environment / secrets — never commit real keys; see .env.example
+.env
+.env.*
+!.env.example
+
+# aico runtime state, written while the tool runs
+.aico/
+.studio/
+.zcode/
+
+# Editor / assistant local config
+.vscode/
+.idea/
+.claude/
+.playwright-mcp/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test output
+coverage/
+test-output.txt
+test-results.txt
+
+# Scratch scaffolding produced by demo runs
+tmp/
+temp/
+expense-tracker/
+gym-management/
+blog-*/
+
+# Built web client — produced by `npm run build:web`, served by `aico serve`
+web-dist/

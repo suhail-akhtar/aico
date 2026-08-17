@@ -1,0 +1,81 @@
+{
+  "name": "aico",
+  "version": "0.3.0-beta",
+  "description": "AI Coder — multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
+  "keywords": [
+    "ai",
+    "cli",
+    "coding-assistant",
+    "openrouter",
+    "deepseek",
+    "anthropic",
+    "claude-code"
+  ],
+  "homepage": "https://github.com/suhail-akhtar/aico#readme",
+  "bugs": {
+    "url": "https://github.com/suhail-akhtar/aico/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suhail-akhtar/aico.git"
+  },
+  "license": "MIT",
+  "author": "Suhail Akhtar",
+  "type": "module",
+  "bin": {
+    "aico": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node --input-type=commonjs -e \"const fs=require('fs');fs.cpSync('src/skills/builtin','dist-test/builtin',{recursive:true})\" && node test-harness.mjs && node scripts/title-sanitizer-probe.mjs",
+    "test:live": "npm run build && npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node live-test.mjs",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build",
+    "build:web": "npm --prefix web run build",
+    "dev:web": "npm --prefix web run dev",
+    "test:web": "npm run build:web && npx tsup src/server/index.ts --format esm --outDir dist-test/server --target node18 --clean && node --input-type=commonjs -e \"const fs=require('fs');fs.cpSync('src/skills/builtin','dist-test/server/builtin',{recursive:true})\" && node web-live-test.mjs",
+    "test:web:unit": "npm --prefix web exec -- esbuild web/src/reduce.ts --bundle --format=esm --outfile=web/dist-test/reduce.mjs --log-level=error && npm --prefix web exec -- esbuild web/src/grouping.ts --bundle --format=esm --outfile=web/dist-test/grouping.mjs --log-level=error && npm --prefix web exec -- esbuild web/src/session-memory.ts --bundle --format=esm --outfile=web/dist-test/session-memory.mjs --log-level=error && npm --prefix web exec -- esbuild web/src/settings-schema.ts --bundle --format=esm --outfile=web/dist-test/settings-schema.mjs --log-level=error && npm --prefix web exec -- esbuild shared/ui/tool-result.ts --bundle --format=esm --outfile=web/dist-test/tool-result.mjs --log-level=error && node web/test-reduce.mjs && node web/test-ui.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.51.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "diff": "^5.2.0",
+    "dotenv": "^17.4.2",
+    "fast-glob": "^3.3.2",
+    "ink": "^6.8.0",
+    "ink-text-input": "^6.0.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.28.0",
+    "react": "^19.2.4",
+    "strip-ansi": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.2.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.4",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "katex": "^0.16.47",
+    "mermaid": "^11.16.1",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^9.1.0",
+    "react-syntax-highlighter": "^15.6.6",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}

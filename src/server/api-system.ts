@@ -1,0 +1,340 @@
+/**
+ * The non-conversational half of the web API: settings, provider onboarding,
+ * and the live state of everything running outside the current turn.
+ *
+ * These are split from `server/index.ts` because they answer a different
+ * question. The routes there are about *this turn* — submit, stream, cancel.
+ * These are about *the installation* — which providers are usable, what
+ * background work is in flight, which scheduled jobs exist. A client polls
+ * these; it subscribes to the others.
+ *
+ * ## On returning keys
+ *
+ * No route here ever returns an API key, not even the one just submitted for
+ * testing. A settings page needs to show *whether* a provider is configured and
+ * *where* the key came from, which is what `configured` and `source` carry. It
+ * never needs the secret back, and a JSON response is the easiest place in the
+ * system for one to end up somewhere it should not be.
+ *
+ * @module server/api-system
+ */
+
+import { getBackgroundAgents, cancelBackgroundAgent } from '../background/index.js';
+import { worktreeManager } from '../worktree/index.js';
+import { skillRegistry } from '../skills/index.js';
+import { executeCronList, executeCronDelete, executeCronPause, executeCronResume } from '../cron/tools.js';
+import { testProvider, testInstance } from '../providers/connection-test.js';
+import {
+  PROVIDER_TYPES, PROVIDER_TYPE_IDS, listInstances, normalize,
+  redactInstance, validateInstance,
+} from '../providers/instances.js';
+import type { ProviderInstance } from '../providers/instances.js';
+import { loadSettings, saveUserSetting } from '../settings.js';
+import { getWorkspaceInfo } from '../workspace.js';
+import type { AicoSettings } from '../settings.js';
+
+/** The environment variable each provider reads when no key is in settings. */
+const ENV_KEYS: Record<string, string> = {
+  openrouter: 'OPENROUTER_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  zai: 'ZAI_API_KEY',
+  ollama: '',
+};
+
+/** Everything the System panel shows, in one round trip. */
+export async function systemSnapshot(): Promise<Record<string, unknown>> {
+  const settings = await loadSettings();
+  return {
+    backgroundAgents: getBackgroundAgents().map(a => ({
+      agentId: a.agentId,
+      description: a.description,
+      model: a.model,
+      status: a.status,
+      statusMessage: a.statusMessage,
+      startedAt: a.startedAt,
+      completedAt: a.completedAt,
+      toolCallCount: a.toolCallCount,
+      currentTool: a.currentTool,
+      // The full result can be a whole essay; the panel lists, it does not read.
+      resultPreview: a.result ? a.result.slice(0, 400) : undefined,
+      error: a.error,
+    })),
+    cron: executeCronList(),
+    worktrees: worktreeManager.getAll(),
+    skills: skillRegistry.list().map(s => ({
+      name: s.frontmatter.name,
+      description: s.frontmatter.description,
+      builtin: s.isBuiltin,
+    })),
+    mcpServers: Object.keys(settings.mcpServers ?? {}),
+    workspace: describeWorkspace(settings),
+  };
+}
+
+/**
+ * Where the agent writes things that are not part of your project.
+ *
+ * Surfaced because it was invisible: files appeared somewhere on disk with no
+ * indication where, and the only way to find out was to ask the agent.
+ */
+function describeWorkspace(settings: AicoSettings): {
+  root: string; configured: boolean; sessionDir?: string;
+} {
+  const info = getWorkspaceInfo({ settings });
+  return {
+    root: info.root,
+    configured: Boolean(settings.workspace?.path),
+    ...(info.sessionDir ? { sessionDir: info.sessionDir } : {}),
+  };
+}
+
+/**
+ * Handle a `/api/system/*` or provider/settings route.
+ *
+ * Returns the JSON body to send, or `undefined` when the route is not ours —
+ * which lets the caller fall through to its own 404 rather than this module
+ * having to know what else exists.
+ */
+export async function handleSystemRoute(
+  route: string,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: unknown } | undefined> {
+  switch (route) {
+    case 'agents': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { listAgentSpecs } = await import('../agents/registry.js');
+      const specs = await listAgentSpecs();
+      return {
+        status: 200,
+        body: {
+          // The full prompt is deliberately not returned: it is thousands of
+          // tokens per agent, the panel lists rather than reads, and nothing in
+          // the browser has a use for it.
+          agents: specs.map(spec => ({
+            name: spec.name,
+            description: spec.description,
+            role: spec.role,
+            goals: spec.goals,
+            skills: spec.skills,
+            tools: spec.tools,
+            canDelegate: spec.canDelegate,
+            source: spec.source,
+          })),
+        },
+      };
+    }
+
+    case 'system':
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      return { status: 200, body: await systemSnapshot() };
+
+    case 'providers': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const settings = await loadSettings();
+      return {
+        status: 200,
+        body: {
+          // Every instance, with its secret removed but its provenance kept.
+          instances: listInstances(settings).map(redactInstance),
+          // The family catalog, so the add dialog can offer types, their
+          // default endpoints, and the hint explaining when to pick each.
+          types: PROVIDER_TYPE_IDS.map(id => PROVIDER_TYPES[id]),
+          active: settings.activeProvider ?? settings.provider ?? null,
+          model: settings.model ?? null,
+        },
+      };
+    }
+
+    case 'providers/save': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const settings = await loadSettings();
+      const draft = (body.instance ?? {}) as Partial<ProviderInstance>;
+      const stored = settings.providerInstances ?? [];
+      const all = listInstances(settings);
+      // "New" means no instance with this id exists *anywhere*, not just in the
+      // explicitly-stored list. Checking only `stored` while validating against
+      // `all` made every edit of a derived provider — which is every provider
+      // on a fresh install, since they come from environment keys — look like a
+      // create that collided with itself: "a provider with that id already
+      // exists", on the provider you were editing.
+      const isNew = !all.some(i => i.id === draft.id);
+
+      const problems = validateInstance(draft, all, { isNew });
+      if (problems.length > 0) return { status: 400, body: { error: problems[0], problems } };
+
+      // A blank key on an edit means "leave it alone", not "clear it". Clearing
+      // is an explicit action, because typing over a password field and then
+      // giving up should not silently disconnect a working provider.
+      // Editing a derived provider materializes it: the previous values come
+      // from wherever it was derived, and the result is stored explicitly.
+      const previous = stored.find(i => i.id === draft.id) ?? all.find(i => i.id === draft.id);
+      const submittedKey = typeof draft.apiKey === 'string' ? draft.apiKey.trim() : undefined;
+      const apiKey = submittedKey
+        ? submittedKey
+        : (body.clearKey === true ? undefined : previous?.apiKey);
+
+      const instance = normalize({
+        ...previous,
+        ...draft,
+        id: String(draft.id),
+        type: draft.type as ProviderInstance['type'],
+        name: draft.name ?? '',
+        ...(apiKey ? { apiKey } : {}),
+      });
+      // The derived flag describes where a record came from; one that has been
+      // saved is now user-authored regardless of how it first appeared.
+      delete instance.derived;
+
+      const existsInStored = stored.some(i => i.id === instance.id);
+      const next = existsInStored
+        ? stored.map(i => (i.id === instance.id ? instance : i))
+        : [...stored, instance];
+      await saveUserSetting('providerInstances', next);
+
+      return { status: 200, body: { instance: redactInstance(instance) } };
+    }
+
+    case 'providers/delete': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const id = String(body.id ?? '');
+      if (!id) return { status: 400, body: { error: 'id required' } };
+      const settings = await loadSettings();
+      const stored = settings.providerInstances ?? [];
+      const next = stored.filter(i => i.id !== id);
+      await saveUserSetting('providerInstances', next);
+      // Deleting the active provider leaves the setting pointing at nothing,
+      // which resolves to "first usable" rather than to an error.
+      if ((settings.activeProvider ?? settings.provider) === id) {
+        await saveUserSetting('activeProvider', next[0]?.id ?? '');
+      }
+      return { status: 200, body: { deleted: stored.length !== next.length } };
+    }
+
+    case 'providers/activate': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const id = String(body.id ?? '');
+      const model = typeof body.model === 'string' ? body.model : undefined;
+      if (!id) return { status: 400, body: { error: 'id required' } };
+      await saveUserSetting('activeProvider', id);
+      if (model) await saveUserSetting('model', model);
+      return { status: 200, body: { active: id, model: model ?? null } };
+    }
+
+    case 'provider-test':
+    case 'providers/test': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const settings = await loadSettings();
+
+      // Two shapes: an id (test what is configured) or a draft (test what is
+      // being typed, before it is saved). The draft form is what makes the add
+      // dialog able to say "this key works" before committing anything.
+      const id = typeof body.id === 'string' ? body.id : undefined;
+      if (id) {
+        const instance = listInstances(settings).find(i => i.id === id);
+        if (!instance) return { status: 404, body: { error: `No provider "${id}"` } };
+        const { resolveApiKey, resolveBaseUrl } = await import('../providers/instances.js');
+        return {
+          status: 200,
+          body: await testInstance({
+            type: instance.type,
+            apiKey: resolveApiKey(instance),
+            baseUrl: instance.baseUrl || undefined,
+          }),
+        };
+      }
+
+      const type = String(body.type ?? body.provider ?? '');
+      if (!type) return { status: 400, body: { error: 'type or id required' } };
+      let apiKey = typeof body.apiKey === 'string' ? body.apiKey : '';
+      if (!apiKey) {
+        // Blank means "use what is already configured", so a user can verify a
+        // stored or environment key without retyping a secret.
+        const existing = listInstances(settings).find(i => i.type === type);
+        if (existing) {
+          const { resolveApiKey } = await import('../providers/instances.js');
+          apiKey = resolveApiKey(existing);
+        }
+      }
+      const baseUrl = typeof body.baseUrl === 'string' && body.baseUrl ? body.baseUrl : undefined;
+      return { status: 200, body: await testProvider(type, apiKey, baseUrl) };
+    }
+
+    case 'settings': {
+      const settings = await loadSettings();
+      if (method === 'GET') {
+        return { status: 200, body: redactSettings(settings) };
+      }
+      if (method !== 'POST') return { status: 405, body: { error: 'GET or POST' } };
+      // Applied key by key so a partial update cannot blank the rest of the file.
+      for (const [key, value] of Object.entries(body)) {
+        await saveUserSetting(key, value);
+      }
+      return { status: 200, body: redactSettings(await loadSettings()) };
+    }
+
+    case 'background/cancel': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const agentId = String(body.agentId ?? '');
+      if (!agentId) return { status: 400, body: { error: 'agentId required' } };
+      return { status: 200, body: { cancelled: cancelBackgroundAgent(agentId) } };
+    }
+
+    case 'cron/delete':
+    case 'cron/pause':
+    case 'cron/resume': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const jobId = String(body.jobId ?? body.job_id ?? '');
+      if (!jobId) return { status: 400, body: { error: 'jobId required' } };
+      const action = route.slice('cron/'.length);
+      const result =
+        action === 'delete' ? await executeCronDelete({ job_id: jobId })
+        : action === 'pause' ? await executeCronPause({ job_id: jobId })
+        : await executeCronResume({ job_id: jobId });
+      return { status: 200, body: result };
+    }
+
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Strip every secret before settings cross the wire.
+ *
+ * Recursive, and keyed on the *field name* rather than on a list of known
+ * locations. The previous version redacted `providers.<vendor>.apiKey` and
+ * nothing else, so the moment `providerInstances` was added — an array of
+ * records each holding its own key — every one of those keys began flowing to
+ * the client. A redactor that has to be taught each new hiding place will
+ * always be one commit behind the thing it is protecting.
+ *
+ * Presence is preserved as `hasKey`, because a settings screen legitimately
+ * needs to know whether something is configured; it never needs the value.
+ */
+function redactSettings(settings: AicoSettings): Record<string, unknown> {
+  return redactDeep(settings) as Record<string, unknown>;
+}
+
+/** Field names whose values never leave the server, at any depth. */
+const SECRET_FIELDS = new Set(['apiKey', 'api_key', 'token', 'secret', 'password']);
+
+function redactDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactDeep);
+  if (!value || typeof value !== 'object') return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    if (SECRET_FIELDS.has(key)) {
+      // Recorded as a boolean beside the field it replaces, so a caller can
+      // tell "configured" from "absent" without ever seeing the value.
+      if (inner) out[`has${key.charAt(0).toUpperCase()}${key.slice(1)}`] = true;
+      continue;
+    }
+    out[key] = redactDeep(inner);
+  }
+  return out;
+}

@@ -1,0 +1,6 @@
+# Normalize line endings cross-platform — prevents CRLF/LF bugs
+# (e.g. the skill loader frontmatter regex that failed on Windows CRLF)
+* text=auto
+
+# Ensure skill markdown files always use LF (the frontmatter parser depends on it)
+*.md text eol=lf

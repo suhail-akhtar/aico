@@ -1,0 +1,437 @@
+/**
+ * Transport to `aico serve`.
+ *
+ * Two things here are load-bearing and easy to get wrong:
+ *
+ * **The token is not in the URL bar.** The server prints a URL with
+ * `?token=…`; we take it once, store it, and strip it from the address bar.
+ * Leaving it there means it lands in browser history, in any screenshot of the
+ * window, and in the `Referer` of every outbound link.
+ *
+ * It is kept in `localStorage`, not `sessionStorage`. Session storage is
+ * per-tab and cleared when the tab closes, so opening a second tab — or coming
+ * back tomorrow — presented a stranger with a password prompt for a server
+ * they had already authorised. The token is scoped to one origin that is
+ * always 127.0.0.1, and it is replaced every time the server restarts.
+ *
+ * **The stream is resumable, not restartable.** Every logged event carries a
+ * monotonic `seq`. On reconnect we ask for `?since=<last seq>` and the server
+ * replays the gap from the session log. That is why a dropped connection —
+ * closing the laptop, a flaky tunnel — costs nothing: the run kept going
+ * server-side and the client catches up. Restarting from zero would double
+ * every message instead.
+ *
+ * `EventSource` is deliberately not used: it cannot send headers, cannot be
+ * cancelled cleanly mid-turn, and reconnects on its own schedule with its own
+ * idea of where to resume. `fetch` + a reader gives us all three.
+ *
+ * @module api
+ */
+
+const TOKEN_KEY = 'aico.token';
+
+/** Storage can be unavailable — private mode, blocked cookies, a locked profile. */
+function read(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function write(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* see above */ }
+}
+
+/** Pull the token out of the URL on first load, then hide it. */
+export function bootstrapToken(): string | null {
+  const url = new URL(window.location.href);
+  const fromUrl = url.searchParams.get('token');
+  if (fromUrl) {
+    write(TOKEN_KEY, fromUrl);
+    url.searchParams.delete('token');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    return fromUrl;
+  }
+  return read(TOKEN_KEY);
+}
+
+export function getToken(): string {
+  return read(TOKEN_KEY) ?? '';
+}
+
+export function setToken(token: string): void {
+  write(TOKEN_KEY, token);
+}
+
+/**
+ * Forget a token the server no longer accepts.
+ *
+ * Every restart mints a fresh token, so a remembered one goes stale the moment
+ * the server is restarted. Keeping it would 401 every request forever with no
+ * explanation; clearing it returns the page to the prompt, which can then say
+ * what actually happened.
+ */
+export function clearToken(): void {
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* see above */ }
+}
+
+/**
+ * Called when the server rejects the stored token.
+ *
+ * A callback rather than an import of the store, so this module stays a
+ * transport and does not need to know what a session is.
+ */
+let onTokenRejected: (() => void) | undefined;
+
+export function setTokenRejectedHandler(handler: () => void): void {
+  onTokenRejected = handler;
+}
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`/api/${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-aico-token': getToken(),
+      ...(init.headers ?? {}),
+    },
+  });
+  const text = await res.text();
+  const body = text ? safeParse(text) : {};
+  if (!res.ok) {
+    if (res.status === 401) {
+      // The server restarted and minted a new token. Forget the old one so the
+      // page can ask for the new one instead of failing every request.
+      clearToken();
+      onTokenRejected?.();
+    }
+    const message = (body as { error?: string }).error ?? `HTTP ${res.status}`;
+    throw new ApiError(message, res.status);
+  }
+  return body as T;
+}
+
+function safeParse(text: string): unknown {
+  try { return JSON.parse(text); } catch { return { raw: text }; }
+}
+
+const post = <T,>(path: string, body: unknown): Promise<T> =>
+  request<T>(path, { method: 'POST', body: JSON.stringify(body) });
+
+// ── conversation ─────────────────────────────────────────────────────
+
+export interface SubmitOptions {
+  sessionId: string;
+  task: string;
+  model?: string;
+  planMode?: boolean;
+  autoApprove?: boolean;
+}
+
+export const api = {
+  sessions: () => request<{ sessions: SessionSummary[]; active: string[] }>('sessions'),
+
+  session: (id: string) => request<{
+    sessionId: string;
+    seq: number;
+    busy: boolean;
+    messages: Array<{ role: string; content: string }>;
+    usage: Record<string, number>;
+  }>(`session?id=${encodeURIComponent(id)}`),
+
+  submit: (opts: SubmitOptions) => post<{ accepted: boolean }>('submit', opts),
+  cancel: (sessionId: string) => post<{ cancelled: boolean }>('cancel', { sessionId }),
+  steer: (sessionId: string, content: string) => post<{ ok: boolean }>('steer', { sessionId, content }),
+  followup: (sessionId: string, content: string) => post<{ ok: boolean }>('followup', { sessionId, content }),
+
+  trajectory: (sessionId: string, opts: { limit?: number; before?: number } = {}) => {
+    const params = new URLSearchParams({ id: sessionId });
+    if (opts.limit) params.set('limit', String(opts.limit));
+    if (opts.before !== undefined) params.set('before', String(opts.before));
+    return request<TrajectoryView>(`trajectory?${params}`);
+  },
+
+  setGoal: (sessionId: string, text: string, status: 'active' | 'paused' | 'cleared') =>
+    post<{ ok: boolean }>('goal', { sessionId, text, status }),
+
+  rate: (sessionId: string, targetSeq: number, rating: 'up' | 'down' | 'none', note?: string) =>
+    post<{ ok: boolean }>('feedback', { sessionId, targetSeq, rating, note }),
+
+  agents: () => request<{ agents: AgentSpec[] }>('agents'),
+
+  /** URL of the transcript as a downloadable document. */
+  exportUrl: (sessionId: string, format: 'md' | 'txt') =>
+    `/api/session/export?id=${encodeURIComponent(sessionId)}&format=${format}`
+    + `&token=${encodeURIComponent(getToken())}`,
+
+  /** The transcript as text, for copying to the clipboard. */
+  exportText: async (sessionId: string, format: 'md' | 'txt'): Promise<string> => {
+    const res = await fetch(
+      `/api/session/export?id=${encodeURIComponent(sessionId)}&format=${format}`,
+      { headers: { 'x-aico-token': getToken() } },
+    );
+    if (!res.ok) throw new ApiError(`export failed: ${res.status}`, res.status);
+    return res.text();
+  },
+
+  rename: (sessionId: string, title: string) =>
+    post<{ renamed: boolean }>('session/rename', { sessionId, title }),
+
+  // ── providers ──────────────────────────────────────────────────────
+  providers: () => request<{
+    instances: ProviderInstance[];
+    types: ProviderTypeInfo[];
+    active: string | null;
+    model: string | null;
+  }>('providers'),
+
+  saveProvider: (instance: Partial<ProviderInstance>) =>
+    post<{ instance: ProviderInstance }>('providers/save', { instance }),
+
+  deleteProvider: (id: string) => post<{ deleted: boolean }>('providers/delete', { id }),
+
+  activateProvider: (id: string, model?: string) =>
+    post<{ active: string; model: string | null }>('providers/activate', { id, model }),
+
+  /** Test an instance that already exists, by id. */
+  testProvider: (id: string) => post<ProviderTestResult>('providers/test', { id }),
+
+  /** Test what is being typed, before it is saved. */
+  testProviderDraft: (draft: { type: string; apiKey?: string; baseUrl?: string }) =>
+    post<ProviderTestResult>('providers/test', draft),
+
+  settings: () => request<Record<string, unknown>>('settings'),
+  saveSettings: (patch: Record<string, unknown>) => post<Record<string, unknown>>('settings', patch),
+
+  system: () => request<SystemSnapshot>('system'),
+  cancelBackgroundAgent: (agentId: string) => post<{ cancelled: boolean }>('background/cancel', { agentId }),
+  cronAction: (action: 'delete' | 'pause' | 'resume', jobId: string) =>
+    post<Record<string, unknown>>(`cron/${action}`, { jobId }),
+};
+
+export interface ProviderTestResult {
+  ok: boolean;
+  error?: string;
+  models?: string[];
+  latencyMs?: number;
+}
+
+/** One configured provider, as the server reports it — never with a key. */
+export interface ProviderInstance {
+  id: string;
+  type: 'openrouter' | 'deepseek' | 'anthropic' | 'openai' | 'gemini' | 'zai' | 'ollama' | 'openai-compatible';
+  name: string;
+  apiKey?: string;
+  baseUrl?: string;
+  models?: string[];
+  defaultModel?: string;
+  enabled?: boolean;
+  keySource?: 'settings' | 'environment' | 'none' | 'not-required';
+  derived?: boolean;
+}
+
+/** One adapter family: its label, defaults, and when to pick it. */
+export interface ProviderTypeInfo {
+  type: ProviderInstance['type'];
+  label: string;
+  defaultBaseUrl: string;
+  defaultModel: string;
+  envVar?: string;
+  requiresKey: boolean;
+  hint: string;
+}
+
+/** One row in the session sidebar. */
+export interface SessionSummary {
+  id: string;
+  title?: string;
+  titleSource?: 'fallback' | 'model' | 'user';
+  updatedAt: number;
+  /** User messages in the log. Zero means nothing has been written yet. */
+  turns?: number;
+  running?: boolean;
+  open?: boolean;
+}
+
+/** One event as the log recorded it. */
+export interface LogEvent {
+  seq: number;
+  type: string;
+  timestamp: number;
+  data: Record<string, unknown>;
+}
+
+export interface StepTiming {
+  turn: number;
+  step: number;
+  startedAt: number;
+  firstTokenAt?: number;
+  endedAt?: number;
+  ttftMs?: number;
+  decodeMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+}
+
+export interface Deliverable {
+  path: string;
+  action: 'created' | 'modified';
+  seq: number;
+  touches: number;
+}
+
+export interface Goal {
+  text: string;
+  status: 'active' | 'paused' | 'cleared';
+  since: number;
+}
+
+export interface Feedback {
+  rating: 'up' | 'down';
+  note?: string;
+  at: number;
+}
+
+export interface TrajectoryView {
+  events: LogEvent[];
+  steps: StepTiming[];
+  deliverables: Deliverable[];
+  total: number;
+  hasMore: boolean;
+  goal: Goal | null;
+  feedback: Record<number, Feedback>;
+}
+
+/** One subagent the harness can delegate to. */
+export interface AgentSpec {
+  name: string;
+  description: string;
+  role: string;
+  goals: string[];
+  skills: string[];
+  tools: string[];
+  canDelegate: boolean;
+  source: string;
+}
+
+/** Where the agent writes files that are not part of the project. */
+export interface WorkspaceInfo {
+  root: string;
+  configured: boolean;
+  sessionDir?: string;
+}
+
+export interface SystemSnapshot {
+  backgroundAgents: Array<{
+    agentId: string; description: string; model: string;
+    status: string; statusMessage: string; startedAt: number;
+    completedAt?: number; toolCallCount: number; currentTool?: string;
+    resultPreview?: string; error?: string;
+  }>;
+  cron: Array<{ id: string; schedule: string; prompt?: string; task?: string; paused?: boolean; nextRun?: number }>;
+  worktrees: Array<{ path?: string; branch?: string; agentId?: string; [k: string]: unknown }>;
+  skills: Array<{ name: string; description: string; builtin: boolean }>;
+  mcpServers: string[];
+  workspace?: WorkspaceInfo;
+}
+
+// ── the event stream ─────────────────────────────────────────────────
+
+export interface StreamEvent {
+  type: string;
+  sessionId: string;
+  seq?: number;
+  data: Record<string, unknown>;
+}
+
+export interface StreamHandle {
+  close: () => void;
+}
+
+/**
+ * Subscribe to a session, reconnecting from the last seen `seq` forever.
+ *
+ * The retry delay backs off but is capped: a server that is merely restarting
+ * should be picked up in seconds, and a user watching a long run should not
+ * have to reload the page because the reconnect timer wandered into minutes.
+ */
+export function streamSession(
+  sessionId: string,
+  onEvent: (event: StreamEvent) => void,
+  onStatus?: (status: 'connecting' | 'live' | 'lost') => void,
+  /** Resume point. Pass the last seq already applied; 0 replays everything. */
+  startSeq = 0,
+): StreamHandle {
+  let closed = false;
+  let since = startSeq;
+  let attempt = 0;
+  let controller: AbortController | null = null;
+
+  const connect = async (): Promise<void> => {
+    if (closed) return;
+    onStatus?.(attempt === 0 ? 'connecting' : 'connecting');
+    controller = new AbortController();
+
+    try {
+      const res = await fetch(
+        `/api/events?session=${encodeURIComponent(sessionId)}&since=${since}&token=${encodeURIComponent(getToken())}`,
+        { signal: controller.signal, headers: { Accept: 'text/event-stream' } },
+      );
+      if (!res.ok || !res.body) throw new ApiError(`stream failed: ${res.status}`, res.status);
+
+      attempt = 0;
+      onStatus?.('live');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE frames are separated by a blank line. Anything after the last
+        // separator is a partial frame and must stay in the buffer.
+        let boundary: number;
+        while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const line = frame.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as StreamEvent;
+            // Only logged events advance the resume point. Streaming deltas
+            // have no seq and are not replayed — treating them as a resume
+            // point would skip real history on the next reconnect.
+            if (typeof event.seq === 'number' && event.seq > since) since = event.seq;
+            onEvent(event);
+          } catch {
+            // A malformed frame is not a reason to tear down a working stream.
+          }
+        }
+      }
+    } catch (err) {
+      if (closed || (err as Error)?.name === 'AbortError') return;
+    }
+
+    if (closed) return;
+    onStatus?.('lost');
+    attempt += 1;
+    const delay = Math.min(1000 * 2 ** (attempt - 1), 15_000);
+    setTimeout(connect, delay);
+  };
+
+  void connect();
+
+  return {
+    close: () => {
+      closed = true;
+      controller?.abort();
+    },
+  };
+}

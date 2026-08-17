@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "test-echo": {
+      "command": "node",
+      "args": ["-e", "
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  try {
+    const msg = JSON.parse(line);
+    if (msg.method === 'initialize') {
+      process.stdout.write(JSON.stringify({ jsonrpc:'2.0', id: msg.id, result: { protocolVersion:'2024-11-05', capabilities:{}, serverInfo:{name:'echo',version:'1.0'} } }) + '\n');
+    } else if (msg.method === 'tools/list') {
+      process.stdout.write(JSON.stringify({ jsonrpc:'2.0', id: msg.id, result: { tools: [{ name:'echo', description:'Echoes input back', inputSchema:{ type:'object', properties:{ text:{ type:'string' } } } }] } }) + '\n');
+    } else if (msg.method === 'tools/call') {
+      process.stdout.write(JSON.stringify({ jsonrpc:'2.0', id: msg.id, result: { content: [{ type:'text', text:'ECHO: ' + (msg.params && msg.params.arguments && msg.params.arguments.text || '') }] } }) + '\n');
+    }
+  } catch(e) {}
+});
+"],
+      "type": "stdio"
+    }
+  }
+}

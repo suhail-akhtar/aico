@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Web-only styling. The palette, markdown, diffs and scrollbars come from
+ * `shared/ui/theme.css`, imported alongside this file, so the browser client
+ * and the desktop shell cannot drift apart visually.
+ */
+
+/* A page scrolls its panes, not its body — but unlike the desktop shell it
+   must still honour the browser's own overscroll and address-bar behaviour. */
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  overscroll-behavior-y: none;
+}
+
+/* Text on a web page is selectable. The desktop opts out of this; a browser
+   user reasonably expects to be able to copy anything on screen. */
+body {
+  user-select: text;
+}
+
+/* Respect a user who has asked the OS for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
