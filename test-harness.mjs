@@ -422,7 +422,8 @@ console.log('\n══ 6. SYSTEM PROMPT ══');
 const asText = (doc, dialect = DEFAULT_DIALECT, id = 'test') =>
   renderPrompt(doc, dialect, id).system;
 
-const p0 = asText(await buildSystemPrompt('test'));
+const doc0 = await buildSystemPrompt('test');
+const p0 = asText(doc0);
 assert(p0.includes('aico'), 'Mentions aico');
 assert(/workspace/i.test(p0), 'Says the scratch workspace exists — the one surrounding fact tools cannot convey');
 assert(!p0.includes('EFFORT'), 'No effort tag default');
@@ -437,6 +438,34 @@ assert(/wide rather than deep/i.test(p0), 'Delegation is framed as a decision, n
 assert(!/You can CREATE|You can DEFINE|You can SPAWN/.test(p0),
   'No capability catalogue: that was prefix tokens restating the tool schemas');
 assert(/never invent one|have not read/i.test(p0), 'Navigation says do not act on an unread path');
+
+// Verification, stated as three specific failures rather than one long
+// injunction to be careful. The weight matters as much as the content: a model
+// that has read nine paragraphs about not claiming success prematurely spends
+// its budget proving it is allowed to finish.
+assert(/has to be fresh/i.test(p0), 'Stale evidence is named as a failure mode');
+assert(/should.*work|probably/i.test(p0), 'Hedged wording is given as the tell to self-check on');
+assert(/stacked half-fixes|one thing at a time/i.test(p0), 'Fix-stacking is named');
+assert(/question the assumption/i.test(p0), 'Repeated failure redirects to the assumption, not a fourth attempt');
+
+// Permission, not restriction: the scheduler already enforces the constraints,
+// so the only thing missing was telling the model which it may exploit.
+assert(/at once rather than one at a time/i.test(p0), 'Independent lookups are allowed to batch');
+assert(/depends on what a previous call returned/i.test(p0), 'and the dependency limit is stated');
+
+// Weight check. This is a budget, not a target: every rule here can be
+// expanded into a doctrine, and the sum of those doctrines is a timid agent.
+{
+  const rendered = renderPrompt(doc0, ANTHROPIC_DIALECT, 'anthropic').system;
+  const NL = String.fromCharCode(10);
+  const bulletsIn = (id) => {
+    const m = new RegExp('<' + id + '>([^]*?)</' + id + '>').exec(rendered);
+    return m ? m[1].split(NL).filter(l => l.startsWith('- ')).length : 0;
+  };
+  assert(bulletsIn('behaviour') <= 14, `behaviour stays scannable (${bulletsIn('behaviour')} bullets)`);
+  assert(bulletsIn('scope') <= 8, `scope stays scannable (${bulletsIn('scope')} bullets)`);
+  assert(bulletsIn('navigation') <= 8, `navigation stays scannable (${bulletsIn('navigation')} bullets)`);
+}
 
 assert(asText(await buildSystemPrompt('test', 'high')).includes('HIGH'), 'High effort');
 assert(asText(await buildSystemPrompt('test', 'max')).includes('MAX'), 'Max effort');
