@@ -25,6 +25,7 @@
  */
 
 import path from 'path';
+import { currentCwd } from '../run-context.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getWorkspaceRuntime } from '../workspace.js';
 
@@ -41,7 +42,7 @@ function isInside(parent: string, target: string): boolean {
  * settings and on which session is running, both of which change within the
  * life of a process.
  */
-export function writableRoots(cwd = path.resolve(process.cwd())): string[] {
+export function writableRoots(cwd = currentCwd()): string[] {
   const roots = [path.resolve(cwd)];
   try {
     const runtime = getWorkspaceRuntime();
@@ -65,7 +66,7 @@ export function writableRoots(cwd = path.resolve(process.cwd())): string[] {
  * the workspace tools report.
  */
 export function resolveInsideWorkspace(inputPath: string, label = 'path'): string {
-  const cwd = path.resolve(process.cwd());
+  const cwd = currentCwd();
   const resolved = path.resolve(cwd, inputPath);
   const roots = writableRoots(cwd);
 

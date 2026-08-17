@@ -30,6 +30,8 @@ import {
   PROVIDER_TYPES, resolveApiKey, resolveBaseUrl, resolveInstance,
 } from './instances.js';
 import type { ProviderInstance } from './instances.js';
+import { isDirectVendor, isDeepSeekPlatformModel, isOpenAIModel, isZAIModel, vendorForModel } from './model-vendor.js';
+export { isDeepSeekPlatformModel, isDirectVendor, vendorForModel } from './model-vendor.js';
 
 /**
  * Whether a model must be driven through `/v1/responses` rather than
@@ -69,18 +71,6 @@ export const PROVIDER_DISPLAY: Record<string, string> = {
   zai:        'Z.AI (GLM)',
   ollama:     'Ollama',
 };
-
-/**
- * Detect a first-party DeepSeek Platform model id.
- *
- * Deliberately excludes the `deepseek/…` form: that slash-prefixed id is
- * OpenRouter's namespacing, and routing it to api.deepseek.com would 404 on a
- * model name the platform has never heard of. Bare ids (`deepseek-v4-flash`)
- * are the platform's own.
- */
-export function isDeepSeekPlatformModel(model: string): boolean {
-  return /^deepseek-/i.test(model);
-}
 
 /**
  * Prompt dialect for a model routed through OpenRouter.
@@ -516,20 +506,4 @@ function apiKey(provider: string): string | undefined {
   }
 }
 
-function isOpenAIModel(model: string): boolean {
-  return (
-    model.startsWith('gpt-') ||
-    model.startsWith('o1') ||
-    model.startsWith('o3') ||
-    model.startsWith('o4')
-  );
-}
 
-/**
- * Detect Z.AI GLM models. Supports both bare names (glm-4.6, glm-5.2) and
- * prefixed names (zai/glm-5.2, z-ai/glm-5). The prefix form is stripped
- * before sending to the API — Z.AI expects bare model IDs.
- */
-function isZAIModel(model: string): boolean {
-  return /^z-?ai\//i.test(model) || /^glm-/i.test(model);
-}

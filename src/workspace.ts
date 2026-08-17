@@ -4,6 +4,7 @@ import os from 'os';
 import crypto from 'crypto';
 import type { AicoSettings } from './settings.js';
 import { saveProjectWorkspacePath } from './settings.js';
+import { currentRunContext } from './run-context.js';
 
 export type WorkspaceScope = 'session' | 'common';
 
@@ -34,11 +35,20 @@ export function setWorkspaceRuntime(ctx: WorkspaceContext): void {
   runtimeSettings = ctx.settings ?? runtimeSettings;
 }
 
+/**
+ * The active run's workspace context.
+ *
+ * Reads the async-local run context first and falls back to the module-level
+ * values. The fallback is for the CLI, where there is one run and the globals
+ * are unambiguous; inside the server, where several runs share the process, the
+ * run context is the only answer that is correct per-caller.
+ */
 export function getWorkspaceRuntime(): WorkspaceContext {
+  const run = currentRunContext();
   return {
-    settings: runtimeSettings,
-    sessionId: runtimeSessionId,
-    cwd: process.cwd(),
+    settings: run?.settings ?? runtimeSettings,
+    sessionId: run?.sessionId ?? runtimeSessionId,
+    cwd: run?.cwd ?? process.cwd(),
   };
 }
 

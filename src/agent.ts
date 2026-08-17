@@ -57,6 +57,7 @@ function getExecutionMode(name: string): ExecutionMode {
   return 'exclusive';
 }
 import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
+import { runInContext } from './run-context.js';
 import { buildRuntimeAwareness } from './capabilities.js';
 import { listAgentSpecs } from './agents/registry.js';
 import { skillRegistry } from './skills/index.js';
@@ -209,6 +210,16 @@ export interface TokenTracker {
 
 export interface AgentOptions {
   task: string;
+  /**
+   * The project directory this run works in.
+   *
+   * Every file tool resolves relative paths against it and refuses writes
+   * outside it. Defaults to `process.cwd()`. Set it to drive a session in a
+   * directory other than the one the process was launched in — which is what
+   * the server does, and why it cannot simply chdir: several sessions in
+   * several projects share one process.
+   */
+  cwd?: string;
   /** GitHub token — now optional; kept for backward compat with sub-agent callers */
   token?: string;
   model: string;
@@ -691,7 +702,27 @@ function attachmentsToText(attachments: SdkAttachment[]): string {
 
 // ── Main agent function ──────────────────────────────────────────────
 
+/**
+ * Run one turn.
+ *
+ * A thin wrapper that establishes the run context and then does the work. The
+ * `cwd` in that context is what every file tool resolves against, so this is
+ * the seam that lets one process drive sessions in several different projects
+ * at once — the browser client's whole reason for existing. It defaults to
+ * `process.cwd()`, which is what the CLI has always meant by "here".
+ */
 export async function runAgent(opts: AgentOptions): Promise<string> {
+  return runInContext(
+    {
+      cwd: opts.cwd ?? process.cwd(),
+      ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+      ...(opts.settings ? { settings: opts.settings } : {}),
+    },
+    () => runAgentInContext(opts),
+  );
+}
+
+async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const {
     task,
     model,

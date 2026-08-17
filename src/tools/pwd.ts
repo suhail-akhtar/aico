@@ -1,11 +1,12 @@
 import path from 'path';
+import { currentCwd } from '../run-context.js';
 
 export interface PwdInput {
   resolve?: boolean;
 }
 
 export function getWorkingDirectory(input: PwdInput): string {
-  const cwd = process.cwd();
+  const cwd = currentCwd();
   if (input.resolve) {
     return path.resolve(cwd);
   }

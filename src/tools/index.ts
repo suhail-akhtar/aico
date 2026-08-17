@@ -1,4 +1,5 @@
 import { bash, bashDefinition } from './bash.js';
+import { currentCwd } from '../run-context.js';
 import { readFile, readDefinition } from './read.js';
 import { writeFile, writeDefinition } from './write.js';
 import { editFile, editDefinition } from './edit.js';
@@ -476,7 +477,7 @@ export async function executeTool(
         result = buildCapabilityReport({
           sessionId: runtime.sessionId,
           settings: runtime.settings,
-          cwd: process.cwd(),
+          cwd: currentCwd(),
           tools: toolDefinitions.map((t) => ({ name: t.name, description: t.description })),
           mcpServers: mcpRegistry.getServerInfos(),
           workspace: getWorkspaceInfo(),

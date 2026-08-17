@@ -173,3 +173,5 @@ export { resolveWorkspaceRoot, setWorkspaceRuntime, getWorkspaceInfo } from './w
 export { bash, setBashProgressSink } from './tools/bash.js';
 // -- Turn summary --
 export { summarizeLastTurn } from './session/summary.js';
+export { vendorForModel, isDirectVendor } from './providers/model-vendor.js';
+export { runInContext, currentCwd, currentRunContext } from './run-context.js';

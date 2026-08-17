@@ -102,6 +102,10 @@ import {
   PROVIDER_TYPE_IDS,
   listInstances,
   resolveInstance,
+  vendorForModel,
+  isDirectVendor,
+  runInContext,
+  currentCwd,
   resolveApiKey,
   resolveBaseUrl,
   keySourceOf,
@@ -3726,6 +3730,93 @@ console.log('  -- The trace survives the session log (the point of storing it) -
 // 36. VOLATILE CONTEXT STAYS OUT OF THE CACHED PREFIX
 // ═══════════════════════════════════════════════════════════
 console.log('\n══ 36. VOLATILE CONTEXT STAYS OUT OF THE CACHED PREFIX ══');
+
+console.log('');
+console.log('══ 40. ROUTING AND RUN CONTEXT ══');
+
+console.log('  -- A model id that names a vendor beats the active provider --');
+{
+  // The failure this pins presented as "[Anthropic] API error 404: model:
+  // deepseek-v4-flash" — an error that reads like a bad model name and is
+  // actually a routing decision. Both the web E2E suite and the benchmark
+  // harness hit it, and both looked at first like a broken model id.
+  const settings = {
+    activeProvider: 'anthropic',
+    providerInstances: [
+      { id: 'anthropic', type: 'anthropic', name: 'Anthropic', apiKey: 'sk-ant-x' },
+      { id: 'deepseek', type: 'deepseek', name: 'DeepSeek', apiKey: 'sk-ds-x' },
+    ],
+  };
+  assert(resolveInstance(settings, { model: 'deepseek-v4-flash' }).type === 'deepseek',
+    'A DeepSeek model routes to DeepSeek even when Anthropic is active');
+  assert(resolveInstance(settings, { model: 'claude-sonnet-5' }).type === 'anthropic',
+    'and the active provider still wins when it can serve the model');
+  assert(resolveInstance(settings, { model: 'some-unknown-model' }).type === 'anthropic',
+    'an id that names no vendor leaves the active provider alone');
+}
+
+console.log('  -- A gateway is never overridden: it fronts every vendor --');
+{
+  const settings = {
+    activeProvider: 'router',
+    providerInstances: [
+      { id: 'router', type: 'openrouter', name: 'OpenRouter', apiKey: 'sk-or-x' },
+      { id: 'anthropic', type: 'anthropic', name: 'Anthropic', apiKey: 'sk-ant-x' },
+    ],
+  };
+  assert(resolveInstance(settings, { model: 'claude-sonnet-5' }).type === 'openrouter',
+    'A router keeps the traffic — serving another vendor is what it is for');
+}
+
+console.log('  -- An explicit model list is the strongest signal --');
+{
+  const settings = {
+    activeProvider: 'anthropic',
+    providerInstances: [
+      { id: 'anthropic', type: 'anthropic', name: 'Anthropic', apiKey: 'sk-ant-x' },
+      { id: 'local', type: 'openai-compatible', name: 'Local', apiKey: 'x',
+        baseUrl: 'http://localhost:8000/v1', models: ['claude-sonnet-5'] },
+    ],
+  };
+  assert(resolveInstance(settings, { model: 'claude-sonnet-5' }).id === 'local',
+    'An instance that says it serves the model outranks inference about the id');
+}
+
+console.log('  -- vendorForModel only answers when it is sure --');
+{
+  assert(vendorForModel('claude-sonnet-5') === 'anthropic', 'claude-');
+  assert(vendorForModel('gpt-4o-mini') === 'openai', 'gpt-');
+  assert(vendorForModel('deepseek-v4-flash') === 'deepseek', 'bare deepseek-');
+  assert(vendorForModel('glm-4.6') === 'zai', 'glm-');
+  assert(vendorForModel('gemini-2.0-flash') === 'gemini', 'gemini-');
+  assert(vendorForModel('deepseek/deepseek-v4-flash') === null,
+    "a router's namespacing is not a vendor claim — that id would 404 at the vendor");
+  assert(vendorForModel('anthropic/claude-sonnet-5') === null, 'nor this one');
+  assert(vendorForModel('llama-3') === null, 'and a model half the industry serves names nobody');
+  assert(isDirectVendor('anthropic') && !isDirectVendor('openrouter'), 'gateways are not direct vendors');
+}
+
+console.log('  -- A run carries its own directory --');
+{
+  const here = currentCwd();
+  assert(here === process.cwd(), 'Outside a run, the answer is process.cwd() — a drop-in replacement');
+
+  const tmp = fs.realpathSync(os.tmpdir());
+  const inside = await runInContext({ cwd: tmp }, async () => currentCwd());
+  assert(inside === tmp, "Inside a run, it is the run's directory");
+  assert(currentCwd() === here, 'and the process is left where it was — no chdir');
+
+  // The property that makes a server possible: two runs, one process, neither
+  // seeing the other's directory.
+  const [a, b] = await Promise.all([
+    runInContext({ cwd: tmp }, async () => {
+      await new Promise(r => setTimeout(r, 10));
+      return currentCwd();
+    }),
+    runInContext({ cwd: here }, async () => currentCwd()),
+  ]);
+  assert(a === tmp && b === here, "Concurrent runs do not see each other's directory");
+}
 
 console.log('  -- The system prompt is frozen --');
 {

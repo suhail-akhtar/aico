@@ -26,6 +26,7 @@
  */
 
 import type { AicoSettings } from '../settings.js';
+import { isDirectVendor, vendorForModel } from './model-vendor.js';
 
 /** Adapter families an instance can speak. */
 export type ProviderType =
@@ -285,18 +286,49 @@ export function resolveInstance(
     if (named) return named;
   }
 
-  const active = settings.activeProvider ?? settings.provider;
-  if (active) {
-    const configured = instances.find(i => i.id === active)
-      // A legacy `provider: 'openai'` names a family, not an instance.
-      ?? instances.find(i => i.type === active);
-    if (configured) return configured;
+  // An instance that lists the model owns it outright — that list is populated
+  // by actually asking the endpoint what it serves, which beats any inference.
+  if (opts.model) {
+    const listed = instances.find(i => i.models?.includes(opts.model!));
+    if (listed) return listed;
   }
 
-  if (opts.model) {
-    const owning = instances.find(i => i.models?.includes(opts.model!));
-    if (owning) return owning;
+  const active = settings.activeProvider ?? settings.provider;
+  const configured = active
+    ? instances.find(i => i.id === active)
+      // A legacy `provider: 'openai'` names a family, not an instance.
+      ?? instances.find(i => i.type === active)
+    : undefined;
+
+  // The active provider is the default, not an override. When the model id
+  // unambiguously names a vendor and the active instance is a *different*
+  // vendor — not a gateway, which is expected to front several — routing to the
+  // active one is a guaranteed 404 on a model that vendor has never heard of.
+  //
+  // This is what made `--model deepseek-v4-flash` fail with "[Anthropic] API
+  // error 404: model: deepseek-v4-flash" whenever the active provider happened
+  // to be Anthropic: an error that reads like a bad model name and is actually
+  // a routing decision. Both the web E2E suite and the benchmark harness hit it
+  // and both looked, at first, like a broken model id.
+  const vendor = opts.model ? vendorForModel(opts.model) : null;
+  const owning = vendor ? instances.find(i => i.type === vendor) : undefined;
+
+  if (owning) {
+    // The active provider is a default, not an override. When it is a *direct*
+    // vendor of a different family it simply cannot serve this model — routing
+    // there is a guaranteed 404 on an id that vendor has never heard of. A
+    // gateway is exempt: fronting other vendors is what it is for.
+    if (configured && isDirectVendor(configured.type) && configured.type !== vendor) return owning;
+
+    // With no active choice, the vendor match beats positional order — but it
+    // must not demote an instance somebody explicitly configured in favour of
+    // one merely derived from an environment variable. Someone who set up a
+    // gateway and also happens to have ANTHROPIC_API_KEY exported meant the
+    // gateway.
+    if (!configured && !(owning.derived && !instances[0]?.derived)) return owning;
   }
+
+  if (configured) return configured;
 
   return instances[0];
 }

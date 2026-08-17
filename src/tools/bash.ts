@@ -16,6 +16,7 @@
  */
 
 import { spawn, execFile } from 'child_process';
+import { currentCwd } from '../run-context.js';
 
 export interface BashInput {
   command: string;
@@ -96,7 +97,7 @@ export async function bash(input: BashInput): Promise<BashResult> {
 
   return new Promise<BashResult>((resolve) => {
     const child = spawn(shell, [shellFlag, input.command], {
-      cwd: process.cwd(),
+      cwd: currentCwd(),
       windowsVerbatimArguments: process.platform === 'win32',
       // Its own process group on POSIX, so a timeout can signal the whole tree
       // rather than just the shell. Without this a killed `sh -c` leaves its

@@ -50,24 +50,18 @@ const record = (bench, metric, value, note = '') => {
 };
 
 /**
- * A scratch directory, *and* the process moved into it.
+ * A scratch directory. No chdir — `runAgent` takes its own `cwd` now.
  *
- * Not optional. `runAgent` has no `cwd` parameter — the session header's cwd
- * locates the event log, while every file tool resolves against
- * `process.cwd()`. Passing a directory without chdir leaves the agent
- * searching the repo it was launched from for files it will never find, which
- * is how the first run of this bench spent 150 seconds and seven steps
- * concluding, correctly, that four files did not exist.
+ * It did not always. An earlier run of this bench spent 150 seconds and seven
+ * steps searching the repo it was launched from for four files sitting in a
+ * temp directory, and concluded — correctly, and uselessly — that they did not
+ * exist.
  */
 function scratch(name) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aico-bench-${name}-`));
-  process.chdir(dir);
-  return dir;
+  return fs.mkdtempSync(path.join(os.tmpdir(), `aico-bench-${name}-`));
 }
 
-const HOME_DIR = process.cwd();
 function leave(dir) {
-  process.chdir(HOME_DIR);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -87,6 +81,7 @@ async function turn(session, task, cwd, tracker, opts = {}) {
   await runAgent({
     task,
     model: MODEL,
+    cwd,
     session,
     sessionId: session.header.id,
     tokenTracker: tracker,
