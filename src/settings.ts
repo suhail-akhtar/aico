@@ -141,6 +141,27 @@ export interface AicoSettings {
     /** Absolute path or project-relative path. Default: ~/.aico/workspace/projects/<project>. */
     path?: string;
   };
+  /**
+   * Directories the browser client offers to work in.
+   *
+   * A *project* is a directory you point AICO at; sessions already live under
+   * `~/.aico/projects/<hash>/sessions/` keyed by exactly this path, so adding
+   * one here does not move anything — it makes an existing grouping reachable
+   * from the client. The directory the server was launched in is always
+   * available whether or not it is listed.
+   *
+   * Deliberately not called "workspaces", which in this codebase already means
+   * the scratch area artifacts are written to (see {@link AicoSettings.workspace}).
+   * Two meanings for one word across the settings screen and the sidebar would
+   * be worse than an unfamiliar label.
+   */
+  projects?: Array<{
+    /** Absolute path. The identity — two entries cannot share one. */
+    path: string;
+    /** What to call it. Defaults to the directory's own name. */
+    name?: string;
+    addedAt?: number;
+  }>;
   /** Automatic context compaction before the conversation gets too large. */
   autoCompact?: {
     enabled?: boolean;

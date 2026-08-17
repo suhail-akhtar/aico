@@ -35,6 +35,7 @@ import { RunManager } from './runs.js';
 import { deriveMessages } from '../session/derive.js';
 import { listSessionSummaries } from '../session/persistence.js';
 import { loadSettings } from '../settings.js';
+import { addProject, browse, isKnownProject, listProjects, normalizeProjectPath, removeProject } from './projects.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
@@ -110,6 +111,34 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   const hub = new EventHub();
   const runs = new RunManager(hub, settings);
 
+  /**
+   * Which directory each session belongs to.
+   *
+   * Derived rather than stored: sessions are already filed on disk under their
+   * directory, so enumerating projects tells us the mapping. The cache is a
+   * memo of that enumeration so every subsequent request for a known session
+   * does not have to rescan, and it is populated on the first `/api/sessions`
+   * call the client makes — which the client makes before it can name a session
+   * at all.
+   */
+  const sessionCwd = new Map<string, string>();
+
+  /**
+   * The directory a request should run in.
+   *
+   * An explicit `project` wins, but only if the server already knows it. That
+   * check is the difference between "drive the folder the user opened" and
+   * "start an agent anywhere on the filesystem, chosen by the caller".
+   */
+  async function resolveCwd(sessionId: string, requested?: string | null): Promise<string> {
+    if (requested && await isKnownProject(cwd, requested)) {
+      const target = normalizeProjectPath(requested);
+      sessionCwd.set(sessionId, target);
+      return target;
+    }
+    return sessionCwd.get(sessionId) ?? cwd;
+  }
+
   const heartbeat = setInterval(() => hub.heartbeat(), HEARTBEAT_MS);
   // The server should not be the reason the process refuses to exit.
   heartbeat.unref?.();
@@ -157,7 +186,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
       // Replay the gap from the log before going live. The log is the history,
       // so this is a read rather than a buffer the server had to maintain.
-      const run = await runs.ensure(sessionId, cwd);
+      const run = await runs.ensure(sessionId, await resolveCwd(sessionId, url.searchParams.get('project')));
       const missed = run.session.events.filter(e => e.seq > since);
       for (const event of missed) {
         res.write(`event: log\ndata: ${JSON.stringify({
@@ -171,18 +200,38 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
+    if (route === 'projects' && req.method === 'GET') {
+      send(res, 200, { projects: await listProjects(cwd), launch: normalizeProjectPath(cwd) });
+      return;
+    }
+
+    if (route === 'fs/browse' && req.method === 'GET') {
+      send(res, 200, browse(url.searchParams.get('path') ?? undefined));
+      return;
+    }
+
     if (route === 'sessions' && req.method === 'GET') {
-      const stored = await listSessionSummaries(cwd);
+      // Every known project, not just the launch directory: the sidebar groups
+      // by project, and a project with no visible sessions is indistinguishable
+      // from one that was never added.
+      const projects = await listProjects(cwd);
+      const stored = (await Promise.all(projects.map(async project => {
+        const rows = project.exists ? await listSessionSummaries(project.path).catch(() => []) : [];
+        return rows.map(row => ({ ...row, project: project.path }));
+      }))).flat();
+      stored.sort((a, b) => b.updatedAt - a.updatedAt);
+      for (const row of stored) sessionCwd.set(row.id, row.project);
       const open = new Map(runs.list().map(r => [r.sessionId, r]));
       // A session opened this process but not yet written to disk still belongs
       // in the list — otherwise a brand-new conversation is invisible in the
       // sidebar until its first event lands.
       for (const run of open.values()) {
         if (!stored.some(s => s.id === run.sessionId)) {
-          stored.unshift({ id: run.sessionId, updatedAt: Date.now(), turns: 0 });
+          stored.unshift({ id: run.sessionId, updatedAt: Date.now(), turns: 0, project: run.cwd });
         }
       }
       send(res, 200, {
+        projects,
         sessions: stored.map(summary => {
           // The in-process record is fresher than the log scan: a title written
           // moments ago may not have been flushed to disk yet.
@@ -284,13 +333,34 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     const body = systemBody;
 
     switch (route) {
+      case 'projects/add': {
+        const { path: dir, name } = body as { path?: string; name?: string };
+        if (!dir) { send(res, 400, { error: 'path required' }); return; }
+        try {
+          send(res, 200, { project: await addProject(dir, name) });
+        } catch (err) {
+          send(res, 400, { error: (err as Error).message });
+        }
+        return;
+      }
+      case 'projects/remove': {
+        const { path: dir } = body as { path?: string };
+        if (!dir) { send(res, 400, { error: 'path required' }); return; }
+        if (normalizeProjectPath(dir) === normalizeProjectPath(cwd)) {
+          send(res, 400, { error: 'the directory the server was launched in cannot be removed' });
+          return;
+        }
+        send(res, 200, { removed: await removeProject(dir) });
+        return;
+      }
       case 'submit': {
         const { sessionId, task, model } = body as { sessionId?: string; task?: string; model?: string };
         if (!sessionId || !task) { send(res, 400, { error: 'sessionId and task required' }); return; }
         // Answer immediately and let the work stream. A ten-minute turn must
         // not be held open on a request that any proxy or browser will time out.
         send(res, 202, { accepted: true });
-        void runs.submit(sessionId, cwd, task, model ?? defaultModel, {
+        const runCwd = await resolveCwd(sessionId, (body as { project?: string }).project);
+        void runs.submit(sessionId, runCwd, task, model ?? defaultModel, {
           planMode: (body as { planMode?: boolean }).planMode ?? false,
           autoApprove: (body as { autoApprove?: boolean }).autoApprove ?? true,
         }).catch(() => { /* already reported on the stream as turn-end */ });

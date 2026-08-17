@@ -19,6 +19,7 @@ import { Trajectory } from './components/Trajectory';
 import { GoalBar } from './components/GoalBar';
 import { SessionMenu } from './components/SessionMenu';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { ProjectPicker } from './components/ProjectPicker';
 import { Icon } from './components/Icon';
 import { applyTheme, type ThemeChoice } from './theme';
 import { getToken, setToken, setTokenRejectedHandler } from './api';
@@ -28,6 +29,7 @@ export function App(): React.ReactElement {
   const [view, setView] = useState<View>('chat');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [hasToken, setHasToken] = useState(Boolean(getToken()));
   /** True when a token we had was refused — a restarted server, not a first visit. */
   const [wasRejected, setWasRejected] = useState(false);
@@ -44,6 +46,7 @@ export function App(): React.ReactElement {
   const refreshSessions = useStore(s => s.refreshSessions);
   const refreshProviders = useStore(s => s.refreshProviders);
   const refreshSettings = useStore(s => s.refreshSettings);
+  const refreshProjects = useStore(s => s.refreshProjects);
   const theme = useStore(s => s.settings.theme as ThemeChoice | undefined);
   const title = useStore(s => s.title);
   const busy = useStore(s => s.busy);
@@ -55,6 +58,7 @@ export function App(): React.ReactElement {
     void refreshSessions();
     void refreshProviders();
     void refreshSettings();
+    void refreshProjects();
     return disconnect;
     // Deliberately once: `connect` is what changes the session, not this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,6 +85,7 @@ export function App(): React.ReactElement {
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onSettings={() => setSettingsOpen(true)}
+        onAddProject={() => setPickerOpen(true)}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -135,6 +140,7 @@ export function App(): React.ReactElement {
       </main>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {pickerOpen && <ProjectPicker onClose={() => setPickerOpen(false)} />}
     </div>
   );
 }

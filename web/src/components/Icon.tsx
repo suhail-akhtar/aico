@@ -20,7 +20,7 @@ import type { IconName } from '../settings-schema';
 export type Glyph =
   | IconName
   | 'search' | 'close' | 'plus' | 'check' | 'chevron-down' | 'chevron-right'
-  | 'trash' | 'edit' | 'bolt' | 'undo';
+  | 'trash' | 'edit' | 'bolt' | 'undo' | 'folder' | 'folder-plus' | 'arrow-up';
 
 const PATHS: Record<Glyph, React.ReactNode> = {
   sliders: <><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></>,
@@ -45,6 +45,9 @@ const PATHS: Record<Glyph, React.ReactNode> = {
   edit: <><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" /><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L13 14l-4 1 1-4 7.5-7.5Z" /></>,
   bolt: <path d="M13 3 5 14h6l-1 7 8-11h-6l1-7Z" />,
   undo: <><path d="M4 9h10a5 5 0 0 1 0 10H9" /><path d="m8 5-4 4 4 4" /></>,
+  folder: <path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.5.7L11.5 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,
+  'folder-plus': <><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.5.7L11.5 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /><path d="M12 11v5M9.5 13.5h5" /></>,
+  'arrow-up': <><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></>,
 };
 
 export function Icon(

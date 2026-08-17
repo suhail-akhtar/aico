@@ -117,6 +117,11 @@ export class RunManager {
       const result = await runAgent({
         task,
         model,
+        // The run's own directory, not the server's. This is what lets one
+        // server drive sessions in several projects at once; before `runAgent`
+        // took a cwd, every session silently worked in whatever directory the
+        // server process happened to be started in.
+        cwd: run.cwd,
         showPlan: false,
         verbose: false,
         silent: true,

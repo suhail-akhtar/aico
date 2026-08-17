@@ -124,6 +124,8 @@ const post = <T,>(path: string, body: unknown): Promise<T> =>
 // ── conversation ─────────────────────────────────────────────────────
 
 export interface SubmitOptions {
+  /** Directory to run in. Must be a project the server knows. */
+  project?: string;
   sessionId: string;
   task: string;
   model?: string;
@@ -132,7 +134,21 @@ export interface SubmitOptions {
 }
 
 export const api = {
-  sessions: () => request<{ sessions: SessionSummary[]; active: string[] }>('sessions'),
+  sessions: () => request<{
+    sessions: SessionSummary[]; active: string[]; projects: Project[];
+  }>('sessions'),
+
+  // ── projects ───────────────────────────────────────────────────────
+  projects: () => request<{ projects: Project[]; launch: string }>('projects'),
+
+  addProject: (path: string, name?: string) =>
+    post<{ project: Project }>('projects/add', { path, name }),
+
+  removeProject: (path: string) => post<{ removed: boolean }>('projects/remove', { path }),
+
+  /** Subdirectories of one directory, for the picker. */
+  browse: (path?: string) =>
+    request<BrowseResult>(`fs/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
 
   session: (id: string) => request<{
     sessionId: string;
@@ -245,8 +261,31 @@ export interface ProviderTypeInfo {
 }
 
 /** One row in the session sidebar. */
+/** A directory the client may start sessions in. */
+export interface Project {
+  path: string;
+  name: string;
+  /** The directory the server was launched in. Cannot be removed. */
+  isLaunch: boolean;
+  /** False once the directory has been deleted or renamed underneath us. */
+  exists: boolean;
+  sessions: number;
+  updatedAt: number;
+}
+
+export interface BrowseResult {
+  path: string;
+  parent: string | null;
+  entries: Array<{ name: string; path: string }>;
+  roots: Array<{ name: string; path: string }>;
+  /** The directory could not be read. `entries` is empty, and that is not an error. */
+  denied?: boolean;
+}
+
 export interface SessionSummary {
   id: string;
+  /** Absolute path of the project this session belongs to. */
+  project?: string;
   title?: string;
   titleSource?: 'fallback' | 'model' | 'user';
   updatedAt: number;
@@ -365,6 +404,15 @@ export function streamSession(
   onStatus?: (status: 'connecting' | 'live' | 'lost') => void,
   /** Resume point. Pass the last seq already applied; 0 replays everything. */
   startSeq = 0,
+  /**
+   * Directory this session belongs to.
+   *
+   * Sent on subscribe as well as on submit because subscribing is what opens
+   * the session server-side — a brand-new session has no row on disk yet, so
+   * the server has no other way to learn which project it is for, and would
+   * file it under the directory it was launched in.
+   */
+  project?: string,
 ): StreamHandle {
   let closed = false;
   let since = startSeq;
@@ -378,7 +426,9 @@ export function streamSession(
 
     try {
       const res = await fetch(
-        `/api/events?session=${encodeURIComponent(sessionId)}&since=${since}&token=${encodeURIComponent(getToken())}`,
+        `/api/events?session=${encodeURIComponent(sessionId)}&since=${since}`
+        + `&token=${encodeURIComponent(getToken())}`
+        + (project ? `&project=${encodeURIComponent(project)}` : ''),
         { signal: controller.signal, headers: { Accept: 'text/event-stream' } },
       );
       if (!res.ok || !res.body) throw new ApiError(`stream failed: ${res.status}`, res.status);

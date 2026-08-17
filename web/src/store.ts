@@ -31,7 +31,7 @@ import type { TurnSummaryData } from './components/TurnSummary';
 import {
   api, streamSession,
   type StreamEvent, type StreamHandle, type SystemSnapshot,
-  type ProviderInstance, type ProviderTypeInfo, type SessionSummary,
+  type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project,
   type Goal, type Feedback, type Deliverable,
 } from './api';
 import {
@@ -56,6 +56,18 @@ interface AppState {
   // ── connection ──
   status: ConnectionStatus;
   lastSeq: number;
+
+  // ── projects ──
+  /** Directories the server will start sessions in. */
+  projects: Project[];
+  /**
+   * The directory new sessions are created in.
+   *
+   * Null until the first listing arrives, at which point it becomes the
+   * server's launch directory. Opening a session switches it to that session's
+   * project, so "new session" always means "here, where I am looking".
+   */
+  project: string | null;
 
   // ── sessions ──
   sessions: SessionSummary[];
@@ -100,6 +112,11 @@ interface AppState {
   steer: (content: string) => Promise<void>;
   followup: (content: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
+  refreshProjects: () => Promise<void>;
+  /** Work in this directory from now on. */
+  selectProject: (path: string) => void;
+  addProject: (path: string, name?: string) => Promise<void>;
+  removeProject: (path: string) => Promise<void>;
   refreshProviders: () => Promise<void>;
   refreshSystem: () => Promise<void>;
   refreshSettings: () => Promise<void>;
@@ -115,6 +132,8 @@ let handle: StreamHandle | null = null;
 export const useStore = create<AppState>((set, get) => ({
   status: 'connecting',
   lastSeq: 0,
+  projects: [],
+  project: null,
   sessions: [],
   activeSessions: [],
   sessionId: initialSessionId(),
@@ -146,10 +165,16 @@ export const useStore = create<AppState>((set, get) => ({
       // immediately, rather than blank until its first title event replays.
       title: get().sessions.find(s => s.id === sessionId)?.title ?? '',
     });
+    // The project rides along on subscribe: subscribing is what opens the
+    // session server-side, and a brand-new session has no row on disk for the
+    // server to infer a directory from.
+    const project = get().sessions.find(s => s.id === sessionId)?.project ?? get().project;
     handle = streamSession(
       sessionId,
       (event) => applyEvent(set, get, event),
       (status) => set({ status }),
+      0,
+      project ?? undefined,
     );
 
     // Usage lives on the server's run, not in the log, so replaying events
@@ -180,6 +205,7 @@ export const useStore = create<AppState>((set, get) => ({
       (event) => applyEvent(set, get, event),
       (status) => set({ status }),
       lastSeq,
+      get().project ?? undefined,
     );
   },
 
@@ -194,6 +220,10 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   openSession: async (id) => {
+    // Follow the session into its directory, so the next new session lands
+    // where you are looking rather than wherever you last were.
+    const project = get().sessions.find(s => s.id === id)?.project;
+    if (project) set({ project });
     get().connect(id);
     await get().refreshSessions();
   },
@@ -205,6 +235,7 @@ export const useStore = create<AppState>((set, get) => ({
       await api.submit({
         sessionId,
         task,
+        ...(get().project ? { project: get().project! } : {}),
         ...(opts.model ?? model ? { model: opts.model ?? model! } : {}),
         planMode: opts.planMode ?? false,
       });
@@ -240,12 +271,55 @@ export const useStore = create<AppState>((set, get) => ({
 
   refreshSessions: async () => {
     try {
-      const { sessions, active } = await api.sessions();
+      const { sessions, active, projects } = await api.sessions();
       // Merged rather than assigned. A listing fetched the moment a message is
       // sent has not necessarily seen the write yet, and assigning it wholesale
       // would undo the promotion that just put the row at the top.
-      set(state => ({ sessions: mergeSessions(state.sessions, sessions), activeSessions: active }));
+      set(state => ({
+        sessions: mergeSessions(state.sessions, sessions),
+        activeSessions: active,
+        ...(projects ? { projects } : {}),
+        // The launch directory is the answer until someone chooses otherwise.
+        ...(state.project ? {} : { project: projects?.find(p => p.isLaunch)?.path ?? null }),
+      }));
     } catch { /* the sidebar is not worth an error banner */ }
+  },
+
+  refreshProjects: async () => {
+    try {
+      const { projects, launch } = await api.projects();
+      set(state => ({ projects, ...(state.project ? {} : { project: launch }) }));
+    } catch { /* the picker will say so when it is opened */ }
+  },
+
+  selectProject: (path) => {
+    if (get().project === path) return;
+    // A new session, because a session belongs to one directory for its whole
+    // life — the log is filed under it. Switching project mid-session would
+    // leave the transcript describing work in a directory it is no longer in.
+    set({ project: path });
+    get().newSession();
+  },
+
+  addProject: async (path, name) => {
+    try {
+      const { project } = await api.addProject(path, name);
+      await get().refreshProjects();
+      get().selectProject(project.path);
+    } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  removeProject: async (path) => {
+    try {
+      await api.removeProject(path);
+      const { projects } = await api.projects();
+      set(state => ({
+        projects,
+        ...(state.project === path
+          ? { project: projects.find(p => p.isLaunch)?.path ?? null }
+          : {}),
+      }));
+    } catch (err) { set({ error: (err as Error).message }); }
   },
 
   refreshProviders: async () => {

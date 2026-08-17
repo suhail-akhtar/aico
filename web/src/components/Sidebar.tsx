@@ -17,7 +17,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import type { SessionSummary } from '../api';
-import { groupByAge, relativeAge } from '../grouping';
+import { groupByAge, groupByProject, relativeAge } from '../grouping';
 import { Icon, type Glyph } from './Icon';
 
 export type View = 'chat' | 'trajectory' | 'system';
@@ -28,9 +28,12 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSettings: () => void;
+  onAddProject: () => void;
 }
 
-export function Sidebar({ view, onView, open, onClose, onSettings }: Props): React.ReactElement {
+export function Sidebar(
+  { view, onView, open, onClose, onSettings, onAddProject }: Props,
+): React.ReactElement {
   const sessions = useStore(s => s.sessions);
   const activeSessions = useStore(s => s.activeSessions);
   const sessionId = useStore(s => s.sessionId);
@@ -38,7 +41,17 @@ export function Sidebar({ view, onView, open, onClose, onSettings }: Props): Rea
   const newSession = useStore(s => s.newSession);
   const [filter, setFilter] = useState('');
 
-  const groups = useMemo(() => groupByAge(sessions, filter), [sessions, filter]);
+  const projects = useStore(s => s.projects);
+
+  // Which axis the list is organised on. Where beats when once there is more
+  // than one where.
+  const byProject = projects.length > 1;
+  // One shape for both axes, so the renderer below does not have to know which
+  // it got. `path` is simply absent on the date buckets.
+  const groups: Array<{ label: string; path?: string; items: SessionSummary[] }> = useMemo(
+    () => (byProject ? groupByProject(sessions, projects, filter) : groupByAge(sessions, filter)),
+    [byProject, sessions, projects, filter],
+  );
 
   const select = (id: string): void => {
     void openSession(id);
@@ -78,6 +91,16 @@ export function Sidebar({ view, onView, open, onClose, onSettings }: Props): Rea
           >
             <Icon name="plus" size={15} className="text-aico-muted" /> New session
           </button>
+          {projects.length <= 1 && (
+            <button
+              onClick={onAddProject}
+              className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-1.5
+                         text-[12px] text-aico-secondary transition-colors hover:bg-aico-hover
+                         hover:text-aico-primary"
+            >
+              <Icon name="folder-plus" size={14} className="text-aico-muted" /> Open a folder
+            </button>
+          )}
         </div>
 
         {sessions.length > 8 && (
@@ -96,6 +119,28 @@ export function Sidebar({ view, onView, open, onClose, onSettings }: Props): Rea
           </div>
         )}
 
+        {/*
+          The projects header only earns its space once there is a choice to
+          make. With one directory open it is a label over a list of everything
+          there is, which is the definition of chrome.
+        */}
+        {projects.length > 1 && (
+          <div className="flex items-center gap-1 px-4 pb-1 pt-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-aico-muted">
+              Projects
+            </span>
+            <div className="flex-1" />
+            <button
+              onClick={onAddProject}
+              title="Open another folder"
+              aria-label="Open another folder"
+              className="rounded p-1 text-aico-muted transition-colors hover:bg-aico-hover hover:text-aico-primary"
+            >
+              <Icon name="folder-plus" size={15} />
+            </button>
+          </div>
+        )}
+
         <nav className="mt-1 flex-1 overflow-y-auto px-2 pb-2">
           {sessions.length === 0 && (
             <p className="px-3 py-3 text-[13px] text-aico-muted">No sessions yet.</p>
@@ -104,11 +149,19 @@ export function Sidebar({ view, onView, open, onClose, onSettings }: Props): Rea
             <p className="px-3 py-3 text-[13px] text-aico-muted">Nothing matches that.</p>
           )}
 
-          {groups.map(group => group.items.length > 0 && (
-            <section key={group.label} className="mb-1">
-              <h2 className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-aico-muted">
-                {group.label}
+          {groups.map(group => (byProject || group.items.length > 0) && (
+            <section key={group.label + (group.path ?? '')} className="mb-1">
+              <h2
+                className={`flex items-center gap-1.5 px-3 pb-1 pt-3 text-[11px] font-medium
+                            tracking-wider text-aico-muted ${byProject ? '' : 'uppercase'}`}
+                {...(group.path ? { title: group.path } : {})}
+              >
+                {byProject && <Icon name="folder" size={12} />}
+                <span className="min-w-0 truncate">{group.label}</span>
               </h2>
+              {group.items.length === 0 && (
+                <p className="px-3 pb-1 text-[12px] text-aico-muted">No sessions here yet.</p>
+              )}
               {group.items.map(session => (
                 <SessionRow
                   key={session.id}

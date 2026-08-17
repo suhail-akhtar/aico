@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { composeMessages, emptyDraft } from './dist-test/reduce.mjs';
-import { groupByAge, relativeAge, promote, merge } from './dist-test/grouping.mjs';
+import { groupByAge, groupByProject, relativeAge, promote, merge } from './dist-test/grouping.mjs';
 import {
   PANES, SECRET_ROOTS, allFields, assertNoSecrets, changedPaths,
   patchFor, readPath, searchFields,
@@ -274,6 +274,60 @@ test('the merged list comes out newest first', () => {
      { id: 'c', updatedAt: 2000, turns: 1 }],
   );
   assert.deepEqual(merged.map(s => s.id), ['b', 'c', 'a']);
+});
+
+// ── grouping by project ──────────────────────────────────────────────
+section('With more than one folder open, where beats when');
+
+const P1 = 'E:/work/api';
+const P2 = 'E:/work/web';
+const proj = [{ path: P1, name: 'api' }, { path: P2, name: 'web' }];
+const inProj = (id, project, updatedAt) => ({ id, project, updatedAt, turns: 1 });
+
+test('sessions land under the folder they belong to', () => {
+  const groups = groupByProject(
+    [inProj('a', P1, 3000), inProj('b', P2, 2000), inProj('c', P1, 1000)], proj);
+  const api = groups.find(g => g.path === P1);
+  assert.deepEqual(api.items.map(s => s.id), ['a', 'c']);
+  assert.deepEqual(groups.find(g => g.path === P2).items.map(s => s.id), ['b']);
+});
+
+test('the folder you touched last is first, and so is the session', () => {
+  const groups = groupByProject(
+    [inProj('old', P1, 1000), inProj('new', P2, 9000), inProj('mid', P2, 5000)], proj);
+  assert.equal(groups[0].path, P2, 'most recently active project leads');
+  assert.deepEqual(groups[0].items.map(s => s.id), ['new', 'mid'], 'newest session leads within it');
+});
+
+test('a folder with no sessions still appears', () => {
+  // A folder you just opened and cannot see is indistinguishable from one that
+  // failed to open.
+  const groups = groupByProject([inProj('a', P1, 1000)], proj);
+  assert.equal(groups.length, 2);
+  assert.equal(groups.find(g => g.path === P2).items.length, 0);
+});
+
+test('a session whose folder is no longer listed is kept, not hidden', () => {
+  const groups = groupByProject([inProj('orphan', 'E:/gone/elsewhere', 5000)], proj);
+  const orphans = groups.find(g => g.path === 'E:/gone/elsewhere');
+  assert.ok(orphans, 'it gets a group of its own');
+  assert.equal(orphans.label, 'elsewhere', 'labelled by its folder name');
+  assert.deepEqual(orphans.items.map(s => s.id), ['orphan']);
+});
+
+test('filtering works the same way it does on the date axis', () => {
+  const sessions = [
+    { id: 'a', project: P1, title: 'Fix the auth bug', updatedAt: 3000, turns: 1 },
+    { id: 'b', project: P1, title: 'Write the docs', updatedAt: 2000, turns: 1 },
+  ];
+  const groups = groupByProject(sessions, proj, 'AUTH');
+  assert.deepEqual(groups.find(g => g.path === P1).items.map(s => s.id), ['a']);
+});
+
+test('a session with no recorded folder is not dropped on the floor', () => {
+  const groups = groupByProject([{ id: 'x', updatedAt: 1000, turns: 1 }], proj);
+  const other = groups.find(g => g.label === 'Other');
+  assert.ok(other && other.items.length === 1);
 });
 
 // ── settings schema ──────────────────────────────────────────────────

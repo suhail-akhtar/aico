@@ -82,6 +82,60 @@ export function merge(local: SessionSummary[], incoming: SessionSummary[]): Sess
 }
 
 /**
+ * Bucket sessions by the directory they belong to.
+ *
+ * Used instead of the date buckets once more than one project is open, because
+ * at that point *where* a conversation happened is the stronger memory than
+ * *when* — you remember you were working on the API, not that it was Tuesday.
+ * With a single project the question never arises and dates are the better
+ * axis, so {@link groupByAge} stays the default.
+ *
+ * Projects are ordered by their most recent activity and sessions within them
+ * by recency, so the same rule holds at both levels: the thing you touched last
+ * is at the top.
+ */
+export function groupByProject(
+  sessions: SessionSummary[],
+  projects: Array<{ path: string; name: string }>,
+  filter = '',
+): Array<{ label: string; path: string; items: SessionSummary[] }> {
+  const needle = filter.trim().toLowerCase();
+  const matching = byRecency(needle
+    ? sessions.filter(s =>
+      (s.title ?? '').toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle))
+    : sessions);
+
+  const groups = new Map<string, { label: string; path: string; items: SessionSummary[] }>();
+  // Seeded from the project list so a project with no sessions still appears —
+  // a folder you just opened and cannot see is indistinguishable from one that
+  // failed to open.
+  for (const project of projects) {
+    groups.set(project.path, { label: project.name, path: project.path, items: [] });
+  }
+
+  for (const session of matching) {
+    const key = session.project ?? '';
+    let group = groups.get(key);
+    if (!group) {
+      // A session whose directory is no longer a known project still has to go
+      // somewhere; dropping it would hide history rather than tidy it.
+      group = { label: key ? basename(key) : 'Other', path: key, items: [] };
+      groups.set(key, group);
+    }
+    group.items.push(session);
+  }
+
+  return [...groups.values()].sort((a, b) =>
+    (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0));
+}
+
+/** Last path segment, for either separator. */
+function basename(dir: string): string {
+  const parts = dir.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? dir;
+}
+
+/**
  * Bucket sessions by age.
  *
  * Boundaries are calendar days, not elapsed hours: something from 11pm last
