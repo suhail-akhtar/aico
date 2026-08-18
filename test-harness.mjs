@@ -140,6 +140,7 @@ import {
   verifyApp, formatVerdict, findBrowser, findPlaceholders, describePlaceholders,
   looksLikeServer, resolveTimeout, backgroundProcesses, stopBackgroundProcesses,
   extractRequirements, coverageOf, setBrief,
+  withTimeout, timeoutFor, ToolTimeoutError,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -5927,6 +5928,83 @@ if (findBrowser()) {
   resetVerification();
 }
 
+
+
+console.log('\n══ NO TOOL RUNS FOREVER ══');
+
+{
+  // The hang was fixed in Bash, but the fault was never really about Bash. Any
+  // tool that never resolves is a turn that never ends — a browser that will
+  // not launch, an MCP server that goes quiet, a fetch into a blackhole. The
+  // backstop sits at the dispatch chokepoint so it covers tools not yet written.
+  let settled = 'never';
+  const hang = withTimeout('Hypothetical', () => new Promise(() => {}), undefined, 150)
+    .then(() => { settled = 'resolved'; }, err => { settled = err; });
+  await new Promise(r => setTimeout(r, 400));
+
+  assert(settled instanceof ToolTimeoutError, 'A tool that never returns is abandoned');
+  assert(/did not return within/.test(settled.message), 'The message says what happened');
+  assert(/not the same as stopping it/.test(settled.message),
+    'And does not claim the work was stopped, because it was not');
+  assert(/Do not simply retry/.test(settled.message),
+    'And says what to do instead, since retrying an identical hang hangs identically');
+  await hang;
+}
+
+{
+  // A tool that honours cancellation gets told before the promise is dropped —
+  // otherwise it is orphaned, still working, with nobody listening.
+  let sawAbort = false;
+  await withTimeout('Hypothetical', (signal) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => { sawAbort = true; reject(new Error('stopped')); });
+  }), undefined, 120).catch(() => {});
+  assert(sawAbort, 'The tool is signalled to stop before the wait is abandoned');
+}
+
+{
+  // The caller's Stop and the deadline want the same thing, so a tool only has
+  // to understand cancellation, not who ordered it.
+  const outer = new AbortController();
+  let sawAbort = false;
+  const call = withTimeout('Hypothetical', (signal) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => { sawAbort = true; reject(new Error('cancelled')); });
+  }), outer.signal, 60_000).catch(() => {});
+  outer.abort();
+  await call;
+  assert(sawAbort, 'A cancelled run reaches the tool through the same signal');
+}
+
+{
+  // Normal work must never be interrupted. A backstop that fires during a
+  // legitimate call is worse than none: it turns a slow success into a failure,
+  // and teaches everyone to raise it until it stops meaning anything.
+  const value = await withTimeout('Hypothetical', async () => {
+    await new Promise(r => setTimeout(r, 50));
+    return 'finished normally';
+  }, undefined, 5000);
+  assert(value === 'finished normally', 'A call that finishes in time is untouched');
+
+  // And a tool's own failure is its own, not reshaped into a timeout.
+  let err;
+  await withTimeout('Hypothetical', async () => { throw new Error('the tool itself failed'); },
+    undefined, 5000).catch(e => { err = e; });
+  assert(/the tool itself failed/.test(err.message), 'A real failure propagates unchanged');
+  assert(!(err instanceof ToolTimeoutError), 'And is not mistaken for a timeout');
+}
+
+{
+  // The ceilings have to be defensible, not decorative.
+  assert(timeoutFor('Bash') > 30 * 60 * 1000,
+    'Bash sits past its own 30-minute ceiling — it kills process trees, this cannot, '
+    + 'so the blunt timer must never fire in front of the precise one');
+  assert(timeoutFor('AskUserQuestion') >= 60 * 60 * 1000,
+    'Waiting on a person is not hanging');
+  assert(timeoutFor('Read') <= 60 * 1000, 'A local read taking a minute is wrong, not slow');
+  assert(timeoutFor('VerifyApp') >= 60 * 1000,
+    'Launching a browser is genuinely slow on a cold start');
+  assert(timeoutFor('SomeToolNobodyHasWrittenYet') > 0,
+    'An unknown tool still gets a ceiling — that is the point of a backstop');
+}
 
 console.log('\n══ REQUIREMENTS COVERAGE ══');
 

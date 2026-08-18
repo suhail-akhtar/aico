@@ -9,6 +9,7 @@ import { listDirectory, lsDefinition } from './ls.js';
 import { webFetch, webFetchDefinition } from './webfetch.js';
 import { verifyApp, verifyAppDefinition, formatVerdict } from './verify-app.js';
 import { recordVerification, noteFileWritten } from '../verification.js';
+import { withTimeout } from './timeout-policy.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
@@ -373,7 +374,7 @@ export async function executeTool(
    * cancellation only ends the *loop*, and the turn stays busy until the
    * in-flight command finishes on its own — which for an install is minutes.
    */
-  signal?: AbortSignal,
+  runSignal?: AbortSignal,
 ): Promise<unknown> {
   // Check cache for read-only tools
   const cached = getCachedResult(name, args);
@@ -387,6 +388,11 @@ export async function executeTool(
 
   let result: unknown;
   try {
+  // Every dispatch, not just the ones known to be slow. A tool that never
+  // returns is a turn that never ends, and the loop cannot tell the difference
+  // between slow and stuck from the outside — the only place that can impose an
+  // answer is here, where the waiting happens. Covers tools not written yet.
+  await withTimeout(name, async (signal) => {
   switch (name) {
     case 'Bash':
       result = await bash(
@@ -560,6 +566,7 @@ export async function executeTool(
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
+  }, runSignal);
   } finally {
     releaseToolLock(name);
   }
