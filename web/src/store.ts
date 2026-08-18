@@ -92,6 +92,17 @@ interface AppState {
   logged: Map<number, ChatMessage>;
   draft: Draft;
   busy: boolean;
+  /** When the running turn began. Null when nothing is running. */
+  turnStartedAt: number | null;
+  /**
+   * When anything last arrived on the stream.
+   *
+   * A long quiet stretch is normal for a big model call and alarming for a
+   * hung one, and the client cannot tell them apart — so it shows the number
+   * and lets the reader judge. Without this the only signal was a screen
+   * that had stopped changing, which is what "is it doing anything?" means.
+   */
+  lastActivityAt: number;
   usage: Usage;
   model: string | null;
   error: string | null;
@@ -178,6 +189,8 @@ export const useStore = create<AppState>((set, get) => ({
   logged: new Map(),
   draft: emptyDraft(),
   busy: false,
+  turnStartedAt: null,
+  lastActivityAt: 0,
   usage: NO_USAGE,
   model: null,
   error: null,
@@ -197,6 +210,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({
       sessionId, logged: new Map(), draft: emptyDraft(),
       lastSeq: 0, usage: NO_USAGE, busy: false,
+      turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
       // Seeded from the sidebar so a session opened from the list is named
       // immediately, rather than blank until its first title event replays.
@@ -267,7 +281,12 @@ export const useStore = create<AppState>((set, get) => ({
 
   submit: async (task, opts = {}) => {
     const { sessionId, model } = get();
-    set({ error: null, busy: true, draft: emptyDraft() });
+    // Started here rather than on `turn-start`: the server may take a moment
+    // to accept, and a blank screen during that moment is the exact problem.
+    set({
+      error: null, busy: true, draft: emptyDraft(),
+      turnStartedAt: Date.now(), lastActivityAt: Date.now(),
+    });
     try {
       await api.submit({
         sessionId,
@@ -541,6 +560,11 @@ type Get = () => AppState;
 function applyEvent(set: Set, get: Get, event: StreamEvent): void {
   const data = event.data ?? {};
 
+  // Any event at all is a sign of life. Recorded before the switch so a type
+  // this function does not otherwise handle still counts — the question being
+  // answered is "is anything happening", not "is something I render happening".
+  if (get().busy) set(() => ({ lastActivityAt: Date.now() }));
+
   switch (event.type) {
     // ── durable: the log ────────────────────────────────────────────
     case 'log':
@@ -593,6 +617,8 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       // not every time an old log is re-read.
       set(state => ({
         busy: true, draft: emptyDraft(), error: null, turnSummary: null,
+        turnStartedAt: state.turnStartedAt ?? Date.now(),
+        lastActivityAt: Date.now(),
         sessions: promote(state.sessions, event.sessionId, Date.now(),
           state.title ? { title: state.title } : {}),
       }));
@@ -763,6 +789,7 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       const cancelled = Boolean(data.cancelled);
       set(state => ({
         busy: false,
+        turnStartedAt: null,
         sessions: promote(state.sessions, event.sessionId, Date.now(),
           state.title ? { title: state.title } : {}),
         // Derived server-side and delivered with the turn, so there is no

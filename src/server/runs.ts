@@ -247,6 +247,14 @@ export class RunManager {
         error: message,
         cancelled: run.abort.signal.aborted,
         seq: run.session.length,
+        // The success path sends one and this did not, so a cancelled turn left
+        // no trace at all: the screen simply stopped changing, which is
+        // indistinguishable from the crash the user was worried about when they
+        // pressed the button. The log already recorded *why* it ended — the
+        // summary is a read of that, and is as true here as it is on the way out
+        // the happy path.
+        summary: summarizeLastTurn(run.session),
+        deliverables: deliverables(run.session, seqBeforeTurn),
       });
       throw err;
     } finally {

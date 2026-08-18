@@ -17,6 +17,7 @@ import { Composer } from './components/Composer';
 import { SystemPanel } from './components/SystemPanel';
 import { Trajectory } from './components/Trajectory';
 import { GoalBar } from './components/GoalBar';
+import { ActivityLine } from './components/ActivityLine';
 import { SessionMenu } from './components/SessionMenu';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { ProjectPicker } from './components/ProjectPicker';
@@ -132,6 +133,7 @@ export function App(): React.ReactElement {
           <>
             <ChatPane />
             <GoalBar />
+            <ActivityLine />
             <Composer />
           </>
         )}

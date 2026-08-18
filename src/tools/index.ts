@@ -358,6 +358,14 @@ export async function executeTool(
   args: Record<string, unknown>,
   /** The dispatching call's id, so a spilled file can be traced back to it. */
   callId?: string,
+  /**
+   * The run's abort signal.
+   *
+   * Threaded so a long-running tool can stop when the user does. Without it
+   * cancellation only ends the *loop*, and the turn stays busy until the
+   * in-flight command finishes on its own — which for an install is minutes.
+   */
+  signal?: AbortSignal,
 ): Promise<unknown> {
   // Check cache for read-only tools
   const cached = getCachedResult(name, args);
@@ -373,7 +381,10 @@ export async function executeTool(
   try {
   switch (name) {
     case 'Bash':
-      result = await bash({ ...(args as unknown as Parameters<typeof bash>[0]), _defaultTimeout: _bashDefaultTimeout });
+      result = await bash(
+        { ...(args as unknown as Parameters<typeof bash>[0]), _defaultTimeout: _bashDefaultTimeout },
+        signal,
+      );
       break;
     case 'Read':
       result = await readFile(args as unknown as Parameters<typeof readFile>[0]);

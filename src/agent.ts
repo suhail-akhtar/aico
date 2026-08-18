@@ -453,6 +453,8 @@ interface ResolvedToolSet {
     args: Record<string, unknown>,
     /** Threaded through so a spilled result can name the call that made it. */
     callId?: string,
+    /** The run's abort signal, so a long tool stops when the user does. */
+    signal?: AbortSignal,
   ) => Promise<unknown>;
 }
 
@@ -488,7 +490,7 @@ function resolveToolSet(opts: {
     defs = opts.agentSpecTools
       ? getToolsForSpec(opts.agentSpecTools)
       : opts.agentType ? getToolsForAgent(opts.agentType) : toolDefinitions;
-    dispatch = (name, args, callId) => executeTool(name, args, callId);
+    dispatch = (name, args, callId, signal) => executeTool(name, args, callId, signal);
   }
 
   if (opts.toolProfile === 'browser-qa') {
@@ -655,7 +657,7 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
 
       const outcome = await pipeline.execute(
         ctx,
-        (call) => dispatch(call.name, call.arguments, call.callId),
+        (call) => dispatch(call.name, call.arguments, call.callId, call.signal),
       );
       const result = outcome.outcome.result;
 

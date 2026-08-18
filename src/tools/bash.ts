@@ -86,7 +86,7 @@ const PROGRESS_INTERVAL_MS = 400;
 /** Output kept in memory. Beyond this the head is dropped, not the tail. */
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 
-export async function bash(input: BashInput): Promise<BashResult> {
+export async function bash(input: BashInput, signal?: AbortSignal): Promise<BashResult> {
   // Priority: explicit timeout arg → settings default → 120s fallback
   const rawTimeout = input.timeout ?? input._defaultTimeout ?? 120;
   const timeoutMs = rawTimeout === 0 ? undefined : rawTimeout * 1000;
@@ -172,7 +172,28 @@ export async function bash(input: BashInput): Promise<BashResult> {
     timer?.unref?.();
     let graceTimer: NodeJS.Timeout | undefined;
 
+    // Cancellation kills the tree, exactly like a timeout does.
+    //
+    // Without this, pressing Stop during `npm install` aborted the *loop* and
+    // left the install running: the loop cannot return until the tool promise
+    // settles, so the turn stayed busy for as long as the command took. The
+    // signal and the deadline want the same thing — stop this process and
+    // everything it started — so they share the machinery.
+    const onAbort = (): void => {
+      if (settled) return;
+      cancelled = true;
+      killTree(child.pid);
+      graceTimer = setTimeout(() => finish(1, cancelMessage), KILL_GRACE_MS);
+      graceTimer.unref?.();
+    };
+    if (signal) {
+      if (signal.aborted) queueMicrotask(onAbort);
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+
     let settled = false;
+    let cancelled = false;
+    const cancelMessage = 'Command cancelled.';
     const finish = (exitCode: number, error?: string): void => {
       // Both `close` and the timeout grace path can reach here; whichever is
       // first is the answer.
@@ -181,6 +202,7 @@ export async function bash(input: BashInput): Promise<BashResult> {
       clearInterval(ticker);
       if (timer) clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
+      signal?.removeEventListener('abort', onAbort);
       report(true);
       // Appended, not substituted. This read `stderr || error`, so the
       // explanation was kept only when the command had said nothing itself —
@@ -200,6 +222,7 @@ export async function bash(input: BashInput): Promise<BashResult> {
     });
 
     child.on('close', (code) => {
+      if (cancelled) { finish(code ?? 1, cancelMessage); return; }
       if (timedOut) {
         finish(code ?? 1, timeoutMessage);
         return;

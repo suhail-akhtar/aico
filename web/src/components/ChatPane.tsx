@@ -124,7 +124,11 @@ export function ChatPane(): React.ReactElement {
             );
           })}
 
-          {busy && messages.every(m => !m.streaming) && <Working />}
+          {/* The live state moved to ActivityLine, which is pinned above the
+              composer and shows while busy regardless of what is streaming.
+              This one only appeared when *nothing* was streaming, so the
+              worst case — text arrived, then silence — showed nothing. */}
+          {busy && messages.length === 0 && <Working />}
 
           {!busy && <TurnSummary summary={turnSummary} />}
 
