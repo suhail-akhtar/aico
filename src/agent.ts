@@ -1574,6 +1574,22 @@ const MAX_COMPLETION_NUDGES = 2;
         // abort so the turn closes as aborted rather than continuing.
         if (scheduled.aborted) throwIfLoopAborted();
 
+        // A proposed plan is the end of a planning turn, and the loop is what
+        // makes that true. The prompt asks the model to call ProposePlan once
+        // and stop; watched live, it proposed a plan, carried on, proposed the
+        // same plan again, and again — three calls and climbing, each one a
+        // paid round trip producing a plan that already existed.
+        //
+        // Enforced here rather than asked for, for the same reason
+        // read-before-edit moved out of the prompt: an instruction the model
+        // may decline is not a contract. There is genuinely nothing left to do
+        // — the reader has to answer before any of it can happen.
+        if (opts.planMode && toolCalls.some(call => call.name === 'ProposePlan')) {
+          turnEndReason = { kind: 'completed' };
+          if (!silent) stopSpinner();
+          return;
+        }
+
         // Step boundary: deliver anything steered in while the tools ran, so a
         // correction reaches the model before it decides its next action.
         const steered = drainSteeredInput();

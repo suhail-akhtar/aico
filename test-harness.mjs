@@ -5938,6 +5938,49 @@ if (findBrowser()) {
 
 
 
+
+{
+  // A proposed plan ends the planning turn, and the loop is what makes that
+  // true. The prompt asks the model to call ProposePlan once and stop; watched
+  // live it proposed, carried on, and proposed the same plan again — three
+  // calls and climbing, each a paid round trip producing a plan that already
+  // existed. An instruction the model may decline is not a contract.
+  const session = mkSession('plan-terminal');
+  const provider = mockProvider([
+    [{ type: 'tool_call', id: 'p1', name: 'ProposePlan',
+       input: { title: 'Add a version file', steps: [{ title: 'write VERSION.txt' }] } },
+     { type: 'finish', reason: 'tool_calls' }],
+    // The loop must never reach these. Left here deliberately: if the turn does
+    // not end, the mock will happily keep proposing and the count will show it.
+    [{ type: 'tool_call', id: 'p2', name: 'ProposePlan',
+       input: { title: 'Add a version file', steps: [{ title: 'write VERSION.txt' }] } },
+     { type: 'finish', reason: 'tool_calls' }],
+  ]);
+
+  await baseRun(provider, session, { planMode: true });
+
+  const proposals = session.events.filter(e =>
+    e.type === 'tool/call' && e.data?.name === 'ProposePlan');
+  assert(proposals.length === 1, `The turn ends on the first plan (${proposals.length} calls)`);
+  assert(session.lastTurnEndReason().kind === 'completed',
+    'And ends as completed — a plan delivered is a turn that did its job');
+  assert(checkSessionInvariants(session).ok, 'The log is still balanced');
+}
+
+{
+  // Outside plan mode the tool is not special. Nothing else should inherit a
+  // rule written for planning.
+  const session = mkSession('plan-not-planning');
+  const provider = mockProvider([
+    [{ type: 'tool_call', id: 'q1', name: 'ProposePlan',
+       input: { title: 'x', steps: [{ title: 'a' }] } },
+     { type: 'finish', reason: 'tool_calls' }],
+    [{ type: 'text', content: 'carried on' }, { type: 'finish', reason: 'stop' }],
+  ]);
+  const reply = await baseRun(provider, session);
+  assert(/carried on/.test(reply), 'A normal turn continues past a proposed plan');
+}
+
 console.log('\n══ STATE BELONGS TO ITS RUN ══');
 
 {
