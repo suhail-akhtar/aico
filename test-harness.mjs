@@ -141,6 +141,7 @@ import {
   looksLikeServer, resolveTimeout, backgroundProcesses, stopBackgroundProcesses,
   extractRequirements, coverageOf, setBrief,
   withTimeout, timeoutFor, ToolTimeoutError,
+  terminal, closeAllTerminals,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -5929,6 +5930,88 @@ if (findBrowser()) {
 }
 
 
+
+
+console.log('\n══ A SHELL THAT REMEMBERS ══');
+
+{
+  const win = process.platform === 'win32';
+  // Platform-neutral phrasing of the same four ideas.
+  const pwd = win ? 'cd' : 'pwd';
+  const setVar = win ? 'set AICO_KEEP=survived' : 'export AICO_KEEP=survived';
+  const readVar = win ? 'echo %AICO_KEEP%' : 'echo $AICO_KEEP';
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aico-term-')));
+
+  // The whole point. Every Bash call is a fresh process, so `cd` is forgotten
+  // the moment it returns — which is why the session that prompted this shows
+  // the model writing `cd "…" && node server.js` over and over, rebuilding
+  // state the shell had already been told about and thrown away.
+  const before = await terminal({ command: pwd });
+  assert(before.exit_code === 0, 'The shell runs a command');
+  assert(before.output.length > 0, 'And its output comes back');
+
+  // `/d` on Windows, because cd does not cross drives without it — see below.
+  const moved = await terminal({ command: `cd ${win ? '/d ' : ''}"${dir}"` });
+  assert(moved.exit_code === 0, `cd succeeds (${moved.stderr})`);
+
+  const after = await terminal({ command: pwd });
+  assert(after.output.toLowerCase().includes(path.basename(dir).toLowerCase()),
+    `The next command is still there (${after.output})`);
+  assert(after.cwd.toLowerCase().includes(path.basename(dir).toLowerCase()),
+    'And the result says where it is, so a cd that did not take cannot pass unnoticed');
+
+  await terminal({ command: setVar });
+  const kept = await terminal({ command: readVar });
+  assert(/survived/.test(kept.output), `An environment variable survives too (${kept.output})`);
+
+  // Output must be the command's output, not a transcript of the session. A
+  // shell prompt prefixed to every result reads exactly like output and is not.
+  const plain = await terminal({ command: 'echo hello world' });
+  assert(plain.output.trim() === 'hello world',
+    `Output is the output, with no prompt or echo (${JSON.stringify(plain.output)})`);
+
+  // A command that prints something marker-shaped must not be able to end its
+  // own read early — which is why the marker carries a fresh nonce each time.
+  const forged = await terminal({ command: 'echo __AICO_deadbeef__ 0 /fake/path' });
+  assert(/__AICO_deadbeef__/.test(forged.output),
+    'A command that prints a marker-like string is not cut short by it');
+  assert(!forged.cwd.includes('/fake/path'), 'And cannot forge the working directory');
+
+  if (win) {
+    // cmd's oldest trap: cd to another drive changes nothing and reports
+    // success. Every later relative path then resolves against a directory the
+    // model believes it left. Silence here is worse than an error.
+    // A drive that certainly exists — this repo's — so the command is a genuine
+    // silent no-op rather than an ordinary "no such drive" failure.
+    const otherDrive = process.cwd()[0].toUpperCase() + ':';
+    if (otherDrive[0].toLowerCase() !== dir[0].toLowerCase()) {
+      const noop = await terminal({ command: `cd ${otherDrive}` });
+      assert(noop.exit_code === 0 && noop.cwd.toLowerCase() === dir.toLowerCase(),
+        'cd across drives reports success and does not move — the trap itself');
+      assert(/does not cross drives/.test(noop.stderr),
+        'So it is reported rather than passed off as success');
+      assert(/\/d/.test(noop.stderr), 'With the flag that would have worked');
+    }
+  }
+
+  // Failures are failures.
+  const failed = await terminal({ command: win ? 'dir /nope' : 'ls /nope-nope-nope' });
+  assert(failed.exit_code !== 0, 'A failing command reports a non-zero exit');
+
+  // The one thing a persistent shell must refuse: a server would hold this
+  // shell open for good, and every later command would queue behind it.
+  const server = await terminal({ command: 'npm run dev' });
+  assert(server.exit_code !== 0, 'A server is refused rather than swallowing the shell');
+  assert(/background/.test(server.stderr), 'And is pointed at the tool that can run it');
+  assert(/Bash/.test(server.stderr), 'Named, so the next move is obvious');
+
+  // Restart is a way out of a shell whose state is no longer wanted.
+  const fresh = await terminal({ command: readVar, restart: true });
+  assert(!/survived/.test(fresh.output), `A restarted shell has forgotten (${fresh.output})`);
+
+  closeAllTerminals();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 
 console.log('\n══ NO TOOL RUNS FOREVER ══');
 

@@ -10,6 +10,7 @@ import { webFetch, webFetchDefinition } from './webfetch.js';
 import { verifyApp, verifyAppDefinition, formatVerdict } from './verify-app.js';
 import { recordVerification, noteFileWritten } from '../verification.js';
 import { withTimeout } from './timeout-policy.js';
+import { terminal, terminalDefinition } from './terminal.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
@@ -144,6 +145,9 @@ const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
 
 export const toolDefinitions: ToolDefinition[] = [
   { ...bashDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
+  // Not concurrency-safe, and more strictly than most: one shell has one stdin,
+  // and two commands sharing it have no way to tell their replies apart.
+  { ...terminalDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...readDefinition, isConcurrencySafe: true, maxResultSizeChars: 200_000 },
   { ...writeDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...editDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
@@ -399,6 +403,9 @@ export async function executeTool(
         { ...(args as unknown as Parameters<typeof bash>[0]), _defaultTimeout: _bashDefaultTimeout },
         signal,
       );
+      break;
+    case 'Terminal':
+      result = await terminal(args as unknown as Parameters<typeof terminal>[0]);
       break;
     case 'Read':
       result = await readFile(args as unknown as Parameters<typeof readFile>[0]);

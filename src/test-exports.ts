@@ -185,3 +185,4 @@ export { getToolsForAgent, toolDefinitions } from './tools/index.js';
 export { looksLikeServer, resolveTimeout, backgroundProcesses, stopBackgroundProcesses } from './tools/bash.js';
 export { extractRequirements, coverageOf, setBrief, currentRequirements, MIN_INTERACTIONS_FOR_COVERAGE } from './requirements.js';
 export { withTimeout, timeoutFor, timeoutMessage, ToolTimeoutError } from './tools/timeout-policy.js';
+export { terminal, closeAllTerminals, terminalDefinition } from './tools/terminal.js';
