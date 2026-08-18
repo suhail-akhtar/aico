@@ -96,21 +96,28 @@ export function merge(local: SessionSummary[], incoming: SessionSummary[]): Sess
  */
 export function groupByProject(
   sessions: SessionSummary[],
-  projects: Array<{ path: string; name: string }>,
+  projects: Array<{ path: string; name: string; pinned?: boolean; addedAt?: number }>,
   filter = '',
-): Array<{ label: string; path: string; items: SessionSummary[] }> {
+): Array<{ label: string; path: string; pinned?: boolean; items: SessionSummary[] }> {
   const needle = filter.trim().toLowerCase();
   const matching = byRecency(needle
     ? sessions.filter(s =>
       (s.title ?? '').toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle))
     : sessions);
 
-  const groups = new Map<string, { label: string; path: string; items: SessionSummary[] }>();
+  const groups = new Map<string, {
+    label: string; path: string; pinned?: boolean; items: SessionSummary[];
+  }>();
   // Seeded from the project list so a project with no sessions still appears —
   // a folder you just opened and cannot see is indistinguishable from one that
   // failed to open.
   for (const project of projects) {
-    groups.set(project.path, { label: project.name, path: project.path, items: [] });
+    groups.set(project.path, {
+      label: project.name,
+      path: project.path,
+      ...(project.pinned ? { pinned: true } : {}),
+      items: [],
+    });
   }
 
   for (const session of matching) {
@@ -125,8 +132,17 @@ export function groupByProject(
     group.items.push(session);
   }
 
-  return [...groups.values()].sort((a, b) =>
-    (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0));
+  // Pinned first, then by activity. A folder you just added has no activity at
+  // all, so plain recency buries it at the bottom — which is the opposite of
+  // what adding a folder means. `order` on the project list carries that:
+  // projects arrive newest-added first, and ties fall back to it.
+  const addedRank = new Map(projects.map((p, index) => [p.path, index]));
+  return [...groups.values()].sort((a, b) => {
+    if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+    const activity = (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0);
+    if (activity !== 0) return activity;
+    return (addedRank.get(a.path) ?? 1e9) - (addedRank.get(b.path) ?? 1e9);
+  });
 }
 
 /** Last path segment, for either separator. */

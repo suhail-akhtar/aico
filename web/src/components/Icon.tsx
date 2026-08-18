@@ -21,7 +21,7 @@ export type Glyph =
   | IconName
   | 'search' | 'close' | 'plus' | 'check' | 'chevron-down' | 'chevron-right'
   | 'trash' | 'edit' | 'bolt' | 'undo' | 'folder' | 'folder-plus' | 'arrow-up'
-  | 'ellipsis' | 'fork' | 'archive';
+  | 'ellipsis' | 'fork' | 'archive' | 'pin';
 
 const PATHS: Record<Glyph, React.ReactNode> = {
   sliders: <><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></>,
@@ -51,12 +51,14 @@ const PATHS: Record<Glyph, React.ReactNode> = {
   'arrow-up': <><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></>,
   ellipsis: <><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></>,
   fork: <><path d="M6 4v6a3 3 0 0 0 3 3h9" /><path d="m14 9 4 4-4 4" /></>,
+  pin: <><path d="M9 4h6l-1 6 3.5 3H6.5L10 10 9 4Z" /><path d="M12 13v7" /></>,
   archive: <><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" /><path d="M10 12h4" /></>,
 };
 
 export function Icon(
-  { name, size = 16, className = '', strokeWidth = 1.6 }:
-  { name: Glyph; size?: number; className?: string; strokeWidth?: number },
+  { name, size = 16, className = '', strokeWidth = 1.6, style }:
+  { name: Glyph; size?: number; className?: string; strokeWidth?: number;
+    style?: React.CSSProperties },
 ): React.ReactElement {
   return (
     <svg
@@ -69,6 +71,7 @@ export function Icon(
       strokeLinecap="round"
       strokeLinejoin="round"
       className={`shrink-0 ${className}`}
+      {...(style ? { style } : {})}
       aria-hidden
       focusable="false"
     >

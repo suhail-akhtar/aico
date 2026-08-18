@@ -18,6 +18,7 @@
  */
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Portal } from './Portal';
 import { Icon, type Glyph } from './Icon';
 
 export interface SessionRowMenuProps {
@@ -88,6 +89,7 @@ export function SessionRowMenu(
       </button>
 
       {open && (
+        <Portal>
         <div
           ref={menuRef}
           role="menu"
@@ -101,6 +103,7 @@ export function SessionRowMenu(
             {archived ? 'Restore session' : 'Archive session'}
           </Item>
         </div>
+        </Portal>
       )}
     </>
   );

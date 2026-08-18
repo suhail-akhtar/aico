@@ -28,7 +28,9 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
+import { Portal } from './Portal';
 import { Icon } from './Icon';
+import { ProjectSettings } from './ProjectSettings';
 
 export interface ProjectGroupHeaderProps {
   label: string;
@@ -45,14 +47,16 @@ export function ProjectGroupHeader({
   label, path, known, isLaunch, collapsed, onToggle, count,
 }: ProjectGroupHeaderProps): React.ReactElement {
   const newSessionIn = useStore(s => s.newSessionIn);
-  const renameProject = useStore(s => s.renameProject);
+  const updateProject = useStore(s => s.updateProject);
   const removeProject = useStore(s => s.removeProject);
+  const project = useStore(s => s.projects.find(p => p.path === path));
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [at, setAt] = useState({ top: 0, left: 0 });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label);
   const [confirming, setConfirming] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -84,7 +88,7 @@ export function ProjectGroupHeader({
   const commit = (): void => {
     setEditing(false);
     const next = draft.trim();
-    if (next && next !== label) void renameProject(path, next);
+    if (next && next !== label) void updateProject(path, { name: next });
   };
 
   if (editing) {
@@ -115,8 +119,18 @@ export function ProjectGroupHeader({
                    tracking-wider text-aico-muted"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
-        <Icon name="folder" size={12} />
-        <span className="min-w-0 truncate" title={path}>{label}</span>
+        <Icon
+          name="folder"
+          size={17}
+          strokeWidth={1.8}
+          {...(project?.color
+            ? { style: { color: project.color } }
+            : { className: 'text-aico-muted' })}
+        />
+        {project?.pinned && (
+          <Icon name="pin" size={11} className="shrink-0 text-aico-accent" />
+        )}
+        <span className="min-w-0 truncate" title={project?.description || path}>{label}</span>
         {collapsed && count > 0 && (
           <span className="shrink-0 tabular-nums opacity-70">{count}</span>
         )}
@@ -147,6 +161,7 @@ export function ProjectGroupHeader({
       )}
 
       {menuOpen && (
+        <Portal>
         <div
           data-project-menu
           role="menu"
@@ -161,6 +176,30 @@ export function ProjectGroupHeader({
                        transition-colors hover:bg-aico-hover"
           >
             <Icon name="edit" size={15} className="text-aico-muted" /> Rename
+          </button>
+
+          <button
+            role="menuitem"
+            onClick={() => { setMenuOpen(false); void updateProject(path, { pinned: !project?.pinned }); }}
+            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-primary
+                       transition-colors hover:bg-aico-hover"
+          >
+            <Icon name="pin" size={15} className="text-aico-muted" />
+            {project?.pinned ? 'Unpin' : 'Pin to top'}
+          </button>
+
+          <button
+            role="menuitem"
+            onClick={() => { setMenuOpen(false); setSettingsOpen(true); }}
+            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-primary
+                       transition-colors hover:bg-aico-hover"
+          >
+            <Icon name="sliders" size={15} className="text-aico-muted" />
+            Description &amp; instructions
+            {project?.instructions && (
+              <span className="ml-auto h-1.5 w-1.5 rounded-full bg-aico-accent"
+                    title="Custom instructions are set" />
+            )}
           </button>
 
           {isLaunch ? (
@@ -199,6 +238,11 @@ export function ProjectGroupHeader({
             </button>
           )}
         </div>
+        </Portal>
+      )}
+
+      {settingsOpen && project && (
+        <ProjectSettings project={project} onClose={() => setSettingsOpen(false)} />
       )}
     </div>
   );

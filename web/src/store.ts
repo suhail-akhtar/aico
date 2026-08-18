@@ -117,7 +117,10 @@ interface AppState {
   selectProject: (path: string) => void;
   addProject: (path: string, name?: string) => Promise<void>;
   removeProject: (path: string) => Promise<void>;
-  renameProject: (path: string, name: string) => Promise<void>;
+  updateProject: (path: string, patch: {
+    name?: string; pinned?: boolean; color?: string;
+    description?: string; instructions?: string;
+  }) => Promise<void>;
   /** Start a session in a specific folder, whatever is currently selected. */
   newSessionIn: (path: string) => void;
   refreshProviders: () => Promise<void>;
@@ -320,9 +323,9 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err) { set({ error: (err as Error).message }); }
   },
 
-  renameProject: async (path, name) => {
+  updateProject: async (path, patch) => {
     try {
-      await api.renameProject(path, name);
+      await api.updateProject(path, patch);
       await get().refreshProjects();
     } catch (err) { set({ error: (err as Error).message }); }
   },

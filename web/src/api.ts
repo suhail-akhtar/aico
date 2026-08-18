@@ -146,9 +146,14 @@ export const api = {
 
   removeProject: (path: string) => post<{ removed: boolean }>('projects/remove', { path }),
 
-  /** Relabel a project. The path stays its identity; only the label moves. */
-  renameProject: (path: string, name: string) =>
-    post<{ renamed: boolean }>('projects/rename', { path, name }),
+  /**
+   * Change what is recorded about a project — label, pin, notes, instructions.
+   * The path stays its identity; none of this moves anything.
+   */
+  updateProject: (path: string, patch: {
+    name?: string; pinned?: boolean; color?: string;
+    description?: string; instructions?: string;
+  }) => post<{ updated: boolean }>('projects/update', { path, ...patch }),
 
   /** Subdirectories of one directory, for the picker. */
   browse: (path?: string) =>
@@ -276,6 +281,14 @@ export interface ProviderTypeInfo {
 export interface Project {
   path: string;
   name: string;
+  /** Kept above recency in the list. */
+  pinned?: boolean;
+  /** Swatch tinting the folder icon. */
+  color?: string;
+  /** A note about the folder. Shown here, never sent to a model. */
+  description?: string;
+  /** Instructions every session in this folder follows. */
+  instructions?: string;
   /** The directory the server was launched in. Cannot be removed. */
   isLaunch: boolean;
   /** False once the directory has been deleted or renamed underneath us. */

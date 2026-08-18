@@ -37,8 +37,8 @@ import { forkSession, listSessionSummaries, loadEventLog } from '../session/pers
 import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
 import {
-  addProject, browse, isKnownProject, listProjects,
-  normalizeProjectPath, removeProject, renameProject,
+  addProject, browse, findProjectForSession, isKnownProject, listProjects,
+  normalizeProjectPath, removeProject, updateProject,
 } from './projects.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
@@ -159,7 +159,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       sessionCwd.set(sessionId, target);
       return target;
     }
-    return sessionCwd.get(sessionId) ?? cwd;
+    const remembered = sessionCwd.get(sessionId);
+    if (remembered) return remembered;
+
+    // Nothing told us, so look. A session already on disk names its own
+    // directory by where its log lives, and finding it is the only thing
+    // standing between a reload and an empty transcript.
+    const found = await findProjectForSession(cwd, sessionId);
+    if (found) {
+      sessionCwd.set(sessionId, found);
+      return found;
+    }
+    return cwd;
   }
 
   const heartbeat = setInterval(() => hub.heartbeat(), HEARTBEAT_MS);
@@ -422,10 +433,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         }
         return;
       }
-      case 'projects/rename': {
-        const { path: dir, name } = body as { path?: string; name?: string };
+      case 'projects/rename':
+      case 'projects/update': {
+        const { path: dir, ...patch } = body as {
+          path?: string; name?: string; pinned?: boolean; color?: string;
+          description?: string; instructions?: string;
+        };
         if (!dir) { send(res, 400, { error: 'path required' }); return; }
-        send(res, 200, { renamed: await renameProject(dir, name ?? '') });
+        send(res, 200, { updated: await updateProject(dir, patch) });
         return;
       }
       case 'projects/remove': {

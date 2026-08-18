@@ -14,6 +14,7 @@ import { runAgent } from '../agent.js';
 import { setBashProgressSink } from '../tools/bash.js';
 import { createTokenTracker } from '../tokens.js';
 import { openSession } from '../session/open.js';
+import { instructionsFor } from './projects.js';
 import { Inbox } from '../session/inbox.js';
 import type { Session } from '../session/session.js';
 import type { AicoSettings } from '../settings.js';
@@ -122,6 +123,9 @@ export class RunManager {
         // took a cwd, every session silently worked in whatever directory the
         // server process happened to be started in.
         cwd: run.cwd,
+        // Whatever the user attached to this folder, re-read per turn so an
+        // edit takes effect on the next message rather than the next restart.
+        ...(await instructionsFor(run.cwd).then(v => (v ? { projectInstructions: v } : {}))),
         showPlan: false,
         verbose: false,
         silent: true,

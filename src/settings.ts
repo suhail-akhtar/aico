@@ -161,6 +161,27 @@ export interface AicoSettings {
     /** What to call it. Defaults to the directory's own name. */
     name?: string;
     addedAt?: number;
+    /** Kept at the top of the list, above recency. */
+    pinned?: boolean;
+    /** Swatch tinting the folder icon. A hex string from the client palette. */
+    color?: string;
+    /** A note to yourself about what this folder is. Never sent to the model. */
+    description?: string;
+    /**
+     * Instructions every session in this folder must follow.
+     *
+     * Sent to the model at the *end* of the system prompt, after the general
+     * behaviour rules, because later instructions win when two conflict and
+     * these are the ones the user chose for this specific project. They are
+     * repeated in the tail on dialects whose vendors ask for that, for the
+     * same reason.
+     *
+     * Distinct from AICO.md, which is a file in the repository and is shared
+     * with anyone who clones it. This is per-machine and per-person: "always
+     * run the linter before you tell me you are done" is a working agreement,
+     * not a project fact.
+     */
+    instructions?: string;
   }>;
   /** Automatic context compaction before the conversation gets too large. */
   autoCompact?: {

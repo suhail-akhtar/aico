@@ -211,6 +211,13 @@ export interface TokenTracker {
 export interface AgentOptions {
   task: string;
   /**
+   * Instructions the user attached to this run's project.
+   *
+   * Rendered last in the system prompt so they win over the general behaviour
+   * rules when the two disagree — which is the point of choosing them.
+   */
+  projectInstructions?: string;
+  /**
    * The project directory this run works in.
    *
    * Every file tool resolves relative paths against it and refuses writes
@@ -759,7 +766,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // Built as a document, not a string: it is rendered below in whatever shape
   // the resolved provider's vendor documents as best (XML for Anthropic,
   // Markdown for the rest). The content is authored once regardless.
-  const promptDoc = await buildSystemPrompt(model, opts.effort);
+  const promptDoc = await buildSystemPrompt(model, opts.effort, opts.projectInstructions);
   const runtimeAwareness = await buildRuntimeAwareness({
     model,
     cwd: process.cwd(),

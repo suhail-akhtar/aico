@@ -110,6 +110,13 @@ const EFFORT_GUIDANCE: Record<string, string> = {
 export async function buildSystemPrompt(
   model: string,
   effort?: string,
+  /**
+   * Instructions the user attached to this project.
+   *
+   * Passed in rather than read here so this module keeps knowing nothing about
+   * where settings live, and so a caller can supply them from anywhere.
+   */
+  projectInstructions?: string,
 ): Promise<PromptDocument> {
   const memory = await loadMemory();
   const doc = new PromptDocument();
@@ -272,6 +279,26 @@ OS: ${os.version()}`,
 and genuinely tabular data. Do not reach for bullet lists when a sentence
 carries the same information.`,
   });
+
+  // Last, and reprised.
+  //
+  // Position is the mechanism, not decoration: when two instructions conflict a
+  // model tends to follow the later one, and these are the ones this particular
+  // user chose for this particular folder. They should win over the general
+  // advice above, and they can only do that by coming after it — including
+  // after memory, which is why the order number is past the memory block rather
+  // than merely at the end of this function.
+  //
+  // Marked `reprise` so vendors whose guidance asks for a tail restatement get
+  // them closest to the model's next decision.
+  if (projectInstructions?.trim()) {
+    doc.add({
+      id: 'project_instructions',
+      order: 900,
+      reprise: true,
+      body: projectInstructions.trim(),
+    });
+  }
 
   // One section per memory source rather than one pre-formatted blob, so each
   // is labelled in the active dialect and can be targeted or overridden by id.

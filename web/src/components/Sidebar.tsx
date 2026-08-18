@@ -21,6 +21,7 @@ import { groupByAge, groupByProject, relativeAge } from '../grouping';
 import { Icon, type Glyph } from './Icon';
 import { SessionRowMenu } from './SessionRowMenu';
 import { ProjectGroupHeader } from './ProjectGroupHeader';
+import { ResizeHandle, useSidebarWidth } from './ResizeHandle';
 
 export type View = 'chat' | 'trajectory' | 'system';
 
@@ -45,6 +46,7 @@ export function Sidebar(
   const [searching, setSearching] = useState(false);
   /** Folded groups, by path. A view preference about right now, not stored. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [width, setWidth] = useSidebarWidth();
   const showArchived = useStore(s => s.showArchived);
   const toggleArchived = useStore(s => s.toggleArchived);
 
@@ -78,10 +80,15 @@ export function Sidebar(
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex w-[280px] flex-col border-r border-aico-border-subtle
-                    bg-aico-surface transition-transform md:static md:translate-x-0
-                    ${open ? 'translate-x-0' : '-translate-x-full'}`}
+        // The width is inline because it is a dragged value, and `transition-transform`
+        // is scoped to the mobile drawer: leaving it on during a resize animates
+        // every pixel of the drag a beat behind the pointer.
+        style={{ width }}
+        className={`fixed inset-y-0 left-0 z-30 flex flex-col border-r border-aico-border-subtle
+                    bg-aico-surface md:static md:translate-x-0
+                    ${open ? 'translate-x-0' : '-translate-x-full transition-transform'}`}
       >
+        <ResizeHandle onResize={setWidth} />
         <div className="flex items-center gap-2 px-4 pb-2 pt-4">
           <span className="text-[15px] font-semibold tracking-tight text-aico-primary">AICO</span>
           <div className="flex-1" />
@@ -267,12 +274,25 @@ function SessionRow(
   return (
     // A row, not a button: the ellipsis is interactive and a button inside a
     // button is invalid markup that browsers resolve by dropping one of them.
+    // The selected row is the one you are *looking at*; the green dot means
+    // *running*. Those are different facts and were both rendered as one faint
+    // grey tint, so a list with two running sessions gave no way to tell which
+    // one the transcript on the right belonged to. Selection now gets an accent
+    // bar down its left edge, a tinted background and a heavier label — three
+    // signals, because the single subtle one is what failed.
     <div
-      className={`group/row mb-0.5 flex w-full items-center gap-2 rounded-lg pr-1.5 text-left
+      aria-current={current ? 'true' : undefined}
+      className={`group/row relative mb-0.5 flex w-full items-center gap-2 rounded-lg pr-1.5 text-left
                   text-[13px] transition-colors ${current
-                    ? 'bg-aico-hover text-aico-primary'
+                    ? 'bg-aico-accent-soft font-medium text-aico-primary'
                     : 'text-aico-secondary hover:bg-aico-hover'} ${session.archived ? 'opacity-55' : ''}`}
     >
+      {current && (
+        <span
+          aria-hidden
+          className="absolute inset-y-1 left-0 w-[3px] rounded-full bg-aico-accent"
+        />
+      )}
       <button
         onClick={onSelect}
         onDoubleClick={() => { setDraft(session.title ?? ''); setEditing(true); }}

@@ -27,11 +27,19 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { loadSettings, saveUserSetting } from '../settings.js';
-import { listSessionSummaries } from '../session/persistence.js';
+import { eventLogPath, listSessionSummaries } from '../session/persistence.js';
 
 export interface ProjectSummary {
   path: string;
   name: string;
+  /** Kept above recency in the list. */
+  pinned?: boolean;
+  /** Swatch tinting the folder icon. */
+  color?: string;
+  /** A note about what this folder is. Shown in the UI, never sent to a model. */
+  description?: string;
+  /** Instructions every session in this folder must follow. */
+  instructions?: string;
   /** The directory the server was launched in. Cannot be removed. */
   isLaunch: boolean;
   /** False when the directory has since been deleted or renamed. */
@@ -61,12 +69,31 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
   const settings = await loadSettings();
   const launch = normalizeProjectPath(launchCwd);
 
-  const configured = (settings.projects ?? []).map(entry => ({
+  type Entry = {
+    path: string; name: string; pinned?: boolean; color?: string;
+    description?: string; instructions?: string;
+  };
+  const configured: Entry[] = (settings.projects ?? []).map(entry => ({
     path: normalizeProjectPath(entry.path),
     name: entry.name?.trim() || defaultName(entry.path),
+    ...(entry.pinned ? { pinned: true } : {}),
+    ...(entry.color?.trim() ? { color: entry.color.trim() } : {}),
+    ...(entry.description?.trim() ? { description: entry.description.trim() } : {}),
+    ...(entry.instructions?.trim() ? { instructions: entry.instructions.trim() } : {}),
   }));
 
-  const seen = new Map<string, { path: string; name: string }>();
+  // Newest addition first. The client sorts by pin and activity, and falls back
+  // to this order for the tie — which is every freshly added folder, since one
+  // with no sessions yet has no activity to sort by. Oldest-first would bury a
+  // folder at the moment you added it.
+  const byNewest = [...(settings.projects ?? [])]
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => (b.entry.addedAt ?? b.index) - (a.entry.addedAt ?? a.index))
+    .map(({ entry }) => normalizeProjectPath(entry.path));
+  const rank = new Map(byNewest.map((p, i) => [p, i]));
+  configured.sort((a, b) => (rank.get(a.path) ?? 0) - (rank.get(b.path) ?? 0));
+
+  const seen = new Map<string, Entry>();
   seen.set(launch, { path: launch, name: defaultName(launch) });
   for (const entry of configured) if (!seen.has(entry.path)) seen.set(entry.path, entry);
 
@@ -80,6 +107,10 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
     return {
       path: entry.path,
       name: entry.name,
+      ...(entry.pinned ? { pinned: true } : {}),
+      ...(entry.color ? { color: entry.color } : {}),
+      ...(entry.description ? { description: entry.description } : {}),
+      ...(entry.instructions ? { instructions: entry.instructions } : {}),
       isLaunch: entry.path === launch,
       exists,
       sessions: sessions.length,
@@ -101,6 +132,33 @@ export async function isKnownProject(launchCwd: string, candidate: string): Prom
   const target = normalizeProjectPath(candidate);
   const projects = await listProjects(launchCwd);
   return projects.some(project => project.path === target);
+}
+
+/**
+ * Which project a session belongs to, worked out from disk.
+ *
+ * Sessions are filed at `<project>/sessions/<id>.events.jsonl`, so the answer
+ * is a handful of `existsSync` calls against a deterministic filename — no
+ * directory scan, no index to keep current.
+ *
+ * Deriving this rather than relying on the client to say is the difference
+ * between a working reload and a lost transcript. On a fresh page load the
+ * client has not listed sessions yet, so it has no project to send; the server
+ * would fall back to its launch directory, fail to find a log that lives
+ * somewhere else, and — because opening a session creates one when it is
+ * missing — write a *new, empty* log into the wrong project. The history was
+ * not lost so much as replaced.
+ */
+export async function findProjectForSession(
+  launchCwd: string,
+  sessionId: string,
+): Promise<string | undefined> {
+  const projects = await listProjects(launchCwd);
+  for (const project of projects) {
+    if (!project.exists) continue;
+    if (fs.existsSync(eventLogPath(sessionId, project.path))) return project.path;
+  }
+  return undefined;
 }
 
 export async function addProject(dir: string, name?: string): Promise<ProjectSummary> {
@@ -139,18 +197,54 @@ export async function addProject(dir: string, name?: string): Promise<ProjectSum
  * Only the label changes. The path is the identity — sessions are filed under
  * it — so renaming is a note to yourself about a folder, not a move.
  */
-export async function renameProject(dir: string, name: string): Promise<boolean> {
+export interface ProjectPatch {
+  name?: string;
+  pinned?: boolean;
+  color?: string;
+  description?: string;
+  instructions?: string;
+}
+
+/**
+ * Change what is recorded about a project.
+ *
+ * Only the label and the notes. The path is the identity — sessions are filed
+ * under it — so none of this is a move.
+ *
+ * A blank string clears a field rather than storing emptiness, which is what
+ * makes "remove my custom instructions" the same gesture as writing none.
+ */
+export async function updateProject(dir: string, patch: ProjectPatch): Promise<boolean> {
   const target = normalizeProjectPath(dir);
   const settings = await loadSettings();
   const existing = settings.projects ?? [];
-  const trimmed = name.trim();
   if (!existing.some(entry => normalizeProjectPath(entry.path) === target)) return false;
-  await saveUserSetting('projects', existing.map(entry =>
-    (normalizeProjectPath(entry.path) === target
-      // Blank clears the override and the directory's own name comes back.
-      ? { ...entry, ...(trimmed ? { name: trimmed } : { name: undefined }) }
-      : entry)));
+
+  const clean = (value?: string): string | undefined => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : undefined;
+  };
+
+  await saveUserSetting('projects', existing.map((entry) => {
+    if (normalizeProjectPath(entry.path) !== target) return entry;
+    const next = { ...entry };
+    if (patch.name !== undefined) next.name = clean(patch.name);
+    if (patch.description !== undefined) next.description = clean(patch.description);
+    if (patch.instructions !== undefined) next.instructions = clean(patch.instructions);
+    if (patch.pinned !== undefined) next.pinned = patch.pinned || undefined;
+    if (patch.color !== undefined) next.color = clean(patch.color);
+    return next;
+  }));
   return true;
+}
+
+/** Instructions attached to the project containing `cwd`, if any. */
+export async function instructionsFor(cwd: string): Promise<string | undefined> {
+  const target = normalizeProjectPath(cwd);
+  const settings = await loadSettings();
+  const entry = (settings.projects ?? [])
+    .find(p => normalizeProjectPath(p.path) === target);
+  return entry?.instructions?.trim() || undefined;
 }
 
 /**
