@@ -139,6 +139,7 @@ import {
   summarizeLastTurn,
   verifyApp, formatVerdict, findBrowser, findPlaceholders, describePlaceholders,
   looksLikeServer, resolveTimeout, backgroundProcesses, stopBackgroundProcesses,
+  extractRequirements, coverageOf, setBrief,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -5924,6 +5925,132 @@ if (findBrowser()) {
 
   fs.rmSync(dir, { recursive: true, force: true });
   resetVerification();
+}
+
+
+console.log('\n══ REQUIREMENTS COVERAGE ══');
+
+const SPEC = `Build a single-page app in one self-contained index.html file.
+
+Color Palette:
+Primary Colors: warm white, oat, charcoal.
+Background: subtle blueprint grid.
+
+Typography:
+Headings: contemporary geometric sans.
+
+Page Structure:
+Templates: cafe / co-working / boutique / restaurant.
+Cost Estimator: rough furniture and fixture totals.
+
+Interaction Details:
+- Switch between top-down floor plan and 3D view with a smooth camera swing.
+- Brand color picker recolors all branded elements live.
+- Capacity meter ticks up/down as you place chairs.
+- Egress paths animate as flowing arrows when "Show fire safety" is toggled.
+- Cost estimator slides out a side panel that updates as you place items.
+- Export to PDF triggers a building-up animation of the layout sheet.`;
+
+{
+  const reqs = extractRequirements(SPEC);
+  const interactive = reqs.filter(r => r.interactive);
+
+  assert(reqs.length > 6, `A spec yields its requirements (${reqs.length})`);
+  assert(interactive.length >= 6, `The behaviours are picked out (${interactive.length})`);
+
+  // The distinction that keeps this from being a nuisance: a colour palette is
+  // a real requirement and no click proves it. Demanding a check for it would
+  // teach the model to write meaningless checks.
+  const asText = r => r.text.toLowerCase();
+  assert(!reqs.filter(r => r.interactive).some(r => /warm white|geometric sans/.test(asText(r))),
+    'A palette or a typeface is not something a click can verify, and is not demanded');
+  assert(interactive.some(r => /export to pdf/i.test(r.text)), 'An export behaviour is demanded');
+  assert(interactive.some(r => /egress/i.test(r.text)), 'A toggle behaviour is demanded');
+
+  // Section headings announce requirements rather than being one.
+  assert(!reqs.some(r => /^interaction details:?$/i.test(r.text)), 'Headings are not requirements');
+  assert(!reqs.some(r => /^typography:?$/i.test(r.text)), 'Nor are the other headings');
+}
+
+{
+  const reqs = extractRequirements(SPEC);
+
+  // The failure this exists for: every check passes, and none of them is about
+  // what was asked for.
+  const thin = coverageOf(reqs, ['a control', 'the page loads']);
+  assert(thin.covered.length === 0, 'A vague check covers no requirement');
+  assert(thin.missing.length >= 6, 'And every behaviour is reported unchecked');
+
+  // Named after the user's words, matched on meaning rather than spelling.
+  const real = coverageOf(reqs, [
+    'brand colour picker', 'floor plan / 3D toggle', 'capacity meter as chairs are placed',
+    'fire safety egress toggle', 'cost estimator side panel', 'export to PDF',
+  ]);
+  assert(real.missing.length === 0,
+    `A check per behaviour covers them all (missing: ${real.missing.map(r => r.text).join('; ')})`);
+  assert(real.covered.length >= 6, 'And all six are counted as covered');
+
+  // Partial coverage names what is left, so the objection is actionable.
+  const partial = coverageOf(reqs, ['brand colour picker', 'floor plan / 3D toggle']);
+  assert(partial.missing.some(r => /export to pdf/i.test(r.text)),
+    'What was not checked is named, not merely counted');
+  assert(partial.missing.every(r => !/brand colour|brand color/i.test(r.text)),
+    'And what was checked is not nagged about under another phrasing');
+}
+
+{
+  // It must stay out of the way of ordinary work. Most tasks are a sentence,
+  // and inventing acceptance criteria for them would tax every one.
+  for (const ask of [
+    'Fix the login bug',
+    'Rename the header component and update its imports',
+    'Why does the build fail on Windows?',
+  ]) {
+    const interactive = extractRequirements(ask).filter(r => r.interactive);
+    assert(interactive.length < 4, `Not treated as a spec: "${ask}"`);
+  }
+}
+
+{
+  // End to end through the gate: a passing verdict whose checks miss the brief
+  // does not finish the turn.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-cover-'));
+  const page = path.join(dir, 'index.html');
+  fs.writeFileSync(page, '<!doctype html><h1>planner</h1>');
+  const href = pathToFileURL(page).href;
+
+  resetVerification();
+  setBrief(SPEC);
+  noteFileWritten(page);
+  recordVerification(
+    { url: href, passed: true, problems: [], rendered: { controls: 17 }, flowsChecked: 1 },
+    ['a control'],
+  );
+  const gate = checkVerificationGate();
+  assert(!gate.ok, 'Passing checks that miss the brief do not finish the turn');
+  assert(/Export to PDF/i.test(gate.message),
+    'The gate names the requirement nobody checked, in the user\'s own words');
+
+  recordVerification(
+    { url: href, passed: true, problems: [], rendered: { controls: 17 }, flowsChecked: 6 },
+    ['brand colour picker', 'floor plan / 3D toggle', 'capacity meter as chairs are placed',
+     'fire safety egress toggle', 'cost estimator side panel', 'export to PDF'],
+  );
+  assert(checkVerificationGate().ok, 'Covering the brief finishes it');
+
+  // And an ordinary task is not held to a spec it never had.
+  resetVerification();
+  setBrief('Fix the login bug');
+  noteFileWritten(page);
+  recordVerification(
+    { url: href, passed: true, problems: [], rendered: { controls: 17 }, flowsChecked: 2 },
+    ['login form'],
+  );
+  assert(checkVerificationGate().ok, 'A one-line task is not held to a feature list');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  resetVerification();
+  setBrief('');
 }
 
 console.log('\n══ SUBSTANCE CHECK ══');

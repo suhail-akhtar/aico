@@ -28,6 +28,7 @@
 import fs from 'fs';
 import path from 'path';
 import { currentCwd } from './run-context.js';
+import { coverageOf, currentRequirements, MIN_INTERACTIONS_FOR_COVERAGE } from './requirements.js';
 
 /** The subset of a browser verdict the gate needs. */
 export interface VerificationRecord {
@@ -37,6 +38,8 @@ export interface VerificationRecord {
   /** Interactive controls the page had, and how many were actually exercised. */
   controls: number;
   flowsChecked: number;
+  /** The names of the checks that ran, for comparing against what was asked for. */
+  checkNames: string[];
   /** Absolute path of the file that was checked, when it was a file. */
   file?: string;
   /** Modification time of that file at check time — how staleness is detected. */
@@ -89,13 +92,14 @@ export function noteFileWritten(file: string): void {
 export function recordVerification(verdict: {
   url: string; passed: boolean; problems: string[];
   rendered?: { controls?: number }; flowsChecked?: number;
-}): void {
+}, checkNames: string[] = []): void {
   const record: VerificationRecord = {
     url: verdict.url,
     passed: verdict.passed,
     problems: verdict.problems,
     controls: verdict.rendered?.controls ?? 0,
     flowsChecked: verdict.flowsChecked ?? 0,
+    checkNames,
     at: Date.now(),
   };
 
@@ -192,6 +196,34 @@ export function checkVerificationGate(): GateResult {
           + `nothing. Run VerifyApp again with checks covering the interactions the user asked `
           + `for, so the result says the app works rather than that it opened.`,
       };
+    }
+
+    // The last question, and the one the user actually asked: was the thing
+    // they described built. A 13,869-byte page with no canvas loaded cleanly,
+    // answered every click, and scored twelve features out of twelve — against
+    // a brief that asked for a 3D view. Every check it ran passed. None of them
+    // was about what was asked for.
+    //
+    // Only for a brief that is a specification. "Fix the login bug" has no
+    // feature list, and inventing one would tax every ordinary task.
+    if (latest.passed) {
+      const requirements = currentRequirements();
+      const interactive = requirements.filter(r => r.interactive);
+      if (interactive.length >= MIN_INTERACTIONS_FOR_COVERAGE) {
+        const { missing } = coverageOf(requirements, latest.checkNames);
+        if (missing.length > 0) {
+          const list = missing.slice(0, 6).map(r => `  - ${r.text}`).join('\n');
+          return {
+            ok: false,
+            message:
+              `${path.basename(artifact.file)} passes the checks it was given, but those checks `
+              + `do not cover what was asked for. Nothing verified:\n${list}\n`
+              + `Add a check for each, run VerifyApp again, and fix what it finds. If one of `
+              + `these genuinely is not built yet, build it — a page that loads is not the same `
+              + `as the page that was asked for.`,
+          };
+        }
+      }
     }
 
     if (!latest.passed) {

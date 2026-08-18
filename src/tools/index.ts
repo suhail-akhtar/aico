@@ -422,7 +422,7 @@ export async function executeTool(
       // Recorded as well as returned. The model reads the text; the completion
       // gate reads the verdict, and a turn cannot end `completed` on a failing
       // one — which is the whole reason this tool is not merely advisory.
-      recordVerification(verdict);
+      recordVerification(verdict, (args as { checks?: { name: string }[] }).checks?.map(c => c.name) ?? []);
       result = formatVerdict(verdict);
       break;
     }

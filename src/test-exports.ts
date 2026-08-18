@@ -183,3 +183,4 @@ export { checkVerificationGate, resetVerification, recordVerification, noteFileW
 export { findPlaceholders, describePlaceholders } from './substance.js';
 export { getToolsForAgent, toolDefinitions } from './tools/index.js';
 export { looksLikeServer, resolveTimeout, backgroundProcesses, stopBackgroundProcesses } from './tools/bash.js';
+export { extractRequirements, coverageOf, setBrief, currentRequirements, MIN_INTERACTIONS_FOR_COVERAGE } from './requirements.js';

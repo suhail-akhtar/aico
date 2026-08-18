@@ -66,6 +66,7 @@ import { cronScheduler } from './cron/scheduler.js';
 import { getBackgroundAgents } from './background/index.js';
 import { getAgentRegistry } from './tools/task.js';
 import { checkVerificationGate, resetVerification } from './verification.js';
+import { setBrief } from './requirements.js';
 
 // Increase max listeners to avoid warnings during long tool chains
 process.setMaxListeners(50);
@@ -1152,6 +1153,10 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // accumulates. Last turn's passing verdict says nothing about this turn's
   // artifact, so the evidence starts empty every time.
   resetVerification();
+  // The user's own words are the standard the work is held to. Taken from the
+  // task rather than from anything the model writes: a model that authors its
+  // own acceptance criteria authors ones it has met.
+  setBrief(opts.task ?? '');
 
   /**
    * Whether cumulative spend has passed a configured ceiling.
