@@ -104,7 +104,17 @@ for (const c of CONTENDERS) {
   if (only && c.model !== only) continue;
 
   const dir = path.join(outRoot, c.model.replace(/[^a-z0-9.-]/gi, '_'));
-  fs.rmSync(dir, { recursive: true, force: true });
+  // Retried, because verifying the *previous* contender leaves a browser
+  // process shutting down and Windows holds the directory until it is gone.
+  // An unretried rmSync took down the whole run after two of three models —
+  // the results were collected and then thrown away over a transient lock.
+  for (let attempt = 0; ; attempt++) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); break; }
+    catch (err) {
+      if (attempt >= 10) { console.log(`    (could not clear ${dir}: ${err.code})`); break; }
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
   fs.mkdirSync(dir, { recursive: true });
 
   const session = new Session({

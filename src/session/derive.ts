@@ -164,7 +164,20 @@ export function deriveMessagesDetailed(events: readonly SessionEvent[]): DeriveR
       const toolCalls = data.toolCalls ?? [];
       messages.push({
         role: 'assistant',
-        content: data.content,
+        // An assistant turn with neither content nor tool calls is a valid
+        // thing to have *happened* — a step that spent its whole budget on
+        // reasoning and was cut off produces exactly that, and the log records
+        // it truthfully. It is not a valid thing to *send*: DeepSeek rejects
+        // the next request outright with "content or tool_calls must be set",
+        // which turns one truncated step into a dead turn.
+        //
+        // Substituted here rather than at the twelve call sites that build
+        // these events, so no future path can reintroduce it. The text says
+        // what happened, because the model reads this back as its own turn and
+        // an empty one would look like it had chosen to say nothing.
+        content: data.content || (toolCalls.length > 0
+          ? data.content
+          : '[no output — this step was cut off at the token limit]'),
         ...(toolCalls.length > 0 ? { toolCalls } : {}),
         // Replayed so a provider that wants its own reasoning back still gets
         // it after a restart or resume, when provider-local memory is long

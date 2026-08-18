@@ -5883,6 +5883,50 @@ console.log('\n══ SUBSTANCE CHECK ══');
 }
 
 
+console.log('\n══ EMPTY ASSISTANT TURNS ══');
+
+{
+  // A step that spends its whole budget on reasoning and is cut off produces an
+  // assistant turn with no content and no tool calls. That is a truthful thing
+  // to log and an invalid thing to send: DeepSeek rejects the next request with
+  // "content or tool_calls must be set", turning one truncated step into a dead
+  // turn. Observed in a real benchmark run — DeepSeek burned 32,000 tokens,
+  // produced nothing, and the turn died on the follow-up request.
+  const session = mkSession('empty-assistant');
+  session.append('turn/start', { turn: 1 });
+  session.append('user/message', { turn: 1, content: 'build it' });
+  session.append('assistant/message', { turn: 1, step: 1, content: '' });
+  session.append('user/message', { turn: 1, content: 'that was cut off, try again' });
+
+  const messages = session.deriveMessages();
+  const assistant = messages.filter(m => m.role === 'assistant');
+  assert(assistant.length === 1, 'The empty assistant turn is still projected, not dropped');
+  assert(assistant[0].content.length > 0,
+    'It is never sent with empty content — that is what the provider refuses');
+  assert(/cut off at the token limit/.test(assistant[0].content),
+    'The substitute says what happened, since the model reads this back as its own turn');
+}
+
+{
+  // The substitution must not fire when there are tool calls: an assistant turn
+  // that is *only* a tool call has legitimately empty content, and inventing
+  // text for it would put words in the model's mouth on every normal step.
+  const session = mkSession('empty-with-calls');
+  session.append('turn/start', { turn: 1 });
+  session.append('user/message', { turn: 1, content: 'go' });
+  session.append('assistant/message', {
+    turn: 1, step: 1, content: '',
+    toolCalls: [{ id: 't1', name: 'Pwd', input: {} }],
+  });
+  session.append('tool/result', { turn: 1, step: 1, callId: 't1', name: 'Pwd', content: '/tmp' });
+
+  const messages = session.deriveMessages();
+  const assistant = messages.find(m => m.role === 'assistant');
+  assert(assistant.content === '', 'A tool-call-only turn keeps its empty content');
+  assert(assistant.toolCalls.length === 1, 'And keeps its tool call');
+}
+
+
 // ═══════════════════════════════════════════════════════════
 // SUMMARY
 // ═══════════════════════════════════════════════════════════
