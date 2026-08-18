@@ -245,6 +245,18 @@ export const api = {
   activateProvider: (id: string, model?: string) =>
     post<{ active: string; model: string | null }>('providers/activate', { id, model }),
 
+  /**
+   * What the active provider can run.
+   *
+   * Answers from the instance's stored catalogue when it has one and asks the
+   * endpoint when it does not, remembering the result either way.
+   */
+  providerModels: (id?: string) =>
+    post<{
+      models: string[]; source: 'stored' | 'fetched' | 'none';
+      provider?: string; defaultModel?: string | null; error?: string;
+    }>('providers/models', id ? { id } : {}),
+
   /** Test an instance that already exists, by id. */
   testProvider: (id: string) => post<ProviderTestResult>('providers/test', { id }),
 

@@ -149,6 +149,59 @@ export async function handleSystemRoute(
       };
     }
 
+    case 'providers/models': {
+      if (method !== 'GET' && method !== 'POST') return { status: 405, body: { error: 'GET or POST' } };
+      const settings = await loadSettings();
+      const wanted = typeof body.id === 'string' && body.id
+        ? body.id
+        : (settings.activeProvider ?? settings.provider ?? '');
+      const instance = listInstances(settings).find(i => i.id === wanted)
+        ?? listInstances(settings).find(i => i.type === wanted)
+        ?? listInstances(settings)[0];
+      if (!instance) return { status: 200, body: { models: [], source: 'none' } };
+
+      // Whatever the instance already knows, first. That list came from asking
+      // the endpoint what it serves, and a picker that made a network call
+      // every time it opened would be a picker nobody keeps open.
+      if (instance.models?.length) {
+        return {
+          status: 200,
+          body: {
+            models: instance.models,
+            source: 'stored',
+            provider: instance.id,
+            defaultModel: instance.defaultModel ?? null,
+          },
+        };
+      }
+
+      const { resolveApiKey } = await import('../providers/instances.js');
+      const probe = await testInstance({
+        type: instance.type,
+        apiKey: resolveApiKey(instance),
+        baseUrl: instance.baseUrl || undefined,
+      });
+      // Remembered, so the next open is instant and the settings screen shows
+      // the same catalogue this picker just discovered.
+      if (probe.models?.length) {
+        const stored = settings.providerInstances ?? [];
+        const merged = stored.some(i => i.id === instance.id)
+          ? stored.map(i => (i.id === instance.id ? { ...i, models: probe.models } : i))
+          : [...stored, { ...instance, models: probe.models }];
+        await saveUserSetting('providerInstances', merged);
+      }
+      return {
+        status: 200,
+        body: {
+          models: probe.models ?? [],
+          source: 'fetched',
+          provider: instance.id,
+          defaultModel: instance.defaultModel ?? null,
+          ...(probe.error ? { error: probe.error } : {}),
+        },
+      };
+    }
+
     case 'providers/save': {
       if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
       const settings = await loadSettings();

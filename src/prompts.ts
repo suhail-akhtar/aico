@@ -117,6 +117,13 @@ export async function buildSystemPrompt(
    * where settings live, and so a caller can supply them from anywhere.
    */
   projectInstructions?: string,
+  /**
+   * The session's standing objective, when it has an active one.
+   *
+   * Passed in for the same reason the instructions are: this module knows
+   * nothing about sessions, and should not learn.
+   */
+  goal?: string,
 ): Promise<PromptDocument> {
   const memory = await loadMemory();
   const doc = new PromptDocument();
@@ -297,6 +304,27 @@ carries the same information.`,
       order: 900,
       reprise: true,
       body: projectInstructions.trim(),
+    });
+  }
+
+  // The standing objective, last of all and reprised.
+  //
+  // This existed for a while as a bar in the UI that the model could not see.
+  // A goal nobody is told is a sticky note: it survived restarts, appeared in
+  // the export, and changed nothing about what the agent did — which is the
+  // worst kind of feature, because it looks like it is working.
+  //
+  // Last because it is the most specific thing in the prompt: the folder's
+  // instructions apply to every session in it, and this applies to exactly
+  // this conversation. Reprised for the same reason the rules are — it is
+  // meant to be in view when the next decision is made, not only at the start.
+  if (goal?.trim()) {
+    doc.add({
+      id: 'session_goal',
+      order: 950,
+      reprise: true,
+      body: `The user has set a standing objective for this session:\n\n${goal.trim()}\n\n`
+        + 'Keep it in view. When a step would not move it forward, say so rather than doing it anyway.',
     });
   }
 

@@ -15,6 +15,7 @@
 
 import React, { useState } from 'react';
 import { useStore } from '../store';
+import { Icon } from './Icon';
 
 export function GoalBar(): React.ReactElement | null {
   const goal = useStore(s => s.goal);
@@ -125,10 +126,12 @@ export function SetGoalButton(): React.ReactElement | null {
   return (
     <button
       onClick={() => setEditing(true)}
-      title="Set a goal for this session"
-      className="rounded-md px-2 py-1 text-xs text-aico-muted transition-all hover:text-aico-secondary"
+      title="Set a standing objective the agent keeps in view"
+      aria-label="Set session goal"
+      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-aico-muted
+                 transition-colors hover:bg-aico-hover hover:text-aico-secondary"
     >
-      ◎ Goal
+      <Icon name="target" size={15} /> Goal
     </button>
   );
 }

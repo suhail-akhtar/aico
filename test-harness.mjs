@@ -3904,6 +3904,39 @@ console.log('  -- Archiving hides a row and destroys nothing --');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+console.log('  -- A goal the model can actually see --');
+{
+  // This was a bar in the UI that the model was never told about: it survived
+  // restarts, appeared in the export, and changed nothing about what the agent
+  // did — the worst kind of feature, because it looks like it is working.
+  const GOAL = 'Ship the payments migration without touching billing.';
+  const INSTR = 'Always run the linter before saying a task is done.';
+
+  const bare = asText(await buildSystemPrompt('m'), ANTHROPIC_DIALECT, 'anthropic');
+  assert(!/session_goal/.test(bare), 'No goal section when no goal is set');
+
+  const doc = await buildSystemPrompt('m', undefined, INSTR, GOAL);
+  const full = asText(doc, ANTHROPIC_DIALECT, 'anthropic');
+  assert(full.includes(GOAL), 'The goal reaches the prompt');
+  assert(full.includes(INSTR), 'and so do the project instructions');
+
+  // Order is the mechanism, not decoration: a model follows the later
+  // instruction when two conflict, and the goal is the most specific thing
+  // here — the folder's rules apply to every session in it, the goal to
+  // exactly this conversation.
+  assert(full.indexOf('<behaviour>') < full.indexOf(INSTR),
+    'general behaviour comes before the folder rules');
+  assert(full.indexOf(INSTR) < full.indexOf(GOAL),
+    'and the folder rules before the session goal');
+
+  // Reprised where the vendor asks for a tail restatement, so it is in view
+  // at the moment of the next decision rather than only at the start.
+  const gemini = renderPrompt(doc, GEMINI_DIALECT, 'gemini');
+  assert(gemini.reprise.includes(GOAL), 'The goal is restated in the tail on Gemini');
+  assert(renderPrompt(doc, ANTHROPIC_DIALECT, 'anthropic').reprise === '',
+    'and not on Anthropic, whose guidance puts instructions first');
+}
+
 console.log('  -- The system prompt is frozen --');
 {
   const sys = asText(await buildSystemPrompt('test-model'));

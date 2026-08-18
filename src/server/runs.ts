@@ -143,6 +143,8 @@ export class RunManager {
     if (run.busy) throw new Error('A turn is already running — use steer or followup');
 
     const settings = await this.currentSettings();
+    const goal = currentGoal(run.session);
+    const activeGoal = goal?.status === 'active' ? goal.text : undefined;
 
     run.busy = true;
     // Fresh per turn: an AbortController is single-use, so reusing one would
@@ -176,6 +178,10 @@ export class RunManager {
         // edit takes effect on the next message rather than the next restart.
         ...(await combinedInstructions(run.cwd, this.groupOf(sessionId) ?? undefined)
           .then(v => (v ? { projectInstructions: v } : {}))),
+        // Only while active. A paused goal is one the user explicitly set
+        // aside, and telling the model to pursue it anyway would make the
+        // pause button a lie.
+        ...(activeGoal ? { goal: activeGoal } : {}),
         showPlan: false,
         verbose: false,
         silent: true,

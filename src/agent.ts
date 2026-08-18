@@ -218,6 +218,13 @@ export interface AgentOptions {
    */
   projectInstructions?: string;
   /**
+   * The session's standing objective, if one is active.
+   *
+   * Read from the log per turn by the caller, so pausing or clearing it takes
+   * effect on the next message rather than the next restart.
+   */
+  goal?: string;
+  /**
    * The project directory this run works in.
    *
    * Every file tool resolves relative paths against it and refuses writes
@@ -766,7 +773,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // Built as a document, not a string: it is rendered below in whatever shape
   // the resolved provider's vendor documents as best (XML for Anthropic,
   // Markdown for the rest). The content is authored once regardless.
-  const promptDoc = await buildSystemPrompt(model, opts.effort, opts.projectInstructions);
+  const promptDoc = await buildSystemPrompt(
+    model, opts.effort, opts.projectInstructions, opts.goal,
+  );
   const runtimeAwareness = await buildRuntimeAwareness({
     model,
     cwd: process.cwd(),

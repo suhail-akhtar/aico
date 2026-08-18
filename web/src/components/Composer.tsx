@@ -22,6 +22,7 @@
 
 import React, { useRef, useState } from 'react';
 import { useStore } from '../store';
+import { ModelPicker } from './ModelPicker';
 import { SetGoalButton } from './GoalBar';
 
 export function Composer(): React.ReactElement {
@@ -92,11 +93,7 @@ export function Composer(): React.ReactElement {
 
             <div className="flex-1" />
 
-            {model && (
-              <span className="hidden truncate text-[12px] text-aico-muted sm:block" title={model}>
-                {model}
-              </span>
-            )}
+            <ModelPicker />
 
             {busy ? (
               <>
