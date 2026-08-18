@@ -182,3 +182,4 @@ export { verifyApp, formatVerdict, findBrowser, verifyAppDefinition } from './to
 export { checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts, verifications } from './verification.js';
 export { findPlaceholders, describePlaceholders } from './substance.js';
 export { getToolsForAgent, toolDefinitions } from './tools/index.js';
+export { looksLikeServer, resolveTimeout, backgroundProcesses, stopBackgroundProcesses } from './tools/bash.js';

@@ -138,6 +138,7 @@ import {
   setBashProgressSink,
   summarizeLastTurn,
   verifyApp, formatVerdict, findBrowser, findPlaceholders, describePlaceholders,
+  looksLikeServer, resolveTimeout, backgroundProcesses, stopBackgroundProcesses,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -5924,6 +5925,112 @@ console.log('\n══ EMPTY ASSISTANT TURNS ══');
   const assistant = messages.find(m => m.role === 'assistant');
   assert(assistant.content === '', 'A tool-call-only turn keeps its empty content');
   assert(assistant.toolCalls.length === 1, 'And keeps its tool call');
+}
+
+
+console.log('\n══ LONG-RUNNING COMMANDS ══');
+
+{
+  // The bug, exactly: `timeout: 0` meant forever, and the tool description told
+  // the model to use it for anything slow. A dev server started that way ran for
+  // 139 minutes — 138 of them with no output at all — until the user killed it
+  // by hand. "No timeout" is not something an agent should be able to ask for.
+  const unlimited = resolveTimeout(0);
+  assert(Number.isFinite(unlimited.timeoutMs), 'timeout:0 no longer means forever');
+  assert(unlimited.timeoutMs === 30 * 60 * 1000, 'It means the 30-minute ceiling');
+  assert(resolveTimeout(9999).timeoutMs === 30 * 60 * 1000,
+    'An absurd explicit timeout is capped at the same ceiling');
+  assert(resolveTimeout(120).timeoutMs === 120_000, 'An ordinary timeout is left alone');
+  assert(resolveTimeout(1).timeoutMs === 1000, 'And so is a short one');
+}
+
+{
+  // Detection has to catch the real command, which arrived with a quoted
+  // Windows path. An earlier version blanked every quoted string before
+  // matching — to stop `grep "npm run dev"` looking like a server — and blanked
+  // the path in `node "C:\...\server.js"` along with it, defeating itself on
+  // the one case it existed for.
+  const servers = [
+    ['node "E:/tmp/x/server.js"', 'a quoted path, as it actually arrived'],
+    ['cd "C:\\Users\\x" && node "C:\\Users\\x\\server.js"', 'after a cd, as it actually arrived'],
+    ['npm run dev', 'the common case'],
+    ['python -m http.server 8000', 'a static server'],
+    ['npx vite', 'a bundler in serve mode'],
+    ['tail -f app.log', 'a log tail'],
+    ['docker compose up', 'containers in the foreground'],
+  ];
+  for (const [cmd, why] of servers) {
+    assert(looksLikeServer(cmd) !== undefined, `Detected: ${why}`);
+  }
+
+  // False positives are the worse failure — backgrounding something the model
+  // meant to wait for silently breaks the step that depends on its output.
+  const foreground = [
+    ['npm run build', 'a build must not be backgrounded'],
+    ['npm test', 'tests must not be backgrounded'],
+    ['node build.js', 'a build script is not a server script'],
+    ['grep -r "npm run dev" src/', 'a search whose pattern mentions a server'],
+    ['echo "starting the dev server"', 'a message about a server'],
+    ['docker compose up -d', 'detached compose already returns on its own'],
+    ['git log --oneline', 'ordinary work'],
+  ];
+  for (const [cmd, why] of foreground) {
+    assert(looksLikeServer(cmd) === undefined, `Left in the foreground: ${why}`);
+  }
+}
+
+{
+  // End to end, against a server that really listens: the call must return in
+  // seconds rather than blocking, the process must survive the call, and the
+  // model must be told where to reach it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-srv-'));
+  const script = path.join(dir, 'server.js');
+  fs.writeFileSync(script, `
+    const http = require('http');
+    http.createServer((q, r) => {
+      r.writeHead(200, { 'Content-Type': 'text/html' });
+      r.end('<!doctype html><title>ok</title><h1 style="font-size:40px">served</h1>');
+    }).listen(8231, () => console.log('listening on http://localhost:8231'));
+  `);
+
+  const started = Date.now();
+  const result = await bash({ command: `node "${script}"`, timeout: 0 });
+  const elapsed = Date.now() - started;
+
+  assert(elapsed < 20_000, `The call returns instead of hanging (${(elapsed / 1000).toFixed(1)}s)`);
+  assert(result.background !== undefined, 'It reports the process it left running');
+  assert(result.exit_code === 0, 'Starting a server is not a failure');
+  assert(/still running as pid/.test(result.stdout), 'The model is told it is still running');
+  assert(/http:\/\/localhost:8231/.test(result.stdout),
+    'And told the address it printed, which is the thing it needed');
+  assert(backgroundProcesses().length === 1, 'The process is tracked so it can be stopped');
+
+  if (findBrowser()) {
+    const v = await verifyApp({ target: 'http://localhost:8231', settleMs: 400 });
+    assert(v.passed, `The server it started is really serving (${v.problems.join('; ')})`);
+  }
+
+  stopBackgroundProcesses();
+  assert(backgroundProcesses().length === 0, 'And stopping clears the registry');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // A server that cannot start must be reported as the failure it is. Saying
+  // "started in the background" for a process that already died would be a
+  // worse lie than the hang this replaced — the model would go on to verify
+  // against a port with nothing behind it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-srv-fail-'));
+  const script = path.join(dir, 'server.js');
+  fs.writeFileSync(script, `console.error('EADDRINUSE: port already in use'); process.exit(1);`);
+
+  const result = await bash({ command: `node "${script}"`, timeout: 0 });
+  assert(result.exit_code !== 0, 'A server that dies on startup reports a failure');
+  assert(result.background === undefined, 'And is not claimed to be running');
+  assert(/EADDRINUSE/.test(result.stderr), 'The reason it died is kept');
+  assert(backgroundProcesses().length === 0, 'Nothing is tracked');
+
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 
