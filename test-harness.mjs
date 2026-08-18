@@ -142,6 +142,7 @@ import {
   extractRequirements, coverageOf, setBrief,
   withTimeout, timeoutFor, ToolTimeoutError,
   terminal, closeAllTerminals,
+  observe, blockedReason, resetObservations, isObserved,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -5931,6 +5932,69 @@ if (findBrowser()) {
 
 
 
+
+
+console.log('\n══ READ BEFORE YOU WRITE ══');
+
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-obs-'));
+  const existing = path.join(dir, 'existing.ts');
+  fs.writeFileSync(existing, 'export const answer = 42;\n');
+
+  resetObservations();
+
+  // The failure this prevents is quiet and expensive: an edit whose old_string
+  // was remembered rather than read either misses, or matches something that
+  // drifted since and rewrites the wrong line in a file nobody has looked at.
+  const refused = blockedReason(existing, 'edit');
+  assert(refused !== undefined, 'Editing a file nobody has read is refused');
+  assert(/has not been read/.test(refused), 'The reason is the actual reason');
+  assert(refused.includes(existing), 'The file is named, so the fix needs no guessing');
+  assert(/Read .* first/.test(refused), 'And the one call that fixes it is spelled out');
+
+  // Overwriting gets its own reason: nothing matches wrongly, but everything
+  // else in the file is silently discarded.
+  const overwrite = blockedReason(existing, 'overwrite');
+  assert(/discard whatever is in it/.test(overwrite),
+    'Overwriting is refused for its own reason, not the edit one');
+
+  // Reading it is the whole cost of compliance.
+  observe(existing);
+  assert(blockedReason(existing, 'edit') === undefined, 'Once read, it can be edited');
+  assert(isObserved(existing), 'And is considered known');
+
+  // A new file destroys nothing, so it needs no permission. Demanding a read of
+  // a file that does not exist would make every first write a two-step dance.
+  const fresh = path.join(dir, 'brand-new.ts');
+  assert(blockedReason(fresh, 'overwrite') === undefined,
+    'Creating a file that does not exist is never blocked');
+
+  // The stale case, which is the one a naive "has it been read?" flag misses. A
+  // file read and then rewritten by a build, a formatter or a checkout is a
+  // file nobody has seen — and that is exactly when a remembered match lands
+  // somewhere it should not.
+  const later = (Date.now() + 5000) / 1000;
+  fs.writeFileSync(existing, 'export const answer = 43;\n');
+  fs.utimesSync(existing, later, later);
+  const stale = blockedReason(existing, 'edit');
+  assert(stale !== undefined, 'A file that changed after being read is not "read"');
+  assert(/changed since it was read/.test(stale), 'And the reason says so');
+  assert(/wrong place/.test(stale), 'Naming the risk, not just the rule');
+
+  observe(existing);
+  assert(blockedReason(existing, 'edit') === undefined, 'Re-reading clears it');
+
+  // Per-turn: knowing a file last turn says nothing about this one.
+  resetObservations();
+  assert(blockedReason(existing, 'edit') !== undefined,
+    'Observations do not carry across turns');
+
+  // A directory is not a file, and is nobody's business here.
+  assert(blockedReason(dir, 'edit') === undefined, 'A directory is not gated');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  resetObservations();
+}
 
 console.log('\n══ A SHELL THAT REMEMBERS ══');
 

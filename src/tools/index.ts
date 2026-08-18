@@ -11,6 +11,7 @@ import { verifyApp, verifyAppDefinition, formatVerdict } from './verify-app.js';
 import { recordVerification, noteFileWritten } from '../verification.js';
 import { withTimeout } from './timeout-policy.js';
 import { terminal, terminalDefinition } from './terminal.js';
+import { observe, blockedReason } from './observation.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
@@ -409,18 +410,33 @@ export async function executeTool(
       break;
     case 'Read':
       result = await readFile(args as unknown as Parameters<typeof readFile>[0]);
+      observe(String((args as Record<string, unknown>).file_path ?? ''));
       break;
-    case 'Write':
+    case 'Write': {
+      // Enforced here rather than asked for in the prompt. A prompt rule holds
+      // until the model is confident, and a model writing from memory is
+      // confident by definition — it has stopped considering the question.
+      const target = String((args as Record<string, unknown>).file_path ?? '');
+      const blocked = target ? blockedReason(target, 'overwrite') : undefined;
+      if (blocked) throw new Error(blocked);
       result = await writeFile(args as unknown as Parameters<typeof writeFile>[0]);
+      // Writing a file is the most direct way of knowing what is in it.
+      observe(target);
       // Noted here rather than reconstructed at the end of the turn: by then a
       // directory listing cannot distinguish what this turn built from what was
       // already sitting there.
-      noteFileWritten(String((args as Record<string, unknown>).file_path ?? ''));
+      noteFileWritten(target);
       break;
-    case 'Edit':
+    }
+    case 'Edit': {
+      const target = String((args as Record<string, unknown>).file_path ?? '');
+      const blocked = target ? blockedReason(target, 'edit') : undefined;
+      if (blocked) throw new Error(blocked);
       result = await editFile(args as unknown as Parameters<typeof editFile>[0]);
-      noteFileWritten(String((args as Record<string, unknown>).file_path ?? ''));
+      observe(target);
+      noteFileWritten(target);
       break;
+    }
     case 'Glob':
       result = await globFiles(args as unknown as Parameters<typeof globFiles>[0]);
       break;

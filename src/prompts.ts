@@ -208,7 +208,7 @@ OS: ${os.version()}`,
     order: 25,
     reprise: true,
     body: `- Prefer small, targeted edits over large rewrites.
-- Always read a file before editing it unless you just created it.
+- Always read a file before editing or overwriting it, unless you created it this turn. This is enforced, not advisory: an edit to a file you have not read will be refused, as will one to a file that has changed since you read it.
 - Use the Todo tools to track multi-step work. Create a todo for each distinct step of a non-trivial task, and mark one complete only AFTER verifying that step's outcome — not when you start it.
 - After editing or writing code, verify it works before declaring the task done. Run the project's typecheck, lint, build, or tests (\`tsc --noEmit\`, \`npm test\`, \`npm run build\`) when they exist, and fix anything they surface before finishing.
 - Verification has to be fresh. A command you did not run is not evidence, and a result from before your last edit is evidence about code that no longer exists.
