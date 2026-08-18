@@ -36,7 +36,11 @@ export function Composer(): React.ReactElement {
   const model = useStore(s => s.model);
 
   const [text, setText] = useState('');
-  const [planMode, setPlanMode] = useState(false);
+  // From the store, not local state. A plan approved in the side panel turns
+  // planning off, and the toggle has to show that — a switch that disagrees
+  // with the mode it controls is worse than no switch.
+  const planMode = useStore(s => s.planMode);
+  const setPlanMode = useStore(s => s.setPlanMode);
   const textarea = useRef<HTMLTextAreaElement>(null);
 
   // Filled from elsewhere — the plan panel's Amend, so far. Appended to what is
@@ -96,7 +100,7 @@ ${prefill.text}` : prefill.text));
 
           <div className="flex items-center gap-1.5 px-3 pb-2.5">
             <button
-              onClick={() => setPlanMode(v => !v)}
+              onClick={() => setPlanMode(!planMode)}
               disabled={busy}
               title="Plan first, then act"
               className={`rounded-lg px-2.5 py-1 text-[13px] transition-colors disabled:opacity-40 ${

@@ -124,6 +124,16 @@ export async function buildSystemPrompt(
    * nothing about sessions, and should not learn.
    */
   goal?: string,
+  /**
+   * Whether this is a planning turn.
+   *
+   * Plan mode was a tool restriction and nothing else: the tools were filtered
+   * to read-only and the model was never told why, what the turn was for, or
+   * how to end it. Whether a usable plan came out depended on a model
+   * recognising the shape of the situation from a filtered tool list, which is
+   * not a contract — it is a hope that happened to work.
+   */
+  planMode?: boolean,
 ): Promise<PromptDocument> {
   const memory = await loadMemory();
   const doc = new PromptDocument();
@@ -237,6 +247,23 @@ OS: ${os.version()}`,
 - When a search returns more than you can read, narrow it rather than skimming everything. Guessing from filenames is how the wrong file gets edited.
 - Independent lookups can go out together. If you need four files to understand something, ask for all four at once rather than one at a time — it is one wait instead of four. Anything that writes, or that depends on what a previous call returned, has to wait for it.`,
   });
+
+  // Only during a planning turn, and worth its tokens only then. A standing
+  // paragraph about how to plan would be read on every ordinary turn, where the
+  // right answer is usually to just do the work.
+  if (planMode) {
+    doc.add({
+      id: 'plan_mode',
+      order: 22,
+      reprise: true,
+      body: `You are planning, not building. Nothing you do this turn may change anything: the write tools are not available to you, and that is deliberate.
+- Investigate first. A plan written without reading the code is a guess with numbered steps, and the reader cannot tell the difference until it fails.
+- Finish by calling ProposePlan exactly once, with the whole plan. Do not describe the plan in prose as well — the reader answers the tool call, and a second copy in the message body is one that can drift from it.
+- Give each step the files or areas it touches. "Update the settings" and "update the settings, in web/src/store.ts and two components" are different plans to agree to.
+- State what you had to assume in open_questions, honestly and specifically. An assumption the reader would have corrected costs a sentence now and a rewrite later, and this is the only moment it is cheap.
+- Then stop. Do not begin the work, and do not ask whether to begin: the reader will approve, amend, defer or decline, and you will be asked again with that answer.`,
+    });
+  }
 
   // Delegation, framed as a decision rather than a catalogue.
   //

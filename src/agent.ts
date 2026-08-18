@@ -791,7 +791,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // the resolved provider's vendor documents as best (XML for Anthropic,
   // Markdown for the rest). The content is authored once regardless.
   const promptDoc = await buildSystemPrompt(
-    model, opts.effort, opts.projectInstructions, opts.goal,
+    model, opts.effort, opts.projectInstructions, opts.goal, opts.planMode,
   );
   const runtimeAwareness = await buildRuntimeAwareness({
     model,

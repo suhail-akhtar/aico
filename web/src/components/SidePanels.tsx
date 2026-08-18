@@ -30,7 +30,8 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { todosFrom, type Todo, type TodoStatus } from '../todos';
-import { planFrom, PLAN_REPLY, type PlanDecision } from '../plans';
+import { planFrom, type PlanDecision } from '../plans';
+import type { PlanAnswer } from '../store';
 import { orderMessages } from '../reduce';
 
 /** How each task state reads at a glance. */
@@ -176,8 +177,8 @@ function TaskCard(): React.ReactElement | null {
 function PlanCard(): React.ReactElement | null {
   const logged = useStore(s => s.logged);
   const busy = useStore(s => s.busy);
-  const submit = useStore(s => s.submit);
-  const prefillComposer = useStore(s => s.prefillComposer);
+  const answerPlan = useStore(s => s.answerPlan);
+  const amendPlan = useStore(s => s.amendPlan);
   const dismissed = useStore(s => s.dismissed);
   const dismissPanel = useStore(s => s.dismissPanel);
   const [manual, setManual] = useState<boolean | null>(null);
@@ -194,13 +195,18 @@ function PlanCard(): React.ReactElement | null {
   // panel should not be in the way of watching that happen.
   const collapsed = manual ?? settled;
 
-  const answer = async (reply: string): Promise<void> => {
+  const answer = async (decision: PlanAnswer): Promise<void> => {
     if (sending || busy) return;
     setSending(true);
     // Collapsed on the way out rather than after the reply lands: the decision
     // is made, and leaving it expanded for a round trip reads as hesitation.
-    setManual(true);
-    try { await submit(reply); } finally { setSending(false); }
+    // Except when starting a deferred plan — that one is expanding into work,
+    // and the reader wants to watch the steps it agreed to.
+    if (decision !== 'startNow') setManual(true);
+    // The store owns this, not the panel: approving both sends the message and
+    // ends planning, and a caller that does only the first produces an agent
+    // that comes back still unable to write a file.
+    try { await answerPlan(decision); } finally { setSending(false); }
   };
 
   return (
@@ -270,7 +276,7 @@ function PlanCard(): React.ReactElement | null {
       {!settled && (
         <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-aico-border pt-2">
           <button
-            onClick={() => void answer(PLAN_REPLY.approved)}
+            onClick={() => void answer('approved')}
             disabled={sending || busy}
             className="rounded-lg bg-aico-accent px-2 py-1 text-[11px] font-medium text-white
                        transition-opacity hover:opacity-90 disabled:opacity-50"
@@ -278,7 +284,7 @@ function PlanCard(): React.ReactElement | null {
             Go ahead
           </button>
           <button
-            onClick={() => prefillComposer('About that plan — ')}
+            onClick={amendPlan}
             disabled={sending || busy}
             className="rounded-lg px-2 py-1 text-[11px] text-aico-secondary
                        transition-colors hover:bg-aico-hover disabled:opacity-50"
@@ -286,7 +292,7 @@ function PlanCard(): React.ReactElement | null {
             Amend
           </button>
           <button
-            onClick={() => void answer(PLAN_REPLY.deferred)}
+            onClick={() => void answer('deferred')}
             disabled={sending || busy}
             className="rounded-lg px-2 py-1 text-[11px] text-aico-secondary
                        transition-colors hover:bg-aico-hover disabled:opacity-50"
@@ -295,7 +301,7 @@ function PlanCard(): React.ReactElement | null {
           </button>
           <div className="flex-1" />
           <button
-            onClick={() => void answer(PLAN_REPLY.declined)}
+            onClick={() => void answer('declined')}
             disabled={sending || busy}
             className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
                        hover:bg-aico-danger/10 hover:text-aico-danger disabled:opacity-50"
@@ -305,10 +311,23 @@ function PlanCard(): React.ReactElement | null {
         </div>
       )}
 
+      {/*
+        A deferred plan is the one state with something still to offer. Telling
+        the reader to "say the word" and then making them find the words is a
+        worse deal than a button, and the plan is already written down.
+      */}
       {decision === 'deferred' && (
-        <p className="mt-1.5 border-t border-aico-border pt-1.5 text-[10px] text-aico-muted">
-          Kept, not started. Say the word when you want it run.
-        </p>
+        <div className="mt-1.5 flex items-center gap-2 border-t border-aico-border pt-1.5">
+          <button
+            onClick={() => void answer('startNow')}
+            disabled={sending || busy}
+            className="rounded-lg bg-aico-accent px-2 py-1 text-[11px] font-medium text-white
+                       transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            Start it now
+          </button>
+          <span className="text-[10px] text-aico-muted">Kept, not started.</span>
+        </div>
       )}
     </Card>
   );

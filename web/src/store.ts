@@ -27,6 +27,10 @@
 import { create } from 'zustand';
 import { initialSessionId, rememberSession, freshSessionId } from './session-memory';
 import type { ChatMessage } from '@aico/ui';
+import { PLAN_REPLY } from './plans';
+
+/** The answers the plan panel can give. `amend` is not one — it sends nothing. */
+export type PlanAnswer = 'approved' | 'deferred' | 'declined' | 'startNow';
 import type { TurnSummaryData } from './components/TurnSummary';
 import {
   api, streamSession,
@@ -150,6 +154,28 @@ interface AppState {
    */
   dismissed: Record<string, string>;
   dismissPanel: (panel: string, identity: string) => void;
+
+  /**
+   * Whether the next turn plans rather than builds.
+   *
+   * Session state, not a toggle inside the composer. It began life as local
+   * component state, which meant nothing else could see it and — worse —
+   * nothing else could change it: approving a plan recorded the approval and
+   * left the mode on, so the agent came back still unable to write a file. The
+   * decision that ends planning has to be able to end planning.
+   */
+  planMode: boolean;
+  setPlanMode: (on: boolean) => void;
+
+  /**
+   * Answer the plan on the table, and mean it.
+   *
+   * Owns the mode change as well as the message, because those are one act. A
+   * caller that only sends the message produces the bug this replaced.
+   */
+  answerPlan: (decision: PlanAnswer) => Promise<void>;
+  /** Start amending: stay in planning, and frame the composer as a correction. */
+  amendPlan: () => void;
   cancel: () => Promise<void>;
   steer: (content: string) => Promise<void>;
   followup: (content: string) => Promise<void>;
@@ -210,6 +236,7 @@ export const useStore = create<AppState>((set, get) => ({
   draft: emptyDraft(),
   composerPrefill: null,
   dismissed: {},
+  planMode: false,
   busy: false,
   turnStartedAt: null,
   lastActivityAt: 0,
@@ -230,9 +257,10 @@ export const useStore = create<AppState>((set, get) => ({
     handle?.close();
     rememberSession(sessionId);
     set({
-      // Dismissals belong to the session they were made in: closing a panel in
-      // one conversation says nothing about the next.
-      sessionId, logged: new Map(), draft: emptyDraft(), dismissed: {},
+      // Dismissals and planning mode belong to the session they were made in:
+      // closing a panel — or planning — in one conversation says nothing about
+      // the next.
+      sessionId, logged: new Map(), draft: emptyDraft(), dismissed: {}, planMode: false,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
@@ -309,6 +337,25 @@ export const useStore = create<AppState>((set, get) => ({
 
   dismissPanel: (panel, identity) =>
     set(state => ({ dismissed: { ...state.dismissed, [panel]: identity } })),
+
+  setPlanMode: (on) => set({ planMode: on }),
+
+  answerPlan: async (decision) => {
+    // Approving, or starting a deferred plan, is the moment planning ends.
+    // Declining ends it too — there is nothing left to plan. Deferring does
+    // not: the reader may well want to keep planning something else.
+    const stillPlanning = decision === 'deferred';
+    set({ planMode: stillPlanning });
+    await get().submit(PLAN_REPLY[decision], { planMode: stillPlanning });
+  },
+
+  amendPlan: () => {
+    // Planning stays on. An amendment asks for a better plan, and a model with
+    // write tools in hand will take "amend that" as licence to start building
+    // the amended version.
+    set({ planMode: true });
+    get().prefillComposer(PLAN_REPLY.amendPrefix);
+  },
 
   submit: async (task, opts = {}) => {
     const { sessionId, model } = get();

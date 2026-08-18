@@ -912,5 +912,51 @@ test('a plan re-proposed unchanged keeps its place in the log', () => {
   assert.equal(plan.title, 'second');
 });
 
+
+// ── Answering a plan has consequences ──────────────────────────────────────
+
+test('starting a deferred plan reads as approved, not as a new question', () => {
+  // A plan picked up later is a plan that was agreed to. Left unmapped, the
+  // panel would go on offering "Start it now" for something already running.
+  const { decision } = planFrom([
+    planCall({ title: 'x', steps: [{ title: 'a' }] }),
+    userSays(PLAN_REPLY.deferred),
+    userSays(PLAN_REPLY.startNow),
+  ]);
+  assert.equal(decision, 'approved');
+});
+
+test('an amendment un-decides the plan', () => {
+  // The agent is rewriting it, so showing yesterday's answer against a plan
+  // being revised would be worse than showing none.
+  const { decision } = planFrom([
+    planCall({ title: 'x', steps: [{ title: 'a' }] }),
+    userSays(PLAN_REPLY.deferred),
+    userSays(`${PLAN_REPLY.amendPrefix}drop the third step`),
+  ]);
+  assert.equal(decision, undefined);
+});
+
+test('the amend frame says it is an amendment', () => {
+  // "About that plan — " left the agent to infer whether it was being
+  // corrected, questioned or chatted with, and those call for different moves.
+  assert.match(PLAN_REPLY.amendPrefix, /amend/i);
+  assert.match(PLAN_REPLY.amendPrefix, /before we start/i,
+    'and that nothing should be built yet');
+});
+
+test('every answer is a distinct phrase', () => {
+  // These are matched by prefix on replay. Two that share a prefix would make
+  // one answer read as another for the life of the log.
+  const replies = [PLAN_REPLY.approved, PLAN_REPLY.deferred, PLAN_REPLY.declined,
+                   PLAN_REPLY.startNow, PLAN_REPLY.amendPrefix];
+  for (const a of replies) {
+    for (const b of replies) {
+      if (a === b) continue;
+      assert.ok(!a.startsWith(b), `"${a}" must not begin with "${b}"`);
+    }
+  }
+});
+
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);

@@ -39,11 +39,28 @@ export interface PlanState {
   decision: PlanDecision;
 }
 
-/** Marker phrases the panel writes when the reader answers. Matched back on replay. */
+/**
+ * What the reader's answer says, verbatim.
+ *
+ * These are the messages the panel sends and the phrases it matches back on
+ * replay, so they are defined once. Changing one silently un-decides every plan
+ * already in a log, which is why they live here rather than being written out
+ * at each call site.
+ */
 export const PLAN_REPLY = {
   approved: 'Go ahead with that plan.',
   deferred: 'Keep that plan for later — do not start it now.',
   declined: 'Do not go ahead with that plan.',
+  /** A deferred plan, picked up later. The same outcome as approving it. */
+  startNow: 'Start that plan now, the one saved for later.',
+  /**
+   * The frame the composer is pre-filled with.
+   *
+   * An amendment has to read as an amendment. "About that plan — " left the
+   * agent to infer whether it was being corrected, questioned, or chatted with,
+   * and the three call for different next moves.
+   */
+  amendPrefix: 'Amend that plan before we start: ',
 } as const;
 
 function readStep(raw: unknown): PlanStep | undefined {
@@ -101,9 +118,18 @@ export function planFrom(messages: ChatMessage[]): PlanState {
     const message = messages[i]!;
     if (message.type !== 'user') continue;
     const text = message.content.trim();
-    if (text.startsWith(PLAN_REPLY.approved)) decision = 'approved';
-    else if (text.startsWith(PLAN_REPLY.deferred)) decision = 'deferred';
+    // startNow resolves to approved: a plan picked up later is a plan that was
+    // agreed to, and the panel should not go on offering to start something
+    // already running.
+    if (text.startsWith(PLAN_REPLY.approved) || text.startsWith(PLAN_REPLY.startNow)) {
+      decision = 'approved';
+    } else if (text.startsWith(PLAN_REPLY.deferred)) decision = 'deferred';
     else if (text.startsWith(PLAN_REPLY.declined)) decision = 'declined';
+    else if (text.startsWith(PLAN_REPLY.amendPrefix)) {
+      // An amendment un-decides the plan: the agent is revising it, so the panel
+      // waits rather than showing a stale answer to a plan being rewritten.
+      decision = undefined;
+    }
   }
 
   return { plan, decision };
