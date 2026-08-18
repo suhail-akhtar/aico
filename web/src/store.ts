@@ -31,7 +31,7 @@ import type { TurnSummaryData } from './components/TurnSummary';
 import {
   api, streamSession,
   type StreamEvent, type StreamHandle, type SystemSnapshot,
-  type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project,
+  type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project, type Group,
   type Goal, type Feedback, type Deliverable,
 } from './api';
 import {
@@ -68,6 +68,17 @@ interface AppState {
    * project, so "new session" always means "here, where I am looking".
    */
   project: string | null;
+
+  /** Containers you made. Orthogonal to projects: a group can span them. */
+  groups: Group[];
+  /**
+   * A group the next new session should be filed under.
+   *
+   * Held rather than applied because a session that has never run has no log
+   * to record membership in, and the membership *is* a log event. It is
+   * written on the first submit, when the session becomes real.
+   */
+  pendingGroup: string | null;
 
   // ── sessions ──
   sessions: SessionSummary[];
@@ -123,6 +134,16 @@ interface AppState {
   }) => Promise<void>;
   /** Start a session in a specific folder, whatever is currently selected. */
   newSessionIn: (path: string) => void;
+  refreshGroups: () => Promise<void>;
+  createGroup: (name: string) => Promise<void>;
+  updateGroup: (id: string, patch: {
+    name?: string; color?: string; pinned?: boolean;
+    description?: string; instructions?: string; cwd?: string;
+  }) => Promise<void>;
+  deleteGroup: (id: string) => Promise<void>;
+  moveToGroup: (sessionId: string, group: string | null) => Promise<void>;
+  /** Start a session filed under a group. */
+  newSessionInGroup: (groupId: string) => void;
   refreshProviders: () => Promise<void>;
   refreshSystem: () => Promise<void>;
   refreshSettings: () => Promise<void>;
@@ -146,6 +167,8 @@ export const useStore = create<AppState>((set, get) => ({
   status: 'connecting',
   lastSeq: 0,
   projects: [],
+  groups: [],
+  pendingGroup: null,
   project: null,
   showArchived: false,
   sessions: [],
@@ -262,6 +285,11 @@ export const useStore = create<AppState>((set, get) => ({
         logged: withPending(state.logged, task),
         sessions: promote(state.sessions, sessionId, Date.now(), state.title ? { title: state.title } : {}),
       }));
+      const pending = get().pendingGroup;
+      if (pending) {
+        set({ pendingGroup: null });
+        void get().moveToGroup(sessionId, pending);
+      }
       void get().refreshSessions();
     } catch (err) {
       set({ busy: false, error: (err as Error).message });
@@ -285,7 +313,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   refreshSessions: async () => {
     try {
-      const { sessions, active, projects } = await api.sessions();
+      const { sessions, active, projects, groups } = await api.sessions();
       // Merged rather than assigned. A listing fetched the moment a message is
       // sent has not necessarily seen the write yet, and assigning it wholesale
       // would undo the promotion that just put the row at the top.
@@ -293,6 +321,7 @@ export const useStore = create<AppState>((set, get) => ({
         sessions: mergeSessions(state.sessions, sessions),
         activeSessions: active,
         ...(projects ? { projects } : {}),
+        ...(groups ? { groups } : {}),
         // The launch directory is the answer until someone chooses otherwise.
         ...(state.project ? {} : { project: projects?.find(p => p.isLaunch)?.path ?? null }),
       }));
@@ -335,6 +364,63 @@ export const useStore = create<AppState>((set, get) => ({
     // session belongs to exactly one directory for its whole life, so there is
     // no meaningful "new session here while I am looking at somewhere else".
     set({ project: path });
+    get().newSession();
+  },
+
+  refreshGroups: async () => {
+    try {
+      const { groups } = await api.groups();
+      set({ groups });
+    } catch { /* the sidebar is not worth an error banner */ }
+  },
+
+  createGroup: async (name) => {
+    try {
+      // Seeded with the folder you are looking at, so a group made while
+      // working somewhere starts its sessions in that somewhere.
+      const { group } = await api.createGroup(name, get().project ?? undefined);
+      await get().refreshGroups();
+      get().newSessionInGroup(group.id);
+    } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  updateGroup: async (id, patch) => {
+    try {
+      await api.updateGroup(id, patch);
+      await get().refreshGroups();
+    } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  deleteGroup: async (id) => {
+    try {
+      await api.deleteGroup(id);
+      await get().refreshGroups();
+      // The sessions are untouched; they fall back to their own folders.
+      await get().refreshSessions();
+    } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  moveToGroup: async (sessionId, group) => {
+    // Applied locally first: the row should move on the click, not after a
+    // round trip, and the server call is the durable record of it.
+    set(state => ({
+      sessions: state.sessions.map(s =>
+        (s.id === sessionId ? { ...s, group: group ?? undefined } : s)),
+    }));
+    try {
+      await api.moveToGroup(sessionId, group);
+    } catch (err) {
+      set({ error: (err as Error).message });
+      await get().refreshSessions();
+    }
+  },
+
+  newSessionInGroup: (groupId) => {
+    const group = get().groups.find(g => g.id === groupId);
+    // A group is not a directory, so it borrows one: its own if it has been
+    // given one, otherwise wherever the client currently is.
+    if (group?.cwd) set({ project: group.cwd });
+    set({ pendingGroup: groupId });
     get().newSession();
   },
 

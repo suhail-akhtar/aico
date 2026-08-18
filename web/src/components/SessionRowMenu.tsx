@@ -26,10 +26,14 @@ export interface SessionRowMenuProps {
   onRename: () => void;
   onFork: () => void;
   onArchive: () => void;
+  /** Groups this session can be filed under. */
+  groups: Array<{ id: string; name: string; color?: string }>;
+  currentGroup?: string;
+  onMoveToGroup: (group: string | null) => void;
 }
 
 export function SessionRowMenu(
-  { archived, onRename, onFork, onArchive }: SessionRowMenuProps,
+  { archived, onRename, onFork, onArchive, groups, currentGroup, onMoveToGroup }: SessionRowMenuProps,
 ): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -41,13 +45,13 @@ export function SessionRowMenu(
     const box = buttonRef.current.getBoundingClientRect();
     // Flipped upward when there is no room below, so a session at the bottom of
     // a long list still shows its whole menu.
-    const height = 132;
+    const height = 132 + (groups.length + (currentGroup ? 1 : 0)) * 30;
     const below = window.innerHeight - box.bottom;
     setAt({
       top: below < height ? box.top - height : box.bottom + 4,
       left: Math.min(box.left, window.innerWidth - 190),
     });
-  }, [open]);
+  }, [open, groups.length, currentGroup]);
 
   useEffect(() => {
     if (!open) return;
@@ -85,7 +89,7 @@ export function SessionRowMenu(
         className={`shrink-0 rounded px-1 text-aico-muted transition-opacity hover:text-aico-primary
                     ${open ? 'opacity-100' : 'opacity-0 focus:opacity-100 group-hover/row:opacity-100'}`}
       >
-        <Icon name="ellipsis" size={15} />
+        <Icon name="ellipsis" size={17} />
       </button>
 
       {open && (
@@ -98,6 +102,47 @@ export function SessionRowMenu(
                      bg-aico-bg py-1 shadow-2xl"
         >
           <Item icon="edit" onClick={run(onRename)}>Rename</Item>
+
+          {/* Inline rather than a submenu. Three groups is the common case and
+              a submenu costs a hover, a delay and a second chance to miss. */}
+          {(groups.length > 0 || currentGroup) && (
+            <div className="my-1 border-y border-aico-border-subtle py-1">
+              <div className="px-3 pb-1 pt-0.5 text-[10px] uppercase tracking-wider text-aico-muted">
+                Move to group
+              </div>
+              {groups.map(group => (
+                <button
+                  key={group.id}
+                  role="menuitem"
+                  onClick={run(() => onMoveToGroup(group.id))}
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px]
+                             text-aico-primary transition-colors hover:bg-aico-hover"
+                >
+                  <Icon
+                    name="stack"
+                    size={15}
+                    filled={Boolean(group.color)}
+                    {...(group.color
+                      ? { style: { color: group.color } }
+                      : { className: 'text-aico-muted' })}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                  {currentGroup === group.id && <Icon name="check" size={14} className="text-aico-accent" />}
+                </button>
+              ))}
+              {currentGroup && (
+                <button
+                  role="menuitem"
+                  onClick={run(() => onMoveToGroup(null))}
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px]
+                             text-aico-secondary transition-colors hover:bg-aico-hover"
+                >
+                  <Icon name="undo" size={15} className="text-aico-muted" />
+                  Back to its folder
+                </button>
+              )}
+            </div>
+          )}
           <Item icon="fork" onClick={run(onFork)}>Fork session</Item>
           <Item icon="archive" onClick={run(onArchive)}>
             {archived ? 'Restore session' : 'Archive session'}
@@ -121,7 +166,7 @@ function Item(
       className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-primary
                  transition-colors hover:bg-aico-hover"
     >
-      <Icon name={icon} size={15} className="text-aico-muted" />
+      <Icon name={icon} size={17} className="text-aico-muted" />
       {children}
     </button>
   );

@@ -94,50 +94,86 @@ export function merge(local: SessionSummary[], incoming: SessionSummary[]): Sess
  * by recency, so the same rule holds at both levels: the thing you touched last
  * is at the top.
  */
+export interface Section {
+  label: string;
+  /** Folder path, or group id. Unique across both — a path is never an id. */
+  path: string;
+  kind: 'project' | 'group';
+  pinned?: boolean;
+  items: SessionSummary[];
+}
+
+/**
+ * Sections, which are folders and the groups you made.
+ *
+ * A session in a group appears under the group *instead of* its folder. It is
+ * still running in that folder — a group is a label, not a location — but a
+ * session shown in two places at once is a list nobody can count, and the
+ * group is the more deliberate of the two facts: the folder is where the code
+ * happens to be, the group is a decision someone made.
+ */
 export function groupByProject(
   sessions: SessionSummary[],
   projects: Array<{ path: string; name: string; pinned?: boolean; addedAt?: number }>,
   filter = '',
-): Array<{ label: string; path: string; pinned?: boolean; items: SessionSummary[] }> {
+  groups: Array<{ id: string; name: string; pinned?: boolean }> = [],
+): Section[] {
   const needle = filter.trim().toLowerCase();
   const matching = byRecency(needle
     ? sessions.filter(s =>
       (s.title ?? '').toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle))
     : sessions);
 
-  const groups = new Map<string, {
-    label: string; path: string; pinned?: boolean; items: SessionSummary[];
-  }>();
+  const sections = new Map<string, Section>();
   // Seeded from the project list so a project with no sessions still appears —
   // a folder you just opened and cannot see is indistinguishable from one that
   // failed to open.
+  // Groups first: they are the ones someone made on purpose.
+  for (const group of groups) {
+    sections.set(group.id, {
+      label: group.name,
+      path: group.id,
+      kind: 'group',
+      ...(group.pinned ? { pinned: true } : {}),
+      items: [],
+    });
+  }
   for (const project of projects) {
-    groups.set(project.path, {
+    sections.set(project.path, {
       label: project.name,
       path: project.path,
+      kind: 'project',
       ...(project.pinned ? { pinned: true } : {}),
       items: [],
     });
   }
 
   for (const session of matching) {
-    const key = session.project ?? '';
-    let group = groups.get(key);
-    if (!group) {
+    // The group wins when the session is in one that still exists. A group that
+    // has been deleted leaves the membership event behind in the log, and the
+    // session correctly falls back to the folder it has been running in.
+    const key = (session.group && sections.has(session.group))
+      ? session.group
+      : (session.project ?? '');
+    let section = sections.get(key);
+    if (!section) {
       // A session whose directory is no longer a known project still has to go
       // somewhere; dropping it would hide history rather than tidy it.
-      group = { label: key ? basename(key) : 'Other', path: key, items: [] };
-      groups.set(key, group);
+      section = { label: key ? basename(key) : 'Other', path: key, kind: 'project', items: [] };
+      sections.set(key, section);
     }
-    group.items.push(session);
+    section.items.push(session);
   }
 
   // Pinned first, then by activity. A folder you just added has no activity at
   // all, so plain recency buries it at the bottom — which is the opposite of
   // what adding a folder means. `order` on the project list carries that:
   // projects arrive newest-added first, and ties fall back to it.
-  const addedRank = new Map(projects.map((p, index) => [p.path, index]));
-  return [...groups.values()].sort((a, b) => {
+  const addedRank = new Map([
+    ...groups.map((g, index) => [g.id, index] as const),
+    ...projects.map((p, index) => [p.path, groups.length + index] as const),
+  ]);
+  return [...sections.values()].sort((a, b) => {
     if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
     const activity = (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0);
     if (activity !== 0) return activity;

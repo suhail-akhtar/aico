@@ -58,7 +58,7 @@ export function Field({ spec, value, onChange, changed, breadcrumb }: FieldProps
                              opacity-0 transition-opacity hover:text-aico-primary
                              focus:opacity-100 group-hover/field:opacity-100"
                 >
-                  <Icon name="undo" size={12} /> Reset
+                  <Icon name="undo" size={16} /> Reset
                 </button>
               </>
             )}
@@ -117,7 +117,7 @@ function Segmented(
             <span className={`flex items-center gap-2 text-[13px] font-medium ${
               active ? 'text-aico-accent' : 'text-aico-primary'
             }`}>
-              {option.icon && <Icon name={option.icon} size={15} />}
+              {option.icon && <Icon name={option.icon} size={17} />}
               {option.label}
             </span>
             {option.hint && (
@@ -237,7 +237,7 @@ function Select(
       </select>
       <Icon
         name="chevron-down"
-        size={14}
+        size={16}
         className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-aico-muted"
       />
     </div>

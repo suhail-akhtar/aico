@@ -23,8 +23,6 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import type { Project } from '../api';
-import { useStore } from '../store';
 import { Portal } from './Portal';
 import { Icon } from './Icon';
 
@@ -42,18 +40,34 @@ export const PALETTE = [
   '#0090ff', '#3e63dd', '#8e4ec6', '#d6409f', '#8b8d98',
 ];
 
+export interface SettingsEntry {
+  name: string;
+  color?: string;
+  description?: string;
+  instructions?: string;
+  /** Present on a folder. A group has no path of its own. */
+  path?: string;
+  isLaunch?: boolean;
+}
+
 export interface ProjectSettingsProps {
-  project: Project;
+  entry: SettingsEntry;
+  kind: 'project' | 'group';
+  onSave: (patch: {
+    name?: string; color?: string; description?: string; instructions?: string;
+  }) => void;
   onClose: () => void;
 }
 
-export function ProjectSettings({ project, onClose }: ProjectSettingsProps): React.ReactElement {
-  const updateProject = useStore(s => s.updateProject);
+export function ProjectSettings(
+  { entry, kind, onSave, onClose }: ProjectSettingsProps,
+): React.ReactElement {
+  const isGroup = kind === 'group';
 
-  const [name, setName] = useState(project.name);
-  const [description, setDescription] = useState(project.description ?? '');
-  const [instructions, setInstructions] = useState(project.instructions ?? '');
-  const [color, setColor] = useState(project.color ?? '');
+  const [name, setName] = useState(entry.name);
+  const [description, setDescription] = useState(entry.description ?? '');
+  const [instructions, setInstructions] = useState(entry.instructions ?? '');
+  const [color, setColor] = useState(entry.color ?? '');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -64,14 +78,14 @@ export function ProjectSettings({ project, onClose }: ProjectSettingsProps): Rea
 
   const save = async (): Promise<void> => {
     setSaving(true);
-    await updateProject(project.path, { name, description, instructions, color });
+    onSave({ name, description, instructions, color });
     onClose();
   };
 
-  const dirty = name !== project.name
-    || description !== (project.description ?? '')
-    || instructions !== (project.instructions ?? '')
-    || color !== (project.color ?? '');
+  const dirty = name !== entry.name
+    || description !== (entry.description ?? '')
+    || instructions !== (entry.instructions ?? '')
+    || color !== (entry.color ?? '');
 
   return (
     <Portal>
@@ -80,7 +94,7 @@ export function ProjectSettings({ project, onClose }: ProjectSettingsProps): Rea
       onMouseDown={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label={`Settings for ${project.name}`}
+      aria-label={`Settings for ${entry.name}`}
     >
       <div
         onMouseDown={e => e.stopPropagation()}
@@ -88,10 +102,10 @@ export function ProjectSettings({ project, onClose }: ProjectSettingsProps): Rea
                    sm:h-auto sm:max-h-[88vh] sm:rounded-2xl sm:border sm:border-aico-border"
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-aico-border-subtle px-5 py-3.5">
-          <Icon name="folder" size={18}
+          <Icon name={isGroup ? 'stack' : 'folder'} size={19} filled={Boolean(color)}
             {...(color ? { style: { color } } : { className: 'text-aico-muted' })} />
           <h2 className="min-w-0 flex-1 truncate text-[16px] font-semibold tracking-tight text-aico-primary">
-            {project.name}
+            {entry.name}
           </h2>
           <button
             onClick={onClose}
@@ -103,14 +117,16 @@ export function ProjectSettings({ project, onClose }: ProjectSettingsProps): Rea
         </header>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
-          <p className="break-all font-mono text-[11px] text-aico-muted">{project.path}</p>
+          {entry.path && (
+            <p className="break-all font-mono text-[11px] text-aico-muted">{entry.path}</p>
+          )}
 
           <label className="block">
             <span className="text-[13px] font-medium text-aico-primary">Name</span>
             <input
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder={project.path.split(/[\\/]/).filter(Boolean).pop()}
+              placeholder={entry.path?.split(/[\\/]/).filter(Boolean).pop() ?? entry.name}
               className="mt-1.5 w-full rounded-lg border border-aico-border-subtle bg-aico-surface px-3 py-2
                          text-[13px] text-aico-primary placeholder:text-aico-muted
                          transition-colors focus:border-aico-accent/60 focus:outline-none"
@@ -123,7 +139,7 @@ export function ProjectSettings({ project, onClose }: ProjectSettingsProps): Rea
           <div>
             <span className="text-[13px] font-medium text-aico-primary">Colour</span>
             <p className="mt-0.5 text-[12px] text-aico-muted">
-              Tints this folder&rsquo;s icon so it is findable at a glance rather than by reading.
+              Tints the icon so it is findable at a glance rather than by reading.
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <button
@@ -144,7 +160,7 @@ export function ProjectSettings({ project, onClose }: ProjectSettingsProps): Rea
                   className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors
                               ${color === swatch ? 'border-aico-accent' : 'border-transparent hover:border-aico-border'}`}
                 >
-                  <Icon name="folder" size={17} style={{ color: swatch }} />
+                  <Icon name="folder" size={18} filled style={{ color: swatch }} />
                 </button>
               ))}
             </div>
@@ -187,7 +203,7 @@ export function ProjectSettings({ project, onClose }: ProjectSettingsProps): Rea
                          focus:border-aico-accent/60 focus:outline-none"
             />
             <span className="mt-1 block text-[12px] leading-relaxed text-aico-muted">
-              Every session in this folder follows these, and they are placed after the
+              Every session here follows these, and they are placed after the
               general rules so they win where the two disagree. Re-read each turn, so an
               edit applies to your next message.
             </span>
@@ -196,7 +212,9 @@ export function ProjectSettings({ project, onClose }: ProjectSettingsProps): Rea
 
         <footer className="flex shrink-0 items-center gap-2 border-t border-aico-border-subtle px-5 py-3">
           <span className="flex-1 text-[11px] text-aico-muted">
-            {project.isLaunch ? 'The server is running in this folder.' : ''}
+            {isGroup
+              ? 'A group is a label — its sessions keep running in their own folders.'
+              : (entry.isLaunch ? 'The server is running in this folder.' : '')}
           </span>
           <button
             onClick={onClose}

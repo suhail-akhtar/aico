@@ -253,6 +253,20 @@ export interface SessionEventMap {
   'session/archived': { archived: boolean };
 
   /**
+   * RECORD. Which group this session is filed under, if any.
+   *
+   * In the log for the same reason the title and the archive flag are: it is
+   * durable state about the session, and the log is the only durable state a
+   * session has. A separate index would be a second thing to keep in step and
+   * a migration the first time it changed shape.
+   *
+   * `null` removes the session from whatever group it was in. The current
+   * group is simply the last one logged, so moving between groups is an
+   * append rather than an edit.
+   */
+  'session/group': { group: string | null };
+
+  /**
    * RECORD. A rating on one assistant message.
    *
    * Keyed by the seq of the message it judges rather than carried on that

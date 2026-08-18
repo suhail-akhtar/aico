@@ -262,6 +262,30 @@ function clock(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 }
 
+/**
+ * What each event type means, in a sentence.
+ *
+ * The inspector used to show only `{"turn": 1, "step": 3}` — accurate, and
+ * useless unless you already know the vocabulary. A *turn* is one thing you
+ * asked for; a *step* is one model request plus the tools it called, and a
+ * turn contains as many steps as the model needed. Nothing else in the product
+ * ever says that, so this is where it gets said.
+ */
+const MEANING: Record<string, string> = {
+  'turn/start': 'You sent something and work began. A turn is one request from you, however many model calls it takes to answer.',
+  'turn/end': 'The turn finished, with the reason it stopped — completed, out of tokens, blocked, cancelled or failed.',
+  'step/start': 'One model request began. A step is a single call to the model plus any tools it asked for; step 3 of turn 1 is the third round trip while answering your first message.',
+  'step/end': 'That model request finished. `firstTokenAt` is when the first text arrived, which separates waiting for the model from reading its answer.',
+  'user/message': 'Input that entered the model request — from you, or injected by the harness.',
+  'assistant/message': 'One reply from the model, with any tool calls it requested and what the call cost.',
+  'tool/call': 'The model asked to run a tool, with the arguments it chose.',
+  'tool/result': 'What that tool returned. Paired with the call by id.',
+  'session/title': 'The session was named — by the first prompt, by a model, or by you. The last one logged is the current name.',
+  'session/archived': 'The session was filed away or brought back. It hides a row; nothing is deleted.',
+  'goal/set': 'A standing objective was set, paused or cleared for this session.',
+  'message/feedback': 'A rating on one assistant message, keyed by the seq of the message it judges.',
+};
+
 function Inspector(
   { event, onClose }: { event: LogEvent; onClose: () => void },
 ): React.ReactElement {
@@ -279,6 +303,12 @@ function Inspector(
         <div className="mb-3 text-[11px] text-aico-muted">
           {new Date(event.timestamp).toLocaleString()}
         </div>
+        {MEANING[event.type] && (
+          <p className="mb-3 text-[12px] leading-relaxed text-aico-secondary">
+            {MEANING[event.type]}
+          </p>
+        )}
+        <div className="mb-1 text-[10px] uppercase tracking-wider text-aico-muted">Payload</div>
         <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-aico-secondary">
           {JSON.stringify(event.data, null, 2)}
         </pre>

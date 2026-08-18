@@ -35,6 +35,8 @@ import { ProjectSettings } from './ProjectSettings';
 export interface ProjectGroupHeaderProps {
   label: string;
   path: string;
+  /** A folder, or a container someone made. */
+  kind: 'project' | 'group';
   /** False for the group holding sessions whose folder is no longer listed. */
   known: boolean;
   isLaunch: boolean;
@@ -44,12 +46,27 @@ export interface ProjectGroupHeaderProps {
 }
 
 export function ProjectGroupHeader({
-  label, path, known, isLaunch, collapsed, onToggle, count,
+  label, path, kind, known, isLaunch, collapsed, onToggle, count,
 }: ProjectGroupHeaderProps): React.ReactElement {
   const newSessionIn = useStore(s => s.newSessionIn);
   const updateProject = useStore(s => s.updateProject);
   const removeProject = useStore(s => s.removeProject);
+  const updateGroup = useStore(s => s.updateGroup);
+  const deleteGroup = useStore(s => s.deleteGroup);
+  const newSessionInGroup = useStore(s => s.newSessionInGroup);
   const project = useStore(s => s.projects.find(p => p.path === path));
+  const group = useStore(s => s.groups.find(g => g.id === path));
+
+  // One shape for both, so everything below asks about "the section" rather
+  // than branching on kind at every use.
+  const isGroup = kind === 'group';
+  const entry = isGroup ? group : project;
+  const update = (patch: {
+    name?: string; color?: string; pinned?: boolean; description?: string; instructions?: string;
+  }): void => {
+    if (isGroup) void updateGroup(path, patch);
+    else void updateProject(path, patch);
+  };
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [at, setAt] = useState({ top: 0, left: 0 });
@@ -88,7 +105,7 @@ export function ProjectGroupHeader({
   const commit = (): void => {
     setEditing(false);
     const next = draft.trim();
-    if (next && next !== label) void updateProject(path, { name: next });
+    if (next && next !== label) update({ name: next });
   };
 
   if (editing) {
@@ -120,17 +137,18 @@ export function ProjectGroupHeader({
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
         <Icon
-          name="folder"
-          size={17}
-          strokeWidth={1.8}
-          {...(project?.color
-            ? { style: { color: project.color } }
+          name={isGroup ? 'stack' : 'folder'}
+          size={18}
+          strokeWidth={1.7}
+          filled={Boolean(entry?.color)}
+          {...(entry?.color
+            ? { style: { color: entry.color } }
             : { className: 'text-aico-muted' })}
         />
-        {project?.pinned && (
+        {entry?.pinned && (
           <Icon name="pin" size={11} className="shrink-0 text-aico-accent" />
         )}
-        <span className="min-w-0 truncate" title={project?.description || path}>{label}</span>
+        <span className="min-w-0 truncate" title={entry?.description || path}>{label}</span>
         {collapsed && count > 0 && (
           <span className="shrink-0 tabular-nums opacity-70">{count}</span>
         )}
@@ -149,7 +167,7 @@ export function ProjectGroupHeader({
             <Icon name="ellipsis" size={14} />
           </button>
           <button
-            onClick={() => newSessionIn(path)}
+            onClick={() => (isGroup ? newSessionInGroup(path) : newSessionIn(path))}
             aria-label={`New session in ${label}`}
             title={`New session in ${label}`}
             className="shrink-0 rounded p-0.5 text-aico-muted opacity-0 transition-opacity
@@ -180,12 +198,12 @@ export function ProjectGroupHeader({
 
           <button
             role="menuitem"
-            onClick={() => { setMenuOpen(false); void updateProject(path, { pinned: !project?.pinned }); }}
+            onClick={() => { setMenuOpen(false); update({ pinned: !entry?.pinned }); }}
             className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-primary
                        transition-colors hover:bg-aico-hover"
           >
             <Icon name="pin" size={15} className="text-aico-muted" />
-            {project?.pinned ? 'Unpin' : 'Pin to top'}
+            {entry?.pinned ? 'Unpin' : 'Pin to top'}
           </button>
 
           <button
@@ -196,7 +214,7 @@ export function ProjectGroupHeader({
           >
             <Icon name="sliders" size={15} className="text-aico-muted" />
             Description &amp; instructions
-            {project?.instructions && (
+            {entry?.instructions && (
               <span className="ml-auto h-1.5 w-1.5 rounded-full bg-aico-accent"
                     title="Custom instructions are set" />
             )}
@@ -209,11 +227,16 @@ export function ProjectGroupHeader({
           ) : confirming ? (
             <div className="px-3 py-2">
               <p className="text-[11px] leading-snug text-aico-secondary">
-                Remove from the list? The sessions stay on disk.
+                {isGroup
+                  ? 'Delete this group? Its sessions go back to their own folders.'
+                  : 'Remove from the list? The sessions stay on disk.'}
               </p>
               <div className="mt-1.5 flex gap-1.5">
                 <button
-                  onClick={() => { setMenuOpen(false); void removeProject(path); }}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    if (isGroup) void deleteGroup(path); else void removeProject(path);
+                  }}
                   className="rounded-full bg-aico-danger/15 px-2.5 py-1 text-[12px] text-aico-danger
                              transition-colors hover:bg-aico-danger/25"
                 >
@@ -234,15 +257,20 @@ export function ProjectGroupHeader({
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-danger
                          transition-colors hover:bg-aico-danger/10"
             >
-              <Icon name="trash" size={15} /> Remove workspace
+              <Icon name="trash" size={16} /> {isGroup ? 'Delete group' : 'Remove workspace'}
             </button>
           )}
         </div>
         </Portal>
       )}
 
-      {settingsOpen && project && (
-        <ProjectSettings project={project} onClose={() => setSettingsOpen(false)} />
+      {settingsOpen && entry && (
+        <ProjectSettings
+          entry={entry}
+          kind={kind}
+          onSave={patch => update(patch)}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
     </div>
   );

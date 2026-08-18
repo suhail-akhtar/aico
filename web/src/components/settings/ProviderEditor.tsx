@@ -210,7 +210,7 @@ export function ProviderEditor({
         className="mt-4 flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-aico-secondary
                    transition-colors hover:bg-aico-hover hover:text-aico-primary"
       >
-        <Icon name={advanced || needsEndpoint ? 'chevron-down' : 'chevron-right'} size={13} />
+        <Icon name={advanced || needsEndpoint ? 'chevron-down' : 'chevron-right'} size={15} />
         Endpoint and identity
       </button>
 
@@ -282,7 +282,7 @@ export function ProviderEditor({
                      text-[12px] text-aico-secondary transition-colors hover:bg-aico-hover
                      hover:text-aico-primary disabled:opacity-40"
         >
-          <Icon name="bolt" size={13} />
+          <Icon name="bolt" size={15} />
           {test.running ? 'Testing…' : 'Test connection'}
         </button>
         <div className="flex-1" />
@@ -324,7 +324,7 @@ export function ModelChooser(
   return (
     <div className="rounded-lg border border-aico-border-subtle bg-aico-bg">
       <div className="flex items-center gap-2 border-b border-aico-border-subtle px-3 py-1.5">
-        <Icon name="search" size={13} className="text-aico-muted" />
+        <Icon name="search" size={15} className="text-aico-muted" />
         <input
           value={filter}
           onChange={e => setFilter(e.target.value)}
@@ -347,7 +347,7 @@ export function ModelChooser(
                           : 'text-aico-secondary hover:bg-aico-hover hover:text-aico-primary'}`}
           >
             <span className="w-3.5 shrink-0">
-              {model === value && <Icon name="check" size={13} />}
+              {model === value && <Icon name="check" size={15} />}
             </span>
             <span className="min-w-0 truncate">{model}</span>
           </button>
@@ -366,7 +366,7 @@ export function TestResult(
         ? 'border-aico-success/40 bg-aico-success/10 text-aico-success'
         : 'border-aico-danger/40 bg-aico-danger/10 text-aico-danger'}`}
     >
-      <Icon name={ok ? 'check' : 'close'} size={14} className="mt-0.5" />
+      <Icon name={ok ? 'check' : 'close'} size={16} className="mt-0.5" />
       <span className="flex-1 break-words">{message}</span>
       {latencyMs !== undefined && <span className="shrink-0 tabular-nums opacity-70">{latencyMs}ms</span>}
     </div>

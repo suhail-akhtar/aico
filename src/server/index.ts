@@ -40,6 +40,7 @@ import {
   addProject, browse, findProjectForSession, isKnownProject, listProjects,
   normalizeProjectPath, removeProject, updateProject,
 } from './projects.js';
+import { createGroup, deleteGroup, listGroups, updateGroup } from './groups.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
@@ -113,6 +114,24 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   });
 
   const hub = new EventHub();
+  /**
+   * The model a turn uses when the client names none.
+   *
+   * Re-read rather than captured, for the same reason the run's settings are:
+   * the settings screen writes to disk, and a value frozen at boot makes the
+   * screen a liar until the process is restarted.
+   */
+  async function currentDefaultModel(): Promise<string> {
+    try {
+      const live = await loadSettings();
+      return live.model
+        ?? PROVIDER_DEFAULT_MODELS[live.activeProvider ?? live.provider ?? 'openrouter']
+        ?? defaultModel;
+    } catch {
+      return defaultModel;
+    }
+  }
+
   const runs = new RunManager(hub, settings);
 
   /**
@@ -239,6 +258,11 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
+    if (route === 'groups' && req.method === 'GET') {
+      send(res, 200, { groups: await listGroups() });
+      return;
+    }
+
     if (route === 'fs/browse' && req.method === 'GET') {
       send(res, 200, browse(url.searchParams.get('path') ?? undefined));
       return;
@@ -264,17 +288,23 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           stored.unshift({ id: run.sessionId, updatedAt: Date.now(), turns: 0, project: run.cwd });
         }
       }
+      const groups = await listGroups();
       send(res, 200, {
         projects,
+        groups,
         sessions: stored.map(summary => {
           // The in-process record is fresher than the log scan: a title written
           // moments ago may not have been flushed to disk yet.
           const live = runs.titleOf(summary.id);
           const archived = runs.archivedOf(summary.id);
+          const group = runs.groupOf(summary.id);
           return {
             ...summary,
             ...(live ? { title: live.title, titleSource: live.source } : {}),
             ...(archived === undefined ? {} : { archived }),
+            // `null` is a real answer — taken out of a group — and has to
+            // beat the value the log scan found, hence the explicit check.
+            ...(group === undefined ? {} : { group: group ?? undefined }),
             running: open.get(summary.id)?.busy === true,
             open: open.has(summary.id),
           };
@@ -433,6 +463,38 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         }
         return;
       }
+      case 'groups/create': {
+        const { name, cwd: groupCwd } = body as { name?: string; cwd?: string };
+        if (!name?.trim()) { send(res, 400, { error: 'name required' }); return; }
+        try {
+          send(res, 200, { group: await createGroup(name, groupCwd) });
+        } catch (err) {
+          send(res, 400, { error: (err as Error).message });
+        }
+        return;
+      }
+      case 'groups/update': {
+        const { id, ...patch } = body as {
+          id?: string; name?: string; color?: string; pinned?: boolean;
+          description?: string; instructions?: string; cwd?: string;
+        };
+        if (!id) { send(res, 400, { error: 'id required' }); return; }
+        send(res, 200, { updated: await updateGroup(id, patch) });
+        return;
+      }
+      case 'groups/delete': {
+        const { id } = body as { id?: string };
+        if (!id) { send(res, 400, { error: 'id required' }); return; }
+        send(res, 200, { deleted: await deleteGroup(id) });
+        return;
+      }
+      case 'session/group': {
+        const { sessionId, group } = body as { sessionId?: string; group?: string | null };
+        if (!sessionId) { send(res, 400, { error: 'sessionId required' }); return; }
+        await runs.ensure(sessionId, await resolveCwd(sessionId));
+        send(res, 200, { moved: runs.setGroup(sessionId, group ?? null) });
+        return;
+      }
       case 'projects/rename':
       case 'projects/update': {
         const { path: dir, ...patch } = body as {
@@ -460,7 +522,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // not be held open on a request that any proxy or browser will time out.
         send(res, 202, { accepted: true });
         const runCwd = await resolveCwd(sessionId, (body as { project?: string }).project);
-        void runs.submit(sessionId, runCwd, task, model ?? defaultModel, {
+        // Resolved now, not at boot. Choosing a different model in settings
+        // has to affect the next turn rather than the next restart.
+        const chosen = model ?? await currentDefaultModel();
+        void runs.submit(sessionId, runCwd, task, chosen, {
           planMode: (body as { planMode?: boolean }).planMode ?? false,
           autoApprove: (body as { autoApprove?: boolean }).autoApprove ?? true,
         }).catch(() => { /* already reported on the stream as turn-end */ });

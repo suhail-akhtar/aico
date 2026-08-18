@@ -14,7 +14,9 @@ import { runAgent } from '../agent.js';
 import { setBashProgressSink } from '../tools/bash.js';
 import { createTokenTracker } from '../tokens.js';
 import { openSession } from '../session/open.js';
+import { loadSettings } from '../settings.js';
 import { instructionsFor } from './projects.js';
+import { groupInstructions } from './groups.js';
 import { Inbox } from '../session/inbox.js';
 import type { Session } from '../session/session.js';
 import type { AicoSettings } from '../settings.js';
@@ -25,6 +27,25 @@ import {
 } from '../session/projections.js';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
+
+/**
+ * The project's instructions, then the group's.
+ *
+ * Both, in that order, because a group is the narrower choice: you put *this*
+ * conversation in it deliberately, while the project applies to everything in
+ * the folder. Later wins where they conflict, which is the whole reason the
+ * order is stated rather than left to whichever resolved first.
+ */
+async function combinedInstructions(
+  cwd: string,
+  group: string | undefined,
+): Promise<string | undefined> {
+  const [project, grouped] = await Promise.all([
+    instructionsFor(cwd),
+    groupInstructions(group),
+  ]);
+  return [project, grouped].filter(Boolean).join('\n\n') || undefined;
+}
 
 export interface ActiveRun {
   sessionId: string;
@@ -45,8 +66,34 @@ export class RunManager {
 
   constructor(
     private readonly hub: EventHub,
-    private readonly settings: AicoSettings,
+    /**
+     * Settings as they were when the server started.
+     *
+     * A fallback only. Every turn re-reads them from disk, because the settings
+     * screen writes there and a long-lived server that captured them once would
+     * keep routing to the provider that was active when it booted. That is
+     * exactly what happened: switching the active provider appeared to work,
+     * then failed with the *old* provider complaining about the *new* model,
+     * and "restart the server" was the only fix anyone found.
+     */
+    private readonly bootSettings: AicoSettings,
   ) {}
+
+  /**
+   * The settings this turn should run under.
+   *
+   * Read fresh. `loadSettings` is three small file reads and a merge, which is
+   * nothing beside a model call, and the alternative is a cache with no
+   * invalidation path — the settings screen writes to disk from a different
+   * request, and there is no signal back into this object.
+   */
+  private async currentSettings(): Promise<AicoSettings> {
+    try {
+      return await loadSettings();
+    } catch {
+      return this.bootSettings;
+    }
+  }
 
   /** Open (or rejoin) a session. Idempotent — reconnecting must not reset state. */
   async ensure(sessionId: string, cwd: string): Promise<ActiveRun> {
@@ -95,6 +142,8 @@ export class RunManager {
     const run = await this.ensure(sessionId, cwd);
     if (run.busy) throw new Error('A turn is already running — use steer or followup');
 
+    const settings = await this.currentSettings();
+
     run.busy = true;
     // Fresh per turn: an AbortController is single-use, so reusing one would
     // make every turn after the first cancellation start pre-aborted.
@@ -125,7 +174,8 @@ export class RunManager {
         cwd: run.cwd,
         // Whatever the user attached to this folder, re-read per turn so an
         // edit takes effect on the next message rather than the next restart.
-        ...(await instructionsFor(run.cwd).then(v => (v ? { projectInstructions: v } : {}))),
+        ...(await combinedInstructions(run.cwd, this.groupOf(sessionId) ?? undefined)
+          .then(v => (v ? { projectInstructions: v } : {}))),
         showPlan: false,
         verbose: false,
         silent: true,
@@ -134,7 +184,7 @@ export class RunManager {
         session: run.session,
         inbox: run.inbox,
         tokenTracker: run.tokenTracker,
-        settings: this.settings,
+        settings,
         autoApprove: opts.autoApprove ?? true,
         planMode: opts.planMode ?? false,
         ...(opts.effort ? { effort: opts.effort } : {}),
@@ -179,7 +229,7 @@ export class RunManager {
       // Deliberately not awaited: the turn is finished as far as the user is
       // concerned, and a naming call must never hold it open. Failures are
       // swallowed inside — the fallback name was already good enough.
-      void generateModelTitle(run.session, task, result, { settings: this.settings, workModel: model })
+      void generateModelTitle(run.session, task, result, { settings, workModel: model })
         .then(title => { if (title) emit('title', title); });
 
       return result;
@@ -249,6 +299,28 @@ export class RunManager {
   titleOf(sessionId: string): ReturnType<typeof currentTitle> {
     const run = this.runs.get(sessionId);
     return run ? currentTitle(run.session) : undefined;
+  }
+
+  /** File a session under a group, or take it out of one. */
+  setGroup(sessionId: string, group: string | null): boolean {
+    const run = this.runs.get(sessionId);
+    if (!run) return false;
+    run.session.append('session/group', { group });
+    this.hub.publish({ type: 'group', sessionId, data: { group } });
+    return true;
+  }
+
+  /** The group an open session is in, fresher than the log scan. */
+  groupOf(sessionId: string): string | null | undefined {
+    const run = this.runs.get(sessionId);
+    if (!run) return undefined;
+    let group: string | null | undefined;
+    for (const event of run.session.events) {
+      if (event.type === 'session/group') {
+        group = (event.data as { group?: string | null }).group ?? null;
+      }
+    }
+    return group;
   }
 
   /**

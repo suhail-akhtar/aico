@@ -135,7 +135,7 @@ export interface SubmitOptions {
 
 export const api = {
   sessions: () => request<{
-    sessions: SessionSummary[]; active: string[]; projects: Project[];
+    sessions: SessionSummary[]; active: string[]; projects: Project[]; groups: Group[];
   }>('sessions'),
 
   // ── projects ───────────────────────────────────────────────────────
@@ -154,6 +154,23 @@ export const api = {
     name?: string; pinned?: boolean; color?: string;
     description?: string; instructions?: string;
   }) => post<{ updated: boolean }>('projects/update', { path, ...patch }),
+
+  // ── groups ─────────────────────────────────────────────────────────
+  groups: () => request<{ groups: Group[] }>('groups'),
+
+  createGroup: (name: string, cwd?: string) =>
+    post<{ group: Group }>('groups/create', { name, cwd }),
+
+  updateGroup: (id: string, patch: {
+    name?: string; color?: string; pinned?: boolean;
+    description?: string; instructions?: string; cwd?: string;
+  }) => post<{ updated: boolean }>('groups/update', { id, ...patch }),
+
+  deleteGroup: (id: string) => post<{ deleted: boolean }>('groups/delete', { id }),
+
+  /** File a session under a group, or `null` to take it out of one. */
+  moveToGroup: (sessionId: string, group: string | null) =>
+    post<{ moved: boolean }>('session/group', { sessionId, group }),
 
   /** Subdirectories of one directory, for the picker. */
   browse: (path?: string) =>
@@ -297,6 +314,26 @@ export interface Project {
   updatedAt: number;
 }
 
+/**
+ * A container you made, as opposed to one the filesystem made for you.
+ *
+ * A group never replaces a session's working directory, so one group can hold
+ * sessions from several projects — which is the only version of this worth
+ * having. If a group were just another folder, the folders would already do it.
+ */
+export interface Group {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string;
+  /** Instructions every session in this group follows. */
+  instructions?: string;
+  pinned?: boolean;
+  /** Where sessions started from this group run. Unset means "wherever you are". */
+  cwd?: string;
+  createdAt?: number;
+}
+
 export interface BrowseResult {
   path: string;
   parent: string | null;
@@ -308,6 +345,8 @@ export interface BrowseResult {
 
 export interface SessionSummary {
   id: string;
+  /** Id of the group this session is filed under, when it is in one. */
+  group?: string;
   /** Absolute path of the project this session belongs to. */
   project?: string;
   /** Filed away — still on disk, just not in the list. */

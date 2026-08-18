@@ -56,17 +56,27 @@ const PATHS: Record<Glyph, React.ReactNode> = {
 };
 
 export function Icon(
-  { name, size = 16, className = '', strokeWidth = 1.6, style }:
+  { name, size = 16, className = '', strokeWidth = 1.6, style, filled = false }:
   { name: Glyph; size?: number; className?: string; strokeWidth?: number;
-    style?: React.CSSProperties },
+    style?: React.CSSProperties;
+    /**
+     * Paint the shape as well as its outline.
+     *
+     * A stroked folder tinted red is a red *outline* — at 17 pixels that is
+     * four thin lines and reads as grey from a normal viewing distance. The
+     * point of colouring a folder is to find it without reading, and only a
+     * filled shape carries enough of the colour to do that.
+     */
+    filled?: boolean },
 ): React.ReactElement {
   return (
     <svg
       viewBox="0 0 24 24"
       width={size}
       height={size}
-      fill="none"
+      fill={filled ? 'currentColor' : 'none'}
       stroke="currentColor"
+      {...(filled ? { fillOpacity: 0.22 } : {})}
       strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"

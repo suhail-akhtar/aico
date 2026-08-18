@@ -95,7 +95,7 @@ export function App(): React.ReactElement {
             className="text-aico-secondary hover:text-aico-primary md:hidden"
             aria-label="Open sidebar"
           >
-            <Icon name="sliders" size={17} />
+            <Icon name="sliders" size={19} />
           </button>
 
           <span className="min-w-0 max-w-[40%] truncate text-[14px] font-medium text-aico-primary">

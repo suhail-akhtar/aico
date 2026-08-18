@@ -106,7 +106,7 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
             aria-label="Close"
             className="rounded-full p-1.5 text-aico-muted transition-colors hover:bg-aico-hover hover:text-aico-primary"
           >
-            <Icon name="close" size={16} />
+            <Icon name="close" size={18} />
           </button>
         </header>
 
@@ -119,7 +119,7 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
             className="rounded-lg p-1.5 text-aico-secondary transition-colors hover:bg-aico-hover
                        hover:text-aico-primary disabled:opacity-30"
           >
-            <Icon name="arrow-up" size={15} />
+            <Icon name="arrow-up" size={17} />
           </button>
           <input
             value={typed}
@@ -145,7 +145,7 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
                 className="mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px]
                            text-aico-secondary transition-colors hover:bg-aico-hover hover:text-aico-primary"
               >
-                <Icon name="folder" size={14} className="text-aico-muted" />
+                <Icon name="folder" size={18} className="text-aico-muted" />
                 <span className="min-w-0 truncate">{root.name}</span>
               </button>
             ))}
@@ -175,7 +175,7 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
                   className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-left text-[13px]
                              text-aico-primary"
                 >
-                  <Icon name="folder" size={15} className="text-aico-muted" />
+                  <Icon name="folder" size={17} className="text-aico-muted" />
                   <span className="min-w-0 truncate">{entry.name}</span>
                 </button>
                 {already(entry.path) ? (

@@ -183,6 +183,29 @@ export interface AicoSettings {
      */
     instructions?: string;
   }>;
+  /**
+   * Containers you make, as opposed to the ones the filesystem made for you.
+   *
+   * A group never replaces a session's working directory — an agent has to run
+   * somewhere — so membership only changes where a session appears in the list.
+   * That is what lets one group hold sessions from several projects, which is
+   * the only version of this worth having: if a group were just another folder,
+   * the folders would already do it.
+   *
+   * @see server/groups
+   */
+  groups?: Array<{
+    id: string;
+    name: string;
+    color?: string;
+    description?: string;
+    /** Instructions every session in this group follows. */
+    instructions?: string;
+    pinned?: boolean;
+    /** Working directory for sessions started from this group. */
+    cwd?: string;
+    createdAt?: number;
+  }>;
   /** Automatic context compaction before the conversation gets too large. */
   autoCompact?: {
     enabled?: boolean;

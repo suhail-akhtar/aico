@@ -110,7 +110,7 @@ export function SettingsModal({ onClose }: SettingsModalProps): React.ReactEleme
           <div className="ml-2 flex min-w-0 flex-1 items-center gap-2 rounded-full border
                           border-aico-border-subtle bg-aico-surface px-3 py-1.5
                           transition-colors focus-within:border-aico-accent/60">
-            <Icon name="search" size={14} className="text-aico-muted" />
+            <Icon name="search" size={18} className="text-aico-muted" />
             <input
               ref={searchRef}
               value={query}
@@ -121,7 +121,7 @@ export function SettingsModal({ onClose }: SettingsModalProps): React.ReactEleme
             />
             {query && (
               <button onClick={() => setQuery('')} className="text-aico-muted hover:text-aico-primary" aria-label="Clear search">
-                <Icon name="close" size={13} />
+                <Icon name="close" size={15} />
               </button>
             )}
           </div>
@@ -133,7 +133,7 @@ export function SettingsModal({ onClose }: SettingsModalProps): React.ReactEleme
             aria-label="Close settings"
             className="rounded-full p-1.5 text-aico-muted transition-colors hover:bg-aico-hover hover:text-aico-primary"
           >
-            <Icon name="close" size={16} />
+            <Icon name="close" size={18} />
           </button>
         </header>
 
@@ -292,7 +292,7 @@ function RailButton(
                     ? 'bg-aico-elevated font-medium text-aico-primary'
                     : 'text-aico-secondary hover:bg-aico-hover hover:text-aico-primary'}`}
     >
-      <Icon name={pane.icon} size={16} className={active ? 'text-aico-accent' : 'text-aico-muted'} />
+      <Icon name={pane.icon} size={18} className={active ? 'text-aico-accent' : 'text-aico-muted'} />
       <span className="min-w-0 flex-1 truncate">{pane.label}</span>
       {count > 0 && (
         <span
@@ -323,7 +323,7 @@ function SaveBadge({ state }: { state: SaveState }): React.ReactElement | null {
   if (state === 'failed') return <span className="shrink-0 text-[12px] text-aico-danger">Not saved</span>;
   return (
     <span className="flex shrink-0 items-center gap-1 text-[12px] text-aico-success">
-      <Icon name="check" size={13} /> Saved
+      <Icon name="check" size={15} /> Saved
     </span>
   );
 }

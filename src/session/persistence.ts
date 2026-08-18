@@ -194,6 +194,8 @@ export interface SessionSummary {
   titleSource?: 'fallback' | 'model' | 'user';
   /** Filed away: still on disk and still replayable, just not in the list. */
   archived?: boolean;
+  /** Id of the group this session is filed under, when it is in one. */
+  group?: string;
   /**
    * Timestamp of the session's last *event*, for recency ordering.
    *
@@ -302,6 +304,7 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
 
     let title: string | undefined;
     let archived = false;
+    let group: string | undefined;
     let titleSource: SessionSummary['titleSource'];
     let updatedAt = 0;
     let turns = 0;
@@ -314,13 +317,14 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
         // and none of them need parsing to be skipped.
         const isTitle = line.includes('"session/title"');
         const isArchive = line.includes('"session/archived"');
+        const isGroup = line.includes('"session/group"');
         const isUser = line.includes('"user/message"');
         const hasStamp = line.includes('"timestamp"');
-        if (!isTitle && !isUser && !isArchive && !hasStamp) continue;
+        if (!isTitle && !isUser && !isArchive && !isGroup && !hasStamp) continue;
         try {
           const event = JSON.parse(line) as {
             type?: string; timestamp?: number;
-            data?: { title?: string; source?: string; archived?: boolean };
+            data?: { title?: string; source?: string; archived?: boolean; group?: string | null };
           };
           if (typeof event.timestamp === 'number' && event.timestamp > updatedAt) {
             updatedAt = event.timestamp;
@@ -329,6 +333,7 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
           // Last one wins, exactly like the title: the log records the whole
           // history and the current state is the most recent decision in it.
           if (event.type === 'session/archived') archived = event.data?.archived === true;
+          if (event.type === 'session/group') group = event.data?.group ?? undefined;
           if (event.type === 'session/title' && event.data?.title) {
             // Later lines win: the log records the title's whole history, and
             // the current name is simply the last decision in it.
@@ -352,6 +357,7 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
       ...(title ? { title } : {}),
       ...(titleSource ? { titleSource } : {}),
       ...(archived ? { archived } : {}),
+      ...(group ? { group } : {}),
     };
   }));
 

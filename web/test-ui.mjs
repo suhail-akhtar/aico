@@ -330,6 +330,54 @@ test('a session with no recorded folder is not dropped on the floor', () => {
   assert.ok(other && other.items.length === 1);
 });
 
+// ── groups ───────────────────────────────────────────────────────────
+section('A group is a label, not a location');
+
+const G = [{ id: 'migration', name: 'Payments migration' }];
+
+test('a session in a group appears under it, not its folder', () => {
+  const rows = [{ id: 'a', project: P1, group: 'migration', updatedAt: 3000, turns: 1 }];
+  const secs = groupByProject(rows, proj, '', G);
+  assert.deepEqual(secs.find(s => s.path === 'migration').items.map(s => s.id), ['a']);
+  assert.equal(secs.find(s => s.path === P1).items.length, 0, 'and not in both at once');
+});
+
+test('a group can hold sessions from several folders', () => {
+  // The whole point. If a group could not span projects, the folders would
+  // already be doing this job.
+  const rows = [
+    { id: 'a', project: P1, group: 'migration', updatedAt: 3000, turns: 1 },
+    { id: 'b', project: P2, group: 'migration', updatedAt: 2000, turns: 1 },
+  ];
+  const secs = groupByProject(rows, proj, '', G);
+  assert.deepEqual(secs.find(s => s.path === 'migration').items.map(s => s.id), ['a', 'b']);
+});
+
+test('a deleted group returns its sessions to their folders', () => {
+  // The membership event stays in the log; with no group to match it, the
+  // session falls back to the directory it has been running in all along.
+  const rows = [{ id: 'a', project: P1, group: 'gone', updatedAt: 3000, turns: 1 }];
+  const secs = groupByProject(rows, proj, '', G);
+  assert.deepEqual(secs.find(s => s.path === P1).items.map(s => s.id), ['a']);
+});
+
+test('groups and folders are distinguishable in the result', () => {
+  const secs = groupByProject([], proj, '', G);
+  assert.equal(secs.find(s => s.path === 'migration').kind, 'group');
+  assert.equal(secs.find(s => s.path === P1).kind, 'project');
+});
+
+test('an empty group still appears', () => {
+  const secs = groupByProject([], proj, '', G);
+  assert.ok(secs.some(s => s.path === 'migration'));
+});
+
+test('pinning wins over activity, for groups too', () => {
+  const rows = [{ id: 'busy', project: P1, updatedAt: 9000, turns: 1 }];
+  const secs = groupByProject(rows, proj, '', [{ id: 'q', name: 'Quiet', pinned: true }]);
+  assert.equal(secs[0].path, 'q', 'a pinned empty group outranks a busy folder');
+});
+
 // ── settings schema ──────────────────────────────────────────────────
 section('Settings are described as data');
 

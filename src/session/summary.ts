@@ -116,7 +116,7 @@ export function summarizeLastTurn(session: Session, throughSeq?: Seq): TurnSumma
     }
   }
 
-  const { outcome, headline, detail } = describe(endData.reason, toolFailures);
+  const { outcome, headline, detail } = describe(endData.reason, toolFailures, outputTokens);
 
   return {
     outcome,
@@ -144,6 +144,7 @@ export function summarizeLastTurn(session: Session, throughSeq?: Seq): TurnSumma
 function describe(
   reason: TurnEndReason,
   toolFailures: number,
+  outputTokens = 0,
 ): { outcome: TurnOutcome; headline: string; detail?: string } {
   switch (reason.kind) {
     case 'completed':
@@ -155,12 +156,32 @@ function describe(
         }
         : { outcome: 'completed', headline: 'Done' };
 
-    case 'max-tokens':
+    case 'max-tokens': {
+      // A truncated *answer* and an answer that never started are the same
+      // provider signal — `finish_reason: length` — and completely different
+      // problems. Telling someone to raise a ceiling they never reached sends
+      // them to the wrong setting: a reply that stops after a few dozen tokens
+      // with nothing visible is almost never AICO's limit, which defaults to
+      // 8192. It is the provider's own — Ollama's `num_predict`, a gateway
+      // cap — or a reasoning model that spent the whole budget thinking and
+      // was cut off before it wrote anything down.
+      const producedNothing = outputTokens > 0 && outputTokens < 200;
+      if (producedNothing) {
+        return {
+          outcome: 'incomplete',
+          headline: 'Stopped before it answered',
+          detail: `The model reported hitting an output limit after only ${outputTokens} tokens, `
+            + 'which is well under the ceiling AICO sends. That usually means the limit is the '
+            + "provider's own — Ollama's num_predict, or a gateway cap — or a reasoning model "
+            + 'that used its whole budget thinking and was cut off before writing an answer.',
+        };
+      }
       return {
         outcome: 'incomplete',
         headline: 'Stopped early — output limit reached',
         detail: 'The reply was cut off at the model\'s output ceiling. Ask it to continue, or raise maxTokens for this provider.',
       };
+    }
 
     case 'blocked':
       return {

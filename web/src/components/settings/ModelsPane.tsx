@@ -76,7 +76,7 @@ export function ModelsPane(): React.ReactElement {
           is a way of changing this line. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-aico-border-subtle
                       bg-aico-surface px-4 py-3">
-        <Icon name="bolt" size={15} className="text-aico-accent" />
+        <Icon name="bolt" size={17} className="text-aico-accent" />
         <span className="text-[13px] text-aico-secondary">Turns run on</span>
         <span className="text-[13px] font-medium text-aico-primary">
           {activeInstance?.name ?? (activeProvider ?? 'the first usable provider')}
@@ -238,7 +238,7 @@ export function ModelsPane(): React.ReactElement {
                         className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[12px]
                                    text-aico-muted transition-colors hover:text-aico-danger"
                       >
-                        <Icon name="trash" size={13} /> Remove this provider
+                        <Icon name="trash" size={17} /> Remove this provider
                       </button>
                     )}
                   </div>
@@ -264,7 +264,7 @@ export function ModelsPane(): React.ReactElement {
           className="mt-3 flex items-center gap-1.5 rounded-full border border-aico-border-subtle px-3.5 py-1.5
                      text-[12px] text-aico-secondary transition-colors hover:bg-aico-hover hover:text-aico-primary"
         >
-          <Icon name="plus" size={13} /> Add provider
+          <Icon name="plus" size={17} /> Add provider
         </button>
       )}
     </div>

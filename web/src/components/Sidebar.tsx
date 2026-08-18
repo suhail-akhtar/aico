@@ -17,7 +17,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import type { SessionSummary } from '../api';
-import { groupByAge, groupByProject, relativeAge } from '../grouping';
+import { groupByProject, relativeAge, type Section } from '../grouping';
 import { Icon, type Glyph } from './Icon';
 import { SessionRowMenu } from './SessionRowMenu';
 import { ProjectGroupHeader } from './ProjectGroupHeader';
@@ -51,6 +51,9 @@ export function Sidebar(
   const toggleArchived = useStore(s => s.toggleArchived);
 
   const projects = useStore(s => s.projects);
+  const groups = useStore(s => s.groups);
+  const createGroup = useStore(s => s.createGroup);
+  const [naming, setNaming] = useState(false);
 
   // Always grouped by folder now. The date axis was better when a folder was
   // not a thing you could choose, but a header that says Projects above a list
@@ -62,9 +65,9 @@ export function Sidebar(
   );
   // One shape for both axes, so the renderer below does not have to know which
   // it got. `path` is simply absent on the date buckets.
-  const groups: Array<{ label: string; path?: string; items: SessionSummary[] }> = useMemo(
-    () => (byProject ? groupByProject(visible, projects, filter) : groupByAge(visible, filter)),
-    [byProject, visible, projects, filter],
+  const sections: Section[] = useMemo(
+    () => groupByProject(visible, projects, filter, groups),
+    [visible, projects, filter, groups],
   );
 
   const select = (id: string): void => {
@@ -97,7 +100,7 @@ export function Sidebar(
             className="text-aico-muted hover:text-aico-primary md:hidden"
             aria-label="Close sidebar"
           >
-            <Icon name="close" size={16} />
+            <Icon name="close" size={18} />
           </button>
         </div>
 
@@ -108,7 +111,7 @@ export function Sidebar(
                        bg-aico-bg px-3 py-2 text-[14px] font-medium text-aico-primary
                        transition-colors hover:bg-aico-hover"
           >
-            <Icon name="plus" size={15} className="text-aico-muted" /> New session
+            <Icon name="plus" size={17} className="text-aico-muted" /> New session
           </button>
         </div>
 
@@ -116,7 +119,7 @@ export function Sidebar(
           <div className="px-3 pb-1">
             <div className="flex items-center gap-2 rounded-lg border border-aico-border-subtle bg-aico-bg
                             px-2.5 py-1.5 transition-colors focus-within:border-aico-accent/40">
-              <Icon name="search" size={13} className="text-aico-muted" />
+              <Icon name="search" size={15} className="text-aico-muted" />
               <input
                 value={filter}
                 onChange={e => setFilter(e.target.value)}
@@ -152,40 +155,69 @@ export function Sidebar(
             active={showArchived}
             onClick={toggleArchived}
           />
+          <HeaderButton
+            icon="stack"
+            label="New group"
+            onClick={() => setNaming(true)}
+          />
           <HeaderButton icon="folder-plus" label="Add workspace" onClick={onAddProject} />
         </div>
+
+        {naming && (
+          <div className="px-3 pb-1">
+            <input
+              autoFocus
+              placeholder="Group name, then Enter"
+              aria-label="New group name"
+              onBlur={() => setNaming(false)}
+              onKeyDown={e => {
+                if (e.key === 'Escape') setNaming(false);
+                if (e.key === 'Enter') {
+                  const value = (e.target as HTMLInputElement).value.trim();
+                  setNaming(false);
+                  if (value) void createGroup(value);
+                }
+              }}
+              className="w-full rounded-lg border border-aico-accent/50 bg-aico-bg px-2.5 py-1.5
+                         text-[13px] text-aico-primary placeholder:text-aico-muted focus:outline-none"
+            />
+          </div>
+        )}
 
         <nav className="mt-1 flex-1 overflow-y-auto px-2 pb-2">
           {sessions.length === 0 && (
             <p className="px-3 py-3 text-[13px] text-aico-muted">No sessions yet.</p>
           )}
-          {sessions.length > 0 && groups.every(g => g.items.length === 0) && (
+          {sessions.length > 0 && sections.every(g => g.items.length === 0) && (
             <p className="px-3 py-3 text-[13px] text-aico-muted">Nothing matches that.</p>
           )}
 
-          {groups.map(group => {
-            const path = group.path ?? '';
-            const known = projects.some(p => p.path === path);
+          {sections.map(section => {
+            const path = section.path;
+            const known = section.kind === 'group'
+              ? groups.some(g => g.id === path)
+              : projects.some(p => p.path === path);
             const isFolded = collapsed.has(path);
             return (
-              <section key={group.label + path} className="mb-1">
+              <section key={section.kind + path} className="mb-1">
                 <ProjectGroupHeader
-                  label={group.label}
+                  label={section.label}
                   path={path}
+                  kind={section.kind}
                   known={known}
                   isLaunch={projects.some(p => p.path === path && p.isLaunch)}
                   collapsed={isFolded}
-                  count={group.items.length}
+                  count={section.items.length}
                   onToggle={() => setCollapsed(current => {
                     const next = new Set(current);
                     if (next.has(path)) next.delete(path); else next.add(path);
                     return next;
                   })}
                 />
-                {!isFolded && group.items.length === 0 && (
+                {!isFolded && section.items.length === 0 && (
                   <p className="px-3 pb-1 text-[12px] text-aico-muted">No sessions here yet.</p>
                 )}
-                {!isFolded && group.items.map(session => (
+                {!isFolded && section.items.map(session => (
                   <SessionRow
                     key={session.id}
                     session={session}
@@ -239,6 +271,8 @@ function SessionRow(
   const renameSession = useStore(s => s.renameSession);
   const archiveSession = useStore(s => s.archiveSession);
   const forkSession = useStore(s => s.forkSession);
+  const allGroups = useStore(s => s.groups);
+  const moveToGroup = useStore(s => s.moveToGroup);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title ?? '');
 
@@ -318,6 +352,9 @@ function SessionRow(
 
       <SessionRowMenu
         archived={session.archived === true}
+        groups={allGroups}
+        currentGroup={session.group}
+        onMoveToGroup={g => void moveToGroup(session.id, g)}
         onRename={() => { setDraft(session.title ?? ''); setEditing(true); }}
         onFork={() => void forkSession(session.id)}
         onArchive={() => void archiveSession(session.id, !session.archived)}
@@ -348,7 +385,7 @@ function HeaderButton(
         active ? 'bg-aico-hover text-aico-accent' : 'text-aico-muted hover:text-aico-primary'
       }`}
     >
-      <Icon name={icon} size={15} />
+      <Icon name={icon} size={17} />
     </button>
   );
 }
@@ -366,7 +403,7 @@ function NavButton(
                     active ? 'bg-aico-hover text-aico-primary' : 'text-aico-secondary hover:bg-aico-hover'
                   }`}
     >
-      <Icon name={icon} size={15} className={active ? 'text-aico-accent' : 'text-aico-muted'} />
+      <Icon name={icon} size={17} className={active ? 'text-aico-accent' : 'text-aico-muted'} />
       {children}
     </button>
   );
