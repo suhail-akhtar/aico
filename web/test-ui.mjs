@@ -18,6 +18,7 @@ import {
 } from './dist-test/session-memory.mjs';
 import { formatResult, outcomeOf } from './dist-test/tool-result.mjs';
 import { todosFrom } from './dist-test/todos.mjs';
+import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
 
 let pass = 0, fail = 0;
 const test = (name, fn) => {
@@ -780,6 +781,89 @@ test('non-TodoWrite tool calls are ignored', () => {
       content: '', toolCallId: 'z', toolRunning: false, timestamp: 0 },
   ]);
   assert.equal(summary.total, 0, 'a stray todos argument on another tool is not the task list');
+});
+
+
+// ── A plan you can answer ──────────────────────────────────────────────────
+
+const planCall = (args) => ({
+  id: 'p', type: 'tool', content: '', toolName: 'ProposePlan',
+  toolArgs: args, toolCallId: 'pc', toolRunning: false, timestamp: 0,
+});
+const userSays = (content) => ({ id: 'u', type: 'user', content, timestamp: 0 });
+
+test('a transcript with no plan shows nothing', () => {
+  assert.equal(planFrom([]).plan, undefined);
+  assert.equal(planFrom([userSays('hello')]).plan, undefined);
+});
+
+test('a proposed plan is read whole', () => {
+  const { plan } = planFrom([planCall({
+    title: 'Add rate limiting',
+    steps: [
+      { title: 'Add a token bucket', detail: 'per API key', touches: ['src/limit.ts'] },
+      { title: 'Wire it into the router' },
+    ],
+    risks: ['existing clients may start seeing 429s'],
+    open_questions: ['what limit did you have in mind?'],
+  })]);
+  assert.equal(plan.title, 'Add rate limiting');
+  assert.equal(plan.steps.length, 2);
+  assert.equal(plan.steps[0].touches[0], 'src/limit.ts');
+  assert.equal(plan.risks.length, 1);
+  assert.equal(plan.openQuestions.length, 1, 'the cheapest bug in the plan is kept');
+});
+
+test('an answer after the plan is the decision', () => {
+  const base = planCall({ title: 'x', steps: [{ title: 'do a thing' }] });
+  assert.equal(planFrom([base]).decision, undefined, 'an unanswered plan is undecided');
+  assert.equal(planFrom([base, userSays(PLAN_REPLY.approved)]).decision, 'approved');
+  assert.equal(planFrom([base, userSays(PLAN_REPLY.deferred)]).decision, 'deferred');
+  assert.equal(planFrom([base, userSays(PLAN_REPLY.declined)]).decision, 'declined');
+});
+
+test('a revised plan does not arrive pre-approved', () => {
+  // A decision recorded before the newest proposal belongs to an older plan.
+  // Carrying it forward would show a freshly revised plan as already agreed —
+  // the one mistake here that could actually run unwanted work.
+  const { plan, decision } = planFrom([
+    planCall({ title: 'first attempt', steps: [{ title: 'a' }] }),
+    userSays(PLAN_REPLY.approved),
+    planCall({ title: 'revised after feedback', steps: [{ title: 'b' }] }),
+  ]);
+  assert.equal(plan.title, 'revised after feedback');
+  assert.equal(decision, undefined, 'the new plan is unanswered');
+});
+
+test('the last answer wins', () => {
+  const { decision } = planFrom([
+    planCall({ title: 'x', steps: [{ title: 'a' }] }),
+    userSays(PLAN_REPLY.deferred),
+    userSays(PLAN_REPLY.approved),
+  ]);
+  assert.equal(decision, 'approved', 'changing your mind is allowed');
+});
+
+test('an ordinary message is not mistaken for a decision', () => {
+  const { decision } = planFrom([
+    planCall({ title: 'x', steps: [{ title: 'a' }] }),
+    userSays('what does step one actually touch?'),
+  ]);
+  assert.equal(decision, undefined, 'a question about the plan is not an answer to it');
+});
+
+test('a plan with no usable steps is not a plan', () => {
+  assert.equal(planFrom([planCall({ title: 'empty', steps: [] })]).plan, undefined);
+  assert.equal(planFrom([planCall({ title: 'junk', steps: [null, { detail: 'no title' }] })]).plan,
+    undefined, 'steps without a title carry no information to act on');
+});
+
+test('missing optional fields become empty rather than undefined', () => {
+  // The panel maps over these; undefined would be a crash on the one path that
+  // matters most — a plan with nothing risky about it.
+  const { plan } = planFrom([planCall({ title: 'simple', steps: [{ title: 'just do it' }] })]);
+  assert.deepEqual(plan.risks, []);
+  assert.deepEqual(plan.openQuestions, []);
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

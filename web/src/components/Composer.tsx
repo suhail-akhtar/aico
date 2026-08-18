@@ -20,7 +20,7 @@
  * @module components/Composer
  */
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { ModelPicker } from './ModelPicker';
 import { SetGoalButton } from './GoalBar';
@@ -28,6 +28,7 @@ import { SetGoalButton } from './GoalBar';
 export function Composer(): React.ReactElement {
   const busy = useStore(s => s.busy);
   const submit = useStore(s => s.submit);
+  const prefill = useStore(s => s.composerPrefill);
   const steer = useStore(s => s.steer);
   const followup = useStore(s => s.followup);
   const cancel = useStore(s => s.cancel);
@@ -37,6 +38,24 @@ export function Composer(): React.ReactElement {
   const [text, setText] = useState('');
   const [planMode, setPlanMode] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
+
+  // Filled from elsewhere — the plan panel's Amend, so far. Appended to what is
+  // already typed rather than replacing it: silently discarding a half-written
+  // message to make room is never the right trade.
+  useEffect(() => {
+    if (!prefill) return;
+    setText(current => (current.trim() ? `${current.trimEnd()}
+
+${prefill.text}` : prefill.text));
+    const node = textarea.current;
+    if (node) {
+      node.focus();
+      requestAnimationFrame(() => {
+        resize(node, true);
+        node.setSelectionRange(node.value.length, node.value.length);
+      });
+    }
+  }, [prefill]);
 
   const send = async (mode: 'send' | 'steer' | 'followup'): Promise<void> => {
     const content = text.trim();

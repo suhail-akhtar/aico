@@ -12,6 +12,7 @@ import { recordVerification, noteFileWritten } from '../verification.js';
 import { withTimeout } from './timeout-policy.js';
 import { terminal, terminalDefinition } from './terminal.js';
 import { observe, blockedReason } from './observation.js';
+import { proposePlan, proposePlanDefinition } from './plan.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
@@ -164,6 +165,7 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...todoReadDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
   { ...todoWriteDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...proposePlanDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...askUserDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...pwdDefinition, isConcurrencySafe: true, maxResultSizeChars: 1_000 },
   // ── New feature tools ─────────────────────────────────────────────
@@ -463,6 +465,9 @@ export async function executeTool(
       break;
     case 'NotebookEdit':
       result = await notebookEdit(args as unknown as Parameters<typeof notebookEdit>[0]);
+      break;
+    case 'ProposePlan':
+      result = await proposePlan(args as unknown as Parameters<typeof proposePlan>[0]);
       break;
     case 'TodoRead':
       result = await todoRead();

@@ -130,6 +130,16 @@ interface AppState {
   newSession: () => void;
   openSession: (id: string) => Promise<void>;
   submit: (task: string, opts?: { planMode?: boolean; model?: string }) => Promise<void>;
+  /**
+   * Text to place in the composer without sending it.
+   *
+   * For answers that need the reader's own words — amending a plan is the one
+   * that prompted this. Writing to the textarea's DOM value would be ignored by
+   * a controlled input, and re-briefing from scratch is what people do when
+   * there is no way to edit, which throws away the parts that were right.
+   */
+  composerPrefill: { text: string; at: number } | null;
+  prefillComposer: (text: string) => void;
   cancel: () => Promise<void>;
   steer: (content: string) => Promise<void>;
   followup: (content: string) => Promise<void>;
@@ -188,6 +198,7 @@ export const useStore = create<AppState>((set, get) => ({
   title: '',
   logged: new Map(),
   draft: emptyDraft(),
+  composerPrefill: null,
   busy: false,
   turnStartedAt: null,
   lastActivityAt: 0,
@@ -278,6 +289,10 @@ export const useStore = create<AppState>((set, get) => ({
     get().connect(id);
     await get().refreshSessions();
   },
+
+  // Stamped, so asking for the same text twice still reaches the composer —
+  // an identical value would otherwise look like no change at all.
+  prefillComposer: (text) => set({ composerPrefill: { text, at: Date.now() } }),
 
   submit: async (task, opts = {}) => {
     const { sessionId, model } = get();

@@ -509,6 +509,9 @@ function resolveToolSet(opts: {
 /** Tools a plan-mode run may use. Read-only by construction. */
 const PLAN_MODE_TOOLS = new Set([
   'Read', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead',
+  // How a planning turn ends. Without it the only way to deliver a plan was
+  // prose, which can be read and cannot be answered.
+  'ProposePlan',
 ]);
 
 /**
