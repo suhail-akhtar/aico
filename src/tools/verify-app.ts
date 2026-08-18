@@ -42,6 +42,7 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { currentCwd } from '../run-context.js';
+import { findPlaceholders, describePlaceholders, type Placeholder } from '../substance.js';
 
 /** Per-check click-and-observe result. */
 export interface FlowResult {
@@ -76,6 +77,8 @@ export interface VerifyVerdict {
   };
   flowsChecked: number;
   brokenFlows: FlowResult[];
+  /** Work that is described rather than done. Reported, but not blocking on its own. */
+  placeholders: Placeholder[];
   /** The single question the gate asks. */
   passed: boolean;
   /** Ordered worst-first, for a reader who will only read the first line. */
@@ -221,6 +224,13 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
     url = pathToFileURL(abs).href;
   }
 
+  // Read before running. The two checks catch different things: the browser
+  // finds what breaks, this finds what was never written — a handler whose body
+  // is a comment fires happily and does nothing anyone asked for.
+  const placeholders = isUrl ? [] : findPlaceholders(
+    fs.readFileSync(path.isAbsolute(target) ? target : path.join(currentCwd(), target), 'utf8'),
+  );
+
   const executablePath = findBrowser();
   if (!executablePath) {
     throw new Error(
@@ -365,6 +375,7 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
       rendered: view,
       flowsChecked: flows.length,
       brokenFlows: broken,
+      placeholders,
       passed: problems.length === 0,
       problems,
     };
@@ -399,6 +410,11 @@ export function formatVerdict(v: VerifyVerdict): string {
   if (v.flowsChecked > 0) {
     lines.push('');
     lines.push(`Interaction checks: ${v.flowsChecked - v.brokenFlows.length}/${v.flowsChecked} working`);
+  }
+
+  if (v.placeholders.length) {
+    lines.push('');
+    lines.push(describePlaceholders(v.placeholders) ?? '');
   }
 
   if (v.externalRequests.length) {

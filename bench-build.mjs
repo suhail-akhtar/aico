@@ -29,6 +29,7 @@ import os from 'os';
 import path from 'path';
 import {
   runAgent, Session, createTokenTracker, checkSessionInvariants,
+  verifyApp, verifications,
 } from './dist-test/test-exports.js';
 
 const BRIEF = `Build a single-page app in one self-contained index.html file.
@@ -153,6 +154,25 @@ for (const c of CONTENDERS) {
   const html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const passed = FEATURES.filter(([, test]) => { try { return test(html); } catch { return false; } });
 
+  // The keyword scores above are what made the first run of this benchmark
+  // worthless: they awarded 12/12 to a page that threw on load. They are kept
+  // only so the two numbers can be compared — the verdict below is the answer.
+  let verdict = null;
+  if (html) {
+    try {
+      verdict = await verifyApp({
+        target: file,
+        settleMs: 3000,
+        checks: [
+          { name: 'floor plan / 3D toggle', selector: 'button, [role=button]' },
+          { name: 'brand colour picker', selector: 'input[type=color]' },
+        ],
+      });
+    } catch (err) {
+      verdict = { passed: false, problems: [`could not verify: ${err.message}`], rendered: {} };
+    }
+  }
+
   rows.push({
     label: c.label, model: c.model, wall,
     ttft: firstChunkAt ? firstChunkAt - started : null,
@@ -165,6 +185,10 @@ for (const c of CONTENDERS) {
     features: passed.length,
     missing: FEATURES.filter(f => !passed.includes(f)).map(([n]) => n),
     reason: turnEnd?.data?.reason?.kind ?? (failure ? 'threw' : 'unknown'),
+    works: verdict ? verdict.passed : false,
+    problems: verdict ? verdict.problems : ['no file produced'],
+    verifiedItself: session.events.filter(e =>
+      e.type === 'tool/call' && e.data?.name === 'VerifyApp').length,
     invariants: checkSessionInvariants(session).ok,
     failure,
     dir,
@@ -173,26 +197,28 @@ for (const c of CONTENDERS) {
   const r = rows[rows.length - 1];
   console.log(`\n    ${(r.wall / 1000).toFixed(1)}s · ${r.steps} steps · ${r.tools} tools · ended: ${r.reason}`);
   console.log(`    in ${r.input.toLocaleString()} (cached ${r.cached.toLocaleString()}) · out ${r.output.toLocaleString()} · $${r.cost.toFixed(4)}`);
-  console.log(`    index.html: ${r.bytes.toLocaleString()} bytes · ${r.features}/${FEATURES.length} features`);
-  if (r.missing.length) console.log(`    missing: ${r.missing.join(', ')}`);
+  console.log(`    index.html: ${r.bytes.toLocaleString()} bytes · ${r.features}/${FEATURES.length} keyword features`);
+  console.log(`    IN A BROWSER: ${r.works ? 'WORKS' : 'BROKEN'} · verified itself ${r.verifiedItself}x`);
+  for (const p of r.problems.slice(0, 4)) console.log(`      - ${p}`);
 }
 
 console.log(`\n${'═'.repeat(66)}\n  RESULTS\n${'═'.repeat(66)}\n`);
 const pad = (s, n) => String(s).padEnd(n);
 const num = (s, n) => String(s).padStart(n);
-console.log(`  ${pad('model', 20)} ${num('secs', 6)} ${num('steps', 6)} ${num('in', 9)} ${num('cached', 8)} ${num('out', 7)} ${num('cost', 9)} ${num('bytes', 8)} ${num('feat', 6)}`);
-console.log(`  ${'-'.repeat(20)} ${'-'.repeat(6)} ${'-'.repeat(6)} ${'-'.repeat(9)} ${'-'.repeat(8)} ${'-'.repeat(7)} ${'-'.repeat(9)} ${'-'.repeat(8)} ${'-'.repeat(6)}`);
+console.log(`  ${pad('model', 20)} ${num('secs', 6)} ${num('steps', 6)} ${num('in', 9)} ${num('cached', 8)} ${num('out', 7)} ${num('cost', 9)} ${num('bytes', 8)} ${num('feat', 6)} ${num('works', 7)}`);
+console.log(`  ${'-'.repeat(20)} ${'-'.repeat(6)} ${'-'.repeat(6)} ${'-'.repeat(9)} ${'-'.repeat(8)} ${'-'.repeat(7)} ${'-'.repeat(9)} ${'-'.repeat(8)} ${'-'.repeat(6)} ${'-'.repeat(7)}`);
 for (const r of rows) {
   console.log(
     `  ${pad(r.label, 20)} ${num((r.wall / 1000).toFixed(0), 6)} ${num(r.steps, 6)}`
     + ` ${num(r.input.toLocaleString(), 9)} ${num(r.cached.toLocaleString(), 8)} ${num(r.output.toLocaleString(), 7)}`
-    + ` ${num('$' + r.cost.toFixed(4), 9)} ${num(r.bytes.toLocaleString(), 8)} ${num(`${r.features}/${FEATURES.length}`, 6)}`,
+    + ` ${num('$' + r.cost.toFixed(4), 9)} ${num(r.bytes.toLocaleString(), 8)} ${num(`${r.features}/${FEATURES.length}`, 6)}`
+    + ` ${num(r.works ? 'yes' : 'NO', 7)}`,
   );
 }
 console.log('');
 for (const r of rows) {
   console.log(`  ${r.label}: ended ${r.reason}, invariants ${r.invariants ? 'clean' : 'VIOLATED'}, ${r.dir}`);
-  if (r.missing.length) console.log(`     missing: ${r.missing.join(', ')}`);
+  console.log(`     browser: ${r.works ? 'works' : 'BROKEN'}${r.problems.length ? ` — ${r.problems[0]}` : ''}`);
 }
 fs.writeFileSync(path.join(outRoot, 'results.json'), JSON.stringify(rows, null, 2));
 console.log(`\n  raw: ${path.join(outRoot, 'results.json')}\n`);

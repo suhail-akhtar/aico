@@ -179,4 +179,5 @@ export { forkSession } from './session/persistence.js';
 export { spillResult, saveSpill, excerpt, setSpillDir, spillDir } from './tools/spill.js';
 
 export { verifyApp, formatVerdict, findBrowser, verifyAppDefinition } from './tools/verify-app.js';
-export { checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts } from './verification.js';
+export { checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts, verifications } from './verification.js';
+export { findPlaceholders, describePlaceholders } from './substance.js';

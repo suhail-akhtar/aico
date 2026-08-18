@@ -137,7 +137,7 @@ import {
   bash,
   setBashProgressSink,
   summarizeLastTurn,
-  verifyApp, formatVerdict, findBrowser,
+  verifyApp, formatVerdict, findBrowser, findPlaceholders, describePlaceholders,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -5814,6 +5814,72 @@ if (findBrowser()) {
   assert(checkSessionInvariants(session).ok, 'Gated turn still leaves a balanced log');
 
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+
+console.log('\n══ SUBSTANCE CHECK ══');
+
+{
+  // The kind of theater a browser cannot see: the handler fires, the page
+  // changes, and the feature the user asked for was never written.
+  const stub = `<script>
+    document.getElementById('go').onclick = () => {
+      // TODO: implement the 3D camera swing
+    };
+    function exportPdf() {}
+    function computeCost() { throw new Error('Not implemented'); }
+  </script>`;
+  const found = findPlaceholders(stub);
+  assert(found.some(p => /work still needs doing/.test(p.reason)),
+    'A "TODO: implement" comment is found');
+  assert(found.some(p => /empty body/.test(p.reason)), 'A function with an empty body is found');
+  assert(found.some(p => /throws instead of working/.test(p.reason)),
+    'A function that throws "Not implemented" is found');
+  assert(found.every(p => p.line > 0 && p.text.length > 0),
+    'Every finding carries a line and the text, so it can be located');
+  assert(/described rather than done/.test(describePlaceholders(found)),
+    'The summary says what the problem is');
+}
+
+{
+  // Placeholder copy, which is about the page rather than the code.
+  // On separate lines: one finding per line is deliberate — the first is the
+  // one worth reporting, and listing four rules against one line is noise.
+  const copy = `<body>
+    <p>Lorem ipsum dolor sit amet</p>
+    <div>Coming soon</div>`;
+  const found = findPlaceholders(copy);
+  assert(found.some(p => /placeholder copy/.test(p.reason)), 'Lorem ipsum is found');
+  assert(found.some(p => /shown to the user/.test(p.reason)), '"Coming soon" is found');
+}
+
+{
+  // The false positives that would make this check worth ignoring. A page
+  // *about* to-do lists is not an unfinished page, and a model sent to rewrite
+  // working code twice stops believing the check.
+  const real = `<body>
+    <h1>Todo List Manager</h1>
+    <p>Track what needs doing. Add a task, mark it complete.</p>
+    <script>
+      const label = 'TODO: implement';
+      document.getElementById('add').onclick = () => {
+        const t = document.createElement('li');
+        t.textContent = input.value;
+        list.appendChild(t);
+      };
+      function render() { draw(state); }
+    </script>`;
+  const found = findPlaceholders(real);
+  assert(found.length === 0,
+    `Working code about todos is not flagged (flagged: ${found.map(p => p.reason).join('; ')})`);
+}
+
+{
+  // A minified bundle is one enormous line with no readable structure. Trying
+  // to find placeholders in it produces noise, not findings.
+  const min = 'a'.repeat(5000) + 'function x(){}';
+  assert(findPlaceholders(min).length === 0, 'A minified line is skipped rather than guessed at');
+  assert(describePlaceholders([]) === undefined, 'Substantive work produces no note at all');
 }
 
 
