@@ -65,6 +65,7 @@ import { skillRegistry } from './skills/index.js';
 import { cronScheduler } from './cron/scheduler.js';
 import { getBackgroundAgents } from './background/index.js';
 import { getAgentRegistry } from './tools/task.js';
+import { checkVerificationGate, resetVerification } from './verification.js';
 
 // Increase max listeners to avoid warnings during long tool chains
 process.setMaxListeners(50);
@@ -1147,6 +1148,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   let sawMaxTokens = false;
   let sawRefusal = false;
 
+  // "Verified" is a claim about this piece of work, not something the session
+  // accumulates. Last turn's passing verdict says nothing about this turn's
+  // artifact, so the evidence starts empty every time.
+  resetVerification();
+
   /**
    * Whether cumulative spend has passed a configured ceiling.
    *
@@ -1187,7 +1193,29 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     // Track how many times the completion gate has nudged the model to keep
     // working despite open todos. Capped so a stuck agent isn't trapped forever.
     let completionNudges = 0;
-    const MAX_COMPLETION_NUDGES = 2;
+    /** Recovery attempts after a step was cut off at the output ceiling. */
+    let truncationRetries = 0;
+    /** Times this turn has been sent back for an unverified or failing artifact. */
+    let verificationNudges = 0;
+    /**
+ * How many times a turn may recover from an output-ceiling truncation.
+ *
+ * Two, for the same reason the completion gate stops at its own cap: a model
+ * that cannot get under the ceiling after being told twice will not manage it
+ * on the fifth attempt, and each attempt is a full paid step.
+ */
+const MAX_TRUNCATION_RETRIES = 2;
+
+/**
+ * How many times a turn may be sent back over an unverified artifact.
+ *
+ * Three, one more than the other gates, because these nudges buy the most:
+ * the first typically produces the first browser run of the whole turn, and
+ * the ones after it are real fix-and-recheck cycles rather than reminders.
+ */
+const MAX_VERIFICATION_NUDGES = 3;
+
+const MAX_COMPLETION_NUDGES = 2;
 
     while (true) {
       throwIfLoopAborted();
@@ -1344,6 +1372,25 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
           // Completion gate: if open todos remain and we haven't exhausted nudges,
           // record the assistant turn, then add a synthetic user message telling
           // the model to keep going instead of accepting a premature finish.
+          // The other half of finishing: not "are the todos ticked" but "does
+          // the thing actually work". Checked before the todo gate because a
+          // page that throws on load is a more concrete objection than an open
+          // checklist item, and the model should be told the concrete one first.
+          if (completionGateEnabled && verificationNudges < MAX_VERIFICATION_NUDGES) {
+            const gate = checkVerificationGate();
+            if (!gate.ok && gate.message) {
+              verificationNudges++;
+              transcript.recordAssistant(text, [], stepUsage, stepReasoning);
+              transcript.recordUserMessage(gate.message, { kind: 'plugin', plugin: 'verification-gate' });
+              if (!silent) {
+                showError(`Verification gate: the artifact is not confirmed working `
+                  + `(nudge ${verificationNudges}/${MAX_VERIFICATION_NUDGES}).`);
+                startSpinner('Thinking…');
+              }
+              continue;
+            }
+          }
+
           if (completionGateEnabled && completionNudges < MAX_COMPLETION_NUDGES) {
             let openCount = 0;
             try { openCount = await getOpenTodoCount(); } catch { /* treat as none */ }
@@ -1362,6 +1409,47 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
               if (!silent) startSpinner('Thinking…');
               continue;
             }
+          }
+
+          // A step cut off at the output ceiling is recoverable, and used not to
+          // be. The turn simply ended `max-tokens` — which is fatal when the
+          // thing being truncated was a *tool call*, because its arguments are
+          // output tokens and a half-emitted call performs no action at all.
+          // The model wrote nothing, was told nothing useful, and the user paid
+          // for the whole attempt.
+          //
+          // Telling it what happened costs one step and usually fixes it: the
+          // model splits the write. Bounded, because a model that cannot get
+          // under the ceiling will not manage it on the fifth try either.
+          //
+          // On *this* step's finish reason, not the sticky turn-level flag. A
+          // step truncated after emitting a complete tool call is not stuck —
+          // the call ran and the loop carried on — and reading the sticky flag
+          // would nudge a later, perfectly healthy step for a truncation that
+          // had already been absorbed.
+          if (finishReason === 'length' && truncationRetries < MAX_TRUNCATION_RETRIES) {
+            truncationRetries++;
+            transcript.recordAssistant(text, [], stepUsage, stepReasoning);
+            transcript.recordUserMessage(
+              'Your previous step was cut off at the output-token ceiling. '
+              + 'If you were calling a tool, that call never ran — nothing was written. '
+              + 'Do not repeat it as-is. Produce the work in smaller pieces: '
+              + 'write a first chunk with Write, then extend it with further Edit or Write calls, '
+              + 'keeping every single call well under the limit.',
+              { kind: 'plugin', plugin: 'truncation-recovery' },
+            );
+            // Cleared only because we are actively recovering *this* truncation.
+            // If the retry succeeds the turn genuinely completed, and reporting
+            // max-tokens on a turn that delivered the artifact would be the
+            // misleading answer. Stickiness still holds everywhere else: a
+            // truncation nobody recovered from is still reported as one.
+            sawMaxTokens = false;
+            if (!silent) {
+              showError(`Output ceiling hit — asking for smaller pieces `
+                + `(attempt ${truncationRetries}/${MAX_TRUNCATION_RETRIES}).`);
+              startSpinner('Thinking…');
+            }
+            continue;
           }
 
           if (!silent) stopSpinner();

@@ -212,6 +212,7 @@ OS: ${os.version()}`,
 - Use the Todo tools to track multi-step work. Create a todo for each distinct step of a non-trivial task, and mark one complete only AFTER verifying that step's outcome — not when you start it.
 - After editing or writing code, verify it works before declaring the task done. Run the project's typecheck, lint, build, or tests (\`tsc --noEmit\`, \`npm test\`, \`npm run build\`) when they exist, and fix anything they surface before finishing.
 - Verification has to be fresh. A command you did not run is not evidence, and a result from before your last edit is evidence about code that no longer exists.
+- When you build something that runs in a browser, open it with VerifyApp before calling it done, and again after every fix. Reading the source you just wrote proves only that you wrote it — a page can look correct in source and still throw on load, render blank, or have controls that do nothing. Give it checks that click the controls the user actually asked for.
 - After a non-trivial edit, re-read the changed file to confirm the change landed as intended.
 - Do not stop with a summary while open todos remain or verification is failing. If you believe the task is done, your final message should state what you verified, not just what you changed.
 - If you find yourself writing that something *should* work, or *probably* passes, that is the tell: you are reporting an expectation. Go and get the actual result, or say plainly that you have not checked.

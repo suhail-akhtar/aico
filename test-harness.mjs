@@ -3,6 +3,7 @@
  * Run: npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node test-harness.mjs
  */
 import fs from 'fs';
+import { pathToFileURL } from 'url';
 import path from 'path';
 import os from 'os';
 
@@ -136,6 +137,8 @@ import {
   bash,
   setBashProgressSink,
   summarizeLastTurn,
+  verifyApp, formatVerdict, findBrowser,
+  checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
 import nodePath from 'path';
@@ -1568,6 +1571,49 @@ const baseRun = (provider, session, extra = {}) => runAgent({
   await baseRun(provider, session);
   assert(session.lastTurnEndReason().kind === 'max-tokens',
     'A later completed step does not downgrade a max-tokens turn');
+}
+
+{
+  // The case the stickiness rule cannot help with: a step truncated with *no*
+  // usable tool call. Nothing ran, nothing was written, and the old loop ended
+  // the turn right there — the user paid for a step that produced nothing and
+  // was told only "output limit reached". The model is now told what happened
+  // and gets a bounded chance to redo the work in smaller pieces.
+  const session = mkSession('e2e-4b');
+  const provider = mockProvider([
+    [{ type: 'text', content: 'about to write a hu' }, { type: 'finish', reason: 'length' }],
+    [
+      { type: 'tool_call', id: 'w1', name: 'Pwd', input: {} },
+      { type: 'finish', reason: 'stop' },
+    ],
+    [{ type: 'text', content: 'wrote it in pieces' }, { type: 'finish', reason: 'stop' }],
+  ]);
+  const reply = await baseRun(provider, session);
+
+  const nudges = session.events.filter(e => e.type === 'user/message'
+    && e.data?.source?.plugin === 'truncation-recovery');
+  assert(nudges.length === 1, `Truncation with no tool call is nudged once (got ${nudges.length})`);
+  assert(/never ran/.test(nudges[0].data.content),
+    'The nudge says the tool call did not run, which is the part that is not obvious');
+  assert(session.lastTurnEndReason().kind === 'completed',
+    'A recovered truncation ends as completed, not as max-tokens');
+  assert(reply.includes('wrote it in pieces'), 'The recovered reply is what the caller gets');
+  assert(checkSessionInvariants(session).ok, 'Recovery leaves a balanced log');
+}
+
+{
+  // Bounded. A model that cannot get under the ceiling must not loop forever
+  // being told the same thing — the turn has to end, and end honestly.
+  const session = mkSession('e2e-4c');
+  const truncated = [{ type: 'text', content: 'still too big' }, { type: 'finish', reason: 'length' }];
+  const provider = mockProvider([truncated, truncated, truncated, truncated]);
+  await baseRun(provider, session);
+
+  const nudges = session.events.filter(e => e.type === 'user/message'
+    && e.data?.source?.plugin === 'truncation-recovery');
+  assert(nudges.length === 2, `Recovery stops at the cap (got ${nudges.length} nudges)`);
+  assert(session.lastTurnEndReason().kind === 'max-tokens',
+    'An unrecovered truncation is still reported as max-tokens');
 }
 
 {
@@ -5550,6 +5596,227 @@ for (const [name, value] of Object.entries(savedProviderEnv)) {
   else process.env[name] = value;
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+//  Verification: does the thing that was built actually work
+// ───────────────────────────────────────────────────────────────────────────
+console.log('\n══ VERIFICATION GATE ══');
+
+{
+  // The gate has to stay out of the way of every task that is not a web build.
+  // A turn that answered a question or edited a config has nothing to open, and
+  // charging it for a browser run would be a tax on unrelated work.
+  resetVerification();
+  noteFileWritten('notes.md');
+  noteFileWritten('src/index.ts');
+  assert(webArtifacts().length === 0, 'Non-web files are not artifacts to verify');
+  assert(checkVerificationGate().ok, 'A turn with no web artifact passes the gate untouched');
+}
+
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-verify-'));
+  const page = path.join(dir, 'index.html');
+  fs.writeFileSync(page, '<!doctype html><h1>hi</h1>');
+  const href = pathToFileURL(page).href;
+
+  // Built and never opened. This is the benchmark's exact failure: the model
+  // reads back its own source, sees what it meant to write, and stops.
+  resetVerification();
+  noteFileWritten(page);
+  const unopened = checkVerificationGate();
+  assert(!unopened.ok, 'An artifact that was never opened does not pass the gate');
+  assert(/never opened it/.test(unopened.message), 'The gate says what was not done');
+  assert(/VerifyApp/.test(unopened.message), 'The gate names the tool that would fix it');
+
+  // Opened and broken.
+  recordVerification({
+    url: href, passed: false,
+    problems: ['uncaught: THREE is not defined', 'canvas never drawn to'],
+  });
+  const failing = checkVerificationGate();
+  assert(!failing.ok, 'A failing verdict does not pass the gate');
+  assert(/THREE is not defined/.test(failing.message),
+    'The gate quotes the actual browser error rather than saying "verification failed"');
+
+  // Opened and working.
+  recordVerification({ url: href, passed: true, problems: [] });
+  assert(checkVerificationGate().ok, 'A passing verdict on the current file passes the gate');
+
+  // Verified, then edited. The verdict now describes a file that no longer
+  // exists in that form — the case a naive "was it verified?" flag gets wrong,
+  // and the one that lets a fix ship unchecked.
+  const later = (Date.now() + 5000) / 1000;
+  fs.writeFileSync(page, '<!doctype html><h1>hi</h1><script>boom()</script>');
+  fs.utimesSync(page, later, later);
+  const stale = checkVerificationGate();
+  assert(!stale.ok, 'A verdict taken before the last edit is stale, not evidence');
+  assert(/changed after it was last verified/.test(stale.message),
+    'The gate explains why the earlier pass no longer counts');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  resetVerification();
+}
+
+if (!findBrowser()) {
+  console.log('  ~ browser checks skipped: no Chrome or Edge on this machine');
+} else {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-browser-'));
+  const write = (name, html) => {
+    const p = path.join(dir, name);
+    fs.writeFileSync(p, html);
+    return p;
+  };
+
+  {
+    // A page that throws on load. Every keyword check passes on this file — it
+    // mentions 3D, canvas, templates — and it renders nothing.
+    const p = write('dead.html', `<!doctype html><title>t</title><body>
+      <canvas id=v width=400 height=300></canvas>
+      <script>const s = new THREE.Scene();</script>`);
+    const v = await verifyApp({ target: p, settleMs: 400 });
+    assert(!v.passed, 'A page that throws on load does not pass');
+    assert(v.uncaughtExceptions.some(e => /THREE is not defined/.test(e)),
+      'The uncaught exception is captured with its message');
+    assert(v.problems[0].startsWith('uncaught:'),
+      'The exception is reported first — nothing else matters when a page is dead');
+    assert(!v.consoleErrors.some(e => /THREE is not defined/.test(e)),
+      'One error is reported once, not as both an exception and a console error');
+  }
+
+  {
+    // The shell: chrome present, app absent. Source inspection cannot tell this
+    // apart from a finished app, which is precisely why it needs a browser.
+    const p = write('shell.html', `<!doctype html><title>t</title><body style="margin:0">
+      <header style="height:60px;background:#222">Planner</header>
+      <canvas id=v width=600 height=400></canvas>
+      <button id=go>Apply template</button>
+      <script>console.log('ready');</script>`);
+    const v = await verifyApp({
+      target: p, settleMs: 400,
+      checks: [{ name: 'Apply template', selector: '#go' }],
+    });
+    assert(!v.passed, 'A shell with no working app does not pass');
+    assert(v.rendered.canvases.length === 1 && !v.rendered.canvases[0].painted,
+      'A canvas nobody drew to is detected as never painted');
+    assert(v.brokenFlows.some(f => /nothing on the page changed/.test(f.detail)),
+      'A button wired to nothing is reported as doing nothing');
+    assert(v.uncaughtExceptions.length === 0,
+      'A shell has no errors to find — which is why only running it catches this');
+  }
+
+  {
+    // The working case. It has to pass, or the gate is a wall rather than a check.
+    const p = write('good.html', `<!doctype html><title>t</title><body style="margin:0">
+      <div id=count>Seats: 0</div>
+      <canvas id=v width=600 height=400></canvas>
+      <button id=go>Apply</button>
+      <script>
+        const c = document.getElementById('v'), x = c.getContext('2d');
+        x.fillStyle = '#c9762f'; x.fillRect(0, 0, 600, 400);
+        let n = 0;
+        document.getElementById('go').onclick = () => {
+          n += 4; document.getElementById('count').textContent = 'Seats: ' + n;
+        };
+      </script>`);
+    const v = await verifyApp({
+      target: p, settleMs: 400,
+      checks: [{ name: 'Apply', selector: '#go' }],
+    });
+    assert(v.passed, `A working page passes (problems: ${v.problems.join('; ')})`);
+    assert(v.rendered.canvases[0].painted, 'A canvas that was drawn to is seen as painted');
+    assert(v.brokenFlows.length === 0, 'A control that changes the page is reported working');
+    assert(/^PASSED/.test(formatVerdict(v)), 'The verdict leads with the answer');
+  }
+
+  {
+    // "No external requests" is checkable, and only from inside a browser: the
+    // source says `<script src>`, the network says whether it went out.
+    const p = write('external.html',
+      `<!doctype html><title>t</title><body><h1 style="font-size:40px">Hi</h1>
+       <script src="https://cdn.example.invalid/three.min.js"></script>`);
+    const v = await verifyApp({ target: p, settleMs: 600 });
+    assert(v.externalRequests.some(u => /cdn\.example\.invalid/.test(u)),
+      'An off-origin request is caught even though the page still renders');
+    assert(!v.passed, 'A page whose script failed to load does not pass');
+  }
+
+  {
+    // Verifying something that was never built must be an error, not a pass.
+    let threw = '';
+    try { await verifyApp({ target: path.join(dir, 'missing.html') }); }
+    catch (err) { threw = err.message; }
+    assert(/does not exist/.test(threw), 'Verifying a missing file fails loudly');
+  }
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+
+if (findBrowser()) {
+  // The whole thing, end to end: an agent that builds a broken page must not be
+  // able to call the turn finished. Mock provider, so this measures the loop and
+  // not the model — step two is the benchmark's exact failure, a confident
+  // "done!" over a page that throws on load.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-gate-e2e-'));
+  const page = path.join(dir, 'index.html');
+
+  const BROKEN = `<!doctype html><title>Planner</title><body>
+    <canvas id=view width=800 height=600></canvas>
+    <script>const s = new THREE.Scene();</script>`;
+  const FIXED = `<!doctype html><title>Planner</title><body style="margin:0">
+    <div id=seats>Seats: 0</div>
+    <canvas id=view width=800 height=600></canvas>
+    <button id=go>Apply</button>
+    <script>
+      const c = document.getElementById('view'), x = c.getContext('2d');
+      x.fillStyle = '#c9762f'; x.fillRect(0, 0, 800, 600);
+      let n = 0;
+      document.getElementById('go').onclick = () => {
+        n += 4; document.getElementById('seats').textContent = 'Seats: ' + n;
+      };
+    </script>`;
+
+  const provider = mockProvider([
+    [{ type: 'tool_call', id: 'c1', name: 'Write', input: { file_path: page, content: BROKEN } },
+     { type: 'finish', reason: 'tool_calls' }],
+    [{ type: 'text', content: 'Done! The space planner is complete and works beautifully.' },
+     { type: 'finish', reason: 'stop' }],
+    [{ type: 'tool_call', id: 'c2', name: 'VerifyApp', input: { target: page, settleMs: 400 } },
+     { type: 'finish', reason: 'tool_calls' }],
+    [{ type: 'tool_call', id: 'c3', name: 'Write', input: { file_path: page, content: FIXED } },
+     { type: 'finish', reason: 'tool_calls' }],
+    // Tries to finish again without re-checking — the staleness case.
+    [{ type: 'text', content: 'Fixed it. All done.' }, { type: 'finish', reason: 'stop' }],
+    [{ type: 'tool_call', id: 'c4', name: 'VerifyApp',
+       input: { target: page, settleMs: 400, checks: [{ name: 'Apply', selector: '#go' }] } },
+     { type: 'finish', reason: 'tool_calls' }],
+    [{ type: 'text', content: 'Verified in the browser: it loads clean and the control works.' },
+     { type: 'finish', reason: 'stop' }],
+  ]);
+
+  const session = mkSession('e2e-gate');
+  const reply = await baseRun(provider, session, {
+    cwd: dir,
+    settings: { completionGate: { enabled: true }, cron: { enabled: false }, maxIterations: 12 },
+  });
+
+  const nudges = session.events.filter(e => e.type === 'user/message'
+    && e.data?.source?.plugin === 'verification-gate');
+
+  assert(nudges.length === 2, `The gate intervened twice (got ${nudges.length})`);
+  assert(/never opened it/.test(nudges[0].data.content),
+    'First: built it and declared it done without ever running it');
+  assert(/changed after it was last verified/.test(nudges[1].data.content),
+    'Second: fixed it and tried to finish on the pre-fix verdict');
+  assert(session.lastTurnEndReason().kind === 'completed',
+    'The turn completes once the artifact actually passes');
+  assert(/Verified in the browser/.test(reply),
+    'And the reply the user gets is the one backed by a real check');
+  assert(checkSessionInvariants(session).ok, 'Gated turn still leaves a balanced log');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+
 // ═══════════════════════════════════════════════════════════
 // SUMMARY
 // ═══════════════════════════════════════════════════════════
@@ -5561,3 +5828,4 @@ if (failures.length > 0) {
 }
 console.log('═'.repeat(50) + '\n');
 process.exit(failed > 0 ? 1 : 0);
+

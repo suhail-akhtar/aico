@@ -47,12 +47,18 @@ export function supportsAdaptiveThinking(model: string): boolean {
 /**
  * Default output ceiling.
  *
+ * Raised again, from 32k, because a *tool call's arguments are output tokens*.
+ * Asked to write an 85 KB file in one Write, Sonnet spent the whole 32,000 on
+ * the argument and was cut off mid-JSON — and a truncated tool call is not a
+ * partial file, it is no file. Ten minutes and a dollar for zero bytes,
+ * reported only as "output limit reached".
+ *
  * Raised from the original 8192 because `max_tokens` caps thinking *and*
  * response text together, and thinking is on by default server-side on the
  * newest models — so a budget sized for a non-thinking model can be consumed
  * before the answer starts. Current models accept up to 128K.
  */
-export const ANTHROPIC_DEFAULT_MAX_TOKENS = 32_000;
+export const ANTHROPIC_DEFAULT_MAX_TOKENS = 64_000;
 
 export interface AnthropicConfig {
   apiKey: string;

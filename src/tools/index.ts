@@ -7,6 +7,8 @@ import { globFiles, globDefinition } from './glob.js';
 import { grepFiles, grepDefinition } from './grep.js';
 import { listDirectory, lsDefinition } from './ls.js';
 import { webFetch, webFetchDefinition } from './webfetch.js';
+import { verifyApp, verifyAppDefinition, formatVerdict } from './verify-app.js';
+import { recordVerification, noteFileWritten } from '../verification.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
@@ -146,6 +148,10 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...grepDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
   { ...lsDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
   { ...webFetchDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
+  // Not concurrency-safe: it launches a browser and the verdict it records is
+  // read by the completion gate, so two overlapping runs would race over which
+  // artifact the turn is judged on.
+  { ...verifyAppDefinition, isConcurrencySafe: false, maxResultSizeChars: 40_000 },
   { ...webSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
   { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...todoReadDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
@@ -391,9 +397,14 @@ export async function executeTool(
       break;
     case 'Write':
       result = await writeFile(args as unknown as Parameters<typeof writeFile>[0]);
+      // Noted here rather than reconstructed at the end of the turn: by then a
+      // directory listing cannot distinguish what this turn built from what was
+      // already sitting there.
+      noteFileWritten(String((args as Record<string, unknown>).file_path ?? ''));
       break;
     case 'Edit':
       result = await editFile(args as unknown as Parameters<typeof editFile>[0]);
+      noteFileWritten(String((args as Record<string, unknown>).file_path ?? ''));
       break;
     case 'Glob':
       result = await globFiles(args as unknown as Parameters<typeof globFiles>[0]);
@@ -404,6 +415,15 @@ export async function executeTool(
     case 'LS':
       result = await listDirectory(args as unknown as Parameters<typeof listDirectory>[0]);
       break;
+    case 'VerifyApp': {
+      const verdict = await verifyApp(args as unknown as Parameters<typeof verifyApp>[0]);
+      // Recorded as well as returned. The model reads the text; the completion
+      // gate reads the verdict, and a turn cannot end `completed` on a failing
+      // one — which is the whole reason this tool is not merely advisory.
+      recordVerification(verdict);
+      result = formatVerdict(verdict);
+      break;
+    }
     case 'WebFetch':
       result = await webFetch(args as unknown as Parameters<typeof webFetch>[0]);
       break;
