@@ -5740,6 +5740,60 @@ if (!findBrowser()) {
     assert(!v.passed, 'A page whose script failed to load does not pass');
   }
 
+
+  {
+    // A colour picker wired the way real ones are: to the `input` event. Clicking
+    // it opens a native OS dialog that headless Chrome does not have, so a click
+    // changes nothing and the control looks dead. This reported a correctly wired
+    // brand-colour picker as broken — the worst failure a gate can have, because
+    // working code that gets flagged sends a model off to "fix" what was already
+    // right.
+    const p = write('picker.html', `<!doctype html><title>t</title><body style="margin:0">
+      <div id=swatch style="width:400px;height:300px;background:#c1553d">brand</div>
+      <input type=color id=brand value="#c1553d">
+      <input type=range id=seats min=0 max=40 value=10>
+      <div id=count>Seats: 10</div>
+      <select id=template><option>Cafe</option><option>Boutique</option></select>
+      <div id=chosen>Cafe</div>
+      <script>
+        document.getElementById('brand').addEventListener('input', e => {
+          document.getElementById('swatch').style.background = e.target.value;
+        });
+        document.getElementById('seats').addEventListener('input', e => {
+          document.getElementById('count').textContent = 'Seats: ' + e.target.value;
+        });
+        document.getElementById('template').addEventListener('change', e => {
+          document.getElementById('chosen').textContent = e.target.value;
+        });
+      </script>`);
+    const v = await verifyApp({
+      target: p, settleMs: 400,
+      checks: [
+        { name: 'brand colour', selector: '#brand' },
+        { name: 'seat count', selector: '#seats' },
+        { name: 'template', selector: '#template' },
+      ],
+    });
+    assert(v.passed, `Value controls are driven, not clicked (${v.problems.join('; ')})`);
+    assert(v.brokenFlows.length === 0, 'A wired colour picker is not reported as broken');
+  }
+
+  {
+    // And the check still has to catch a control that really is dead, or driving
+    // them properly would just be a way of passing everything.
+    const p = write('deadpicker.html', `<!doctype html><title>t</title><body style="margin:0">
+      <div id=swatch style="width:400px;height:300px;background:#c1553d">brand</div>
+      <input type=color id=brand value="#c1553d">
+      <script>console.log('the picker is not wired to anything');</script>`);
+    const v = await verifyApp({
+      target: p, settleMs: 400,
+      checks: [{ name: 'brand colour', selector: '#brand' }],
+    });
+    assert(!v.passed, 'An unwired colour picker is still caught');
+    assert(/set a new colour/.test(v.brokenFlows[0].detail),
+      'And the report says what was actually done to it, not "clicked"');
+  }
+
   {
     // Verifying something that was never built must be an error, not a pass.
     let threw = '';

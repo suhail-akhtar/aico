@@ -194,6 +194,74 @@ const SNAPSHOT = `(() => {
   ].join('|');
 })()`;
 
+/**
+ * Operate a control the way its type demands, and say what was done.
+ *
+ * Clicking is right for a button and wrong for everything that carries a value.
+ * A colour input opens a native OS dialog that headless Chrome does not have,
+ * so a click changes nothing and the control looks dead — this reported a
+ * correctly wired brand-colour picker as broken, which is the worst failure a
+ * gate can have. Working code that gets flagged sends a model off to "fix" what
+ * was already right, and after one of those the check is worth less than
+ * nothing.
+ *
+ * So a value control gets a new value and the `input` and `change` events a
+ * real interaction would raise, and a button gets a click.
+ */
+async function drive(el: import('playwright-core').Locator): Promise<string> {
+  const kind = await el.evaluate((node: Element) => {
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'select') return 'select';
+    if (tag !== 'input') return 'click';
+    const type = (node as HTMLInputElement).type;
+    if (type === 'color' || type === 'range' || type === 'number' || type === 'date') return type;
+    if (type === 'text' || type === 'search') return 'text';
+    return 'click';
+  }).catch(() => 'click');
+
+  if (kind === 'click') {
+    await el.click({ timeout: 5000, force: true });
+    return 'clicked';
+  }
+
+  if (kind === 'select') {
+    // The second option, since the first is usually the one already chosen and
+    // re-selecting it changes nothing by definition.
+    const changed = await el.evaluate((node: Element) => {
+      const sel = node as HTMLSelectElement;
+      if (sel.options.length < 2) return false;
+      sel.selectedIndex = sel.selectedIndex === 0 ? 1 : 0;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    });
+    return changed ? 'changed the selection' : 'clicked';
+  }
+
+  await el.evaluate((node: Element, type: string) => {
+    const field = node as HTMLInputElement;
+    if (type === 'color') {
+      field.value = field.value === '#00ff88' ? '#ff0055' : '#00ff88';
+    } else if (type === 'range' || type === 'number') {
+      const min = Number(field.min || 0);
+      const max = Number(field.max || 100);
+      const now = Number(field.value || min);
+      field.value = String(now >= max ? min : Math.min(max, now + (Number(field.step) || 1)));
+    } else if (type === 'date') {
+      field.value = '2026-01-15';
+    } else {
+      field.value = 'aico verification';
+    }
+    // Both, because handlers are wired to one or the other and there is no way
+    // to tell which from outside. A real interaction raises both anyway.
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  }, kind);
+
+  return kind === 'color' ? 'set a new colour'
+    : kind === 'range' || kind === 'number' ? 'moved the value'
+    : 'typed into it';
+}
+
 /** Trim a message to something a log can hold without losing the identifying part. */
 function brief(text: string, max = 300): string {
   const clean = String(text).replace(/\s+/g, ' ').trim();
@@ -308,18 +376,18 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
           }
           const before = String(await page.evaluate(SNAPSHOT));
           const errorsBefore = consoleErrors.length;
-          await el.click({ timeout: 5000, force: true });
+          const how = await drive(el);
           await page.waitForTimeout(600);
           const after = String(await page.evaluate(SNAPSHOT));
 
           if (consoleErrors.length > errorsBefore) {
-            result.detail = `clicking it raised: ${consoleErrors[errorsBefore]}`;
+            result.detail = `${how} it raised: ${consoleErrors[errorsBefore]}`;
           } else if (check.expect) {
             const hit = await page.locator(check.expect).count();
             result.ok = hit > 0;
-            if (!hit) result.detail = `clicked, but nothing matched ${check.expect}`;
+            if (!hit) result.detail = `${how}, but nothing matched ${check.expect}`;
           } else if (before === after) {
-            result.detail = 'clicked, and nothing on the page changed';
+            result.detail = `${how}, and nothing on the page changed`;
           } else {
             result.ok = true;
           }
