@@ -34,6 +34,9 @@ export interface VerificationRecord {
   url: string;
   passed: boolean;
   problems: string[];
+  /** Interactive controls the page had, and how many were actually exercised. */
+  controls: number;
+  flowsChecked: number;
   /** Absolute path of the file that was checked, when it was a file. */
   file?: string;
   /** Modification time of that file at check time — how staleness is detected. */
@@ -55,6 +58,12 @@ export function resetVerification(): void {
   records = [];
   artifacts = new Map();
 }
+
+/**
+ * How many controls a page needs before "you checked none of them" is a fair
+ * objection. A page with one stray link is not an app.
+ */
+const MIN_CONTROLS_TO_CHECK = 3;
 
 /** Extensions a browser can open and this loop can therefore be held to. */
 const WEB_EXTENSIONS = new Set(['.html', '.htm']);
@@ -79,11 +88,14 @@ export function noteFileWritten(file: string): void {
 /** Record a browser verdict, with the artifact's mtime so staleness is detectable. */
 export function recordVerification(verdict: {
   url: string; passed: boolean; problems: string[];
+  rendered?: { controls?: number }; flowsChecked?: number;
 }): void {
   const record: VerificationRecord = {
     url: verdict.url,
     passed: verdict.passed,
     problems: verdict.problems,
+    controls: verdict.rendered?.controls ?? 0,
+    flowsChecked: verdict.flowsChecked ?? 0,
     at: Date.now(),
   };
 
@@ -160,6 +172,25 @@ export function checkVerificationGate(): GateResult {
           `${path.basename(artifact.file)} changed after it was last verified, so the last `
           + `result no longer describes what is on disk. Run VerifyApp again — a fix is not `
           + `finished until the check that found the problem passes.`,
+      };
+    }
+
+    // Loading is not working. A verdict with no interaction checks on a page
+    // full of controls says the page opened without throwing — which is the
+    // weaker half of the question, and exactly the state that produced a
+    // "12/12 features" score for an app where nothing did anything.
+    //
+    // Only when there is something to check: a static page with no controls has
+    // nothing to exercise, and demanding checks from it would be a ritual.
+    if (latest.passed && latest.flowsChecked === 0 && latest.controls >= MIN_CONTROLS_TO_CHECK) {
+      return {
+        ok: false,
+        message:
+          `${path.basename(artifact.file)} loads without errors, but nothing was actually `
+          + `operated — it has ${latest.controls} interactive controls and the check exercised `
+          + `none of them. A page can load perfectly and still have every button wired to `
+          + `nothing. Run VerifyApp again with checks covering the interactions the user asked `
+          + `for, so the result says the app works rather than that it opened.`,
       };
     }
 

@@ -74,6 +74,8 @@ export interface VerifyVerdict {
     svgs: number;
     /** Largest painted area, as a share of the viewport. Near zero means blank. */
     coverage: number;
+    /** Interactive controls on the page — how much there is to get wrong. */
+    controls: number;
   };
   flowsChecked: number;
   brokenFlows: FlowResult[];
@@ -175,6 +177,13 @@ const INSPECT = `(() => {
     canvases,
     svgs: document.querySelectorAll('svg').length,
     coverage: px > 0 ? Math.min(1, biggest / px) : 0,
+    // How much of this page there is to get wrong. A page with twenty controls
+    // and no interaction checks has been verified to load, which is not the
+    // same as verified to work — and the difference is the entire failure this
+    // tool was built for.
+    controls: document.querySelectorAll(
+      'button, select, textarea, input:not([type=hidden]), a[href], [role=button], [onclick]',
+    ).length,
   };
 })()`;
 
@@ -406,7 +415,9 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
     const errors = uniq(consoleErrors).filter(e => !exceptions.some(x => e.includes(x) || x.includes(e)));
     const broken = flows.filter(f => !f.ok);
 
-    const view = rendered ?? { elements: 0, visibleText: 0, canvases: [], svgs: 0, coverage: 0 };
+    const view = rendered ?? {
+      elements: 0, visibleText: 0, canvases: [], svgs: 0, coverage: 0, controls: 0,
+    };
     const blankCanvases = view.canvases.filter(c => !c.painted).length;
 
     // Worst first. A reader who stops after one line should have read the thing
@@ -469,7 +480,7 @@ export function formatVerdict(v: VerifyVerdict): string {
   const r = v.rendered;
   lines.push('What rendered:');
   lines.push(`  ${r.elements} elements, ${r.visibleText} characters of visible text, `
-    + `${r.canvases.length} canvas, ${r.svgs} svg`);
+    + `${r.canvases.length} canvas, ${r.svgs} svg, ${r.controls} interactive control(s)`);
   lines.push(`  largest visible element covers ${(r.coverage * 100).toFixed(1)}% of the viewport`);
   for (const c of r.canvases) {
     lines.push(`  canvas ${c.width}×${c.height} — ${c.painted ? 'painted' : 'NEVER DRAWN TO'}`);

@@ -5872,6 +5872,60 @@ if (findBrowser()) {
 }
 
 
+
+{
+  // Loading is not working. A verdict with no interaction checks says the page
+  // opened without throwing — the weaker half of the question, and exactly the
+  // state that scored an app 12/12 while nothing in it did anything.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-weak-'));
+  const page = path.join(dir, 'index.html');
+  fs.writeFileSync(page, '<!doctype html><h1>app</h1>');
+  const href = pathToFileURL(page).href;
+
+  resetVerification();
+  noteFileWritten(page);
+  recordVerification({
+    url: href, passed: true, problems: [],
+    rendered: { controls: 21 }, flowsChecked: 0,
+  });
+  const weak = checkVerificationGate();
+  assert(!weak.ok, 'A pass that exercised nothing does not satisfy the gate');
+  assert(/21 interactive controls/.test(weak.message),
+    'The gate says how much went unchecked, so the objection is concrete');
+  assert(/wired to nothing/.test(weak.message), 'And says what it is guarding against');
+
+  // Exercise something and it counts.
+  recordVerification({
+    url: href, passed: true, problems: [],
+    rendered: { controls: 21 }, flowsChecked: 3,
+  });
+  assert(checkVerificationGate().ok, 'A pass that exercised the controls satisfies it');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  resetVerification();
+}
+
+{
+  // A page with nothing to operate must not be held to it. A static report or a
+  // chart has no controls, and demanding interaction checks from it would be a
+  // ritual rather than a test — and rituals are how a gate gets switched off.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-static-'));
+  const page = path.join(dir, 'report.html');
+  fs.writeFileSync(page, '<!doctype html><h1>Quarterly report</h1><p>text</p>');
+
+  resetVerification();
+  noteFileWritten(page);
+  recordVerification({
+    url: pathToFileURL(page).href, passed: true, problems: [],
+    rendered: { controls: 1 }, flowsChecked: 0,
+  });
+  assert(checkVerificationGate().ok,
+    'A static page with nothing to click passes without interaction checks');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  resetVerification();
+}
+
 console.log('\n══ SUBSTANCE CHECK ══');
 
 {
