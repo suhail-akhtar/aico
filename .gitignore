@@ -51,3 +51,7 @@ blog-*/
 
 # Built web client — produced by `npm run build:web`, served by `aico serve`
 web-dist/
+
+# Throwaway probe directories from UI testing
+ui-probe/
+tmp-wire-*/
