@@ -88,6 +88,7 @@ import { skillRegistry } from '../skills/index.js';
 import { cronScheduler } from '../cron/scheduler.js';
 import { getBackgroundAgents } from '../background/index.js';
 import { getAgentRegistry } from './task.js';
+import { spillResult } from './spill.js';
 
 export interface ToolDefinition {
   name: string;
@@ -315,6 +316,17 @@ function releaseToolLock(toolName: string): void {
   }
 }
 
+/**
+ * Whether oversized output is kept rather than discarded.
+ *
+ * On unless explicitly disabled. The old behaviour is strictly worse — it
+ * destroyed 11 MB of output across this installation's own logs — so the
+ * switch exists for a read-only workspace, not as a preference.
+ */
+let spillOn = true;
+export function setSpillEnabled(on: boolean): void { spillOn = on; }
+export function spillEnabled(): boolean { return spillOn; }
+
 /** Truncate tool result to maxResultSizeChars, returning truncation notice */
 export function truncateResult(result: unknown, maxChars: number): unknown {
   if (typeof result === 'string') {
@@ -344,6 +356,8 @@ export function truncateResult(result: unknown, maxChars: number): unknown {
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
+  /** The dispatching call's id, so a spilled file can be traced back to it. */
+  callId?: string,
 ): Promise<unknown> {
   // Check cache for read-only tools
   const cached = getCachedResult(name, args);
@@ -517,10 +531,15 @@ export async function executeTool(
     releaseToolLock(name);
   }
 
-  // Apply result truncation based on tool's maxResultSizeChars
+  // Bound the result to the tool's budget, keeping whatever did not fit.
+  // `spillResult` writes the overflow to the session workspace and hands the
+  // model an excerpt plus the path; it falls back to plain truncation when the
+  // workspace cannot be written, so this can never fail a tool call.
   const def = toolDefinitions.find(d => d.name === name);
   if (def?.maxResultSizeChars) {
-    result = truncateResult(result, def.maxResultSizeChars);
+    result = spillEnabled()
+      ? spillResult(result, def.maxResultSizeChars, name, callId)
+      : truncateResult(result, def.maxResultSizeChars);
   }
 
   // Cache read-only tool results

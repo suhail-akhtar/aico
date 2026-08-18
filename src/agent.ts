@@ -3,6 +3,7 @@ import fs from 'fs';
 import chalk from 'chalk';
 import { buildSystemPrompt, buildVolatileContext } from './prompts.js';
 import { PromptDocument, renderPrompt, renderTail, DEFAULT_DIALECT } from './prompt/index.js';
+import { spillResult } from './tools/spill.js';
 import { toolDefinitions, executeTool, setBashDefaultTimeout, getToolsForAgent, getToolsForSpec, truncateResult, type SubAgentType } from './tools/index.js';
 import { taskToolDefinition, runTask } from './tools/task.js';
 import { mcpRegistry } from './mcp.js';
@@ -447,7 +448,12 @@ function selectToolProfile(task: string): AgentToolProfile {
 /** Tools available to a run, plus how to invoke them. */
 interface ResolvedToolSet {
   defs: ToolDefinition[];
-  dispatch: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  dispatch: (
+    name: string,
+    args: Record<string, unknown>,
+    /** Threaded through so a spilled result can name the call that made it. */
+    callId?: string,
+  ) => Promise<unknown>;
 }
 
 /**
@@ -482,7 +488,7 @@ function resolveToolSet(opts: {
     defs = opts.agentSpecTools
       ? getToolsForSpec(opts.agentSpecTools)
       : opts.agentType ? getToolsForAgent(opts.agentType) : toolDefinitions;
-    dispatch = (name, args) => executeTool(name, args);
+    dispatch = (name, args, callId) => executeTool(name, args, callId);
   }
 
   if (opts.toolProfile === 'browser-qa') {
@@ -647,7 +653,10 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
         ...(opts.signal ? { signal: opts.signal } : {}),
       };
 
-      const outcome = await pipeline.execute(ctx, (call) => dispatch(call.name, call.arguments));
+      const outcome = await pipeline.execute(
+        ctx,
+        (call) => dispatch(call.name, call.arguments, call.callId),
+      );
       const result = outcome.outcome.result;
 
       if (!opts.silent) showToolResult(def.name, result, opts.verbose);
@@ -929,7 +938,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       if (!silent) showToolCall(t.name, args, verbose);
       onToolCall?.(t.name, args, callId);
       try {
-        const result = truncateResult(await t.execute(args), 80_000);
+        // Same budget as before; the overflow is now kept rather than cut.
+        const result = spillResult(await t.execute(args), 80_000, t.name, callId);
         if (!silent) showToolResult(t.name, result, verbose);
         onToolDone?.(t.name, result, callId);
         return { result };

@@ -109,6 +109,10 @@ import {
   runInContext,
   currentCwd,
   forkSession,
+  spillResult,
+  saveSpill,
+  excerpt,
+  setSpillDir,
   resolveApiKey,
   resolveBaseUrl,
   keySourceOf,
@@ -3935,6 +3939,129 @@ console.log('  -- A goal the model can actually see --');
   assert(gemini.reprise.includes(GOAL), 'The goal is restated in the tail on Gemini');
   assert(renderPrompt(doc, ANTHROPIC_DIALECT, 'anthropic').reprise === '',
     'and not on Anthropic, whose guidance puts instructions first');
+}
+
+console.log('');
+console.log('══ 41. OVERSIZED TOOL OUTPUT IS KEPT, NOT CUT ══');
+
+{
+  const spillHome = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-spill-'));
+  setSpillDir(spillHome);
+  const filesIn = () => { try { return fs.readdirSync(spillHome); } catch { return []; } };
+  const NL = String.fromCharCode(10);
+
+  console.log('  -- Small results are untouched --');
+  {
+    const before = filesIn().length;
+    assert(spillResult('ok', 100, 'Bash', 'c1') === 'ok', 'a short string passes through unchanged');
+    assert(spillResult({ a: 1 }, 100, 'Bash', 'c1').a === 1, 'and so does a small object');
+    assert(spillResult(undefined, 100, 'X') === undefined, 'undefined is not a string to excerpt');
+    assert(spillResult(42, 100, 'X') === 42, 'nor is a number');
+    assert(filesIn().length === before, 'and nothing is written for output that fits');
+  }
+
+  console.log('  -- Oversized output is saved whole and pointed at --');
+  {
+    const body = 'L'.repeat(60_000);
+    const out = spillResult(body, 2_000, 'Bash', 'call-abc');
+    assert(out.length <= 2_000, `the excerpt honours its budget (${out.length})`);
+    assert(/complete output is saved at/.test(out), 'and says where the rest is');
+
+    const named = /\n(\S+\.txt)\n/.exec(out);
+    assert(named, 'the notice names a readable path');
+    assert(fs.existsSync(named[1]), 'the file is really there');
+    assert(fs.readFileSync(named[1], 'utf8').length === 60_000,
+      'holding every character, not a prefix');
+    assert(/call-abc/.test(named[1]), 'named after the call that produced it');
+  }
+
+  console.log('  -- The excerpt keeps both ends --');
+  {
+    // A build log opens with what ran and closes with why it failed. A plain
+    // head reliably discards the more useful half.
+    const body = 'START-MARKER' + NL + 'x'.repeat(40_000) + NL + 'END-MARKER';
+    const out = spillResult(body, 3_000, 'Bash', 'c2');
+    assert(out.includes('START-MARKER'), 'the beginning survives');
+    assert(out.includes('END-MARKER'), 'and so does the end');
+  }
+
+  console.log('  -- Object results keep their shape --');
+  {
+    const out = spillResult(
+      { stdout: 'S'.repeat(50_000), stderr: 'the real reason it failed', exit_code: 1 },
+      4_000, 'Bash', 'c3');
+    assert(out.exit_code === 1, 'the exit code is not a string and is left alone');
+    assert(out.stderr === 'the real reason it failed',
+      'a short stderr is not crowded out by a huge stdout');
+    assert(out.stdout.length < 50_000, 'the oversized field is bounded');
+    assert(/saved at/.test(out.stdout), 'and points at its own file');
+  }
+
+  console.log('  -- Nothing is lost across the whole result --');
+  {
+    const body = 'Z'.repeat(120_000);
+    const out = spillResult(body, 1_500, 'Grep', 'c4');
+    const named = /\n(\S+\.txt)\n/.exec(out);
+    const saved = fs.readFileSync(named[1], 'utf8');
+    assert(saved === body, 'the saved file is byte-identical to what the tool returned');
+  }
+
+  console.log('  -- A tiny budget still produces something usable --');
+  {
+    const out = spillResult('Q'.repeat(9_000), 120, 'Bash', 'c5');
+    assert(typeof out === 'string' && out.length > 0, 'it does not return empty');
+    // Three notice forms exist so a bound is always honoured; any of them
+    // counts as explaining itself, and a *partial* path counts as none of them.
+    assert(/saved at|full output:|truncated/.test(out), 'and still explains itself');
+    const named = /(\S+\.txt)/.exec(out);
+    assert(!named || fs.existsSync(named[1]),
+      'a path it prints is a path that exists — never a sliced one that points nowhere');
+  }
+
+  console.log('  -- Spilling never fails a tool call --');
+  {
+    // The workspace can be read-only, full, or on a disconnected drive. None of
+    // those are reasons to fail the call the user is waiting on.
+    setSpillDir(path.join(spillHome, 'nul-device', '\u0000bad'));
+    let threw = null;
+    let out;
+    try { out = spillResult('Y'.repeat(30_000), 500, 'Bash', 'c6'); }
+    catch (err) { threw = err; }
+    assert(!threw, `an unwritable spill directory does not throw (${threw?.message})`);
+    assert(typeof out === 'string' && out.length <= 500, 'the result is still bounded');
+    assert(/not recoverable/.test(out),
+      'and says plainly that the overflow was lost, rather than pointing at a file that is not there');
+    setSpillDir(spillHome);
+  }
+
+  console.log('  -- The excerpt fits its budget at every size --');
+  {
+    for (const budget of [80, 200, 1_000, 5_000, 20_000]) {
+      const out = excerpt('A'.repeat(200_000), budget, { path: 'C:/x/y.txt', chars: 200_000 });
+      assert(out.length <= budget, `budget ${budget} respected (got ${out.length})`);
+    }
+  }
+
+  console.log('  -- Two calls do not overwrite each other --');
+  {
+    const a = spillResult('A'.repeat(20_000), 500, 'Bash', 'first');
+    const b = spillResult('B'.repeat(20_000), 500, 'Bash', 'second');
+    const pa = /\n(\S+\.txt)\n/.exec(a)[1];
+    const pb = /\n(\S+\.txt)\n/.exec(b)[1];
+    assert(pa !== pb, 'each call gets its own file');
+    assert(fs.readFileSync(pa, 'utf8')[0] === 'A' && fs.readFileSync(pb, 'utf8')[0] === 'B',
+      'and each holds its own output');
+  }
+
+  console.log('  -- saveSpill reports what it wrote --');
+  {
+    const ref = saveSpill('Read', 'hello world', 'c7');
+    assert(ref && ref.chars === 11, 'the reference states the size');
+    assert(fs.readFileSync(ref.path, 'utf8') === 'hello world', 'and the path holds the content');
+  }
+
+  setSpillDir(undefined);
+  fs.rmSync(spillHome, { recursive: true, force: true });
 }
 
 console.log('  -- The system prompt is frozen --');
