@@ -117,7 +117,9 @@ const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
   general: 'all',
   explore: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd']),
   plan: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
-  verification: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd']),
+  // VerifyApp included: an agent whose only job is verification could not, until
+  // now, open the page it was asked to verify.
+  verification: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp']),
   'security-audit': new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
   // Project orchestrator — full access (it spawns specialists)
   project: 'all',
@@ -126,7 +128,7 @@ const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
   // DevSecOps — read-only + Bash for running scanners (no file modification)
   devsecops: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
   // Code review — read-only + Bash for running linters/tests
-  review: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'TodoRead', 'TodoWrite']),
+  review: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite']),
   // Studio — implementation agents (full access)
   frontend: 'all',
   backend: 'all',
@@ -134,7 +136,7 @@ const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
   'studio-orchestrator': 'all',
   'tech-writer': 'all',
   // Studio — constrained agents
-  qa: new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'TodoRead', 'TodoWrite', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers', 'ListMcpResources', 'ReadMcpResource', 'WorkspaceInfo', 'WorkspaceWrite', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead']),
+  qa: new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers', 'ListMcpResources', 'ReadMcpResource', 'WorkspaceInfo', 'WorkspaceWrite', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead']),
   architect: new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite']),
   'product-owner': new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch']),
 };

@@ -181,3 +181,4 @@ export { spillResult, saveSpill, excerpt, setSpillDir, spillDir } from './tools/
 export { verifyApp, formatVerdict, findBrowser, verifyAppDefinition } from './tools/verify-app.js';
 export { checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts, verifications } from './verification.js';
 export { findPlaceholders, describePlaceholders } from './substance.js';
+export { getToolsForAgent, toolDefinitions } from './tools/index.js';
