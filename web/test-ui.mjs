@@ -17,6 +17,7 @@ import {
   initialSessionId, rememberSession, forgetSession, isValidSessionId, freshSessionId,
 } from './dist-test/session-memory.mjs';
 import { formatResult, outcomeOf } from './dist-test/tool-result.mjs';
+import { todosFrom } from './dist-test/todos.mjs';
 
 let pass = 0, fail = 0;
 const test = (name, fn) => {
@@ -690,6 +691,95 @@ test('no tool is given a headline it does not have', () => {
   assert.equal(outcomeOf('VerifyApp', undefined), undefined);
   assert.equal(outcomeOf('VerifyApp', 'something unexpected'), undefined,
     'an unrecognised verdict is not guessed at');
+});
+
+
+// ── The task list, derived from the transcript ─────────────────────────────
+
+const todoCall = (todos) => ({
+  id: 'x', type: 'tool', content: '', toolName: 'TodoWrite',
+  toolArgs: { todos }, toolCallId: 'c', toolRunning: false, timestamp: 0,
+});
+
+test('a transcript with no task list yields nothing to show', () => {
+  const empty = todosFrom([]);
+  assert.equal(empty.total, 0);
+  assert.equal(empty.allSettled, false, 'an empty list is not a finished one');
+});
+
+test('the newest TodoWrite is the whole answer', () => {
+  // TodoWrite replaces the list wholesale, so merging earlier calls would
+  // resurrect items the agent has since dropped.
+  const summary = todosFrom([
+    todoCall([
+      { id: '1', title: 'old idea', status: 'pending', priority: 'high' },
+      { id: '2', title: 'another old idea', status: 'pending', priority: 'low' },
+    ]),
+    todoCall([{ id: '1', title: 'the current plan', status: 'in_progress', priority: 'high' }]),
+  ]);
+  assert.equal(summary.total, 1);
+  assert.equal(summary.todos[0].title, 'the current plan');
+  assert.equal(summary.inProgress, 1);
+});
+
+test('progress counts what is closed, however it closed', () => {
+  const summary = todosFrom([todoCall([
+    { id: '1', title: 'built it', status: 'done', priority: 'high' },
+    { id: '2', title: 'dropped it', status: 'cancelled', priority: 'low' },
+    { id: '3', title: 'still going', status: 'in_progress', priority: 'medium' },
+    { id: '4', title: 'not started', status: 'pending', priority: 'medium' },
+  ])]);
+  assert.equal(summary.closed, 2, 'done and cancelled are both closed');
+  assert.equal(summary.total, 4);
+  assert.equal(summary.allSettled, false, 'with work outstanding, nothing is settled');
+});
+
+test('a list finished by cancelling is settled, and distinguishable', () => {
+  // The distinction a green tick hides. A list finished by cancelling half of
+  // it is not a list that was done, and conflating them is how a task list
+  // becomes a formality.
+  const summary = todosFrom([todoCall([
+    { id: '1', title: 'built it', status: 'done', priority: 'high' },
+    { id: '2', title: 'gave up on it', status: 'cancelled', priority: 'low' },
+  ])]);
+  assert.equal(summary.allSettled, true);
+  assert.equal(summary.done, 1);
+  assert.equal(summary.cancelled, 1, 'so the panel can say "1 done · 1 cancelled"');
+});
+
+test('an unknown status keeps the item open rather than counting it done', () => {
+  // A model can emit a status nobody defined. Treating it as pending keeps the
+  // item visible and the list honestly unfinished — the safe direction.
+  const summary = todosFrom([todoCall([
+    { id: '1', title: 'mystery', status: 'almost-done', priority: 'high' },
+  ])]);
+  assert.equal(summary.pending, 1);
+  assert.equal(summary.allSettled, false);
+});
+
+test('malformed entries are skipped, not rendered as blanks', () => {
+  const summary = todosFrom([todoCall([
+    { id: '1', title: 'a real one', status: 'pending', priority: 'high' },
+    null,
+    { id: '2' },
+    'not an object',
+  ])]);
+  assert.equal(summary.total, 1, 'only the entry that has a title survives');
+});
+
+test('an item titled with content rather than title still reads', () => {
+  // Different models spell this field differently; the list is more useful than
+  // the naming convention.
+  const summary = todosFrom([todoCall([{ id: '1', content: 'from a content field', status: 'done' }])]);
+  assert.equal(summary.todos[0].title, 'from a content field');
+});
+
+test('non-TodoWrite tool calls are ignored', () => {
+  const summary = todosFrom([
+    { id: 'a', type: 'tool', toolName: 'Bash', toolArgs: { todos: [{ title: 'nope' }] },
+      content: '', toolCallId: 'z', toolRunning: false, timestamp: 0 },
+  ]);
+  assert.equal(summary.total, 0, 'a stray todos argument on another tool is not the task list');
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);
