@@ -71,3 +71,90 @@ export function formatResult(result: unknown): { text: string; isError: boolean 
   return { text: JSON.stringify(result, null, 2), isError: false };
 }
 
+
+/** The headline fact about a finished tool call. */
+export interface ToolOutcome {
+  /** Short chip text — the thing worth knowing without expanding the row. */
+  label: string;
+  tone: 'good' | 'bad' | 'neutral';
+  /** One line of supporting detail, when there is one worth the width. */
+  detail?: string;
+}
+
+/**
+ * The one thing worth showing about a finished call, when there is one.
+ *
+ * The generic fallback is a line count, which is honest and nearly useless: a
+ * browser verification that found three broken controls and one that passed
+ * cleanly both read as "7 lines". For tools whose result has a headline — did
+ * it pass, where did the shell end up, what was left running — that headline is
+ * the summary, and the line count goes back to being the fallback it was meant
+ * to be.
+ *
+ * Returns undefined for everything else, so no tool is given a summary that
+ * pretends to more meaning than its result has.
+ */
+export function outcomeOf(name: string, result: unknown): ToolOutcome | undefined {
+  if (result === undefined || result === null) return undefined;
+
+  // VerifyApp answers one question, and its answer is the first line.
+  if (name === 'VerifyApp' && typeof result === 'string') {
+    if (result.startsWith('PASSED')) return { label: 'works', tone: 'good' };
+    if (result.startsWith('FAILED')) {
+      const count = /has (\d+) problem/.exec(result);
+      // The first problem is ordered worst-first, so it is the one to surface.
+      const firstProblem = result.split(LF).find(line => line.trim().startsWith('- '));
+      return {
+        label: count ? `${count[1]} problem${count[1] === '1' ? '' : 's'}` : 'broken',
+        tone: 'bad',
+        ...(firstProblem ? { detail: firstProblem.trim().slice(2) } : {}),
+      };
+    }
+    return undefined;
+  }
+
+  // A structured result reaches the client as the JSON string the log stored,
+  // not as an object. Tests that pass an object therefore prove nothing about
+  // the running UI — these branches never fired in the browser until this
+  // parsed first, and the unit tests were green throughout.
+  const parsed = typeof result === 'string' ? tryParse(result) : result;
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const r = parsed as Record<string, unknown>;
+
+  // A backgrounded command is not finished, and saying "exit 0" about it would
+  // be actively wrong.
+  const background = r.background as { pid?: number } | undefined;
+  if (background?.pid) return { label: `running · pid ${background.pid}`, tone: 'neutral' };
+
+  // The whole point of a persistent shell is where it left you.
+  if (name === 'Terminal' && typeof r.cwd === 'string') {
+    const failed = typeof r.exit_code === 'number' && r.exit_code !== 0;
+    return {
+      label: shortPath(r.cwd),
+      tone: failed ? 'bad' : 'neutral',
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * A path short enough for a chip, keeping the end — the identifying part.
+ *
+ * The separator class needs both slashes. Written with one backslash too few it
+ * became `[\/]`, which matches only a forward slash, so no Windows path ever
+ * split and every chip showed the full path. The test that should have caught
+ * it used a two-segment path, which is returned whole either way.
+ */
+function shortPath(full: string): string {
+  const parts = full.split(new RegExp('[\\\\/]')).filter(Boolean);
+  if (parts.length <= 2) return full;
+  return `…/${parts.slice(-2).join('/')}`;
+}
+
+/** Parse a stored result, or nothing. Never throws — a non-JSON result is normal. */
+function tryParse(text: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{')) return undefined;
+  try { return JSON.parse(trimmed); } catch { return undefined; }
+}

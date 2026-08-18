@@ -72,9 +72,19 @@ Everything must work offline from the single file — no CDN links, no external
 requests. Write it to index.html in the current directory.`;
 
 const CONTENDERS = [
-  { label: 'Claude Sonnet 5', model: 'claude-sonnet-5', provider: 'anthropic' },
   { label: 'DeepSeek V4 Flash', model: 'deepseek-v4-flash', provider: 'deepseek' },
   { label: 'GPT-5.6 Luna', model: 'gpt-5.6-luna', provider: 'openai' },
+  // Capped on purpose. This one is expensive enough that an unbounded run is
+  // not worth the answer, so it gets a hard spend ceiling and a shorter leash —
+  // and the results table says so, because a number produced under a tighter
+  // budget is not comparable to one that was not.
+  {
+    label: 'GLM-5.2', model: 'glm-5.2', provider: 'zai',
+    safetyLimits: { maxCostPerSession: 1.5 },
+    maxIterations: 22,
+    agentTimeout: 12 * 60 * 1000,
+    capped: 'capped at $1.50 / 22 steps / 12 min',
+  },
 ];
 
 /** Named requirements, each checked against the file rather than the model. */
@@ -129,9 +139,10 @@ for (const c of CONTENDERS) {
     activeProvider: c.provider, provider: c.provider, model: c.model,
     autoApprove: true,
     autoCompact: { enabled: true },
-    maxIterations: 40,
-    agentTimeout: 20 * 60 * 1000,
+    maxIterations: c.maxIterations ?? 40,
+    agentTimeout: c.agentTimeout ?? 20 * 60 * 1000,
     workspace: { path: path.join(dir, '.workspace') },
+    ...(c.safetyLimits ? { safetyLimits: c.safetyLimits } : {}),
   };
 
   console.log(`\n${'═'.repeat(66)}\n  ${c.label}  (${c.model})\n${'═'.repeat(66)}`);
@@ -170,14 +181,19 @@ for (const c of CONTENDERS) {
   let verdict = null;
   if (html) {
     try {
-      verdict = await verifyApp({
-        target: file,
-        settleMs: 3000,
-        checks: [
-          { name: 'floor plan / 3D toggle', selector: 'button, [role=button]' },
-          { name: 'brand colour picker', selector: 'input[type=color]' },
-        ],
-      });
+      // Selectors derived from what is actually in the file. The previous run
+      // clicked `button` — whichever happened to be first — and a colour input,
+      // which opens a dialog headless Chrome does not have. Both reported
+      // working artifacts as broken, which is the worst way to be wrong.
+      const checks = [];
+      if (/<input[^>]*type=["']color["']/i.test(html)) {
+        checks.push({ name: 'brand colour picker', selector: 'input[type=color]' });
+      }
+      if (/<input[^>]*type=["']range["']/i.test(html)) {
+        checks.push({ name: 'a slider control', selector: 'input[type=range]' });
+      }
+      if (/<select/i.test(html)) checks.push({ name: 'a dropdown', selector: 'select' });
+      verdict = await verifyApp({ target: file, settleMs: 3000, checks });
     } catch (err) {
       verdict = { passed: false, problems: [`could not verify: ${err.message}`], rendered: {} };
     }
@@ -195,6 +211,7 @@ for (const c of CONTENDERS) {
     features: passed.length,
     missing: FEATURES.filter(f => !passed.includes(f)).map(([n]) => n),
     reason: turnEnd?.data?.reason?.kind ?? (failure ? 'threw' : 'unknown'),
+    capped: c.capped ?? '',
     works: verdict ? verdict.passed : false,
     problems: verdict ? verdict.problems : ['no file produced'],
     verifiedItself: session.events.filter(e =>
@@ -227,7 +244,9 @@ for (const r of rows) {
 }
 console.log('');
 for (const r of rows) {
-  console.log(`  ${r.label}: ended ${r.reason}, invariants ${r.invariants ? 'clean' : 'VIOLATED'}, ${r.dir}`);
+  console.log(`  ${r.label}: ended ${r.reason}, invariants ${r.invariants ? 'clean' : 'VIOLATED'}`
+    + `${r.capped ? `, ${r.capped}` : ''}`);
+  console.log(`     ${r.dir}`);
   console.log(`     browser: ${r.works ? 'works' : 'BROKEN'}${r.problems.length ? ` — ${r.problems[0]}` : ''}`);
 }
 fs.writeFileSync(path.join(outRoot, 'results.json'), JSON.stringify(rows, null, 2));

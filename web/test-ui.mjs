@@ -16,7 +16,7 @@ import {
 import {
   initialSessionId, rememberSession, forgetSession, isValidSessionId, freshSessionId,
 } from './dist-test/session-memory.mjs';
-import { formatResult } from './dist-test/tool-result.mjs';
+import { formatResult, outcomeOf } from './dist-test/tool-result.mjs';
 
 let pass = 0, fail = 0;
 const test = (name, fn) => {
@@ -606,6 +606,90 @@ test('an unrecognised shape still renders, indented', () => {
 test('null and undefined are empty, not the words', () => {
   assert.equal(formatResult(null).text, '');
   assert.equal(formatResult(undefined).text, '');
+});
+
+
+// ── The headline of a tool call ────────────────────────────────────────────
+//
+// The generic fallback is a line count, which is honest and nearly useless: a
+// browser check that found three broken controls and one that passed cleanly
+// both rendered as "7 lines".
+
+test('a passing browser check says so', () => {
+  const passed = outcomeOf('VerifyApp', 'PASSED — file:///x/index.html loads and works.\n\nWhat rendered:\n  12 elements');
+  assert.equal(passed.label, 'works');
+  assert.equal(passed.tone, 'good');
+  assert.equal(passed.detail, undefined, 'with nothing more to say');
+});
+
+test('a failing browser check counts the problems and names the worst', () => {
+  const failed = outcomeOf('VerifyApp',
+    'FAILED — file:///x/index.html has 3 problem(s). This artifact is not finished.\n'
+    + '\nProblems, worst first:\n'
+    + '  - uncaught: THREE is not defined\n'
+    + '  - 1 of 1 canvas element(s) were never drawn to\n');
+  assert.equal(failed.label, '3 problems');
+  assert.equal(failed.tone, 'bad', 'impossible to mistake for success');
+  // The reason a page does not work is the point of running the check; putting
+  // it one interaction away is how it gets skipped.
+  assert.equal(failed.detail, 'uncaught: THREE is not defined');
+});
+
+test('one problem is not "1 problems"', () => {
+  const one = outcomeOf('VerifyApp', 'FAILED — x has 1 problem(s).\n\n  - the page did not load\n');
+  assert.equal(one.label, '1 problem');
+});
+
+test('a persistent shell reports where it left you', () => {
+  // A cd that did not take looks exactly like one that did, until something
+  // writes a file into the wrong place.
+  const moved = outcomeOf('Terminal', { output: '', stderr: '', exit_code: 0, cwd: 'E:\\work\\ui-probe' });
+  assert.ok(/ui-probe/.test(moved.label), `working directory is the summary (${moved.label})`);
+  assert.equal(moved.tone, 'neutral', 'a successful command is not shouted about');
+});
+
+test('a failed shell command is not quiet', () => {
+  const failedCmd = outcomeOf('Terminal', { output: '', stderr: 'nope', exit_code: 1, cwd: 'E:\\work' });
+  assert.equal(failedCmd.tone, 'bad');
+});
+
+test('a long path is shortened to its identifying end', () => {
+  // The separator class needs both slashes. With one backslash too few it
+  // became [\/] — forward slash only — so no Windows path split and every
+  // chip showed the full path. The two-segment test below is returned whole
+  // either way, so it could not catch this.
+  const deep = outcomeOf('Terminal', JSON.stringify({
+    output: '', stderr: '', exit_code: 0, cwd: 'E:\\github_repos\\AI-Projects\\aico\\ui-probe',
+  }));
+  assert.equal(deep.label, '…/aico/ui-probe');
+
+  const posix = outcomeOf('Terminal', JSON.stringify({
+    output: '', stderr: '', exit_code: 0, cwd: '/home/me/work/thing',
+  }));
+  assert.equal(posix.label, '…/work/thing', 'and posix paths shorten the same way');
+});
+
+test('a short path is shown whole rather than elided to nothing', () => {
+  const shortCwd = outcomeOf('Terminal', { output: '', stderr: '', exit_code: 0, cwd: 'E:\\x' });
+  assert.equal(shortCwd.label, 'E:\\x');
+});
+
+test('a backgrounded command reads as still running, with its pid', () => {
+  // Calling it "exit 0" would be actively wrong about what happened.
+  const bg = outcomeOf('Bash', JSON.stringify({ stdout: 'listening', stderr: '', exit_code: 0, background: { pid: 4321 } }));
+  assert.ok(/running/.test(bg.label));
+  assert.ok(/4321/.test(bg.label), 'carries the pid needed to stop it');
+});
+
+test('no tool is given a headline it does not have', () => {
+  assert.equal(outcomeOf('Read', 'file contents here'), undefined);
+  assert.equal(outcomeOf('Bash', JSON.stringify({ stdout: 'ok', exit_code: 0 })), undefined,
+    'an ordinary command falls back to the line count');
+  assert.equal(outcomeOf('Terminal', 'not json at all'), undefined,
+    'a result that is not JSON is not guessed at');
+  assert.equal(outcomeOf('VerifyApp', undefined), undefined);
+  assert.equal(outcomeOf('VerifyApp', 'something unexpected'), undefined,
+    'an unrecognised verdict is not guessed at');
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

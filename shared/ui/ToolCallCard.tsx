@@ -15,7 +15,7 @@
 
 import React, { useState } from 'react';
 import { changeFromArgs, FileDiff } from './FileDiff';
-import { formatResult } from './tool-result';
+import { formatResult, outcomeOf } from './tool-result';
 
 /**
  * The one thing about a call worth reading at a glance.
@@ -49,6 +49,7 @@ function describeArgs(args?: Record<string, unknown>): string {
 /** What each tool is doing, in the present tense, as the row's verb. */
 const TOOL_VERBS: Record<string, string> = {
   Bash: 'Ran', Read: 'Read', Write: 'Wrote', Edit: 'Edited', MultiEdit: 'Edited',
+  Terminal: 'Ran', VerifyApp: 'Checked in a browser',
   Glob: 'Searched', Grep: 'Searched', LS: 'Listed', WebFetch: 'Fetched',
   WebSearch: 'Searched the web', Task: 'Delegated', TodoWrite: 'Updated todos',
   TodoRead: 'Read todos', NotebookEdit: 'Edited notebook', Pwd: 'Checked directory',
@@ -83,6 +84,10 @@ export const ToolCallCard = React.memo(function ToolCallCard({
 
   const { text: resultText, isError } = result !== undefined ? formatResult(result) : { text: '', isError: false };
   const resultLineCount = resultText.split('\n').length;
+  // The headline, where the tool has one. A line count is honest and nearly
+  // useless: a browser check that found three broken controls and one that
+  // passed cleanly both read as "7 lines".
+  const outcome = running ? undefined : outcomeOf(name, result);
 
   // Attention is spent where it is needed. Twenty successful calls should not
   // shout — they are the normal case and shouting makes the prose unreadable.
@@ -142,13 +147,34 @@ export const ToolCallCard = React.memo(function ToolCallCard({
         {isError && !running && (
           <span className="shrink-0 text-[11px] text-aico-danger">failed</span>
         )}
-        {!running && result !== undefined && resultLineCount > 1 && (
+        {outcome && (
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${
+            outcome.tone === 'good' ? 'bg-aico-success/12 text-aico-success'
+              : outcome.tone === 'bad' ? 'bg-aico-danger/12 text-aico-danger'
+              : 'bg-aico-hover text-aico-muted'
+          }`}>
+            {outcome.label}
+          </span>
+        )}
+        {/* The line count is the fallback it was always meant to be. */}
+        {!outcome && !running && result !== undefined && resultLineCount > 1 && (
           <span className="shrink-0 text-[11px] text-aico-muted">{resultLineCount} lines</span>
         )}
         <span className="shrink-0 text-[10px] text-aico-muted opacity-0 transition-opacity group-hover/tool:opacity-100">
           {expanded ? '▴' : '▾'}
         </span>
       </button>
+
+      {/*
+        A failure worth acting on says so without being clicked. The reason a
+        page does not work is the point of running the check, and putting it one
+        interaction away is how it gets skipped.
+      */}
+      {outcome?.detail && !expanded && (
+        <div className="ml-6 mt-0.5 truncate text-[12px] text-aico-danger" title={outcome.detail}>
+          {outcome.detail}
+        </div>
+      )}
 
       {/* A file write shows its diff without being asked. */}
       {change && <FileDiff change={change} />}
