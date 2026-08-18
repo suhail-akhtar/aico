@@ -37,6 +37,14 @@ export interface TodoSummary {
   total: number;
   /** True when there is nothing left open and there was something to begin with. */
   allSettled: boolean;
+  /**
+   * Identity of this particular list.
+   *
+   * Dismissing a panel means "I have seen this one", not "never show me a task
+   * list again". Keyed on the titles and their states, so the panel returns the
+   * moment the work actually changes and stays gone while it does not.
+   */
+  signature: string;
 }
 
 const STATUSES = new Set<TodoStatus>(['pending', 'in_progress', 'done', 'cancelled']);
@@ -91,5 +99,6 @@ export function todosFrom(messages: ChatMessage[]): TodoSummary {
     closed: done + cancelled,
     total: todos.length,
     allSettled: todos.length > 0 && inProgress + pending === 0,
+    signature: todos.map(t => `${t.id}:${t.status}:${t.title}`).join('|'),
   };
 }

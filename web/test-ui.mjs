@@ -866,5 +866,51 @@ test('missing optional fields become empty rather than undefined', () => {
   assert.deepEqual(plan.openQuestions, []);
 });
 
+
+// ── Closing a panel means "I have seen this one" ───────────────────────────
+
+test('a task list has an identity that changes when the work does', () => {
+  // A plain "dismissed" boolean would make the first close permanent, hiding
+  // the next real thing behind a decision made about something else.
+  const first = todosFrom([todoCall([
+    { id: '1', title: 'write it', status: 'pending', priority: 'high' },
+  ])]);
+  const sameAgain = todosFrom([todoCall([
+    { id: '1', title: 'write it', status: 'pending', priority: 'high' },
+  ])]);
+  assert.equal(first.signature, sameAgain.signature,
+    'the same list re-rendered stays dismissed');
+
+  const progressed = todosFrom([todoCall([
+    { id: '1', title: 'write it', status: 'done', priority: 'high' },
+  ])]);
+  assert.notEqual(first.signature, progressed.signature,
+    'an item changing state is new information, so the panel returns');
+
+  const extended = todosFrom([todoCall([
+    { id: '1', title: 'write it', status: 'pending', priority: 'high' },
+    { id: '2', title: 'and test it', status: 'pending', priority: 'high' },
+  ])]);
+  assert.notEqual(first.signature, extended.signature, 'a new item likewise');
+});
+
+test('an empty list has an identity too, and it is not undefined', () => {
+  // The dock compares against this before rendering; undefined would compare
+  // equal to a missing dismissal and hide a list that was never closed.
+  assert.equal(typeof todosFrom([]).signature, 'string');
+});
+
+test('a plan re-proposed unchanged keeps its place in the log', () => {
+  // Plan identity is its position plus its title: a revision arrives at a new
+  // seq, so a dismissal cannot silence the plan that replaced it.
+  const messages = [
+    planCall({ title: 'first', steps: [{ title: 'a' }] }),
+    planCall({ title: 'second', steps: [{ title: 'b' }] }),
+  ];
+  const { plan } = planFrom(messages);
+  assert.equal(plan.seq, 1, 'the newest proposal is the one on the table');
+  assert.equal(plan.title, 'second');
+});
+
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);

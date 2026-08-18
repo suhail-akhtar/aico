@@ -140,6 +140,16 @@ interface AppState {
    */
   composerPrefill: { text: string; at: number } | null;
   prefillComposer: (text: string) => void;
+  /**
+   * Panels the reader has closed, keyed by *what* was closed.
+   *
+   * A plain boolean would make dismissal permanent, so a genuinely new plan or
+   * a task list that has moved on would stay hidden behind a decision made
+   * about something else. Keyed by content identity, closing means "I have seen
+   * this one" and anything new comes back on its own.
+   */
+  dismissed: Record<string, string>;
+  dismissPanel: (panel: string, identity: string) => void;
   cancel: () => Promise<void>;
   steer: (content: string) => Promise<void>;
   followup: (content: string) => Promise<void>;
@@ -199,6 +209,7 @@ export const useStore = create<AppState>((set, get) => ({
   logged: new Map(),
   draft: emptyDraft(),
   composerPrefill: null,
+  dismissed: {},
   busy: false,
   turnStartedAt: null,
   lastActivityAt: 0,
@@ -219,7 +230,9 @@ export const useStore = create<AppState>((set, get) => ({
     handle?.close();
     rememberSession(sessionId);
     set({
-      sessionId, logged: new Map(), draft: emptyDraft(),
+      // Dismissals belong to the session they were made in: closing a panel in
+      // one conversation says nothing about the next.
+      sessionId, logged: new Map(), draft: emptyDraft(), dismissed: {},
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
@@ -293,6 +306,9 @@ export const useStore = create<AppState>((set, get) => ({
   // Stamped, so asking for the same text twice still reaches the composer —
   // an identical value would otherwise look like no change at all.
   prefillComposer: (text) => set({ composerPrefill: { text, at: Date.now() } }),
+
+  dismissPanel: (panel, identity) =>
+    set(state => ({ dismissed: { ...state.dismissed, [panel]: identity } })),
 
   submit: async (task, opts = {}) => {
     const { sessionId, model } = get();
