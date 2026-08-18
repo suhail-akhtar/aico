@@ -49,6 +49,18 @@ const MAX_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OUTPUT = 200_000;
 /** Grace after the marker for stderr, which arrives on its own pipe. */
 const DRAIN_MS = 60;
+/**
+ * How long an untouched shell is kept alive.
+ *
+ * Each of these is a real OS process holding pipes. One per session was fine
+ * for a CLI and a slow leak under a server: a session opened once and never
+ * returned to left its shell running for the life of the process. Twenty
+ * minutes is far longer than a pause between commands and far shorter than a
+ * working day of abandoned sessions.
+ */
+const IDLE_TTL_MS = 20 * 60 * 1000;
+/** A hard ceiling, in case something opens sessions faster than they idle out. */
+const MAX_SHELLS = 32;
 
 export interface TerminalResult {
   output: string;
@@ -67,6 +79,8 @@ interface Shell {
   cwd: string;
   /** One command at a time: a shared stdin has no way to tell replies apart. */
   busy: boolean;
+  /** When this shell was last used, for idling it out. */
+  usedAt: number;
   /**
    * Resolves once the shell's own startup noise has been read and discarded.
    *
@@ -97,7 +111,7 @@ function open(cwd: string, key: string): Shell {
     : spawn('/bin/bash', [], { cwd, detached: true });
 
   const shell = {
-    child, stdout: '', stderr: '', cwd, busy: false,
+    child, stdout: '', stderr: '', cwd, busy: false, usedAt: Date.now(),
   } as Shell;
 
   child.stdout?.on('data', (b: Buffer) => { shell.stdout += b.toString('utf8'); });
@@ -153,6 +167,30 @@ export function closeAllTerminals(): void {
 
 let exitHook = false;
 
+/**
+ * Close shells nobody is using.
+ *
+ * Called when a new one is opened, which is the only moment the count can grow
+ * — no timer, because a background timer that reaps processes is a thing that
+ * fires during tests and in a CLI that has already finished.
+ */
+function reap(keep: string): void {
+  const now = Date.now();
+  for (const [key, shell] of [...shells]) {
+    if (key === keep || shell.busy) continue;
+    if (now - shell.usedAt > IDLE_TTL_MS) close(key);
+  }
+  if (shells.size <= MAX_SHELLS) return;
+  // Oldest first. Map iteration is insertion order, and a shell that has not
+  // been used since the others were opened is the safest one to take.
+  const byAge = [...shells].filter(([k, s]) => k !== keep && !s.busy)
+    .sort((a, b) => a[1].usedAt - b[1].usedAt);
+  for (const [key] of byAge) {
+    if (shells.size <= MAX_SHELLS) break;
+    close(key);
+  }
+}
+
 /** Trim to a budget, keeping the end — where a failure explains itself. */
 function bound(text: string): string {
   if (text.length <= MAX_OUTPUT) return text;
@@ -203,8 +241,10 @@ export async function terminal(input: TerminalInput): Promise<TerminalResult> {
   if (!shell || shell.child.exitCode !== null || shell.child.killed) {
     shell = open(currentCwd(), key);
     shells.set(key, shell);
+    reap(key);
     if (!exitHook) { exitHook = true; process.once('exit', closeAllTerminals); }
   }
+  shell.usedAt = Date.now();
   await shell.ready;
 
   if (shell.busy) {
@@ -307,7 +347,7 @@ export async function terminal(input: TerminalInput): Promise<TerminalResult> {
     };
   } finally {
     const live = shells.get(key);
-    if (live) live.busy = false;
+    if (live) { live.busy = false; live.usedAt = Date.now(); }
   }
 }
 

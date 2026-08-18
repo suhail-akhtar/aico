@@ -29,6 +29,7 @@ import fs from 'fs';
 import path from 'path';
 import { currentCwd } from './run-context.js';
 import { coverageOf, currentRequirements, MIN_INTERACTIONS_FOR_COVERAGE } from './requirements.js';
+import { runScoped } from './run-scoped.js';
 
 /** The subset of a browser verdict the gate needs. */
 export interface VerificationRecord {
@@ -53,13 +54,21 @@ export interface WebArtifact {
   mtimeMs: number;
 }
 
-let records: VerificationRecord[] = [];
-let artifacts = new Map<string, number>();
+/**
+ * Per run, not per process.
+ *
+ * Module-level state here was a real fault, not a tidiness one: under the
+ * server two sessions share the process, so one turn's reset wiped another's
+ * evidence and a gate could pass on a verdict belonging to different work.
+ */
+const state = runScoped(() => ({
+  records: [] as VerificationRecord[],
+  artifacts: new Map<string, number>(),
+}));
 
 /** Start of turn: last turn's evidence says nothing about this one. */
 export function resetVerification(): void {
-  records = [];
-  artifacts = new Map();
+  state.reset();
 }
 
 /**
@@ -82,7 +91,7 @@ export function noteFileWritten(file: string): void {
   if (!WEB_EXTENSIONS.has(path.extname(file).toLowerCase())) return;
   const abs = path.isAbsolute(file) ? file : path.join(currentCwd(), file);
   try {
-    artifacts.set(abs, fs.statSync(abs).mtimeMs);
+    state.get().artifacts.set(abs, fs.statSync(abs).mtimeMs);
   } catch {
     // Written but already gone, or unreadable. Nothing to gate on.
   }
@@ -114,12 +123,12 @@ export function recordVerification(verdict: {
     }
   }
 
-  records.push(record);
+  state.get().records.push(record);
 }
 
 /** Everything recorded this turn, oldest first. */
 export function verifications(): readonly VerificationRecord[] {
-  return records;
+  return state.get().records;
 }
 
 export interface GateResult {
@@ -137,6 +146,7 @@ export interface GateResult {
  * before the last change.
  */
 export function checkVerificationGate(): GateResult {
+  const { records, artifacts } = state.get();
   if (artifacts.size === 0) return { ok: true };
 
   // Freshest mtime wins — a turn that touched several pages is judged on the
@@ -243,5 +253,5 @@ export function checkVerificationGate(): GateResult {
 
 /** Artifacts seen this turn. Exposed for tests and for the turn summary. */
 export function webArtifacts(): WebArtifact[] {
-  return [...artifacts.entries()].map(([file, mtimeMs]) => ({ file, mtimeMs }));
+  return [...state.get().artifacts.entries()].map(([file, mtimeMs]) => ({ file, mtimeMs }));
 }

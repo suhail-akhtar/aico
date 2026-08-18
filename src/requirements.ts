@@ -31,6 +31,8 @@
  * @module requirements
  */
 
+import { runScoped } from './run-scoped.js';
+
 /** One thing the user asked for. */
 export interface Requirement {
   /** The user's own words, trimmed to something quotable. */
@@ -177,17 +179,21 @@ export function coverageOf(requirements: Requirement[], checkNames: string[]): C
  * Per-turn, like the rest of the verification state: the requirements of the
  * task two turns ago are not the standard for this one.
  */
-let brief = '';
-let cached: Requirement[] | undefined;
+const state = runScoped(() => ({
+  brief: '',
+  cached: undefined as Requirement[] | undefined,
+}));
 
 export function setBrief(text: string): void {
-  brief = text;
-  cached = undefined;
+  const s = state.get();
+  s.brief = text;
+  s.cached = undefined;
 }
 
 export function currentRequirements(): Requirement[] {
-  cached ??= extractRequirements(brief);
-  return cached;
+  const s = state.get();
+  s.cached ??= extractRequirements(s.brief);
+  return s.cached;
 }
 
 /**

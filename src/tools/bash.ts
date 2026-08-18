@@ -138,11 +138,22 @@ export function resolveTimeout(rawTimeout: number): { requestedMs: number; timeo
   return { requestedMs, timeoutMs: Math.min(requestedMs, MAX_FOREGROUND_MS) };
 }
 
+/**
+ * The longest command chunk worth pattern-matching.
+ *
+ * Several of the patterns pair an unbounded class with a following literal,
+ * which is the shape that backtracks badly on a long non-matching string. A
+ * launcher name lives at the front of a command; a megabyte-long heredoc has
+ * nothing at the front worth reading, so bounding costs no detection.
+ */
+const MAX_MATCH_CHARS = 400;
+
 /** What kind of never-exiting command this is, if it is one. */
 export function looksLikeServer(command: string): string | undefined {
   // Each link in a chain is judged on its own: `cd x && npm run dev` is a
   // server, and `npm run build && echo done` is not.
-  for (const part of command.split(/&&|\|\||;/)) {
+  for (const chunk of command.split(/&&|\|\||;/)) {
+    const part = chunk.length > MAX_MATCH_CHARS ? chunk.slice(0, MAX_MATCH_CHARS) : chunk;
     if (TEXT_TOOLS.test(part)) continue;
     for (const { re, what } of SERVER_PATTERNS) {
       if (re.test(part)) return what;

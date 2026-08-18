@@ -17,6 +17,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { createHash } from 'crypto';
 import { currentRunContext } from '../run-context.js';
 
 const TODO_DIR = path.join(os.homedir(), '.aico', 'todos');
@@ -30,10 +31,19 @@ export interface Todo {
   priority: 'high' | 'medium' | 'low';
 }
 
-/** A session id reduced to something safe to use as a filename. */
+/**
+ * A session id reduced to something safe to use as a filename.
+ *
+ * The readable part is truncated and has its punctuation folded, so two ids
+ * could reduce to the same name and one session would read another's list —
+ * the exact fault this file was keyed by session to fix. A short hash of the
+ * *whole* id is appended so only genuinely identical sessions collide.
+ */
 function todoFilePath(): string {
   const id = currentRunContext()?.sessionId ?? UNSCOPED;
-  return path.join(TODO_DIR, `${id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120)}.json`);
+  const readable = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+  const digest = createHash('sha256').update(id).digest('hex').slice(0, 10);
+  return path.join(TODO_DIR, `${readable}-${digest}.json`);
 }
 
 async function loadTodos(): Promise<Todo[]> {

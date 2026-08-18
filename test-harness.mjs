@@ -144,6 +144,7 @@ import {
   terminal, closeAllTerminals,
   observe, blockedReason, resetObservations, isObserved,
   todoRead,
+  runScoped, currentRequirements,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -5936,6 +5937,81 @@ if (findBrowser()) {
 
 
 
+
+console.log('\n══ STATE BELONGS TO ITS RUN ══');
+
+{
+  const inSession = (id, fn) => runInContext({ cwd: process.cwd(), sessionId: id }, fn);
+
+  // run-context.ts exists because this is a server that owns several runs at
+  // once, and answering anything from a module-level variable is wrong the
+  // moment two overlap. Three features added later each reintroduced exactly
+  // that with a module-level `let`. The symptom is quiet: nothing throws, a
+  // check simply starts answering about the wrong work.
+  const counter = runScoped(() => ({ n: 0 }));
+
+  await inSession('run-a', async () => { counter.get().n = 10; });
+  await inSession('run-b', async () => { counter.get().n = 99; });
+  const a = await inSession('run-a', () => Promise.resolve(counter.get().n));
+  const b = await inSession('run-b', () => Promise.resolve(counter.get().n));
+  assert(a === 10 && b === 99, `Two runs keep their own state (${a}, ${b})`);
+
+  // The interleaving that made this a real fault rather than a tidy-up: one
+  // run resetting while another is mid-turn.
+  await inSession('run-a', async () => { counter.get().n = 1; });
+  await inSession('run-b', async () => { counter.reset(); });
+  const stillA = await inSession('run-a', () => Promise.resolve(counter.get().n));
+  assert(stillA === 1, `One run's reset does not wipe another's (${stillA})`);
+
+  // Truly concurrent, not merely sequential: the context has to follow the
+  // async chain, which is the whole reason AsyncLocalStorage is used here.
+  const [x, y] = await Promise.all([
+    inSession('par-1', async () => {
+      counter.get().n = 7;
+      await new Promise(r => setTimeout(r, 20));
+      return counter.get().n;
+    }),
+    inSession('par-2', async () => {
+      await new Promise(r => setTimeout(r, 5));
+      counter.get().n = 8;
+      return counter.get().n;
+    }),
+  ]);
+  assert(x === 7 && y === 8, `Overlapping runs do not read each other (${x}, ${y})`);
+}
+
+{
+  // The same, through a feature that had the bug. Two briefs, two sessions.
+  const inSession = (id, fn) => runInContext({ cwd: process.cwd(), sessionId: id }, fn);
+  const SPEC_A = ['Interaction Details:',
+    '- Export to PDF triggers a building-up animation.',
+    '- Brand color picker recolors branded elements live.',
+    '- Capacity meter ticks up as you place chairs.',
+    '- Egress paths animate when fire safety is toggled.'].join('\n');
+
+  await inSession('brief-a', async () => { setBrief(SPEC_A); });
+  await inSession('brief-b', async () => { setBrief('Fix the login bug'); });
+
+  const aCount = await inSession('brief-a',
+    () => Promise.resolve(currentRequirements().filter(r => r.interactive).length));
+  const bCount = await inSession('brief-b',
+    () => Promise.resolve(currentRequirements().filter(r => r.interactive).length));
+
+  assert(aCount >= 4, `The spec session still has its requirements (${aCount})`);
+  assert(bCount === 0, `The one-line session has none of them (${bCount})`);
+}
+
+{
+  // Bounded. A session opened once and never returned to must not pin state
+  // for the life of a server process.
+  const counter = runScoped(() => ({ n: 0 }));
+  for (let i = 0; i < 400; i++) {
+    await runInContext({ cwd: process.cwd(), sessionId: `bulk-${i}` },
+      () => Promise.resolve(counter.get()));
+  }
+  assert(counter.size() <= 256, `Buckets are capped (${counter.size()})`);
+}
+
 console.log('\n══ A TASK LIST BELONGS TO ITS SESSION ══');
 
 {
@@ -5980,10 +6056,27 @@ console.log('\n══ A TASK LIST BELONGS TO ITS SESSION ══');
   const finished = await inSession('todo-session-a', () => getOpenTodoCount());
   assert(finished === 0, 'Done and cancelled are both closed');
 
+  // Two ids that fold to the same readable filename must not share a list. The
+  // readable part is truncated and has its punctuation replaced, so without a
+  // hash of the whole id these two would be one file — reintroducing, one level
+  // down, the very fault this file was keyed by session to fix.
+  await inSession('web/session:one', async () => {
+    await todoWrite({ todos: [{ id: 'a', title: 'first', status: 'pending', priority: 'high' }] });
+  });
+  await inSession('web_session_one', async () => {
+    await todoWrite({ todos: [{ id: 'b', title: 'second', status: 'pending', priority: 'high' }] });
+  });
+  const first = await inSession('web/session:one', () => todoRead());
+  assert(/first/.test(first) && !/second/.test(first),
+    'Ids that sanitize alike still get their own list');
+
   // Left behind, these make the next run of this suite start dirty — the same
   // way a shared list made every new session start dirty.
-  for (const id of ['todo-session-a', 'todo-session-b']) {
-    fs.rmSync(path.join(os.homedir(), '.aico', 'todos', `${id}.json`), { force: true });
+  const dir = path.join(os.homedir(), '.aico', 'todos');
+  for (const name of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+    if (/^(todo-session-[ab]|web.session.one)-/.test(name)) {
+      fs.rmSync(path.join(dir, name), { force: true });
+    }
   }
 }
 

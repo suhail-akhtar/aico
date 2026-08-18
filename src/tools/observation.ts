@@ -34,6 +34,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { runScoped } from '../run-scoped.js';
 
 /** What we knew about a file, and when. */
 interface Observation {
@@ -41,12 +42,23 @@ interface Observation {
   mtimeMs: number;
 }
 
-const observed = new Map<string, Observation>();
+const state = runScoped(() => new Map<string, Observation>());
 
-/** One spelling of a path, so `./x`, `x` and an absolute path agree. */
+/**
+ * One spelling of a path, so `./x`, `x` and an absolute path agree.
+ *
+ * Case is folded only where the filesystem folds it. On Linux `Config.ts` and
+ * `config.ts` are two files, and lowercasing both would have let a read of one
+ * authorise an edit to the other — a guard against editing unseen files that
+ * quietly hands out permission for a file nobody read.
+ */
 function key(file: string): string {
-  return path.resolve(file).toLowerCase();
+  const resolved = path.resolve(file);
+  return CASE_INSENSITIVE_FS ? resolved.toLowerCase() : resolved;
 }
+
+/** Windows and macOS default to case-insensitive; Linux does not. */
+const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
 
 /**
  * Record that the contents of this file are now known.
@@ -56,7 +68,7 @@ function key(file: string): string {
  */
 export function observe(file: string): void {
   try {
-    observed.set(key(file), { mtimeMs: fs.statSync(file).mtimeMs });
+    state.get().set(key(file), { mtimeMs: fs.statSync(file).mtimeMs });
   } catch {
     // Gone, or unreadable. Nothing to remember, and no claim to make.
   }
@@ -64,7 +76,7 @@ export function observe(file: string): void {
 
 /** Forget everything. Per-turn, like the rest of what a turn is allowed to assume. */
 export function resetObservations(): void {
-  observed.clear();
+  state.reset();
 }
 
 /**
@@ -84,7 +96,7 @@ export function blockedReason(file: string, operation: 'edit' | 'overwrite'): st
   }
   if (!current.isFile()) return undefined;
 
-  const seen = observed.get(key(file));
+  const seen = state.get().get(key(file));
   if (!seen) {
     return `${path.basename(file)} has not been read in this session, so its current contents `
       + `are unknown. ${operation === 'edit'
