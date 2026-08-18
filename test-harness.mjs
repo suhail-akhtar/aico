@@ -143,6 +143,7 @@ import {
   withTimeout, timeoutFor, ToolTimeoutError,
   terminal, closeAllTerminals,
   observe, blockedReason, resetObservations, isObserved,
+  todoRead,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -5933,6 +5934,58 @@ if (findBrowser()) {
 
 
 
+
+
+console.log('\n══ A TASK LIST BELONGS TO ITS SESSION ══');
+
+{
+  // The list used to be one file in the home directory, shared by every session
+  // on the machine. Observed live: a fresh session about a counter button
+  // opened holding five items from an unrelated floor-plan project, and the
+  // completion gate refused to let it finish until the model worked out they
+  // were somebody else's and cancelled them.
+  const inSession = (id, fn) => runInContext({ cwd: process.cwd(), sessionId: id }, fn);
+
+  await inSession('todo-session-a', async () => {
+    await todoWrite({ todos: [
+      { id: '1', title: 'Build the floor plan', status: 'pending', priority: 'high' },
+      { id: '2', title: 'Add egress arrows', status: 'in_progress', priority: 'medium' },
+    ] });
+  });
+
+  const aCount = await inSession('todo-session-a', () => getOpenTodoCount());
+  assert(aCount === 2, `The session that wrote them sees them (${aCount})`);
+
+  const bCount = await inSession('todo-session-b', () => getOpenTodoCount());
+  assert(bCount === 0, `A different session starts empty (${bCount})`);
+
+  const bList = await inSession('todo-session-b', () => todoRead());
+  assert(/No todos/.test(bList), 'And is told so plainly rather than shown somebody else\'s work');
+
+  // Writing in one must not disturb the other.
+  await inSession('todo-session-b', async () => {
+    await todoWrite({ todos: [{ id: '9', title: 'Something else', status: 'pending', priority: 'low' }] });
+  });
+  const aStill = await inSession('todo-session-a', () => todoRead());
+  assert(/floor plan/.test(aStill), 'The first session still has its own list');
+  assert(!/Something else/.test(aStill), 'And has not been given the second one\'s');
+
+  // Completion counts what is genuinely open, which is what the gate asks.
+  await inSession('todo-session-a', async () => {
+    await todoWrite({ todos: [
+      { id: '1', title: 'Build the floor plan', status: 'done', priority: 'high' },
+      { id: '2', title: 'Add egress arrows', status: 'cancelled', priority: 'medium' },
+    ] });
+  });
+  const finished = await inSession('todo-session-a', () => getOpenTodoCount());
+  assert(finished === 0, 'Done and cancelled are both closed');
+
+  // Left behind, these make the next run of this suite start dirty — the same
+  // way a shared list made every new session start dirty.
+  for (const id of ['todo-session-a', 'todo-session-b']) {
+    fs.rmSync(path.join(os.homedir(), '.aico', 'todos', `${id}.json`), { force: true });
+  }
+}
 
 console.log('\n══ READ BEFORE YOU WRITE ══');
 

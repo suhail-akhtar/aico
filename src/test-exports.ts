@@ -15,7 +15,7 @@ export { createTokenTracker, estimateTokens } from './tokens.js';
 export { readMemory } from './memory/index.js';
 export { runHooks, freezeHooks, resetHooks } from './hooks.js';
 // Exports for the new-logic test suites
-export { getOpenTodoCount, todoWrite } from './tools/todo.js';
+export { getOpenTodoCount, todoWrite, todoRead } from './tools/todo.js';
 export { maybeAutoCompactConversation, getCompactionThreshold } from './compact.js';
 export { getContextWindow, getEffectiveContextBudget, resetContextWindowCache } from './context-window.js';
 export { skillRegistry } from './skills/index.js';

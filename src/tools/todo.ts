@@ -1,8 +1,27 @@
-import { readFile, writeFile } from 'fs/promises';
+/**
+ * The task list, and whose it is.
+ *
+ * It used to be one file in the home directory, shared by every session on the
+ * machine. Open a new chat and it inherited whatever the last one had left
+ * unfinished — observed live: a fresh session about a counter button opened
+ * holding five items from an unrelated floor-plan project, and the completion
+ * gate dutifully refused to let it finish until the model worked out they were
+ * somebody else's and cancelled them.
+ *
+ * A task list belongs to the piece of work that created it. Keyed by session,
+ * so the gate is asking about this turn's work and the panel is showing it.
+ *
+ * @module tools/todo
+ */
+
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { currentRunContext } from '../run-context.js';
 
-const TODO_FILE = '.aico-todos.json';
+const TODO_DIR = path.join(os.homedir(), '.aico', 'todos');
+/** Where a run with no session id lands — a one-shot CLI invocation. */
+const UNSCOPED = 'unscoped';
 
 export interface Todo {
   id: string;
@@ -11,8 +30,10 @@ export interface Todo {
   priority: 'high' | 'medium' | 'low';
 }
 
+/** A session id reduced to something safe to use as a filename. */
 function todoFilePath(): string {
-  return path.join(os.homedir(), TODO_FILE);
+  const id = currentRunContext()?.sessionId ?? UNSCOPED;
+  return path.join(TODO_DIR, `${id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120)}.json`);
 }
 
 async function loadTodos(): Promise<Todo[]> {
@@ -55,7 +76,9 @@ export interface TodoWriteInput {
 }
 
 export async function todoWrite(input: TodoWriteInput): Promise<string> {
-  await writeFile(todoFilePath(), JSON.stringify(input.todos, null, 2), 'utf8');
+  const file = todoFilePath();
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify(input.todos, null, 2), 'utf8');
   return `Saved ${input.todos.length} todo(s).\n${formatTodos(input.todos)}`;
 }
 
