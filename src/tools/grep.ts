@@ -2,7 +2,7 @@ import { readFile } from 'fs/promises';
 import { currentCwd } from '../run-context.js';
 import path from 'path';
 import fastGlob from 'fast-glob';
-import { resolveInsideWorkspace } from './path.js';
+import { resolveForReading } from './path.js';
 
 export interface GrepInput {
   pattern: string;
@@ -19,7 +19,7 @@ interface GrepMatch {
 }
 
 export async function grepFiles(input: GrepInput): Promise<string> {
-  const basePath = input.path ? resolveInsideWorkspace(input.path, 'path') : currentCwd();
+  const basePath = input.path ? resolveForReading(input.path, 'path') : currentCwd();
   const globPattern = input.glob ?? '**/*';
 
   const files = await fastGlob(globPattern, {

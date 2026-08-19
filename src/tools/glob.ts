@@ -1,6 +1,6 @@
 import fastGlob from 'fast-glob';
 import { currentCwd } from '../run-context.js';
-import { resolveInsideWorkspace } from './path.js';
+import { resolveForReading } from './path.js';
 
 export interface GlobInput {
   pattern: string;
@@ -8,7 +8,7 @@ export interface GlobInput {
 }
 
 export async function globFiles(input: GlobInput): Promise<string> {
-  const cwd = input.cwd ? resolveInsideWorkspace(input.cwd, 'cwd') : currentCwd();
+  const cwd = input.cwd ? resolveForReading(input.cwd, 'cwd') : currentCwd();
   const matches = await fastGlob(input.pattern, {
     cwd,
     dot: true,

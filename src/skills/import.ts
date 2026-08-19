@@ -74,8 +74,15 @@ export function userSkillsDir(): string {
  * to the skills directory itself, passed a `startsWith` check that equality
  * satisfies, and recursively deleted every skill the user had. Names made only
  * of dots are refused here, and the caller checks the boundary again.
+ *
+ * Exported because it is the one rule, and the paths that lacked it were the
+ * dangerous ones: `addSkill` takes its filename from a name the *model* chose,
+ * and `install` from a name a *downloaded file* chose. Both did
+ * `path.join(dir, name + '.md')` with no sanitising at all — measured, a
+ * SkillCreate call naming itself `../escaped-probe` wrote outside the skills
+ * directory. Separators are stripped here, so nothing can traverse.
  */
-function safeName(name: string): string {
+export function safeName(name: string): string {
   const cleaned = name.trim().toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '')

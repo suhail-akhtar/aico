@@ -28,6 +28,7 @@ import path from 'path';
 import { currentCwd } from '../run-context.js';
 import os from 'os';
 import { resolveWorkspaceRoot } from '../workspace.js';
+import { getBuiltinDir } from '../skills/loader.js';
 import { getWorkspaceRuntime } from '../workspace.js';
 
 /** Whether `target` is `parent` or sits beneath it. */
@@ -45,6 +46,19 @@ function isInside(parent: string, target: string): boolean {
  */
 export function writableRoots(cwd = currentCwd()): string[] {
   const roots = [path.resolve(cwd)];
+
+  // Skills the user installed and the agent authors. Watched live: the
+  // orchestrator wrote a skill, ran its script, found a bug in it, was refused
+  // an Edit — and then rewrote the identical file with Bash and python. Four
+  // extra calls, the same result, and the change no longer visible as a diff.
+  //
+  // A rule Bash walks straight through is not a boundary, it is friction, and
+  // this one bought nothing: SkillCreate already replaces any skill by name. So
+  // the tools that show their work are allowed to do what the shell could do
+  // regardless. Built-in skills stay out — those ship with AICO and are
+  // readable only, which is the asymmetry actually worth keeping.
+  roots.push(path.join(os.homedir(), '.aico', 'skills'));
+
   try {
     const runtime = getWorkspaceRuntime();
     const workspace = resolveWorkspaceRoot(runtime.settings, runtime.cwd ?? cwd);
@@ -67,14 +81,21 @@ export function writableRoots(cwd = currentCwd()): string[] {
  * agent fell back to `cat` through Bash, which worked by luck and would not
  * have on a machine without it.
  *
- * Readable, not writable, and the asymmetry is the point: a procedure you chose
- * to install is content you have already decided to trust reading, and nothing
- * about that argues for letting the file tools rewrite it in place.
+ * Used by every tool that only looks — Read, LS, Glob, Grep. Fixing Read alone
+ * was the obvious half-measure and it showed up within one turn: the
+ * orchestrator created a skill, ran LS on the directory it had just been told
+ * it owned, and was refused. A boundary that four tools disagree about is not a
+ * boundary, it is a lottery.
+ *
+ * The one thing readable adds over writable is the **built-in** skills, which
+ * ship inside the install and are nobody's to edit. That is the asymmetry worth
+ * keeping: a procedure you installed is yours to change, and a procedure that
+ * came with the program is yours to read.
  */
 export function readableRoots(cwd = currentCwd()): string[] {
   const roots = writableRoots(cwd);
-  const skills = path.join(os.homedir(), '.aico', 'skills');
-  if (!roots.some(root => isInside(root, skills))) roots.push(skills);
+  const builtin = getBuiltinDir();
+  if (!roots.some(root => isInside(root, builtin))) roots.push(builtin);
   return roots;
 }
 
@@ -91,7 +112,7 @@ export function resolveForReading(inputPath: string, label = 'path'): string {
   if (roots.some(root => isInside(root, resolved))) return resolved;
 
   throw new Error(
-    `${label} must stay inside the project, the AICO workspace, or the skills directory.\n` +
+    `${label} must stay inside the project, the AICO workspace, or the skills directories.\n` +
     `  given:     ${inputPath}\n` +
     roots.map(root => `  allowed:   ${root}`).join('\n'),
   );

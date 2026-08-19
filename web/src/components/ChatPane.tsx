@@ -109,16 +109,19 @@ export function ChatPane(): React.ReactElement {
             it is only this page that has gone deaf. Saying that turns "it is
             broken" into "reload it", which is both true and actionable.
 
-            Deliberately does not diagnose. The obvious culprit — HTTP/1.1's six
-            connections per host — was measured and ruled out here, and a banner
-            that confidently names the wrong cause sends people to fix the wrong
-            thing.
+            Deliberately does not diagnose, and deliberately does not promise a
+            fix. Two candidate causes were measured and ruled out — HTTP/1.1's
+            six connections per host, and the server being slow to accept, which
+            answers an identical request from curl instantly. An earlier draft
+            said "reloading usually fixes it" and was watched not fixing it. A
+            banner that names the wrong cause, or promises a remedy that does
+            not work, is worse than one that just says what is true.
           */}
           {stalledConnect && (
             <div className="mb-4 rounded-xl border border-aico-warning/30 bg-aico-warning/8 px-4 py-2 text-[13px] text-aico-warning">
               Still connecting to the event stream. Your run is unaffected — it is on the server and
-              keeps going — but this page will not show it until the stream opens. Reloading usually
-              fixes it.
+              keeps going — but this page will not show it until the stream opens. It keeps
+              retrying; if it stays this way, try reloading or another browser window.
             </div>
           )}
 

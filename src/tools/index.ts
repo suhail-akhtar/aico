@@ -606,6 +606,7 @@ export async function executeTool(
       result = await executeSkillCreate(args as {
         name: string; description: string; prompt: string;
         aliases?: string[]; trigger?: string; scope?: 'user' | 'project';
+        allowedTools?: string[]; resources?: Array<{ path: string; content: string }>;
       });
       break;
     default:

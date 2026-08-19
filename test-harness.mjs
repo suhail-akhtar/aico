@@ -151,6 +151,8 @@ import {
   runScoped, currentRequirements,
   listChanges, diffOf, revertFile, isGitRepo,
   importSkill, removeSkill, skillCatalogue, useSkill, loadAllSkills,
+  executeSkillCreate,
+  listDirectory, globFiles, grepFiles, getBuiltinDir,
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
   checkProjectGate, newestSourceChange, touchedFiles,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
@@ -5084,18 +5086,60 @@ console.log('  -- The agent may write to its own workspace --');
   catch (err) { skillRead = err.message; }
   assert(skillRead === '', `a skill's bundled file can be read${skillRead ? `: ${skillRead}` : ''}`);
 
-  // The asymmetry is the whole point: readable does not mean writable.
+  // Writing to it is allowed too, and that reversed an earlier decision.
+  // "Readable, not writable" sounded principled until it was watched failing:
+  // the orchestrator authored a skill, found a bug in its script, was refused
+  // an Edit, and rewrote the identical file with Bash and python instead. A
+  // rule the shell walks straight through is friction, not a boundary.
   let skillWrite = '';
   try { resolveInsideWorkspace(skillFile, 'file_path'); }
   catch (err) { skillWrite = err.message; }
-  assert(skillWrite !== '', 'but writing to it through the file tools is still refused');
+  assert(skillWrite === '', `a skill you installed can also be edited${skillWrite ? `: ${skillWrite}` : ''}`);
 
-  // Widening reads must not widen them past the roots actually named.
+  // The asymmetry that survived: built-ins ship with AICO and are read-only.
+  const builtinFile = nodePath.join(getBuiltinDir(), 'commit.md');
+  let builtinRead = '';
+  try { resolveForReading(builtinFile, 'file_path'); }
+  catch (err) { builtinRead = err.message; }
+  assert(builtinRead === '', `a built-in skill can be read${builtinRead ? `: ${builtinRead}` : ''}`);
+
+  // Stated as the rule rather than one machine's answer: in a development
+  // checkout the built-ins sit *inside* the project being edited, so they are
+  // writable for the same reason the rest of the source is. It is the installed
+  // case — dist/ somewhere else entirely — where the asymmetry bites.
+  const builtinInProject = writableRoots().some(root =>
+    nodePath.resolve(getBuiltinDir()).startsWith(nodePath.resolve(root)));
+  let builtinWrite = '';
+  try { resolveInsideWorkspace(builtinFile, 'file_path'); }
+  catch (err) { builtinWrite = err.message; }
+  assert(builtinInProject ? builtinWrite === '' : builtinWrite !== '',
+    builtinInProject
+      ? 'built-ins inside the checkout are writable, like the rest of the source'
+      : 'an installed built-in skill cannot be written — it came with the program');
+
+  // Widening must not widen past the roots actually named.
   let stillRefused = '';
   try { resolveForReading('../../../etc/passwd', 'file_path'); }
   catch (err) { stillRefused = err.message; }
   assert(stillRefused !== '', 'reading outside every root is still refused');
-  assert(readableRoots().length === writableRoots().length + 1, 'reads add exactly one root, not a wildcard');
+  assert(readableRoots().some(root => nodePath.resolve(getBuiltinDir()).startsWith(nodePath.resolve(root))),
+    'the built-in skills are always reachable for reading');
+  assert(readableRoots().length <= writableRoots().length + 1,
+    'reads add at most one root — the built-ins — never a wildcard');
+
+  // Every tool that only looks shares the boundary. Fixing Read alone was the
+  // obvious half-measure and failed within one turn: the orchestrator created a
+  // skill, ran LS on the directory it had just been given, and was refused.
+  const skillDir = nodePath.join(os.homedir(), '.aico', 'skills', 'x');
+  for (const [tool, run] of [
+    ['LS', () => listDirectory({ path: skillDir })],
+    ['Glob', () => globFiles({ pattern: '**/*.md', cwd: skillDir })],
+    ['Grep', () => grepFiles({ pattern: 'anything', path: skillDir })],
+  ]) {
+    let refused = '';
+    try { await run(); } catch (err) { refused = err.message; }
+    assert(!/must stay inside/.test(refused), `${tool} can reach a skill directory too (${refused})`);
+  }
 
   // Also found in the browser, and self-inflicted: a 7-byte tone.md was
   // announced as "1 KB", so the agent read it correctly, disbelieved its own
@@ -6191,6 +6235,81 @@ function writeClaudeSkill(root, name, extra = {}) {
   const missing = await useSkill({ name: 'no-such-skill' });
   assert(/no skill called/.test(missing), 'A wrong name is refused');
   assert(/commit/.test(missing), 'And the alternatives are named, since a near miss is the usual cause');
+}
+
+console.log('  -- The orchestrator can author a skill, and cannot escape with one --');
+{
+  const home = path.join(os.homedir(), '.aico', 'skills');
+
+  // Measured before this was fixed: SkillCreate took its filename straight from
+  // a name the *model* chose, so `../escaped-probe` wrote outside the skills
+  // directory entirely. The same hole was in install(), where the name comes
+  // from a file fetched over the network.
+  for (const escape of ['../escaped', '../../escaped', 'a/b/escaped', '..\\escaped', '.', '..']) {
+    const body = ['---', `name: ${escape}`, 'description: traversal probe', '---', 'body'].join('\n');
+    let landed = null, refused = '';
+    try { landed = (await skillRegistry.addSkill(body, escape, 'user')).filePath; }
+    catch (err) { refused = err.message; }
+    const escaped = landed !== null
+      && !nodePath.resolve(landed).startsWith(nodePath.resolve(home) + nodePath.sep);
+    assert(!escaped, `"${escape}" cannot write outside the skills directory (landed: ${landed})`);
+    if (landed && fs.existsSync(landed)) fs.rmSync(landed, { force: true });
+  }
+
+  // The point of the directory format is the files beside the markdown. Being
+  // able to import one but never author one left the good half read-only.
+  const created = await executeSkillCreate({
+    name: 'harness-authored',
+    description: 'A skill the orchestrator wrote, with files beside it',
+    prompt: 'Run scripts/check.py, then read references/tone.md.',
+    allowedTools: ['Bash', 'Read'],
+    resources: [
+      { path: 'scripts/check.py', content: 'print("ok")\n' },
+      { path: 'references/tone.md', content: '# Tone\nPlain.\n' },
+      // Every one of these must be refused rather than written elsewhere.
+      { path: '../../escaped.txt', content: 'nope' },
+      { path: 'SKILL.md', content: 'would overwrite the skill with its own attachment' },
+    ],
+  });
+  assert(/created and activated/.test(created), `the skill is created: ${created.slice(0, 120)}`);
+  assert(/Ships with:/.test(created), 'and reports what it ships with');
+
+  const dir = path.join(home, 'harness-authored');
+  assert(fs.existsSync(path.join(dir, 'SKILL.md')), 'a directory skill has SKILL.md at its top');
+  assert(fs.existsSync(path.join(dir, 'scripts', 'check.py')), 'and its script beside it');
+  assert(fs.existsSync(path.join(dir, 'references', 'tone.md')), 'and its reference');
+  assert(!fs.existsSync(path.join(home, 'escaped.txt')), 'a resource cannot escape the skill directory');
+  assert(!/would overwrite/.test(fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8')),
+    'and cannot overwrite the skill with an attachment named SKILL.md');
+
+  // Round trip: what the orchestrator wrote is what the loader reads back.
+  const reloaded = (await loadAllSkills({ disableBuiltins: true, extraDirs: [home] }))
+    .find(s => s.frontmatter.name === 'harness-authored');
+  assert(reloaded, 'the authored skill loads back from disk');
+  assert(reloaded.resources?.length === 2, `with both its files (${reloaded.resources?.join(', ')})`);
+  assert(reloaded.frontmatter.allowedTools?.join(',') === 'Bash,Read',
+    'and the allowed-tools it declared, in Claude\'s spelling');
+
+  // A colon in the description used to end the line early and truncate the skill.
+  const tricky = await executeSkillCreate({
+    name: 'harness-colon',
+    description: 'Deploy: staging first, then production',
+    prompt: 'body',
+  });
+  assert(/created and activated/.test(tricky), 'a description containing a colon still creates');
+  const colonSkill = (await loadAllSkills({ disableBuiltins: true, extraDirs: [home] }))
+    .find(s => s.frontmatter.name === 'harness-colon');
+  assert(colonSkill?.frontmatter.description === 'Deploy: staging first, then production',
+    `and survives the round trip intact (got: ${colonSkill?.frontmatter.description})`);
+
+  // A skill with no description can never be chosen, so it is refused outright.
+  const blank = await executeSkillCreate({ name: 'harness-blank', description: '  ', prompt: 'body' });
+  assert(/Error creating skill/.test(blank), 'a skill with no description is refused');
+  assert(/never be chosen/.test(blank), 'and the refusal says why that matters');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(path.join(home, 'harness-colon.md'), { force: true });
+  fs.rmSync(path.join(home, 'harness-blank.md'), { force: true });
 }
 
 console.log('  -- One skill per name, however many places define it --');

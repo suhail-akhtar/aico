@@ -1,6 +1,6 @@
 import { readdir, stat } from 'fs/promises';
 import path from 'path';
-import { resolveInsideWorkspace } from './path.js';
+import { resolveForReading } from './path.js';
 
 export interface LSInput {
   path?: string;
@@ -8,7 +8,7 @@ export interface LSInput {
 }
 
 export async function listDirectory(input: LSInput): Promise<string> {
-  const dirPath = resolveInsideWorkspace(input.path ?? '.', 'path');
+  const dirPath = resolveForReading(input.path ?? '.', 'path');
   const entries = await readdir(dirPath, { withFileTypes: true });
 
   const filtered = input.show_hidden
