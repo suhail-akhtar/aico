@@ -19,6 +19,10 @@ and local Ollama.
 
 **Status:** `0.3.0-beta`. Used daily, tested hard, not yet 1.0.
 
+New here? [**GUIDE.md**](GUIDE.md) walks through actually using it — the web
+client, planning before building, what the checks are doing when they push back,
+and what to do when something goes wrong.
+
 ---
 
 ## Why this one
@@ -55,12 +59,20 @@ A real session log looks like this:
 ## Install
 
 ```sh
-git clone https://github.com/suhailakhtar/aico.git
-cd aico && npm install && npm run build
-npm link                # makes `aico` available globally
+npx aico                 # try it without installing
+npm install -g aico      # or keep it
 ```
 
-Requires Node 18+.
+From source:
+
+```sh
+git clone https://github.com/suhailakhtar/aico.git
+cd aico && npm install && npm run build && npm run build:web
+npm link                 # makes `aico` available globally
+```
+
+Requires Node 18+. The web client ships in the package, so `aico serve` works
+from a bare `npx` with nothing else installed.
 
 ## Quick start
 
@@ -147,6 +159,59 @@ correct on tests neither model saw. Reproduce with `npm run test:live`.
 
 ---
 
+## It checks its own work
+
+The failure this exists for: three models were asked for a single-file 3D space
+planner, and a keyword check scored two of them twelve features out of twelve.
+Opened in a browser, one threw on load and rendered nothing, and the other was a
+shell — the toolbars were there, the app was not.
+
+Nothing in the loop had ever *run* the artifact. The agent wrote a file, read it
+back, saw its own text, and concluded it worked.
+
+**`VerifyApp` opens the page in a real browser** and reports what a person would
+hit: uncaught exceptions, console errors, failed and off-origin requests, what
+actually rendered — including whether a `<canvas>` was ever painted — and
+whether named controls do anything when clicked.
+
+```
+FAILED — file:///…/index.html has 3 problem(s). This artifact is not finished.
+
+Problems, worst first:
+  - uncaught: THREE is not defined
+  - 1 of 1 canvas element(s) were never drawn to
+  - "brand colour picker" does not work: set a new colour, and nothing changed
+
+What rendered:
+  183 elements, 3 canvas, 0 svg, 12 interactive control(s)
+  canvas 300×240 — NEVER DRAWN TO
+```
+
+**The verdict is not advisory.** A turn that produced a web page cannot end
+`completed` until a passing verdict exists for the file *as it stands now*.
+Four ways to fail, each with its own objection:
+
+| State | What the turn is told |
+|---|---|
+| Built it, never opened it | Reading the source you just wrote is not verification |
+| Verified, then edited | The last result no longer describes what is on disk |
+| Loads, but nothing was clicked | It has 21 controls and the check exercised none |
+| Checks miss the brief | Nothing verified: *"Export to PDF triggers a building-up animation"* |
+
+That last one reads the requirements out of **your own words**, not the model's
+— a model that writes its own acceptance criteria writes ones it has met. Only
+requirements naming an *action* are held to a check: a colour palette is a real
+requirement and no click proves it.
+
+It drives each control the way its type demands. Clicking a `<input type=color>`
+opens a native dialog headless Chrome does not have, so a click proves nothing —
+value controls get a value and the `input`/`change` events a real interaction
+raises.
+
+Uses `playwright-core` against a Chrome or Edge you already have.
+
+---
+
 ## Steering — redirect a run in flight
 
 Type while the agent is working and the message is delivered at its **next step
@@ -165,6 +230,69 @@ actually keep the session cookie name unchanged
 Queued input also **prevents the loop from finishing**: a model that was about
 to answer will continue instead. Both queues are durable, so anything typed
 before a crash is still owed when the session resumes.
+
+---
+
+## Plan before you build
+
+Turn **Plan** on and the turn cannot change anything — the write tools are gone,
+not discouraged. The agent investigates, then finishes with a structured plan
+you can answer:
+
+```
+Plan   Create VERSION.txt with the version from package.json
+  1  Write VERSION.txt containing "0.3.0-beta"
+     Create VERSION.txt in the repo root with the single line "0.3.0-beta".
+     VERSION.txt
+  Risk: None.
+
+  [ Go ahead ]  Amend   Later                          Decline
+```
+
+**Go ahead** turns planning off and the agent starts work — the mode change is
+part of the answer, not something you have to remember. **Amend** puts the plan
+in the composer so a correction is a sentence rather than a re-brief, and keeps
+planning on. **Later** keeps it without starting it, and offers *Start it now*
+whenever you come back. **Decline** closes it.
+
+Assumptions appear *above* the steps, because an assumption you would have
+corrected costs a sentence now and a rewrite later — putting it beside the
+approve button is the same as not asking.
+
+A proposed plan ends the turn. Asked to "call it once and stop", a model
+proposed the same plan three times and then announced it would write a file in
+a mode with no write tools; the loop enforces it now.
+
+---
+
+## Running things
+
+**`Bash`** is one-shot. Commands that are not supposed to exit — a dev server, a
+watcher, a log tail — are detected and **started in the background**: you get the
+pid and the URL it printed, and the turn carries on.
+
+```
+Started in the background — this looks like a dev server. It is still running as
+pid 41820 and printed http://localhost:8099. Nothing is waiting on it, so carry
+on — you can verify against http://localhost:8099 now. Stop it with `kill 41820`.
+```
+
+That replaced the worst hang this project has had: a server started in the
+foreground held one turn for **139 minutes**, 138 of them with no output, because
+the tool description recommended `timeout=0` for anything slow and `timeout=0`
+meant *forever*. Nothing runs forever now — 30 minutes is the ceiling, and a
+backstop wraps **every** tool dispatch, not just Bash. A browser that will not
+launch and an MCP server that goes quiet are the same bug as that dev server.
+
+**`Terminal`** is a shell that remembers. `cd` into a directory and stay there;
+export a variable and it is still set next call. Every result reports the
+working directory it ended in, because a `cd` that did not take looks exactly
+like one that did until something writes a file into the wrong place.
+
+**`Read` before `Edit` is enforced**, not requested. An edit to a file you have
+not read is refused, as is one to a file that has changed since you read it — a
+remembered `old_str` either fails to match or, worse, matches something that
+drifted and rewrites a line nobody has looked at.
 
 ---
 
@@ -353,9 +481,21 @@ startup — reaching the port is not the same as being able to drive it, because
 this server can run commands and edit files.
 
 Chat and trajectory are two readings of one session. Tool calls render as cards
-with diffs, sessions are named automatically and can be pinned by renaming,
-transcripts export as Markdown or text, and settings — providers, permission
-mode, context and spend ceilings — are searchable across every pane.
+with diffs and an outcome — a browser check reads *works* or *3 problems* with
+the worst one inline, a persistent shell reports the directory it left you in, a
+backgrounded command reads *running · pid 4321* rather than a misleading
+*exit 0*.
+
+A plan and a task list float beside the conversation when there is one, and know
+when to stop talking: both collapse to a single line once resolved, and *all
+done* is never shown for a list finished by cancelling half of it — that reads
+"0 done · 5 cancelled", because conflating the two is how a task list becomes a
+formality. Closing a panel records *what* was closed, so a genuinely new plan
+comes back on its own and the one you dismissed stays gone.
+
+Sessions are named automatically and can be pinned by renaming, transcripts
+export as Markdown or text, and settings — providers, permission mode, context
+and spend ceilings — are searchable across every pane.
 
 ---
 
@@ -368,6 +508,14 @@ mode, context and spend ceilings — are searchable across every pane.
   between steps, so each step reasons afresh from the conversation.
 - **Legacy sessions.** Transcripts recorded before the event log are seeded once
   on resume; tool detail from before the migration was never stored.
+- **Verification covers the web.** `VerifyApp` opens HTML in a browser. A CLI
+  tool, a library or a server has no equivalent gate — the tests it runs are
+  whatever the agent chose to run.
+- **`Terminal` is a pipe, not a pseudo-terminal.** State persists; programs that
+  demand a TTY do not work, and it says so rather than hanging.
+- **A check can be shallow.** Requirements coverage forces a check *per
+  behaviour the brief named*; it cannot judge whether the behaviour is any good.
+  It closes "never built it" and "never looked", not "built it badly".
 - Not a sandbox for untrusted code. Review what it runs.
 
 ---
