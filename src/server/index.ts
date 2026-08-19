@@ -347,6 +347,37 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
+    if (route === 'changes' && req.method === 'GET') {
+      const sessionId = url.searchParams.get('id');
+      if (!sessionId) { send(res, 400, { error: 'id required' }); return; }
+      const cwd = await resolveCwd(sessionId);
+      // Marked, not filtered: a conflicting edit of the reader's own sitting in
+      // the same tree is exactly the case where a revert is dangerous, so it is
+      // listed too.
+      const opened = peek(sessionId)?.session
+        ?? await loadEventLog(sessionId, cwd).catch(() => null);
+      const { deliverables } = await import('../session/projections.js');
+      const written = opened
+        ? deliverables(opened).map(d => path.resolve(cwd, d.path))
+        : [];
+      const { listChanges } = await import('./changes.js');
+      send(res, 200, await listChanges(cwd, written));
+      return;
+    }
+
+    if (route === 'changes/diff' && req.method === 'GET') {
+      const sessionId = url.searchParams.get('id');
+      const file = url.searchParams.get('path');
+      if (!sessionId || !file) { send(res, 400, { error: 'id and path required' }); return; }
+      const { diffOf } = await import('./changes.js');
+      try {
+        send(res, 200, { diff: await diffOf(await resolveCwd(sessionId), file) });
+      } catch (err) {
+        send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
     if (route === 'session/export' && req.method === 'GET') {
       const sessionId = url.searchParams.get('id');
       if (!sessionId) { send(res, 400, { error: 'id required' }); return; }
@@ -564,6 +595,20 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       case 'cancel': {
         const { sessionId } = body as { sessionId?: string };
         send(res, 200, { cancelled: sessionId ? runs.cancel(sessionId) : false });
+        return;
+      }
+      case 'changes/revert': {
+        // Destructive, and deliberately narrow: one named path, and deleting a
+        // new file has to be asked for separately because "revert" and "delete"
+        // are not the same promise.
+        const { sessionId, path: file, deleteUntracked } = body as {
+          sessionId?: string; path?: string; deleteUntracked?: boolean;
+        };
+        if (!sessionId || !file) { send(res, 400, { error: 'sessionId and path required' }); return; }
+        const { revertFile } = await import('./changes.js');
+        const outcome = await revertFile(await resolveCwd(sessionId), file,
+          { deleteUntracked: deleteUntracked === true });
+        send(res, outcome.ok ? 200 : 400, outcome);
         return;
       }
       case 'answer': {

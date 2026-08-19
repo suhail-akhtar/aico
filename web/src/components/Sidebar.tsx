@@ -23,7 +23,7 @@ import { SessionRowMenu } from './SessionRowMenu';
 import { ProjectGroupHeader } from './ProjectGroupHeader';
 import { ResizeHandle, useSidebarWidth } from './ResizeHandle';
 
-export type View = 'chat' | 'trajectory' | 'system';
+export type View = 'chat' | 'changes' | 'trajectory' | 'system';
 
 interface Props {
   view: View;

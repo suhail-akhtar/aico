@@ -19,6 +19,7 @@ import { Trajectory } from './components/Trajectory';
 import { GoalBar } from './components/GoalBar';
 import { ActivityLine } from './components/ActivityLine';
 import { SidePanels } from './components/SidePanels';
+import { ChangesPane } from './components/ChangesPane';
 import { SessionMenu } from './components/SessionMenu';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { ProjectPicker } from './components/ProjectPicker';
@@ -104,10 +105,12 @@ export function App(): React.ReactElement {
             {view === 'system' ? 'System' : (title || 'New session')}
           </span>
 
-          {/* Chat and Trajectory are two readings of one session, so they are
-              tabs on it rather than separate destinations in the sidebar. */}
+          {/* Three readings of one session — what was said, what it did to the
+              tree, and what happened in what order — so they are tabs on it
+              rather than separate destinations in the sidebar. */}
           <nav className="flex items-center gap-1">
             <Tab active={view === 'chat'} onClick={() => setView('chat')}>Chat</Tab>
+            <Tab active={view === 'changes'} onClick={() => setView('changes')}>Changes</Tab>
             <Tab active={view === 'trajectory'} onClick={() => setView('trajectory')}>Trajectory</Tab>
           </nav>
 
@@ -139,6 +142,7 @@ export function App(): React.ReactElement {
             <Composer />
           </>
         )}
+        {view === 'changes' && <ChangesPane />}
         {view === 'trajectory' && <Trajectory />}
         {view === 'system' && <SystemPanel />}
       </main>

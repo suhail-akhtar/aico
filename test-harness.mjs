@@ -6,6 +6,7 @@ import fs from 'fs';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import os from 'os';
+import { execFileSync } from 'child_process';
 
 import {
   classifyBashCommand, isBashReadOnly,
@@ -145,6 +146,7 @@ import {
   observe, blockedReason, resetObservations, isObserved,
   todoRead,
   runScoped, currentRequirements,
+  listChanges, diffOf, revertFile, isGitRepo,
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
   checkProjectGate, newestSourceChange, touchedFiles,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
@@ -6019,6 +6021,127 @@ if (findBrowser()) {
   assert(/carried on/.test(reply), 'A normal turn continues past a proposed plan');
 }
 
+
+
+console.log('\n══ WHAT CHANGED, AND HOW TO PUT IT BACK ══');
+
+/** A throwaway repo with one commit, so HEAD exists to diff against. */
+function makeRepo() {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aico-chg-')));
+  const run = (args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  run(['init', '-q']);
+  run(['config', 'user.email', 'probe@example.invalid']);
+  run(['config', 'user.name', 'probe']);
+  fs.writeFileSync(path.join(dir, 'kept.txt'), 'one\ntwo\nthree\n');
+  fs.writeFileSync(path.join(dir, 'doomed.txt'), 'delete me\n');
+  run(['add', '-A']);
+  run(['commit', '-qm', 'first']);
+  return dir;
+}
+
+{
+  const dir = makeRepo();
+  assert(await isGitRepo(dir), 'A git repo is recognised');
+  assert(!await isGitRepo(os.tmpdir()), 'And a plain directory is not');
+
+  // Nothing changed yet.
+  const clean = await listChanges(dir);
+  assert(clean.files.length === 0, 'A clean tree lists nothing');
+
+  fs.writeFileSync(path.join(dir, 'kept.txt'), 'one\nTWO\nthree\nfour\n');
+  fs.writeFileSync(path.join(dir, 'fresh.ts'), 'export const a = 1;\n');
+  fs.rmSync(path.join(dir, 'doomed.txt'));
+
+  const report = await listChanges(dir, [path.join(dir, 'kept.txt')]);
+  const byPath = Object.fromEntries(report.files.map(f => [f.path, f]));
+
+  assert(report.files.length === 3, `Every kind is listed (${report.files.length})`);
+  assert(byPath['kept.txt'].kind === 'modified', 'A changed file is modified');
+  assert(byPath['fresh.ts'].kind === 'untracked', 'A new file is untracked');
+  assert(byPath['doomed.txt'].kind === 'deleted', 'A removed file is deleted');
+  assert(byPath['kept.txt'].added === 2 && byPath['kept.txt'].removed === 1,
+    `Line counts are real (+${byPath['kept.txt'].added} -${byPath['kept.txt'].removed})`);
+
+  // Marked, not filtered. Hiding a change the reader made themselves is exactly
+  // the case where reverting is dangerous.
+  assert(byPath['kept.txt'].bySession === true, "The session's own edit is marked");
+  assert(byPath['fresh.ts'].bySession === false, 'And a change from elsewhere is still listed');
+  assert(report.files[0].bySession, "The session's files sort first");
+
+  const diff = await diffOf(dir, 'kept.txt');
+  assert(/^\+four$/m.test(diff) && /^-two$/m.test(diff), 'The diff shows both sides');
+  const newDiff = await diffOf(dir, 'fresh.ts');
+  assert(/export const a = 1;/.test(newDiff), 'A file git has never seen still diffs');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // Reverting is the one operation here that destroys work.
+  const dir = makeRepo();
+  const kept = path.join(dir, 'kept.txt');
+  fs.writeFileSync(kept, 'ruined\n');
+  fs.writeFileSync(path.join(dir, 'fresh.ts'), 'export const a = 1;\n');
+
+  assert((await revertFile(dir, 'kept.txt')).ok, 'A tracked file reverts');
+  // Normalised, because git on Windows checks out under core.autocrlf and hands
+  // back CRLF for a file committed with LF. The bytes differ; the content does
+  // not, and asserting on the bytes would be asserting on the platform.
+  assert(fs.readFileSync(kept, 'utf8').replace(/\r\n/g, '\n') === 'one\ntwo\nthree\n',
+    'And its contents come back');
+
+  // "Revert" and "delete" are not the same promise, so the second one has to be
+  // asked for by name.
+  const refused = await revertFile(dir, 'fresh.ts');
+  assert(!refused.ok, 'A new file is not silently deleted');
+  assert(/means deleting it/.test(refused.error), 'And is told what reverting it would mean');
+  assert(fs.existsSync(path.join(dir, 'fresh.ts')), 'The file is still there');
+
+  const deleted = await revertFile(dir, 'fresh.ts', { deleteUntracked: true });
+  assert(deleted.ok && deleted.deleted === true, 'Asked properly, it is deleted');
+  assert(!fs.existsSync(path.join(dir, 'fresh.ts')), 'And is gone');
+
+  // A staged change must go too: a revert that leaves the index holding the old
+  // edit has not reverted anything a commit would see.
+  fs.writeFileSync(kept, 'staged ruin\n');
+  execFileSync('git', ['add', 'kept.txt'], { cwd: dir, stdio: 'ignore' });
+  assert((await revertFile(dir, 'kept.txt')).ok, 'A staged change reverts');
+  const after = await listChanges(dir);
+  assert(after.files.length === 0, `Nothing is left behind in the index (${after.files.length})`);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // The boundary. This deletes files, so every shape of "get me out of here"
+  // is worth an assertion rather than an assumption.
+  const dir = makeRepo();
+  const escapes = [
+    '../../../etc/passwd', '..\\..\\secrets.txt', '../secrets.txt', '..\\package.json',
+    '/etc/passwd', 'C:\\Windows\\win.ini', 'src/../../outside.txt', './../../outside.txt',
+    'a\0b', '',
+  ];
+  for (const attempt of escapes) {
+    const r = await revertFile(dir, attempt, { deleteUntracked: true });
+    assert(!r.ok && /outside the project/.test(r.error ?? ''),
+      `Refused: ${JSON.stringify(attempt)}`);
+  }
+  for (const attempt of escapes.slice(0, 6)) {
+    let threw = '';
+    try { await diffOf(dir, attempt); } catch (err) { threw = err.message; }
+    assert(/outside the project/.test(threw), `Diff refused too: ${JSON.stringify(attempt)}`);
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // Somewhere that is not a repository is not an error, it is a normal answer.
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-norepo-'));
+  const report = await listChanges(plain);
+  assert(report.isRepo === false, 'A non-repo says so');
+  assert(report.files.length === 0, 'And lists nothing rather than throwing');
+  fs.rmSync(plain, { recursive: true, force: true });
+}
 
 console.log('\n══ THE PROJECT SAYS WHAT WORKING MEANS ══');
 

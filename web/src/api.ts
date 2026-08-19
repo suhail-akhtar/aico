@@ -121,6 +121,8 @@ function safeParse(text: string): unknown {
 const post = <T,>(path: string, body: unknown): Promise<T> =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
+const get = <T,>(path: string): Promise<T> => request<T>(path, { method: 'GET' });
+
 // ── conversation ─────────────────────────────────────────────────────
 
 export interface SubmitOptions {
@@ -189,6 +191,15 @@ export const api = {
   steer: (sessionId: string, content: string) => post<{ ok: boolean }>('steer', { sessionId, content }),
   /** Resolve the question a blocked turn is waiting on. */
   answer: (sessionId: string, content: string) => post<{ ok: boolean }>('answer', { sessionId, content }),
+
+  /** What differs from the last commit, with this session's own edits marked. */
+  changes: (sessionId: string) => get<ChangesReport>(`changes?id=${encodeURIComponent(sessionId)}`),
+  changesDiff: (sessionId: string, file: string) =>
+    get<{ diff: string }>(`changes/diff?id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(file)}`),
+  /** Destructive. `deleteUntracked` is required for a file that was never committed. */
+  revert: (sessionId: string, file: string, deleteUntracked = false) =>
+    post<{ ok: boolean; deleted?: boolean; error?: string }>(
+      'changes/revert', { sessionId, path: file, deleteUntracked }),
   followup: (sessionId: string, content: string) => post<{ ok: boolean }>('followup', { sessionId, content }),
 
   trajectory: (sessionId: string, opts: { limit?: number; before?: number } = {}) => {
@@ -441,6 +452,25 @@ export interface WorkspaceInfo {
   root: string;
   configured: boolean;
   sessionDir?: string;
+}
+
+export interface FileChange {
+  path: string;
+  kind: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked';
+  from?: string;
+  added: number;
+  removed: number;
+  binary: boolean;
+  /** True when a tool in this session wrote it. */
+  bySession: boolean;
+}
+
+export interface ChangesReport {
+  isRepo: boolean;
+  files: FileChange[];
+  added: number;
+  removed: number;
+  reverted: string[];
 }
 
 export interface SystemSnapshot {

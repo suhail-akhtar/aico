@@ -190,3 +190,4 @@ export { observe, blockedReason, resetObservations, isObserved } from './tools/o
 export { runScoped } from './run-scoped.js';
 export { detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck, checkProjectGate, checkResults, newestSourceChange, touchedFiles } from './checks.js';
 export { runChecks } from './tools/run-checks.js';
+export { listChanges, diffOf, revertFile, isGitRepo } from './server/changes.js';
