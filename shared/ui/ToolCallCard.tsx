@@ -60,12 +60,15 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   name,
   args,
   result,
+  failed,
   running,
   progressMs,
 }: {
   name: string;
   args?: Record<string, unknown>;
   result?: unknown;
+  /** The engine's own verdict, which outranks anything inferred from the text. */
+  failed?: boolean;
   running?: boolean;
   /** Elapsed time of a still-running command, when it reports progress. */
   progressMs?: number;
@@ -82,7 +85,14 @@ export const ToolCallCard = React.memo(function ToolCallCard({
 
   const argPreview = describeArgs(args);
 
-  const { text: resultText, isError } = result !== undefined ? formatResult(result) : { text: '', isError: false };
+  const { text: resultText, isError: looksLikeError } =
+    result !== undefined ? formatResult(result) : { text: '', isError: false };
+  // The engine said so, or the text betrays it. The first is authoritative and
+  // was being thrown away: a structured failure arrives as the JSON string the
+  // log stored, and a string cannot be inspected for an `error` field, so every
+  // one of them rendered as a green tick. Watched live, six refused writes in
+  // plan mode all displayed as "Wrote VERSION.txt".
+  const isError = failed === true || looksLikeError;
   const resultLineCount = resultText.split('\n').length;
   // The headline, where the tool has one. A line count is honest and nearly
   // useless: a browser check that found three broken controls and one that
@@ -133,7 +143,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({
         )}
         {!argPreview && <span className="flex-1" />}
 
-        {change && (change.added.length > 0 || change.removed.length > 0) && (
+        {change && !isError && (change.added.length > 0 || change.removed.length > 0) && (
           <span className="shrink-0 text-[11px] tabular-nums">
             {change.added.length > 0 && <span className="text-aico-success">+{change.added.length}</span>}
             {change.removed.length > 0 && <span className="ml-1 text-aico-danger">−{change.removed.length}</span>}
@@ -176,8 +186,12 @@ export const ToolCallCard = React.memo(function ToolCallCard({
         </div>
       )}
 
-      {/* A file write shows its diff without being asked. */}
-      {change && <FileDiff change={change} />}
+      {/*
+        A file write shows its diff without being asked — but only if it
+        happened. The diff is built from the *arguments*, so a refused write
+        drew a confident green patch for a file that was never created.
+      */}
+      {change && !isError && <FileDiff change={change} />}
 
       {(expanded || live) && resultText && (
         <pre

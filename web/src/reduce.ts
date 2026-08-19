@@ -119,7 +119,10 @@ export function applyLogEvent(
       for (const [key, message] of logged) {
         if (message.type === 'tool' && message.toolCallId === callId) {
           const next = new Map(logged);
-          next.set(key, { ...message, toolResult: data.content, toolRunning: false });
+          next.set(key, {
+            ...message, toolResult: data.content, toolRunning: false,
+            toolFailed: data.isError === true,
+          });
           return next;
         }
       }
@@ -133,6 +136,7 @@ export function applyLogEvent(
         toolName: String(data.name ?? 'tool'),
         toolCallId: callId,
         toolResult: data.content,
+        toolFailed: data.isError === true,
         toolRunning: false,
         timestamp: now,
       });

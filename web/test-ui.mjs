@@ -958,5 +958,37 @@ test('every answer is a distinct phrase', () => {
   }
 });
 
+
+// ── A failed call must look failed ─────────────────────────────────────────
+
+test('a structured error survives being stringified', () => {
+  // The result reaches the client as the JSON string the log stored. A string
+  // cannot be inspected for an `error` field, so every structured failure was
+  // rendering as a green tick — watched live, six writes refused by plan mode
+  // all displayed as "Wrote VERSION.txt" with a diff of a file that was never
+  // created.
+  const asObject = formatResult({ error: 'Unknown tool: Write' });
+  assert.equal(asObject.isError, true);
+  assert.equal(asObject.text, 'Unknown tool: Write');
+
+  const asString = formatResult(JSON.stringify({ error: 'Unknown tool: Write' }));
+  assert.equal(asString.isError, true, 'the string form is an error too');
+  assert.equal(asString.text, 'Unknown tool: Write',
+    'and reads as the message, not as raw JSON');
+});
+
+test('a stringified shell failure keeps its exit code', () => {
+  const failed = formatResult(JSON.stringify({ stdout: '', stderr: 'nope', exit_code: 1 }));
+  assert.equal(failed.isError, true);
+  assert.ok(/exited 1/.test(failed.text));
+});
+
+test('ordinary text is still just text', () => {
+  // The parse must not turn every result into a guess.
+  assert.equal(formatResult('all good').isError, false);
+  assert.equal(formatResult('all good').text, 'all good');
+  assert.equal(formatResult('{not json').text, '{not json', 'a broken brace is not a shape');
+});
+
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);

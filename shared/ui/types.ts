@@ -34,6 +34,14 @@ export interface ChatMessage {
   toolArgs?: Record<string, unknown>;
   /** For tool messages: tool result */
   toolResult?: unknown;
+  /**
+   * Whether the call failed, as the engine reported it.
+   *
+   * Carried rather than re-derived. The result reaches the client as the JSON
+   * string the log stored, and a string cannot be inspected for an `error`
+   * field — so every structured failure was rendering as a success.
+   */
+  toolFailed?: boolean;
   /** For tool messages: whether the tool is still running */
   toolRunning?: boolean;
   /**

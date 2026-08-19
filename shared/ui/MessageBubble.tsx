@@ -30,6 +30,7 @@ export const MessageBubble = React.memo(function MessageBubble({
         name={message.toolName || 'Tool'}
         args={message.toolArgs}
         result={message.toolResult}
+        failed={message.toolFailed === true}
         running={message.toolRunning}
         {...(message.toolProgressMs !== undefined ? { progressMs: message.toolProgressMs } : {})}
       />

@@ -30,7 +30,14 @@ const TRAILING_BLANK = new RegExp('[\\r\\n]+$');
  * field name.
  */
 export function formatResult(result: unknown): { text: string; isError: boolean } {
-  if (typeof result === 'string') return { text: result, isError: false };
+  if (typeof result === 'string') {
+    // A structured result reaches the client as the JSON string the log stored.
+    // Reading it back is what turns `{"error":"Unknown tool: Write"}` into
+    // "Unknown tool: Write" instead of showing the reader raw JSON.
+    const parsed = tryParse(result);
+    if (parsed && typeof parsed === 'object') return formatResult(parsed);
+    return { text: result, isError: false };
+  }
   if (result === null || result === undefined) return { text: '', isError: false };
   if (typeof result !== 'object') return { text: String(result), isError: false };
 
