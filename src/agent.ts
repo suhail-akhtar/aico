@@ -67,6 +67,8 @@ import { getBackgroundAgents } from './background/index.js';
 import { getAgentRegistry } from './tools/task.js';
 import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
+import { checkProjectGate, detectChecks, resetChecks } from './checks.js';
+import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
 
 // Increase max listeners to avoid warnings during long tool chains
@@ -1158,6 +1160,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // artifact, so the evidence starts empty every time.
   resetVerification();
   resetObservations();
+  resetChecks();
   // The user's own words are the standard the work is held to. Taken from the
   // task rather than from anything the model writes: a model that authors its
   // own acceptance criteria authors ones it has met.
@@ -1207,6 +1210,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     let truncationRetries = 0;
     /** Times this turn has been sent back for an unverified or failing artifact. */
     let verificationNudges = 0;
+    /** Times this turn has been sent back over failing or stale project checks. */
+    let checksNudges = 0;
     /**
  * How many times a turn may recover from an output-ceiling truncation.
  *
@@ -1224,6 +1229,15 @@ const MAX_TRUNCATION_RETRIES = 2;
  * the ones after it are real fix-and-recheck cycles rather than reminders.
  */
 const MAX_VERIFICATION_NUDGES = 3;
+
+/**
+ * How many times a turn may be sent back over its own project checks.
+ *
+ * Three, like the browser gate: the first usually buys the only run of the
+ * suite in the whole turn, and the ones after it are real fix-and-recheck
+ * cycles rather than reminders.
+ */
+const MAX_CHECKS_NUDGES = 3;
 
 const MAX_COMPLETION_NUDGES = 2;
 
@@ -1382,6 +1396,26 @@ const MAX_COMPLETION_NUDGES = 2;
           // Completion gate: if open todos remain and we haven't exhausted nudges,
           // record the assistant turn, then add a synthetic user message telling
           // the model to keep going instead of accepting a premature finish.
+          // Does the project still build and pass its own tests? Checked before
+          // the browser, because a type error makes every other question moot —
+          // and because it is the objection that applies to most work, most of
+          // the time. Silent when the project defines no checks or the turn
+          // changed no source.
+          if (completionGateEnabled && checksNudges < MAX_CHECKS_NUDGES) {
+            const gate = checkProjectGate(detectChecks(currentCwd()));
+            if (!gate.ok && gate.message) {
+              checksNudges++;
+              transcript.recordAssistant(text, [], stepUsage, stepReasoning);
+              transcript.recordUserMessage(gate.message, { kind: 'plugin', plugin: 'checks-gate' });
+              if (!silent) {
+                showError(`Checks gate: the project's own checks do not vouch for this code `
+                  + `(nudge ${checksNudges}/${MAX_CHECKS_NUDGES}).`);
+                startSpinner('Thinking…');
+              }
+              continue;
+            }
+          }
+
           // The other half of finishing: not "are the todos ticked" but "does
           // the thing actually work". Checked before the todo gate because a
           // page that throws on load is a more concrete objection than an open

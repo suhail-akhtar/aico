@@ -145,6 +145,8 @@ import {
   observe, blockedReason, resetObservations, isObserved,
   todoRead,
   runScoped, currentRequirements,
+  detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
+  checkProjectGate, newestSourceChange, touchedFiles,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
 } from './dist-test/test-exports.js';
 
@@ -6015,6 +6017,133 @@ if (findBrowser()) {
   ]);
   const reply = await baseRun(provider, session);
   assert(/carried on/.test(reply), 'A normal turn continues past a proposed plan');
+}
+
+
+console.log('\n══ THE PROJECT SAYS WHAT WORKING MEANS ══');
+
+{
+  // Detected, not demanded. Nobody configures a tool before it is useful, so
+  // the commands come out of the file that already answers the question.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-checks-'));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+    name: 'x',
+    scripts: { build: 'tsup', test: 'node t.mjs', typecheck: 'tsc --noEmit', lint: 'eslint .' },
+  }));
+
+  const found = detectChecks(dir);
+  assert(found.length === 4, `All four kinds are detected (${found.length})`);
+  assert(found[0].name === 'typecheck',
+    `Cheapest first — a two-second typecheck must not queue behind a four-minute suite (got ${found[0].name})`);
+  assert(found[found.length - 1].name === 'test', 'And the slowest runs last');
+  assert(found.every(c => c.command.startsWith('npm run')), 'npm by default');
+
+  // The lockfile decides the runner, because running npm in a pnpm repo is a
+  // different install and sometimes a different answer.
+  fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '');
+  assert(detectChecks(dir).every(c => c.command.startsWith('pnpm ')), 'A pnpm lockfile switches the runner');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // A folder with nothing to build gets no checks and no nagging. Silence is
+  // the correct behaviour for most directories anyone opens.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-nochecks-'));
+  fs.writeFileSync(path.join(dir, 'notes.md'), '# notes');
+  assert(detectChecks(dir).length === 0, 'A folder of notes has no checks');
+  assert(checkProjectGate([]).ok, 'And nothing is required of it');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // Other ecosystems, so this is not a JavaScript-only idea.
+  const rust = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-rust-'));
+  fs.writeFileSync(path.join(rust, 'Cargo.toml'), '[package]\nname = "x"');
+  const rustChecks = detectChecks(rust);
+  assert(rustChecks.some(c => c.command === 'cargo check'), 'Cargo is detected');
+  assert(rustChecks.some(c => c.command === 'cargo test'), 'And its tests');
+  fs.rmSync(rust, { recursive: true, force: true });
+
+  const go = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-go-'));
+  fs.writeFileSync(path.join(go, 'go.mod'), 'module x');
+  assert(detectChecks(go).some(c => c.command === 'go test ./...'), 'Go is detected');
+  fs.rmSync(go, { recursive: true, force: true });
+}
+
+{
+  // What counts as source. Editing a README must not demand a test run — that
+  // is the tax that makes a gate get switched off.
+  assert(isSourceFile('src/agent.ts'), 'TypeScript is source');
+  assert(isSourceFile('main.rs') && isSourceFile('app.py') && isSourceFile('x.go'), 'So are others');
+  assert(isSourceFile('tsconfig.json'), 'And config that changes how it builds');
+  assert(!isSourceFile('README.md'), 'Prose is not');
+  assert(!isSourceFile('logo.png'), 'Nor an image');
+}
+
+{
+  const CHECKS = [
+    { name: 'typecheck', command: 'tsc --noEmit', weight: 1 },
+    { name: 'test', command: 'npm test', weight: 4 },
+  ];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-gate-'));
+  const file = path.join(dir, 'thing.ts');
+  const at = (ms) => ({ name: 'x', command: 'c', passed: true, ms: 1, output: '', at: Date.now(), sourceMtimeMs: ms });
+
+  await runInContext({ cwd: dir, sessionId: 'checks-gate' }, async () => {
+    resetChecks();
+
+    // A turn that changed nothing is nobody's business, even in a project that
+    // has checks.
+    assert(checkProjectGate(CHECKS).ok, 'No source changed, nothing required');
+
+    fs.writeFileSync(file, 'export const a = 1;\n');
+    noteSourceChanged(file);
+    assert(touchedFiles().length === 1, 'The change is noted');
+
+    const unrun = checkProjectGate(CHECKS);
+    assert(!unrun.ok, 'Changed source with no checks run does not finish');
+    assert(/typecheck.*tsc --noEmit/s.test(unrun.message),
+      'And the objection names the commands, so the fix needs no guessing');
+    assert(/not been compiled or tested/.test(unrun.message), 'Saying plainly what is wrong with that');
+    // Watched live: told explicitly not to run checks, a model was nudged three
+    // times and spent three steps arguing — correctly — that a specific human
+    // instruction outranks generic automation. It was right, and a gate that
+    // offers no way to say so turns a reasonable disagreement into a loop.
+    assert(/say so once and stop/.test(unrun.message),
+      'And offering the legitimate way to decline, so a real exception costs one step not three');
+
+    // A failure is reported with its output, not merely as a red light.
+    recordCheck({ ...at(newestSourceChange()), name: 'typecheck', command: 'tsc --noEmit',
+      passed: false, output: "thing.ts(1,14): error TS2322: Type 'string' is not assignable to type 'number'." });
+    const failing = checkProjectGate(CHECKS);
+    assert(!failing.ok, 'A failing check does not finish');
+    assert(/TS2322/.test(failing.message), 'The compiler error is quoted, not summarised away');
+
+    // Green, but only for one of them.
+    recordCheck({ ...at(newestSourceChange()), name: 'typecheck', command: 'tsc --noEmit', passed: true });
+    const partial = checkProjectGate(CHECKS);
+    assert(!partial.ok, 'One green check is not the whole suite');
+    assert(/test/.test(partial.message), 'And the one that has not run is named');
+
+    recordCheck({ ...at(newestSourceChange()), name: 'test', command: 'npm test', passed: true });
+    assert(checkProjectGate(CHECKS).ok, 'All green against the current code finishes');
+
+    // The case a naive "did it pass?" flag gets wrong, and the expensive one:
+    // fix, do not re-run, ship.
+    const later = (Date.now() + 5000) / 1000;
+    fs.writeFileSync(file, 'export const a = 2;\n');
+    fs.utimesSync(file, later, later);
+    noteSourceChanged(file);
+    const stale = checkProjectGate(CHECKS);
+    assert(!stale.ok, 'A green suite from before the last edit is not evidence');
+    assert(/no longer exists/.test(stale.message), 'And is described as what it is');
+
+    resetChecks();
+    assert(checkProjectGate(CHECKS).ok, 'A new turn starts owing nothing');
+  });
+
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log('\n══ STATE BELONGS TO ITS RUN ══');

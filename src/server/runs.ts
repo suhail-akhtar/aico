@@ -18,6 +18,7 @@ import { loadSettings } from '../settings.js';
 import { instructionsFor } from './projects.js';
 import { groupInstructions } from './groups.js';
 import { Inbox } from '../session/inbox.js';
+import { setAskUserCallback } from '../tools/askuser.js';
 import type { Session } from '../session/session.js';
 import type { AicoSettings } from '../settings.js';
 import type { EventHub } from './events.js';
@@ -58,6 +59,13 @@ export interface ActiveRun {
   close: () => Promise<void>;
   /** True while a turn is in flight — a second submit is rejected, not queued. */
   busy: boolean;
+  /**
+   * A question the agent is blocked on, and the promise waiting for the answer.
+   *
+   * Held on the run rather than in a module map so it cannot outlive the turn
+   * that asked, and so two sessions asking at once cannot answer each other.
+   */
+  pendingQuestion?: { question: string; resolve: (answer: string) => void; at: number };
   conversationHistory: Array<{ role: string; content: string }>;
 }
 
@@ -165,6 +173,17 @@ export class RunManager {
 
     emit('turn-start', { task, model });
 
+    // The agent can ask a question, and until now the web had no way to hear
+    // it. `askUser` falls back to readline when nothing registers a callback,
+    // so a question asked from a browser session was printed on the *server's*
+    // terminal and the turn blocked on stdin nobody was watching — a silent
+    // hang for up to the hour that tool is allowed. Registered per turn, so
+    // the answer is delivered to the run that asked.
+    setAskUserCallback((question) => new Promise<string>((resolve) => {
+      run.pendingQuestion = { question, resolve, at: Date.now() };
+      emit('question', { question });
+    }));
+
     try {
       const result = await runAgent({
         task,
@@ -259,6 +278,14 @@ export class RunManager {
       throw err;
     } finally {
       run.busy = false;
+      // However the turn ended — finished, failed, cancelled — nothing is
+      // waiting for an answer any more. Leaving the prompt on screen would
+      // invite an answer that resolves nothing.
+      if (run.pendingQuestion) {
+        run.pendingQuestion.resolve('');
+        delete run.pendingQuestion;
+        emit('question', { question: '' });
+      }
     }
   }
 
@@ -404,6 +431,27 @@ export class RunManager {
     if (!run || !run.busy) return false;
     run.abort.abort();
     return true;
+  }
+
+  /**
+   * Answer the question the run is waiting on.
+   *
+   * Returns false when nothing was asked, so a stale answer from a reloaded tab
+   * cannot resolve a question that has already moved on.
+   */
+  answer(sessionId: string, content: string): boolean {
+    const run = this.runs.get(sessionId);
+    if (!run?.pendingQuestion) return false;
+    const { resolve } = run.pendingQuestion;
+    delete run.pendingQuestion;
+    this.hub.publish({ type: 'question', sessionId, data: { question: '' } });
+    resolve(content);
+    return true;
+  }
+
+  /** The question this session is waiting on, if any. */
+  questionOf(sessionId: string): string | undefined {
+    return this.runs.get(sessionId)?.pendingQuestion?.question;
   }
 
   /** Deliver into the running turn at its next step boundary. */

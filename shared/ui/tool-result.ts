@@ -120,6 +120,25 @@ export function outcomeOf(name: string, result: unknown): ToolOutcome | undefine
     return undefined;
   }
 
+  // The project's own checks, answering the same question VerifyApp answers for
+  // a page: does this work.
+  if (name === 'RunChecks' && typeof result === 'string') {
+    if (result.startsWith('PASSED')) {
+      const count = /^PASSED — (\d+) check/.exec(result);
+      return { label: count ? `${count[1]}/${count[1]} green` : 'green', tone: 'good' };
+    }
+    if (result.startsWith('FAILED')) {
+      const which = /^FAILED — (\S+) did not pass/.exec(result);
+      const firstLine = result.split(LF).find(l => l.startsWith('FAIL '));
+      return {
+        label: which ? `${which[1]} failing` : 'failing',
+        tone: 'bad',
+        ...(firstLine ? { detail: firstLine.replace(/\s+/g, ' ').trim() } : {}),
+      };
+    }
+    return undefined;
+  }
+
   // A structured result reaches the client as the JSON string the log stored,
   // not as an object. Tests that pass an object therefore prove nothing about
   // the running UI — these branches never fired in the browser until this

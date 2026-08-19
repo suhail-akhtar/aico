@@ -19,6 +19,7 @@ import {
 import { formatResult, outcomeOf } from './dist-test/tool-result.mjs';
 import { todosFrom } from './dist-test/todos.mjs';
 import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
+import { checksFrom } from './dist-test/checks.mjs';
 
 let pass = 0, fail = 0;
 const test = (name, fn) => {
@@ -1012,6 +1013,88 @@ test('the task list is visible while the turn is still running', () => {
   assert.equal(live.total, 2, 'the in-flight list is found');
   assert.equal(live.inProgress, 1);
   assert.equal(live.allSettled, false, 'and is not mistaken for finished');
+});
+
+
+// ── Whether the project still builds ───────────────────────────────────────
+
+const checksCall = (report) => ({
+  id: 'rc', type: 'tool', content: '', toolName: 'RunChecks',
+  toolResult: report, toolCallId: 'rc1', toolRunning: false, timestamp: 0,
+});
+
+const GREEN = [
+  'PASSED — 2 checks, all green.',
+  '',
+  'PASS  typecheck  npm run typecheck  (2.1s)',
+  'PASS  test       npm test  (18.4s)',
+].join('\n');
+
+const RED = [
+  'FAILED — test did not pass. The project is not in a working state.',
+  '',
+  'PASS  typecheck  npm run typecheck  (2.1s)',
+  'PASS  build      npm run build  (0.9s)',
+  'FAIL  test       npm test  (12.0s)',
+  '',
+  'Output from test:',
+  'AssertionError: expected 3 to equal 4',
+  '  at Object.<anonymous> (t.mjs:4:1)',
+  '',
+  'Not run: lint — stopped at the first failure, because the later ones usually fail for the same reason.',
+  '',
+  'Fix this and run RunChecks again.',
+].join('\n');
+
+test('a green suite is read whole', () => {
+  const c = checksFrom([checksCall(GREEN)]);
+  assert.equal(c.lines.length, 2);
+  assert.equal(c.passed, 2);
+  assert.equal(c.failed, 0);
+  assert.equal(c.allGreen, true);
+  assert.equal(c.lines[0].name, 'typecheck');
+  assert.equal(c.lines[1].seconds, 18.4, 'durations survive, so a slow check is visible as one');
+});
+
+test('a failure carries its output and what was skipped', () => {
+  const c = checksFrom([checksCall(RED)]);
+  assert.equal(c.allGreen, false);
+  assert.equal(c.failed, 1);
+  assert.equal(c.passed, 2, 'the ones that did pass still count');
+  assert.ok(/expected 3 to equal 4/.test(c.failureOutput), 'the assertion is kept verbatim');
+  assert.deepEqual(c.notRun, ['lint'],
+    'and a check that never ran is named rather than left looking green');
+});
+
+test('the newest run is the whole answer', () => {
+  // Each run reports the entire suite, so merging older ones would resurrect
+  // results the code has already moved past.
+  const c = checksFrom([checksCall(RED), checksCall(GREEN)]);
+  assert.equal(c.allGreen, true);
+  assert.equal(c.lines.length, 2);
+});
+
+test('a transcript with no run shows nothing', () => {
+  assert.equal(checksFrom([]).lines.length, 0);
+  assert.equal(checksFrom([checksCall('This project defines no checks — nothing to run.')]).lines.length, 0,
+    'and a project with no checks is not rendered as an empty suite');
+});
+
+test('the identity changes when the result does', () => {
+  // Dismissing means "I have seen this one". A red run that goes green must
+  // come back rather than staying hidden behind a decision about the failure.
+  assert.notEqual(checksFrom([checksCall(RED)]).signature, checksFrom([checksCall(GREEN)]).signature);
+  assert.equal(checksFrom([checksCall(GREEN)]).signature, checksFrom([checksCall(GREEN)]).signature);
+});
+
+test('the tool row says green or names what failed', () => {
+  assert.equal(outcomeOf('RunChecks', GREEN).label, '2/2 green');
+  assert.equal(outcomeOf('RunChecks', GREEN).tone, 'good');
+
+  const bad = outcomeOf('RunChecks', RED);
+  assert.equal(bad.label, 'test failing');
+  assert.equal(bad.tone, 'bad');
+  assert.ok(/FAIL\s+test/.test(bad.detail), 'with the failing line inline');
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

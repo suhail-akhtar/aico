@@ -13,6 +13,8 @@ import { withTimeout } from './timeout-policy.js';
 import { terminal, terminalDefinition } from './terminal.js';
 import { observe, blockedReason } from './observation.js';
 import { proposePlan, proposePlanDefinition } from './plan.js';
+import { runChecks, runChecksDefinition } from './run-checks.js';
+import { noteSourceChanged } from '../checks.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
@@ -161,6 +163,10 @@ export const toolDefinitions: ToolDefinition[] = [
   // read by the completion gate, so two overlapping runs would race over which
   // artifact the turn is judged on.
   { ...verifyAppDefinition, isConcurrencySafe: false, maxResultSizeChars: 40_000 },
+  // Not concurrency-safe: two suites running at once fight over ports, build
+  // outputs and lock files, and the verdict the gate reads must belong to one
+  // known state of the tree.
+  { ...runChecksDefinition, isConcurrencySafe: false, maxResultSizeChars: 40_000 },
   { ...webSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
   { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...todoReadDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
@@ -428,6 +434,7 @@ export async function executeTool(
       // directory listing cannot distinguish what this turn built from what was
       // already sitting there.
       noteFileWritten(target);
+      noteSourceChanged(target);
       break;
     }
     case 'Edit': {
@@ -437,6 +444,7 @@ export async function executeTool(
       result = await editFile(args as unknown as Parameters<typeof editFile>[0]);
       observe(target);
       noteFileWritten(target);
+      noteSourceChanged(target);
       break;
     }
     case 'Glob':
@@ -465,6 +473,9 @@ export async function executeTool(
       break;
     case 'NotebookEdit':
       result = await notebookEdit(args as unknown as Parameters<typeof notebookEdit>[0]);
+      break;
+    case 'RunChecks':
+      result = await runChecks(args as unknown as Parameters<typeof runChecks>[0]);
       break;
     case 'ProposePlan':
       result = await proposePlan(args as unknown as Parameters<typeof proposePlan>[0]);

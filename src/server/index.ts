@@ -566,6 +566,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         send(res, 200, { cancelled: sessionId ? runs.cancel(sessionId) : false });
         return;
       }
+      case 'answer': {
+        // The agent asked something and is blocked. Separate from steer because
+        // it resolves a specific waiting promise rather than joining the queue —
+        // steering an answer would deliver it at the next step boundary, which
+        // is a boundary the turn cannot reach while it is waiting.
+        const { sessionId, content } = body as { sessionId?: string; content?: string };
+        if (!sessionId || content === undefined) {
+          send(res, 400, { error: 'sessionId and content required' }); return;
+        }
+        send(res, 200, { ok: runs.answer(sessionId, content) });
+        return;
+      }
       case 'steer':
       case 'followup': {
         const { sessionId, content } = body as { sessionId?: string; content?: string };

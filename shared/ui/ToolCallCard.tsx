@@ -49,7 +49,7 @@ function describeArgs(args?: Record<string, unknown>): string {
 /** What each tool is doing, in the present tense, as the row's verb. */
 const TOOL_VERBS: Record<string, string> = {
   Bash: 'Ran', Read: 'Read', Write: 'Wrote', Edit: 'Edited', MultiEdit: 'Edited',
-  Terminal: 'Ran', VerifyApp: 'Checked in a browser',
+  Terminal: 'Ran', VerifyApp: 'Checked in a browser', RunChecks: 'Ran the project checks',
   Glob: 'Searched', Grep: 'Searched', LS: 'Listed', WebFetch: 'Fetched',
   WebSearch: 'Searched the web', Task: 'Delegated', TodoWrite: 'Updated todos',
   TodoRead: 'Read todos', NotebookEdit: 'Edited notebook', Pwd: 'Checked directory',

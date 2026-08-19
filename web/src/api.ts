@@ -187,6 +187,8 @@ export const api = {
   submit: (opts: SubmitOptions) => post<{ accepted: boolean }>('submit', opts),
   cancel: (sessionId: string) => post<{ cancelled: boolean }>('cancel', { sessionId }),
   steer: (sessionId: string, content: string) => post<{ ok: boolean }>('steer', { sessionId, content }),
+  /** Resolve the question a blocked turn is waiting on. */
+  answer: (sessionId: string, content: string) => post<{ ok: boolean }>('answer', { sessionId, content }),
   followup: (sessionId: string, content: string) => post<{ ok: boolean }>('followup', { sessionId, content }),
 
   trajectory: (sessionId: string, opts: { limit?: number; before?: number } = {}) => {

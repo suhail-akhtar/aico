@@ -29,6 +29,8 @@ export function Composer(): React.ReactElement {
   const busy = useStore(s => s.busy);
   const submit = useStore(s => s.submit);
   const prefill = useStore(s => s.composerPrefill);
+  const question = useStore(s => s.question);
+  const answer = useStore(s => s.answer);
   const steer = useStore(s => s.steer);
   const followup = useStore(s => s.followup);
   const cancel = useStore(s => s.cancel);
@@ -67,6 +69,10 @@ ${prefill.text}` : prefill.text));
     setText('');
     resize(textarea.current, true);
 
+    // A blocked turn takes precedence over every other reading of Enter. It
+    // cannot reach a step boundary, so steering would queue the answer behind
+    // a boundary that never arrives.
+    if (question !== null) { await answer(content); return; }
     if (mode === 'steer') await steer(content);
     else if (mode === 'followup') await followup(content);
     else await submit(content, { planMode });
@@ -85,6 +91,19 @@ ${prefill.text}` : prefill.text));
   return (
     <div className="px-5 pb-3">
       <div className="mx-auto w-full max-w-column">
+        {/*
+          Above the box, not in the transcript. The turn is stopped until this
+          is answered, and a question you can scroll past is a turn that hangs —
+          which is exactly what happened before the web had any way to hear one.
+        */}
+        {question !== null && (
+          <div className="mb-1.5 flex items-start gap-2 rounded-xl border border-aico-accent/40
+                          bg-aico-accent-soft px-3 py-2">
+            <span className="mt-[1px] shrink-0 text-[12px] text-aico-accent" aria-hidden>?</span>
+            <p className="min-w-0 flex-1 text-[13px] leading-[19px] text-aico-primary">{question}</p>
+            <span className="shrink-0 text-[11px] text-aico-muted">waiting</span>
+          </div>
+        )}
         <div className="rounded-[22px] border border-aico-border bg-aico-bg shadow-sm transition-colors
                         focus-within:border-aico-accent/40">
           <textarea
@@ -93,7 +112,9 @@ ${prefill.text}` : prefill.text));
             onChange={e => { setText(e.target.value); resize(e.target); }}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder={busy ? 'Steer the running turn…' : 'Message the agent'}
+            placeholder={question !== null
+              ? 'Answer to continue…'
+              : busy ? 'Steer the running turn…' : 'Message the agent'}
             className="block max-h-64 w-full resize-none bg-transparent px-5 py-3.5 text-[15px]
                        leading-[24px] text-aico-primary placeholder:text-aico-muted focus:outline-none"
           />

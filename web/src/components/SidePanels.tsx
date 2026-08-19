@@ -32,6 +32,7 @@ import type { ChatMessage } from '@aico/ui';
 import { useStore } from '../store';
 import { todosFrom, type Todo, type TodoStatus } from '../todos';
 import { planFrom, type PlanDecision } from '../plans';
+import { checksFrom } from '../checks';
 import type { PlanAnswer } from '../store';
 import { composeMessages } from '../reduce';
 
@@ -187,6 +188,76 @@ function TaskCard(): React.ReactElement | null {
           );
         })}
       </ul>
+    </Card>
+  );
+}
+
+
+/**
+ * Whether the project still builds.
+ *
+ * The counterpart to the browser check, for everything that is not a page. It
+ * shows only once a run has happened — a project with no checks, or a turn that
+ * has not needed them, gets nothing.
+ */
+function ChecksCard(): React.ReactElement | null {
+  const messages = useMessages();
+  const busy = useStore(s => s.busy);
+  const dismissed = useStore(s => s.dismissed);
+  const dismissPanel = useStore(s => s.dismissPanel);
+  const [manual, setManual] = useState<boolean | null>(null);
+
+  const checks = useMemo(() => checksFrom(messages), [messages]);
+  if (checks.lines.length === 0) return null;
+  if (dismissed.checks === checks.signature) return null;
+
+  // Green collapses; red stays open. A failure is the one state where the
+  // detail is the point, and hiding it behind a click is how it gets skipped.
+  const collapsed = manual ?? (checks.allGreen && !busy);
+
+  return (
+    <Card
+      title="Checks"
+      status={checks.allGreen
+        ? `${checks.passed}/${checks.lines.length} green`
+        : `${checks.lines.find(l => !l.passed)?.name ?? 'a check'} failing`}
+      statusTone={checks.allGreen ? 'good' : 'bad'}
+      collapsed={collapsed}
+      onToggle={() => setManual(!collapsed)}
+      onClose={() => dismissPanel('checks', checks.signature)}
+      urgent={!checks.allGreen}
+    >
+      <ul className="space-y-0.5">
+        {checks.lines.map(line => (
+          <li key={line.name} className="flex items-baseline gap-1.5">
+            <span className={`shrink-0 text-[11px] ${
+              line.passed ? 'text-aico-success' : 'text-aico-danger'}`} aria-hidden>
+              {line.passed ? '✓' : '✕'}
+            </span>
+            <span className="shrink-0 text-[11px] text-aico-secondary">{line.name}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-aico-muted"
+                  title={line.command}>
+              {line.command}
+            </span>
+            <span className="shrink-0 tabular-nums text-[10px] text-aico-muted">
+              {line.seconds.toFixed(1)}s
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {checks.notRun.length > 0 && (
+        <p className="mt-1 text-[10px] text-aico-muted">
+          Not run: {checks.notRun.join(', ')} — stopped at the first failure.
+        </p>
+      )}
+
+      {checks.failureOutput && (
+        <pre className="mt-1.5 max-h-40 overflow-auto rounded-lg bg-aico-code px-2 py-1.5
+                        font-mono text-[10px] leading-[15px] text-aico-danger selectable">
+          {checks.failureOutput}
+        </pre>
+      )}
     </Card>
   );
 }
@@ -364,6 +435,7 @@ export function SidePanels(): React.ReactElement {
                  xl:fixed xl:right-4 xl:top-16 xl:w-[290px] xl:px-0"
     >
       <PlanCard />
+      <ChecksCard />
       <TaskCard />
     </div>
   );

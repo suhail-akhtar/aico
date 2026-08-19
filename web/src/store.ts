@@ -177,6 +177,15 @@ interface AppState {
   /** Start amending: stay in planning, and frame the composer as a correction. */
   amendPlan: () => void;
   cancel: () => Promise<void>;
+  /**
+   * A question the agent is blocked on, or null.
+   *
+   * The turn cannot proceed until this is answered, which is why it takes over
+   * the composer rather than sitting in the transcript: a question you can
+   * scroll past is a turn that hangs.
+   */
+  question: string | null;
+  answer: (content: string) => Promise<void>;
   steer: (content: string) => Promise<void>;
   followup: (content: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
@@ -236,6 +245,7 @@ export const useStore = create<AppState>((set, get) => ({
   draft: emptyDraft(),
   composerPrefill: null,
   dismissed: {},
+  question: null,
   planMode: false,
   busy: false,
   turnStartedAt: null,
@@ -261,6 +271,7 @@ export const useStore = create<AppState>((set, get) => ({
       // closing a panel — or planning — in one conversation says nothing about
       // the next.
       sessionId, logged: new Map(), draft: emptyDraft(), dismissed: {}, planMode: false,
+      question: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
@@ -339,6 +350,14 @@ export const useStore = create<AppState>((set, get) => ({
     set(state => ({ dismissed: { ...state.dismissed, [panel]: identity } })),
 
   setPlanMode: (on) => set({ planMode: on }),
+
+  answer: async (content) => {
+    const { sessionId } = get();
+    // Cleared optimistically: the turn resumes the moment the server has it,
+    // and leaving the prompt up through a round trip invites a second answer.
+    set({ question: null });
+    await api.answer(sessionId, content);
+  },
 
   answerPlan: async (decision) => {
     // Approving, or starting a deferred plan, is the moment planning ends.
@@ -689,6 +708,12 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       return;
 
     // ── ephemeral: the live turn ────────────────────────────────────
+    case 'question':
+      // An empty question means the run is no longer waiting — answered,
+      // finished, or cancelled.
+      set(() => ({ question: String((data as { question?: string }).question ?? '') || null }));
+      return;
+
     case 'turn-start':
       // Ephemeral events are never replayed, which is precisely what makes
       // this a safe place to promote: it fires when a turn actually begins,
