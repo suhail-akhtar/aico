@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'fs/promises';
+import { readFile, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -36,7 +36,9 @@ export function parseSkillFile(content: string, filePath: string, isBuiltin: boo
   for (const line of fmRaw.split('\n')) {
     const colonIdx = line.indexOf(':');
     if (colonIdx === -1) continue;
-    const key = line.slice(0, colonIdx).trim();
+    // `allowed-tools` is Claude's spelling; ours is camelCase. Normalised here
+    // so a skill written for either reads the same once loaded.
+    const key = line.slice(0, colonIdx).trim().replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
     const value = line.slice(colonIdx + 1).trim();
 
     if (!key) continue;
@@ -63,6 +65,16 @@ export function parseSkillFile(content: string, filePath: string, isBuiltin: boo
     aliases: Array.isArray(fm['aliases']) ? (fm['aliases'] as string[]) : undefined,
     author: fm['author'] ? String(fm['author']) : undefined,
     version: fm['version'] ? String(fm['version']) : undefined,
+    // Claude's fields. Carried rather than dropped: a skill that says it
+    // expects Bash is telling the reader something true about itself, and
+    // silently discarding it on import is how "compatible" becomes "parses".
+    // `allowed-tools` arrives as a bare list as often as a bracketed one.
+    allowedTools: Array.isArray(fm['allowedTools'])
+      ? (fm['allowedTools'] as string[])
+      : fm['allowedTools']
+        ? String(fm['allowedTools']).split(',').map(t => t.trim()).filter(Boolean)
+        : undefined,
+    license: fm['license'] ? String(fm['license']) : undefined,
   };
 
   return { frontmatter, promptTemplate, filePath, isBuiltin };
@@ -91,16 +103,51 @@ export function getBuiltinDir(): string {
 }
 
 /** Discover all .md skill files in a directory (non-recursive) */
+/**
+ * Every skill in a directory, in either shape.
+ *
+ * A flat `foo.md` is a skill; so is a folder `foo/` containing `SKILL.md`. The
+ * second is Claude's format and the reason it matters is what sits beside the
+ * markdown — scripts, references, templates a skill can tell the agent to read.
+ * Supporting both is a few lines here and the difference between importing
+ * somebody's skill and rewriting it.
+ */
 export async function discoverSkillFiles(dir: string): Promise<string[]> {
   if (!existsSync(dir)) return [];
   try {
-    const files = await readdir(dir);
-    return files
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => path.join(dir, f));
+    const found: string[] = [];
+    for (const entry of await readdir(dir)) {
+      const full = path.join(dir, entry);
+      if (entry.endsWith('.md')) { found.push(full); continue; }
+      try {
+        if (!(await stat(full)).isDirectory()) continue;
+      } catch { continue; }
+      // SKILL.md is the convention; skill.md is accepted because case is the
+      // kind of thing that varies between people and should not lose a skill.
+      for (const name of ['SKILL.md', 'skill.md']) {
+        if (existsSync(path.join(full, name))) { found.push(path.join(full, name)); break; }
+      }
+    }
+    return found;
   } catch {
     return [];
   }
+}
+
+/** What a directory skill ships alongside its markdown. */
+async function bundledFiles(dir: string, depth = 0): Promise<string[]> {
+  if (depth > 3) return [];
+  const out: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (entry.name.startsWith('.') || /^skill\.md$/i.test(entry.name)) continue;
+    const rel = entry.name;
+    if (entry.isDirectory()) {
+      out.push(...(await bundledFiles(path.join(dir, rel), depth + 1)).map(f => `${rel}/${f}`));
+    } else {
+      out.push(rel);
+    }
+  }
+  return out;
 }
 
 /** Load all skills from a directory */
@@ -112,7 +159,16 @@ export async function loadSkillsFromDir(dir: string, isBuiltin: boolean): Promis
     try {
       const content = await readFile(filePath, 'utf8');
       const skill = parseSkillFile(content, filePath, isBuiltin);
-      if (skill) skills.push(skill);
+      if (skill) {
+        // A directory skill knows where it lives, so the body can refer to
+        // `scripts/build.py` and the agent can be told where that actually is.
+        if (/^skill\.md$/i.test(path.basename(filePath))) {
+          const own = path.dirname(filePath);
+          skill.dir = own;
+          skill.resources = await bundledFiles(own);
+        }
+        skills.push(skill);
+      }
     } catch {
       // Skip unreadable files
     }

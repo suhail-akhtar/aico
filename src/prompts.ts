@@ -125,6 +125,13 @@ export async function buildSystemPrompt(
    */
   goal?: string,
   /**
+   * One line per installed skill, or nothing when none are installed.
+   *
+   * Passed in for the same reason the instructions are: this module knows
+   * nothing about where skills live and should not learn.
+   */
+  skills?: string,
+  /**
    * Whether this is a planning turn.
    *
    * Plan mode was a tool restriction and nothing else: the tools were filtered
@@ -262,6 +269,23 @@ OS: ${os.version()}`,
 - Give each step the files or areas it touches. "Update the settings" and "update the settings, in web/src/store.ts and two components" are different plans to agree to.
 - State what you had to assume in open_questions, honestly and specifically. An assumption the reader would have corrected costs a sentence now and a rewrite later, and this is the only moment it is cheap.
 - Then stop. Do not begin the work, and do not ask whether to begin: the reader will approve, amend, defer or decline, and you will be asked again with that answer.`,
+    });
+  }
+
+  // What is on the shelf, and nothing about how to use it.
+  //
+  // A skill's body can run to hundreds of lines — that length is what makes it
+  // worth having — and twenty bodies in every request would cost more than the
+  // skills save. So the model gets the one line that decides *whether* to open
+  // one, and the procedure itself arrives only when it does. It cannot choose
+  // a skill it has never heard of, and it will not go looking for a list.
+  if (skills?.trim()) {
+    doc.add({
+      id: 'skills',
+      order: 37,
+      body: `Skills available to you. Each is a procedure someone wrote for a task of that kind; open one with the Skill tool when its description matches what you are about to do, instead of working the procedure out again.
+
+${skills.trim()}`,
     });
   }
 

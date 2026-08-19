@@ -14,6 +14,7 @@ import { terminal, terminalDefinition } from './terminal.js';
 import { observe, blockedReason } from './observation.js';
 import { proposePlan, proposePlanDefinition } from './plan.js';
 import { runChecks, runChecksDefinition } from './run-checks.js';
+import { useSkill, skillDefinition } from './skill.js';
 import { noteSourceChanged } from '../checks.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
@@ -201,6 +202,8 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...agentPromptToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...teamPromptToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 120_000 },
   { ...skillCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  // Reading a procedure changes nothing, so several can open at once.
+  { ...skillDefinition, isConcurrencySafe: true, maxResultSizeChars: 60_000 },
 ];
 
 /** Get tool definitions filtered for a specific sub-agent type */
@@ -473,6 +476,9 @@ export async function executeTool(
       break;
     case 'NotebookEdit':
       result = await notebookEdit(args as unknown as Parameters<typeof notebookEdit>[0]);
+      break;
+    case 'Skill':
+      result = await useSkill(args as unknown as Parameters<typeof useSkill>[0]);
       break;
     case 'RunChecks':
       result = await runChecks(args as unknown as Parameters<typeof runChecks>[0]);

@@ -68,6 +68,7 @@ import { getAgentRegistry } from './tools/task.js';
 import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
 import { checkProjectGate, detectChecks, resetChecks } from './checks.js';
+import { skillCatalogue } from './tools/skill.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
 
@@ -793,7 +794,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // the resolved provider's vendor documents as best (XML for Anthropic,
   // Markdown for the rest). The content is authored once regardless.
   const promptDoc = await buildSystemPrompt(
-    model, opts.effort, opts.projectInstructions, opts.goal, opts.planMode,
+    model, opts.effort, opts.projectInstructions, opts.goal, skillCatalogue(), opts.planMode,
   );
   const runtimeAwareness = await buildRuntimeAwareness({
     model,

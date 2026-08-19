@@ -147,6 +147,7 @@ import {
   todoRead,
   runScoped, currentRequirements,
   listChanges, diffOf, revertFile, isGitRepo,
+  importSkill, removeSkill, skillCatalogue, useSkill, loadAllSkills,
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
   checkProjectGate, newestSourceChange, touchedFiles,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
@@ -6022,6 +6023,139 @@ if (findBrowser()) {
 }
 
 
+
+
+console.log('\n══ SKILLS ARE FOR USING ══');
+
+/** A skill in Claude's shape: a directory, SKILL.md, resources beside it. */
+function writeClaudeSkill(root, name, extra = {}) {
+  const dir = path.join(root, name);
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'references'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), [
+    '---',
+    `name: ${name}`,
+    `description: ${extra.description ?? 'Fill and flatten PDF forms, including radio groups'}`,
+    'allowed-tools: Bash, Read, Write',
+    'license: MIT',
+    '---',
+    'Use scripts/fill.py, then read references/field-types.md.',
+    '',
+    'Context: {args}',
+  ].join('\n'));
+  fs.writeFileSync(path.join(dir, 'scripts', 'fill.py'), 'print("filling")\n');
+  fs.writeFileSync(path.join(dir, 'references', 'field-types.md'), '# Field types\n');
+  return dir;
+}
+
+{
+  // Import, in the three shapes a skill actually arrives in.
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-skill-'));
+  const installed = path.join(work, 'installed');
+  const source = writeClaudeSkill(work, 'pdf-forms');
+
+  const fromDir = await importSkill(source, { targetDir: installed });
+  assert(fromDir.ok, `A Claude-format folder imports (${fromDir.error ?? ''})`);
+  assert(fromDir.name === 'pdf-forms', 'Named from its frontmatter, not its filename');
+  assert(fromDir.resources.includes('scripts/fill.py'), 'Bundled scripts come with it');
+  assert(fromDir.resources.includes('references/field-types.md'), 'Including nested ones');
+
+  // Importing the same name twice must not quietly overwrite work.
+  const again = await importSkill(source, { targetDir: installed });
+  assert(!again.ok && /already installed/.test(again.error), 'A second import is refused by default');
+  const forced = await importSkill(source, { targetDir: installed, overwrite: true });
+  assert(forced.ok && forced.replaced === true, 'And allowed when asked for');
+
+  // A lone markdown file is a whole skill, it just has no resources.
+  const solo = path.join(work, 'quick.md');
+  fs.writeFileSync(solo, '---\nname: quick\ndescription: A one-file skill\n---\nDo the thing.\n');
+  const fromFile = await importSkill(solo, { targetDir: installed });
+  assert(fromFile.ok && fromFile.name === 'quick', 'A bare SKILL.md imports');
+  assert(fs.existsSync(path.join(installed, 'quick', 'SKILL.md')),
+    'And is normalised into a directory, so it can grow resources later');
+
+  fs.rmSync(work, { recursive: true, force: true });
+}
+
+{
+  // What is not a skill, and being told which of the two problems it is.
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-skill-bad-'));
+  const installed = path.join(work, 'installed');
+
+  fs.writeFileSync(path.join(work, 'plain.md'), '# just a document\n');
+  const noFm = await importSkill(path.join(work, 'plain.md'), { targetDir: installed });
+  assert(!noFm.ok && /no frontmatter/.test(noFm.error), 'Markdown with no frontmatter is refused');
+
+  fs.writeFileSync(path.join(work, 'partial.md'), '---\nname: thing\n---\nbody\n');
+  const noDesc = await importSkill(path.join(work, 'partial.md'), { targetDir: installed });
+  assert(!noDesc.ok, 'Frontmatter without a description is refused');
+  // The two faults need different fixes — "add a --- block" versus "add one
+  // line to the block you already have" — so they must not share a message.
+  assert(/missing name or description/.test(noDesc.error),
+    `And says which is missing rather than claiming there is none (${noDesc.error})`);
+
+  const missing = await importSkill(path.join(work, 'nope.zip'), { targetDir: installed });
+  assert(!missing.ok && /does not exist/.test(missing.error), 'A path that is not there says so');
+
+  fs.rmSync(work, { recursive: true, force: true });
+}
+
+{
+  // Removal deletes a directory tree, so every degenerate name is worth an
+  // assertion. `.` sanitised to itself, resolved to the skills root, passed a
+  // startsWith check that equality satisfies, and deleted every skill installed.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-skill-rm-'));
+  fs.mkdirSync(path.join(root, 'keeper'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'keeper', 'SKILL.md'),
+    '---\nname: keeper\ndescription: must survive\n---\nbody\n');
+
+  for (const attempt of ['.', '..', '../..', './', '...', '-', '', '   ', '../sibling', '/etc']) {
+    const r = removeSkill(attempt, root);
+    assert(!r.ok, `Refused: ${JSON.stringify(attempt)}`);
+  }
+  assert(fs.existsSync(path.join(root, 'keeper')), 'The installed skill survived all of that');
+
+  assert(removeSkill('keeper', root).ok, 'A real name removes');
+  assert(!fs.existsSync(path.join(root, 'keeper')), 'And is gone');
+  assert(!removeSkill('keeper', root).ok, 'Removing it twice is an honest no');
+
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+{
+  // The half that makes skills usable: the model can see them, and open one.
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-skill-use-'));
+  writeClaudeSkill(work, 'pdf-forms');
+  const loaded = await loadAllSkills({ disableBuiltins: true, extraDirs: [work] });
+  assert(loaded.length === 1, `A directory skill loads (${loaded.length})`);
+  assert(loaded[0].dir !== undefined, 'And knows where it lives');
+  assert(loaded[0].resources.length === 2, 'And what it ships');
+  assert(loaded[0].frontmatter.allowedTools?.includes('Bash'),
+    "Claude's allowed-tools is carried through, hyphen and all");
+  assert(loaded[0].frontmatter.license === 'MIT', 'As is the licence');
+
+  fs.rmSync(work, { recursive: true, force: true });
+}
+
+{
+  // The catalogue is the whole selection decision, so it must exist and be one
+  // line per skill — a model cannot choose a skill it has never heard of.
+  await skillRegistry.load({});
+  const catalogue = skillCatalogue();
+  assert(catalogue.length > 0, 'There is a catalogue');
+  assert(catalogue.split('\n').every(l => l.startsWith('- ') && l.includes(': ')),
+    'One line each, name and description');
+  assert(/commit/.test(catalogue), 'Built-ins are in it');
+
+  const opened = await useSkill({ name: 'commit', args: 'scope: auth' });
+  assert(/Skill: commit/.test(opened), 'Opening one returns it');
+  assert(/conventional commit/.test(opened), 'With its actual procedure');
+  assert(!/\{args\}/.test(opened), 'And the placeholder substituted');
+
+  const missing = await useSkill({ name: 'no-such-skill' });
+  assert(/no skill called/.test(missing), 'A wrong name is refused');
+  assert(/commit/.test(missing), 'And the alternatives are named, since a near miss is the usual cause');
+}
 
 console.log('\n══ WHAT CHANGED, AND HOW TO PUT IT BACK ══');
 

@@ -18,7 +18,6 @@ export { runHooks, freezeHooks, resetHooks } from './hooks.js';
 export { getOpenTodoCount, todoWrite, todoRead } from './tools/todo.js';
 export { maybeAutoCompactConversation, getCompactionThreshold } from './compact.js';
 export { getContextWindow, getEffectiveContextBudget, resetContextWindowCache } from './context-window.js';
-export { skillRegistry } from './skills/index.js';
 export { AGENT_PROMPTS } from './agents/prompts-registry.js';
 // ── Session event log ─────────────────────────────────────────────────
 export {
@@ -191,3 +190,7 @@ export { runScoped } from './run-scoped.js';
 export { detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck, checkProjectGate, checkResults, newestSourceChange, touchedFiles } from './checks.js';
 export { runChecks } from './tools/run-checks.js';
 export { listChanges, diffOf, revertFile, isGitRepo } from './server/changes.js';
+export { useSkill, skillCatalogue, skillDefinition } from './tools/skill.js';
+export { skillRegistry } from './skills/registry.js';
+export { loadAllSkills, discoverSkillFiles, parseSkillFile } from './skills/loader.js';
+export { importSkill, removeSkill, userSkillsDir } from './skills/import.js';
