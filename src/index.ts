@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import * as readline from 'readline';
 import chalk from 'chalk';
@@ -139,10 +140,14 @@ export interface CLIOptions {
 
 const program = new Command();
 
+/** Single source of truth for the reported version is package.json */
+const nodeRequire = createRequire(import.meta.url);
+const pkgVersion: string = nodeRequire('../package.json').version;
+
 program
   .name('aico')
   .description('AI Coder — multi-provider coding assistant (Claude Code compatible)')
-  .version('0.3.0-beta')
+  .version(pkgVersion)
   .argument('[prompt]', 'Run a single task non-interactively (like claude -p)')
   .option('-f, --file <path>', 'attach file context')
   .option(
