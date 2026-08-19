@@ -139,7 +139,11 @@ async function bundledFiles(dir: string, depth = 0): Promise<string[]> {
   if (depth > 3) return [];
   const out: string[] = [];
   for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    // Build artefacts are not part of the skill. Running a shipped script
+    // leaves __pycache__ beside it, and listing a .pyc as something the
+    // agent may read is noise at best.
     if (entry.name.startsWith('.') || /^skill\.md$/i.test(entry.name)) continue;
+    if (entry.name === '__pycache__' || entry.name === 'node_modules') continue;
     const rel = entry.name;
     if (entry.isDirectory()) {
       out.push(...(await bundledFiles(path.join(dir, rel), depth + 1)).map(f => `${rel}/${f}`));

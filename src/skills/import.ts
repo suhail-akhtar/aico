@@ -121,6 +121,7 @@ function copyTree(from: string, to: string): string[] {
   fs.mkdirSync(to, { recursive: true });
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
     if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === '__MACOSX') continue;
+    if (entry.name === '__pycache__') continue;
     const src = path.join(from, entry.name);
     const dst = path.join(to, entry.name);
     if (entry.isDirectory()) {
