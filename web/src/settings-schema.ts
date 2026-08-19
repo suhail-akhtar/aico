@@ -71,7 +71,7 @@ export interface Group {
 
 export type IconName =
   | 'sliders' | 'stack' | 'shield' | 'gauge' | 'wallet'
-  | 'sun' | 'moon' | 'monitor' | 'lock' | 'pencil' | 'globe';
+  | 'sun' | 'moon' | 'monitor' | 'lock' | 'pencil' | 'globe' | 'bolt';
 
 export interface Pane {
   id: string;
@@ -80,7 +80,7 @@ export interface Pane {
   blurb?: string;
   groups: Group[];
   /** Panes that render their own thing rather than a list of fields. */
-  custom?: 'models';
+  custom?: 'models' | 'skills' | 'mcp';
 }
 
 /* ── The schema ───────────────────────────────────────────────────── */
@@ -156,6 +156,23 @@ export const PANES: Pane[] = [
     groups: [],
   },
 
+  {
+    id: 'skills',
+    label: 'Skills',
+    icon: 'bolt',
+    blurb: 'Procedures someone already worked out. Every one is offered to the agent by name and '
+      + 'description on every turn, and the description is what decides whether it gets used.',
+    custom: 'skills',
+    groups: [],
+  },
+  {
+    id: 'mcp',
+    label: 'MCP',
+    icon: 'globe',
+    blurb: 'Model Context Protocol servers. Whatever tools they expose become the tools the agent has.',
+    custom: 'mcp',
+    groups: [],
+  },
   {
     id: 'agent',
     label: 'Agent',

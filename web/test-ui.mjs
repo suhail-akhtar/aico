@@ -20,6 +20,7 @@ import { formatResult, outcomeOf } from './dist-test/tool-result.mjs';
 import { todosFrom } from './dist-test/todos.mjs';
 import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
 import { checksFrom } from './dist-test/checks.mjs';
+import { shouldClearBusy } from './dist-test/turn-state.mjs';
 
 let pass = 0, fail = 0;
 const test = (name, fn) => {
@@ -1095,6 +1096,34 @@ test('the tool row says green or names what failed', () => {
   assert.equal(bad.label, 'test failing');
   assert.equal(bad.tone, 'bad');
   assert.ok(/FAIL\s+test/.test(bad.detail), 'with the failing line inline');
+});
+
+
+section('Stop can always unstick the page');
+
+// Found live: a submit whose request never settled left the client certain a
+// turn was running while the server had no record of one. `busy` is cleared by
+// a turn-end event, so when no turn exists the event never comes, Stop does
+// nothing, and only a reload escapes.
+test('Stop clears busy when the server says nothing is running', () => {
+  assert.equal(shouldClearBusy(true, { running: false }), true);
+});
+
+test('but leaves a real turn alone — Stop asks the server, it does not overrule it', () => {
+  assert.equal(shouldClearBusy(true, { running: true }), false,
+    'a turn that is genuinely running ends via turn-end, not by the page deciding');
+});
+
+test('an unreachable server clears it too, since it cannot be running our turn', () => {
+  // Of the two ways to be wrong, a page that stops claiming to be busy is
+  // recoverable and a page that never stops is not.
+  assert.equal(shouldClearBusy(true, 'unreachable'), true);
+});
+
+test('and a page that was not busy is left exactly as it was', () => {
+  assert.equal(shouldClearBusy(false, { running: false }), false);
+  assert.equal(shouldClearBusy(false, { running: true }), false);
+  assert.equal(shouldClearBusy(false, 'unreachable'), false);
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

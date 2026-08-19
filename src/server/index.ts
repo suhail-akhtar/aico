@@ -477,7 +477,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     // Settings, provider onboarding, and system state. Consulted before the
     // POST guard because several of these are reads.
     const systemBody = req.method === 'POST' ? await readJson(req) : {};
-    const handled = await handleSystemRoute(route, req.method ?? 'GET', systemBody as Record<string, unknown>);
+    const handled = await handleSystemRoute(route, req.method ?? 'GET', systemBody as Record<string, unknown>, url.searchParams);
     if (handled) { send(res, handled.status, handled.body); return; }
 
     if (req.method !== 'POST') { send(res, 405, { error: 'method not allowed' }); return; }

@@ -102,6 +102,14 @@ export async function handleSystemRoute(
   route: string,
   method: string,
   body: Record<string, unknown>,
+  /**
+   * The request's query string.
+   *
+   * A GET carries its arguments here rather than in a body, and without this a
+   * read like `skills/read?name=commit` had no way to learn which skill was
+   * being asked for.
+   */
+  query: URLSearchParams = new URLSearchParams(),
 ): Promise<{ status: number; body: unknown } | undefined> {
   switch (route) {
     case 'agents': {
@@ -126,6 +134,133 @@ export async function handleSystemRoute(
           })),
         },
       };
+    }
+
+    // ── skills ───────────────────────────────────────────────────────
+    //
+    // A skill is a procedure someone wrote down, and the point of having one is
+    // that the agent uses it. So the list carries the same description the
+    // model selects on, and importing accepts what people actually have: a
+    // folder, a zip, or a bare SKILL.md.
+    case 'skills': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { skillRegistry } = await import('../skills/registry.js');
+      await skillRegistry.load({});
+      return {
+        status: 200,
+        body: {
+          skills: skillRegistry.list().map(s => ({
+            name: s.frontmatter.name,
+            description: s.frontmatter.description,
+            builtin: s.isBuiltin,
+            aliases: s.frontmatter.aliases ?? [],
+            allowedTools: s.frontmatter.allowedTools ?? [],
+            license: s.frontmatter.license,
+            version: s.frontmatter.version,
+            author: s.frontmatter.author,
+            resources: s.resources ?? [],
+            path: s.dir ?? s.filePath,
+          })),
+        },
+      };
+    }
+
+    case 'skills/read': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const name = String(query.get('name') ?? body.name ?? '');
+      const { skillRegistry } = await import('../skills/registry.js');
+      await skillRegistry.load({});
+      const found = skillRegistry.lookup(name);
+      if (!found) return { status: 404, body: { error: `no skill called "${name}"` } };
+      return { status: 200, body: { name: found.frontmatter.name, body: found.promptTemplate } };
+    }
+
+    case 'skills/import': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const source = String(body.source ?? '').trim();
+      if (!source) return { status: 400, body: { error: 'source required' } };
+      const { importSkill } = await import('../skills/import.js');
+      const result = await importSkill(source, { overwrite: body.overwrite === true });
+      if (result.ok) {
+        const { skillRegistry } = await import('../skills/registry.js');
+        await skillRegistry.load({});
+      }
+      return { status: result.ok ? 200 : 400, body: result };
+    }
+
+    case 'skills/create': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const name = String(body.name ?? '').trim();
+      const description = String(body.description ?? '').trim();
+      const content = String(body.body ?? '').trim();
+      if (!name || !description) {
+        return { status: 400, body: { error: 'name and description are both required' } };
+      }
+      const fs = await import('fs');
+      const path = await import('path');
+      const { userSkillsDir } = await import('../skills/import.js');
+      const dir = path.join(userSkillsDir(), name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-'));
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'SKILL.md'),
+          `---
+name: ${name}
+description: ${description}
+---
+${content || 'Describe the procedure here.'}
+`,
+          'utf8');
+      } catch (err) {
+        return { status: 400, body: { error: err instanceof Error ? err.message : String(err) } };
+      }
+      const { skillRegistry } = await import('../skills/registry.js');
+      await skillRegistry.load({});
+      return { status: 200, body: { ok: true, name, installedAt: dir } };
+    }
+
+    case 'skills/remove': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const name = String(body.name ?? '');
+      const { removeSkill } = await import('../skills/import.js');
+      const result = removeSkill(name);
+      if (result.ok) {
+        const { skillRegistry } = await import('../skills/registry.js');
+        await skillRegistry.load({});
+      }
+      return { status: result.ok ? 200 : 400, body: result };
+    }
+
+    // ── MCP ──────────────────────────────────────────────────────────
+    case 'mcp/add': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { addMcpServer } = await import('../mcp/manage.js');
+      try {
+        const out = await addMcpServer(body as never);
+        return { status: 200, body: { ok: true, result: out } };
+      } catch (err) {
+        return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
+      }
+    }
+
+    case 'mcp/remove': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { removeMcpServer } = await import('../mcp/manage.js');
+      try {
+        const out = await removeMcpServer(String(body.name ?? ''));
+        return { status: 200, body: { ok: true, result: out } };
+      } catch (err) {
+        return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
+      }
+    }
+
+    case 'mcp/reload': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { reloadMcpServers } = await import('../mcp/manage.js');
+      try {
+        return { status: 200, body: { ok: true, result: await reloadMcpServers() } };
+      } catch (err) {
+        return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
+      }
     }
 
     case 'system':

@@ -15,9 +15,20 @@ export class SkillRegistry {
   async load(opts: { disableBuiltins?: boolean; extraDirs?: string[] } = {}): Promise<void> {
     this._opts = opts;
 
-    // Always include ~/.aico/skills/ as a default user dir
+    // Always include ~/.aico/skills/ as a default user dir. Listing it in
+    // `skills.dirs` as well is the obvious thing to do and used to scan it
+    // twice, so the list is deduped by resolved path first — case-insensitively
+    // where the filesystem is.
     const userSkillsDir = path.join(os.homedir(), '.aico', 'skills');
-    const dirs = [userSkillsDir, ...(opts.extraDirs ?? [])];
+    const seen = new Set<string>();
+    const dirs: string[] = [];
+    for (const dir of [userSkillsDir, ...(opts.extraDirs ?? [])]) {
+      const resolved = path.resolve(dir);
+      const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dirs.push(resolved);
+    }
 
     this._skills = await loadAllSkills({
       disableBuiltins: opts.disableBuiltins,

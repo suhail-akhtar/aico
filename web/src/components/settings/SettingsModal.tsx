@@ -37,6 +37,8 @@ import {
 import { Icon } from '../Icon';
 import { Field } from './Field';
 import { ModelsPane } from './ModelsPane';
+import { SkillsPane } from './SkillsPane';
+import { McpPane } from './McpPane';
 
 export interface SettingsModalProps {
   onClose: () => void;
@@ -193,7 +195,9 @@ export function SettingsModal({ onClose }: SettingsModalProps): React.ReactEleme
                 )}
 
                 <div className="mt-5">
-                  {pane.custom === 'models' ? <ModelsPane /> : (
+                  {pane.custom === 'models' ? <ModelsPane />
+                    : pane.custom === 'skills' ? <SkillsPane />
+                    : pane.custom === 'mcp' ? <McpPane /> : (
                     pane.groups.map(group => (
                       <section key={group.title} className="mb-7 last:mb-0">
                         <h4 className="text-[11px] font-semibold uppercase tracking-wider text-aico-muted">

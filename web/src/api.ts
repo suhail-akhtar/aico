@@ -193,6 +193,26 @@ export const api = {
   answer: (sessionId: string, content: string) => post<{ ok: boolean }>('answer', { sessionId, content }),
 
   /** What differs from the last commit, with this session's own edits marked. */
+  // ── skills ─────────────────────────────────────────────────────────
+  skills: () => get<{ skills: SkillSummary[] }>('skills'),
+  readSkill: (name: string) =>
+    get<{ name: string; body: string }>(`skills/read?name=${encodeURIComponent(name)}`),
+  importSkill: (source: string, overwrite = false) =>
+    post<{ ok: boolean; name?: string; resources?: string[]; replaced?: boolean; error?: string }>(
+      'skills/import', { source, overwrite }),
+  createSkill: (name: string, description: string, body: string) =>
+    post<{ ok: boolean; name?: string; error?: string }>('skills/create', { name, description, body }),
+  removeSkill: (name: string) =>
+    post<{ ok: boolean; error?: string }>('skills/remove', { name }),
+
+  // ── mcp ────────────────────────────────────────────────────────────
+  addMcpServer: (config: Record<string, unknown>) =>
+    post<{ ok: boolean; result?: string; error?: string }>('mcp/add', config),
+  removeMcpServer: (name: string) =>
+    post<{ ok: boolean; result?: string; error?: string }>('mcp/remove', { name }),
+  reloadMcpServers: () =>
+    post<{ ok: boolean; result?: string; error?: string }>('mcp/reload', {}),
+
   changes: (sessionId: string) => get<ChangesReport>(`changes?id=${encodeURIComponent(sessionId)}`),
   changesDiff: (sessionId: string, file: string) =>
     get<{ diff: string }>(`changes/diff?id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(file)}`),
@@ -471,6 +491,20 @@ export interface ChangesReport {
   added: number;
   removed: number;
   reverted: string[];
+}
+
+export interface SkillSummary {
+  name: string;
+  /** The sentence the agent selects on. */
+  description: string;
+  builtin: boolean;
+  aliases: string[];
+  allowedTools: string[];
+  license?: string;
+  version?: string;
+  author?: string;
+  resources: string[];
+  path: string;
 }
 
 export interface SystemSnapshot {

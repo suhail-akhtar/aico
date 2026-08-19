@@ -46,14 +46,33 @@ export function skillCatalogue(): string {
     .join('\n');
 }
 
+/**
+ * A file's size, told truthfully at every scale.
+ *
+ * Rounding everything up to whole kilobytes seems harmless until a 7-byte
+ * `tone.md` is announced as "1 KB". Watched live: the agent read the file
+ * correctly, compared two lines against the promised kilobyte, concluded Read
+ * had truncated it, and spent three tool calls proving otherwise with `cat` and
+ * `type`. A number that disagrees with what the agent just saw is worse than no
+ * number — it manufactures a problem and then gets worked around.
+ */
+export function describeSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** What a skill ships with, described so the agent knows what it may read. */
 function describeResources(skill: Skill): string {
   if (!skill.dir || !skill.resources?.length) return '';
   const lines = skill.resources.map(rel => {
     const full = path.join(skill.dir!, rel);
     let size = '';
-    try { size = ` (${Math.max(1, Math.round(fs.statSync(full).size / 1024))} KB)`; } catch { /* gone */ }
-    return `  ${rel}${size}`;
+    try { size = ` (${describeSize(fs.statSync(full).size)})`; } catch { /* gone */ }
+    // The full path, not the relative name: the body says `references/tone.md`
+    // and Read needs somewhere real. Making the agent join the two itself is a
+    // step that can go wrong for no benefit.
+    return `  ${rel}${size} — ${full}`;
   });
   return `\nThis skill ships files alongside it, in ${skill.dir}:\n${lines.join('\n')}\n`
     + 'Read any of them with Read when the procedure calls for it.';

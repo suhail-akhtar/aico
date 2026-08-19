@@ -1,5 +1,5 @@
 import { readFile as fsReadFile } from 'fs/promises';
-import { resolveInsideWorkspace } from './path.js';
+import { resolveForReading } from './path.js';
 
 export interface ReadInput {
   file_path: string;
@@ -8,7 +8,7 @@ export interface ReadInput {
 }
 
 export async function readFile(input: ReadInput): Promise<string> {
-  const resolved = resolveInsideWorkspace(input.file_path, 'file_path');
+  const resolved = resolveForReading(input.file_path, 'file_path');
   const raw = await fsReadFile(resolved, 'utf8');
   const lines = raw.split('\n');
 

@@ -26,6 +26,7 @@
 
 import path from 'path';
 import { currentCwd } from '../run-context.js';
+import os from 'os';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getWorkspaceRuntime } from '../workspace.js';
 
@@ -54,6 +55,46 @@ export function writableRoots(cwd = currentCwd()): string[] {
     // would be a worse failure than the one this guard exists to prevent.
   }
   return roots;
+}
+
+/**
+ * Roots a *read* may reach, which is a longer list than the writable one.
+ *
+ * A skill can ship references and scripts, and its whole purpose is to tell the
+ * agent to read them — `read references/tone.md before writing the summary`.
+ * Those files live in `~/.aico/skills`, outside the project, so `Read` refused
+ * them and the skill's own instruction could not be followed. Watched live: the
+ * agent fell back to `cat` through Bash, which worked by luck and would not
+ * have on a machine without it.
+ *
+ * Readable, not writable, and the asymmetry is the point: a procedure you chose
+ * to install is content you have already decided to trust reading, and nothing
+ * about that argues for letting the file tools rewrite it in place.
+ */
+export function readableRoots(cwd = currentCwd()): string[] {
+  const roots = writableRoots(cwd);
+  const skills = path.join(os.homedir(), '.aico', 'skills');
+  if (!roots.some(root => isInside(root, skills))) roots.push(skills);
+  return roots;
+}
+
+/**
+ * Resolve a path a tool intends to read.
+ *
+ * Separate from the write path so widening one never widens the other.
+ */
+export function resolveForReading(inputPath: string, label = 'path'): string {
+  const cwd = currentCwd();
+  const resolved = path.resolve(cwd, inputPath);
+  const roots = readableRoots(cwd);
+
+  if (roots.some(root => isInside(root, resolved))) return resolved;
+
+  throw new Error(
+    `${label} must stay inside the project, the AICO workspace, or the skills directory.\n` +
+    `  given:     ${inputPath}\n` +
+    roots.map(root => `  allowed:   ${root}`).join('\n'),
+  );
 }
 
 /**

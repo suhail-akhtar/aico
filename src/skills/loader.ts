@@ -177,23 +177,46 @@ export async function loadSkillsFromDir(dir: string, isBuiltin: boolean): Promis
   return skills;
 }
 
-/** Load all skills from builtin + user + project dirs */
+/**
+ * Load all skills from builtin + user + project dirs.
+ *
+ * **One skill per name, and the last one loaded wins.** Both halves matter.
+ *
+ * Without the dedupe a name can arrive twice — the same directory listed in
+ * `skills.dirs` as well as being the default, a project and a user dir that
+ * both define `review`, or an old flat `foo.md` left beside a newer
+ * `foo/SKILL.md`. Every duplicate costs a line in the system prompt on every
+ * single turn, and `lookup` quietly returns whichever happened to load first.
+ * The registry already enforced this on the paths that install and create a
+ * skill; the path that runs at every startup did not, which is the wrong one
+ * to leave out.
+ *
+ * Last-wins rather than first-wins because the load order runs
+ * builtins → user → project, so overriding a built-in skill by writing your own
+ * with the same name does what you would expect instead of silently doing
+ * nothing.
+ */
 export async function loadAllSkills(opts: {
   disableBuiltins?: boolean;
   extraDirs?: string[];
 }): Promise<Skill[]> {
-  const all: Skill[] = [];
+  const byName = new Map<string, Skill>();
+  const remember = (skills: Skill[]): void => {
+    for (const skill of skills) {
+      const key = skill.frontmatter.name.trim().toLowerCase();
+      // Delete before set so an override takes the newcomer's position rather
+      // than inheriting the one it replaced — the list reads in load order.
+      byName.delete(key);
+      byName.set(key, skill);
+    }
+  };
 
-  if (!opts.disableBuiltins) {
-    const builtinSkills = await loadSkillsFromDir(getBuiltinDir(), true);
-    all.push(...builtinSkills);
-  }
+  if (!opts.disableBuiltins) remember(await loadSkillsFromDir(getBuiltinDir(), true));
 
   // Extra dirs from settings (e.g. ~/.aico/skills/)
   for (const dir of opts.extraDirs ?? []) {
-    const extra = await loadSkillsFromDir(dir, false);
-    all.push(...extra);
+    remember(await loadSkillsFromDir(dir, false));
   }
 
-  return all;
+  return [...byName.values()];
 }

@@ -28,6 +28,7 @@ import { create } from 'zustand';
 import { initialSessionId, rememberSession, freshSessionId } from './session-memory';
 import type { ChatMessage } from '@aico/ui';
 import { PLAN_REPLY } from './plans';
+import { shouldClearBusy, type ServerTurn } from './turn-state';
 
 /** The answers the plan panel can give. `amend` is not one — it sends nothing. */
 export type PlanAnswer = 'approved' | 'deferred' | 'declined' | 'startNow';
@@ -412,9 +413,53 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  /**
+   * Stop the turn — and, failing that, stop the *appearance* of one.
+   *
+   * Cancelling used to only ask the server and then wait for a `turn-end`
+   * event to clear `busy`. That is correct whenever a turn exists. When one
+   * does not, nothing ever arrives and the page sits at "running" forever with
+   * a Stop button that cannot help: found live after a submit whose request
+   * never settled, leaving the client certain a turn was running while the
+   * server had no record of one. Reloading was the only way out, which is the
+   * same "stuck until I killed it" the stall detector was built to end.
+   *
+   * So Stop reconciles against the server rather than waiting to be told. The
+   * server stays the source of truth — it is asked, not overruled — but if it
+   * says nothing is running, the UI stops pretending.
+   *
+   * **Both requests are bounded, and that is the part that matters.** The first
+   * version awaited the cancel before reconciling, which is fine until the
+   * request that hangs is the cancel itself — and a request hanging is the
+   * exact condition Stop is here to escape. Watched live: Stop was pressed on a
+   * page whose fetches were not settling, and nothing happened, because the
+   * rescue was queued behind the thing it was rescuing from. A rescue that can
+   * be blocked by the failure it handles is not a rescue.
+   */
   cancel: async () => {
-    try { await api.cancel(get().sessionId); }
+    const { sessionId } = get();
+
+    // Long enough that a healthy server always answers first, short enough that
+    // a person pressing Stop does not wonder whether they missed.
+    const bounded = <T,>(work: Promise<T>): Promise<T | 'timeout'> => Promise.race([
+      work,
+      new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 4000)),
+    ]);
+
+    try { await bounded(api.cancel(sessionId)); }
     catch (err) { set({ error: (err as Error).message }); }
+
+    let server: ServerTurn = 'unreachable';
+    try {
+      const snapshot = await bounded(api.session(sessionId));
+      // A timeout is not a claim that a turn is running, so it stays
+      // 'unreachable' — the case that clears.
+      if (snapshot !== 'timeout') server = { running: snapshot.busy };
+    } catch { /* unreachable is the answer, and shouldClearBusy knows what to do */ }
+
+    if (shouldClearBusy(get().busy, server)) {
+      set({ busy: false, turnStartedAt: null, question: null });
+    }
   },
 
   steer: async (content) => {

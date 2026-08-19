@@ -166,7 +166,7 @@ export {
 } from './session/projections.js';
 // -- Transcript export + workspace write roots --
 export { toMarkdown, toPlainText, exportFilename } from './session/export.js';
-export { resolveInsideWorkspace, writableRoots } from './tools/path.js';
+export { resolveInsideWorkspace, writableRoots, resolveForReading, readableRoots } from './tools/path.js';
 export { resolveWorkspaceRoot, setWorkspaceRuntime, getWorkspaceInfo } from './workspace.js';
 // -- Streamed command output --
 export { bash, setBashProgressSink } from './tools/bash.js';
@@ -190,7 +190,7 @@ export { runScoped } from './run-scoped.js';
 export { detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck, checkProjectGate, checkResults, newestSourceChange, touchedFiles } from './checks.js';
 export { runChecks } from './tools/run-checks.js';
 export { listChanges, diffOf, revertFile, isGitRepo } from './server/changes.js';
-export { useSkill, skillCatalogue, skillDefinition } from './tools/skill.js';
+export { useSkill, skillCatalogue, skillDefinition, describeSize } from './tools/skill.js';
 export { skillRegistry } from './skills/registry.js';
 export { loadAllSkills, discoverSkillFiles, parseSkillFile } from './skills/loader.js';
 export { importSkill, removeSkill, userSkillsDir } from './skills/import.js';

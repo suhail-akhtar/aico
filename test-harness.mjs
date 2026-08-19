@@ -132,6 +132,9 @@ import {
   toPlainText,
   exportFilename,
   resolveInsideWorkspace,
+  resolveForReading,
+  readableRoots,
+  describeSize,
   writableRoots,
   resolveWorkspaceRoot,
   setWorkspaceRuntime,
@@ -5070,6 +5073,39 @@ console.log('  -- The agent may write to its own workspace --');
   try { resolveInsideWorkspace(process.platform === 'win32' ? 'C:\\Windows\\System32\\x' : '/etc/x', 'file_path'); }
   catch (err) { absolute = err.message; }
   assert(absolute !== '', 'an unrelated absolute path is refused');
+
+  // Found in the browser, not in a test: a skill told the agent to read its own
+  // bundled `references/tone.md`, Read refused because skills live under
+  // ~/.aico/skills, and the agent only recovered by shelling out to `cat`. A
+  // procedure you chose to install is one you already decided to trust reading.
+  const skillFile = nodePath.join(os.homedir(), '.aico', 'skills', 'x', 'references', 'tone.md');
+  let skillRead = '';
+  try { resolveForReading(skillFile, 'file_path'); }
+  catch (err) { skillRead = err.message; }
+  assert(skillRead === '', `a skill's bundled file can be read${skillRead ? `: ${skillRead}` : ''}`);
+
+  // The asymmetry is the whole point: readable does not mean writable.
+  let skillWrite = '';
+  try { resolveInsideWorkspace(skillFile, 'file_path'); }
+  catch (err) { skillWrite = err.message; }
+  assert(skillWrite !== '', 'but writing to it through the file tools is still refused');
+
+  // Widening reads must not widen them past the roots actually named.
+  let stillRefused = '';
+  try { resolveForReading('../../../etc/passwd', 'file_path'); }
+  catch (err) { stillRefused = err.message; }
+  assert(stillRefused !== '', 'reading outside every root is still refused');
+  assert(readableRoots().length === writableRoots().length + 1, 'reads add exactly one root, not a wildcard');
+
+  // Also found in the browser, and self-inflicted: a 7-byte tone.md was
+  // announced as "1 KB", so the agent read it correctly, disbelieved its own
+  // correct result, and spent three calls proving Read had not truncated it.
+  assert(describeSize(7) === '7 B', 'a tiny file is reported in bytes, not rounded up to a kilobyte');
+  assert(describeSize(0) === '0 B', 'an empty file says so');
+  assert(describeSize(1023) === '1023 B', 'and everything under a kilobyte stays in bytes');
+  assert(describeSize(2048) === '2.0 KB', 'a small kilobyte file keeps a decimal');
+  assert(describeSize(65536) === '64 KB', 'a larger one drops it as noise');
+  assert(describeSize(5 * 1024 * 1024) === '5.0 MB', 'and megabytes read as megabytes');
 }
 
 console.log('  -- Markdown export --');
@@ -6155,6 +6191,44 @@ function writeClaudeSkill(root, name, extra = {}) {
   const missing = await useSkill({ name: 'no-such-skill' });
   assert(/no skill called/.test(missing), 'A wrong name is refused');
   assert(/commit/.test(missing), 'And the alternatives are named, since a near miss is the usual cause');
+}
+
+console.log('  -- One skill per name, however many places define it --');
+{
+  // A duplicate name costs a line of the system prompt on every turn and makes
+  // lookup return whichever loaded first. The registry already enforced this
+  // when installing or creating a skill; loading did not.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-dupe-'));
+  const dirA = path.join(root, 'a');
+  const dirB = path.join(root, 'b');
+  writeClaudeSkill(dirA, 'notes', { description: 'the first one' });
+  writeClaudeSkill(dirB, 'notes', { description: 'the second one' });
+
+  const same = await loadAllSkills({ disableBuiltins: true, extraDirs: [dirA, dirA] });
+  assert(same.filter(s => s.frontmatter.name === 'notes').length === 1,
+    'the same directory listed twice yields one skill, not two');
+
+  const both = await loadAllSkills({ disableBuiltins: true, extraDirs: [dirA, dirB] });
+  const notes = both.filter(s => s.frontmatter.name === 'notes');
+  assert(notes.length === 1, 'two directories defining the same name yield one skill');
+  assert(notes[0].frontmatter.description === 'the second one',
+    'and the later directory wins, so a project skill can override a user one');
+
+  // The reason last-wins is the right direction: overriding a built-in by
+  // writing your own with the same name should work, not silently do nothing.
+  const overrideDir = path.join(root, 'override');
+  writeClaudeSkill(overrideDir, 'commit', { description: 'my own commit procedure' });
+  const withBuiltins = await loadAllSkills({ extraDirs: [overrideDir] });
+  const commits = withBuiltins.filter(s => s.frontmatter.name === 'commit');
+  assert(commits.length === 1, 'a user skill named after a built-in replaces it rather than joining it');
+  assert(commits[0].frontmatter.description === 'my own commit procedure', 'and it is the user\'s that survives');
+  assert(commits[0].isBuiltin === false, 'the surviving one is not marked built in');
+
+  // Overriding must not cost the other built-ins.
+  assert(withBuiltins.some(s => s.frontmatter.name === 'review'),
+    'the built-ins that were not overridden are all still there');
+
+  fs.rmSync(root, { recursive: true, force: true });
 }
 
 console.log('\n══ WHAT CHANGED, AND HOW TO PUT IT BACK ══');
