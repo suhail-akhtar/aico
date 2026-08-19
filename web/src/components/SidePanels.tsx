@@ -28,11 +28,28 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import type { ChatMessage } from '@aico/ui';
 import { useStore } from '../store';
 import { todosFrom, type Todo, type TodoStatus } from '../todos';
 import { planFrom, type PlanDecision } from '../plans';
 import type { PlanAnswer } from '../store';
-import { orderMessages } from '../reduce';
+import { composeMessages } from '../reduce';
+
+/**
+ * The same view the conversation renders, live entries included.
+ *
+ * Both panels read this rather than the durable log alone. A tool call is
+ * ephemeral until the turn ends — it lands in the draft first and reaches
+ * `logged` later — so a panel reading only the log stayed empty for the whole
+ * run and appeared at the end, having missed the part it exists for. Watched
+ * live: three TodoWrite calls went past with no task list on screen.
+ */
+function useMessages(): ChatMessage[] {
+  const logged = useStore(s => s.logged);
+  const draft = useStore(s => s.draft);
+  const busy = useStore(s => s.busy);
+  return useMemo(() => composeMessages(logged, draft, busy), [logged, draft, busy]);
+}
 
 /** How each task state reads at a glance. */
 const MARKS: Record<TodoStatus, { glyph: string; tone: string; label: string }> = {
@@ -109,13 +126,13 @@ function Card({
 }
 
 function TaskCard(): React.ReactElement | null {
-  const logged = useStore(s => s.logged);
+  const messages = useMessages();
   const busy = useStore(s => s.busy);
   const dismissed = useStore(s => s.dismissed);
   const dismissPanel = useStore(s => s.dismissPanel);
   const [manual, setManual] = useState<boolean | null>(null);
 
-  const summary = useMemo(() => todosFrom(orderMessages(logged)), [logged]);
+  const summary = useMemo(() => todosFrom(messages), [messages]);
   if (summary.total === 0) return null;
   if (dismissed.tasks === summary.signature) return null;
 
@@ -175,7 +192,7 @@ function TaskCard(): React.ReactElement | null {
 }
 
 function PlanCard(): React.ReactElement | null {
-  const logged = useStore(s => s.logged);
+  const messages = useMessages();
   const busy = useStore(s => s.busy);
   const answerPlan = useStore(s => s.answerPlan);
   const amendPlan = useStore(s => s.amendPlan);
@@ -184,7 +201,7 @@ function PlanCard(): React.ReactElement | null {
   const [manual, setManual] = useState<boolean | null>(null);
   const [sending, setSending] = useState(false);
 
-  const { plan, decision } = useMemo(() => planFrom(orderMessages(logged)), [logged]);
+  const { plan, decision } = useMemo(() => planFrom(messages), [messages]);
   if (!plan) return null;
 
   const identity = `${plan.seq}:${plan.title}`;

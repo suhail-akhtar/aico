@@ -990,5 +990,29 @@ test('ordinary text is still just text', () => {
   assert.equal(formatResult('{not json').text, '{not json', 'a broken brace is not a shape');
 });
 
+
+test('the task list is visible while the turn is still running', () => {
+  // A tool call is ephemeral until the turn ends: it lands in the draft and
+  // reaches the durable log later. Panels that read only the log stayed empty
+  // for the whole run and appeared at the end, having missed the part they
+  // exist for — watched live, three TodoWrite calls went past with no task list
+  // on screen. They read the same merged view the conversation renders.
+  const draft = emptyDraft();
+  draft.tools.set('c1', {
+    id: 'tool-c1', type: 'tool', content: '', toolName: 'TodoWrite',
+    toolArgs: { todos: [
+      { id: '1', title: 'read it', status: 'in_progress', priority: 'high' },
+      { id: '2', title: 'report', status: 'pending', priority: 'high' },
+    ] },
+    toolCallId: 'c1', toolRunning: false, timestamp: 0,
+  });
+  draft.order.push({ kind: 'tool', key: 'c1' });
+
+  const live = todosFrom(composeMessages(new Map(), draft, true));
+  assert.equal(live.total, 2, 'the in-flight list is found');
+  assert.equal(live.inProgress, 1);
+  assert.equal(live.allSettled, false, 'and is not mistaken for finished');
+});
+
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);
