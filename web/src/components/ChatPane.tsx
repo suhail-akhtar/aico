@@ -32,6 +32,15 @@ import { MessageActions } from './MessageActions';
 /** How close to the bottom still counts as "following the stream". */
 const FOLLOW_THRESHOLD_PX = 140;
 
+/**
+ * How long "connecting" may last before it needs explaining.
+ *
+ * A healthy stream is live in well under a second, so anything past this is not
+ * slowness — it is a connection that is never going to open, and the usual
+ * reason is worth naming rather than leaving as a small grey word.
+ */
+const CONNECT_PATIENCE_MS = 6000;
+
 export function ChatPane(): React.ReactElement {
   // Each slice is subscribed to individually and the list derived here.
   // Subscribing to a selector that builds the array would hand zustand a new
@@ -42,6 +51,14 @@ export function ChatPane(): React.ReactElement {
   const messages = useMemo(() => composeMessages(logged, draft, busy), [logged, draft, busy]);
 
   const status = useStore(s => s.status);
+
+  // "connecting" is normal for a moment and a symptom after that.
+  const [stalledConnect, setStalledConnect] = useState(false);
+  useEffect(() => {
+    if (status !== 'connecting') { setStalledConnect(false); return; }
+    const timer = setTimeout(() => setStalledConnect(true), CONNECT_PATIENCE_MS);
+    return () => clearTimeout(timer);
+  }, [status]);
   const error = useStore(s => s.error);
   const clearError = useStore(s => s.clearError);
   const turnSummary = useStore(s => s.turnSummary);
@@ -81,6 +98,27 @@ export function ChatPane(): React.ReactElement {
           {status === 'lost' && (
             <div className="mb-4 rounded-xl border border-aico-warning/30 bg-aico-warning/8 px-4 py-2 text-[13px] text-aico-warning">
               Connection lost — reconnecting. The run keeps going on the server; nothing is lost.
+            </div>
+          )}
+
+          {/*
+            A stream that never opens showed nothing but the word "connecting"
+            in the corner, while the page sat empty and a submitted turn looked
+            like a hang. The distinction that matters is one the page can state
+            without knowing the cause: the run is on the server and is fine, and
+            it is only this page that has gone deaf. Saying that turns "it is
+            broken" into "reload it", which is both true and actionable.
+
+            Deliberately does not diagnose. The obvious culprit — HTTP/1.1's six
+            connections per host — was measured and ruled out here, and a banner
+            that confidently names the wrong cause sends people to fix the wrong
+            thing.
+          */}
+          {stalledConnect && (
+            <div className="mb-4 rounded-xl border border-aico-warning/30 bg-aico-warning/8 px-4 py-2 text-[13px] text-aico-warning">
+              Still connecting to the event stream. Your run is unaffected — it is on the server and
+              keeps going — but this page will not show it until the stream opens. Reloading usually
+              fixes it.
             </div>
           )}
 
