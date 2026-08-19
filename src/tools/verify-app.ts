@@ -72,8 +72,10 @@ export interface VerifyVerdict {
     visibleText: number;
     canvases: { width: number; height: number; painted: boolean }[];
     svgs: number;
-    /** Largest painted area, as a share of the viewport. Near zero means blank. */
+    /** Largest painted area, as a share of the viewport. */
     coverage: number;
+    /** Elements big enough to see. A page with several is not blank. */
+    visible: number;
     /** Interactive controls on the page — how much there is to get wrong. */
     controls: number;
   };
@@ -159,16 +161,22 @@ const INSPECT = `(() => {
     return { width: c.width, height: c.height, painted };
   });
 
-  // The largest thing actually drawn, as a share of the viewport. A page whose
-  // biggest visible element covers a fraction of a percent is blank, whatever
-  // its markup says.
+  // The largest thing drawn, and how many things were drawn at all. Both are
+  // needed: the largest alone called a real page blank. A heading, a button and
+  // a status line is a page — three modest boxes, none of them big — and judging
+  // it by its biggest element flagged it as empty while its interaction check
+  // was passing.
   let biggest = 0;
+  let visible = 0;
   for (const el of document.body ? document.body.querySelectorAll('*') : []) {
     const r = el.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) continue;
     const s = getComputedStyle(el);
     if (s.visibility === 'hidden' || s.display === 'none' || Number(s.opacity) === 0) continue;
     biggest = Math.max(biggest, r.width * r.height);
+    // Big enough to see. Excludes the zero-height wrappers and one-pixel
+    // spacers that would otherwise make any document look populated.
+    if (r.width * r.height >= 400) visible++;
   }
 
   return {
@@ -177,6 +185,7 @@ const INSPECT = `(() => {
     canvases,
     svgs: document.querySelectorAll('svg').length,
     coverage: px > 0 ? Math.min(1, biggest / px) : 0,
+    visible,
     // How much of this page there is to get wrong. A page with twenty controls
     // and no interaction checks has been verified to load, which is not the
     // same as verified to work — and the difference is the entire failure this
@@ -416,7 +425,7 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
     const broken = flows.filter(f => !f.ok);
 
     const view = rendered ?? {
-      elements: 0, visibleText: 0, canvases: [], svgs: 0, coverage: 0, controls: 0,
+      elements: 0, visibleText: 0, canvases: [], svgs: 0, coverage: 0, visible: 0, controls: 0,
     };
     const blankCanvases = view.canvases.filter(c => !c.painted).length;
 
@@ -427,15 +436,21 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
     for (const e of exceptions) problems.push(`uncaught: ${e}`);
     for (const e of errors.slice(0, 10)) problems.push(`console error: ${e}`);
     for (const f of uniq(failedRequests).slice(0, 10)) problems.push(`request failed: ${f}`);
-    // Emptiness is about what rendered, not how much markup there is. An early
-    // version flagged anything under ten elements and failed a working page
-    // built from eight — a canvas app is *supposed* to be a short document.
-    // The honest test is whether anything of any size ended up on screen.
-    const blank = view.coverage < 0.02 && view.visibleText < 40
+    // Emptiness is about what rendered, not how much markup there is. Two
+    // earlier versions were wrong in opposite directions: one flagged anything
+    // under ten elements and failed a working canvas app built from eight; the
+    // next judged by the largest element alone and called a heading-plus-button
+    // page blank while its own interaction check was passing. The model that
+    // hit it spent twelve steps rebuilding a page that had been fine.
+    //
+    // Blank now means blank: nothing painted, almost nothing readable, and
+    // fewer than three things on screen big enough to see.
+    const blank = view.coverage < 0.02 && view.visibleText < 10 && view.visible < 3
       && !view.canvases.some(c => c.painted) && view.svgs === 0;
     if (loaded && blank) {
       problems.push(`nothing rendered — the page is visually blank `
-        + `(${view.elements} elements, ${view.visibleText} characters of text, nothing painted)`);
+        + `(${view.visible} visible element(s), ${view.visibleText} characters of text, `
+        + `nothing painted)`);
     }
     if (blankCanvases > 0) {
       problems.push(`${blankCanvases} of ${view.canvases.length} canvas element(s) were never drawn to`);

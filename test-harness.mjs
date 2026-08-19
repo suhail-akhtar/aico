@@ -5800,6 +5800,42 @@ if (!findBrowser()) {
       'And the report says what was actually done to it, not "clicked"');
   }
 
+
+  {
+    // A real page that is merely small. Watched live: a heading, a button and a
+    // status line was reported "visually blank" because no single element
+    // covered 2% of the viewport — while its own interaction check was passing
+    // 1/1. The model spent twelve steps and thirteen tool calls rebuilding a
+    // page that had been fine, and wrote a precise bug report about the checker
+    // on its way through.
+    const p = write('sparse.html', `<!doctype html><title>t</title><body>
+      <h1 id=heading>Status Probe</h1>
+      <button id=start>Start</button>
+      <div id=status>Idle</div>
+      <script>
+        document.getElementById('start').addEventListener('click', () => {
+          document.getElementById('status').textContent = 'Running';
+        });
+      </script>`);
+    const v = await verifyApp({
+      target: p, settleMs: 400,
+      checks: [{ name: 'Start', selector: '#start' }],
+    });
+    assert(!v.problems.some(x => /visually blank/.test(x)),
+      `A small but real page is not blank (${v.problems.join('; ')})`);
+    assert(v.passed, 'And it passes');
+    assert(v.rendered.visible >= 3, `Its visible elements are counted (${v.rendered.visible})`);
+  }
+
+  {
+    // Blank still means blank, or the fix above would just be a way of passing
+    // everything.
+    const p = write('trulyblank.html', '<!doctype html><title>t</title><body></body>');
+    const v = await verifyApp({ target: p, settleMs: 300 });
+    assert(v.problems.some(x => /visually blank/.test(x)),
+      `An empty body is still reported blank (${v.problems.join('; ')})`);
+  }
+
   {
     // Verifying something that was never built must be an error, not a pass.
     let threw = '';
