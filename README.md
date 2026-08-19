@@ -403,7 +403,7 @@ the only state, a validation stack, and a self-healer. Resumable.
 
 ## Commands
 
-58 slash commands. The ones worth knowing:
+48 slash commands. The ones worth knowing:
 
 ```
 /help  /status  /cost  /compact  /clear  /plan
