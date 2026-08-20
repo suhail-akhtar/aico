@@ -71,7 +71,7 @@ export interface Group {
 
 export type IconName =
   | 'sliders' | 'stack' | 'shield' | 'gauge' | 'wallet'
-  | 'sun' | 'moon' | 'monitor' | 'lock' | 'pencil' | 'globe' | 'bolt';
+  | 'sun' | 'moon' | 'monitor' | 'lock' | 'pencil' | 'globe' | 'bolt' | 'users' | 'bookmark';
 
 export interface Pane {
   id: string;
@@ -80,7 +80,7 @@ export interface Pane {
   blurb?: string;
   groups: Group[];
   /** Panes that render their own thing rather than a list of fields. */
-  custom?: 'models' | 'skills' | 'mcp';
+  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory';
 }
 
 /* ── The schema ───────────────────────────────────────────────────── */
@@ -171,6 +171,24 @@ export const PANES: Pane[] = [
     icon: 'globe',
     blurb: 'Model Context Protocol servers. Whatever tools they expose become the tools the agent has.',
     custom: 'mcp',
+    groups: [],
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    icon: 'users',
+    blurb: 'Specialists work can be handed to. What an agent is for decides when it gets the task, and '
+      + 'the skills assigned to it are the procedures it reaches for first.',
+    custom: 'agents',
+    groups: [],
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    icon: 'bookmark',
+    blurb: 'Facts the agent carries between turns. Scope decides how far each one travels — everywhere, '
+      + 'this project, or just this conversation.',
+    custom: 'memory',
     groups: [],
   },
   {

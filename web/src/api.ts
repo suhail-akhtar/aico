@@ -213,6 +213,16 @@ export const api = {
   reloadMcpServers: () =>
     post<{ ok: boolean; result?: string; error?: string }>('mcp/reload', {}),
 
+  // ── registries ─────────────────────────────────────────────────────
+  //
+  // One call for every verb on every registry, hitting the same executors the
+  // agent uses. The panel is a second front door to one implementation rather
+  // than a parallel one that has to be kept in step.
+  manage: (registry: 'skills' | 'agents' | 'mcp' | 'memory', input: Record<string, unknown>) =>
+    post<ManageResult>('manage', { registry, ...input }),
+  memories: (scope?: string) =>
+    get<{ memories: MemorySummary[] }>(`memory${scope && scope !== 'all' ? `?scope=${encodeURIComponent(scope)}` : ''}`),
+
   changes: (sessionId: string) => get<ChangesReport>(`changes?id=${encodeURIComponent(sessionId)}`),
   changesDiff: (sessionId: string, file: string) =>
     get<{ diff: string }>(`changes/diff?id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(file)}`),
@@ -465,6 +475,9 @@ export interface AgentSpec {
   tools: string[];
   canDelegate: boolean;
   source: string;
+  /** False when switched off: still defined, just not offered. */
+  enabled: boolean;
+  model?: string;
 }
 
 /** Where the agent writes files that are not part of the project. */
@@ -505,6 +518,24 @@ export interface SkillSummary {
   author?: string;
   resources: string[];
   path: string;
+  enabled: boolean;
+  trigger?: string;
+}
+
+/** Every registry verb answers the same way: did it work, and what happened. */
+export interface ManageResult {
+  ok: boolean;
+  result?: string;
+  error?: string;
+}
+
+export interface MemorySummary {
+  id: string;
+  scope: 'global' | 'project' | 'session';
+  text: string;
+  tags: string[];
+  updatedAt: number;
+  belongsTo?: string;
 }
 
 export interface SystemSnapshot {

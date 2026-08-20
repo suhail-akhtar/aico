@@ -115,7 +115,9 @@ export async function handleSystemRoute(
     case 'agents': {
       if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
       const { listAgentSpecs } = await import('../agents/registry.js');
+      const { disabledIn: disabledAgents } = await import('../registry-state.js');
       const specs = await listAgentSpecs();
+      const offAgents = disabledAgents('agents');
       return {
         status: 200,
         body: {
@@ -131,6 +133,8 @@ export async function handleSystemRoute(
             tools: spec.tools,
             canDelegate: spec.canDelegate,
             source: spec.source,
+            enabled: !offAgents.has(spec.name.toLowerCase()),
+            model: spec.model,
           })),
         },
       };
@@ -145,7 +149,9 @@ export async function handleSystemRoute(
     case 'skills': {
       if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
       const { skillRegistry } = await import('../skills/registry.js');
+      const { disabledIn } = await import('../registry-state.js');
       await skillRegistry.load({});
+      const offSkills = disabledIn('skills');
       return {
         status: 200,
         body: {
@@ -153,6 +159,8 @@ export async function handleSystemRoute(
             name: s.frontmatter.name,
             description: s.frontmatter.description,
             builtin: s.isBuiltin,
+            enabled: !offSkills.has(s.frontmatter.name.toLowerCase()),
+            trigger: s.frontmatter.trigger,
             aliases: s.frontmatter.aliases ?? [],
             allowedTools: s.frontmatter.allowedTools ?? [],
             license: s.frontmatter.license,
@@ -261,6 +269,73 @@ ${content || 'Describe the procedure here.'}
       } catch (err) {
         return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
       }
+    }
+
+    // ── registry management ──────────────────────────────────────────
+    //
+    // One route for every verb on every registry, and it calls exactly the
+    // executors the agent calls. That is the point: the panel and the
+    // orchestrator are two front doors to one implementation, so a rule added
+    // for one — a draft that must be verified before it registers, a built-in
+    // that cannot be deleted — holds for the other without being written
+    // twice. Two code paths for the same operation is how they drift.
+    case 'manage': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const registry = String(body.registry ?? '');
+      const input = { ...body };
+      delete (input as Record<string, unknown>).registry;
+
+      try {
+        let result: string;
+        switch (registry) {
+          case 'skills': {
+            const { executeSkillManage } = await import('../skills/manage.js');
+            result = await executeSkillManage(input as never);
+            break;
+          }
+          case 'agents': {
+            const { executeAgentManage } = await import('../tools/manage-agents.js');
+            result = await executeAgentManage(input as never);
+            break;
+          }
+          case 'mcp': {
+            const { executeMcpManage } = await import('../mcp/manage-tool.js');
+            result = await executeMcpManage(input as never);
+            break;
+          }
+          case 'memory': {
+            const { executeMemoryManage } = await import('../tools/manage-memory.js');
+            result = await executeMemoryManage(input as never);
+            break;
+          }
+          default:
+            return { status: 400, body: { ok: false, error: `Unknown registry "${registry}".` } };
+        }
+        // The executors report refusals as text rather than throwing, so the
+        // panel has to read the reply to know whether it worked.
+        const refused = /^(Not |No |There is no |Unknown |Nothing |Give either|A name is required|A path is required|An id is required)/.test(result);
+        return { status: 200, body: { ok: !refused, result } };
+      } catch (err) {
+        return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
+      }
+    }
+
+    case 'memory': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { applicable, listScope } = await import('../memory/store.js');
+      const scope = query.get('scope');
+      const found = scope && scope !== 'all'
+        ? listScope(scope as never, query.get('belongsTo') ?? undefined)
+        : applicable(process.cwd(), query.get('session') ?? undefined);
+      return {
+        status: 200,
+        body: {
+          memories: found.map(m => ({
+            id: m.id, scope: m.scope, text: m.text, tags: m.tags,
+            updatedAt: m.updatedAt, belongsTo: m.belongsTo,
+          })),
+        },
+      };
     }
 
     case 'system':

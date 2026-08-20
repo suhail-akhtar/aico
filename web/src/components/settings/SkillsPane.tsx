@@ -80,6 +80,19 @@ export function SkillsPane(): React.ReactElement {
     catch { setBody('Could not read this skill.'); }
   };
 
+  /** Switch a skill off without losing it — it leaves the catalogue, not the disk. */
+  const toggle = async (skill: SkillSummary): Promise<void> => {
+    const result = await api.manage('skills', {
+      action: skill.enabled === false ? 'enable' : 'disable',
+      name: skill.name,
+    });
+    setNote({
+      tone: result.ok ? 'good' : 'bad',
+      text: result.result ?? result.error ?? 'nothing came back',
+    });
+    await refresh();
+  };
+
   const remove = async (name: string): Promise<void> => {
     const result = await api.removeSkill(name);
     setNote(result.ok
@@ -173,21 +186,40 @@ export function SkillsPane(): React.ReactElement {
                         built in
                       </span>
                     )}
+                    {skill.enabled === false && (
+                      <span className="rounded bg-aico-warning/15 px-1.5 py-0.5 text-[10px] text-aico-warning">
+                        off
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 text-[12px] leading-[17px] text-aico-secondary">
                     {skill.description}
                   </p>
                   <Extras skill={skill} />
                 </button>
-                {!skill.builtin && (
+                <div className="flex shrink-0 gap-1">
+                  {/*
+                    Offered for built-ins too, and that is the point of having a
+                    switch at all: a built-in cannot be deleted, so without this
+                    there is no way to say "not this one".
+                  */}
                   <button
-                    onClick={() => setConfirming(skill.name)}
-                    className="shrink-0 rounded-lg px-2 py-1 text-[11px] text-aico-muted
-                               transition-colors hover:bg-aico-danger/10 hover:text-aico-danger"
+                    onClick={() => void toggle(skill)}
+                    className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
+                               hover:bg-aico-hover hover:text-aico-primary"
                   >
-                    Remove
+                    {skill.enabled === false ? 'Enable' : 'Disable'}
                   </button>
-                )}
+                  {!skill.builtin && (
+                    <button
+                      onClick={() => setConfirming(skill.name)}
+                      className="rounded-lg px-2 py-1 text-[11px] text-aico-muted
+                                 transition-colors hover:bg-aico-danger/10 hover:text-aico-danger"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
 
               {confirming === skill.name && (
