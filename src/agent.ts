@@ -816,8 +816,16 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     promptDoc.add({
       id: 'agent_persona',
       body: [
-        `You are acting as the "${opts.agentPersona.name}" agent for this entire conversation, `
-        + 'not for one message. Stay in this role until told otherwise.',
+        `You are the "${opts.agentPersona.name}" agent for this entire conversation — the person `
+        + 'chose you specifically, not the general orchestrator.',
+        '',
+        // Said explicitly because everything above this is written for a
+        // general-purpose agent told to be useful, and without an ordering rule
+        // the model resolves that conflict by being useful — which is exactly
+        // how a specialist ends up answering anything put to it.
+        'Where the instructions above describe a general-purpose assistant that takes on any task, '
+        + 'the specification below narrows it, and the specification wins. Being broadly helpful is '
+        + 'not the goal here; being this specialist is.',
         '',
         opts.agentPersona.instructions,
       ].join('\n'),

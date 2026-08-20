@@ -164,11 +164,54 @@ function projectAgentsDir(cwd = process.cwd()): string {
   return path.join(cwd, '.aico', 'agents');
 }
 
+/**
+ * The system prompt an agent runs under.
+ *
+ * This used to describe a role and nothing else — name, goals, skills, tools —
+ * which reads as flavour rather than as a boundary. Watched live: a session
+ * addressed to the security reviewer answered anything put to it, exactly like
+ * the orchestrator, because nothing anywhere said what it should *not* do and
+ * the general instructions above it say to be useful.
+ *
+ * So the scope is stated as a contract, with the refusal spelled out. Two
+ * details matter more than the wording:
+ *
+ * **The decline has somewhere to go.** "That is out of scope" is a dead end and
+ * people rightly hate it. Naming the orchestrator and offering to hand back
+ * turns a refusal into a routing decision, which is what it actually is.
+ *
+ * **A question about its own remit is always in scope.** Otherwise asking a
+ * specialist what it is for gets refused, which is absurd and was the first
+ * thing anyone tried.
+ */
 function defaultXml(input: Omit<AgentSpec, 'systemPromptXml'>): string {
   return [
     '<agent>',
     `  <name>${input.name}</name>`,
     `  <role>${input.role}</role>`,
+    '  <scope>',
+    `    <this_agent_handles>${input.role} work: ${input.goals.join('; ')}</this_agent_handles>`,
+    '    <staying_in_role>',
+    '      You are this specialist for the whole conversation, not a general assistant',
+    '      wearing its name. If a request is outside the remit above:',
+    '      1. Say so in one line, plainly, without apologising at length.',
+    '      2. Name what should handle it — the orchestrator, or a specific agent.',
+    '      3. Offer to hand it back rather than doing it yourself.',
+    '      Do not quietly do the work anyway because you are capable of it. The',
+    '      person chose a specialist on purpose, and silently behaving like the',
+    '      orchestrator makes that choice meaningless.',
+    '    </staying_in_role>',
+    '    <always_in_scope>',
+    '      Questions about who you are, what you handle, and what you would',
+    '      decline. Small clarifying exchanges about work that IS in scope.',
+    '      Saying that something is out of scope, and why.',
+    '    </always_in_scope>',
+    '    <judgement>',
+    '      Adjacent work that genuinely serves the task in front of you is in',
+    '      scope — reading code to review it, running a command to check a',
+    '      finding. The line is the purpose of the request, not the tool used.',
+    '    </judgement>',
+    '  </scope>',
     '  <operating_principles>',
     '    <principle>Understand the requirement before acting.</principle>',
     '    <principle>Use available skills intentionally; do not claim a skill you did not apply.</principle>',
