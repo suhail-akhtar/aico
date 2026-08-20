@@ -27,7 +27,9 @@ import { addMcpServer, updateMcpServer, removeMcpServer, reloadMcpServers } from
 import { disabledIn, isDisabled, setEnabled, forget } from '../registry-state.js';
 
 export interface McpManageInput {
-  action: 'list' | 'read' | 'add' | 'update' | 'remove' | 'enable' | 'disable' | 'reload' | 'test' | 'export' | 'import';
+  action: 'list' | 'read' | 'add' | 'update' | 'remove' | 'enable' | 'disable' | 'reload' | 'test' | 'export' | 'import' | 'paste';
+  /** A pasted JSON config, in either the whole-file or just-the-block shape. */
+  json?: string;
   name?: string;
   /** stdio: the command to run. */
   command?: string;
@@ -46,6 +48,111 @@ export function splitCommandLine(line: string): { command: string; args: string[
   const parts = line.trim().match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
   const clean = parts.map(p => p.replace(/^["']|["']$/g, ''));
   return { command: clean[0] ?? '', args: clean.slice(1) };
+}
+
+/**
+ * What a pasted MCP config says, and what is wrong with it.
+ *
+ * Config for these servers is passed around as a JSON blob — it is what every
+ * README gives you and what Claude Desktop stores — so pasting one should be a
+ * first-class way in rather than something to translate by hand into fields.
+ *
+ * Checked before anything is written, and reported all at once. A server that
+ * is saved and then fails to start is the same dead end as a typo'd command:
+ * the moment to catch it is while the person is still looking at the text they
+ * pasted.
+ */
+export interface ParsedMcpConfig {
+  ok: boolean;
+  servers: Array<{ name: string; type: string; summary: string }>;
+  problems: string[];
+}
+
+export function parseMcpConfig(text: string): ParsedMcpConfig {
+  const problems: string[] = [];
+  const servers: ParsedMcpConfig['servers'] = [];
+
+  if (!text.trim()) return { ok: false, servers, problems: ['Nothing pasted.'] };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      servers,
+      // Trailing commas and comments are the two things people paste from a
+      // config file that JSON.parse will not take, and the message otherwise
+      // just says "unexpected token".
+      problems: [
+        `Not valid JSON: ${why}.`,
+        'Trailing commas and // comments are the usual cause — JSON allows neither.',
+      ],
+    };
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, servers, problems: ['That is not a JSON object.'] };
+  }
+
+  // Both shapes are common: the whole settings file with an mcpServers key, or
+  // just the contents of that key.
+  const record = parsed as Record<string, unknown>;
+  const block = (record['mcpServers'] && typeof record['mcpServers'] === 'object')
+    ? record['mcpServers'] as Record<string, unknown>
+    : record;
+
+  const names = Object.keys(block);
+  if (names.length === 0) return { ok: false, servers, problems: ['No servers defined in there.'] };
+
+  for (const name of names) {
+    const config = block[name];
+    if (!config || typeof config !== 'object') {
+      problems.push(`"${name}": expected an object.`);
+      continue;
+    }
+    const entry = config as Record<string, unknown>;
+    if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+      problems.push(`"${name}": a name may only hold letters, numbers, underscores and dashes.`);
+      continue;
+    }
+
+    const url = typeof entry['url'] === 'string' ? entry['url'] : '';
+    const command = typeof entry['command'] === 'string' ? entry['command'] : '';
+    const declared = typeof entry['type'] === 'string' ? entry['type'] : '';
+
+    if (!url && !command) {
+      problems.push(`"${name}": needs either a command (stdio) or a url (http/sse).`);
+      continue;
+    }
+    if (url && command) {
+      problems.push(`"${name}": has both a command and a url — it can only be one.`);
+      continue;
+    }
+    if (declared && !['stdio', 'http', 'sse'].includes(declared)) {
+      problems.push(`"${name}": type "${declared}" is not one of stdio, http, sse.`);
+      continue;
+    }
+    if (entry['args'] !== undefined && !Array.isArray(entry['args'])) {
+      problems.push(`"${name}": args must be a list.`);
+      continue;
+    }
+    if (url && !/^https?:\/\//i.test(url)) {
+      problems.push(`"${name}": "${url}" is not an http or https URL.`);
+      continue;
+    }
+
+    const type = declared || (url ? (url.includes('/sse') ? 'sse' : 'http') : 'stdio');
+    const args = Array.isArray(entry['args']) ? entry['args'] as string[] : [];
+    servers.push({
+      name,
+      type,
+      summary: url || [command, ...args].join(' '),
+    });
+  }
+
+  return { ok: problems.length === 0 && servers.length > 0, servers, problems };
 }
 
 /** What a server is contributing right now. */
@@ -148,6 +255,31 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
       }
     }
 
+    case 'paste': {
+      const parsed = parseMcpConfig(String(input.json ?? ''));
+      if (!parsed.ok) {
+        return `Not added:\n${parsed.problems.map(p => `  - ${p}`).join('\n')}`;
+      }
+      const block = JSON.parse(String(input.json));
+      const servers = (block.mcpServers && typeof block.mcpServers === 'object')
+        ? block.mcpServers : block;
+
+      const added: string[] = [];
+      const failed: string[] = [];
+      for (const server of parsed.servers) {
+        try {
+          await addMcpServer({ name: server.name, ...servers[server.name] });
+          added.push(`${server.name} — ${statusOf(server.name)}`);
+        } catch (err) {
+          failed.push(`${server.name} (${err instanceof Error ? err.message : String(err)})`);
+        }
+      }
+      return [
+        added.length ? `Added: ${added.join('; ')}` : '',
+        failed.length ? `Failed: ${failed.join('; ')}` : '',
+      ].filter(Boolean).join('\n');
+    }
+
     case 'remove': {
       const result = await removeMcpServer(name);
       forget('mcp', name);
@@ -242,7 +374,7 @@ export const mcpManageToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'read', 'add', 'update', 'remove', 'enable', 'disable', 'reload', 'test', 'export', 'import'],
+        enum: ['list', 'read', 'add', 'update', 'remove', 'enable', 'disable', 'reload', 'test', 'export', 'import', 'paste'],
         description:
           'list: every configured server and what it contributes. read: one in full, with its tools. '
           + 'add: connect a new one. update: change part of its config, keeping the rest. remove: delete '
@@ -261,6 +393,7 @@ export const mcpManageToolDefinition = {
       type: { type: 'string', enum: ['stdio', 'http', 'sse'], description: 'Usually inferred from command vs url.' },
       headers: { type: 'object', description: 'HTTP headers, for a url server that needs auth.' },
       path: { type: 'string', description: 'For export: where to write the JSON. For import: the file to read.' },
+      json: { type: 'string', description: 'For paste: a JSON config, either the whole file with an mcpServers key or just that block.' },
     },
     required: ['action'],
   },

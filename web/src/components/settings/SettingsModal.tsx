@@ -198,9 +198,9 @@ export function SettingsModal({ onClose }: SettingsModalProps): React.ReactEleme
 
                 <div className="mt-5">
                   {pane.custom === 'models' ? <ModelsPane />
-                    : pane.custom === 'skills' ? <SkillsPane />
+                    : pane.custom === 'skills' ? <SkillsPane onClose={onClose} />
                     : pane.custom === 'mcp' ? <McpPane />
-                    : pane.custom === 'agents' ? <AgentsPane />
+                    : pane.custom === 'agents' ? <AgentsPane onClose={onClose} />
                     : pane.custom === 'memory' ? <MemoryPane /> : (
                     pane.groups.map(group => (
                       <section key={group.title} className="mb-7 last:mb-0">

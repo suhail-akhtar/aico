@@ -18,9 +18,19 @@
  * @module components/settings/SkillsPane
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type SkillSummary } from '../../api';
 import { useStore } from '../../store';
+
+/** What a SKILL.md looks like, for the paste box. */
+const SKILL_TEMPLATE = [
+  '---',
+  'name: my-skill',
+  'description: what it does and when to reach for it',
+  '---',
+  '',
+  'The procedure…',
+].join('\n');
 
 /** A short line about what a skill ships with. */
 function Extras({ skill }: { skill: SkillSummary }): React.ReactElement | null {
@@ -34,7 +44,7 @@ function Extras({ skill }: { skill: SkillSummary }): React.ReactElement | null {
   return <p className="mt-0.5 text-[11px] text-aico-muted">{bits.join(' · ')}</p>;
 }
 
-export function SkillsPane(): React.ReactElement {
+export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactElement {
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [source, setSource] = useState('');
   const [busy, setBusy] = useState(false);
@@ -42,7 +52,11 @@ export function SkillsPane(): React.ReactElement {
   const [open, setOpen] = useState<string | null>(null);
   const [body, setBody] = useState('');
   const [confirming, setConfirming] = useState<string | null>(null);
-  const prefillComposer = useStore(s => s.prefillComposer);
+  const [pasting, setPasting] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const folderInput = useRef<HTMLInputElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const askAgentFor = useStore(s => s.askAgentFor);
 
   const refresh = useCallback(async () => {
     try { setSkills((await api.skills()).skills); }
@@ -51,6 +65,22 @@ export function SkillsPane(): React.ReactElement {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  /** One place that turns an import result into something readable. */
+  const report = async (
+    result: { ok: boolean; name?: string; resources?: string[]; replaced?: boolean; error?: string },
+  ): Promise<void> => {
+    if (result.ok) {
+      setNote({
+        tone: 'good',
+        text: `Installed ${result.name}${result.replaced ? ' (replaced the previous one)' : ''}`
+          + `${result.resources?.length ? ` with ${result.resources.length} bundled file(s)` : ''}.`,
+      });
+      await refresh();
+    } else {
+      setNote({ tone: 'bad', text: result.error ?? 'import failed' });
+    }
+  };
+
   const install = async (overwrite = false): Promise<void> => {
     const path = source.trim();
     if (!path || busy) return;
@@ -58,17 +88,8 @@ export function SkillsPane(): React.ReactElement {
     setNote(null);
     try {
       const result = await api.importSkill(path, overwrite);
-      if (result.ok) {
-        setNote({
-          tone: 'good',
-          text: `Installed ${result.name}${result.replaced ? ' (replaced the previous one)' : ''}`
-            + `${result.resources?.length ? ` with ${result.resources.length} bundled file(s)` : ''}.`,
-        });
-        setSource('');
-        await refresh();
-      } else {
-        setNote({ tone: 'bad', text: result.error ?? 'import failed' });
-      }
+      if (result.ok) setSource('');
+      await report(result);
     } finally { setBusy(false); }
   };
 
@@ -93,6 +114,88 @@ export function SkillsPane(): React.ReactElement {
     await refresh();
   };
 
+  /**
+   * What a picked folder should not carry.
+   *
+   * A skill directory sits inside a repository as often as not, and picking it
+   * with the OS folder chooser takes everything under it — including the git
+   * history and any node_modules, which are megabytes of things no skill needs
+   * and which would blow the request limit before the skill got installed.
+   */
+  const IGNORED = /(^|\/)(\.git|node_modules|__pycache__|\.venv|\.DS_Store|__MACOSX)(\/|$)/;
+
+  /** Bytes as base64, without loading a 50 MB file into a string first. */
+  const encode = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('could not read the file'));
+    reader.onload = () => {
+      const result = String(reader.result);
+      // A data: URL, and everything after the comma is the base64.
+      resolve(result.slice(result.indexOf(',') + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+
+  /** Send whatever the file chooser handed back. */
+  const uploadFiles = async (list: FileList | null): Promise<void> => {
+    if (!list || list.length === 0 || busy) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const chosen = Array.from(list)
+        .map(file => ({
+          file,
+          // webkitRelativePath is set for a folder pick and empty for a single
+          // file, where the name is the whole path.
+          path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+        }))
+        .filter(entry => !IGNORED.test(`/${entry.path}`));
+
+      if (chosen.length === 0) {
+        setNote({ tone: 'bad', text: 'Nothing usable in there — it was all git or build files.' });
+        return;
+      }
+
+      // The server caps a request at 8 MB and base64 adds a third, so the limit
+      // is stated in the terms the person can act on rather than as a failure
+      // after a long upload.
+      const total = chosen.reduce((sum, entry) => sum + entry.file.size, 0);
+      if (total > 5 * 1024 * 1024) {
+        setNote({
+          tone: 'bad',
+          text: `That folder is ${(total / 1024 / 1024).toFixed(1)} MB, which is far more than a `
+            + 'skill needs — check you picked the skill itself and not the repository around it. '
+            + 'For something genuinely large, give the server a path instead.',
+        });
+        return;
+      }
+
+      const files = await Promise.all(
+        chosen.map(async entry => ({ path: entry.path, base64: await encode(entry.file) })),
+      );
+      const result = await api.uploadSkill({ files });
+      report(result);
+    } catch (err) {
+      setNote({ tone: 'bad', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+      // Cleared so choosing the same file twice fires change again.
+      if (folderInput.current) folderInput.current.value = '';
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  };
+
+  const installPasted = async (): Promise<void> => {
+    if (!pasted.trim() || busy) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      report(await api.uploadSkill({ markdown: pasted }));
+      setPasted('');
+      setPasting(false);
+    } finally { setBusy(false); }
+  };
+
   const remove = async (name: string): Promise<void> => {
     const result = await api.removeSkill(name);
     setNote(result.ok
@@ -107,11 +210,87 @@ export function SkillsPane(): React.ReactElement {
       <section>
         <h3 className="text-[13px] font-medium text-aico-primary">Install a skill</h3>
         <p className="mt-0.5 text-[12px] text-aico-muted">
-          A folder, a <code className="font-mono">.zip</code>, or a single{' '}
-          <code className="font-mono">SKILL.md</code>. Claude-format skills work as they are —
-          their bundled scripts and references come with them. Nothing is run on import.
+          A folder, a <code className="font-mono">.zip</code> or{' '}
+          <code className="font-mono">.skill</code>, or a single{' '}
+          <code className="font-mono">SKILL.md</code>. Claude skills work exactly as they are — the
+          scripts and references beside the markdown come with them, and nothing is run on import.
         </p>
-        <div className="mt-2 flex gap-1.5">
+
+        {/*
+          Three ways in, because people arrive holding three different things: a
+          folder they already unpacked, an archive they just downloaded, or the
+          text of a SKILL.md someone pasted at them. Typing an absolute path was
+          the only option and is the one nobody has to hand.
+        */}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <button
+            onClick={() => folderInput.current?.click()}
+            disabled={busy}
+            className="rounded-lg border border-aico-border px-3 py-1.5 text-[12px] text-aico-primary
+                       transition-colors hover:bg-aico-hover disabled:opacity-40"
+          >
+            Choose a folder…
+          </button>
+          <button
+            onClick={() => fileInput.current?.click()}
+            disabled={busy}
+            className="rounded-lg border border-aico-border px-3 py-1.5 text-[12px] text-aico-primary
+                       transition-colors hover:bg-aico-hover disabled:opacity-40"
+          >
+            Choose a .skill / .zip / SKILL.md…
+          </button>
+          <button
+            onClick={() => setPasting(p => !p)}
+            className="rounded-lg px-3 py-1.5 text-[12px] text-aico-secondary transition-colors hover:bg-aico-hover"
+          >
+            {pasting ? 'Cancel paste' : 'Paste a SKILL.md'}
+          </button>
+        </div>
+
+        <input
+          ref={folderInput}
+          type="file"
+          // Not in the React types, and the whole point of the button above.
+          {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+          multiple
+          onChange={e => void uploadFiles(e.target.files)}
+          className="hidden"
+        />
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".skill,.zip,.md,application/zip"
+          onChange={e => void uploadFiles(e.target.files)}
+          className="hidden"
+        />
+
+        {pasting && (
+          <div className="mt-2">
+            <textarea
+              value={pasted}
+              onChange={e => setPasted(e.target.value)}
+              rows={8}
+              placeholder={SKILL_TEMPLATE}
+              className="w-full resize-y rounded-lg border border-aico-border bg-aico-bg px-2.5 py-1.5
+                         font-mono text-[11px] leading-[17px] text-aico-primary
+                         placeholder:text-aico-muted focus:border-aico-accent/40 focus:outline-none"
+            />
+            <button
+              onClick={() => void installPasted()}
+              disabled={busy || !pasted.trim()}
+              className="mt-1.5 rounded-lg bg-aico-accent px-3 py-1.5 text-[12px] font-medium text-white
+                         transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              Install it
+            </button>
+          </div>
+        )}
+
+        <p className="mt-2.5 text-[11px] text-aico-muted">
+          Or give the server a path directly — useful for something already on the machine AICO is
+          running on.
+        </p>
+        <div className="mt-1 flex gap-1.5">
           <input
             value={source}
             onChange={e => setSource(e.target.value)}
@@ -153,12 +332,19 @@ export function SkillsPane(): React.ReactElement {
           fill in a form. This hands over a brief, not a template.
         */}
         <button
-          onClick={() => prefillComposer(
-            'Write me a new skill. Ask me what the procedure is for, then draft a SKILL.md with '
-            + 'a name, a description precise enough that you would know when to pick it over '
-            + 'anything else, and the steps in the order they should happen. Install it when I '
-            + 'am happy with it.',
-          )}
+          onClick={() => {
+            // A fresh conversation, and Settings out of the way: writing a skill
+            // is its own task, and burying it inside whatever chat happened to
+            // be open loses both the request and the result.
+            askAgentFor(
+              'Write me a new skill. Ask me what the procedure is for, then use SkillManage to '
+              + 'draft it — a name, a description precise enough that you would know when to pick '
+              + 'it over anything else, and the steps in the order they should happen. Ship a '
+              + 'script or a reference alongside it if the procedure needs one. Try it on a real '
+              + 'example before registering it.',
+            );
+            onClose?.();
+          }}
           className="mt-2 text-[12px] text-aico-accent underline underline-offset-2 hover:opacity-80"
         >
           Or write one with the agent →

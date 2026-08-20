@@ -155,7 +155,7 @@ import {
   listDirectory, globFiles, grepFiles, getBuiltinDir,
   executeSkillManage, verifySkillDir, draftsDir,
   setEnabled, isDisabled, matchingSkills, exportSkill,
-  executeAgentManage, executeMemoryManage, executeMcpManage, splitCommandLine,
+  executeAgentManage, executeMemoryManage, executeMcpManage, splitCommandLine, parseMcpConfig,
   remember, listScope, applicable, activeMemories, memoryRoot, scopeDir, searchMemories, buildRuntimeAwareness,
   setMemoryEnabled, memoryKey,
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
@@ -6562,6 +6562,59 @@ console.log('  -- MCP: a command line is split the way a shell would --');
   assert(/Not updated/.test(missing), 'updating a server that is not configured is refused, not created');
   assert(/not configured/.test(missing), 'and says why');
   assert(/A name is required/.test(await executeMcpManage({ action: 'update' })), 'update needs a name');
+}
+
+console.log('  -- A pasted MCP config is read and checked before anything is written --');
+{
+  // The shape every README and Claude Desktop config uses.
+  const whole = parseMcpConfig(JSON.stringify({
+    mcpServers: {
+      filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'] },
+      remote: { url: 'https://example.com/mcp' },
+    },
+  }));
+  assert(whole.ok, `a whole config file parses: ${whole.problems.join('; ')}`);
+  assert(whole.servers.length === 2, 'finding both servers');
+  assert(whole.servers.find(s => s.name === 'filesystem').type === 'stdio', 'a command is stdio');
+  assert(whole.servers.find(s => s.name === 'remote').type === 'http', 'and a url is http');
+
+  // People paste the inner block as often as the whole file.
+  const inner = parseMcpConfig(JSON.stringify({ solo: { command: 'node server.js' } }));
+  assert(inner.ok, 'just the mcpServers block parses too');
+  assert(inner.servers[0].name === 'solo', 'and finds the server in it');
+
+  // sse is inferred from the path, since that is how these URLs are written.
+  assert(parseMcpConfig(JSON.stringify({ s: { url: 'https://x.dev/sse' } })).servers[0].type === 'sse',
+    'an /sse url is recognised as sse');
+
+  // The failures worth naming, each one something a person actually pastes.
+  const trailing = parseMcpConfig('{ "a": { "command": "x" }, }');
+  assert(!trailing.ok, 'a trailing comma is rejected');
+  assert(/trailing commas/i.test(trailing.problems.join(' ')),
+    'and the message names the usual cause rather than saying "unexpected token"');
+
+  const neither = parseMcpConfig(JSON.stringify({ broken: { type: 'stdio' } }));
+  assert(!neither.ok, 'a server with neither command nor url is rejected');
+  assert(/command \(stdio\) or a url/.test(neither.problems.join(' ')), 'and says what is missing');
+
+  const both = parseMcpConfig(JSON.stringify({ x: { command: 'a', url: 'https://b.dev' } }));
+  assert(!both.ok, 'a server with both is rejected');
+  assert(/only be one/.test(both.problems.join(' ')), 'and says why');
+
+  assert(!parseMcpConfig(JSON.stringify({ x: { url: 'ftp://nope' } })).ok, 'a non-http url is rejected');
+  assert(!parseMcpConfig(JSON.stringify({ 'bad name!': { command: 'x' } })).ok, 'an unusable name is rejected');
+  assert(!parseMcpConfig(JSON.stringify({ x: { command: 'a', args: 'not-a-list' } })).ok, 'args must be a list');
+  assert(!parseMcpConfig('').ok, 'nothing pasted is not ok');
+  assert(!parseMcpConfig('[]').ok, 'an array is not a config');
+  assert(!parseMcpConfig('{}').ok, 'an empty object defines no servers');
+
+  // Every problem is reported, not just the first — one round trip per typo is
+  // how a five-server paste takes five attempts.
+  const many = parseMcpConfig(JSON.stringify({ a: { type: 'stdio' }, b: { url: 'ftp://x' } }));
+  assert(many.problems.length === 2, `both problems are reported at once (${many.problems.length})`);
+
+  assert(/Not added/.test(await executeMcpManage({ action: 'paste', json: '{ oops }' })),
+    'and pasting an invalid config writes nothing');
 }
 
 console.log('  -- Creating a skill does not register it --');

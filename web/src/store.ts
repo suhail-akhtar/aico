@@ -146,6 +146,16 @@ interface AppState {
   composerPrefill: { text: string; at: number } | null;
   prefillComposer: (text: string) => void;
   /**
+   * Hand a brief to the agent in a conversation of its own.
+   *
+   * "Write one with the agent" was dropping the brief into whatever chat
+   * happened to be open, which is the wrong place twice over: the request
+   * lands in the middle of unrelated work, and the work it produces is buried
+   * in a session about something else. Making a skill or an agent is its own
+   * task and deserves its own thread.
+   */
+  askAgentFor: (text: string) => void;
+  /**
    * Panels the reader has closed, keyed by *what* was closed.
    *
    * A plain boolean would make dismissal permanent, so a genuinely new plan or
@@ -346,6 +356,13 @@ export const useStore = create<AppState>((set, get) => ({
   // Stamped, so asking for the same text twice still reaches the composer —
   // an identical value would otherwise look like no change at all.
   prefillComposer: (text) => set({ composerPrefill: { text, at: Date.now() } }),
+
+  askAgentFor: (text) => {
+    // New session first: connect() resets the draft, so prefilling before it
+    // would put the brief in a composer that is about to be cleared.
+    get().newSession();
+    get().prefillComposer(text);
+  },
 
   dismissPanel: (panel, identity) =>
     set(state => ({ dismissed: { ...state.dismissed, [panel]: identity } })),

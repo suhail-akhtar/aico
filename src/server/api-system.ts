@@ -211,6 +211,73 @@ export async function handleSystemRoute(
       return { status: result.ok ? 200 : 400, body: result };
     }
 
+    /**
+     * A skill uploaded from the browser, in any of the shapes people have one.
+     *
+     * The path-based import assumes the browser and the server share a
+     * filesystem, which is true when you launched both and false the moment
+     * anyone opens the portal from another machine. It also assumes people know
+     * the absolute path of a file they just downloaded, which they do not.
+     *
+     * So the bytes come over the wire and land in a temp directory, and from
+     * there it is the same `importSkill` as everything else — one code path
+     * that already knows about Claude directory skills, zips, bare SKILL.md,
+     * and the wrapper folder a zip usually adds.
+     *
+     * Three shapes arrive here:
+     *   - `files`: a folder the user picked, each entry with its relative path
+     *   - `files` of one `.zip`/`.skill`: the archive is written and unpacked
+     *   - `markdown`: SKILL.md pasted straight in
+     */
+    case 'skills/upload': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const fsMod = await import('fs');
+      const pathMod = await import('path');
+      const osMod = await import('os');
+      const { importSkill } = await import('../skills/import.js');
+
+      const staging = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'aico-upload-'));
+      try {
+        let source = staging;
+        const markdown = typeof body.markdown === 'string' ? body.markdown : '';
+        const files = Array.isArray(body.files) ? body.files as Array<{ path?: string; base64?: string }> : [];
+
+        if (markdown.trim()) {
+          fsMod.writeFileSync(pathMod.join(staging, 'SKILL.md'), markdown, 'utf8');
+        } else if (files.length > 0) {
+          for (const file of files) {
+            const relative = String(file.path ?? '').split('\\').join('/');
+            if (!relative) continue;
+            // The uploaded name decides where it lands, so it is checked the
+            // same way a skill's own resources are.
+            const target = pathMod.resolve(staging, relative);
+            if (!target.startsWith(pathMod.resolve(staging) + pathMod.sep)) continue;
+            fsMod.mkdirSync(pathMod.dirname(target), { recursive: true });
+            fsMod.writeFileSync(target, Buffer.from(String(file.base64 ?? ''), 'base64'));
+          }
+          // A single archive is handed to importSkill as the archive, which
+          // already knows how to unpack one on this platform.
+          const written = files.map(f => String(f.path ?? '')).filter(Boolean);
+          if (written.length === 1 && /\.(zip|skill)$/i.test(written[0]!)) {
+            source = pathMod.join(staging, written[0]!);
+          }
+        } else {
+          return { status: 400, body: { ok: false, error: 'Nothing uploaded.' } };
+        }
+
+        const result = await importSkill(source, { overwrite: body.overwrite === true });
+        if (result.ok) {
+          const { skillRegistry } = await import('../skills/registry.js');
+          await skillRegistry.load({});
+        }
+        return { status: result.ok ? 200 : 400, body: result };
+      } catch (err) {
+        return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
+      } finally {
+        fsMod.rmSync(staging, { recursive: true, force: true });
+      }
+    }
+
     case 'skills/create': {
       if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
       const name = String(body.name ?? '').trim();
@@ -274,6 +341,19 @@ ${content || 'Describe the procedure here.'}
       } catch (err) {
         return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
       }
+    }
+
+    /**
+     * Say what a pasted config means, without writing anything.
+     *
+     * Separate from adding it so the panel can show what will happen while the
+     * text is still on screen. Validating only when you press the button makes
+     * the error land after the decision rather than before it.
+     */
+    case 'mcp/validate': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { parseMcpConfig } = await import('../mcp/manage-tool.js');
+      return { status: 200, body: parseMcpConfig(String(body.json ?? '')) };
     }
 
     case 'mcp/reload': {

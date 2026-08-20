@@ -18,9 +18,9 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, type SystemSnapshot } from '../../api';
+import { api, type SystemSnapshot, type McpConfigCheck } from '../../api';
 
-type Shape = 'command' | 'url';
+type Shape = 'command' | 'url' | 'json';
 
 /** Split a pasted command line the way a shell would, honouring quotes. */
 export function splitCommand(line: string): { command: string; args: string[] } {
@@ -28,6 +28,18 @@ export function splitCommand(line: string): { command: string; args: string[] } 
   const clean = parts.map(p => p.replace(/^["']|["']$/g, ''));
   return { command: clean[0] ?? '', args: clean.slice(1) };
 }
+
+/** The shape people actually have, for the paste box. */
+const MCP_TEMPLATE = [
+  '{',
+  '  "mcpServers": {',
+  '    "filesystem": {',
+  '      "command": "npx",',
+  '      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/some/path"]',
+  '    }',
+  '  }',
+  '}',
+].join('\n');
 
 export function McpPane(): React.ReactElement {
   const [servers, setServers] = useState<SystemSnapshot['mcpServers']>([]);
@@ -38,6 +50,8 @@ export function McpPane(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [json, setJson] = useState('');
+  const [check, setCheck] = useState<McpConfigCheck | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -67,6 +81,33 @@ export function McpPane(): React.ReactElement {
       } else {
         setNote({ tone: 'bad', text: result.error ?? 'could not connect' });
       }
+    } finally { setBusy(false); }
+  };
+
+  const validate = async (): Promise<void> => {
+    setBusy(true);
+    try { setCheck(await api.validateMcpConfig(json)); }
+    catch (err) { setNote({ tone: 'bad', text: err instanceof Error ? err.message : String(err) }); }
+    finally { setBusy(false); }
+  };
+
+  const addPasted = async (): Promise<void> => {
+    setBusy(true);
+    setNote(null);
+    try {
+      // Checked first regardless of whether the person pressed the button, so
+      // a bad paste never reaches the config file.
+      const verdict = await api.validateMcpConfig(json);
+      setCheck(verdict);
+      if (!verdict.ok) return;
+
+      const result = await api.manage('mcp', { action: 'paste', json });
+      setNote({
+        tone: result.ok ? 'good' : 'bad',
+        text: result.result ?? result.error ?? 'nothing came back',
+      });
+      if (result.ok) { setJson(''); setCheck(null); }
+      await refresh();
     } finally { setBusy(false); }
   };
 
@@ -116,7 +157,7 @@ export function McpPane(): React.ReactElement {
         </p>
 
         <div className="mt-2 flex gap-1">
-          {(['command', 'url'] as Shape[]).map(option => (
+          {(['command', 'url', 'json'] as Shape[]).map(option => (
             <button
               key={option}
               onClick={() => setShape(option)}
@@ -126,11 +167,77 @@ export function McpPane(): React.ReactElement {
                   : 'text-aico-muted hover:bg-aico-hover'
               }`}
             >
-              {option === 'command' ? 'A command' : 'A URL'}
+              {option === 'command' ? 'A command' : option === 'url' ? 'A URL' : 'Paste JSON'}
             </button>
           ))}
         </div>
 
+        {shape === 'json' ? (
+          <div className="mt-2 space-y-1.5">
+            <p className="text-[11px] text-aico-muted">
+              The block every README and Claude Desktop config uses. Paste the whole file or just
+              the <code className="font-mono">mcpServers</code> object — either works.
+            </p>
+            <textarea
+              value={json}
+              onChange={e => { setJson(e.target.value); setCheck(null); }}
+              rows={9}
+              placeholder={MCP_TEMPLATE}
+              className="w-full resize-y rounded-lg border border-aico-border bg-aico-bg px-2.5 py-1.5
+                         font-mono text-[11px] leading-[17px] text-aico-primary
+                         placeholder:text-aico-muted focus:border-aico-accent/40 focus:outline-none"
+            />
+
+            {/*
+              Checked before anything is written, and shown while the text is
+              still on screen. Validating only on the button press puts the
+              error after the decision instead of before it.
+            */}
+            {check && (
+              <div className={`rounded-lg px-2.5 py-1.5 text-[12px] ${
+                check.ok ? 'bg-aico-success/10 text-aico-success' : 'bg-aico-danger/10 text-aico-danger'
+              }`}>
+                {check.ok
+                  ? (
+                    <>
+                      <p>Looks good — {check.servers.length} server{check.servers.length === 1 ? '' : 's'}:</p>
+                      <ul className="mt-1 space-y-0.5">
+                        {check.servers.map(server => (
+                          <li key={server.name} className="font-mono text-[11px]">
+                            {server.name} ({server.type}) — {server.summary}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )
+                  : (
+                    <ul className="space-y-0.5">
+                      {check.problems.map(problem => <li key={problem}>{problem}</li>)}
+                    </ul>
+                  )}
+              </div>
+            )}
+
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => void validate()}
+                disabled={busy || !json.trim()}
+                className="rounded-lg px-3 py-1.5 text-[12px] text-aico-secondary transition-colors
+                           hover:bg-aico-hover disabled:opacity-40"
+              >
+                Check it
+              </button>
+              <button
+                onClick={() => void addPasted()}
+                disabled={busy || !json.trim()}
+                className="rounded-lg bg-aico-accent px-3 py-1.5 text-[12px] font-medium text-white
+                           transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                Add {check?.ok && check.servers.length > 1 ? `all ${check.servers.length}` : 'it'}
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="mt-2 space-y-1.5">
           <input
             value={name}
@@ -170,6 +277,7 @@ export function McpPane(): React.ReactElement {
             </button>
           </div>
         </div>
+        )}
 
         {note && (
           <p className={`mt-2 rounded-lg px-2.5 py-1.5 text-[12px] ${

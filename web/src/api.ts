@@ -200,6 +200,20 @@ export const api = {
   importSkill: (source: string, overwrite = false) =>
     post<{ ok: boolean; name?: string; resources?: string[]; replaced?: boolean; error?: string }>(
       'skills/import', { source, overwrite }),
+  /**
+   * Install a skill from bytes rather than a path.
+   *
+   * The path form assumes the browser and the server share a filesystem, which
+   * stops being true the moment the portal is opened from another machine —
+   * and assumes people know the absolute path of something they just
+   * downloaded, which they generally do not.
+   */
+  uploadSkill: (
+    payload: { files?: Array<{ path: string; base64: string }>; markdown?: string; overwrite?: boolean },
+  ) =>
+    post<{ ok: boolean; name?: string; resources?: string[]; replaced?: boolean; error?: string }>(
+      'skills/upload', payload),
+
   createSkill: (name: string, description: string, body: string) =>
     post<{ ok: boolean; name?: string; error?: string }>('skills/create', { name, description, body }),
   removeSkill: (name: string) =>
@@ -212,6 +226,8 @@ export const api = {
     post<{ ok: boolean; result?: string; error?: string }>('mcp/remove', { name }),
   reloadMcpServers: () =>
     post<{ ok: boolean; result?: string; error?: string }>('mcp/reload', {}),
+  /** What a pasted config means, checked before anything is written. */
+  validateMcpConfig: (json: string) => post<McpConfigCheck>('mcp/validate', { json }),
 
   // ── registries ─────────────────────────────────────────────────────
   //
@@ -520,6 +536,12 @@ export interface SkillSummary {
   path: string;
   enabled: boolean;
   trigger?: string;
+}
+
+export interface McpConfigCheck {
+  ok: boolean;
+  servers: Array<{ name: string; type: string; summary: string }>;
+  problems: string[];
 }
 
 /** Every registry verb answers the same way: did it work, and what happened. */

@@ -198,7 +198,7 @@ export { setEnabled, isDisabled, disabledIn, registryStatePath } from './registr
 export { matchingSkills } from './tools/skill.js';
 export { executeAgentManage } from './tools/manage-agents.js';
 export { executeMemoryManage } from './tools/manage-memory.js';
-export { executeMcpManage, splitCommandLine } from './mcp/manage-tool.js';
+export { executeMcpManage, splitCommandLine, parseMcpConfig } from './mcp/manage-tool.js';
 export { remember, listScope, applicable, activeMemories, memoryRoot, scopeDir, searchMemories, setMemoryEnabled, memoryKey } from './memory/store.js';
 export { updateMcpServer } from './mcp/manage.js';
 export { buildRuntimeAwareness } from './capabilities.js';
