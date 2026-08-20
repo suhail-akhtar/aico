@@ -47,6 +47,29 @@ export function applyLogEvent(
       return next;
     }
 
+    /**
+     * Who the conversation was addressed to, at the point it changed.
+     *
+     * Rendered in the transcript rather than only in the composer, because
+     * reading a session back is the case that needs it most: without a mark in
+     * the log there is no way to tell which replies came from the architect and
+     * which from the orchestrator, and the composer only ever shows the current
+     * answer.
+     */
+    case 'session/agent': {
+      const name = data.name ? String(data.name) : null;
+      const next = new Map(logged);
+      next.set(seq, {
+        id: `seq-${seq}`,
+        type: 'system',
+        content: name
+          ? `Talking to ${name} from here — its role, its skills, its tools.`
+          : 'Back to the orchestrator from here.',
+        timestamp: now,
+      });
+      return next;
+    }
+
     case 'assistant/message': {
       const content = String(data.content ?? '');
       const reasoning = readReasoning(data.reasoning);

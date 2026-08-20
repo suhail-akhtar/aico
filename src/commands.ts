@@ -734,33 +734,62 @@ export async function handleSlashCommand(
     }
 
     case 'agent-mode': {
-      // Switch the active agent persona mid-session. The agent's system prompt
-      // is prepended to subsequent user messages, restricting the conversation
-      // to that agent's role, tools, and skills.
+      // Address this whole conversation to one specialist.
+      //
+      // This used to print "all subsequent messages will be handled by the X
+      // agent persona" and set nothing — nothing outside this file read it,
+      // despite a comment claiming the REPL applied it as a prefix. It is now
+      // the same logged session state the web portal uses, so the two clients
+      // cannot disagree about who you are talking to.
+      if (!ctx.session) {
+        return { handled: true, output: 'Agent mode needs a session; this UI does not have one.' };
+      }
+
+      const { currentAgent } = await import('./session/projections.js');
+      const active = currentAgent(ctx.session);
+
       if (!args) {
+        const specs = await listAgentSpecs();
         return {
           handled: true,
           output: [
-            'Usage: /agent-mode <name>',
+            active ? `Talking to: ${active}` : 'Talking to: the orchestrator',
             '',
-            'Switch the active agent persona. The agent\'s instructions become',
-            'the system context for all subsequent messages.',
+            'Usage: /agent-mode <name>   — address this conversation to one agent',
+            '       /agent-mode off      — back to the orchestrator',
             '',
-            'Built-in agents: devops, devsecops, review, project, security-audit,',
-            'backend, frontend, qa, architect, verification, explore',
-            '',
-            'Use /agents to list custom agents, or /agent-mode off to reset.',
+            'The agent stays in role for every turn, with its own instructions,',
+            'its assigned skills, and its tool list. Available:',
+            ...specs.map((spec) => `  ${spec.name.padEnd(18)} ${spec.description}`),
           ].join('\n'),
         };
       }
+
       if (args.toLowerCase() === 'off' || args.toLowerCase() === 'default') {
-        return { handled: true, output: 'Agent mode OFF — back to default orchestrator.' };
+        ctx.session.append('session/agent', { name: null });
+        return { handled: true, output: 'Back to the orchestrator.' };
       }
+
+      const { resolveAgent } = await import('./agents/resolve.js');
+      const resolved = await resolveAgent(args.trim());
+      if (!resolved) {
+        return { handled: true, output: `There is no agent called "${args.trim()}". Use /agents to list them.` };
+      }
+      if (!resolved.enabled) {
+        return { handled: true, output: `"${resolved.spec.name}" is switched off. Enable it first.` };
+      }
+
+      ctx.session.append('session/agent', { name: resolved.spec.name });
       return {
         handled: true,
-        output: `Agent mode: ${args}\nAll subsequent messages will be handled by the ${args} agent persona.\nUse /agent-mode off to reset.`,
-        // The REPL applies this as a prefix to subsequent runAgent calls
-        sendAsPrompt: undefined,
+        output: [
+          `Talking to ${resolved.spec.name} — ${resolved.spec.description}`,
+          resolved.spec.skills?.length ? `It reaches for: ${resolved.spec.skills.join(', ')}` : '',
+          resolved.missingSkills.length
+            ? `Note: these assigned skills are missing or switched off: ${resolved.missingSkills.join(', ')}`
+            : '',
+          'Every turn from here, until /agent-mode off.',
+        ].filter(Boolean).join('\n'),
       };
     }
 

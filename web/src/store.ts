@@ -370,8 +370,14 @@ export const useStore = create<AppState>((set, get) => ({
   setSessionAgent: async (name) => {
     const { sessionId } = get();
     const result = await api.setSessionAgent(sessionId, name);
-    if (result.ok) set({ sessionAgent: result.agent ?? null, error: null });
-    else set({ error: result.error ?? 'could not switch agent' });
+    if (!result.ok) { set({ error: result.error ?? 'could not switch agent' }); return; }
+
+    set({ sessionAgent: result.agent ?? null, error: null });
+    // The switch is a log event, and log events reach the client by replay
+    // rather than live — the same reason `turn-end` reconnects instead of
+    // synthesizing the final message. Resuming replays the gap, so the mark
+    // appears in the transcript where it happened.
+    get().resume();
   },
 
   askAgentFor: (text) => {

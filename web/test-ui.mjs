@@ -7,7 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { composeMessages, emptyDraft } from './dist-test/reduce.mjs';
+import { composeMessages, emptyDraft, applyLogEvent } from './dist-test/reduce.mjs';
 import { groupByAge, groupByProject, relativeAge, promote, merge } from './dist-test/grouping.mjs';
 import {
   PANES, SECRET_ROOTS, allFields, assertNoSecrets, changedPaths,
@@ -1098,6 +1098,29 @@ test('the tool row says green or names what failed', () => {
   assert.ok(/FAIL\s+test/.test(bad.detail), 'with the failing line inline');
 });
 
+
+section('Who you were talking to is in the transcript');
+
+// The composer only ever shows the *current* answer. Reading a session back is
+// the case that needs the mark in the log: without it there is no way to tell
+// which replies came from the architect and which from the orchestrator.
+test('switching to an agent leaves a mark in the transcript', () => {
+  const out = applyLogEvent(new Map(), 4, { type: 'session/agent', name: 'architect' }, 0);
+  const entry = out.get(4);
+  assert.equal(entry.type, 'system');
+  assert.match(entry.content, /Talking to architect from here/);
+});
+
+test('and switching back says so too', () => {
+  const out = applyLogEvent(new Map(), 5, { type: 'session/agent', name: null }, 0);
+  assert.match(out.get(5).content, /Back to the orchestrator/);
+});
+
+test('it is keyed by seq, so replaying the log is idempotent', () => {
+  let out = applyLogEvent(new Map(), 7, { type: 'session/agent', name: 'qa' }, 0);
+  out = applyLogEvent(out, 7, { type: 'session/agent', name: 'qa' }, 0);
+  assert.equal(out.size, 1, 'the same event twice is still one entry');
+});
 
 section('Stop can always unstick the page');
 

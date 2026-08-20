@@ -26,6 +26,8 @@ import { isDisabled } from '../registry-state.js';
 
 export interface ResolvedAgent {
   spec: AgentSpec;
+  /** False when the agent has been switched off since it was chosen. */
+  enabled: boolean;
   /** The system prompt this agent runs under. */
   instructions?: string;
   /** Tools it may use, or undefined for the default set. */
@@ -61,6 +63,41 @@ export function inlineSkills(names: string[]): { block: string; missing: string[
 }
 
 /**
+ * The persona a session should run under, and what to say if it cannot.
+ *
+ * Wraps `resolveAgent` with the two things every caller needs to handle and
+ * would otherwise each handle differently: an agent that has been deleted since
+ * it was chosen, and one that has been switched off since. Both fall back to
+ * the orchestrator with a reason rather than stranding the session or —
+ * worse — carrying on as though the switch had not happened, which is the same
+ * lie a disabled skill would be if it were still quoted at an agent.
+ */
+export async function personaFor(
+  name: string | undefined,
+  cwd?: string,
+): Promise<{ persona?: { name: string; instructions: string }; tools?: string[]; model?: string; notice?: string }> {
+  if (!name) return {};
+
+  const resolved = await resolveAgent(name, cwd);
+  if (!resolved) {
+    return { notice: `The agent "${name}" no longer exists, so this turn ran as the orchestrator.` };
+  }
+  if (!resolved.enabled) {
+    return {
+      notice: `The agent "${resolved.spec.name}" is switched off, so this turn ran as the orchestrator. `
+        + 'Enable it in Settings to go back to talking to it.',
+    };
+  }
+  if (!resolved.instructions) return {};
+
+  return {
+    persona: { name: resolved.spec.name, instructions: resolved.instructions },
+    ...(resolved.tools?.length ? { tools: resolved.tools } : {}),
+    ...(resolved.model ? { model: resolved.model } : {}),
+  };
+}
+
+/**
  * Look up an agent and work out how to run it.
  *
  * Returns undefined when there is no such agent, so the caller can say which
@@ -75,6 +112,7 @@ export async function resolveAgent(name: string, cwd?: string): Promise<Resolved
 
   return {
     spec,
+    enabled: !isDisabled('agents', spec.name),
     instructions: instructions.trim() ? instructions : undefined,
     tools: spec.tools?.length ? spec.tools : undefined,
     model: spec.model,

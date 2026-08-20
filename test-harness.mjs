@@ -156,7 +156,7 @@ import {
   executeSkillManage, verifySkillDir, draftsDir,
   setEnabled, isDisabled, matchingSkills, exportSkill,
   executeAgentManage, executeMemoryManage, executeMcpManage, splitCommandLine, parseMcpConfig,
-  resolveAgent, inlineSkills, currentAgent,
+  resolveAgent, inlineSkills, currentAgent, personaFor,
   remember, listScope, applicable, activeMemories, memoryRoot, scopeDir, searchMemories, buildRuntimeAwareness,
   setMemoryEnabled, memoryKey,
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
@@ -6569,6 +6569,29 @@ console.log('  -- Talking to one agent, not just delegating to it --');
   setEnabled('skills', 'commit', true);
 
   assert(!(await resolveAgent('no-such-agent-at-all')), 'an unknown name resolves to nothing');
+
+  // The switch has to mean something here too. An agent disabled after a
+  // session was addressed to it must not keep answering as that agent —
+  // otherwise the switch is a lie in the one place it matters most.
+  const live = await personaFor(NAME);
+  assert(live.persona?.name === NAME, 'an enabled agent supplies its persona');
+  assert(!live.notice, 'with nothing to report');
+
+  setEnabled('agents', NAME, false);
+  const off = await personaFor(NAME);
+  assert(!off.persona, 'a switched-off agent supplies no persona');
+  assert(/switched off/.test(off.notice ?? ''), 'and says why rather than silently reverting');
+  assert(/orchestrator/.test(off.notice ?? ''), 'naming what ran instead');
+  setEnabled('agents', NAME, true);
+
+  // Deleted is the other way this goes wrong, and it must not strand the
+  // session either.
+  const gone = await personaFor('deleted-since-you-chose-it');
+  assert(!gone.persona, 'an agent that no longer exists supplies no persona');
+  assert(/no longer exists/.test(gone.notice ?? ''), 'and says so');
+
+  assert(!(await personaFor(undefined)).persona, 'no agent chosen means no persona and no notice');
+  assert(!(await personaFor(undefined)).notice, 'and nothing to report');
 
   await executeAgentManage({ action: 'delete', name: NAME });
 }

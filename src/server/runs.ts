@@ -26,7 +26,7 @@ import { currentTitle } from '../session/title.js';
 import {
   currentGoal, currentAgent, feedbackBySeq, deliverables, trajectory,
 } from '../session/projections.js';
-import { resolveAgent } from '../agents/resolve.js';
+import { personaFor, resolveAgent } from '../agents/resolve.js';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
 
@@ -158,7 +158,7 @@ export class RunManager {
     // so a change takes effect on the next message, and so reopening the
     // session a week later restores the same persona.
     const agentName = currentAgent(run.session);
-    const agent = agentName ? await resolveAgent(agentName, run.cwd) : undefined;
+    const agent = await personaFor(agentName, run.cwd);
     const activeGoal = goal?.status === 'active' ? goal.text : undefined;
 
     run.busy = true;
@@ -178,6 +178,11 @@ export class RunManager {
     // than reporting everything the session has ever written.
     const seqBeforeTurn = run.session.length;
 
+    // Said out loud. A session addressed to an agent that has since been
+    // deleted or switched off used to run as the orchestrator with nothing on
+    // screen to explain why the replies had changed character.
+    if (agent.notice) emit('notice', { text: agent.notice });
+
     emit('turn-start', { task, model });
 
     // The agent can ask a question, and until now the web had no way to hear
@@ -196,7 +201,7 @@ export class RunManager {
         task,
         // An agent pinned to a model gets it, unless the caller named one
         // explicitly — an explicit choice is a decision, the pin is a default.
-        model: model ?? agent?.model ?? model,
+        model: model ?? agent.model ?? model,
         // The run's own directory, not the server's. This is what lets one
         // server drive sessions in several projects at once; before `runAgent`
         // took a cwd, every session silently worked in whatever directory the
@@ -222,10 +227,8 @@ export class RunManager {
         // The agent's own system prompt, with its skills' procedures inlined.
         // Same resolver the Task tool uses, so an agent behaves identically
         // whether it was delegated to or is being spoken to directly.
-        ...(agent?.instructions
-          ? { agentPersona: { name: agent.spec.name, instructions: agent.instructions } }
-          : {}),
-        ...(agent?.tools?.length ? { agentSpecTools: agent.tools } : {}),
+        ...(agent.persona ? { agentPersona: agent.persona } : {}),
+        ...(agent.tools?.length ? { agentSpecTools: agent.tools } : {}),
         autoApprove: opts.autoApprove ?? true,
         planMode: opts.planMode ?? false,
         ...(opts.effort ? { effort: opts.effort } : {}),
@@ -424,6 +427,12 @@ export class RunManager {
     if (name) {
       const resolved = await resolveAgent(name, run.cwd);
       if (!resolved) return { ok: false, error: `There is no agent called "${name}".` };
+      if (!resolved.enabled) {
+        return {
+          ok: false,
+          error: `"${resolved.spec.name}" is switched off. Enable it in Settings first.`,
+        };
+      }
       run.session.append('session/agent', { name: resolved.spec.name });
       this.hub.publish({ type: 'agent', sessionId, data: { name: resolved.spec.name } });
       return { ok: true, agent: resolved.spec.name };

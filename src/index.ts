@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { personaFor } from './agents/resolve.js';
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import * as readline from 'readline';
@@ -686,9 +687,18 @@ async function startReadlineREPL(
 
       rl.pause();
       try {
+        // Who this conversation is addressed to, read from the log each turn so
+        // /agent-mode takes effect on the next message. Without this the
+        // command would set state nothing consumed — which is exactly what it
+        // used to do.
+        const persona = session
+          ? await personaFor((await import('./session/projections.js')).currentAgent(session), cwd)
+          : {};
+        if (persona.notice) console.log(`\n${chalk.yellow(persona.notice)}\n`);
+
         const finalMessage = await runAgent({
           task: trimmed + effortHint,
-          model: currentModel,
+          model: persona.model ?? currentModel,
           filePath: opts.file,
           showPlan: opts.plan,
           autoApprove: opts.yes || (settings.autoApprove ?? false),
@@ -701,6 +711,8 @@ async function startReadlineREPL(
           effort: opts.effort,
           ...(session ? { session } : {}),
           ...(inbox ? { inbox } : {}),
+          ...(persona.persona ? { agentPersona: persona.persona } : {}),
+          ...(persona.tools?.length ? { agentSpecTools: persona.tools } : {}),
         });
         if (finalMessage) {
           conversationHistory.push({ role: 'user',      content: trimmed });
