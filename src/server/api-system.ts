@@ -331,7 +331,7 @@ ${content || 'Describe the procedure here.'}
         status: 200,
         body: {
           memories: found.map(m => ({
-            id: m.id, scope: m.scope, text: m.text, tags: m.tags,
+            id: m.id, scope: m.scope, text: m.text, tags: m.tags, enabled: m.enabled,
             updatedAt: m.updatedAt, belongsTo: m.belongsTo,
           })),
         },

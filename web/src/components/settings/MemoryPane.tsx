@@ -135,25 +135,48 @@ export function MemoryPane(): React.ReactElement {
             <li key={`${memory.scope}-${memory.id}`} className="rounded-xl border border-aico-border">
               <div className="flex items-start gap-2 px-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[12px] leading-[17px] text-aico-primary">{memory.text}</p>
+                  <p className={`text-[12px] leading-[17px] ${
+                    memory.enabled ? 'text-aico-primary' : 'text-aico-muted line-through decoration-1'
+                  }`}>{memory.text}</p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-aico-muted">
                     <span className="rounded bg-aico-hover px-1.5 py-0.5">{memory.scope}</span>
+                    {!memory.enabled && (
+                      <span className="rounded bg-aico-warning/15 px-1.5 py-0.5 text-aico-warning">silenced</span>
+                    )}
                     <span className="font-mono">{memory.id}</span>
                     {memory.tags.map(tag => <span key={tag} className="text-aico-muted">#{tag}</span>)}
                   </p>
                 </div>
-                <button
-                  onClick={() => setConfirming(memory.id)}
-                  className="shrink-0 rounded-lg px-2 py-1 text-[11px] text-aico-muted
-                             transition-colors hover:bg-aico-danger/10 hover:text-aico-danger"
-                >
-                  Forget
-                </button>
+                <div className="flex shrink-0 gap-1">
+                  {/*
+                    Silencing sits beside forgetting because it is usually what
+                    was meant: a fact that is true again next month costs
+                    nothing to keep, and forgetting is the one action with
+                    nothing to undo it.
+                  */}
+                  <button
+                    onClick={() => void act({ action: memory.enabled ? 'disable' : 'enable', id: memory.id })}
+                    className="rounded-lg px-2 py-1 text-[11px] text-aico-muted
+                               transition-colors hover:bg-aico-hover hover:text-aico-primary"
+                  >
+                    {memory.enabled ? 'Silence' : 'Restore'}
+                  </button>
+                  <button
+                    onClick={() => setConfirming(memory.id)}
+                    className="rounded-lg px-2 py-1 text-[11px] text-aico-muted
+                               transition-colors hover:bg-aico-danger/10 hover:text-aico-danger"
+                  >
+                    Forget
+                  </button>
+                </div>
               </div>
 
               {confirming === memory.id && (
                 <div className="border-t border-aico-border bg-aico-danger/5 px-3 py-2">
-                  <p className="text-[12px] text-aico-primary">Forget this? It is deleted from disk.</p>
+                  <p className="text-[12px] text-aico-primary">
+                    Forget this? It is deleted from disk. Silencing keeps it and stops the agent
+                    being told it.
+                  </p>
                   <div className="mt-1.5 flex gap-1.5">
                     <button
                       onClick={() => void act({ action: 'forget', id: memory.id })}

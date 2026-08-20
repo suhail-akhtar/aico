@@ -30,6 +30,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
+import { disabledIn, setEnabled as setRegistryEnabled } from '../registry-state.js';
 
 export type MemoryScope = 'global' | 'project' | 'session';
 
@@ -43,6 +44,8 @@ export interface StoredMemory {
   /** The project path or session id this belongs to, when scoped. */
   belongsTo?: string;
   file: string;
+  /** False when silenced: kept on disk, withheld from the prompt. */
+  enabled: boolean;
 }
 
 export function memoryRoot(): string {
@@ -94,8 +97,10 @@ function parse(file: string, scope: MemoryScope): StoredMemory | null {
       const i = line.indexOf(':');
       if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim();
     }
+    const id = meta['id'] ?? path.basename(file, '.md');
     return {
-      id: meta['id'] ?? path.basename(file, '.md'),
+      id,
+      enabled: !disabledIn('memories').has(memoryKey(scope, id)),
       scope,
       text: match[2]!.trim(),
       tags: meta['tags'] ? meta['tags'].split(',').map(t => t.trim()).filter(Boolean) : [],
@@ -107,6 +112,22 @@ function parse(file: string, scope: MemoryScope): StoredMemory | null {
   } catch {
     return null;
   }
+}
+
+/** How a memory is named in the disabled list: unique across scopes. */
+export function memoryKey(scope: MemoryScope, id: string): string {
+  return `${scope}:${id}`.toLowerCase();
+}
+
+/**
+ * Silence a memory without deleting it.
+ *
+ * The case this is for: a fact that is true again next month. "We are not
+ * deploying on Fridays during the freeze" should not cost you the note about
+ * how deploys work — and forgetting is the one action with nothing to undo it.
+ */
+export function setMemoryEnabled(memory: StoredMemory, enabled: boolean): boolean {
+  return setRegistryEnabled('memories', memoryKey(memory.scope, memory.id), enabled);
 }
 
 function serialise(memory: Omit<StoredMemory, 'file'>): string {
@@ -150,6 +171,18 @@ export function applicable(cwd: string, sessionId?: string): StoredMemory[] {
   ];
 }
 
+/**
+ * What the agent is actually told, as opposed to what is on file.
+ *
+ * Separate from `applicable` on purpose: the panel lists everything and marks
+ * the silenced ones, because a switch you cannot find is indistinguishable from
+ * a bug. The prompt gets only the live ones, because offering a fact and then
+ * ignoring it is worse than not having it.
+ */
+export function activeMemories(cwd: string, sessionId?: string): StoredMemory[] {
+  return applicable(cwd, sessionId).filter(m => m.enabled);
+}
+
 export function remember(
   text: string,
   scope: MemoryScope,
@@ -160,7 +193,7 @@ export function remember(
   const now = Date.now();
   const id = makeId(text, dir);
   const memory: Omit<StoredMemory, 'file'> = {
-    id, scope, text: text.trim(), tags: opts.tags ?? [],
+    id, scope, enabled: true, text: text.trim(), tags: opts.tags ?? [],
     createdAt: now, updatedAt: now,
     belongsTo: scope === 'global' ? undefined : (opts.belongsTo ?? undefined),
   };

@@ -534,6 +534,8 @@ export interface MemorySummary {
   scope: 'global' | 'project' | 'session';
   text: string;
   tags: string[];
+  /** False when silenced: still stored, withheld from the agent. */
+  enabled: boolean;
   updatedAt: number;
   belongsTo?: string;
 }

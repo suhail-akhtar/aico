@@ -27,12 +27,18 @@ import path from 'path';
 import os from 'os';
 
 /** The registries that can have entries switched off. */
-export type RegistryKind = 'skills' | 'mcp' | 'agents';
+export type RegistryKind = 'skills' | 'mcp' | 'agents' | 'memories';
 
 interface RegistryState {
   skills?: { disabled?: string[] };
   mcp?: { disabled?: string[] };
   agents?: { disabled?: string[] };
+  /**
+   * Keyed `scope:id`, because a memory id is only unique inside its scope —
+   * a global and a project memory may both be called `deploy-notes`, and
+   * silencing one must not silence the other.
+   */
+  memories?: { disabled?: string[] };
 }
 
 export function registryStatePath(): string {

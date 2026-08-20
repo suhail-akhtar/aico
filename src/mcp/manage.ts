@@ -76,6 +76,46 @@ export async function addMcpServer(input: McpAddServerInput): Promise<string> {
   return `MCP server "${input.name}" saved to ${getProjectLocalSettingsPath()} and loaded: ${status}`;
 }
 
+/**
+ * Change part of a server's configuration without restating the rest.
+ *
+ * Remove-then-add was the only way to alter one thing, and it is a bad way:
+ * everything not restated is lost, the server goes down between the two calls,
+ * and getting it wrong leaves nothing behind to compare against. A merge keeps
+ * the fields nobody mentioned.
+ *
+ * `env` and `headers` merge key by key rather than replacing wholesale, because
+ * the common edit is one variable — usually a rotated token — and replacing the
+ * map would silently drop the others.
+ */
+export async function updateMcpServer(input: McpAddServerInput): Promise<string> {
+  assertValidName(input.name);
+  const settings = await loadSettings();
+  const current = settings.mcpServers ?? {};
+  const existing = current[input.name];
+  if (!existing) throw new Error(`MCP server "${input.name}" is not configured.`);
+
+  const merged = {
+    ...existing,
+    ...(input.type ? { type: input.type } : {}),
+    ...(input.command ? { command: input.command } : {}),
+    ...(input.args ? { args: input.args } : {}),
+    ...(input.url ? { url: input.url } : {}),
+    ...(input.env ? { env: { ...(existing as { env?: Record<string, string> }).env, ...input.env } } : {}),
+    ...(input.headers
+      ? { headers: { ...(existing as { headers?: Record<string, string> }).headers, ...input.headers } }
+      : {}),
+  } as McpServerConfigV2;
+
+  await persistAndReload({ ...current, [input.name]: merged });
+
+  const info = mcpRegistry.getServerInfos().find((s) => s.name === input.name);
+  const changed = ['type', 'command', 'args', 'url', 'env', 'headers']
+    .filter((k) => input[k as keyof McpAddServerInput] !== undefined);
+  return `Updated MCP server "${input.name}" (${changed.join(', ') || 'nothing'}) and reloaded it: `
+    + (info ? `${info.health}, ${info.toolCount} tool(s)` : 'not loaded');
+}
+
 export async function removeMcpServer(name: string): Promise<string> {
   assertValidName(name);
   const settings = await loadSettings();

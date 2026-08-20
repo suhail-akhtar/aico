@@ -156,7 +156,8 @@ import {
   executeSkillManage, verifySkillDir, draftsDir,
   setEnabled, isDisabled, matchingSkills, exportSkill,
   executeAgentManage, executeMemoryManage, executeMcpManage, splitCommandLine,
-  remember, listScope, applicable, memoryRoot, scopeDir, searchMemories, buildRuntimeAwareness,
+  remember, listScope, applicable, activeMemories, memoryRoot, scopeDir, searchMemories, buildRuntimeAwareness,
+  setMemoryEnabled, memoryKey,
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
   checkProjectGate, newestSourceChange, touchedFiles,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
@@ -6377,6 +6378,42 @@ console.log('  -- Memory you can point at one at a time --');
   assert(!/<remembered>/.test(empty), 'and nothing remembered adds nothing to the prompt');
   assert(!/\n\n/.test(empty), 'not even a blank line');
 
+  // Silenced, not forgotten: a fact that is true again next month should cost
+  // nothing to keep, and forgetting is the one action with nothing to undo it.
+  const keep = remember('Deploy freeze until the 30th', 'project', { belongsTo: HERE });
+  assert(activeMemories(HERE).some(m => m.id === keep.id), 'a new memory is live');
+
+  const silenced = await executeMemoryManage({ action: 'disable', id: keep.id });
+  assert(/silenced/.test(silenced), `a memory can be silenced: ${silenced.slice(0, 60)}`);
+  assert(!activeMemories(HERE).some(m => m.id === keep.id), 'and the prompt stops being told it');
+  assert(applicable(HERE).some(m => m.id === keep.id), 'while the panel still lists it');
+  assert(/\[disabled\]/.test(await executeMemoryManage({ action: 'list' })), 'marked off, so the switch is findable');
+  assert(fs.existsSync(keep.file), 'and it is still on disk');
+
+  await executeMemoryManage({ action: 'enable', id: keep.id });
+  assert(activeMemories(HERE).some(m => m.id === keep.id), 'restoring puts it back in the prompt');
+
+  // Ids only have to be unique inside a scope, so silencing must not collide.
+  const local = remember('Same name, different scope', 'project', { belongsTo: HERE });
+  const global = remember('Same name, different scope', 'global');
+  assert(local.id === global.id, 'two scopes can hold the same id');
+  setMemoryEnabled(local, false);
+  assert(!listScope('project', HERE).find(m => m.id === local.id).enabled, 'the project one is silenced');
+  assert(listScope('global').find(m => m.id === global.id).enabled, 'and the global one of the same name is not');
+
+  // Round trip through a file.
+  const memOut = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'aico-mem-')), 'memories.json');
+  const exported = await executeMemoryManage({ action: 'export', path: memOut, scope: 'global' });
+  assert(/Exported/.test(exported), `memories export: ${exported.slice(0, 70)}`);
+  fs.rmSync(scopeDir('global'), { recursive: true, force: true });
+  assert(listScope('global').length === 0, 'cleared before importing back');
+  const imported = await executeMemoryManage({ action: 'import', path: memOut, scope: 'global' });
+  assert(/Imported/.test(imported), `and import back: ${imported.slice(0, 70)}`);
+  assert(listScope('global').length > 0, 'restoring them');
+  const again = await executeMemoryManage({ action: 'import', path: memOut, scope: 'global' });
+  assert(/skipping/.test(again), 'importing the same file twice does not double every memory');
+
+  fs.rmSync(path.dirname(memOut), { recursive: true, force: true });
   wipe();
 }
 
@@ -6465,6 +6502,13 @@ console.log('  -- MCP: a command line is split the way a shell would --');
     'reading one that does not exist says so');
   assert(/Give either a command/.test(await executeMcpManage({ action: 'add', name: 'x' })),
     'adding with neither a command nor a url explains what is needed');
+
+  // Remove-then-add was the only way to change one field, and it loses
+  // everything not restated while dropping the server in between.
+  const missing = await executeMcpManage({ action: 'update', name: 'not-configured-anywhere', command: 'x' });
+  assert(/Not updated/.test(missing), 'updating a server that is not configured is refused, not created');
+  assert(/not configured/.test(missing), 'and says why');
+  assert(/A name is required/.test(await executeMcpManage({ action: 'update' })), 'update needs a name');
 }
 
 console.log('  -- Creating a skill does not register it --');

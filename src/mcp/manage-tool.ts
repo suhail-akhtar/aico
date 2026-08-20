@@ -23,11 +23,11 @@ import fs from 'fs';
 import path from 'path';
 import { loadSettings } from '../settings.js';
 import { mcpRegistry } from './registry.js';
-import { addMcpServer, removeMcpServer, reloadMcpServers } from './manage.js';
+import { addMcpServer, updateMcpServer, removeMcpServer, reloadMcpServers } from './manage.js';
 import { disabledIn, isDisabled, setEnabled, forget } from '../registry-state.js';
 
 export interface McpManageInput {
-  action: 'list' | 'read' | 'add' | 'remove' | 'enable' | 'disable' | 'reload' | 'test' | 'export' | 'import';
+  action: 'list' | 'read' | 'add' | 'update' | 'remove' | 'enable' | 'disable' | 'reload' | 'test' | 'export' | 'import';
   name?: string;
   /** stdio: the command to run. */
   command?: string;
@@ -129,6 +129,25 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
       return `${saved}\nIts ${info.toolCount} tool(s) are now available to the agent.`;
     }
 
+    case 'update': {
+      if (!name) return 'A name is required.';
+      // A command line arrives as a line, not an argv array, wherever it comes
+      // from — so it is split here exactly as it is on add.
+      const split = input.command && !input.args?.length ? splitCommandLine(input.command) : undefined;
+      try {
+        return await updateMcpServer({
+          name,
+          ...(split ? split : { ...(input.command ? { command: input.command } : {}), ...(input.args ? { args: input.args } : {}) }),
+          ...(input.url ? { url: input.url } : {}),
+          ...(input.type ? { type: input.type } : {}),
+          ...(input.env ? { env: input.env } : {}),
+          ...(input.headers ? { headers: input.headers } : {}),
+        });
+      } catch (err) {
+        return `Not updated: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+
     case 'remove': {
       const result = await removeMcpServer(name);
       forget('mcp', name);
@@ -223,10 +242,11 @@ export const mcpManageToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'read', 'add', 'remove', 'enable', 'disable', 'reload', 'test', 'export', 'import'],
+        enum: ['list', 'read', 'add', 'update', 'remove', 'enable', 'disable', 'reload', 'test', 'export', 'import'],
         description:
           'list: every configured server and what it contributes. read: one in full, with its tools. '
-          + 'add: connect a new one. remove: delete its config. enable/disable: switch without losing '
+          + 'add: connect a new one. update: change part of its config, keeping the rest. remove: delete '
+          + 'its config. enable/disable: switch without losing '
           + 'the config. reload: reconnect everything. test: check one is actually working. '
           + 'export/import: JSON config files.',
       },

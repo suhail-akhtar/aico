@@ -69,7 +69,7 @@ import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
 import { checkProjectGate, detectChecks, resetChecks } from './checks.js';
 import { skillCatalogue, matchingSkills } from './tools/skill.js';
-import { applicable as applicableMemories } from './memory/store.js';
+import { activeMemories } from './memory/store.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
 
@@ -816,7 +816,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     // Everything remembered that applies to this directory and this
     // conversation. Read at build time rather than cached: a memory saved
     // during a turn should be in effect on the next one, not next launch.
-    memories: applicableMemories(currentCwd(), opts.sessionId).map(m => ({
+    memories: activeMemories(currentCwd(), opts.sessionId).map(m => ({
       id: m.id, scope: m.scope, text: m.text,
     })),
   });
