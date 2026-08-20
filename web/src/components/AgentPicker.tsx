@@ -18,18 +18,25 @@
  * @module components/AgentPicker
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type AgentSpec } from '../api';
 import { useStore } from '../store';
+import { searchAgents, splitAgents } from '../agents';
 
 export function AgentPicker(): React.ReactElement | null {
   const [agents, setAgents] = useState<AgentSpec[]>([]);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const wrap = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLInputElement>(null);
 
   const current = useStore(s => s.sessionAgent);
   const setSessionAgent = useStore(s => s.setSessionAgent);
   const busy = useStore(s => s.busy);
+  // Off means gone, not greyed out: a control that is visible but inert is
+  // worse than one that is absent.
+  const enabled = useStore(s => (s.settings as { agents?: { directChat?: boolean } })
+    .agents?.directChat !== false);
 
   useEffect(() => {
     void api.agents()
@@ -46,15 +53,21 @@ export function AgentPicker(): React.ReactElement | null {
     return () => document.removeEventListener('mousedown', away);
   }, [open]);
 
-  if (agents.length === 0) return null;
+  // Focused on open, because the only reason to open a searchable list is to
+  // search it, and reaching for the mouse to click the box is a wasted step.
+  useEffect(() => { if (open) search.current?.focus(); }, [open]);
+
+  const matches = useMemo(() => searchAgents(agents, query), [agents, query]);
+
+  if (!enabled || agents.length === 0) return null;
 
   const choose = async (name: string | null): Promise<void> => {
     setOpen(false);
+    setQuery('');
     await setSessionAgent(name);
   };
 
-  const mine = agents.filter(a => a.source !== 'builtin');
-  const builtin = agents.filter(a => a.source === 'builtin');
+  const { mine, builtin } = splitAgents(matches);
 
   const item = (agent: AgentSpec): React.ReactElement => (
     <button
@@ -93,8 +106,25 @@ export function AgentPicker(): React.ReactElement | null {
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 z-20 mb-1.5 max-h-80 w-72 overflow-y-auto
-                        rounded-xl border border-aico-border bg-aico-bg py-1 shadow-lg">
+        <div className="absolute bottom-full right-0 z-20 mb-1.5 flex max-h-80 w-72 flex-col
+                        rounded-xl border border-aico-border bg-aico-bg shadow-lg">
+          <input
+            ref={search}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Escape') { setOpen(false); setQuery(''); }
+              // Enter takes the top match, so a specific search is two
+              // keystrokes and a return rather than a search and a click.
+              if (e.key === 'Enter' && matches.length > 0) void choose(matches[0]!.name);
+            }}
+            placeholder="Search agents…"
+            className="m-1 shrink-0 rounded-lg border border-aico-border bg-aico-bg px-2.5 py-1.5
+                       text-[12px] text-aico-primary placeholder:text-aico-muted
+                       focus:border-aico-accent/40 focus:outline-none"
+          />
+
+          <div className="min-h-0 flex-1 overflow-y-auto pb-1">
           <button
             onClick={() => void choose(null)}
             className={`block w-full px-3 py-1.5 text-left transition-colors hover:bg-aico-hover ${
@@ -118,10 +148,21 @@ export function AgentPicker(): React.ReactElement | null {
             </>
           )}
 
-          <p className="mt-1 px-3 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wide text-aico-muted">
-            Built in
-          </p>
-          {builtin.map(item)}
+          {builtin.length > 0 && (
+            <>
+              <p className="mt-1 px-3 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wide text-aico-muted">
+                Built in
+              </p>
+              {builtin.map(item)}
+            </>
+          )}
+
+          {query && matches.length === 0 && (
+            <p className="px-3 py-2 text-[12px] text-aico-muted">
+              No agent matches “{query}”.
+            </p>
+          )}
+          </div>
         </div>
       )}
     </div>

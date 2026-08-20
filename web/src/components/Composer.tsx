@@ -25,6 +25,9 @@ import { useStore } from '../store';
 import { ModelPicker } from './ModelPicker';
 import { AgentPicker } from './AgentPicker';
 import { SetGoalButton } from './GoalBar';
+import { MentionMenu } from './MentionMenu';
+import { mentionAt, searchAgents } from '../agents';
+import { api, type AgentSpec } from '../api';
 
 export function Composer(): React.ReactElement {
   const busy = useStore(s => s.busy);
@@ -45,6 +48,51 @@ export function Composer(): React.ReactElement {
   const planMode = useStore(s => s.planMode);
   const setPlanMode = useStore(s => s.setPlanMode);
   const textarea = useRef<HTMLTextAreaElement>(null);
+
+  // ── @mentions ──────────────────────────────────────────────────────
+  //
+  // The same act as the picker, reached without leaving the keyboard. The
+  // picker is a decision made before you start writing; this is one made three
+  // words in, when you realise the question is a security question.
+  const setSessionAgent = useStore(s => s.setSessionAgent);
+  const mentionsOn = useStore(s => (s.settings as { agents?: { directChat?: boolean } })
+    .agents?.directChat !== false);
+  const [agents, setAgents] = useState<AgentSpec[]>([]);
+  const [mention, setMention] = useState<{ query: string; from: number } | null>(null);
+  const [highlighted, setHighlighted] = useState(0);
+
+  useEffect(() => {
+    if (!mentionsOn) return;
+    void api.agents()
+      .then(r => setAgents(r.agents.filter(a => a.enabled)))
+      .catch(() => { /* mentions are a shortcut, not a requirement */ });
+  }, [mentionsOn]);
+
+  /** Re-read after every edit and caret move, so the menu tracks what is typed. */
+  const syncMention = (value: string, caret: number): void => {
+    if (!mentionsOn) return;
+    const found = mentionAt(value, caret);
+    setMention(found);
+    if (found) setHighlighted(0);
+  };
+
+  /** Engage the agent and take its `@name` back out of the message. */
+  const engage = (name: string): void => {
+    const at = mention;
+    setMention(null);
+    if (at) {
+      const node = textarea.current;
+      const caret = node?.selectionStart ?? text.length;
+      const next = (text.slice(0, at.from) + text.slice(caret)).replace(/^\s+/, '');
+      setText(next);
+      // The caret goes where the token was, so typing continues in place.
+      requestAnimationFrame(() => {
+        node?.focus();
+        node?.setSelectionRange(at.from, at.from);
+      });
+    }
+    void setSessionAgent(name);
+  };
 
   // Filled from elsewhere — the plan panel's Amend, so far. Appended to what is
   // already typed rather than replacing it: silently discarding a half-written
@@ -80,6 +128,28 @@ ${prefill.text}` : prefill.text));
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    // The menu owns these keys while it is open, so Enter engages the agent
+    // rather than sending a message addressed to nobody in particular.
+    if (mention) {
+      const matches = searchAgents(agents, mention.query);
+      if (event.key === 'Escape') { event.preventDefault(); setMention(null); return; }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setHighlighted(i => Math.min(i + 1, matches.length - 1));
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setHighlighted(i => Math.max(i - 1, 0));
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && matches.length > 0) {
+        event.preventDefault();
+        engage(matches[Math.min(highlighted, matches.length - 1)]!.name);
+        return;
+      }
+    }
+
     if (event.key !== 'Enter' || event.shiftKey) return;
     event.preventDefault();
     // While running, plain Enter steers — the action someone reaching for the
@@ -91,7 +161,17 @@ ${prefill.text}` : prefill.text));
 
   return (
     <div className="px-5 pb-3">
-      <div className="mx-auto w-full max-w-column">
+      <div className="relative mx-auto w-full max-w-column">
+        {mention && (
+          <MentionMenu
+            agents={agents}
+            query={mention.query}
+            selected={highlighted}
+            onSelectedChange={setHighlighted}
+            onChoose={engage}
+            onDismiss={() => setMention(null)}
+          />
+        )}
         {/*
           Above the box, not in the transcript. The turn is stopped until this
           is answered, and a question you can scroll past is a turn that hangs —
@@ -110,7 +190,18 @@ ${prefill.text}` : prefill.text));
           <textarea
             ref={textarea}
             value={text}
-            onChange={e => { setText(e.target.value); resize(e.target); }}
+            onChange={e => {
+              setText(e.target.value);
+              resize(e.target);
+              syncMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            }}
+            // Clicking or arrowing out of a half-typed mention should close the
+            // menu, not leave it hanging over unrelated text.
+            onSelect={e => {
+              const node = e.target as HTMLTextAreaElement;
+              syncMention(node.value, node.selectionStart ?? 0);
+            }}
+            onBlur={() => setMention(null)}
             onKeyDown={onKeyDown}
             rows={1}
             placeholder={question !== null

@@ -157,7 +157,11 @@ export class RunManager {
     // Who this conversation is being held with. Resolved per turn from the log
     // so a change takes effect on the next message, and so reopening the
     // session a week later restores the same persona.
-    const agentName = currentAgent(run.session);
+    // Honoured here as well as in the UI. Hiding the picker while the server
+    // still ran a stored persona would leave sessions addressed to an agent
+    // with no visible way to tell, or to change it back.
+    const directChat = settings.agents?.directChat !== false;
+    const agentName = directChat ? currentAgent(run.session) : undefined;
     const agent = await personaFor(agentName, run.cwd);
     const activeGoal = goal?.status === 'active' ? goal.text : undefined;
 

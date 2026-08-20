@@ -180,7 +180,24 @@ export const PANES: Pane[] = [
     blurb: 'Specialists work can be handed to. What an agent is for decides when it gets the task, and '
       + 'the skills assigned to it are the procedures it reaches for first.',
     custom: 'agents',
-    groups: [],
+    groups: [
+      {
+        title: 'Talking to a specialist',
+        hint: 'A conversation can be addressed to one agent instead of the orchestrator. '
+          + 'It then stays in that role for every turn and declines work outside it.',
+        fields: [
+          {
+            path: 'agents.directChat',
+            label: 'Let me talk to an agent directly',
+            hint: 'Adds the agent picker beside the model, and @name in the composer. '
+              + 'Off hides both and every session goes to the orchestrator.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'agent persona mention direct chat specialist role',
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'memory',

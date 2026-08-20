@@ -21,6 +21,7 @@ import { todosFrom } from './dist-test/todos.mjs';
 import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
 import { checksFrom } from './dist-test/checks.mjs';
 import { shouldClearBusy } from './dist-test/turn-state.mjs';
+import { searchAgents, splitAgents, mentionAt } from './dist-test/agents.mjs';
 
 let pass = 0, fail = 0;
 const test = (name, fn) => {
@@ -1098,6 +1099,73 @@ test('the tool row says green or names what failed', () => {
   assert.ok(/FAIL\s+test/.test(bad.detail), 'with the failing line inline');
 });
 
+
+section('Finding an agent by typing');
+
+const ROSTER = [
+  { name: 'security', description: 'Defensive security review.', role: 'Application Security Reviewer', source: 'builtin' },
+  { name: 'backend', description: 'Production backend implementation.', role: 'Senior Backend Engineer', source: 'builtin' },
+  { name: 'my-reviewer', description: 'Checks tests for security holes.', role: 'reviewer', source: 'user' },
+];
+
+test('an exact name wins, then a prefix, then a substring', () => {
+  const hits = searchAgents(ROSTER, 'sec');
+  // "security" starts with it; "my-reviewer" only mentions security in prose.
+  assert.equal(hits[0].name, 'security', 'the agent being typed comes first');
+  assert.ok(hits.some(a => a.name === 'my-reviewer'), 'and a description match still appears');
+});
+
+test('the role is searchable, not just the name', () => {
+  assert.equal(searchAgents(ROSTER, 'engineer')[0].name, 'backend',
+    'a word from the role finds the agent');
+  assert.equal(searchAgents(ROSTER, 'backend engineer')[0].name, 'backend',
+    'and so does a phrase from it — "Senior Backend Engineer" contains it');
+});
+
+test('an empty query is everyone, in the order given', () => {
+  assert.equal(searchAgents(ROSTER, '   ').length, 3);
+});
+
+test('nothing matching is empty rather than everything', () => {
+  assert.equal(searchAgents(ROSTER, 'zzzz').length, 0);
+});
+
+test('yours are separated from the ones that shipped', () => {
+  const { mine, builtin } = splitAgents(ROSTER);
+  assert.deepEqual(mine.map(a => a.name), ['my-reviewer']);
+  assert.equal(builtin.length, 2);
+});
+
+section('@ opens the menu, and only where it should');
+
+test('a bare @ at the start opens it', () => {
+  assert.deepEqual(mentionAt('@', 1), { query: '', from: 0 });
+});
+
+test('and captures what follows', () => {
+  assert.deepEqual(mentionAt('look at @sec', 12), { query: 'sec', from: 8 });
+});
+
+test('an email address does not open an agent menu', () => {
+  // The @ has a word character before it, so it is not a mention.
+  assert.equal(mentionAt('mail me at bob@example.com', 26), null);
+});
+
+test('nor does a completed mention followed by more words', () => {
+  assert.equal(mentionAt('@security please review this', 28), null,
+    'once you type past the name, the menu is done');
+});
+
+test('the caret position decides, not the whole string', () => {
+  const text = '@security review';
+  assert.deepEqual(mentionAt(text, 4), { query: 'sec', from: 0 },
+    'a caret inside the token still opens it');
+  assert.equal(mentionAt(text, 16), null, 'a caret past it does not');
+});
+
+test('no @ at all is no menu', () => {
+  assert.equal(mentionAt('just a normal message', 21), null);
+});
 
 section('Who you were talking to is in the transcript');
 

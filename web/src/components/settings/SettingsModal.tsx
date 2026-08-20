@@ -197,12 +197,22 @@ export function SettingsModal({ onClose }: SettingsModalProps): React.ReactEleme
                 )}
 
                 <div className="mt-5">
+                  {/*
+                    A custom pane and its schema groups, not one or the other.
+                    A pane that renders a component *instead of* its fields
+                    silently drops any setting added to it — which is what
+                    happened to the switch that turns direct agent chat off:
+                    it was in the schema, searchable, and never drawn.
+                  */}
                   {pane.custom === 'models' ? <ModelsPane />
                     : pane.custom === 'skills' ? <SkillsPane onClose={onClose} />
                     : pane.custom === 'mcp' ? <McpPane />
                     : pane.custom === 'agents' ? <AgentsPane onClose={onClose} />
-                    : pane.custom === 'memory' ? <MemoryPane /> : (
-                    pane.groups.map(group => (
+                    : pane.custom === 'memory' ? <MemoryPane /> : null}
+
+                  {pane.groups.length > 0 && (
+                    <div className={pane.custom ? 'mt-7 border-t border-aico-border-subtle pt-6' : ''}>
+                    {pane.groups.map(group => (
                       <section key={group.title} className="mb-7 last:mb-0">
                         <h4 className="text-[11px] font-semibold uppercase tracking-wider text-aico-muted">
                           {group.title}
@@ -224,7 +234,8 @@ export function SettingsModal({ onClose }: SettingsModalProps): React.ReactEleme
                           ))}
                         </div>
                       </section>
-                    ))
+                    ))}
+                    </div>
                   )}
                 </div>
               </>

@@ -225,6 +225,17 @@ export interface AicoSettings {
     allowedCommands?: string[];
     warnUntrusted?: boolean;
   };
+  /**
+   * Talking to a specialist directly, rather than only through the orchestrator.
+   *
+   * A master switch for the whole idea. Off, sessions always run as the
+   * orchestrator and the picker and `@` menu are hidden — because a control
+   * that is visible but inert is worse than one that is absent.
+   */
+  agents?: {
+    directChat?: boolean;
+  };
+
   /** Extra skill directories and options */
   skills?: {
     dirs?: string[];
