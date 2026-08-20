@@ -318,6 +318,16 @@ export interface AgentOptions {
    * the tools their spec defines ('all', 'readonly', or explicit names).
    */
   agentSpecTools?: string[] | 'all' | 'readonly';
+  /**
+   * A persona this whole run is held under, with its skills' procedures inlined.
+   *
+   * The system prompt rather than a prefix on the user message, which is where
+   * the one-shot delegation path puts it. For a single handoff that is close
+   * enough; for a conversation it is not — a persona restated inside each
+   * message competes with the message, and re-sending it every turn defeats
+   * the prompt cache it should be sitting in front of.
+   */
+  agentPersona?: { name: string; instructions: string };
   /** Plan mode — only read-only tools allowed */
   planMode?: boolean;
   /** Effort level for system prompt (low/medium/high/max) */
@@ -797,6 +807,22 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const promptDoc = await buildSystemPrompt(
     model, opts.effort, opts.projectInstructions, opts.goal, skillCatalogue(), opts.planMode,
   );
+
+  // Added after the base prompt so it reads as a narrowing of the role rather
+  // than a replacement for it: the agent still gets the tool contracts, the
+  // verification rules and the skill catalogue, and then is told which
+  // specialist it is while doing all that.
+  if (opts.agentPersona) {
+    promptDoc.add({
+      id: 'agent_persona',
+      body: [
+        `You are acting as the "${opts.agentPersona.name}" agent for this entire conversation, `
+        + 'not for one message. Stay in this role until told otherwise.',
+        '',
+        opts.agentPersona.instructions,
+      ].join('\n'),
+    });
+  }
   const runtimeAwareness = await buildRuntimeAwareness({
     model,
     cwd: process.cwd(),

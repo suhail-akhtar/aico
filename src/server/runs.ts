@@ -24,8 +24,9 @@ import type { AicoSettings } from '../settings.js';
 import type { EventHub } from './events.js';
 import { currentTitle } from '../session/title.js';
 import {
-  currentGoal, feedbackBySeq, deliverables, trajectory,
+  currentGoal, currentAgent, feedbackBySeq, deliverables, trajectory,
 } from '../session/projections.js';
+import { resolveAgent } from '../agents/resolve.js';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
 
@@ -152,6 +153,12 @@ export class RunManager {
 
     const settings = await this.currentSettings();
     const goal = currentGoal(run.session);
+
+    // Who this conversation is being held with. Resolved per turn from the log
+    // so a change takes effect on the next message, and so reopening the
+    // session a week later restores the same persona.
+    const agentName = currentAgent(run.session);
+    const agent = agentName ? await resolveAgent(agentName, run.cwd) : undefined;
     const activeGoal = goal?.status === 'active' ? goal.text : undefined;
 
     run.busy = true;
@@ -187,7 +194,9 @@ export class RunManager {
     try {
       const result = await runAgent({
         task,
-        model,
+        // An agent pinned to a model gets it, unless the caller named one
+        // explicitly — an explicit choice is a decision, the pin is a default.
+        model: model ?? agent?.model ?? model,
         // The run's own directory, not the server's. This is what lets one
         // server drive sessions in several projects at once; before `runAgent`
         // took a cwd, every session silently worked in whatever directory the
@@ -210,6 +219,13 @@ export class RunManager {
         inbox: run.inbox,
         tokenTracker: run.tokenTracker,
         settings,
+        // The agent's own system prompt, with its skills' procedures inlined.
+        // Same resolver the Task tool uses, so an agent behaves identically
+        // whether it was delegated to or is being spoken to directly.
+        ...(agent?.instructions
+          ? { agentPersona: { name: agent.spec.name, instructions: agent.instructions } }
+          : {}),
+        ...(agent?.tools?.length ? { agentSpecTools: agent.tools } : {}),
         autoApprove: opts.autoApprove ?? true,
         planMode: opts.planMode ?? false,
         ...(opts.effort ? { effort: opts.effort } : {}),
@@ -391,6 +407,36 @@ export class RunManager {
     run.session.append('goal/set', { text, status });
     this.hub.publish({ type: 'goal', sessionId, data: { text, status } });
     return true;
+  }
+
+  /**
+   * Address this conversation to a specialist, or back to the orchestrator.
+   *
+   * Refused when the agent does not exist, so a typo leaves you talking to the
+   * orchestrator rather than to nobody — a session silently addressed to a
+   * missing agent would answer every message as though nothing had been set,
+   * which is indistinguishable from the feature not working.
+   */
+  async setAgent(sessionId: string, name: string | null): Promise<{ ok: boolean; error?: string; agent?: string }> {
+    const run = this.runs.get(sessionId);
+    if (!run) return { ok: false, error: 'no such session' };
+
+    if (name) {
+      const resolved = await resolveAgent(name, run.cwd);
+      if (!resolved) return { ok: false, error: `There is no agent called "${name}".` };
+      run.session.append('session/agent', { name: resolved.spec.name });
+      this.hub.publish({ type: 'agent', sessionId, data: { name: resolved.spec.name } });
+      return { ok: true, agent: resolved.spec.name };
+    }
+
+    run.session.append('session/agent', { name: null });
+    this.hub.publish({ type: 'agent', sessionId, data: { name: null } });
+    return { ok: true };
+  }
+
+  agentOf(sessionId: string): string | undefined {
+    const run = this.runs.get(sessionId);
+    return run ? currentAgent(run.session) : undefined;
   }
 
   goalOf(sessionId: string): ReturnType<typeof currentGoal> {

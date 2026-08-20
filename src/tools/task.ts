@@ -265,38 +265,17 @@ export async function runTask(
     resolvedTools = args.agent_spec.tools;
     resolvedModel = args.agent_spec.model;
   } else if (args.agent_name) {
-    // Load the registered spec and extract its config
+    // Shared with the sticky per-session path, so an agent behaves the same
+    // whether the orchestrator delegates to it or a person talks to it.
     try {
-      const { getAgentSpec } = await import('../agents/registry.js');
-      const spec = await getAgentSpec(args.agent_name);
-      if (spec) {
-        resolvedInstructions = spec.systemPromptXml || undefined;
-        resolvedTools = spec.tools?.length ? spec.tools : undefined;
-        resolvedModel = spec.model;
-
-        // R3: Resolve the agent's declared skills and inject their prompt content.
-        // This makes AgentSpec.skills functional — the agent receives the actual
-        // skill prompt body, not just the name. Skills are looked up from the
-        // live registry (which includes runtime-created skills via SkillCreate).
-        if (spec.skills?.length) {
-          try {
-            const { skillRegistry } = await import('../skills/index.js');
-            const skillPrompts: string[] = [];
-            for (const skillName of spec.skills) {
-              const skill = skillRegistry.lookup(skillName);
-              if (skill?.promptTemplate) {
-                skillPrompts.push(`## Skill: ${skill.frontmatter.name}\n${skill.promptTemplate}`);
-              }
-            }
-            if (skillPrompts.length > 0) {
-              const skillsBlock = `\n\n## Assigned Skills\nFollow these skill procedures when relevant:\n\n${skillPrompts.join('\n\n')}\n`;
-              resolvedInstructions = (resolvedInstructions || '') + skillsBlock;
-            }
-          } catch { /* skill resolution is best-effort */ }
-        }
-      } else {
+      const { resolveAgent } = await import('../agents/resolve.js');
+      const resolved = await resolveAgent(args.agent_name);
+      if (!resolved) {
         return `[error] Agent "${args.agent_name}" not found. Use AgentList to see available agents.`;
       }
+      resolvedInstructions = resolved.instructions;
+      resolvedTools = resolved.tools;
+      resolvedModel = resolved.model;
     } catch {
       return `[error] Failed to load agent "${args.agent_name}".`;
     }

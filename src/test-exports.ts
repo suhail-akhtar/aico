@@ -197,6 +197,8 @@ export { executeSkillManage, verifySkillDir, draftsDir } from './skills/manage.j
 export { setEnabled, isDisabled, disabledIn, registryStatePath } from './registry-state.js';
 export { matchingSkills } from './tools/skill.js';
 export { executeAgentManage } from './tools/manage-agents.js';
+export { resolveAgent, inlineSkills } from './agents/resolve.js';
+export { currentAgent } from './session/projections.js';
 export { executeMemoryManage } from './tools/manage-memory.js';
 export { executeMcpManage, splitCommandLine, parseMcpConfig } from './mcp/manage-tool.js';
 export { remember, listScope, applicable, activeMemories, memoryRoot, scopeDir, searchMemories, setMemoryEnabled, memoryKey } from './memory/store.js';

@@ -263,6 +263,10 @@ export const api = {
 
   agents: () => request<{ agents: AgentSpec[] }>('agents'),
 
+  /** Address a session to one specialist, or `null` for the orchestrator. */
+  setSessionAgent: (sessionId: string, name: string | null) =>
+    post<{ ok: boolean; agent?: string; error?: string }>('agent', { sessionId, name }),
+
   /** URL of the transcript as a downloadable document. */
   exportUrl: (sessionId: string, format: 'md' | 'txt') =>
     `/api/session/export?id=${encodeURIComponent(sessionId)}&format=${format}`

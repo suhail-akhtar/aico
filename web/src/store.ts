@@ -91,6 +91,12 @@ interface AppState {
   sessionId: string;
   /** This session's display name, kept live from the stream. */
   title: string;
+  /**
+   * The specialist this conversation is addressed to, or null for the
+   * orchestrator. Session state, restored on reconnect from `caught-up`.
+   */
+  sessionAgent: string | null;
+  setSessionAgent: (name: string | null) => Promise<void>;
 
   // ── the conversation ──
   /** Finalized messages, keyed by log seq. Replay is idempotent. */
@@ -260,6 +266,7 @@ export const useStore = create<AppState>((set, get) => ({
   planMode: false,
   busy: false,
   turnStartedAt: null,
+  sessionAgent: null,
   lastActivityAt: 0,
   usage: NO_USAGE,
   model: null,
@@ -282,6 +289,9 @@ export const useStore = create<AppState>((set, get) => ({
       // closing a panel — or planning — in one conversation says nothing about
       // the next.
       sessionId, logged: new Map(), draft: emptyDraft(), dismissed: {}, planMode: false,
+      // Cleared on switch and restored by `caught-up`, so a session opened from
+      // the sidebar never inherits the previous one's persona.
+      sessionAgent: null,
       question: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
@@ -356,6 +366,13 @@ export const useStore = create<AppState>((set, get) => ({
   // Stamped, so asking for the same text twice still reaches the composer —
   // an identical value would otherwise look like no change at all.
   prefillComposer: (text) => set({ composerPrefill: { text, at: Date.now() } }),
+
+  setSessionAgent: async (name) => {
+    const { sessionId } = get();
+    const result = await api.setSessionAgent(sessionId, name);
+    if (result.ok) set({ sessionAgent: result.agent ?? null, error: null });
+    else set({ error: result.error ?? 'could not switch agent' });
+  },
 
   askAgentFor: (text) => {
     // New session first: connect() resets the draft, so prefilling before it
@@ -763,6 +780,7 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       set(state => ({
         status: 'live',
         busy: Boolean((data as { busy?: boolean }).busy),
+        sessionAgent: (data as { agent?: string | null }).agent ?? null,
         draft: (data as { busy?: boolean }).busy ? state.draft : emptyDraft(),
         // Drop the optimistic echo now that the real user message has replayed.
         logged: dropPending(state.logged),
@@ -770,6 +788,10 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       return;
 
     // ── ephemeral: the live turn ────────────────────────────────────
+    case 'agent':
+      set(() => ({ sessionAgent: (data as { name?: string | null }).name ?? null }));
+      return;
+
     case 'question':
       // An empty question means the run is no longer waiting — answered,
       // finished, or cancelled.

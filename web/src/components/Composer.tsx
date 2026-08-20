@@ -23,6 +23,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { ModelPicker } from './ModelPicker';
+import { AgentPicker } from './AgentPicker';
 import { SetGoalButton } from './GoalBar';
 
 export function Composer(): React.ReactElement {
@@ -136,6 +137,8 @@ ${prefill.text}` : prefill.text));
             <SetGoalButton />
 
             <div className="flex-1" />
+
+            <AgentPicker />
 
             <ModelPicker />
 

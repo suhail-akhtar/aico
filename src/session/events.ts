@@ -295,6 +295,21 @@ export interface SessionEventMap {
   };
 
   /**
+   * RECORD. Who this conversation is being held with.
+   *
+   * A session can be addressed to one specialist instead of the orchestrator,
+   * and that choice outlives the turn that made it — so it belongs in the log
+   * rather than on the in-memory run. Reopening the session a week later has to
+   * restore the same persona, and "switched to the reviewer at 14:02, back to
+   * the orchestrator at 14:40" is worth being able to reconstruct.
+   *
+   * A null name means back to the orchestrator.
+   */
+  'session/agent': {
+    name: string | null;
+  };
+
+  /**
    * RECORD. Compaction bookkeeping. The summary itself rides on a
    * `user/message` carrying `surfaceOp: {op:'replace'}`; this event records
    * what was shadowed so the reduction is auditable and reversible.

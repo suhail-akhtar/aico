@@ -248,7 +248,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       }
       // Tells the client where to resume from if this connection drops.
       res.write(`event: caught-up\ndata: ${JSON.stringify({
-        type: 'caught-up', sessionId, seq: run.session.length, data: { busy: run.busy },
+        type: 'caught-up',
+        sessionId,
+        seq: run.session.length,
+        // The agent rides along here rather than needing a fetch of its own:
+        // this frame already says "here is where you stand", and a reconnect
+        // that restored the transcript but forgot who you were talking to would
+        // silently put you back with the orchestrator.
+        data: { busy: run.busy, agent: runs.agentOf(sessionId) ?? null },
       })}\n\n`);
       return;
     }
@@ -462,6 +469,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         sessionId,
         seq: run.session.length,
         busy: run.busy,
+        agent: runs.agentOf(sessionId) ?? null,
         messages: deriveMessages(run.session.events),
         // Cost is not part of the raw usage record because it depends on the
         // model, which the tracker does not own. Included here so a reopened
@@ -574,6 +582,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         }
         await runs.ensure(sessionId, await resolveCwd(sessionId));
         send(res, 200, { ok: runs.setGoal(sessionId, text?.trim() ?? '', next) });
+        return;
+      }
+      case 'agent': {
+        const { sessionId, name } = body as { sessionId?: string; name?: string | null };
+        if (!sessionId) { send(res, 400, { error: 'sessionId required' }); return; }
+        await runs.ensure(sessionId, await resolveCwd(sessionId));
+        const result = await runs.setAgent(sessionId, name?.trim() ? name.trim() : null);
+        send(res, result.ok ? 200 : 400, result);
         return;
       }
       case 'feedback': {

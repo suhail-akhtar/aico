@@ -156,6 +156,7 @@ import {
   executeSkillManage, verifySkillDir, draftsDir,
   setEnabled, isDisabled, matchingSkills, exportSkill,
   executeAgentManage, executeMemoryManage, executeMcpManage, splitCommandLine, parseMcpConfig,
+  resolveAgent, inlineSkills, currentAgent,
   remember, listScope, applicable, activeMemories, memoryRoot, scopeDir, searchMemories, buildRuntimeAwareness,
   setMemoryEnabled, memoryKey,
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
@@ -6532,6 +6533,65 @@ console.log('  -- Agents: created, checked against real skills, switched off --'
 
   await cleanup();
   fs.rmSync(path.dirname(out), { recursive: true, force: true });
+}
+
+console.log('  -- Talking to one agent, not just delegating to it --');
+{
+  const NAME = 'harness-persona';
+  await executeAgentManage({ action: 'delete', name: NAME }).catch(() => {});
+
+  await executeAgentManage({
+    action: 'create', name: NAME,
+    description: 'A specialist that exists to prove a persona sticks to a conversation',
+    role: 'the persona under test',
+    skills: ['commit'],
+    tools: ['Read', 'Grep'],
+  });
+
+  const resolved = await resolveAgent(NAME);
+  assert(resolved, 'a named agent resolves');
+  assert(resolved.spec.name === NAME, 'to the right spec');
+  assert(resolved.tools?.join(',') === 'Read,Grep', 'carrying its tool list');
+
+  // The thing that makes a specialist more than a system prompt with opinions:
+  // its skills arrive as procedure text, not as names it has to go and open.
+  assert(/## Assigned Skills/.test(resolved.instructions ?? ''), 'with its skills inlined');
+  assert(/conventional commit/i.test(resolved.instructions ?? ''),
+    'as the actual procedure text, not just the name');
+  assert(resolved.missingSkills.length === 0, 'and nothing reported missing');
+
+  // A skill that was switched off must not be quoted at an agent anyway —
+  // otherwise the switch is a lie in the one place it matters most.
+  setEnabled('skills', 'commit', false);
+  const muted = await resolveAgent(NAME);
+  assert(!/## Assigned Skills/.test(muted.instructions ?? ''), 'a disabled skill is not inlined');
+  assert(muted.missingSkills.includes('commit'), 'and is reported as missing rather than dropped silently');
+  setEnabled('skills', 'commit', true);
+
+  assert(!(await resolveAgent('no-such-agent-at-all')), 'an unknown name resolves to nothing');
+
+  await executeAgentManage({ action: 'delete', name: NAME });
+}
+
+console.log('  -- The agent a session is addressed to survives a reload --');
+{
+  // A projection over the log, not a field on the run: reopening a session a
+  // week later has to restore who you were talking to.
+  const events = [];
+  const fake = { events };
+  assert(currentAgent(fake) === undefined, 'a fresh session talks to the orchestrator');
+
+  events.push({ type: 'session/agent', data: { name: 'reviewer' }, timestamp: 1 });
+  assert(currentAgent(fake) === 'reviewer', 'setting one is remembered');
+
+  events.push({ type: 'user/message', data: {}, timestamp: 2 });
+  assert(currentAgent(fake) === 'reviewer', 'and survives later messages');
+
+  events.push({ type: 'session/agent', data: { name: 'architect' }, timestamp: 3 });
+  assert(currentAgent(fake) === 'architect', 'switching again wins');
+
+  events.push({ type: 'session/agent', data: { name: null }, timestamp: 4 });
+  assert(currentAgent(fake) === undefined, 'and clearing goes back to the orchestrator');
 }
 
 console.log('  -- MCP: a command line is split the way a shell would --');

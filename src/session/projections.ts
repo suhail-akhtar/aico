@@ -42,6 +42,24 @@ export function currentGoal(session: Session): Goal | undefined {
   return undefined;
 }
 
+/**
+ * The agent this conversation is being held with, if it is not the orchestrator.
+ *
+ * A projection over the log rather than a field on the run, for the reason
+ * everything else here is: the run is in memory and the log is on disk, so
+ * reopening a session a week later has to be able to reconstruct who you were
+ * talking to. Last write wins, and a cleared value ends it.
+ */
+export function currentAgent(session: Session): string | undefined {
+  for (let i = session.events.length - 1; i >= 0; i--) {
+    const event = session.events[i];
+    if (event?.type !== 'session/agent') continue;
+    const name = (event.data as { name?: string | null }).name;
+    return name ? String(name) : undefined;
+  }
+  return undefined;
+}
+
 // ── feedback ─────────────────────────────────────────────────────────
 
 export interface Feedback {
