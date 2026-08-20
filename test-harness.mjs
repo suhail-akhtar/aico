@@ -6319,14 +6319,34 @@ console.log('  -- The orchestrator can author a skill, and cannot escape with on
 
 console.log('  -- Memory you can point at one at a time --');
 {
-  const HERE = process.cwd();
+  // A throwaway directory, never the real project. An earlier version used
+  // process.cwd() and wiped the scope dir afterwards, which meant running the
+  // test suite deleted whatever the user actually had remembered for this
+  // repository. Caught by watching it delete a memory created in the browser
+  // thirty seconds earlier.
+  const HERE = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-mem-project-'));
   const SESSION = 'harness-memory-session';
+
+  // Global has no belongsTo to point somewhere safe, so the global scope is
+  // never wiped wholesale — only the entries this test created are removed.
+  const createdGlobal = [];
   const wipe = () => {
-    for (const [scope, owner] of [['global'], ['project', HERE], ['session', SESSION]]) {
-      fs.rmSync(scopeDir(scope, owner), { recursive: true, force: true });
+    fs.rmSync(scopeDir('project', HERE), { recursive: true, force: true });
+    fs.rmSync(scopeDir('session', SESSION), { recursive: true, force: true });
+    for (const id of createdGlobal.splice(0)) {
+      const file = path.join(scopeDir('global'), `${id}.md`);
+      fs.rmSync(file, { force: true });
+      setEnabled('memories', `global:${id}`, true);
     }
   };
+  const globalMemoriesBefore = listScope('global').length;
   wipe();
+
+  // Everything below runs as if HERE were the project, because that is how the
+  // tool resolves scope — `currentCwd()`, not a parameter. Passing belongsTo on
+  // the writes alone would file them in the temp directory and then look for
+  // them in the real one.
+  await runInContext({ cwd: HERE, sessionId: SESSION }, async () => {
 
   const saved = await executeMemoryManage({ action: 'remember', text: 'This repo deploys on Fridays only' });
   assert(/Remembered as/.test(saved), 'something can be remembered');
@@ -6334,11 +6354,14 @@ console.log('  -- Memory you can point at one at a time --');
   const id = saved.match(/id:"([^"]+)"/)?.[1];
   assert(id, `the reply names the id to forget it by (${saved.slice(0, 80)})`);
 
-  await executeMemoryManage({ action: 'remember', text: 'Prefers tabs over spaces', scope: 'global', tags: ['style'] });
+  const globalSaved = await executeMemoryManage({
+    action: 'remember', text: 'Harness prefers tabs over spaces', scope: 'global', tags: ['style'],
+  });
+  createdGlobal.push(globalSaved.match(/as "([^"]+)"/)[1]);
 
   const listed = await executeMemoryManage({ action: 'list' });
   assert(/deploys on Fridays/.test(listed), 'list shows the project memory');
-  assert(/Prefers tabs/.test(listed), 'and the global one, because both apply here');
+  assert(/prefers tabs/i.test(listed), 'and the global one, because both apply here');
 
   // Scope is the whole point: a project memory must not leak into other projects.
   const elsewhere = listScope('project', path.join(os.tmpdir(), 'some-other-project'));
@@ -6369,7 +6392,7 @@ console.log('  -- Memory you can point at one at a time --');
   });
   assert(/<remembered>/.test(awareness), 'memories reach the prompt');
   assert(/Deploys happen on Fridays/.test(awareness), 'with their actual text');
-  assert(/Prefers tabs/.test(awareness), 'global and project together');
+  assert(/prefers tabs/i.test(awareness), 'global and project together');
 
   const empty = buildRuntimeAwareness({
     tools: [], mcpServers: [], workspace: { root: '/w' }, agents: [], skills: [],
@@ -6393,28 +6416,58 @@ console.log('  -- Memory you can point at one at a time --');
   await executeMemoryManage({ action: 'enable', id: keep.id });
   assert(activeMemories(HERE).some(m => m.id === keep.id), 'restoring puts it back in the prompt');
 
+  // Ids are slugs of the text, so a later memory can land on the same one.
+  // Inheriting a silence flag from something deleted months ago would make it
+  // born switched off with nothing on screen to explain why.
+  setMemoryEnabled(keep, false);
+  await executeMemoryManage({ action: 'forget', id: keep.id });
+  const reborn = remember('Deploy freeze until the 30th', 'project', { belongsTo: HERE });
+  assert(reborn.id === keep.id, 'the same text slugs to the same id');
+  assert(reborn.enabled, 'and a memory reusing a forgotten id is not born silenced');
+  await executeMemoryManage({ action: 'forget', id: reborn.id });
+
   // Ids only have to be unique inside a scope, so silencing must not collide.
   const local = remember('Same name, different scope', 'project', { belongsTo: HERE });
-  const global = remember('Same name, different scope', 'global');
-  assert(local.id === global.id, 'two scopes can hold the same id');
+  const twin = remember('Same name, different scope', 'global');
+  createdGlobal.push(twin.id);  // so the suite puts the real store back as it found it
+
+  // Asserted on the key rather than on the ids matching: whether the global one
+  // gets `-2` depends on what is already in the real global scope, and a test
+  // that depends on that passes or fails according to what ran before it.
+  assert(memoryKey('project', local.id) !== memoryKey('global', local.id),
+    'the same id in two scopes produces two different keys');
+
   setMemoryEnabled(local, false);
   assert(!listScope('project', HERE).find(m => m.id === local.id).enabled, 'the project one is silenced');
-  assert(listScope('global').find(m => m.id === global.id).enabled, 'and the global one of the same name is not');
+  assert(listScope('global').every(m => m.enabled),
+    'and no global memory is silenced by a project one being switched off');
+  setMemoryEnabled(local, true);
 
   // Round trip through a file.
   const memOut = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'aico-mem-')), 'memories.json');
-  const exported = await executeMemoryManage({ action: 'export', path: memOut, scope: 'global' });
+  const exported = await executeMemoryManage({
+    action: 'export', path: memOut, scope: 'project', belongsTo: HERE,
+  });
   assert(/Exported/.test(exported), `memories export: ${exported.slice(0, 70)}`);
-  fs.rmSync(scopeDir('global'), { recursive: true, force: true });
-  assert(listScope('global').length === 0, 'cleared before importing back');
-  const imported = await executeMemoryManage({ action: 'import', path: memOut, scope: 'global' });
+  fs.rmSync(scopeDir('project', HERE), { recursive: true, force: true });
+  assert(listScope('project', HERE).length === 0, 'cleared before importing back');
+  const imported = await executeMemoryManage({
+    action: 'import', path: memOut, scope: 'project', belongsTo: HERE,
+  });
   assert(/Imported/.test(imported), `and import back: ${imported.slice(0, 70)}`);
-  assert(listScope('global').length > 0, 'restoring them');
-  const again = await executeMemoryManage({ action: 'import', path: memOut, scope: 'global' });
+  assert(listScope('project', HERE).length > 0, 'restoring them');
+  const again = await executeMemoryManage({
+    action: 'import', path: memOut, scope: 'project', belongsTo: HERE,
+  });
   assert(/skipping/.test(again), 'importing the same file twice does not double every memory');
 
   fs.rmSync(path.dirname(memOut), { recursive: true, force: true });
+  });
+
   wipe();
+  fs.rmSync(HERE, { recursive: true, force: true });
+  assert(listScope('global').length === globalMemoriesBefore,
+    'the suite leaves the real global memories exactly as it found them');
 }
 
 console.log('  -- Agents: created, checked against real skills, switched off --');

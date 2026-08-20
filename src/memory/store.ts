@@ -218,6 +218,11 @@ export function updateMemory(memory: StoredMemory, text: string, tags?: string[]
 
 export function forgetMemory(memory: StoredMemory): void {
   fs.rmSync(memory.file, { force: true });
+  // Clear the silence flag as well. Ids are slugs of the text, so a later
+  // memory can land on the same one — and inheriting a disabled flag from
+  // something deleted months ago would make it silently born switched off,
+  // with nothing on screen to explain why.
+  setRegistryEnabled('memories', memoryKey(memory.scope, memory.id), true);
 }
 
 /** Memories whose text or tags mention every one of these words. */
