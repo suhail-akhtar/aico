@@ -89,6 +89,14 @@ import {
   teamPromptToolDefinition,
 } from './agents.js';
 import { skillCreateToolDefinition, executeSkillCreate } from '../skills/create.js';
+import { skillManageToolDefinition, executeSkillManage } from '../skills/manage.js';
+import { mcpManageToolDefinition, executeMcpManage } from '../mcp/manage-tool.js';
+import type { McpManageInput } from '../mcp/manage-tool.js';
+import { agentManageToolDefinition, executeAgentManage } from './manage-agents.js';
+import { memoryManageToolDefinition, executeMemoryManage } from './manage-memory.js';
+import type { MemoryManageInput } from './manage-memory.js';
+import type { AgentManageInput } from './manage-agents.js';
+import type { SkillManageInput } from '../skills/manage.js';
 import { buildCapabilityReport } from '../capabilities.js';
 import { getWorkspaceInfo, getWorkspaceRuntime } from '../workspace.js';
 import { mcpRegistry } from '../mcp/registry.js';
@@ -202,6 +210,10 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...agentPromptToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...teamPromptToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 120_000 },
   { ...skillCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...skillManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
+  { ...mcpManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
+  { ...agentManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
+  { ...memoryManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   // Reading a procedure changes nothing, so several can open at once.
   { ...skillDefinition, isConcurrencySafe: true, maxResultSizeChars: 60_000 },
 ];
@@ -601,6 +613,18 @@ export async function executeTool(
       break;
     case 'TeamPrompt':
       result = await executeTeamPrompt(args as { requirements: string; agents?: string[] });
+      break;
+    case 'MemoryManage':
+      result = await executeMemoryManage(args as unknown as MemoryManageInput);
+      break;
+    case 'McpManage':
+      result = await executeMcpManage(args as unknown as McpManageInput);
+      break;
+    case 'AgentManage':
+      result = await executeAgentManage(args as unknown as AgentManageInput);
+      break;
+    case 'SkillManage':
+      result = await executeSkillManage(args as unknown as SkillManageInput);
       break;
     case 'SkillCreate':
       result = await executeSkillCreate(args as {

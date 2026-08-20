@@ -193,6 +193,15 @@ export { listChanges, diffOf, revertFile, isGitRepo } from './server/changes.js'
 export { useSkill, skillCatalogue, skillDefinition, describeSize } from './tools/skill.js';
 export { skillRegistry } from './skills/registry.js';
 export { executeSkillCreate } from './skills/create.js';
+export { executeSkillManage, verifySkillDir, draftsDir } from './skills/manage.js';
+export { setEnabled, isDisabled, disabledIn, registryStatePath } from './registry-state.js';
+export { matchingSkills } from './tools/skill.js';
+export { executeAgentManage } from './tools/manage-agents.js';
+export { executeMemoryManage } from './tools/manage-memory.js';
+export { executeMcpManage, splitCommandLine } from './mcp/manage-tool.js';
+export { remember, listScope, applicable, memoryRoot, scopeDir, searchMemories } from './memory/store.js';
+export { buildRuntimeAwareness } from './capabilities.js';
+export { exportSkill } from './skills/import.js';
 export { listDirectory } from './tools/ls.js';
 export { globFiles } from './tools/glob.js';
 export { grepFiles } from './tools/grep.js';

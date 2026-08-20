@@ -191,6 +191,73 @@ async function extract(archive: string): Promise<string> {
 }
 
 /**
+ * Ways to pack a directory into a zip, best first.
+ *
+ * The mirror of `extractors`, and it inherits the same lesson: on Windows the
+ * system tar is named by full path because Git's GNU tar shadows it on PATH and
+ * cannot write zip either. `Compress-Archive` is the fallback that is always
+ * present.
+ *
+ * `-a` asks bsdtar to pick the format from the extension, which is what makes
+ * one command produce a real zip rather than a tar named `.zip`.
+ */
+function compressors(dir: string, archive: string): { file: string; args: string[] }[] {
+  if (process.platform === 'win32') {
+    const system = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+    return [
+      { file: system, args: ['-a', '-c', '-f', archive, '-C', path.dirname(dir), path.basename(dir)] },
+      {
+        file: 'powershell',
+        args: ['-NoProfile', '-NonInteractive', '-Command',
+          `Compress-Archive -Path '${dir.replace(/'/g, "''")}' `
+          + `-DestinationPath '${archive.replace(/'/g, "''")}' -Force`],
+      },
+    ];
+  }
+  return [
+    { file: 'zip', args: ['-q', '-r', archive, path.basename(dir)] },
+    { file: 'tar', args: ['-a', '-c', '-f', archive, '-C', path.dirname(dir), path.basename(dir)] },
+  ];
+}
+
+/**
+ * Pack an installed skill into a `.zip` someone else can import.
+ *
+ * The counterpart to import, and the reason skills are worth writing carefully:
+ * a procedure that cannot leave the machine it was written on is a note, not a
+ * skill.
+ */
+export async function exportSkill(
+  skillDir: string,
+  destination: string,
+): Promise<{ ok: boolean; path?: string; error?: string }> {
+  if (!fs.existsSync(skillDir)) return { ok: false, error: `${skillDir} does not exist.` };
+
+  const archive = /\.(zip|skill)$/i.test(destination)
+    ? path.resolve(destination)
+    : path.resolve(destination, `${path.basename(skillDir)}.zip`);
+  fs.mkdirSync(path.dirname(archive), { recursive: true });
+  // A stale archive left in place would be reported as a successful export.
+  fs.rmSync(archive, { force: true });
+
+  const tried: string[] = [];
+  for (const { file, args } of compressors(skillDir, archive)) {
+    try {
+      await run(file, args, { cwd: path.dirname(skillDir) });
+      if (fs.existsSync(archive) && fs.statSync(archive).size > 0) return { ok: true, path: archive };
+      tried.push(`${path.basename(file)} (produced nothing)`);
+    } catch (err) {
+      tried.push(`${path.basename(file)} (${err instanceof Error ? err.message.split('\n')[0] : 'failed'})`);
+    }
+  }
+  return {
+    ok: false,
+    error: `Could not pack ${path.basename(skillDir)}. Tried: ${tried.join('; ')}. `
+      + `The skill itself is intact at ${skillDir} — copy the folder instead.`,
+  };
+}
+
+/**
  * Install a skill from a path.
  *
  * Accepts a `.zip`/`.skill` archive, a directory, or a single markdown file.

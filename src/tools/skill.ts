@@ -25,6 +25,7 @@
 import fs from 'fs';
 import path from 'path';
 import { skillRegistry } from '../skills/index.js';
+import { disabledIn } from '../registry-state.js';
 import type { Skill } from '../skills/types.js';
 
 export interface SkillInput {
@@ -37,13 +38,42 @@ export interface SkillInput {
 /** How much of a bundled file to inline before pointing at it instead. */
 const INLINE_LIMIT = 4000;
 
-/** One line per skill, for the prompt. */
+/**
+ * One line per skill, for the prompt.
+ *
+ * Disabled skills are left out entirely rather than listed as unavailable.
+ * Offering something and then refusing it wastes a turn and reads as a bug; a
+ * switched-off skill should simply not be part of the decision. They stay
+ * visible in `SkillManage list`, which is where someone looking for the switch
+ * would look.
+ */
 export function skillCatalogue(): string {
-  const skills = skillRegistry.list();
+  const off = disabledIn('skills');
+  const skills = skillRegistry.list().filter(s => !off.has(s.frontmatter.name.toLowerCase()));
   if (skills.length === 0) return '';
   return skills
     .map(s => `- ${s.frontmatter.name}: ${s.frontmatter.description}`)
     .join('\n');
+}
+
+/**
+ * The skills whose trigger matches what was asked, most specific first.
+ *
+ * A skill can declare the shape of request it is for, and a description sitting
+ * in a list is easy to skim past — so when one actually matches, it is named as
+ * a match rather than left to be noticed. This is the "prefer a skill when one
+ * fits" rule expressed where it can act, instead of as an instruction that the
+ * model may or may not follow.
+ */
+export function matchingSkills(request: string): Skill[] {
+  if (!request.trim()) return [];
+  const off = disabledIn('skills');
+  return skillRegistry.list().filter(skill => {
+    if (off.has(skill.frontmatter.name.toLowerCase())) return false;
+    if (!skill.frontmatter.trigger) return false;
+    try { return new RegExp(skill.frontmatter.trigger, 'i').test(request); }
+    catch { return false; }
+  });
 }
 
 /**

@@ -153,6 +153,10 @@ import {
   importSkill, removeSkill, skillCatalogue, useSkill, loadAllSkills,
   executeSkillCreate,
   listDirectory, globFiles, grepFiles, getBuiltinDir,
+  executeSkillManage, verifySkillDir, draftsDir,
+  setEnabled, isDisabled, matchingSkills, exportSkill,
+  executeAgentManage, executeMemoryManage, executeMcpManage, splitCommandLine,
+  remember, listScope, applicable, memoryRoot, scopeDir, searchMemories, buildRuntimeAwareness,
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
   checkProjectGate, newestSourceChange, touchedFiles,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
@@ -6310,6 +6314,330 @@ console.log('  -- The orchestrator can author a skill, and cannot escape with on
   fs.rmSync(dir, { recursive: true, force: true });
   fs.rmSync(path.join(home, 'harness-colon.md'), { force: true });
   fs.rmSync(path.join(home, 'harness-blank.md'), { force: true });
+}
+
+console.log('  -- Memory you can point at one at a time --');
+{
+  const HERE = process.cwd();
+  const SESSION = 'harness-memory-session';
+  const wipe = () => {
+    for (const [scope, owner] of [['global'], ['project', HERE], ['session', SESSION]]) {
+      fs.rmSync(scopeDir(scope, owner), { recursive: true, force: true });
+    }
+  };
+  wipe();
+
+  const saved = await executeMemoryManage({ action: 'remember', text: 'This repo deploys on Fridays only' });
+  assert(/Remembered as/.test(saved), 'something can be remembered');
+  assert(/this project/.test(saved), 'and the default scope is the project, not everywhere');
+  const id = saved.match(/id:"([^"]+)"/)?.[1];
+  assert(id, `the reply names the id to forget it by (${saved.slice(0, 80)})`);
+
+  await executeMemoryManage({ action: 'remember', text: 'Prefers tabs over spaces', scope: 'global', tags: ['style'] });
+
+  const listed = await executeMemoryManage({ action: 'list' });
+  assert(/deploys on Fridays/.test(listed), 'list shows the project memory');
+  assert(/Prefers tabs/.test(listed), 'and the global one, because both apply here');
+
+  // Scope is the whole point: a project memory must not leak into other projects.
+  const elsewhere = listScope('project', path.join(os.tmpdir(), 'some-other-project'));
+  assert(elsewhere.length === 0, 'a project memory does not apply in a different project');
+  assert(listScope('global').some(m => /tabs/.test(m.text)), 'while a global one applies everywhere');
+
+  const found = await executeMemoryManage({ action: 'search', query: 'fridays' });
+  assert(/deploys on Fridays/.test(found), 'search finds by word');
+  assert(/Nothing remembered matches/.test(await executeMemoryManage({ action: 'search', query: 'kangaroo' })),
+    'and says so plainly when nothing matches');
+
+  await executeMemoryManage({ action: 'update', id, text: 'This repo deploys on Fridays, and never after 4pm' });
+  assert(/never after 4pm/.test(await executeMemoryManage({ action: 'list' })), 'a memory can be corrected');
+
+  // The half that did not exist before: forgetting.
+  const forgotten = await executeMemoryManage({ action: 'forget', id });
+  assert(/Forgot/.test(forgotten), 'a specific memory can be forgotten');
+  assert(!/deploys on Fridays/.test(await executeMemoryManage({ action: 'list' })), 'and it is gone from the list');
+  assert(/No memory called/.test(await executeMemoryManage({ action: 'forget', id })),
+    'forgetting it twice says so rather than pretending');
+
+  // Remembered things have to reach the prompt, or remembering is write-only.
+  remember('Deploys happen on Fridays', 'project', { belongsTo: HERE });
+  const awareness = buildRuntimeAwareness({
+    tools: [], mcpServers: [], workspace: { root: '/w' }, agents: [], skills: [],
+    cronJobs: [], backgroundAgents: [], subAgents: [],
+    memories: applicable(HERE).map(m => ({ id: m.id, scope: m.scope, text: m.text })),
+  });
+  assert(/<remembered>/.test(awareness), 'memories reach the prompt');
+  assert(/Deploys happen on Fridays/.test(awareness), 'with their actual text');
+  assert(/Prefers tabs/.test(awareness), 'global and project together');
+
+  const empty = buildRuntimeAwareness({
+    tools: [], mcpServers: [], workspace: { root: '/w' }, agents: [], skills: [],
+    cronJobs: [], backgroundAgents: [], subAgents: [], memories: [],
+  });
+  assert(!/<remembered>/.test(empty), 'and nothing remembered adds nothing to the prompt');
+  assert(!/\n\n/.test(empty), 'not even a blank line');
+
+  wipe();
+}
+
+console.log('  -- Agents: created, checked against real skills, switched off --');
+{
+  const NAME = 'harness-specialist';
+  const cleanup = async () => {
+    await executeAgentManage({ action: 'delete', name: NAME }).catch(() => {});
+    setEnabled('agents', NAME, true);
+  };
+  await cleanup();
+
+  // An agent pointed at a skill that does not exist is quietly less capable
+  // than it looks, and nothing would ever say so.
+  const bogus = await executeAgentManage({
+    action: 'create', name: NAME,
+    description: 'Reviews migrations', skills: ['no-such-skill-anywhere'],
+  });
+  assert(/do not exist/.test(bogus), 'an agent naming a skill that does not exist is refused');
+  assert(/no-such-skill-anywhere/.test(bogus), 'and the reply names the offender');
+
+  const made = await executeAgentManage({
+    action: 'create', name: NAME,
+    description: 'Reviews database migrations for dangerous operations',
+    role: 'database reviewer', skills: ['commit'],
+  });
+  assert(/Created agent/.test(made), `an agent with real skills is created: ${made.slice(0, 90)}`);
+  assert(/commit/.test(made), 'and it says what the agent will reach for');
+
+  assert(/harness-specialist/.test(await executeAgentManage({ action: 'list' })), 'it shows up in the list');
+  const read = await executeAgentManage({ action: 'read', name: NAME });
+  assert(/database reviewer/.test(read), 'and can be read back in full');
+
+  assert(/already exists/.test(await executeAgentManage({
+    action: 'create', name: NAME, description: 'Something else entirely',
+  })), 'creating it twice is refused rather than silently overwriting');
+
+  await executeAgentManage({ action: 'update', name: NAME, description: 'Revised description' });
+  assert(/Revised description/.test(await executeAgentManage({ action: 'read', name: NAME })), 'update works');
+
+  await executeAgentManage({ action: 'disable', name: NAME });
+  assert(/\[disabled\]/.test(await executeAgentManage({ action: 'list' })), 'and it can be switched off');
+  await executeAgentManage({ action: 'enable', name: NAME });
+
+  // Round trip through a file.
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'aico-agents-')), 'agents.json');
+  assert(/Exported/.test(await executeAgentManage({ action: 'export', name: NAME, path: out })), 'exports');
+  await executeAgentManage({ action: 'delete', name: NAME });
+  assert(!/harness-specialist/.test(await executeAgentManage({ action: 'list' })), 'delete removes it');
+  const back = await executeAgentManage({ action: 'import', path: out });
+  assert(/Imported/.test(back), `and the export imports back: ${back.slice(0, 100)}`);
+  assert(/harness-specialist/.test(await executeAgentManage({ action: 'list' })), 'restoring the agent');
+
+  // A built-in is protected from both destructive verbs.
+  const builtins = await executeAgentManage({ action: 'list' });
+  const builtin = builtins.split('\n').find(l => /\(builtin\)/.test(l))?.match(/^- ([\w-]+)/)?.[1];
+  if (builtin) {
+    assert(/cannot be deleted/.test(await executeAgentManage({ action: 'delete', name: builtin })),
+      'a built-in agent cannot be deleted');
+    assert(/cannot be edited/.test(await executeAgentManage({ action: 'update', name: builtin, description: 'x' })),
+      'nor edited');
+  }
+
+  await cleanup();
+  fs.rmSync(path.dirname(out), { recursive: true, force: true });
+}
+
+console.log('  -- MCP: a command line is split the way a shell would --');
+{
+  // The field takes what a README gave you, which is a line, not an argv array.
+  const simple = splitCommandLine('npx -y @modelcontextprotocol/server-filesystem /some/path');
+  assert(simple.command === 'npx', 'the first word is the command');
+  assert(simple.args.length === 3, 'and the rest are arguments');
+
+  const quoted = splitCommandLine('node "C:/Program Files/thing/server.js" --port 3000');
+  assert(quoted.args[0] === 'C:/Program Files/thing/server.js',
+    `a quoted path with spaces stays one argument (${quoted.args[0]})`);
+  assert(quoted.args.length === 3, 'and the flags after it survive');
+
+  assert(splitCommandLine('   ').command === '', 'an empty line yields nothing rather than throwing');
+
+  const servers = await executeMcpManage({ action: 'list' });
+  assert(/MCP server\(s\):|No MCP servers configured/.test(servers),
+    `listing servers works whether or not any are configured (${servers.slice(0, 70)})`);
+  assert(/No MCP server called/.test(await executeMcpManage({ action: 'read', name: 'nope-not-here' })),
+    'reading one that does not exist says so');
+  assert(/Give either a command/.test(await executeMcpManage({ action: 'add', name: 'x' })),
+    'adding with neither a command nor a url explains what is needed');
+}
+
+console.log('  -- Creating a skill does not register it --');
+{
+  const home = path.join(os.homedir(), '.aico', 'skills');
+  const NAME = 'harness-lifecycle';
+  const clean = () => {
+    fs.rmSync(path.join(home, NAME), { recursive: true, force: true });
+    fs.rmSync(path.join(draftsDir(), NAME), { recursive: true, force: true });
+    setEnabled('skills', NAME, true);
+  };
+  clean();
+
+  // The requirement this encodes: write it, try it, *then* install it. A tool
+  // that registers on the first call makes the middle step optional, and
+  // optional verification is verification that does not happen.
+  const created = await executeSkillManage({
+    action: 'create',
+    name: NAME,
+    description: 'Check a changelog entry reads like a human wrote it, using the shipped tone reference',
+    prompt: 'Read references/tone.md, then rewrite the entry.\n\nEntry: {args}',
+    resources: [{ path: 'references/tone.md', content: '# Tone\nPlain words.\n' }],
+  });
+  assert(/NOT registered/.test(created), 'create says plainly that it did not register');
+  assert(/Checks pass/.test(created), 'and reports the checks');
+  await skillRegistry.load({});
+  assert(!skillRegistry.lookup(NAME), 'and the skill genuinely is not in the registry yet');
+  assert(!skillCatalogue().includes(NAME), 'nor in the catalogue the model sees');
+
+  const listed = await executeSkillManage({ action: 'list' });
+  assert(/unregistered draft/.test(listed), 'list surfaces the draft so it cannot be forgotten');
+
+  // Registering re-runs the checks rather than trusting the ones done at create
+  // time — the draft is editable in between, which is the point of it.
+  fs.rmSync(path.join(draftsDir(), NAME, 'references', 'tone.md'), { force: true });
+  const refused = await executeSkillManage({ action: 'register', name: NAME });
+  assert(/Not registered/.test(refused), 'a draft whose file went missing is refused');
+  assert(/tone\.md/.test(refused), 'and the reason names the missing file');
+  await skillRegistry.load({});
+  assert(!skillRegistry.lookup(NAME), 'and it is still not registered');
+
+  // Put it back and register for real.
+  fs.mkdirSync(path.join(draftsDir(), NAME, 'references'), { recursive: true });
+  fs.writeFileSync(path.join(draftsDir(), NAME, 'references', 'tone.md'), '# Tone\nPlain words.\n');
+  const registered = await executeSkillManage({ action: 'register', name: NAME });
+  assert(/Registered/.test(registered), `a passing draft registers: ${registered.slice(0, 90)}`);
+  assert(!fs.existsSync(path.join(draftsDir(), NAME)), 'and the draft is consumed, not left behind');
+  assert(skillRegistry.lookup(NAME), 'the skill is now in the registry');
+  assert(skillCatalogue().includes(NAME), 'and in the catalogue');
+
+  // Disabling is not deleting.
+  const off = await executeSkillManage({ action: 'disable', name: NAME });
+  assert(/now disabled/.test(off), 'a skill can be switched off');
+  assert(!skillCatalogue().includes(NAME), 'a disabled skill leaves the catalogue entirely');
+  assert(fs.existsSync(path.join(home, NAME)), 'but stays on disk');
+  const listedOff = await executeSkillManage({ action: 'list' });
+  assert(/\[disabled\]/.test(listedOff), 'and stays listed, marked off — a switch you cannot find is a bug');
+  assert(/already disabled/.test(await executeSkillManage({ action: 'disable', name: NAME })),
+    'disabling twice says so rather than reporting a no-op as an action');
+  await executeSkillManage({ action: 'enable', name: NAME });
+  assert(skillCatalogue().includes(NAME), 'enabling puts it back');
+
+  // Update touches only what was named.
+  await executeSkillManage({ action: 'update', name: NAME, description: 'A description long enough to choose by, revised' });
+  await skillRegistry.load({});
+  const updated = skillRegistry.lookup(NAME);
+  assert(/revised/.test(updated.frontmatter.description), 'update changes the description');
+  assert(/references\/tone\.md/.test(updated.promptTemplate), 'and leaves the body alone when it was not given');
+  assert(updated.resources?.includes('references/tone.md'), 'and the shipped files survive');
+
+  // Export and re-import: a procedure that cannot leave the machine is a note.
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-export-'));
+  const exported = await executeSkillManage({ action: 'export', name: NAME, path: outDir });
+  assert(/Exported/.test(exported), `export produces an archive: ${exported.slice(0, 120)}`);
+  const archive = fs.readdirSync(outDir).find(f => /\.zip$/i.test(f));
+  assert(archive, `and it is a .zip on disk (${fs.readdirSync(outDir).join(', ')})`);
+
+  await executeSkillManage({ action: 'delete', name: NAME });
+  await skillRegistry.load({});
+  assert(!skillRegistry.lookup(NAME), 'delete removes it');
+  assert(!fs.existsSync(path.join(home, NAME)), 'from disk as well');
+
+  const reimported = await executeSkillManage({ action: 'import', path: path.join(outDir, archive) });
+  assert(/Imported/.test(reimported), `the exported zip imports back: ${reimported.slice(0, 120)}`);
+  await skillRegistry.load({});
+  const round = skillRegistry.lookup(NAME);
+  assert(round, 'and the skill is whole again');
+  assert(round.resources?.includes('references/tone.md'), 'with the files it shipped');
+
+  fs.rmSync(outDir, { recursive: true, force: true });
+  clean();
+}
+
+console.log('  -- Verification catches what actually breaks a skill --');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-verify-'));
+
+  const write = (frontmatter, body, files = {}) => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\n${frontmatter}\n---\n${body}`);
+    for (const [rel, content] of Object.entries(files)) {
+      fs.mkdirSync(path.join(dir, path.dirname(rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), content);
+    }
+  };
+
+  write('name: x\ndescription: A description long enough to actually choose by', 'Do the thing.');
+  assert(verifySkillDir(dir).ok, 'a complete skill passes');
+
+  write('name: x', 'Do the thing.');
+  assert(!verifySkillDir(dir).ok, 'no description fails');
+
+  write('name: x\ndescription: short', 'Do the thing.');
+  const vague = verifySkillDir(dir);
+  assert(!vague.ok, 'a description too vague to choose by fails');
+  assert(/selection decision|whole selection/.test(vague.problems.join(' ')), 'and says why that matters');
+
+  // The one that strands the agent mid-procedure.
+  write('name: x\ndescription: A description long enough to actually choose by',
+    'First run scripts/check.py, then read references/tone.md.');
+  const missing = verifySkillDir(dir);
+  assert(!missing.ok, 'a body referring to files that never shipped fails');
+  assert(/scripts\/check\.py/.test(missing.problems.join(' ')), 'naming the missing script');
+  assert(/references\/tone\.md/.test(missing.problems.join(' ')), 'and the missing reference');
+
+  write('name: x\ndescription: A description long enough to actually choose by',
+    'First run scripts/check.py, then read references/tone.md.',
+    { 'scripts/check.py': 'print(1)\n', 'references/tone.md': '# Tone\n' });
+  assert(verifySkillDir(dir).ok, 'and passes once those files are actually there');
+
+  write('name: x\ndescription: A description long enough to actually choose by', '');
+  assert(!verifySkillDir(dir).ok, 'an empty body fails — there is no procedure to follow');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- A skill that matches the request is named as a match --');
+{
+  const home = path.join(os.homedir(), '.aico', 'skills');
+  const NAME = 'harness-trigger';
+  fs.rmSync(path.join(home, NAME), { recursive: true, force: true });
+  fs.rmSync(path.join(draftsDir(), NAME), { recursive: true, force: true });
+
+  await executeSkillManage({
+    action: 'create',
+    name: NAME,
+    description: 'Review a database migration for dangerous operations before it ships',
+    prompt: 'Review the migration.',
+    // Both directions on purpose: "review this migration" and "migration
+    // review" are the same request, and a one-way regex silently misses half
+    // of how people actually phrase it.
+    trigger: '(migration|schema change).*(review|check)|(review|check).*(migration|schema change)',
+  });
+  await executeSkillManage({ action: 'register', name: NAME });
+  await skillRegistry.load({});
+
+  for (const phrasing of ['can you review this migration for me', 'do a migration review on db/003.sql']) {
+    assert(matchingSkills(phrasing).some(s => s.frontmatter.name === NAME),
+      `the trigger finds the skill for "${phrasing}"`);
+  }
+  assert(matchingSkills('what is the weather').every(s => s.frontmatter.name !== NAME),
+    'and an unrelated request does not');
+
+  // A disabled skill must not be offered even when it matches — otherwise the
+  // switch is cosmetic in the one case that matters.
+  setEnabled('skills', NAME, false);
+  assert(matchingSkills('review this migration').every(s => s.frontmatter.name !== NAME),
+    'a disabled skill is never offered, even on an exact trigger match');
+  setEnabled('skills', NAME, true);
+
+  await executeSkillManage({ action: 'delete', name: NAME });
+  await skillRegistry.load({});
 }
 
 console.log('  -- One skill per name, however many places define it --');

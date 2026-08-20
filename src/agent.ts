@@ -68,7 +68,8 @@ import { getAgentRegistry } from './tools/task.js';
 import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
 import { checkProjectGate, detectChecks, resetChecks } from './checks.js';
-import { skillCatalogue } from './tools/skill.js';
+import { skillCatalogue, matchingSkills } from './tools/skill.js';
+import { applicable as applicableMemories } from './memory/store.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
 
@@ -812,6 +813,12 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     cronJobs: cronScheduler.getJobs(),
     backgroundAgents: getBackgroundAgents(),
     subAgents: getAgentRegistry(),
+    // Everything remembered that applies to this directory and this
+    // conversation. Read at build time rather than cached: a memory saved
+    // during a turn should be in effect on the next one, not next launch.
+    memories: applicableMemories(currentCwd(), opts.sessionId).map(m => ({
+      id: m.id, scope: m.scope, text: m.text,
+    })),
   });
   // ── Volatile context ───────────────────────────────────────────────
   // Everything here changes between turns: the working tree moves whenever the
@@ -824,6 +831,27 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const volatileDoc = new PromptDocument()
     .add({ id: 'working_tree', body: await buildVolatileContext() })
     .add({ id: 'runtime_awareness', body: runtimeAwareness });
+
+  // A skill whose trigger matches this request is named as a match rather than
+  // left sitting in a list of twenty descriptions. "Prefer a skill when one
+  // fits" is easy to write in a prompt and easy to skim past; pointing at the
+  // specific skill that fits, in the volatile tail where the request itself
+  // lives, is the version that acts. It stays a recommendation — the model can
+  // still decide the skill is wrong for this case, which is why the wording
+  // says consider rather than must.
+  const matched = matchingSkills(task);
+  if (matched.length > 0) {
+    volatileDoc.add({
+      id: 'matching_skills',
+      body: [
+        'These installed skills declare that they are for requests like this one:',
+        ...matched.map(s => `- ${s.frontmatter.name}: ${s.frontmatter.description}`),
+        'Open the relevant one with Skill before working the procedure out yourself. '
+        + 'If none of them actually fit, say so and carry on.',
+      ].join('\n'),
+    });
+  }
+
   if (toolProfile === 'browser-qa') {
     volatileDoc.add({
       id: 'browser_qa_mode',

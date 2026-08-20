@@ -258,13 +258,22 @@ export async function createAgentSpec(input: AgentCreateInput, cwd = process.cwd
   return spec;
 }
 
+/**
+ * Delete an agent the user defined, wherever they defined it.
+ *
+ * Project *and* user scope, because creating defaults to user and an earlier
+ * version could only delete project agents — so the ordinary path produced an
+ * agent that could never be removed or edited again. Built-ins are still
+ * refused: they come back on the next install, so "deleted" would be a lie.
+ */
 export async function deleteProjectAgentSpec(name: string, cwd = process.cwd()): Promise<boolean> {
   const slug = slugName(name);
   if (!slug) return false;
   const spec = await getAgentSpec(slug, cwd);
-  if (!spec || spec.source !== 'project') return false;
+  if (!spec || spec.source === 'builtin') return false;
+  const dir = spec.source === 'project' ? projectAgentsDir(cwd) : userAgentsDir();
   try {
-    await unlink(path.join(projectAgentsDir(cwd), `${spec.name}.json`));
+    await unlink(path.join(dir, `${spec.name}.json`));
     return true;
   } catch {
     return false;
@@ -278,14 +287,21 @@ export async function updateProjectAgentSpec(
 ): Promise<AgentSpec> {
   const existing = await getAgentSpec(name, cwd);
   if (!existing) throw new Error(`Agent "${name}" not found`);
-  if (existing.source !== 'project') throw new Error(`Only project agents can be edited. "${name}" is ${existing.source}.`);
+  // Built-ins only. A user-scoped agent is one the user made and must be able
+  // to change; refusing that made every agent created with the default scope
+  // permanently frozen.
+  if (existing.source === 'builtin') {
+    throw new Error(`"${name}" is built in and cannot be edited. Create your own agent instead.`);
+  }
   const updated = withXml({
     ...existing,
     ...patch,
-    source: 'project',
+    source: existing.source,
     systemPromptXml: '',
   });
-  const dir = projectAgentsDir(cwd);
+  // Rewritten where it already lives, so editing does not silently move an
+  // agent from user scope into the project.
+  const dir = existing.source === 'project' ? projectAgentsDir(cwd) : userAgentsDir();
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, `${updated.name}.json`), JSON.stringify(updated, null, 2), 'utf8');
   return updated;

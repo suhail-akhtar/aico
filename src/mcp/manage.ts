@@ -1,5 +1,6 @@
 import { loadSettings, saveProjectMcpServers, getProjectLocalSettingsPath } from '../settings.js';
 import { mcpRegistry } from './registry.js';
+import { disabledIn } from '../registry-state.js';
 import type { McpServerConfigV2 } from './base.js';
 
 export type McpPreset = 'playwright';
@@ -87,7 +88,15 @@ export async function removeMcpServer(name: string): Promise<string> {
 
 export async function reloadMcpServers(): Promise<string> {
   const settings = await loadSettings();
-  const servers = settings.mcpServers ?? {};
+  const all = settings.mcpServers ?? {};
+  // A disabled server is not started. Filtering here rather than at the call
+  // sites is what makes the switch mean anything: every path that brings
+  // servers up goes through this one, so there is nowhere for a disabled
+  // server to sneak back in.
+  const off = disabledIn('mcp');
+  const servers = Object.fromEntries(
+    Object.entries(all).filter(([name]) => !off.has(name.toLowerCase())),
+  );
   await mcpRegistry.loadServers(servers);
   mcpRegistry.startHealthChecks();
   return formatMcpServers();
