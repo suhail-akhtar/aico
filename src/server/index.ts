@@ -28,6 +28,7 @@
 import http from 'http';
 import { spawn } from 'child_process';
 import crypto from 'crypto';
+import { fileURLToPath } from 'url';
 import fs from 'fs';
 import path from 'path';
 import { EventHub } from './events.js';
@@ -741,7 +742,13 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
  * root.
  */
 function webRoot(): string {
-  const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+  // `fileURLToPath`, not manual URL surgery. The hand-rolled version stripped
+  // the leading slash from a drive letter and stopped there, leaving every
+  // percent-escape in place — so a user called "Suhail Akhtar" got
+  // `C:/Users/Suhail%20Akhtar/...`, which matches no directory on earth, and
+  // the portal answered "web client not built" while sitting next to a
+  // perfectly good build. Most Windows home directories have a space in them.
+  const here = path.dirname(fileURLToPath(import.meta.url));
   let dir = here;
   for (let depth = 0; depth < 6; depth++) {
     const candidate = path.join(dir, 'web-dist');

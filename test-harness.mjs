@@ -3,7 +3,7 @@
  * Run: npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node test-harness.mjs
  */
 import fs from 'fs';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
@@ -5047,6 +5047,31 @@ console.log('  -- The trajectory view reads everything in one pass --');
 // WORKSPACE WRITES + TRANSCRIPT EXPORT
 // ═══════════════════════════════════════════════════════════
 console.log('\n══ WORKSPACE WRITES + TRANSCRIPT EXPORT ══');
+
+console.log('  -- A path with a space in it is still a path --');
+{
+  // Found by installing the package into a real Windows home directory. The
+  // hand-rolled URL-to-path conversion stripped the drive letter's leading
+  // slash and left every percent-escape alone, so "Suhail Akhtar" became
+  // "Suhail%20Akhtar" and the portal reported "web client not built" while
+  // sitting beside a perfectly good build. Most Windows home directories
+  // contain a space.
+  const spaced = nodePath.join(os.tmpdir(), 'aico probe dir');
+  fs.mkdirSync(spaced, { recursive: true });
+  const file = nodePath.join(spaced, 'thing.js');
+  fs.writeFileSync(file, '// marker');
+
+  const url = pathToFileURL(file);
+  assert(url.href.includes('%20'), 'a file URL escapes the space');
+  assert(fileURLToPath(url) === file, 'and converting it back gives the path again');
+  assert(fs.existsSync(fileURLToPath(url)), 'which actually exists on disk');
+
+  // The old approach, kept as a test so nobody reintroduces it.
+  const naive = url.pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  assert(!fs.existsSync(naive), 'while the naive conversion points at nothing');
+
+  fs.rmSync(spaced, { recursive: true, force: true });
+}
 
 console.log('  -- The portal defaults to the workspace, the CLI to where you are --');
 {
