@@ -81,6 +81,22 @@ export function McpPane(): React.ReactElement {
     } finally { setBusy(false); }
   };
 
+  /** Stop a server without losing the command line that took a README to assemble. */
+  const toggle = async (server: SystemSnapshot['mcpServers'][number]): Promise<void> => {
+    setBusy(true);
+    try {
+      const result = await api.manage('mcp', {
+        action: server.enabled ? 'disable' : 'enable',
+        name: server.name,
+      });
+      setNote({
+        tone: result.ok ? 'good' : 'bad',
+        text: result.result ?? result.error ?? 'nothing came back',
+      });
+      await refresh();
+    } finally { setBusy(false); }
+  };
+
   const disconnect = async (server: string): Promise<void> => {
     const result = await api.removeMcpServer(server);
     setNote(result.ok
@@ -170,20 +186,48 @@ export function McpPane(): React.ReactElement {
         </h3>
         <ul className="mt-2 space-y-1">
           {servers.map(server => {
-            const label = typeof server === 'string' ? server : String(server);
+            const label = server.name;
             return (
               <li key={label} className="rounded-xl border border-aico-border">
                 <div className="flex items-center gap-2 px-3 py-2">
-                  <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-aico-primary">
-                    {label}
-                  </span>
-                  <button
-                    onClick={() => setConfirming(label)}
-                    className="shrink-0 rounded-lg px-2 py-1 text-[11px] text-aico-muted
-                               transition-colors hover:bg-aico-danger/10 hover:text-aico-danger"
-                  >
-                    Remove
-                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate font-mono text-[12px] text-aico-primary">{label}</span>
+                      {!server.enabled && (
+                        <span className="rounded bg-aico-warning/15 px-1.5 py-0.5 text-[10px] text-aico-warning">
+                          off
+                        </span>
+                      )}
+                    </div>
+                    {/*
+                      A server contributing zero tools is the commonest way this
+                      is misconfigured, and it looks identical to a working one
+                      if all you show is the name.
+                    */}
+                    <p className="mt-0.5 text-[11px] text-aico-muted">
+                      {server.enabled
+                        ? `${server.health} — ${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}, `
+                          + `${server.resourceCount} resource${server.resourceCount === 1 ? '' : 's'}`
+                        : 'switched off — its tools are not available to the agent'}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      onClick={() => void toggle(server)}
+                      disabled={busy}
+                      className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
+                                 hover:bg-aico-hover hover:text-aico-primary disabled:opacity-40"
+                    >
+                      {server.enabled ? 'Disable' : 'Enable'}
+                    </button>
+                    <button
+                      onClick={() => setConfirming(label)}
+                      className="rounded-lg px-2 py-1 text-[11px] text-aico-muted
+                                 transition-colors hover:bg-aico-danger/10 hover:text-aico-danger"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
                 {confirming === label && (
                   <div className="border-t border-aico-border bg-aico-danger/5 px-3 py-2">

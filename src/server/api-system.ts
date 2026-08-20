@@ -22,6 +22,8 @@
 import { getBackgroundAgents, cancelBackgroundAgent } from '../background/index.js';
 import { worktreeManager } from '../worktree/index.js';
 import { skillRegistry } from '../skills/index.js';
+import { mcpRegistry } from '../mcp/registry.js';
+import { disabledIn } from '../registry-state.js';
 import { executeCronList, executeCronDelete, executeCronPause, executeCronResume } from '../cron/tools.js';
 import { testProvider, testInstance } from '../providers/connection-test.js';
 import {
@@ -47,6 +49,7 @@ const ENV_KEYS: Record<string, string> = {
 /** Everything the System panel shows, in one round trip. */
 export async function systemSnapshot(): Promise<Record<string, unknown>> {
   const settings = await loadSettings();
+  const disabledMcp = disabledIn('mcp');
   return {
     backgroundAgents: getBackgroundAgents().map(a => ({
       agentId: a.agentId,
@@ -69,7 +72,19 @@ export async function systemSnapshot(): Promise<Record<string, unknown>> {
       description: s.frontmatter.description,
       builtin: s.isBuiltin,
     })),
-    mcpServers: Object.keys(settings.mcpServers ?? {}),
+    // Names alone said nothing about whether a server was doing anything. A
+    // server contributing zero tools is the commonest way this is
+    // misconfigured, and the panel is where someone would look.
+    mcpServers: Object.keys(settings.mcpServers ?? {}).map(name => {
+      const info = mcpRegistry.getServerInfos().find(s => s.name === name);
+      return {
+        name,
+        enabled: !disabledMcp.has(name.toLowerCase()),
+        health: info?.health ?? 'not loaded',
+        toolCount: info?.toolCount ?? 0,
+        resourceCount: info?.resourceCount ?? 0,
+      };
+    }),
     workspace: describeWorkspace(settings),
   };
 }

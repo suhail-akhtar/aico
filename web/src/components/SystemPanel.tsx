@@ -192,9 +192,15 @@ export function SystemPanel(): React.ReactElement {
 
           <Section title="MCP servers" count={mcpServers.length}>
             {mcpServers.length === 0 && <Empty>No MCP servers configured.</Empty>}
-            {mcpServers.map(name => (
-              <Row key={name}>
-                <span className="font-mono text-sm text-aico-primary">{name}</span>
+            {mcpServers.map(server => (
+              <Row key={server.name}>
+                <span className="font-mono text-sm text-aico-primary">{server.name}</span>
+                {/* What it is contributing, not merely that it is configured. */}
+                <span className="ml-auto text-xs text-aico-muted">
+                  {server.enabled
+                    ? `${server.health} · ${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}`
+                    : 'disabled'}
+                </span>
               </Row>
             ))}
           </Section>

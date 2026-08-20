@@ -550,7 +550,14 @@ export interface SystemSnapshot {
   cron: Array<{ id: string; schedule: string; prompt?: string; task?: string; paused?: boolean; nextRun?: number }>;
   worktrees: Array<{ path?: string; branch?: string; agentId?: string; [k: string]: unknown }>;
   skills: Array<{ name: string; description: string; builtin: boolean }>;
-  mcpServers: string[];
+  mcpServers: Array<{
+    name: string;
+    enabled: boolean;
+    /** What it is actually contributing right now, not merely that it is configured. */
+    health: string;
+    toolCount: number;
+    resourceCount: number;
+  }>;
   workspace?: WorkspaceInfo;
 }
 
