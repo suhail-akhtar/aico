@@ -43,6 +43,7 @@ import {
 import { createGroup, deleteGroup, listGroups, updateGroup } from './groups.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
+import { resolveWorkspaceRoot } from '../workspace.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 
 export interface ServeOptions {
@@ -172,6 +173,31 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     return runs.get(sessionId);
   }
 
+  /**
+   * Where a web session works when nobody has said otherwise.
+   *
+   * The launch directory is the right default for the CLI — you typed `aico`
+   * inside a repository, so that repository is the subject. It is the wrong
+   * one for the portal, which you may have left running for days and which is
+   * reached from a browser that has no idea where the server was started. A
+   * session opened there was silently pointed at whatever folder the process
+   * happened to be launched in, which is how "it ignores my workspace" happens.
+   *
+   * So the portal falls back to the workspace — the configured path if there
+   * is one, and the per-project workspace under ~/.aico otherwise. Both are
+   * places the agent is meant to write. Picking a project in the sidebar still
+   * wins; this only decides what happens when nothing was picked.
+   */
+  const webDefaultDir = resolveWorkspaceRoot(settings, cwd);
+  try {
+    // Created up front: a default directory that does not exist turns the
+    // first tool call into an error about a path nobody chose.
+    fs.mkdirSync(webDefaultDir, { recursive: true });
+  } catch {
+    // If it cannot be made, resolveCwd falls back to the launch directory
+    // below rather than leaving sessions with nowhere to run.
+  }
+
   async function resolveCwd(sessionId: string, requested?: string | null): Promise<string> {
     if (requested && await isKnownProject(cwd, requested)) {
       const target = normalizeProjectPath(requested);
@@ -189,7 +215,8 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       sessionCwd.set(sessionId, found);
       return found;
     }
-    return cwd;
+    // The workspace, not the launch directory. See webDefaultDir above.
+    return fs.existsSync(webDefaultDir) ? webDefaultDir : cwd;
   }
 
   const heartbeat = setInterval(() => hub.heartbeat(), HEARTBEAT_MS);

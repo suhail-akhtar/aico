@@ -5048,6 +5048,32 @@ console.log('  -- The trajectory view reads everything in one pass --');
 // ═══════════════════════════════════════════════════════════
 console.log('\n══ WORKSPACE WRITES + TRANSCRIPT EXPORT ══');
 
+console.log('  -- The portal defaults to the workspace, the CLI to where you are --');
+{
+  // The launch directory is right for the CLI — you typed `aico` inside a
+  // repository, so that repository is the subject. It is wrong for a portal you
+  // may have left running for days, reached from a browser that has no idea
+  // where the server was started.
+  const repo = nodePath.resolve(process.cwd());
+
+  const derived = resolveWorkspaceRoot(undefined, repo);
+  assert(derived.includes('.aico'), `with nothing configured the workspace is under ~/.aico (${derived})`);
+  assert(nodePath.resolve(derived) !== repo, 'and is never the project directory itself');
+  assert(derived.includes(nodePath.basename(repo)),
+    'named after the project, so several are tellable apart');
+
+  // A configured path wins, which is what "as user setup custom or default" means.
+  const custom = nodePath.join(os.tmpdir(), 'aico-custom-workspace');
+  assert(nodePath.resolve(resolveWorkspaceRoot({ workspace: { path: custom } }, repo))
+    === nodePath.resolve(custom), 'a configured absolute path is used as given');
+
+  // A relative one resolves against the project, not the process — two servers
+  // in two repositories must not share one ./workspace.
+  const relative = resolveWorkspaceRoot({ workspace: { path: 'scratch' } }, repo);
+  assert(nodePath.resolve(relative) === nodePath.join(repo, 'scratch'),
+    'a relative path hangs off the project it belongs to');
+}
+
 console.log('  -- The agent may write to its own workspace --');
 {
   const roots = writableRoots();

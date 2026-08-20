@@ -24,6 +24,7 @@
  */
 
 import fs from 'fs';
+import { resolveWorkspaceRoot } from '../workspace.js';
 import os from 'os';
 import path from 'path';
 import { loadSettings, saveUserSetting } from '../settings.js';
@@ -95,6 +96,15 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
 
   const seen = new Map<string, Entry>();
   seen.set(launch, { path: launch, name: defaultName(launch) });
+
+  // The workspace is always offered, because the portal now defaults to it.
+  // A directory that sessions are filed under but that never appears in the
+  // list is one nobody can select, rename, or even find — and `isKnownProject`
+  // reads this list, so an unlisted default would be refused when passed back
+  // explicitly.
+  const workspace = normalizeProjectPath(resolveWorkspaceRoot(settings, launch));
+  if (!seen.has(workspace)) seen.set(workspace, { path: workspace, name: 'Workspace' });
+
   for (const entry of configured) if (!seen.has(entry.path)) seen.set(entry.path, entry);
 
   return Promise.all([...seen.values()].map(async (entry): Promise<ProjectSummary> => {
