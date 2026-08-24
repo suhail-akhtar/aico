@@ -592,7 +592,30 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // Resolved now, not at boot. Choosing a different model in settings
         // has to affect the next turn rather than the next restart.
         const chosen = model ?? await currentDefaultModel();
-        void runs.submit(sessionId, runCwd, task, chosen, {
+
+        // Resolved to real paths and appended to the task, so the model is told
+        // what it has and where, and reads any of it only if the question needs
+        // it. Failing to resolve must not lose the message: the turn runs
+        // without the manifest and the reason is said out loud.
+        let task2 = task;
+        const attachmentIds = (body as { attachmentIds?: string[] }).attachmentIds ?? [];
+        if (attachmentIds.length > 0) {
+          try {
+            const { resolveAttachments, attachmentManifest } = await import('./attachments.js');
+            const settings = await loadSettings();
+            const files = await resolveAttachments({
+              settings, cwd: runCwd, sessionId, ids: attachmentIds,
+            });
+            task2 = task + attachmentManifest(files);
+          } catch (err) {
+            task2 = `${task}
+
+[Attachments could not be attached: ${
+              err instanceof Error ? err.message : String(err)}]`;
+          }
+        }
+
+        void runs.submit(sessionId, runCwd, task2, chosen, {
           planMode: (body as { planMode?: boolean }).planMode ?? false,
           autoApprove: (body as { autoApprove?: boolean }).autoApprove ?? true,
         }).catch(() => { /* already reported on the stream as turn-end */ });
@@ -612,6 +635,52 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         send(res, 200, { ok: runs.setGoal(sessionId, text?.trim() ?? '', next) });
         return;
       }
+      /**
+       * Files the user attached in the composer.
+       *
+       * Held per session rather than sent with the message: a document is
+       * context for a conversation, not for one turn, and re-uploading a
+       * specification to ask a second question about it is the kind of thing
+       * people stop doing rather than tolerate.
+       */
+      case 'attachments/upload': {
+        const { sessionId, name, base64, mimeType } = body as {
+          sessionId?: string; name?: string; base64?: string; mimeType?: string;
+        };
+        if (!sessionId || !name || !base64) {
+          send(res, 400, { error: 'sessionId, name and base64 required' });
+          return;
+        }
+        try {
+          const { storeAttachment } = await import('./attachments.js');
+          const settings = await loadSettings();
+          const stored = await storeAttachment({
+            settings, cwd: await resolveCwd(sessionId), sessionId, name, base64,
+            ...(mimeType ? { mimeType } : {}),
+          });
+          send(res, 200, { ok: true, attachment: stored });
+        } catch (err) {
+          send(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      case 'attachments/remove': {
+        const { sessionId, id } = body as { sessionId?: string; id?: string };
+        if (!sessionId || !id) { send(res, 400, { error: 'sessionId and id required' }); return; }
+        try {
+          const { removeAttachment } = await import('./attachments.js');
+          const settings = await loadSettings();
+          const removed = await removeAttachment({
+            settings, cwd: await resolveCwd(sessionId), sessionId, id,
+          });
+          send(res, 200, { ok: removed });
+        } catch (err) {
+          send(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
       case 'agent': {
         const { sessionId, name } = body as { sessionId?: string; name?: string | null };
         if (!sessionId) { send(res, 400, { error: 'sessionId required' }); return; }

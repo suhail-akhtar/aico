@@ -1,6 +1,7 @@
 import { bash, bashDefinition } from './bash.js';
 import { currentCwd } from '../run-context.js';
 import { readFile, readDefinition } from './read.js';
+import { readAttachment, readAttachmentDefinition } from './read-attachment.js';
 import { writeFile, writeDefinition } from './write.js';
 import { editFile, editDefinition } from './edit.js';
 import { globFiles, globDefinition } from './glob.js';
@@ -162,6 +163,7 @@ export const toolDefinitions: ToolDefinition[] = [
   // and two commands sharing it have no way to tell their replies apart.
   { ...terminalDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...readDefinition, isConcurrencySafe: true, maxResultSizeChars: 200_000 },
+  { ...readAttachmentDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...writeDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...editDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...globDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
@@ -433,6 +435,13 @@ export async function executeTool(
       break;
     case 'Read':
       result = await readFile(args as unknown as Parameters<typeof readFile>[0]);
+      observe(String((args as Record<string, unknown>).file_path ?? ''));
+      break;
+    // Declared in toolDefinitions but never dispatched, which is the worst of
+    // the three possible states: the model is offered the tool, calls it, and
+    // is told the tool does not exist.
+    case 'ReadAttachment':
+      result = await readAttachment(args as unknown as Parameters<typeof readAttachment>[0]);
       observe(String((args as Record<string, unknown>).file_path ?? ''));
       break;
     case 'Write': {

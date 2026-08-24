@@ -1,7 +1,7 @@
 {
   "name": "@suhail-akhtar/aico",
   "version": "0.3.0",
-  "description": "AI Coder \u2014 multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
+  "description": "AI Coder — multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
   "keywords": [
     "ai",
     "cli",
@@ -60,11 +60,14 @@
     "fast-glob": "^3.3.2",
     "ink": "^6.8.0",
     "ink-text-input": "^6.0.0",
+    "mammoth": "^1.12.1",
     "node-fetch": "^3.3.2",
     "openai": "^4.28.0",
+    "pdf-parse": "^2.4.5",
     "playwright-core": "^1.62.1",
     "react": "^19.2.4",
-    "strip-ansi": "^7.1.0"
+    "strip-ansi": "^7.1.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/diff": "^5.2.0",
