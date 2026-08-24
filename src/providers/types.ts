@@ -57,8 +57,40 @@ export interface ReasoningTrace {
 
 // ── Internal multi-turn message format ───────────────────────────
 // Used within a single agentic turn (supports tool calls + results).
+/**
+ * One image riding along with a user message.
+ *
+ * Carried beside the text rather than encoded into it, because every provider
+ * spells images differently — Anthropic wants a base64 source block, OpenAI a
+ * `data:` URL, Google an `inlineData` part — and a string would force the
+ * choice at the wrong end of the pipe, where the provider is not yet known.
+ *
+ * Bytes rather than a path. The provider layer runs after the sandbox and has
+ * no business reading the filesystem, and a path would also make the message
+ * un-replayable the moment the file moved.
+ */
+export interface ImagePart {
+  /** Raw base64, without the `data:` prefix. */
+  data: string;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  /** What the reader called it, for the text the model sees beside the image. */
+  name?: string;
+}
+
 export type AicoMessage =
-  | { role: 'user';      content: string }
+  | {
+      role: 'user';
+      content: string;
+      /**
+       * Images the reader attached to this turn.
+       *
+       * Only ever set when the model was checked and accepts image input; see
+       * {@link module:model-capabilities}. A provider that finds them here can
+       * send them without asking again, and one that has no image support of
+       * its own should say so rather than dropping them silently.
+       */
+      images?: ImagePart[];
+    }
   | {
       role: 'assistant';
       content: string;

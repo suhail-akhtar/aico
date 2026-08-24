@@ -27,6 +27,7 @@ import {
   currentGoal, currentAgent, feedbackBySeq, deliverables, trajectory,
 } from '../session/projections.js';
 import { personaFor, resolveAgent } from '../agents/resolve.js';
+import type { SdkAttachment } from '../attachments.js';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
 
@@ -146,7 +147,11 @@ export class RunManager {
     cwd: string,
     task: string,
     model: string,
-    opts: { planMode?: boolean; autoApprove?: boolean; effort?: string } = {},
+    opts: {
+      planMode?: boolean; autoApprove?: boolean; effort?: string;
+      /** Images the reader attached to this turn, already read into memory. */
+      attachments?: SdkAttachment[];
+    } = {},
   ): Promise<string> {
     const run = await this.ensure(sessionId, cwd);
     if (run.busy) throw new Error('A turn is already running — use steer or followup');
@@ -203,6 +208,10 @@ export class RunManager {
     try {
       const result = await runAgent({
         task,
+        // Passed through rather than turned into text here: whether the
+        // model can be shown a picture is a question about the model, and
+        // the model is resolved a few lines below this.
+        ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
         // An agent pinned to a model gets it, unless the caller named one
         // explicitly — an explicit choice is a decision, the pin is a default.
         model: model ?? agent.model ?? model,

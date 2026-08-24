@@ -249,8 +249,22 @@ export class OpenAIResponsesProvider implements ProviderAPI {
 // ── Message conversion ───────────────────────────────────────────────
 
 /** One item in a Responses `input` array. */
+/**
+ * What the Responses API calls the parts of a turn.
+ *
+ * Note `input_text` and `input_image` rather than chat completions' `text` and
+ * `image_url`, and that the image URL is a bare string rather than an object.
+ * The two APIs express the same request and share none of the spelling.
+ */
+type ResponsesContent =
+  | string
+  | Array<
+    | { type: 'input_text'; text: string }
+    | { type: 'input_image'; image_url: string; detail: 'auto' | 'low' | 'high' }
+  >;
+
 type ResponsesInputItem =
-  | { role: 'user' | 'assistant'; content: string }
+  | { role: 'user' | 'assistant'; content: ResponsesContent }
   | { type: 'function_call'; call_id: string; name: string; arguments: string }
   | { type: 'function_call_output'; call_id: string; output: string };
 
@@ -269,7 +283,21 @@ export function toResponsesInput(
   const items: ResponsesInputItem[] = [];
   for (const message of messages) {
     if (message.role === 'user') {
-      items.push({ role: 'user', content: message.content });
+      // The responses API spells the same idea differently again:
+      // `input_text` / `input_image`, with the image as a `data:` URL.
+      items.push(message.images?.length
+        ? {
+          role: 'user',
+          content: [
+            ...message.content ? [{ type: 'input_text' as const, text: message.content }] : [],
+            ...message.images.map(image => ({
+              type: 'input_image' as const,
+              image_url: `data:${image.mediaType};base64,${image.data}`,
+              detail: 'auto' as const,
+            })),
+          ],
+        }
+        : { role: 'user', content: message.content });
       continue;
     }
     if (message.role === 'assistant') {

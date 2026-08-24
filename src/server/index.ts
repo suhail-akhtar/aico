@@ -37,6 +37,8 @@ import { deriveMessages } from '../session/derive.js';
 import { forkSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
 import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
+import { readFile } from 'fs/promises';
+import type { SdkAttachment } from '../attachments.js';
 import {
   addProject, browse, findProjectForSession, isKnownProject, listProjects,
   normalizeProjectPath, removeProject, updateProject,
@@ -598,15 +600,32 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // it. Failing to resolve must not lose the message: the turn runs
         // without the manifest and the reason is said out loud.
         let task2 = task;
+        let pictures: SdkAttachment[] = [];
         const attachmentIds = (body as { attachmentIds?: string[] }).attachmentIds ?? [];
         if (attachmentIds.length > 0) {
           try {
-            const { resolveAttachments, attachmentManifest } = await import('./attachments.js');
+            const { resolveAttachments, attachmentManifest, isImage, IMAGE_MEDIA_TYPES } =
+              await import('./attachments.js');
             const settings = await loadSettings();
             const files = await resolveAttachments({
               settings, cwd: runCwd, sessionId, ids: attachmentIds,
             });
-            task2 = task + attachmentManifest(files);
+
+            // Two kinds of attachment, handled two ways. A document is named in
+            // the manifest and read on demand, because most questions do not
+            // need all of a hundred-page PDF. A picture is the opposite: an
+            // image nobody looked at is an image that did nothing, and there is
+            // no cheap summary of one to offer first.
+            const documents = files.filter(file => !isImage(file.extension));
+            const images = files.filter(file => isImage(file.extension));
+            task2 = task + attachmentManifest(documents);
+
+            pictures = await Promise.all(images.map(async file => ({
+              type: 'blob' as const,
+              data: (await readFile(file.path)).toString('base64'),
+              mimeType: IMAGE_MEDIA_TYPES[file.extension] ?? 'application/octet-stream',
+              displayName: file.name,
+            })));
           } catch (err) {
             task2 = `${task}
 
@@ -633,6 +652,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         void runs.submit(sessionId, runCwd, task2, chosen, {
           planMode: (body as { planMode?: boolean }).planMode ?? false,
           autoApprove: (body as { autoApprove?: boolean }).autoApprove ?? true,
+          ...(pictures.length ? { attachments: pictures } : {}),
         }).catch(() => { /* already reported on the stream as turn-end */ });
         return;
       }

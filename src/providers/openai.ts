@@ -368,7 +368,21 @@ function toOpenAIMessages(
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      result.push({ role: 'user', content: msg.content });
+      // A `data:` URL rather than a hosted one: the bytes are already here,
+      // and uploading them somewhere first to hand back a link would add a
+      // failure mode and a retention question for no gain.
+      result.push(msg.images?.length
+        ? {
+          role: 'user',
+          content: [
+            ...msg.content ? [{ type: 'text' as const, text: msg.content }] : [],
+            ...msg.images.map(image => ({
+              type: 'image_url' as const,
+              image_url: { url: `data:${image.mediaType};base64,${image.data}` },
+            })),
+          ],
+        }
+        : { role: 'user', content: msg.content });
     } else if (msg.role === 'assistant') {
       if (msg.toolCalls?.length) {
         result.push({

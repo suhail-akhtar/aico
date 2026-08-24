@@ -8,7 +8,31 @@ import { ensureWorkspace, getWorkspaceInfo } from '../workspace.js';
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SESSION_BYTES = 50 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
-const EXTENSIONS = new Set(['.pdf', '.docx', '.xlsx', '.csv', '.txt', '.md']);
+const EXTENSIONS = new Set([
+  '.pdf', '.docx', '.xlsx', '.csv', '.txt', '.md',
+  '.png', '.jpg', '.jpeg', '.webp', '.gif',
+]);
+
+/**
+ * The extensions that are pictures, and what each is called on the wire.
+ *
+ * Both halves are needed and neither can be derived from the other: `.jpg` and
+ * `.jpeg` are one media type, and every provider wants the media type rather
+ * than the extension. Deriving it from the browser's declared MIME would mean
+ * trusting a value the browser guessed from the same extension anyway.
+ */
+export const IMAGE_MEDIA_TYPES: Record<string, 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
+
+/** Whether this attachment is one the model can be shown rather than read. */
+export function isImage(extension: string): boolean {
+  return extension in IMAGE_MEDIA_TYPES;
+}
 
 export interface AttachmentDescriptor {
   id: string;
@@ -43,6 +67,33 @@ async function save(dir: string, data: AttachmentIndex): Promise<void> {
 function validateContent(ext: string, bytes: Buffer): void {
   if (ext === '.pdf' && !bytes.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('PDF file signature is invalid');
   if ((ext === '.docx' || ext === '.xlsx') && !bytes.subarray(0, 2).equals(Buffer.from('PK'))) throw new Error(`${ext.slice(1).toUpperCase()} files must be Office Open XML documents`);
+  validateImage(ext, bytes);
+}
+
+/**
+ * Check a picture is the picture its name claims.
+ *
+ * The extension decides the media type sent to the provider, so a `.png` that
+ * is really a JPEG would be announced wrongly and rejected by the endpoint —
+ * with the bytes already stored and already in the turn. Cheaper to catch on
+ * the way in, where the answer is one clear upload error.
+ */
+function validateImage(ext: string, bytes: Buffer): void {
+  const signature: Record<string, (b: Buffer) => boolean> = {
+    '.png': b => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+    '.jpg': b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+    '.jpeg': b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+    // RIFF....WEBP — the size field sits between the two markers.
+    '.webp': b => b.subarray(0, 4).toString('latin1') === 'RIFF'
+      && b.subarray(8, 12).toString('latin1') === 'WEBP',
+    '.gif': b => b.subarray(0, 6).toString('latin1') === 'GIF87a'
+      || b.subarray(0, 6).toString('latin1') === 'GIF89a',
+  };
+  const check = signature[ext];
+  if (check && !check(bytes)) {
+    throw new Error(`${ext.slice(1).toUpperCase()} file signature is invalid — `
+      + 'the extension does not match the actual image format');
+  }
 }
 
 export async function storeAttachment(input: {

@@ -22,6 +22,8 @@ import {
 import { runHooks } from './hooks.js';
 import { estimateTokens } from './tokens.js';
 import type { SdkAttachment } from './attachments.js';
+import type { ImagePart } from './providers/types.js';
+import { modelAccepts, explainRefusal } from './model-capabilities.js';
 import type { AicoSettings } from './settings.js';
 import { selectProvider } from './providers/index.js';
 import { detectProviderType } from './providers/index.js';
@@ -719,7 +721,13 @@ function buildToolDefs(opts: {
 
 /**
  * Convert SdkAttachments to inline text appended to the user message.
- * Images are included as base64 data URIs if the provider supports vision.
+ *
+ * Images are *not* handled here. This function's contract is text, and an
+ * image turned into text is an image the model cannot see — which is exactly
+ * what used to happen: an attached screenshot became the words "[Image
+ * attached: shot.png]" and nothing else, on every model, including the ones
+ * that could have read it. {@link imagesFrom} takes them instead, and the
+ * placeholder it writes is only what remains for a model that cannot.
  */
 function attachmentsToText(attachments: SdkAttachment[]): string {
   const parts: string[] = [];
@@ -737,12 +745,65 @@ function attachmentsToText(attachments: SdkAttachment[]): string {
         const name = att.displayName ?? path.basename(att.path);
         parts.push(`\n\n<directory path="${name}">\n${listing}\n</directory>`);
       } catch { /* skip */ }
-    } else if (att.type === 'blob' && att.mimeType?.startsWith('image/')) {
-      const name = att.displayName ?? 'image';
-      parts.push(`\n\n[Image attached: ${name} (${att.mimeType})]`);
     }
   }
   return parts.join('');
+}
+
+/** Image media types every provider in this codebase can be sent. */
+const SENDABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
+/**
+ * The attached images a model can actually be shown, and a note about the rest.
+ *
+ * Filtered by media type as well as by the model, because the two fail
+ * differently. An unsupported format — BMP, SVG — would be refused for any
+ * model; an unsupported model is a fact about the route that changes the
+ * moment the reader picks another one. Both end up as text, and the text says
+ * which happened, because "your screenshot did not arrive" with no reason is
+ * the same as it silently vanishing.
+ */
+function imagesFrom(
+  attachments: SdkAttachment[],
+  model: string,
+  settings?: AicoSettings,
+): { images: ImagePart[]; note: string } {
+  const blobs = attachments.filter(
+    (a): a is Extract<SdkAttachment, { type: 'blob' }> =>
+      a.type === 'blob' && (a.mimeType?.startsWith('image/') ?? false),
+  );
+  if (blobs.length === 0) return { images: [], note: '' };
+
+  const sendable = blobs.filter(b => SENDABLE_IMAGE_TYPES.has(b.mimeType));
+  const wrongFormat = blobs.filter(b => !SENDABLE_IMAGE_TYPES.has(b.mimeType));
+
+  // Asked once for the whole batch: the answer cannot differ between two PNGs,
+  // and asking per image would put the same refusal on the transcript once per
+  // file.
+  const canSee = sendable.length > 0 && modelAccepts(model, 'image', settings);
+
+  const notes: string[] = [];
+  for (const blob of wrongFormat) {
+    notes.push(`[${blob.displayName ?? 'image'} (${blob.mimeType}) was attached but `
+      + 'cannot be sent — supported image formats are PNG, JPEG, WebP and GIF]');
+  }
+  if (!canSee) {
+    for (const blob of sendable) {
+      notes.push(`[${blob.displayName ?? 'image'} was attached but not sent: `
+        + `${explainRefusal(model, 'image', settings) ?? 'this model does not read images'}]`);
+    }
+  }
+
+  return {
+    images: canSee
+      ? sendable.map(blob => ({
+        data: blob.data,
+        mediaType: blob.mimeType as ImagePart['mediaType'],
+        ...blob.displayName ? { name: blob.displayName } : {},
+      }))
+      : [],
+    note: notes.length > 0 ? `\n\n${notes.join('\n')}` : '',
+  };
 }
 
 // ── Main agent function ──────────────────────────────────────────────
@@ -1075,8 +1136,14 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   }
 
   // Append attachments as inline text
+  let turnImages: ImagePart[] = [];
   if (opts.attachments?.length) {
     userMessage += attachmentsToText(opts.attachments);
+    // Split out here rather than inside `attachmentsToText`, because these do
+    // not become text: they ride on the message as their own content blocks.
+    const pictures = imagesFrom(opts.attachments, model, settings);
+    turnImages = pictures.images;
+    userMessage += pictures.note;
   }
 
   // ── Hooks ──────────────────────────────────────────────────────────
@@ -1143,7 +1210,10 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   }));
 
   transcript.beginTurn();
-  transcript.recordUserMessage(userMessage);
+  // The images ride with this exact message, not the turn: a completion-gate
+  // nudge later in the same turn is a different message and must not inherit
+  // the reader's screenshot.
+  transcript.recordUserMessage(userMessage, undefined, turnImages);
 
   let finalContent = '';
   let totalInputTokens = 0;

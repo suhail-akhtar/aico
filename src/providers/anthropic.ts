@@ -319,7 +319,19 @@ export function toAnthropicMessages(messages: AicoMessage[]): Anthropic.MessageP
     const msg = messages[i];
 
     if (msg.role === 'user') {
-      result.push({ role: 'user', content: msg.content });
+      // Images lead the block. Anthropic documents better results when the
+      // picture precedes the question about it, and the reader's text is
+      // almost always a question about the picture they just attached.
+      if (msg.images?.length) {
+        const blocks: Anthropic.ContentBlockParam[] = msg.images.map(image => ({
+          type: 'image',
+          source: { type: 'base64', media_type: image.mediaType, data: image.data },
+        }));
+        if (msg.content) blocks.push({ type: 'text', text: msg.content });
+        result.push({ role: 'user', content: blocks });
+      } else {
+        result.push({ role: 'user', content: msg.content });
+      }
       i++;
     } else if (msg.role === 'assistant') {
       const content: Anthropic.ContentBlockParam[] = [];

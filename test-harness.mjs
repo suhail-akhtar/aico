@@ -8065,6 +8065,84 @@ console.log('\n══ LONG-RUNNING COMMANDS ══');
 // ═══════════════════════════════════════════════════════════
 // SUMMARY
 // ═══════════════════════════════════════════════════════════
+// IMAGES ON THE WIRE
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ IMAGES ON THE WIRE ══');
+
+// One pixel, so the tests carry a real payload rather than a placeholder that
+// would pass through code paths a genuine base64 string would not.
+const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const withImage = [{
+  role: 'user',
+  content: 'what is wrong with this layout?',
+  images: [{ data: PIXEL, mediaType: 'image/png', name: 'shot.png' }],
+}];
+const textOnly = [{ role: 'user', content: 'no picture here' }];
+
+// Every provider spells the same request differently, and each spelling is a
+// separate chance to be silently wrong: a malformed image block does not throw
+// here, it comes back as a 400 from the vendor mid-run.
+{
+  const [msg] = toAnthropicMessages(withImage);
+  assert(Array.isArray(msg.content), 'Anthropic gets content blocks, not a string');
+  assert(msg.content[0].type === 'image', 'image leads, as Anthropic recommends');
+  assert(msg.content[0].source.type === 'base64', 'sent as base64');
+  assert(msg.content[0].source.media_type === 'image/png', 'with its media type');
+  assert(msg.content[0].source.data === PIXEL, 'and the actual bytes');
+  assert(msg.content[1].type === 'text', 'the question follows the picture');
+  assert(msg.content[1].text === 'what is wrong with this layout?',
+    'carrying the question the reader actually asked');
+}
+{
+  const [msg] = toDeepSeekMessages(textOnly, 'sys');
+  void msg;
+  const out = toDeepSeekMessages(withImage, 'sys');
+  const user = out.find(m => m.role === 'user');
+  assert(Array.isArray(user.content), 'DeepSeek takes OpenAI-shaped content parts');
+  assert(user.content[0].type === 'text', 'text first in the OpenAI shape');
+  assert(user.content[1].type === 'image_url', 'then the image');
+  assert(user.content[1].image_url.url === `data:image/png;base64,${PIXEL}`,
+    'as a data URL, since the bytes are already here and hosting them would add a failure mode');
+}
+{
+  const items = toResponsesInput(withImage);
+  const user = items.find(i => i.role === 'user');
+  assert(Array.isArray(user.content), 'the Responses API also takes parts');
+  // The two OpenAI APIs express the same request and share none of the
+  // spelling, which is exactly the kind of thing that only breaks in production.
+  assert(user.content[0].type === 'input_text', 'input_text, not text');
+  assert(user.content[1].type === 'input_image', 'input_image, not image_url');
+  assert(user.content[1].image_url === `data:image/png;base64,${PIXEL}`,
+    'and its url is a bare string rather than an object');
+}
+
+// A message with no images must keep the plain string form. Sending a
+// single-element content array instead would work, and would also invalidate
+// the prompt cache for every existing conversation.
+{
+  const [plain] = toAnthropicMessages(textOnly);
+  assert(typeof plain.content === 'string', 'Anthropic: unchanged when there is no image');
+  const ds = toDeepSeekMessages(textOnly, 'sys').find(m => m.role === 'user');
+  assert(typeof ds.content === 'string', 'DeepSeek: likewise');
+  const rp = toResponsesInput(textOnly).find(i => i.role === 'user');
+  assert(typeof rp.content === 'string', 'Responses: likewise');
+}
+
+// The transcript holds bytes in memory and never writes them to the log — a
+// base64 screenshot in an append-only JSONL file is a cost every later reader
+// of that session pays.
+{
+  const t = new LegacyTranscript();
+  t.recordUserMessage('look at this', undefined, [{ data: PIXEL, mediaType: 'image/png' }]);
+  t.recordUserMessage('and now a follow-up');
+  const messages = t.messages();
+  assert(messages[0].images?.length === 1, 'the images stay on the message they arrived with');
+  assert(messages[1].images === undefined,
+    'and do not migrate onto the next one — the completion gate appends a user '
+    + 'message on most turns, and "the last user message" would hand it the screenshot');
+}
+
+// ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);
 if (failures.length > 0) {

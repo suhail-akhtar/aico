@@ -76,6 +76,36 @@ export function Composer(): React.ReactElement {
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  /**
+   * A screenshot pasted straight into the message.
+   *
+   * The whole reason images are worth having: the alternative is save the
+   * screenshot to a file, find the file, attach the file. Ctrl-V is what
+   * people actually do, and a composer that ignored it would have image
+   * support nobody used.
+   *
+   * Only intercepted when the clipboard actually holds an image. Pasting text
+   * that happens to come from an app which also offers an image flavour must
+   * still paste as text, so the default is left alone unless a file is found.
+   */
+  const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const images = [...event.clipboardData.files].filter(file => file.type.startsWith('image/'));
+    if (images.length === 0) return;
+    event.preventDefault();
+    // A pasted screenshot arrives named "image.png" or nothing at all, which
+    // is indistinguishable from the next one. The time makes the chips tellable
+    // apart, which matters as soon as there are two.
+    const stamped = images.map(file => new File(
+      [file],
+      file.name && file.name !== 'image.png'
+        ? file.name
+        : `pasted-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}.${
+          file.type === 'image/jpeg' ? 'jpg' : file.type.slice('image/'.length)}`,
+      { type: file.type },
+    ));
+    void take(stamped);
+  };
+
   const take = async (files: FileList | File[] | null): Promise<void> => {
     if (!files || (files instanceof FileList ? files.length : files.length) === 0) return;
     setUploading(true);
@@ -250,6 +280,7 @@ ${prefill.text}` : prefill.text));
             }}
             onBlur={() => setMention(null)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             rows={1}
             placeholder={question !== null
               ? 'Answer to continue…'
@@ -293,7 +324,7 @@ ${prefill.text}` : prefill.text));
             ref={fileInput}
             type="file"
             multiple
-            accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
+            accept=".pdf,.docx,.xlsx,.csv,.txt,.md,.png,.jpg,.jpeg,.webp,.gif"
             onChange={e => void take(e.target.files)}
             className="hidden"
           />
@@ -302,7 +333,7 @@ ${prefill.text}` : prefill.text));
             <button
               onClick={() => fileInput.current?.click()}
               disabled={uploading}
-              title="Attach a document — PDF, Word, Excel, CSV, text or Markdown"
+              title="Attach a document or image — PDF, Word, Excel, CSV, text, Markdown, PNG, JPEG, WebP or GIF. Screenshots can be pasted straight in."
               aria-label="Attach a document"
               className="rounded-lg px-2 py-1 text-[13px] text-aico-muted transition-colors
                          hover:bg-aico-hover hover:text-aico-secondary disabled:opacity-40"

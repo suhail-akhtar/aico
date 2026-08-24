@@ -269,8 +269,21 @@ interface DeepSeekAssistantMessage {
   }>;
 }
 
+/**
+ * A user turn's content, which is a plain string until an image joins it.
+ *
+ * DeepSeek follows OpenAI's content-part shape here, so the same two part
+ * kinds cover both. Kept as its own alias rather than inlined because two
+ * providers spell it identically and one place to correct it is worth more
+ * than the line it saves.
+ */
+type OpenAiStyleContent =
+  | string
+  | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>;
+
 type DeepSeekMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: OpenAiStyleContent }
   | DeepSeekAssistantMessage
   | { role: 'tool'; tool_call_id: string; content: string };
 
@@ -304,7 +317,19 @@ export function toDeepSeekMessages(
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      result.push({ role: 'user', content: msg.content });
+      // DeepSeek's chat endpoint follows the OpenAI content-part shape.
+      result.push(msg.images?.length
+        ? {
+          role: 'user',
+          content: [
+            ...msg.content ? [{ type: 'text' as const, text: msg.content }] : [],
+            ...msg.images.map(image => ({
+              type: 'image_url' as const,
+              image_url: { url: `data:${image.mediaType};base64,${image.data}` },
+            })),
+          ],
+        }
+        : { role: 'user', content: msg.content });
       continue;
     }
 
