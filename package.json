@@ -1,6 +1,6 @@
 {
   "name": "@suhail-akhtar/aico",
-  "version": "0.3.0-beta",
+  "version": "0.3.0",
   "description": "AI Coder \u2014 multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
   "keywords": [
     "ai",
@@ -46,7 +46,6 @@
     "test:live": "npm run build && npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node live-test.mjs",
     "start": "node dist/index.js",
     "prepare": "node -e \"process.exit(require('fs').existsSync('src')?0:1)\" && npm --prefix web install --no-audit --no-fund && npm run build && npm run build:web || exit 0",
-    "prepublishOnly": "npm run build && npm run build:web",
     "build:web": "npm --prefix web run build",
     "dev:web": "npm --prefix web run dev",
     "test:web": "npm run build:web && npx tsup src/server/index.ts --format esm --outDir dist-test/server --target node18 --clean && node --input-type=commonjs -e \"const fs=require('fs');fs.cpSync('src/skills/builtin','dist-test/server/builtin',{recursive:true})\" && node web-live-test.mjs",
