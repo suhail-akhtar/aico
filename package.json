@@ -1,5 +1,5 @@
 {
-  "name": "aico",
+  "name": "@suhail-akhtar/aico",
   "version": "0.3.0-beta",
   "description": "AI Coder \u2014 multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
   "keywords": [
@@ -83,5 +83,8 @@
     "remark-math": "^6.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
