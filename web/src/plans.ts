@@ -32,7 +32,15 @@ export interface Plan {
 }
 
 /** What was said about a plan after it was proposed. */
-export type PlanDecision = 'approved' | 'deferred' | 'declined' | undefined;
+/**
+ * How a plan ended.
+ *
+ * `cancelled` and `completed` are separate from `declined` because they can
+ * follow approval — a plan can be agreed to and then called off, or agreed to
+ * and finished, and neither is the same as having refused it.
+ */
+export type PlanDecision =
+  | 'approved' | 'deferred' | 'declined' | 'cancelled' | 'completed' | undefined;
 
 export interface PlanState {
   plan?: Plan;
@@ -61,6 +69,20 @@ export const PLAN_REPLY = {
    * and the three call for different next moves.
    */
   amendPrefix: 'Amend that plan before we start: ',
+  /**
+   * Called off, whether or not it was approved.
+   *
+   * Distinct from declining, which answers a plan that was never started.
+   * This one has to survive having already been agreed to, so it says the
+   * plan no longer applies rather than that it was refused — an agent told
+   * "do not go ahead" halfway through work it already began has to reconcile
+   * two contradictory instructions, and reconciling is where it guesses.
+   */
+  cancelled: 'Cancel that plan — it no longer applies. Do not continue with it, and do not '
+    + 'treat its steps as outstanding work.',
+  /** Everything on it is done, so nothing is owed. */
+  completed: 'That plan is finished — treat every step on it as complete. Nothing from it is '
+    + 'outstanding.',
 } as const;
 
 function readStep(raw: unknown): PlanStep | undefined {
@@ -123,7 +145,9 @@ export function planFrom(messages: ChatMessage[]): PlanState {
     // already running.
     if (text.startsWith(PLAN_REPLY.approved) || text.startsWith(PLAN_REPLY.startNow)) {
       decision = 'approved';
-    } else if (text.startsWith(PLAN_REPLY.deferred)) decision = 'deferred';
+    } else if (text.startsWith(PLAN_REPLY.cancelled)) decision = 'cancelled';
+    else if (text.startsWith(PLAN_REPLY.completed)) decision = 'completed';
+    else if (text.startsWith(PLAN_REPLY.deferred)) decision = 'deferred';
     else if (text.startsWith(PLAN_REPLY.declined)) decision = 'declined';
     else if (text.startsWith(PLAN_REPLY.amendPrefix)) {
       // An amendment un-decides the plan: the agent is revising it, so the panel

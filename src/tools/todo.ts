@@ -39,16 +39,16 @@ export interface Todo {
  * the exact fault this file was keyed by session to fix. A short hash of the
  * *whole* id is appended so only genuinely identical sessions collide.
  */
-function todoFilePath(): string {
-  const id = currentRunContext()?.sessionId ?? UNSCOPED;
+function todoFilePath(sessionId?: string): string {
+  const id = sessionId ?? currentRunContext()?.sessionId ?? UNSCOPED;
   const readable = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
   const digest = createHash('sha256').update(id).digest('hex').slice(0, 10);
   return path.join(TODO_DIR, `${readable}-${digest}.json`);
 }
 
-async function loadTodos(): Promise<Todo[]> {
+async function loadTodos(sessionId?: string): Promise<Todo[]> {
   try {
-    const raw = await readFile(todoFilePath(), 'utf8');
+    const raw = await readFile(todoFilePath(sessionId), 'utf8');
     return JSON.parse(raw) as Todo[];
   } catch {
     return [];
@@ -132,3 +132,38 @@ export const todoWriteDefinition = {
     required: ['todos'],
   },
 };
+
+/**
+ * Close out the list because the reader said so, not because the work happened.
+ *
+ * The message that carries this intent also reaches the model, and on its own
+ * that would be enough — if the model always complied. It does not have to.
+ * The completion gate reads *this file*, so a list left open here goes on
+ * nudging the model back to work the reader just called off, and the reader
+ * watches their own instruction being argued with.
+ *
+ * So the file is settled here, in the loop, and the message is what makes the
+ * model understand why. Neither half is sufficient: settle without telling and
+ * the model works from a list it still believes in; tell without settling and
+ * the gate overrules the telling.
+ *
+ * Only open items are touched. What was genuinely finished stays finished, and
+ * what was already cancelled is not resurrected as `done` — the record of what
+ * happened is not the reader's to rewrite.
+ */
+export async function retireTodos(
+  outcome: 'done' | 'cancelled',
+  sessionId?: string,
+): Promise<number> {
+  const todos = await loadTodos(sessionId);
+  const open = todos.filter(t => t.status === 'pending' || t.status === 'in_progress');
+  if (open.length === 0) return 0;
+
+  const settled = todos.map(t => (
+    t.status === 'pending' || t.status === 'in_progress' ? { ...t, status: outcome } : t
+  ));
+  const file = todoFilePath(sessionId);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify(settled, null, 2), 'utf8');
+  return open.length;
+}

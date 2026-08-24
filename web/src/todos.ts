@@ -45,7 +45,37 @@ export interface TodoSummary {
    * moment the work actually changes and stays gone while it does not.
    */
   signature: string;
+  /**
+   * The reader has retired this list — marked it finished or dropped what was
+   * left — and the agent has been told so.
+   *
+   * Separate from `allSettled`, which is the agent's own account of the work.
+   * This one is the reader overruling it, and it is what lets a stale list stop
+   * following the conversation around.
+   */
+  retired: boolean;
 }
+
+/**
+ * What retiring a task list says, in the reader's own voice.
+ *
+ * These are sent as real user messages, exactly like the plan replies, for the
+ * same reason: the agent has to *know*, not merely be hidden from. A panel that
+ * disappeared while the agent carried on working from the list it could still
+ * see would be worse than no button at all — the work would continue and the
+ * one place it was visible would be gone.
+ *
+ * Matched back on replay, which is how the panel stays retired across a reload
+ * without a second store to keep in step with the transcript.
+ */
+export const TASK_REPLY = {
+  /** Everything on it is finished, whatever the individual states still say. */
+  completed: 'Treat every task on that list as complete. Update the task list to '
+    + 'match, and do not carry any of it forward as outstanding work.',
+  /** Called off. What is done is done; what is left is not going to happen. */
+  dropped: 'Drop the rest of that task list — the remaining items are cancelled '
+    + 'and should not be worked on. Update the task list to match.',
+} as const;
 
 const STATUSES = new Set<TodoStatus>(['pending', 'in_progress', 'done', 'cancelled']);
 
@@ -74,14 +104,26 @@ function readTodo(raw: unknown, index: number): Todo | undefined {
  */
 export function todosFrom(messages: ChatMessage[]): TodoSummary {
   let todos: Todo[] = [];
+  let listAt = -1;
+  let retiredAt = -1;
 
+  // Two backward scans rather than one, because they stop at different places:
+  // the list is the *last* TodoWrite, while the retirement is the last time the
+  // reader said so — which may be either side of it, and which side decides
+  // whether the list is live.
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
     if (message.type !== 'tool' || message.toolName !== 'TodoWrite') continue;
     const raw = (message.toolArgs as Record<string, unknown> | undefined)?.todos;
     if (!Array.isArray(raw)) continue;
     todos = raw.map(readTodo).filter((t): t is Todo => t !== undefined);
+    listAt = i;
     break;
+  }
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (message.type === 'user' && retires(message.content)) { retiredAt = i; break; }
   }
 
   const count = (status: TodoStatus): number => todos.filter(t => t.status === status).length;
@@ -100,5 +142,18 @@ export function todosFrom(messages: ChatMessage[]): TodoSummary {
     total: todos.length,
     allSettled: todos.length > 0 && inProgress + pending === 0,
     signature: todos.map(t => `${t.id}:${t.status}:${t.title}`).join('|'),
+    // Retired if the reader said so after the list was written, or if they said
+    // so at all and the agent's answer was to close everything out. That second
+    // clause is what stops the panel bouncing back to say "all done" one turn
+    // after being retired — while still returning the moment genuinely new work
+    // appears, because new work is not settled.
+    retired: retiredAt !== -1
+      && (retiredAt > listAt || (todos.length > 0 && inProgress + pending === 0)),
   };
+}
+
+/** Whether a message is one of the retiring phrases above. */
+function retires(text: string): boolean {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith(TASK_REPLY.completed) || trimmed.startsWith(TASK_REPLY.dropped);
 }

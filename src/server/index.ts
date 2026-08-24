@@ -615,6 +615,21 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           }
         }
 
+        // Settled before the turn starts, so the completion gate reads a list
+        // that already reflects the instruction the model is about to be given.
+        // Done here rather than by matching the message text: the wording is
+        // written for the model, and prose written to be read gets reworded.
+        const retire = (body as { retireTasks?: 'done' | 'cancelled' }).retireTasks;
+        if (retire === 'done' || retire === 'cancelled') {
+          try {
+            const { retireTodos } = await import('../tools/todo.js');
+            await retireTodos(retire, sessionId);
+          } catch {
+            // The message still goes through. A list that failed to settle
+            // makes the gate noisier, not the turn wrong.
+          }
+        }
+
         void runs.submit(sessionId, runCwd, task2, chosen, {
           planMode: (body as { planMode?: boolean }).planMode ?? false,
           autoApprove: (body as { autoApprove?: boolean }).autoApprove ?? true,

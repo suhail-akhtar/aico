@@ -26,12 +26,18 @@
 
 import { create } from 'zustand';
 import { initialSessionId, rememberSession, freshSessionId } from './session-memory';
+import { loadDismissals, saveDismissals } from './panel-memory';
 import type { ChatMessage } from '@aico/ui';
 import { PLAN_REPLY } from './plans';
 import { shouldClearBusy, type ServerTurn } from './turn-state';
 
 /** The answers the plan panel can give. `amend` is not one — it sends nothing. */
-export type PlanAnswer = 'approved' | 'deferred' | 'declined' | 'startNow';
+export type PlanAnswer =
+  | 'approved' | 'deferred' | 'declined' | 'startNow'
+  /** Called off after being agreed to — not the same as never agreeing. */
+  | 'cancelled'
+  /** Finished, so nothing on it is outstanding. */
+  | 'completed';
 import type { TurnSummaryData } from './components/TurnSummary';
 import {
   api, streamSession,
@@ -140,7 +146,9 @@ interface AppState {
   disconnect: () => void;
   newSession: () => void;
   openSession: (id: string) => Promise<void>;
-  submit: (task: string, opts?: { planMode?: boolean; model?: string }) => Promise<void>;
+  submit: (task: string, opts?: {
+    planMode?: boolean; model?: string; retireTasks?: 'done' | 'cancelled';
+  }) => Promise<void>;
   /**
    * Files uploaded to this session and not yet sent with a turn.
    *
@@ -178,6 +186,9 @@ interface AppState {
    * a task list that has moved on would stay hidden behind a decision made
    * about something else. Keyed by content identity, closing means "I have seen
    * this one" and anything new comes back on its own.
+   *
+   * Persisted per session, so closing a finished plan survives a reload rather
+   * than making the reader close it again on every visit.
    */
   dismissed: Record<string, string>;
   dismissPanel: (panel: string, identity: string) => void;
@@ -298,8 +309,11 @@ export const useStore = create<AppState>((set, get) => ({
     set({
       // Dismissals and planning mode belong to the session they were made in:
       // closing a panel — or planning — in one conversation says nothing about
-      // the next.
-      sessionId, logged: new Map(), draft: emptyDraft(), dismissed: {}, planMode: false,
+      // the next. Which is why dismissals are re-read for the session being
+      // opened rather than simply cleared: they outlive the page, not the
+      // conversation.
+      sessionId, logged: new Map(), draft: emptyDraft(), planMode: false,
+      dismissed: loadDismissals(sessionId),
       // Cleared on switch and restored by `caught-up`, so a session opened from
       // the sidebar never inherits the previous one's persona.
       sessionAgent: null,
@@ -436,7 +450,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   dismissPanel: (panel, identity) =>
-    set(state => ({ dismissed: { ...state.dismissed, [panel]: identity } })),
+    set(state => {
+      const dismissed = { ...state.dismissed, [panel]: identity };
+      saveDismissals(state.sessionId, dismissed);
+      return { dismissed };
+    }),
 
   setPlanMode: (on) => set({ planMode: on }),
 
@@ -480,6 +498,7 @@ export const useStore = create<AppState>((set, get) => ({
         ...(get().project ? { project: get().project! } : {}),
         ...(opts.model ?? model ? { model: opts.model ?? model! } : {}),
         planMode: opts.planMode ?? false,
+        ...(opts.retireTasks ? { retireTasks: opts.retireTasks } : {}),
         ...(get().pendingAttachments.length
           ? { attachmentIds: get().pendingAttachments.map(a => a.id) }
           : {}),

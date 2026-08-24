@@ -30,7 +30,7 @@
 import React, { useMemo, useState } from 'react';
 import type { ChatMessage } from '@aico/ui';
 import { useStore } from '../store';
-import { todosFrom, type Todo, type TodoStatus } from '../todos';
+import { todosFrom, TASK_REPLY, type Todo, type TodoStatus } from '../todos';
 import { planFrom, type PlanDecision } from '../plans';
 import { checksFrom } from '../checks';
 import type { PlanAnswer } from '../store';
@@ -62,11 +62,28 @@ const MARKS: Record<TodoStatus, { glyph: string; tone: string; label: string }> 
   cancelled: { glyph: '⊘', tone: 'text-aico-muted', label: 'cancelled' },
 };
 
+/**
+ * Exhaustive by type, though only `approved` and `deferred` can be seen: the
+ * rest hide the panel outright (see `FINISHED`). Kept complete so that policy
+ * can change without leaving a decision with no name.
+ */
 const DECISION_LABEL: Record<Exclude<PlanDecision, undefined>, string> = {
   approved: 'approved',
   deferred: 'saved for later',
   declined: 'declined',
+  cancelled: 'cancelled',
+  completed: 'done',
 };
+
+/**
+ * Decisions that end a plan for good.
+ *
+ * `approved` is deliberately not one of them: work is under way and the plan
+ * is the thing being worked from, so it stays on screen. The rest are answers
+ * that leave nothing outstanding, and a panel that keeps offering an answer to
+ * a question already settled is just clutter that returns on every reload.
+ */
+const FINISHED: PlanDecision[] = ['declined', 'cancelled', 'completed'];
 
 /** Shared chrome: a title row that can collapse, and a close that means it. */
 function Card({
@@ -139,11 +156,14 @@ function TaskCard(): React.ReactElement | null {
   const busy = useStore(s => s.busy);
   const dismissed = useStore(s => s.dismissed);
   const dismissPanel = useStore(s => s.dismissPanel);
+  const submit = useStore(s => s.submit);
   const [manual, setManual] = useState<boolean | null>(null);
+  const [sending, setSending] = useState(false);
 
   const summary = useMemo(() => todosFrom(messages), [messages]);
   if (summary.total === 0) return null;
   if (dismissed.tasks === summary.signature) return null;
+  if (summary.retired) return null;
 
   const { closed, total, inProgress, cancelled, done, allSettled } = summary;
   // Finished work collapses itself. The reader's own choice always wins over
@@ -155,6 +175,17 @@ function TaskCard(): React.ReactElement | null {
   const status = settledAndQuiet
     ? (cancelled === 0 ? 'all done' : `${done} done · ${cancelled} cancelled`)
     : `${closed}/${total}${inProgress > 0 ? ` · ${inProgress} running` : ''}`;
+
+  const retire = async (reply: string, outcome: 'done' | 'cancelled'): Promise<void> => {
+    if (sending || busy) return;
+    setSending(true);
+    // Both halves, deliberately. The message is what the model reads, so it
+    // knows the list is over rather than merely losing sight of it; the flag
+    // settles the list the completion gate reads, so the loop stops pushing
+    // the model back onto work the reader just called off. Either alone
+    // leaves the two disagreeing about whether there is anything left to do.
+    try { await submit(reply, { retireTasks: outcome }); } finally { setSending(false); }
+  };
 
   return (
     <Card
@@ -196,6 +227,33 @@ function TaskCard(): React.ReactElement | null {
           );
         })}
       </ul>
+
+      {/*
+        Only while something is still open. Offering to finish a list that is
+        already finished is a button that cannot do anything, and the panel
+        collapses itself at that point anyway.
+      */}
+      {!allSettled && (
+        <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-aico-border pt-2">
+          <button
+            onClick={() => void retire(TASK_REPLY.completed, 'done')}
+            disabled={sending || busy}
+            className="rounded-lg px-2 py-1 text-[11px] text-aico-secondary
+                       transition-colors hover:bg-aico-hover disabled:opacity-50"
+          >
+            Mark all done
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={() => void retire(TASK_REPLY.dropped, 'cancelled')}
+            disabled={sending || busy}
+            className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
+                       hover:bg-aico-danger/10 hover:text-aico-danger disabled:opacity-50"
+          >
+            Drop the rest
+          </button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -285,6 +343,11 @@ function PlanCard(): React.ReactElement | null {
 
   const identity = `${plan.seq}:${plan.title}`;
   if (dismissed.plan === identity) return null;
+  // A plan that was declined, called off, or finished has nothing left to say.
+  // Approval is deliberately not in that set: an approved plan is the thing
+  // being worked from, and hiding it would remove the one panel that says what
+  // the agent is doing.
+  if (FINISHED.includes(decision)) return null;
 
   const settled = decision !== undefined;
   // An answered plan has done its job; the agent is getting on with it and the
@@ -310,7 +373,7 @@ function PlanCard(): React.ReactElement | null {
       title="Plan"
       status={settled ? DECISION_LABEL[decision] : plan.title}
       statusTone={settled
-        ? (decision === 'approved' ? 'good' : decision === 'declined' ? 'bad' : 'muted')
+        ? (decision === 'approved' ? 'good' : 'muted')
         : 'muted'}
       collapsed={collapsed}
       onToggle={() => setManual(!collapsed)}
@@ -403,6 +466,34 @@ function PlanCard(): React.ReactElement | null {
                        hover:bg-aico-danger/10 hover:text-aico-danger disabled:opacity-50"
           >
             Decline
+          </button>
+        </div>
+      )}
+
+      {/*
+        An approved plan can still be called off or declared finished. Both were
+        previously only sayable in prose, which meant the panel kept showing an
+        agreed plan as live work long after it had been abandoned or done — and
+        it came back on every reload.
+      */}
+      {decision === 'approved' && (
+        <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-aico-border pt-2">
+          <button
+            onClick={() => void answer('completed')}
+            disabled={sending || busy}
+            className="rounded-lg px-2 py-1 text-[11px] text-aico-secondary
+                       transition-colors hover:bg-aico-hover disabled:opacity-50"
+          >
+            Mark done
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={() => void answer('cancelled')}
+            disabled={sending || busy}
+            className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
+                       hover:bg-aico-danger/10 hover:text-aico-danger disabled:opacity-50"
+          >
+            Cancel plan
           </button>
         </div>
       )}

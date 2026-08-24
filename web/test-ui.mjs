@@ -17,8 +17,9 @@ import {
   initialSessionId, rememberSession, forgetSession, isValidSessionId, freshSessionId,
 } from './dist-test/session-memory.mjs';
 import { formatResult, outcomeOf } from './dist-test/tool-result.mjs';
-import { todosFrom } from './dist-test/todos.mjs';
+import { todosFrom, TASK_REPLY } from './dist-test/todos.mjs';
 import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
+import { loadDismissals, saveDismissals } from './dist-test/panel-memory.mjs';
 import { checksFrom } from './dist-test/checks.mjs';
 import { shouldClearBusy } from './dist-test/turn-state.mjs';
 import { searchAgents, splitAgents, mentionAt } from './dist-test/agents.mjs';
@@ -1250,6 +1251,136 @@ test('and a page that was not busy is left exactly as it was', () => {
   assert.equal(shouldClearBusy(false, { running: false }), false);
   assert.equal(shouldClearBusy(false, { running: true }), false);
   assert.equal(shouldClearBusy(false, 'unreachable'), false);
+});
+
+
+// ── Retiring a plan or a task list ─────────────────────────────────────────
+
+const shipIt = () => planCall({ title: 'Ship it', steps: [{ title: 'do the thing' }] });
+
+test('a plan can be called off after it was approved, which is not declining it', () => {
+  const messages = [shipIt(), userSays(PLAN_REPLY.approved), userSays(PLAN_REPLY.cancelled)];
+  assert.equal(planFrom(messages).decision, 'cancelled',
+    'the later word wins — approval is not permanent');
+});
+
+test('and it can be declared finished, which the agent is told in so many words', () => {
+  const messages = [shipIt(), userSays(PLAN_REPLY.approved), userSays(PLAN_REPLY.completed)];
+  assert.equal(planFrom(messages).decision, 'completed');
+  // The point of routing this through a real message: the agent reads the same
+  // sentence the panel acted on, so hiding the panel and stopping the work are
+  // one event rather than two that can disagree.
+  assert.match(PLAN_REPLY.completed, /finished/i);
+  assert.match(PLAN_REPLY.cancelled, /no longer applies/i);
+});
+
+test('a task list the reader retired stops following the conversation around', () => {
+  const live = [todoCall([
+    { id: '1', title: 'write it', status: 'pending', priority: 'high' },
+  ])];
+  assert.equal(todosFrom(live).retired, false, 'an untouched list is not retired');
+
+  assert.equal(todosFrom([...live, userSays(TASK_REPLY.completed)]).retired, true);
+  assert.equal(todosFrom([...live, userSays(TASK_REPLY.dropped)]).retired, true);
+});
+
+test('it stays retired once the agent closes the list out, rather than bouncing back', () => {
+  // Without this the panel returns one turn later to announce "all done",
+  // which is exactly the thing the reader just dismissed.
+  const summary = todosFrom([
+    todoCall([{ id: '1', title: 'write it', status: 'pending', priority: 'high' }]),
+    userSays(TASK_REPLY.completed),
+    todoCall([{ id: '1', title: 'write it', status: 'done', priority: 'high' }]),
+  ]);
+  assert.equal(summary.allSettled, true);
+  assert.equal(summary.retired, true, 'the agent complied, so there is nothing left to show');
+});
+
+test('but genuinely new work brings it back, because new work is not settled', () => {
+  const messages = [
+    todoCall([{ id: '1', title: 'write it', status: 'pending', priority: 'high' }]),
+    userSays(TASK_REPLY.completed),
+    todoCall([
+      { id: '1', title: 'write it', status: 'done', priority: 'high' },
+      { id: '2', title: 'something else entirely', status: 'pending', priority: 'high' },
+    ]),
+  ];
+  assert.equal(todosFrom(messages).retired, false,
+    'retiring one list does not silence the panel for the rest of the session');
+});
+
+test('an ordinary message that merely mentions the tasks does not retire them', () => {
+  const messages = [
+    todoCall([{ id: '1', title: 'write it', status: 'pending', priority: 'high' }]),
+    userSays('are all of those tasks complete?'),
+  ];
+  assert.equal(todosFrom(messages).retired, false);
+});
+
+// ── Dismissals that survive a reload ───────────────────────────────────────
+
+function fakeStorage() {
+  const data = new Map();
+  return {
+    getItem: (k) => (data.has(k) ? data.get(k) : null),
+    setItem: (k, v) => { data.set(k, String(v)); },
+    removeItem: (k) => { data.delete(k); },
+  };
+}
+
+test('a closed panel is still closed after a reload', () => {
+  const store = fakeStorage();
+  saveDismissals('s1', { plan: '4:Ship it' }, store);
+  assert.deepEqual(loadDismissals('s1', store), { plan: '4:Ship it' });
+});
+
+test('but only in the session it was closed in', () => {
+  const store = fakeStorage();
+  saveDismissals('s1', { plan: '4:Ship it' }, store);
+  assert.deepEqual(loadDismissals('s2', store), {},
+    'closing a panel says nothing about the next conversation');
+});
+
+test('clearing a session removes it rather than storing an empty shell', () => {
+  const store = fakeStorage();
+  saveDismissals('s1', { plan: 'x' }, store);
+  saveDismissals('s1', {}, store);
+  assert.deepEqual(loadDismissals('s1', store), {});
+});
+
+test('old sessions are evicted, so this does not grow for ever', () => {
+  const store = fakeStorage();
+  for (let i = 0; i < 45; i++) saveDismissals(`s${i}`, { plan: String(i) }, store);
+  assert.deepEqual(loadDismissals('s0', store), {}, 'the oldest is gone');
+  assert.deepEqual(loadDismissals('s44', store), { plan: '44' }, 'the newest is kept');
+});
+
+test('a session written again is kept, being the most recently used', () => {
+  const store = fakeStorage();
+  saveDismissals('keep', { plan: 'a' }, store);
+  for (let i = 0; i < 20; i++) saveDismissals(`s${i}`, { plan: String(i) }, store);
+  saveDismissals('keep', { plan: 'b' }, store);
+  for (let i = 20; i < 39; i++) saveDismissals(`s${i}`, { plan: String(i) }, store);
+  assert.deepEqual(loadDismissals('keep', store), { plan: 'b' },
+    'eviction drops the least recently used, not the first ever created');
+});
+
+test('nonsense in storage is discarded rather than half-trusted', () => {
+  const store = fakeStorage();
+  for (const junk of ['not json', '[]', 'null', '{"s1":"a string"}', '{"s1":{"plan":7}}']) {
+    store.setItem('aico.dismissed', junk);
+    assert.deepEqual(loadDismissals('s1', store), {}, `survives ${junk}`);
+  }
+});
+
+test('and storage that throws is survivable, because a panel is not worth a crash', () => {
+  const hostile = {
+    getItem: () => { throw new Error('blocked'); },
+    setItem: () => { throw new Error('blocked'); },
+    removeItem: () => { throw new Error('blocked'); },
+  };
+  assert.deepEqual(loadDismissals('s1', hostile), {});
+  saveDismissals('s1', { plan: 'x' }, hostile);
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

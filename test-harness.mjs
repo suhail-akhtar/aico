@@ -18,7 +18,7 @@ import {
   createTokenTracker, estimateTokens,
   readMemory,
   runHooks, freezeHooks, resetHooks,
-  getOpenTodoCount, todoWrite,
+  getOpenTodoCount, todoWrite, retireTodos,
   maybeAutoCompactConversation,
   getContextWindow,
   getEffectiveContextBudget,
@@ -612,6 +612,37 @@ await todoWrite({ todos: [
   { id: '2', title: 'b', status: 'done', priority: 'high' },
 ]});
 assert((await getOpenTodoCount()) === 0, 'All done → 0 open');
+
+// Retiring the list is what stops the completion gate arguing with the reader.
+// The message that carries the same intent reaches the model, but the gate reads
+// the file — so if the file stays open, the loop pushes the model back onto work
+// that was just called off, and the reader watches their instruction overruled.
+await todoWrite({ todos: [
+  { id: '1', title: 'finished already', status: 'done', priority: 'high' },
+  { id: '2', title: 'still pending', status: 'pending', priority: 'high' },
+  { id: '3', title: 'half done', status: 'in_progress', priority: 'medium' },
+  { id: '4', title: 'abandoned earlier', status: 'cancelled', priority: 'low' },
+]});
+assert((await retireTodos('done')) === 2, 'retiring reports how many were still open');
+assert((await getOpenTodoCount()) === 0, 'the gate sees nothing left to nudge about');
+{
+  // What actually happened is not the reader's to rewrite: an item that was
+  // cancelled does not become done because the list was closed out.
+  const listed = await todoRead();
+  assert(listed.includes('abandoned earlier'), 'the cancelled item survives');
+  assert(/\[4\] \[cancelled/.test(listed), 'and is still cancelled, not retconned as done');
+  assert(/\[1\] \[done/.test(listed), 'and the genuinely finished one is untouched');
+}
+
+await todoWrite({ todos: [
+  { id: '1', title: 'still pending', status: 'pending', priority: 'high' },
+]});
+assert((await retireTodos('cancelled')) === 1, 'dropping the rest settles them too');
+assert((await getOpenTodoCount()) === 0, 'gate quiet either way');
+assert(/\[1\] \[cancelled/.test(await todoRead()), 'dropped work reads as cancelled, not done');
+
+// Nothing open is not an error, just nothing to do.
+assert((await retireTodos('done')) === 0, 'retiring a settled list is a no-op');
 
 // Clean up the test todos
 await todoWrite({ todos: [] });

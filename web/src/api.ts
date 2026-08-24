@@ -135,6 +135,15 @@ export interface SubmitOptions {
   model?: string;
   planMode?: boolean;
   autoApprove?: boolean;
+  /**
+   * Settle this session's open tasks as part of accepting the message.
+   *
+   * Sent as a field rather than left for the server to recognise in the
+   * message text. The wording is written for the model to read, and prose
+   * written to be read is prose that will be reworded — matching on it would
+   * put a silent dependency on two sentences staying identical for ever.
+   */
+  retireTasks?: 'done' | 'cancelled';
 }
 
 export const api = {
