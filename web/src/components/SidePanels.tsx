@@ -89,8 +89,16 @@ function Card({
 
   return (
     <section
-      className={`pointer-events-auto overflow-hidden rounded-xl border shadow-sm backdrop-blur-sm
-                  transition-colors ${
+      /*
+        `shrink-0` is what makes the column scroll. A flex child shrinks to fit
+        by default, so the card silently compressed to the container's height
+        and clipped its own content — the container never overflowed, so there
+        was nothing to scroll and no scrollbar to suggest there might be.
+        Measured: scrollHeight equalled clientHeight while a plan ran off the
+        bottom of the screen.
+      */
+      className={`pointer-events-auto shrink-0 overflow-hidden rounded-xl border shadow-sm
+                  backdrop-blur-sm transition-colors ${
         urgent ? 'border-aico-accent/50 bg-aico-accent-soft' : 'border-aico-border bg-aico-panel/95'
       }`}
     >
@@ -164,7 +172,7 @@ function TaskCard(): React.ReactElement | null {
           style={{ width: `${Math.round((closed / total) * 100)}%` }}
         />
       </div>
-      <ul className="max-h-64 space-y-0.5 overflow-y-auto">
+      <ul className="space-y-0.5">
         {summary.todos.map((todo: Todo) => {
           const mark = MARKS[todo.status];
           return (
@@ -331,7 +339,7 @@ function PlanCard(): React.ReactElement | null {
         </div>
       )}
 
-      <ol className="max-h-56 space-y-1 overflow-y-auto">
+      <ol className="space-y-1">
         {plan.steps.map((step, i) => (
           <li key={i} className="flex items-start gap-1.5">
             <span className="mt-[1px] w-3 shrink-0 text-right tabular-nums text-[10px] text-aico-muted">
@@ -431,8 +439,15 @@ function PlanCard(): React.ReactElement | null {
 export function SidePanels(): React.ReactElement {
   return (
     <div
+      /*
+        Bounded and scrollable. Fixed with no height, the stack simply grew past
+        the bottom of the screen and everything below the fold — including the
+        buttons that answer a plan — became unreachable. There was no scrollbar
+        because nothing was scrollable: the column had no limit to overflow.
+      */
       className="pointer-events-none z-30 flex flex-col gap-2 px-5 pb-2
-                 xl:fixed xl:right-4 xl:top-16 xl:w-[290px] xl:px-0"
+                 xl:fixed xl:right-4 xl:top-16 xl:max-h-[calc(100vh_-_5rem)]
+                 xl:w-[290px] xl:overflow-y-auto xl:overscroll-contain xl:px-0"
     >
       <PlanCard />
       <ChecksCard />
