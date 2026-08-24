@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { composeMessages, emptyDraft, applyLogEvent } from './dist-test/reduce.mjs';
-import { groupByAge, groupByProject, relativeAge, promote, merge } from './dist-test/grouping.mjs';
+import { groupByAge, groupByProject, recentSessions, relativeAge, promote, merge } from './dist-test/grouping.mjs';
 import {
   PANES, SECRET_ROOTS, allFields, assertNoSecrets, changedPaths,
   patchFor, readPath, searchFields,
@@ -1099,6 +1099,41 @@ test('the tool row says green or names what failed', () => {
   assert.ok(/FAIL\s+test/.test(bad.detail), 'with the failing line inline');
 });
 
+
+section('The chat you were just in, without hunting for it');
+
+const CHATS = [
+  { id: 'a', title: 'oldest',  updatedAt: 1000, project: 'E:/one' },
+  { id: 'b', title: 'middle',  updatedAt: 3000, project: 'E:/two' },
+  { id: 'c', title: 'newest',  updatedAt: 5000, project: 'E:/one' },
+  { id: 'd', title: 'fourth',  updatedAt: 2000 },
+];
+
+test('newest first, whatever folder it lives in', () => {
+  const { items } = recentSessions(CHATS, '', 10);
+  assert.deepEqual(items.map(s => s.id), ['c', 'b', 'd', 'a']);
+});
+
+test('a session with no folder at all still appears', () => {
+  // The case the folder list cannot show: nothing to file it under.
+  assert.ok(recentSessions(CHATS, '', 10).items.some(s => s.id === 'd'));
+});
+
+test('the limit caps the list but the total counts everything', () => {
+  const { items, total } = recentSessions(CHATS, '', 2);
+  assert.equal(items.length, 2, 'only two rows');
+  assert.equal(total, 4, 'but the header knows there are four');
+});
+
+test('view-more arithmetic is right', () => {
+  const { items, total } = recentSessions(CHATS, '', 3);
+  assert.equal(total - items.length, 1, 'one older, which is what the button offers');
+});
+
+test('the filter applies here too', () => {
+  assert.deepEqual(recentSessions(CHATS, 'newest', 10).items.map(s => s.id), ['c']);
+  assert.equal(recentSessions(CHATS, 'zzz', 10).total, 0, 'and nothing matching is empty');
+});
 
 section('Finding an agent by typing');
 

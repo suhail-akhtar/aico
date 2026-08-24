@@ -181,6 +181,32 @@ export function groupByProject(
   });
 }
 
+/**
+ * The most recent conversations, whatever folder they live in.
+ *
+ * Grouping by folder is right for finding something you know the home of, and
+ * wrong for the commonest case by far: carrying on with what you were just
+ * doing. That chat is one row in one of eight collapsed folders, and finding
+ * it means remembering which — a question nobody should have to answer about
+ * their own last five minutes.
+ *
+ * Deliberately flat and deliberately short. A second full list of everything
+ * would just be the sidebar twice; the point is the handful you are actually
+ * moving between, with the folders still below for everything else.
+ */
+export function recentSessions(
+  sessions: SessionSummary[],
+  filter = '',
+  limit = 10,
+): { items: SessionSummary[]; total: number } {
+  const needle = filter.trim().toLowerCase();
+  const matching = byRecency(needle
+    ? sessions.filter(s =>
+      (s.title ?? '').toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle))
+    : sessions);
+  return { items: matching.slice(0, limit), total: matching.length };
+}
+
 /** Last path segment, for either separator. */
 function basename(dir: string): string {
   const parts = dir.split(/[\\/]/).filter(Boolean);

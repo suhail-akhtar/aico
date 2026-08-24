@@ -17,7 +17,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import type { SessionSummary } from '../api';
-import { groupByProject, relativeAge, type Section } from '../grouping';
+import { groupByProject, recentSessions, relativeAge, type Section } from '../grouping';
 import { Icon, type Glyph } from './Icon';
 import { SessionRowMenu } from './SessionRowMenu';
 import { ProjectGroupHeader } from './ProjectGroupHeader';
@@ -69,6 +69,16 @@ export function Sidebar(
     () => groupByProject(visible, projects, filter, groups),
     [visible, projects, filter, groups],
   );
+
+  // How many recent rows to show before the folders start. Ten is enough to
+  // cover a working session's worth of switching; more turns it into a second
+  // copy of the sidebar.
+  const [recentLimit, setRecentLimit] = useState(10);
+  const recent = useMemo(
+    () => recentSessions(visible, filter, recentLimit),
+    [visible, filter, recentLimit],
+  );
+  const [recentFolded, setRecentFolded] = useState(false);
 
   const select = (id: string): void => {
     void openSession(id);
@@ -190,6 +200,62 @@ export function Sidebar(
           )}
           {sessions.length > 0 && sections.every(g => g.items.length === 0) && (
             <p className="px-3 py-3 text-[13px] text-aico-muted">Nothing matches that.</p>
+          )}
+
+          {/*
+            Above the folders, because "the thing I was just doing" is what the
+            sidebar is opened for most of the time, and it was previously one
+            row inside one of several collapsed folders.
+          */}
+          {recent.items.length > 0 && (
+            <section className="mb-2">
+              <div className="flex items-center gap-1.5 px-3 py-1">
+                <button
+                  onClick={() => setRecentFolded(f => !f)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                  aria-expanded={!recentFolded}
+                >
+                  <span className="text-[10px] text-aico-muted">{recentFolded ? '▸' : '▾'}</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-aico-muted">
+                    Recent
+                  </span>
+                  <span className="text-[11px] text-aico-muted">{recent.total}</span>
+                </button>
+              </div>
+
+              {!recentFolded && recent.items.map(session => (
+                <SessionRow
+                  key={`recent-${session.id}`}
+                  session={session}
+                  running={session.running === true || activeSessions.includes(session.id)}
+                  current={session.id === sessionId}
+                  onSelect={() => select(session.id)}
+                />
+              ))}
+
+              {/*
+                Grows in place rather than opening a separate screen. Somebody
+                looking for a chat from last week is still looking in the list
+                they are already reading.
+              */}
+              {!recentFolded && recent.total > recent.items.length && (
+                <button
+                  onClick={() => setRecentLimit(n => n + 20)}
+                  className="w-full px-3 py-1 text-left text-[12px] text-aico-accent
+                             hover:underline"
+                >
+                  View more ({recent.total - recent.items.length} older)
+                </button>
+              )}
+              {!recentFolded && recentLimit > 10 && recent.total <= recent.items.length && (
+                <button
+                  onClick={() => setRecentLimit(10)}
+                  className="w-full px-3 py-1 text-left text-[12px] text-aico-muted hover:underline"
+                >
+                  Show fewer
+                </button>
+              )}
+            </section>
           )}
 
           {sections.map(section => {
