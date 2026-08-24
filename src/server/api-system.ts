@@ -32,6 +32,8 @@ import {
 } from '../providers/instances.js';
 import type { ProviderInstance } from '../providers/instances.js';
 import { loadSettings, saveUserSetting } from '../settings.js';
+import { getModelCapabilities } from '../model-capabilities.js';
+import type { ModelCapabilities } from '../model-capabilities.js';
 import { getWorkspaceInfo } from '../workspace.js';
 import type { AicoSettings } from '../settings.js';
 
@@ -473,6 +475,7 @@ ${content || 'Describe the procedure here.'}
           status: 200,
           body: {
             models: instance.models,
+            capabilities: describeCapabilities(instance.models, settings),
             source: 'stored',
             provider: instance.id,
             defaultModel: instance.defaultModel ?? null,
@@ -499,6 +502,7 @@ ${content || 'Describe the procedure here.'}
         status: 200,
         body: {
           models: probe.models ?? [],
+          capabilities: describeCapabilities(probe.models ?? [], settings),
           source: 'fetched',
           provider: instance.id,
           defaultModel: instance.defaultModel ?? null,
@@ -694,5 +698,26 @@ function redactDeep(value: unknown): unknown {
     }
     out[key] = redactDeep(inner);
   }
+  return out;
+}
+
+/**
+ * What each model in a catalogue takes and returns, keyed by id.
+ *
+ * Sent beside the list rather than folded into it: the list is a contract the
+ * picker already reads, and callers that only want ids should not have to
+ * learn a new shape to keep working.
+ *
+ * Every entry is answered, including the ones nothing describes — `known:
+ * false` is the useful half of the answer. A picker that showed a badge only
+ * for models it recognised would leave the reader unable to tell "text only"
+ * apart from "not labelled yet", and those call for different actions.
+ */
+function describeCapabilities(
+  models: readonly string[],
+  settings: AicoSettings,
+): Record<string, ModelCapabilities> {
+  const out: Record<string, ModelCapabilities> = {};
+  for (const model of models) out[model] = getModelCapabilities(model, settings);
   return out;
 }

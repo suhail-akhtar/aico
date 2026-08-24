@@ -16,6 +16,10 @@ export { readMemory } from './memory/index.js';
 export { runHooks, freezeHooks, resetHooks } from './hooks.js';
 // Exports for the new-logic test suites
 export { getOpenTodoCount, todoWrite, todoRead, retireTodos } from './tools/todo.js';
+export {
+  getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal,
+  resetCapabilityCache, MODALITIES,
+} from './model-capabilities.js';
 export { maybeAutoCompactConversation, getCompactionThreshold } from './compact.js';
 export { getContextWindow, getEffectiveContextBudget, resetContextWindowCache } from './context-window.js';
 export { AGENT_PROMPTS } from './agents/prompts-registry.js';

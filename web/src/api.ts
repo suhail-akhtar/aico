@@ -335,6 +335,10 @@ export const api = {
   providerModels: (id?: string) =>
     post<{
       models: string[]; source: 'stored' | 'fetched' | 'none';
+      /** Per-model input/output modalities, keyed by id. Absent on older servers. */
+      capabilities?: Record<string, {
+        input: string[]; output: string[]; chat: boolean; known: boolean;
+      }>;
       provider?: string; defaultModel?: string | null; error?: string;
     }>('providers/models', id ? { id } : {}),
 

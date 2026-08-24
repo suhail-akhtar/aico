@@ -273,6 +273,23 @@ export interface AicoSettings {
    */
   contextWindows?: Record<string, number>;
   /**
+   * What a model takes and returns, when the built-in table is wrong or silent.
+   *
+   * The same escape hatch as `contextWindows`, for the same reason: a shipped
+   * table cannot know about a model released after it, and a reader who has
+   * one in front of them should not have to wait for a release to use it.
+   *
+   * An unlisted model is treated as text-only rather than guessed at. Sending
+   * an image to a model that cannot read one fails the whole request, and on a
+   * durable transcript it fails every later turn that replays it.
+   *
+   * Example: { "my-gateway/some-vision-model": { input: ['text', 'image'] } }
+   */
+  modelCapabilities?: Record<string, {
+    input?: Array<'text' | 'image' | 'audio' | 'video'>;
+    output?: Array<'text' | 'image' | 'audio' | 'video'>;
+  }>;
+  /**
    * Hard cap on agentic tool-calling iterations per run. A safety net against a
    * model that loops on tools indefinitely. Default: 100 (effectively unlimited
    * for real work; sub-agents handle decomposition so 100 is rarely reached).
@@ -366,6 +383,7 @@ async function tryReadJson(filePath: string): Promise<AicoSettings> {
 const MERGED_SECTIONS = [
   'providers', 'hooks', 'env', 'mcpServers', 'workspace', 'autoCompact',
   'mcpSecurity', 'skills', 'memory', 'cron', 'promptCaching', 'contextWindows',
+  'modelCapabilities',
   'completionGate', 'safetyLimits', 'repeatGuard', 'sandbox', 'sessionTitles',
 ] as const satisfies ReadonlyArray<keyof AicoSettings>;
 

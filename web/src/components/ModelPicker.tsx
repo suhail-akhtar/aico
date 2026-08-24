@@ -38,6 +38,7 @@ export function ModelPicker(): React.ReactElement {
 
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<string[] | null>(null);
+  const [caps, setCaps] = useState<Record<string, ModelCapabilities>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
@@ -52,6 +53,7 @@ export function ModelPicker(): React.ReactElement {
     try {
       const result = await api.providerModels();
       setModels(result.models);
+      setCaps(result.capabilities ?? {});
       if (result.error) setError(result.error);
     } catch (err) {
       setError((err as Error).message);
@@ -62,7 +64,7 @@ export function ModelPicker(): React.ReactElement {
   }, []);
 
   // The catalogue belongs to the provider, so a different one invalidates it.
-  useEffect(() => { setModels(null); }, [activeProvider]);
+  useEffect(() => { setModels(null); setCaps({}); }, [activeProvider]);
 
   useEffect(() => {
     if (!open) return;
@@ -184,17 +186,85 @@ export function ModelPicker(): React.ReactElement {
                   <span className="w-4 shrink-0">
                     {entry === model && <Icon name="check" size={14} />}
                   </span>
-                  <span className="min-w-0 truncate">{entry}</span>
+                  <span className="min-w-0 flex-1 truncate">{entry}</span>
+                  <ModalityBadges caps={caps[entry]} />
                 </button>
               ))}
             </div>
 
             <div className="border-t border-aico-border-subtle px-3 py-2 text-[11px] leading-relaxed text-aico-muted">
               Applies to this session from your next message.
+              {' '}Badges say what a model accepts beyond text; unbadged means text only,
+              {' '}and a red one is not a chat model.
             </div>
           </div>
         </Portal>
       )}
     </>
+  );
+}
+
+/** What a model takes beyond text, or nothing when the answer is "just text". */
+interface ModelCapabilities {
+  input: string[];
+  output: string[];
+  chat: boolean;
+  known: boolean;
+}
+
+/**
+ * The extra modalities, as initials.
+ *
+ * Text is left out on purpose. Every model here takes text, so a badge saying
+ * so would appear on all two hundred rows and distinguish none of them — the
+ * only informative thing about a text-only model is the *absence* of a badge.
+ *
+ * A model nothing describes gets a dim mark instead of being left blank, so
+ * "we have not been told" does not read as "it cannot". They call for
+ * different actions: one means pick another model, the other means say what
+ * this one does.
+ */
+function ModalityBadges({ caps }: { caps?: ModelCapabilities }): React.ReactElement | null {
+  if (!caps) return null;
+  // Said first, because it is the only badge that changes whether to pick the
+  // row at all. An image generator listed beside the chat models is not a
+  // worse model, it is the wrong kind of thing, and finding that out from a
+  // failed run is finding out too late.
+  if (!caps.chat) {
+    return (
+      <span title={`Not a chat model — produces ${caps.output.join(', ')}. `
+        + 'The agent needs a model that takes and returns text.'}
+            className="shrink-0 rounded bg-aico-danger/15 px-1 text-[9px] uppercase text-aico-danger">
+        {/*
+          What makes it not a chat model, in one word. Usually that is what it
+          emits — an image, a video. For transcription it is the opposite end:
+          the output is text, and the reason it cannot be talked to is that the
+          input is audio. Falling back to the input side keeps that row from
+          reading "n/a", which explains nothing.
+        */}
+        {caps.output.find(m => m !== 'text')
+          ?? caps.input.find(m => m !== 'text')
+          ?? 'n/a'}
+      </span>
+    );
+  }
+  if (!caps.known) {
+    return (
+      <span title="Nothing describes this model, so it is treated as text-only"
+            className="shrink-0 text-[10px] text-aico-muted opacity-50">?</span>
+    );
+  }
+  const extra = caps.input.filter(m => m !== 'text');
+  if (extra.length === 0) return null;
+  return (
+    <span title={`Accepts ${caps.input.join(', ')}`}
+          className="flex shrink-0 gap-0.5">
+      {extra.map(m => (
+        <span key={m}
+              className="rounded bg-aico-accent-soft px-1 text-[9px] uppercase text-aico-accent">
+          {m[0]}
+        </span>
+      ))}
+    </span>
   );
 }

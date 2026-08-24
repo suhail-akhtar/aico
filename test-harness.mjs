@@ -19,6 +19,7 @@ import {
   readMemory,
   runHooks, freezeHooks, resetHooks,
   getOpenTodoCount, todoWrite, retireTodos,
+  getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
   getEffectiveContextBudget,
@@ -646,6 +647,126 @@ assert((await retireTodos('done')) === 0, 'retiring a settled list is a no-op');
 
 // Clean up the test todos
 await todoWrite({ todos: [] });
+
+// ═══════════════════════════════════════════════════════════
+// MODEL CAPABILITIES
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ MODEL CAPABILITIES ══');
+
+resetCapabilityCache();
+
+// The point of the whole module: a model nobody described is text-only, and
+// says so as a default rather than as a finding.
+{
+  const unknown = getModelCapabilities('some-gateway/never-heard-of-it');
+  assert(unknown.known === false, 'an undescribed model is not claimed to be known');
+  assert(unknown.input.join() === 'text', 'and is treated as text-only');
+  assert(unknown.output.join() === 'text', 'in both directions');
+  assert(modelAccepts('some-gateway/never-heard-of-it', 'image') === false,
+    'so an image is not sent to it');
+}
+
+// Vision families resolve, including through a gateway prefix.
+assert(modelAccepts('claude-opus-5', 'image'), 'Claude reads images');
+assert(modelAccepts('anthropic/claude-opus-5', 'image'),
+  'and still does when a gateway prefixes the id');
+assert(modelAccepts('openai/gpt-4o-2024-11-20', 'image'),
+  'a dated suffix does not defeat the prefix table');
+assert(modelAccepts('gemini-2.5-pro', 'video'), 'Gemini takes video');
+assert(modelAccepts('gemini-2.5-pro', 'audio'), 'and audio');
+
+// Longest prefix wins, which is the only thing keeping the narrow entries
+// meaningful next to the broad vendor fallbacks.
+assert(modelAccepts('deepseek/deepseek-v4-flash', 'image'), 'V4 reads images');
+assert(modelAccepts('deepseek/deepseek-chat', 'image') === false,
+  'the V3 chat endpoint does not, despite sharing the vendor prefix');
+assert(modelAccepts('o1-preview', 'image') === false, 'o1 predates vision');
+assert(modelAccepts('o3-mini', 'image'), 'o3 does not');
+assert(modelAccepts('qwen3-vl-7b', 'image'), 'the VL variant reads images');
+assert(modelAccepts('qwen3-32b', 'image') === false, 'the plain one does not');
+
+// Chat routes do not claim to emit pictures. Every vendor here generates
+// images behind a different endpoint, so claiming it would promise something
+// this platform could not carry even if the model could do it.
+assert(modelProduces('claude-opus-5', 'text'), 'text out, everywhere');
+assert(modelProduces('gemini-2.5-pro', 'image') === false,
+  'a chat route does not claim image output');
+
+// An override is how a reader fixes a table that cannot know about a model
+// released after it.
+{
+  const settings = { modelCapabilities: { 'my/custom-vlm': { input: ['image'] } } };
+  assert(modelAccepts('my/custom-vlm', 'image', settings), 'the override is honoured');
+  // Text is added back: a model that takes images but not prompts cannot be
+  // talked to, so it is never what someone meant to write.
+  assert(modelAccepts('my/custom-vlm', 'text', settings),
+    'and text comes back even though the override omitted it');
+}
+
+// An override wins over the built-in table in the restrictive direction too —
+// a reader whose gateway serves a text-only build under a vision-sounding name
+// needs to be able to say so.
+{
+  const settings = { modelCapabilities: { 'claude-opus-5': { input: ['text'] } } };
+  assert(modelAccepts('claude-opus-5', 'image', settings) === false,
+    'the reader can narrow a family the table thinks is wider');
+}
+
+// Junk in settings does not become capability. This matters more than it
+// looks: a malformed override that silently read as "accepts everything"
+// would send images to endpoints that reject them.
+{
+  const junk = { modelCapabilities: { 'x/y': { input: ['telepathy', 42, null] } } };
+  assert(modelAccepts('x/y', 'image', junk) === false, 'unknown modalities are dropped');
+  const empty = { modelCapabilities: { 'x/y': { input: [] } } };
+  assert(modelAccepts('x/y', 'text', empty),
+    'an empty list means unstated, not "accepts nothing" — nothing is unusable');
+}
+
+// A provider catalogue is not a list of chat models. Every one of these comes
+// back from a plain listing beside the models that can hold a conversation,
+// and picking one produces a run that fails on its first request with a vendor
+// error about the wrong endpoint — nothing about the choice just made.
+assert(modelCanChat('gpt-5'), 'a chat model can chat');
+assert(modelCanChat('gpt-image-1') === false, 'an image generator cannot');
+assert(modelCanChat('sora-2') === false, 'nor a video generator');
+assert(modelCanChat('whisper-1') === false, 'nor transcription');
+assert(modelCanChat('tts-1-hd') === false, 'nor speech synthesis');
+assert(modelCanChat('text-embedding-3-large') === false, 'nor embeddings');
+assert(modelCanChat('gpt-realtime-2') === false,
+  'nor the realtime line, which speaks a socket protocol rather than chat completion');
+assert(modelCanChat('never-heard-of-it'), 'but an unknown model is assumed usable');
+
+// The failure mode this table has, stated as a test: a narrow variant that is
+// not a prefix-extension of its narrow sibling silently falls through to the
+// broad family entry. `gpt-4o-mini-transcribe` does not start with
+// `gpt-4o-transcribe`, so without its own row it matches plain `gpt-4o` and a
+// speech-to-text endpoint is offered as an image-reading chat model.
+assert(modelCanChat('gpt-4o-mini-transcribe') === false,
+  'a mini variant does not inherit its family entry just because it is longer');
+assert(modelCanChat('gpt-4o-mini-tts') === false, 'same shape, same answer');
+assert(modelCanChat('gpt-4o-mini'), 'while the actual mini chat model is still usable');
+assert(modelAccepts('gpt-4o-mini', 'image'), 'and still reads images');
+assert(getModelCapabilities('sora-2').output.join() === 'video',
+  'and what it does produce is recorded, which is what the badge shows');
+assert(getModelCapabilities('whisper-1').input.join() === 'audio',
+  'transcription takes audio and not text, which is the other way to fail');
+
+// The refusal has to name the model, the modality, and the way out. An error
+// that says "unsupported content type" leaves the reader guessing.
+{
+  const described = explainRefusal('deepseek/deepseek-chat', 'image');
+  assert(described.includes('deepseek/deepseek-chat'), 'names the model');
+  assert(described.includes('image'), 'names what was refused');
+  assert(described.includes('modelCapabilities'), 'says how to override it');
+
+  const undescribed = explainRefusal('who/knows', 'image');
+  assert(undescribed.includes('Nothing describes'),
+    'and distinguishes "we do not know" from "it cannot"');
+
+  assert(explainRefusal('claude-opus-5', 'image') === undefined,
+    'nothing to explain when it is accepted');
+}
 
 // ═══════════════════════════════════════════════════════════
 // 13. AUTO-COMPACTION (shared module)
