@@ -29,6 +29,13 @@ import { MentionMenu } from './MentionMenu';
 import { mentionAt, searchAgents } from '../agents';
 import { api, type AgentSpec } from '../api';
 
+/** Bytes at a scale a person reads. */
+function describeBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function Composer(): React.ReactElement {
   const busy = useStore(s => s.busy);
   const submit = useStore(s => s.submit);
@@ -60,6 +67,24 @@ export function Composer(): React.ReactElement {
   const [agents, setAgents] = useState<AgentSpec[]>([]);
   const [mention, setMention] = useState<{ query: string; from: number } | null>(null);
   const [highlighted, setHighlighted] = useState(0);
+
+  // ── attachments ────────────────────────────────────────────────────
+  const pendingAttachments = useStore(st => st.pendingAttachments);
+  const attachFiles = useStore(st => st.attachFiles);
+  const detachFile = useStore(st => st.detachFile);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const take = async (files: FileList | File[] | null): Promise<void> => {
+    if (!files || (files instanceof FileList ? files.length : files.length) === 0) return;
+    setUploading(true);
+    try { await attachFiles(files); }
+    finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  };
 
   useEffect(() => {
     if (!mentionsOn) return;
@@ -161,7 +186,20 @@ ${prefill.text}` : prefill.text));
 
   return (
     <div className="px-5 pb-3">
-      <div className="relative mx-auto w-full max-w-column">
+      <div
+        className="relative mx-auto w-full max-w-column"
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={e => {
+          // Only when the pointer actually leaves the box: dragging across a
+          // child fires dragleave for the child and would flicker the state.
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+        }}
+        onDrop={e => {
+          e.preventDefault();
+          setDragging(false);
+          void take(e.dataTransfer.files);
+        }}
+      >
         {mention && (
           <MentionMenu
             agents={agents}
@@ -177,6 +215,15 @@ ${prefill.text}` : prefill.text));
           is answered, and a question you can scroll past is a turn that hangs —
           which is exactly what happened before the web had any way to hear one.
         */}
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center
+                          rounded-2xl border-2 border-dashed border-aico-accent bg-aico-accent-soft/80">
+            <p className="text-[13px] font-medium text-aico-accent">
+              Drop to attach — PDF, Word, Excel, CSV, text, Markdown
+            </p>
+          </div>
+        )}
+
         {question !== null && (
           <div className="mb-1.5 flex items-start gap-2 rounded-xl border border-aico-accent/40
                           bg-aico-accent-soft px-3 py-2">
@@ -211,7 +258,58 @@ ${prefill.text}` : prefill.text));
                        leading-[24px] text-aico-primary placeholder:text-aico-muted focus:outline-none"
           />
 
+          {/*
+            Chips above the controls rather than inside the text. An attachment
+            is not part of the sentence, and putting a filename in the textarea
+            makes it something you can half-delete.
+          */}
+          {pendingAttachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-3 pb-1.5">
+              {pendingAttachments.map(file => (
+                <span
+                  key={file.id}
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-lg border
+                             border-aico-border bg-aico-bg px-2 py-1 text-[12px] text-aico-secondary"
+                  title={`${file.name} · ${describeBytes(file.bytes)}`}
+                >
+                  <span className="shrink-0 text-[10px] uppercase text-aico-muted">
+                    {file.extension.slice(1)}
+                  </span>
+                  <span className="min-w-0 truncate">{file.name}</span>
+                  <span className="shrink-0 text-[11px] text-aico-muted">{describeBytes(file.bytes)}</span>
+                  <button
+                    onClick={() => void detachFile(file.id)}
+                    aria-label={`Remove ${file.name}`}
+                    className="shrink-0 rounded px-0.5 text-aico-muted hover:text-aico-danger"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
+            onChange={e => void take(e.target.files)}
+            className="hidden"
+          />
+
           <div className="flex items-center gap-1.5 px-3 pb-2.5">
+            <button
+              onClick={() => fileInput.current?.click()}
+              disabled={uploading}
+              title="Attach a document — PDF, Word, Excel, CSV, text or Markdown"
+              aria-label="Attach a document"
+              className="rounded-lg px-2 py-1 text-[13px] text-aico-muted transition-colors
+                         hover:bg-aico-hover hover:text-aico-secondary disabled:opacity-40"
+            >
+              {uploading ? '…' : '📎'}
+            </button>
+
             <button
               onClick={() => setPlanMode(!planMode)}
               disabled={busy}

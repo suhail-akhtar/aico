@@ -37,7 +37,7 @@ import {
   api, streamSession,
   type StreamEvent, type StreamHandle, type SystemSnapshot,
   type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project, type Group,
-  type Goal, type Feedback, type Deliverable,
+  type Goal, type Feedback, type Deliverable, type Attachment,
 } from './api';
 import {
   applyLogEvent, withPending, dropPending, emptyDraft,
@@ -141,6 +141,16 @@ interface AppState {
   newSession: () => void;
   openSession: (id: string) => Promise<void>;
   submit: (task: string, opts?: { planMode?: boolean; model?: string }) => Promise<void>;
+  /**
+   * Files uploaded to this session and not yet sent with a turn.
+   *
+   * Held in the store rather than the composer because they outlive a draft:
+   * clearing what you typed should not silently throw away a document you
+   * spent a minute uploading.
+   */
+  pendingAttachments: Attachment[];
+  attachFiles: (files: FileList | File[]) => Promise<void>;
+  detachFile: (id: string) => Promise<void>;
   /**
    * Text to place in the composer without sending it.
    *
@@ -267,6 +277,7 @@ export const useStore = create<AppState>((set, get) => ({
   busy: false,
   turnStartedAt: null,
   sessionAgent: null,
+  pendingAttachments: [],
   lastActivityAt: 0,
   usage: NO_USAGE,
   model: null,
@@ -292,6 +303,7 @@ export const useStore = create<AppState>((set, get) => ({
       // Cleared on switch and restored by `caught-up`, so a session opened from
       // the sidebar never inherits the previous one's persona.
       sessionAgent: null,
+      pendingAttachments: [],
       question: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
@@ -367,6 +379,42 @@ export const useStore = create<AppState>((set, get) => ({
   // an identical value would otherwise look like no change at all.
   prefillComposer: (text) => set({ composerPrefill: { text, at: Date.now() } }),
 
+  attachFiles: async (files) => {
+    const { sessionId } = get();
+    for (const file of Array.from(files)) {
+      try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(reader.error ?? new Error('could not read the file'));
+          reader.onload = () => {
+            const result = String(reader.result);
+            resolve(result.slice(result.indexOf(',') + 1));
+          };
+          reader.readAsDataURL(file);
+        });
+        const result = await api.uploadAttachment(sessionId, file.name, base64, file.type);
+        if (result.ok && result.attachment) {
+          set(state => ({ pendingAttachments: [...state.pendingAttachments, result.attachment!] }));
+        } else {
+          // Named, because "upload failed" for one file in a batch of five
+          // leaves you guessing which one and why.
+          set({ error: `${file.name}: ${result.error ?? 'could not be attached'}` });
+        }
+      } catch (err) {
+        set({ error: `${file.name}: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+  },
+
+  detachFile: async (id) => {
+    const { sessionId } = get();
+    // Removed from view first: the file is the user's and the click already
+    // said what they want, so waiting on a round trip to acknowledge it only
+    // makes the button feel broken.
+    set(state => ({ pendingAttachments: state.pendingAttachments.filter(a => a.id !== id) }));
+    await api.removeAttachment(sessionId, id).catch(() => { /* already gone from view */ });
+  },
+
   setSessionAgent: async (name) => {
     const { sessionId } = get();
     const result = await api.setSessionAgent(sessionId, name);
@@ -432,6 +480,9 @@ export const useStore = create<AppState>((set, get) => ({
         ...(get().project ? { project: get().project! } : {}),
         ...(opts.model ?? model ? { model: opts.model ?? model! } : {}),
         planMode: opts.planMode ?? false,
+        ...(get().pendingAttachments.length
+          ? { attachmentIds: get().pendingAttachments.map(a => a.id) }
+          : {}),
       });
       // The user's own message is echoed immediately rather than waiting for
       // the log to replay it — a composer that clears with nothing appearing
@@ -439,6 +490,7 @@ export const useStore = create<AppState>((set, get) => ({
       // same beat, for the same reason: sending is the clearest possible
       // statement that this is now the most recent session.
       set(state => ({
+        pendingAttachments: [],
         logged: withPending(state.logged, task),
         sessions: promote(state.sessions, sessionId, Date.now(), state.title ? { title: state.title } : {}),
       }));

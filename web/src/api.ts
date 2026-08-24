@@ -126,6 +126,8 @@ const get = <T,>(path: string): Promise<T> => request<T>(path, { method: 'GET' }
 // ── conversation ─────────────────────────────────────────────────────
 
 export interface SubmitOptions {
+  /** Files already uploaded to this session that this turn should reference. */
+  attachmentIds?: string[];
   /** Directory to run in. Must be a project the server knows. */
   project?: string;
   sessionId: string;
@@ -262,6 +264,13 @@ export const api = {
     post<{ ok: boolean }>('feedback', { sessionId, targetSeq, rating, note }),
 
   agents: () => request<{ agents: AgentSpec[] }>('agents'),
+
+  /** Files attached to a session, held until the turn that uses them. */
+  uploadAttachment: (sessionId: string, name: string, base64: string, mimeType?: string) =>
+    post<{ ok: boolean; attachment?: Attachment; error?: string }>(
+      'attachments/upload', { sessionId, name, base64, ...(mimeType ? { mimeType } : {}) }),
+  removeAttachment: (sessionId: string, id: string) =>
+    post<{ ok: boolean; error?: string }>('attachments/remove', { sessionId, id }),
 
   /** Address a session to one specialist, or `null` for the orchestrator. */
   setSessionAgent: (sessionId: string, name: string | null) =>
@@ -540,6 +549,14 @@ export interface SkillSummary {
   path: string;
   enabled: boolean;
   trigger?: string;
+}
+
+export interface Attachment {
+  id: string;
+  name: string;
+  extension: string;
+  mimeType: string;
+  bytes: number;
 }
 
 export interface McpConfigCheck {
