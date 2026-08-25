@@ -215,4 +215,4 @@ export { grepFiles } from './tools/grep.js';
 export { loadAllSkills, discoverSkillFiles, parseSkillFile, getBuiltinDir } from './skills/loader.js';
 export { importSkill, removeSkill, userSkillsDir } from './skills/import.js';
 export { imageDimensions, describeOversize, IMAGE_LIMITS } from './server/image-dimensions.js';
-export { projectImages } from './agent.js';
+export { projectImages, budgetImages } from './agent.js';

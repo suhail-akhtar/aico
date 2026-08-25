@@ -830,12 +830,78 @@ export async function projectImages(
     }
   }
 
-  return messages.map((message) => {
+  return budgetImages(messages.map((message) => {
     if (message.role !== 'user' || !message.imageRefs?.length) return message;
     const images = message.imageRefs
       .map(ref => cache.get(ref.id))
       .filter((part): part is ImagePart => part !== undefined);
     return images.length > 0 ? { ...message, images } : message;
+  }));
+}
+
+/**
+ * Base64 bytes of images one request may carry.
+ *
+ * Images used to last a single turn, so their cost was paid once. Now that
+ * they persist, every picture in a session is re-sent on every step of every
+ * turn — and an agent that works for twenty steps pays for the reader's ten
+ * screenshots twenty times over.
+ *
+ * The lever is bytes rather than a count, because a count treats a phone photo
+ * and a cropped error dialog as the same thing. Roughly three to eight
+ * full-size screenshots, which is more than any one question needs and few
+ * enough that a long session does not quietly become expensive.
+ */
+const MAX_REQUEST_IMAGE_BYTES = 12 * 1024 * 1024;
+
+/**
+ * Drop the oldest images until the request fits, and say that they were dropped.
+ *
+ * Oldest first, because the picture being discussed is almost always the most
+ * recent one — and the older ones have usually been described in the replies
+ * that followed them, so the conversation still carries what they showed.
+ *
+ * The most recent image is never dropped, even alone over budget. A request
+ * that silently contains no picture at all is worse than an expensive one: the
+ * reader asked about something they can see and would get an answer about
+ * nothing, with no indication why.
+ *
+ * Each dropped image leaves a line naming it, for the same reason the
+ * capability refusal does. An image that vanishes without a word makes the
+ * model's confusion inexplicable to the person reading along.
+ */
+export function budgetImages(
+  messages: AicoMessage[],
+  maxBytes: number = MAX_REQUEST_IMAGE_BYTES,
+): AicoMessage[] {
+  const total = messages.reduce(
+    (sum, m) => sum + (m.role === 'user' ? (m.images ?? []).reduce((n, i) => n + i.data.length, 0) : 0),
+    0,
+  );
+  if (total <= maxBytes) return messages;
+
+  // Walked backwards, so "keep" means "most recent", and the first image is
+  // admitted before the budget is consulted at all.
+  let kept = 0;
+  const keep = new Set<AicoMessage>();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (message.role !== 'user' || !message.images?.length) continue;
+    const size = message.images.reduce((n, image) => n + image.data.length, 0);
+    if (kept === 0 || kept + size <= maxBytes) {
+      kept += size;
+      keep.add(message);
+    }
+  }
+
+  return messages.map((message) => {
+    if (message.role !== 'user' || !message.images?.length || keep.has(message)) return message;
+    const notes = message.images
+      .map(image => `[earlier image${image.name ? ` ${image.name}` : ''} omitted to stay `
+        + 'within this request’s image budget; it was described in the replies that followed]')
+      .join('\n');
+    const { images: _dropped, ...rest } = message;
+    return { ...rest, content: `${message.content}\n\n${notes}` };
   });
 }
 

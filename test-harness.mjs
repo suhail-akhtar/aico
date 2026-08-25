@@ -19,7 +19,7 @@ import {
   readMemory,
   runHooks, freezeHooks, resetHooks,
   getOpenTodoCount, todoWrite, retireTodos,
-  imageDimensions, describeOversize, projectImages,
+  imageDimensions, describeOversize, projectImages, budgetImages,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8382,6 +8382,90 @@ const part = { data: PIXEL, mediaType: 'image/png', name: 'shot.png' };
   const plain = [{ role: 'user', content: 'no pictures here' }];
   const out = await projectImages(plain, 'claude-opus-5', undefined, async () => [], new Map());
   assert(out === plain, 'a conversation with no references is returned as-is');
+}
+
+// ═══════════════════════════════════════════════════════════
+// IMAGE BUDGET
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ IMAGE BUDGET ══');
+
+const img = (name, bytes) => ({ data: 'x'.repeat(bytes), mediaType: 'image/png', name });
+const turn = (label, ...images) => ({ role: 'user', content: label, images });
+
+// Images used to last one turn, so their cost was paid once. Now that they
+// persist, every picture is re-sent on every step — an agent working twenty
+// steps pays for ten screenshots twenty times.
+{
+  const messages = [turn('one', img('a.png', 100)), turn('two', img('b.png', 100))];
+  const out = budgetImages(messages, 1000);
+  assert(out === messages, 'a conversation inside the budget is returned untouched');
+}
+{
+  const messages = [
+    turn('oldest', img('a.png', 600)),
+    { role: 'assistant', content: 'that one is red' },
+    turn('newest', img('b.png', 600)),
+  ];
+  const out = budgetImages(messages, 1000);
+  assert(out[2].images?.length === 1, 'the most recent picture is kept');
+  assert(out[2].images[0].name === 'b.png', 'and it is the right one');
+  assert(out[0].images === undefined, 'the oldest is dropped — it is the one least likely '
+    + 'to be what the current question is about');
+  assert(out[0].content.includes('a.png'), 'and the message says which image went');
+  assert(out[0].content.includes('oldest'), 'without losing what the reader asked');
+  assert(out[1].content === 'that one is red', 'assistant turns are untouched');
+}
+
+// Never leave a request with no picture at all. A reader asking about
+// something they can see would get an answer about nothing, with no clue why.
+{
+  const messages = [turn('huge', img('big.png', 50_000))];
+  const out = budgetImages(messages, 1000);
+  assert(out[0].images?.length === 1,
+    'a single image over budget is still sent — silence would be worse than cost');
+}
+{
+  const messages = [turn('old', img('a.png', 100)), turn('huge', img('big.png', 50_000))];
+  const out = budgetImages(messages, 1000);
+  assert(out[1].images?.length === 1, 'the newest is admitted before the budget is consulted');
+  assert(out[0].images === undefined, 'and everything earlier still goes');
+}
+
+// Several images on one message are one unit — a message is either sent with
+// its pictures or described without them.
+{
+  const messages = [
+    turn('pair', img('a.png', 400), img('b.png', 400)),
+    turn('single', img('c.png', 400)),
+  ];
+  const out = budgetImages(messages, 1000);
+  assert(out[1].images?.length === 1, 'the recent one is kept');
+  assert(out[0].images === undefined, 'and the pair goes together rather than being split');
+  assert(out[0].content.includes('a.png') && out[0].content.includes('b.png'),
+    'with both named');
+}
+
+// An unnamed image must not read as "[earlier image  omitted]".
+{
+  const messages = [
+    turn('old', { data: 'x'.repeat(600), mediaType: 'image/png' }),
+    turn('new', img('b.png', 600)),
+  ];
+  const out = budgetImages(messages, 1000);
+  assert(!out[0].content.includes('image  omitted'), 'no double space where a name would be');
+  assert(out[0].content.includes('[earlier image omitted'), 'it just says an image went');
+}
+
+// The references stay put. Only the bytes are withheld, and only for this
+// request — the log still records that an image was attached there.
+{
+  const messages = [
+    { role: 'user', content: 'old', images: [img('a.png', 600)], imageRefs: [{ id: 'r1', mediaType: 'image/png' }] },
+    turn('new', img('b.png', 600)),
+  ];
+  const out = budgetImages(messages, 1000);
+  assert(out[0].imageRefs?.length === 1, 'the reference survives being over budget');
+  assert(out[0].images === undefined, 'even though the bytes do not');
 }
 
 // ═══════════════════════════════════════════════════════════
