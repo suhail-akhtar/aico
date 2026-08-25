@@ -19,6 +19,7 @@ import {
   readMemory,
   runHooks, freezeHooks, resetHooks,
   getOpenTodoCount, todoWrite, retireTodos,
+  imageDimensions, describeOversize,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8141,6 +8142,140 @@ const textOnly = [{ role: 'user', content: 'no picture here' }];
     'and do not migrate onto the next one — the completion gate appends a user '
     + 'message on most turns, and "the last user message" would hand it the screenshot');
 }
+
+// ═══════════════════════════════════════════════════════════
+// IMAGE ADMISSION
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ IMAGE ADMISSION ══');
+
+// Headers built by hand, so the tests exercise the same offsets a real file
+// would rather than a fixture that happens to agree with the parser.
+function pngHeader(width, height) {
+  const b = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+  b.writeUInt32BE(13, 8);
+  b.write('IHDR', 12, 'latin1');
+  b.writeUInt32BE(width, 16);
+  b.writeUInt32BE(height, 20);
+  return b;
+}
+function gifHeader(width, height) {
+  const b = Buffer.alloc(10);
+  b.write('GIF89a', 0, 'latin1');
+  b.writeUInt16LE(width, 6);
+  b.writeUInt16LE(height, 8);
+  return b;
+}
+function jpegHeader(width, height, padSegments = 0) {
+  const parts = [Buffer.from([0xff, 0xd8])];
+  // Metadata ahead of the frame, which is what forces the walk: how much of it
+  // there is varies by camera and by editor, so the frame is never at a fixed
+  // offset.
+  for (let i = 0; i < padSegments; i++) {
+    const seg = Buffer.alloc(2 + 2 + 40);
+    seg.writeUInt8(0xff, 0);
+    seg.writeUInt8(0xe1, 1); // APP1, where EXIF lives
+    seg.writeUInt16BE(2 + 40, 2);
+    parts.push(seg);
+  }
+  const sof = Buffer.alloc(2 + 2 + 6);
+  sof.writeUInt8(0xff, 0);
+  sof.writeUInt8(0xc0, 1);
+  sof.writeUInt16BE(8 + 3, 2);
+  sof.writeUInt8(8, 4);
+  sof.writeUInt16BE(height, 5);
+  sof.writeUInt16BE(width, 7);
+  parts.push(sof, Buffer.alloc(4));
+  return Buffer.concat(parts);
+}
+function webpVp8x(width, height) {
+  const b = Buffer.alloc(30);
+  b.write('RIFF', 0, 'latin1');
+  b.write('WEBP', 8, 'latin1');
+  b.write('VP8X', 12, 'latin1');
+  const w = width - 1, h = height - 1;
+  b[24] = w & 0xff; b[25] = (w >> 8) & 0xff; b[26] = (w >> 16) & 0xff;
+  b[27] = h & 0xff; b[28] = (h >> 8) & 0xff; b[29] = (h >> 16) & 0xff;
+  return b;
+}
+function webpLossy(width, height) {
+  const b = Buffer.alloc(30);
+  b.write('RIFF', 0, 'latin1');
+  b.write('WEBP', 8, 'latin1');
+  b.write('VP8 ', 12, 'latin1');
+  b[23] = 0x9d; b[24] = 0x01; b[25] = 0x2a;
+  b.writeUInt16LE(width, 26);
+  b.writeUInt16LE(height, 28);
+  return b;
+}
+function webpLossless(width, height) {
+  const b = Buffer.alloc(30);
+  b.write('RIFF', 0, 'latin1');
+  b.write('WEBP', 8, 'latin1');
+  b.write('VP8L', 12, 'latin1');
+  b[20] = 0x2f;
+  // width-1 in the low 14 bits, height-1 in the next 14. No byte alignment.
+  b.writeUInt32LE(((height - 1) << 14) | (width - 1), 21);
+  return b;
+}
+
+{
+  const d = imageDimensions('.png', pngHeader(1920, 1080));
+  assert(d.width === 1920 && d.height === 1080, 'PNG reads from its IHDR chunk');
+}
+{
+  const d = imageDimensions('.gif', gifHeader(640, 480));
+  assert(d.width === 640 && d.height === 480, 'GIF reads little-endian, unlike PNG');
+}
+{
+  const d = imageDimensions('.jpg', jpegHeader(800, 600));
+  assert(d.width === 800 && d.height === 600, 'JPEG finds its start-of-frame marker');
+  const padded = imageDimensions('.jpeg', jpegHeader(800, 600, 6));
+  assert(padded.width === 800 && padded.height === 600,
+    'and still finds it behind six segments of metadata, which is why it walks');
+}
+{
+  // Three formats behind one signature, each storing its size differently.
+  const x = imageDimensions('.webp', webpVp8x(4000, 3000));
+  assert(x.width === 4000 && x.height === 3000, 'WebP VP8X states the canvas directly');
+  const lossy = imageDimensions('.webp', webpLossy(1024, 768));
+  assert(lossy.width === 1024 && lossy.height === 768, 'VP8 hides it in the keyframe header');
+  const lossless = imageDimensions('.webp', webpLossless(1024, 768));
+  assert(lossless.width === 1024 && lossless.height === 768,
+    'and VP8L packs it into 28 unaligned bits');
+}
+
+// An unreadable size is allowed through rather than refused. Refusing would
+// mean rejecting valid images on the strength of not having parsed them.
+assert(imageDimensions('.png', Buffer.alloc(4)) === undefined, 'a truncated file says nothing');
+assert(imageDimensions('.bmp', Buffer.alloc(64)) === undefined, 'nor does a format this cannot read');
+assert(describeOversize(undefined) === undefined, 'and nothing is not a refusal');
+
+// The case this whole module exists for: a picture that is enormous in pixels
+// and small on disk. A flat-colour PNG at 20000x20000 is a few hundred
+// kilobytes, so it passes a ten-megabyte limit and is then rejected by the
+// provider — after the bytes are in the turn, on every later replay of it.
+{
+  const refusal = describeOversize({ width: 20000, height: 20000 });
+  assert(refusal, 'an image far past the edge limit is refused');
+  assert(refusal.includes('20000'), 'and the refusal says how big it actually was');
+  assert(refusal.includes('8000'), 'and what the limit is');
+  assert(refusal.includes('Scale it down'), 'and what to do about it');
+}
+{
+  // The limit is inclusive, and the largest image it admits is 8000x8000 —
+  // exactly 64 megapixels. That number is why there is no separate pixel-area
+  // cap: one set at 64 megapixels could never have fired, because nothing that
+  // passes the edge rule can exceed it.
+  assert(describeOversize({ width: 8000, height: 8000 }) === undefined,
+    'exactly at the limit on both axes is accepted');
+  assert(describeOversize({ width: 8001, height: 8000 }) !== undefined,
+    'one pixel past it is not');
+}
+assert(describeOversize({ width: 1920, height: 1080 }) === undefined,
+  'an ordinary screenshot is not bothered');
+assert(describeOversize({ width: 8001, height: 10 }) !== undefined,
+  'one long edge is enough, even when the pixel count is trivial');
 
 // ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));

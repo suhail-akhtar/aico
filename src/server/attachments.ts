@@ -4,6 +4,7 @@ import path from 'path';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises';
 import type { AicoSettings } from '../settings.js';
 import { ensureWorkspace, getWorkspaceInfo } from '../workspace.js';
+import { imageDimensions, describeOversize } from './image-dimensions.js';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SESSION_BYTES = 50 * 1024 * 1024;
@@ -94,6 +95,12 @@ function validateImage(ext: string, bytes: Buffer): void {
     throw new Error(`${ext.slice(1).toUpperCase()} file signature is invalid — `
       + 'the extension does not match the actual image format');
   }
+
+  // Checked after the signature, because reading dimensions from a file that
+  // is not the format it claims would produce a confident wrong number rather
+  // than an error.
+  const oversize = describeOversize(imageDimensions(ext, bytes));
+  if (oversize) throw new Error(oversize);
 }
 
 export async function storeAttachment(input: {
