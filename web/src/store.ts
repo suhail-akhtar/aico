@@ -826,9 +826,19 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
           logged: applyLogEvent(state.logged, event.seq ?? 0, data),
           lastSeq: Math.max(state.lastSeq, event.seq ?? 0),
         };
-        // Goal and feedback are projections of the same log, so replaying it
-        // restores them for free — a reopened session shows its goal without
-        // a second request.
+        // Goal, feedback and the title are projections of the same log, so
+        // replaying it restores them for free — a reopened session shows its
+        // goal without a second request.
+        if (data.type === 'session/title') {
+          // The live `title` event already did this, which is why a session
+          // named while you watch shows its name and one you came back to did
+          // not: on a cold load `connect` runs before the sidebar list has
+          // arrived, so there was nothing to seed the header from, and the
+          // replayed naming event was being dropped on the floor. Later events
+          // win, so a model-generated name still supersedes the fallback.
+          const replayed = String(data.title ?? '');
+          if (replayed) patch.title = replayed;
+        }
         if (data.type === 'goal/set') {
           const status = String(data.status) as Goal['status'];
           patch.goal = status === 'cleared'
