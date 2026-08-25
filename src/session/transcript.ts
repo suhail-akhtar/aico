@@ -19,7 +19,7 @@
  * @module session/transcript
  */
 
-import type { AicoMessage, ImagePart, ReasoningTrace, ToolCall } from '../providers/types.js';
+import type { AicoMessage, ImageRef, ReasoningTrace, ToolCall } from '../providers/types.js';
 import type { MessageSource, RequestHeader, TurnEndReason, Usage } from './events.js';
 import type { Session } from './session.js';
 
@@ -34,7 +34,7 @@ export interface Transcript {
    *   reminder, a completion-gate nudge) must declare its plugin so a UI does
    *   not render it as something the user typed.
    */
-  recordUserMessage(content: string, source?: MessageSource, images?: ImagePart[]): void;
+  recordUserMessage(content: string, source?: MessageSource, images?: ImageRef[]): void;
 
   /** Open a turn. Returns its number. */
   beginTurn(): number;
@@ -102,52 +102,30 @@ export class SessionTranscript implements Transcript {
     this.recordChunks = options.recordChunks ?? false;
   }
 
-  /**
-   * Image bytes for a user message, by that message's position in the log.
-   *
-   * **Held in memory, never written to the log.** A base64 screenshot is
-   * hundreds of kilobytes and the log is an append-only JSONL file that is
-   * read in full on every replay; putting the bytes there would make one
-   * attachment permanently expensive for every later reader of that session.
-   *
-   * The consequence is stated rather than hidden: after a restart the bytes
-   * are gone and the message keeps only the text that was recorded beside it.
-   * The model does not silently lose the picture mid-conversation — within the
-   * process every step re-derives and re-attaches, so it keeps seeing the
-   * screenshot for as long as it is working on it.
-   *
-   * Keyed by ordinal rather than "the last user message", because a message
-   * arrives after this one on almost every turn: the completion gate appends a
-   * user message of its own, and images anchored to "the last" would migrate
-   * onto it the moment it did.
-   */
-  private readonly imagesByUserMessage = new Map<number, ImagePart[]>();
-  private userMessageCount = 0;
-
   messages(): AicoMessage[] {
     // Re-derived every call: the log is the request, not a mirror of it.
-    const derived = this.session.deriveMessages();
-    if (this.imagesByUserMessage.size === 0) return derived;
-
-    let index = 0;
-    return derived.map((message) => {
-      if (message.role !== 'user') return message;
-      const images = this.imagesByUserMessage.get(index++);
-      return images?.length ? { ...message, images } : message;
-    });
+    return this.session.deriveMessages();
   }
 
+  /**
+   * Record what the reader said, and which images came with it.
+   *
+   * Only references go in — ids and media types, not bytes. An earlier version
+   * kept the bytes in a map beside the log so they would not bloat it, which
+   * worked until the process restarted and every picture in the session
+   * silently became a name. References are both smaller and durable: the log
+   * says an image was attached and which one, and the store still has it.
+   */
   recordUserMessage(
     content: string,
     source: MessageSource = { kind: 'human' },
-    images?: ImagePart[],
+    images?: ImageRef[],
   ): void {
-    if (images?.length) this.imagesByUserMessage.set(this.userMessageCount, images);
-    this.userMessageCount += 1;
     this.session.append('user/message', {
       turn: this.turn,
       content,
       source,
+      ...images?.length ? { images } : {},
     }, { surfaceOp: { op: 'append' } });
   }
 
@@ -273,8 +251,10 @@ export class LegacyTranscript implements Transcript {
     return this.buffer;
   }
 
-  recordUserMessage(content: string, _source?: MessageSource, images?: ImagePart[]): void {
-    this.buffer.push(images?.length ? { role: 'user', content, images } : { role: 'user', content });
+  recordUserMessage(content: string, _source?: MessageSource, images?: ImageRef[]): void {
+    this.buffer.push(
+      images?.length ? { role: 'user', content, imageRefs: images } : { role: 'user', content },
+    );
   }
 
   beginTurn(): number {

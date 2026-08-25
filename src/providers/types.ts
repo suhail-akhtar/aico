@@ -77,17 +77,40 @@ export interface ImagePart {
   name?: string;
 }
 
+/**
+ * A stored image, named but not carried.
+ *
+ * What the session log records. Bytes stay in the attachment store, because a
+ * base64 screenshot is hundreds of kilobytes and the log is an append-only
+ * file read in full on every replay — one attachment would otherwise be
+ * permanently expensive for every later reader of that session.
+ */
+export interface ImageRef {
+  /** Attachment id, resolvable through the store that took the upload. */
+  id: string;
+  mediaType: ImagePart['mediaType'];
+  name?: string;
+}
+
 export type AicoMessage =
   | {
       role: 'user';
       content: string;
       /**
-       * Images the reader attached to this turn.
+       * Images the reader attached, as the log records them.
        *
-       * Only ever set when the model was checked and accepts image input; see
-       * {@link module:model-capabilities}. A provider that finds them here can
-       * send them without asking again, and one that has no image support of
-       * its own should say so rather than dropping them silently.
+       * Durable and cheap. Says an image was attached and which one, without
+       * saying what it looked like.
+       */
+      imageRefs?: ImageRef[];
+      /**
+       * The same images with their bytes, for one request.
+       *
+       * Filled in just before the provider call and never recorded. Whether it
+       * gets filled is a question about the model, and the model is a property
+       * of the request rather than of the conversation — which is what lets a
+       * reader switch to a vision model and have the pictures they attached
+       * three turns ago become visible.
        */
       images?: ImagePart[];
     }

@@ -27,7 +27,8 @@ import {
   currentGoal, currentAgent, feedbackBySeq, deliverables, trajectory,
 } from '../session/projections.js';
 import { personaFor, resolveAgent } from '../agents/resolve.js';
-import type { SdkAttachment } from '../attachments.js';
+import type { ImageRef } from '../providers/types.js';
+import { readFile } from 'fs/promises';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
 
@@ -149,8 +150,8 @@ export class RunManager {
     model: string,
     opts: {
       planMode?: boolean; autoApprove?: boolean; effort?: string;
-      /** Images the reader attached to this turn, already read into memory. */
-      attachments?: SdkAttachment[];
+      /** Images the reader attached to this turn, by attachment id. */
+      images?: ImageRef[];
     } = {},
   ): Promise<string> {
     const run = await this.ensure(sessionId, cwd);
@@ -208,10 +209,30 @@ export class RunManager {
     try {
       const result = await runAgent({
         task,
-        // Passed through rather than turned into text here: whether the
-        // model can be shown a picture is a question about the model, and
-        // the model is resolved a few lines below this.
-        ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+        // References go to the log; the bytes are fetched per request by the
+        // resolver below. Whether they are fetched at all is a question about
+        // the model, answered inside the run where the model is known.
+        ...(opts.images?.length ? { images: opts.images } : {}),
+        resolveImages: async (refs) => {
+          const { resolveAttachment } = await import('./attachments.js');
+          return Promise.all(refs.map(async (ref) => {
+            try {
+              const found = await resolveAttachment({
+                settings, cwd: run.cwd, sessionId, id: ref.id,
+              });
+              return {
+                data: (await readFile(found.path)).toString('base64'),
+                mediaType: ref.mediaType,
+                ...ref.name ? { name: ref.name } : {},
+              };
+            } catch {
+              // One missing attachment must not cost the others. Answered
+              // positionally, so this slot is empty and the rest still arrive
+              // against the messages they belong to.
+              return undefined;
+            }
+          }));
+        },
         // An agent pinned to a model gets it, unless the caller named one
         // explicitly — an explicit choice is a decision, the pin is a default.
         model: model ?? agent.model ?? model,

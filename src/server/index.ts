@@ -37,8 +37,7 @@ import { deriveMessages } from '../session/derive.js';
 import { forkSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
 import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
-import { readFile } from 'fs/promises';
-import type { SdkAttachment } from '../attachments.js';
+import type { ImageRef } from '../providers/types.js';
 import {
   addProject, browse, findProjectForSession, isKnownProject, listProjects,
   normalizeProjectPath, removeProject, updateProject,
@@ -600,7 +599,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // it. Failing to resolve must not lose the message: the turn runs
         // without the manifest and the reason is said out loud.
         let task2 = task;
-        let pictures: SdkAttachment[] = [];
+        let pictures: ImageRef[] = [];
         const attachmentIds = (body as { attachmentIds?: string[] }).attachmentIds ?? [];
         if (attachmentIds.length > 0) {
           try {
@@ -620,12 +619,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
             const images = files.filter(file => isImage(file.extension));
             task2 = task + attachmentManifest(documents);
 
-            pictures = await Promise.all(images.map(async file => ({
-              type: 'blob' as const,
-              data: (await readFile(file.path)).toString('base64'),
-              mimeType: IMAGE_MEDIA_TYPES[file.extension] ?? 'application/octet-stream',
-              displayName: file.name,
-            })));
+            // References, not bytes. The log records these, and the run reads
+            // the bytes back through `resolveImages` below — which is what lets
+            // a session reopened tomorrow still show the model the screenshot.
+            pictures = images.map(file => ({
+              id: file.id,
+              mediaType: IMAGE_MEDIA_TYPES[file.extension]!,
+              name: file.name,
+            }));
           } catch (err) {
             task2 = `${task}
 
@@ -652,7 +653,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         void runs.submit(sessionId, runCwd, task2, chosen, {
           planMode: (body as { planMode?: boolean }).planMode ?? false,
           autoApprove: (body as { autoApprove?: boolean }).autoApprove ?? true,
-          ...(pictures.length ? { attachments: pictures } : {}),
+          ...(pictures.length ? { images: pictures } : {}),
         }).catch(() => { /* already reported on the stream as turn-end */ });
         return;
       }

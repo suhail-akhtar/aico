@@ -22,7 +22,7 @@ import {
 import { runHooks } from './hooks.js';
 import { estimateTokens } from './tokens.js';
 import type { SdkAttachment } from './attachments.js';
-import type { ImagePart } from './providers/types.js';
+import type { AicoMessage, ImagePart, ImageRef } from './providers/types.js';
 import { modelAccepts, explainRefusal } from './model-capabilities.js';
 import type { AicoSettings } from './settings.js';
 import { selectProvider } from './providers/index.js';
@@ -312,6 +312,23 @@ export interface AgentOptions {
   depth?: number;
   /** Optional file/image attachments included with the user message */
   attachments?: SdkAttachment[];
+  /**
+   * Images the reader attached to this turn, by reference.
+   *
+   * References rather than bytes, so what goes in the session log is small and
+   * durable. What they resolve to is decided per request by
+   * {@link projectImages}, which is where the model is known.
+   */
+  images?: ImageRef[];
+  /**
+   * Fetch the bytes behind image references.
+   *
+   * Injected rather than imported, because the store that holds them belongs
+   * to whoever took the upload — the web server here — and the agent core has
+   * no business knowing about it. Answers positionally: one slot per reference,
+   * `undefined` for anything it cannot find.
+   */
+  resolveImages?: (refs: ImageRef[]) => Promise<Array<ImagePart | undefined>>;
   /** Sub-agent type — restricts available tools */
   agentType?: SubAgentType;
   /**
@@ -750,60 +767,76 @@ function attachmentsToText(attachments: SdkAttachment[]): string {
   return parts.join('');
 }
 
-/** Image media types every provider in this codebase can be sent. */
-const SENDABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-
 /**
- * The attached images a model can actually be shown, and a note about the rest.
+ * Turn the references in a conversation into bytes this model can be sent.
  *
- * Filtered by media type as well as by the model, because the two fail
- * differently. An unsupported format — BMP, SVG — would be refused for any
- * model; an unsupported model is a fact about the route that changes the
- * moment the reader picks another one. Both end up as text, and the text says
- * which happened, because "your screenshot did not arrive" with no reason is
- * the same as it silently vanishing.
+ * Run immediately before each request, which is the only place that knows
+ * enough to decide. The reference is durable and says an image was attached;
+ * whether it becomes a picture or a sentence depends on the model, and the
+ * model can change between one turn and the next.
+ *
+ * A model that cannot read images gets a line of text in place of each one.
+ * Dropping them silently would leave the reader watching the agent answer a
+ * question about a screenshot it was never shown, with nothing to explain the
+ * confusion. The text names the model and the way out.
+ *
+ * The returned messages are for this request only. Nothing here is recorded,
+ * so switching to a vision model makes every picture in the session visible
+ * rather than only the ones attached afterwards.
  */
-function imagesFrom(
-  attachments: SdkAttachment[],
+export async function projectImages(
+  messages: AicoMessage[],
   model: string,
-  settings?: AicoSettings,
-): { images: ImagePart[]; note: string } {
-  const blobs = attachments.filter(
-    (a): a is Extract<SdkAttachment, { type: 'blob' }> =>
-      a.type === 'blob' && (a.mimeType?.startsWith('image/') ?? false),
-  );
-  if (blobs.length === 0) return { images: [], note: '' };
+  settings: AicoSettings | undefined,
+  resolve: ((refs: ImageRef[]) => Promise<Array<ImagePart | undefined>>) | undefined,
+  cache: Map<string, ImagePart>,
+): Promise<AicoMessage[]> {
+  if (!messages.some(m => m.role === 'user' && m.imageRefs?.length)) return messages;
 
-  const sendable = blobs.filter(b => SENDABLE_IMAGE_TYPES.has(b.mimeType));
-  const wrongFormat = blobs.filter(b => !SENDABLE_IMAGE_TYPES.has(b.mimeType));
-
-  // Asked once for the whole batch: the answer cannot differ between two PNGs,
-  // and asking per image would put the same refusal on the transcript once per
-  // file.
-  const canSee = sendable.length > 0 && modelAccepts(model, 'image', settings);
-
-  const notes: string[] = [];
-  for (const blob of wrongFormat) {
-    notes.push(`[${blob.displayName ?? 'image'} (${blob.mimeType}) was attached but `
-      + 'cannot be sent — supported image formats are PNG, JPEG, WebP and GIF]');
+  if (!modelAccepts(model, 'image', settings)) {
+    const reason = explainRefusal(model, 'image', settings)
+      ?? 'this model does not read images';
+    return messages.map((message) => {
+      if (message.role !== 'user' || !message.imageRefs?.length) return message;
+      const notes = message.imageRefs
+        .map(ref => `[${ref.name ?? 'image'} was attached but not sent: ${reason}]`)
+        .join('\n');
+      return { ...message, content: `${message.content}\n\n${notes}` };
+    });
   }
-  if (!canSee) {
-    for (const blob of sendable) {
-      notes.push(`[${blob.displayName ?? 'image'} was attached but not sent: `
-        + `${explainRefusal(model, 'image', settings) ?? 'this model does not read images'}]`);
+
+  if (!resolve) return messages;
+
+  // Resolved once per run rather than once per step. A turn is many requests
+  // and the bytes do not change between them; re-reading them from the store
+  // on every step would make a screenshot cost more the longer the agent
+  // worked on it.
+  const wanted = messages
+    .flatMap(m => (m.role === 'user' ? m.imageRefs ?? [] : []))
+    .filter(ref => !cache.has(ref.id));
+  if (wanted.length > 0) {
+    try {
+      // Answered positionally, so a resolver that cannot find one image says
+      // so in that slot rather than returning a shorter list and silently
+      // shifting every picture onto the wrong message.
+      const parts = await resolve(wanted);
+      wanted.forEach((ref, index) => {
+        const part = parts[index];
+        if (part) cache.set(ref.id, part);
+      });
+    } catch {
+      // An unreadable attachment is not worth losing the turn over. The
+      // message keeps its text and the model is simply not shown the picture.
     }
   }
 
-  return {
-    images: canSee
-      ? sendable.map(blob => ({
-        data: blob.data,
-        mediaType: blob.mimeType as ImagePart['mediaType'],
-        ...blob.displayName ? { name: blob.displayName } : {},
-      }))
-      : [],
-    note: notes.length > 0 ? `\n\n${notes.join('\n')}` : '',
-  };
+  return messages.map((message) => {
+    if (message.role !== 'user' || !message.imageRefs?.length) return message;
+    const images = message.imageRefs
+      .map(ref => cache.get(ref.id))
+      .filter((part): part is ImagePart => part !== undefined);
+    return images.length > 0 ? { ...message, images } : message;
+  });
 }
 
 // ── Main agent function ──────────────────────────────────────────────
@@ -1106,6 +1139,15 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   }
 
   // ── Build user message ─────────────────────────────────────────────
+  /**
+   * Image bytes already fetched for this run, by reference id.
+   *
+   * A turn is many requests and the pictures do not change between them, so
+   * reading them from the store on every step would make a screenshot cost
+   * more the longer the agent spent working on it.
+   */
+  const imageCache = new Map<string, ImagePart>();
+
   let userMessage = task;
 
   if (showPlan && toolProfile !== 'browser-qa') {
@@ -1136,14 +1178,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   }
 
   // Append attachments as inline text
-  let turnImages: ImagePart[] = [];
   if (opts.attachments?.length) {
     userMessage += attachmentsToText(opts.attachments);
-    // Split out here rather than inside `attachmentsToText`, because these do
-    // not become text: they ride on the message as their own content blocks.
-    const pictures = imagesFrom(opts.attachments, model, settings);
-    turnImages = pictures.images;
-    userMessage += pictures.note;
   }
 
   // ── Hooks ──────────────────────────────────────────────────────────
@@ -1213,7 +1249,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // The images ride with this exact message, not the turn: a completion-gate
   // nudge later in the same turn is a different message and must not inherit
   // the reader's screenshot.
-  transcript.recordUserMessage(userMessage, undefined, turnImages);
+  transcript.recordUserMessage(userMessage, undefined, opts.images);
 
   let finalContent = '';
   let totalInputTokens = 0;
@@ -1418,6 +1454,17 @@ const MAX_COMPLETION_NUDGES = 2;
         let stepUsage: Usage | undefined;
         let finishReason: FinishReason | undefined;
 
+        // Derived fresh every step. On the session path this means the log IS
+        // the request rather than a mirror of it, so anything the model sees is
+        // by construction reconstructable.
+        //
+        // Images are the one thing the log does not hold literally: it holds
+        // references, and they become bytes — or a sentence saying why not —
+        // here, where the model for this request is finally known.
+        const requestMessages = await projectImages(
+          transcript.messages(), model, settings, opts.resolveImages, imageCache,
+        );
+
         // Stream from provider — forward the merged signal so a cancel/timeout
         // tears down the in-flight HTTP stream instead of leaking the socket.
         try {
@@ -1425,10 +1472,7 @@ const MAX_COMPLETION_NUDGES = 2;
             model,
             systemPrompt,
             volatileContext,
-            // Derived fresh every step. On the session path this means the log
-            // IS the request rather than a mirror of it, so anything the model
-            // sees is by construction reconstructable.
-            messages: transcript.messages(),
+            messages: requestMessages,
             tools: toolDefs,
             signal: loopSignal,
           })) {

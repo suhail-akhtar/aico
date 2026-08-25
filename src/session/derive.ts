@@ -36,7 +36,7 @@
  * @module session/derive
  */
 
-import type { AicoMessage, ReasoningTrace, ToolCall } from '../providers/types.js';
+import type { AicoMessage, ImageRef, ReasoningTrace, ToolCall } from '../providers/types.js';
 import type { SessionEvent, Seq } from './events.js';
 import { isSurfaceEvent } from './events.js';
 
@@ -149,8 +149,12 @@ export function deriveMessagesDetailed(events: readonly SessionEvent[]): DeriveR
       // A user message starts a new exchange: any assistant tool calls still
       // unanswered at this point never will be.
       flushOpenCalls();
-      const data = event.data as { content: string };
-      messages.push({ role: 'user', content: data.content });
+      const data = event.data as { content: string; images?: ImageRef[] };
+      // References, not bytes — see the note on `recordUserMessage`. What they
+      // resolve to is decided at request time, because it depends on the model.
+      messages.push(data.images?.length
+        ? { role: 'user', content: data.content, imageRefs: data.images }
+        : { role: 'user', content: data.content });
       continue;
     }
 

@@ -19,7 +19,7 @@ import {
   readMemory,
   runHooks, freezeHooks, resetHooks,
   getOpenTodoCount, todoWrite, retireTodos,
-  imageDimensions, describeOversize,
+  imageDimensions, describeOversize, projectImages,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8129,18 +8129,21 @@ const textOnly = [{ role: 'user', content: 'no picture here' }];
   assert(typeof rp.content === 'string', 'Responses: likewise');
 }
 
-// The transcript holds bytes in memory and never writes them to the log — a
-// base64 screenshot in an append-only JSONL file is a cost every later reader
-// of that session pays.
+// The log carries references, never bytes. A base64 screenshot in an
+// append-only JSONL file is a cost every later reader of that session pays —
+// and an earlier version that kept the bytes in memory instead lost every
+// picture the moment the process restarted.
 {
   const t = new LegacyTranscript();
-  t.recordUserMessage('look at this', undefined, [{ data: PIXEL, mediaType: 'image/png' }]);
+  t.recordUserMessage('look at this', undefined, [{ id: 'att-1', mediaType: 'image/png', name: 'shot.png' }]);
   t.recordUserMessage('and now a follow-up');
   const messages = t.messages();
-  assert(messages[0].images?.length === 1, 'the images stay on the message they arrived with');
-  assert(messages[1].images === undefined,
-    'and do not migrate onto the next one — the completion gate appends a user '
-    + 'message on most turns, and "the last user message" would hand it the screenshot');
+  assert(messages[0].imageRefs?.length === 1, 'the reference stays on the message it arrived with');
+  assert(messages[0].imageRefs[0].id === 'att-1', 'naming the attachment rather than carrying it');
+  assert(messages[0].images === undefined, 'and no bytes are recorded anywhere');
+  assert(messages[1].imageRefs === undefined,
+    'and it does not migrate onto the next message — the completion gate appends a '
+    + 'user message on most turns, and "the last user message" would hand it the screenshot');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -8276,6 +8279,110 @@ assert(describeOversize({ width: 1920, height: 1080 }) === undefined,
   'an ordinary screenshot is not bothered');
 assert(describeOversize({ width: 8001, height: 10 }) !== undefined,
   'one long edge is enough, even when the pixel count is trivial');
+
+// ═══════════════════════════════════════════════════════════
+// IMAGES RESOLVED PER REQUEST
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ IMAGES RESOLVED PER REQUEST ══');
+
+const REF = { id: 'att-1', mediaType: 'image/png', name: 'shot.png' };
+const conversation = () => ([
+  { role: 'user', content: 'what is wrong here?', imageRefs: [REF] },
+  { role: 'assistant', content: 'let me look' },
+  { role: 'user', content: 'any luck?' },
+]);
+const part = { data: PIXEL, mediaType: 'image/png', name: 'shot.png' };
+
+// The whole reason resolution happens per request rather than at submit: the
+// same stored conversation becomes a different request depending on the model.
+{
+  const cache = new Map();
+  const out = await projectImages(conversation(), 'claude-opus-5', undefined,
+    async refs => refs.map(() => part), cache);
+  assert(out[0].images?.length === 1, 'a vision model is shown the picture');
+  assert(out[0].images[0].data === PIXEL, 'with its actual bytes');
+  assert(out[2].images === undefined, 'and the message with no reference is untouched');
+}
+{
+  const cache = new Map();
+  let asked = false;
+  const out = await projectImages(conversation(), 'gpt-3.5-turbo', undefined,
+    async refs => { asked = true; return refs.map(() => part); }, cache);
+  assert(out[0].images === undefined, 'a text-only model is not shown it');
+  assert(asked === false,
+    'and the bytes are never even read — refusing after loading them would be work '
+    + 'done for a request that cannot use it');
+  assert(out[0].content.includes('shot.png'), 'the message says which image');
+  assert(out[0].content.includes('gpt-3.5-turbo'), 'and which model would not take it');
+  assert(out[0].content.includes('what is wrong here?'),
+    'without losing what the reader actually asked');
+}
+
+// The payoff of deciding per request: switching to a vision model makes
+// pictures attached three turns ago visible, because nothing about the refusal
+// was ever written down.
+{
+  const stored = conversation();
+  const textRun = await projectImages(stored, 'gpt-3.5-turbo', undefined,
+    async refs => refs.map(() => part), new Map());
+  assert(textRun[0].images === undefined, 'text-only run: no picture');
+  const visionRun = await projectImages(stored, 'claude-opus-5', undefined,
+    async refs => refs.map(() => part), new Map());
+  assert(visionRun[0].images?.length === 1,
+    'the same stored conversation, sent to a vision model, shows the picture');
+  assert(!visionRun[0].content.includes('was attached but not sent'),
+    'and carries no trace of the earlier refusal');
+}
+
+// A settings override is honoured here too, since this is the gate that counts.
+{
+  const settings = { modelCapabilities: { 'my/vlm': { input: ['image'] } } };
+  const out = await projectImages(conversation(), 'my/vlm', settings,
+    async refs => refs.map(() => part), new Map());
+  assert(out[0].images?.length === 1, 'an overridden model is shown the picture');
+}
+
+// Resolved once per run, not once per step. A turn is many requests and the
+// bytes do not change between them.
+{
+  const cache = new Map();
+  let calls = 0;
+  const resolve = async (refs) => { calls++; return refs.map(() => part); };
+  await projectImages(conversation(), 'claude-opus-5', undefined, resolve, cache);
+  await projectImages(conversation(), 'claude-opus-5', undefined, resolve, cache);
+  await projectImages(conversation(), 'claude-opus-5', undefined, resolve, cache);
+  assert(calls === 1, 'three steps, one read — otherwise a screenshot costs more the '
+    + 'longer the agent works on it');
+}
+
+// One missing attachment must not cost the others, and must not shift the rest
+// onto the wrong messages — which is what a shorter return array would do.
+{
+  const two = [
+    { role: 'user', content: 'first', imageRefs: [{ id: 'gone', mediaType: 'image/png' }] },
+    { role: 'user', content: 'second', imageRefs: [REF] },
+  ];
+  const out = await projectImages(two, 'claude-opus-5', undefined,
+    async refs => refs.map(r => (r.id === 'gone' ? undefined : part)), new Map());
+  assert(out[0].images === undefined, 'the missing one is simply absent');
+  assert(out[1].images?.length === 1, 'and the one that resolved lands on its own message');
+  assert(out[1].images[0].name === 'shot.png', 'not on the other one');
+}
+
+// A resolver that throws loses the pictures, not the turn.
+{
+  const out = await projectImages(conversation(), 'claude-opus-5', undefined,
+    async () => { throw new Error('store is unreachable'); }, new Map());
+  assert(out[0].images === undefined, 'no picture');
+  assert(out[0].content === 'what is wrong here?', 'but the message is intact and the turn runs');
+}
+
+// Nothing to do is the common case and must not cost anything.
+{
+  const plain = [{ role: 'user', content: 'no pictures here' }];
+  const out = await projectImages(plain, 'claude-opus-5', undefined, async () => [], new Map());
+  assert(out === plain, 'a conversation with no references is returned as-is');
+}
 
 // ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));
