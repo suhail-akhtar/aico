@@ -119,6 +119,14 @@ const BUILTIN_CAPABILITIES: CapabilityEntry[] = [
   { match: 'claude-', input: ['text', 'image'] },
 
   // ── OpenAI ──
+  //
+  // Not listed, deliberately: `chat-latest`, which the catalogue really does
+  // return under that bare name. It is a moving alias, so any capability
+  // written here would describe whatever it pointed at on the day it was
+  // written and go quietly wrong the next time OpenAI repoints it. Left
+  // undescribed, it reads as text-only and says so — which is the safe
+  // direction, and the badge invites an override from someone who knows what
+  // it currently is. Resist the urge to "fix" this by guessing.
   { match: 'gpt-5', input: ['text', 'image'] },
   { match: 'gpt-4.1', input: ['text', 'image'] },
   { match: 'gpt-4o', input: ['text', 'image'] },
