@@ -216,3 +216,7 @@ export { loadAllSkills, discoverSkillFiles, parseSkillFile, getBuiltinDir } from
 export { importSkill, removeSkill, userSkillsDir } from './skills/import.js';
 export { imageDimensions, describeOversize, IMAGE_LIMITS } from './server/image-dimensions.js';
 export { projectImages, budgetImages } from './agent.js';
+export {
+  compareVersions, highestVersion, repoSlug, updateNotice,
+  refreshUpdateCache, pendingUpdate,
+} from './update-check.js';

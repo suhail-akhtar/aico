@@ -143,9 +143,44 @@ const program = new Command();
 
 /** Single source of truth for the reported version is package.json */
 const nodeRequire = createRequire(import.meta.url);
-const pkgVersion: string = nodeRequire('../package.json').version;
+const pkgJson = nodeRequire('../package.json') as {
+  version: string; name: string; repository?: unknown;
+};
+const pkgVersion: string = pkgJson.version;
+
+/**
+ * Say if a newer AICO exists, and start finding out for next time.
+ *
+ * Two halves on purpose. The notice comes from the previous run's cached
+ * answer, so it costs a file read; the refresh is fired and deliberately not
+ * awaited, so nothing a person is waiting on ever includes a network round
+ * trip. One run of lag on hearing about a release, in exchange for never
+ * slowing anything down.
+ *
+ * Someone running through `npx` is the reason this exists: they are pinned to
+ * whatever was cached the first time and have no installed package to notice
+ * is out of date.
+ */
+async function announceUpdate(): Promise<void> {
+  try {
+    const { pendingUpdate, refreshUpdateCache, updateNotice } = await import('./update-check.js');
+    const latest = await pendingUpdate(pkgVersion);
+    if (latest) console.log(chalk.dim(`\n  ${updateNotice(pkgVersion, latest, pkgJson.name)}\n`));
+    void refreshUpdateCache(pkgJson.repository);
+  } catch {
+    // A version check is never worth interrupting the tool for.
+  }
+}
 
 program
+  // Options after a subcommand belong to that subcommand.
+  //
+  // Without this, `aico serve -p 7399` silently ignored the port and bound
+  // 7317: the program declares `-p, --print` for Claude Code compatibility,
+  // and it shadowed serve's own `-p, --port`. The failure was quiet in the
+  // worst way — the flag was accepted, the documented short form, and the
+  // server simply started somewhere else.
+  .enablePositionalOptions()
   .name('aico')
   .description('AI Coder — multi-provider coding assistant (Claude Code compatible)')
   .version(pkgVersion)
@@ -269,6 +304,7 @@ program
       : '  Opening your browser. If it did not open, use the link above —\n'
         + '  the token in it is what authorises the page.');
     console.log('\n  Bound to 127.0.0.1 only. Ctrl-C to stop.\n');
+    await announceUpdate();
 
     const shutdown = async (): Promise<void> => {
       console.log('\n  Stopping — flushing session logs…');
@@ -566,6 +602,9 @@ async function startReadlineREPL(
     chalk.gray(' for commands, or ') + chalk.white('exit') + chalk.gray(' to quit.'),
   );
   console.log('');
+  // After the banner rather than before it: the session is already usable by
+  // the time this prints, so a slow disk cannot delay the prompt appearing.
+  await announceUpdate();
 
   const prompt = (): void => {
     rl.question(chalk.green('❯ '), async (input) => {

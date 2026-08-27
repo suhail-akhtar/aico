@@ -20,6 +20,7 @@ import {
   runHooks, freezeHooks, resetHooks,
   getOpenTodoCount, todoWrite, retireTodos,
   imageDimensions, describeOversize, projectImages, budgetImages,
+  compareVersions, highestVersion, repoSlug, updateNotice,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8568,6 +8569,60 @@ console.log('\n══ PRICING HONESTY ══');
   // 100k uncached at $1/M = $0.10, 900k cached at $0.02/M = $0.018
   assert(Math.abs(t.estimateCost('x/y', settings) - 0.118) < 0.0001,
     'cached tokens are billed at the stated cache rate, not the full one');
+}
+
+// ═══════════════════════════════════════════════════════════
+// UPDATE CHECK
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ UPDATE CHECK ══');
+
+// The classic way to announce a downgrade as an update: GitHub returns tags by
+// ref, which sorts v0.9.0 after v0.10.0.
+{
+  const tags = [{ name: 'v0.1.0' }, { name: 'v0.10.0' }, { name: 'v0.9.0' }, { name: 'v0.2.0' }];
+  assert(highestVersion(tags) === '0.10.0',
+    'the highest version wins, not the last one the API happened to list');
+}
+assert(compareVersions('0.10.0', '0.9.0') > 0, '0.10.0 is newer than 0.9.0');
+assert(compareVersions('1.0.0', '0.99.99') > 0, 'major beats everything below it');
+assert(compareVersions('0.3.0', '0.3.0') === 0, 'equal is equal');
+assert(compareVersions('0.3.0', '0.3.1') < 0, 'and older is older');
+
+// Prereleases are dropped rather than compared. Someone on a stable version
+// must never be told an rc is an upgrade.
+{
+  const tags = [{ name: 'v0.3.0' }, { name: 'v0.4.0-rc.1' }, { name: 'v0.4.0-beta' }];
+  assert(highestVersion(tags) === '0.3.0', 'a release candidate is not an update');
+}
+
+// Tags that are not versions at all, which every real repository has.
+{
+  const tags = [{ name: 'latest' }, { name: 'legacy/pre-rewrite' }, { name: 'v1.2.3' }];
+  assert(highestVersion(tags) === '1.2.3', 'non-version tags are ignored');
+  assert(highestVersion([{ name: 'nightly' }]) === undefined, 'and none left means none');
+  assert(highestVersion([]) === undefined, 'an untagged repository is silent, not an error');
+  assert(highestVersion([{ nope: 1 }, { name: 42 }]) === undefined,
+    'and malformed entries do not throw');
+}
+
+// The slug comes from package.json so a fork checks itself rather than
+// reporting its upstream's releases as its own.
+{
+  assert(repoSlug({ url: 'git+https://github.com/suhail-akhtar/aico.git' }) === 'suhail-akhtar/aico',
+    'the shape npm actually writes');
+  assert(repoSlug('https://github.com/owner/repo') === 'owner/repo', 'a bare string');
+  assert(repoSlug({ url: 'git@github.com:owner/repo.git' }) === 'owner/repo', 'ssh');
+  assert(repoSlug({ url: 'owner/repo' }) === 'owner/repo', 'the shorthand npm also accepts');
+  assert(repoSlug(undefined) === undefined, 'no repository means no check');
+  assert(repoSlug({}) === undefined, 'nor does an object without a url');
+}
+
+// The notice answers the question the reader actually has next.
+{
+  const notice = updateNotice('0.3.0', '0.4.0', '@suhail-akhtar/aico');
+  assert(notice.includes('0.3.0') && notice.includes('0.4.0'), 'both versions are named');
+  assert(notice.includes('npx @suhail-akhtar/aico@latest'),
+    'and the npx command, which is what an npx user needs and would not guess');
 }
 
 // ═══════════════════════════════════════════════════════════
