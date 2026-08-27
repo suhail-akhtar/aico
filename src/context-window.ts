@@ -19,6 +19,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import type { AicoSettings } from './settings.js';
+import { listInstances, resolveApiKey } from './providers/instances.js';
 
 // ── Built-in context windows (corrected July 2026) ──────────────────
 // These are the AUTHORITATIVE limits as published by each vendor.
@@ -221,6 +222,21 @@ export async function detectContextWindow(
         );
         break;
       }
+      // A custom endpoint is the case that needs this most and had it least:
+      // its model ids are whatever its operator chose, so the built-in table's
+      // 128K fallback is a guess about a model nobody has ever described. Many
+      // such servers — vLLM, LM Studio, llama.cpp, most gateways — do report a
+      // length, just under one of several names.
+      case 'openai-compatible': {
+        const instance = listInstances(settings ?? {}).find(i => i.type === 'openai-compatible');
+        if (!instance?.baseUrl) return undefined;
+        detected = await detectViaOpenAICompatible(
+          model,
+          `${instance.baseUrl.replace(/\/+$/, '')}/models`,
+          resolveApiKey(instance),
+        );
+        break;
+      }
       // OpenAI, Anthropic, Gemini don't expose context_length in their
       // model list endpoints in a reliable way — rely on built-in table
       default:
@@ -281,9 +297,22 @@ async function detectViaOpenAICompatible(
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
   const res = await fetch(url, { headers });
   if (!res.ok) return undefined;
-  const data = await res.json() as { data?: Array<{ id: string; context_length?: number }> };
+  const data = await res.json() as { data?: Array<Record<string, unknown>> };
   const found = data.data?.find(m => m.id === _model);
-  return found?.context_length;
+  if (!found) return undefined;
+  // No standard name for this. vLLM says `max_model_len`, OpenRouter
+  // `context_length`, others `context_window` — reading all of them costs
+  // nothing and is the difference between a real number and a 128K guess.
+  for (const key of [
+    'context_length', 'max_model_len', 'context_window',
+    'max_context_length', 'max_input_tokens', 'context_size',
+  ]) {
+    const value = Number(found[key]);
+    // Bounded, not merely finite: a server reporting 0, or bytes where tokens
+    // were meant, would otherwise be persisted as fact and drive compaction.
+    if (Number.isInteger(value) && value >= 1_000 && value <= 20_000_000) return value;
+  }
+  return undefined;
 }
 
 /**

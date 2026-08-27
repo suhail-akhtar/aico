@@ -497,6 +497,23 @@ ${content || 'Describe the procedure here.'}
           ? stored.map(i => (i.id === instance.id ? { ...i, models: probe.models } : i))
           : [...stored, { ...instance, models: probe.models }];
         await saveUserSetting('providerInstances', merged);
+
+        // Endpoints that volunteer a context length are believed, because the
+        // alternative is a 128K guess that is wrong in both directions —
+        // compacting a 1M-context model eight times too early, or overrunning
+        // an 8K one. Free: the catalogue was already fetched for the picker.
+        //
+        // Never overwrites an existing entry. That map is also where a reader
+        // corrects a wrong value by hand, and a re-fetch that clobbered the
+        // correction would undo it every time the picker was opened.
+        const discovered = probe.contextWindows ?? {};
+        const known = settings.contextWindows ?? {};
+        const additions = Object.fromEntries(
+          Object.entries(discovered).filter(([model]) => known[model] === undefined),
+        );
+        if (Object.keys(additions).length > 0) {
+          await saveUserSetting('contextWindows', { ...known, ...additions });
+        }
       }
       return {
         status: 200,

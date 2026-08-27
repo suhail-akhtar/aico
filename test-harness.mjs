@@ -8469,6 +8469,108 @@ const turn = (label, ...images) => ({ role: 'user', content: label, images });
 }
 
 // ═══════════════════════════════════════════════════════════
+// PRICING AND CONTEXT FOR MODELS NOBODY DESCRIBED
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ PRICING HONESTY ══');
+
+// The reported case: an OpenAI-compatible gateway serving a model no table
+// knows. The tokens are real; the money is invented, and used to be printed in
+// the same style as a measured figure.
+{
+  const t = createTokenTracker();
+  t.add(1_000_000, 1_000_000);
+  assert(t.isEstimated('my-gateway/some-llm') === true,
+    'an unlisted model is known to be a guess');
+  const guessed = t.estimateCost('my-gateway/some-llm');
+  assert(Math.abs(guessed - 6.0) < 0.001,
+    'and costed at the placeholder rate — $1 in, $5 out per million');
+}
+
+// The fix: the operator of the gateway knows their rates and this table never can.
+{
+  const t = createTokenTracker();
+  t.add(1_000_000, 1_000_000);
+  const settings = { modelPricing: { 'my-gateway/some-llm': { input: 0.3, output: 0.9 } } };
+  assert(t.isEstimated('my-gateway/some-llm', settings) === false,
+    'a stated rate is not an estimate');
+  assert(Math.abs(t.estimateCost('my-gateway/some-llm', settings) - 1.2) < 0.001,
+    'and it is the rate that gets used');
+}
+
+// A local model costs nothing, and zero must survive being falsy.
+{
+  const t = createTokenTracker();
+  t.add(500_000, 500_000);
+  const settings = { modelPricing: { 'ollama/qwen3': { input: 0, output: 0 } } };
+  assert(t.estimateCost('ollama/qwen3', settings) === 0, 'free is a real price');
+  assert(t.isEstimated('ollama/qwen3', settings) === false, 'and a stated one');
+}
+
+// A stated rate beats the built-in table, not just the default — a reseller
+// can charge more than the vendor for the very same model id.
+{
+  const t = createTokenTracker();
+  t.add(1_000_000, 0);
+  const settings = { modelPricing: { 'claude-sonnet-5': { input: 9, output: 30 } } };
+  assert(Math.abs(t.estimateCost('claude-sonnet-5') - 3.0) < 0.001, 'table says 3');
+  assert(Math.abs(t.estimateCost('claude-sonnet-5', settings) - 9.0) < 0.001,
+    'the reader says 9, and the reader wins');
+}
+
+// Half a rate is not a rate. Accepting it would cost the other side at zero,
+// which reads as "output is free" rather than as an unfinished setting.
+{
+  const t = createTokenTracker();
+  t.add(1_000_000, 1_000_000);
+  for (const bad of [
+    { input: 0.3 },
+    { output: 0.9 },
+    { input: 'cheap', output: 1 },
+    { input: -1, output: 1 },
+    {},
+  ]) {
+    const settings = { modelPricing: { 'x/y': bad } };
+    assert(t.isEstimated('x/y', settings) === true,
+      `a malformed rate is ignored rather than half-applied: ${JSON.stringify(bad)}`);
+  }
+}
+
+// The sharpest case, and the one that prompted this: a custom endpoint serving
+// a model whose name happens to match a familiar prefix. `gpt-5.6-terra` on
+// someone's gateway matched `gpt-5` and was billed at OpenAI's list price as
+// though that were a known fact.
+{
+  const t = createTokenTracker();
+  t.add(1_000_000, 1_000_000);
+  assert(t.isEstimated('gpt-5.6-terra') === false,
+    'against the vendor itself, a prefix match is knowledge');
+  assert(t.isEstimated('gpt-5.6-terra', undefined, 'openai-compatible') === true,
+    'on a custom endpoint the same match is a coincidence of naming');
+  assert(t.isEstimated('llama-3.3-70b', undefined, 'ollama') === true,
+    'and a local model the table would happily bill is free');
+  // The rate is still applied — a plausible number beside honest token counts
+  // beats no number — it is just no longer presented as fact.
+  assert(t.estimateCost('gpt-5.6-terra') > 0, 'a figure is still shown');
+  // Stating the rate settles it, whoever serves the model.
+  const settings = { modelPricing: { 'gpt-5.6-terra': { input: 2, output: 6 } } };
+  assert(t.isEstimated('gpt-5.6-terra', settings, 'openai-compatible') === false,
+    'an explicit rate is never an estimate');
+  assert(Math.abs(t.estimateCost('gpt-5.6-terra', settings) - 8.0) < 0.001,
+    'and it is what gets charged');
+}
+
+// Cache tiers still apply to a stated rate — otherwise configuring a price
+// would silently turn off the cache discount.
+{
+  const t = createTokenTracker();
+  t.add(1_000_000, 0, 900_000, 0);
+  const settings = { modelPricing: { 'x/y': { input: 1, output: 1, cacheRead: 0.02 } } };
+  // 100k uncached at $1/M = $0.10, 900k cached at $0.02/M = $0.018
+  assert(Math.abs(t.estimateCost('x/y', settings) - 0.118) < 0.0001,
+    'cached tokens are billed at the stated cache rate, not the full one');
+}
+
+// ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);
 if (failures.length > 0) {

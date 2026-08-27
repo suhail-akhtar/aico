@@ -285,6 +285,29 @@ export interface AicoSettings {
    *
    * Example: { "my-gateway/some-vision-model": { input: ['text', 'image'] } }
    */
+  /**
+   * What a model actually costs, per million tokens.
+   *
+   * The built-in table covers the models AICO ships knowing about and is wrong
+   * about everything else — an OpenAI-compatible gateway can be a free local
+   * model or a reseller charging more than the vendor, and no table can know
+   * which. Unlisted models fall back to an invented rate and every surface
+   * that shows the result says it is an estimate; this is how you replace the
+   * guess with the truth.
+   *
+   * `input` and `output` are required together. `cacheRead` is a fraction of
+   * `input` (0.1 is typical, DeepSeek's is nearer 0.02) and `cacheWrite` a
+   * multiple of it (1.25 on Anthropic, 1 where caching is automatic).
+   *
+   * Example: { "my-gateway/llama-70b": { input: 0.3, output: 0.9 } }
+   * A local model that costs nothing: { "ollama/qwen3": { input: 0, output: 0 } }
+   */
+  modelPricing?: Record<string, {
+    input: number;
+    output: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  }>;
   modelCapabilities?: Record<string, {
     input?: Array<'text' | 'image' | 'audio' | 'video'>;
     output?: Array<'text' | 'image' | 'audio' | 'video'>;
@@ -384,6 +407,7 @@ const MERGED_SECTIONS = [
   'providers', 'hooks', 'env', 'mcpServers', 'workspace', 'autoCompact',
   'mcpSecurity', 'skills', 'memory', 'cron', 'promptCaching', 'contextWindows',
   'modelCapabilities',
+  'modelPricing',
   'completionGate', 'safetyLimits', 'repeatGuard', 'sandbox', 'sessionTitles',
 ] as const satisfies ReadonlyArray<keyof AicoSettings>;
 

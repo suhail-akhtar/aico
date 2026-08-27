@@ -37,6 +37,7 @@ import { deriveMessages } from '../session/derive.js';
 import { forkSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
 import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
+import { activeProviderType } from '../providers/instances.js';
 import type { ImageRef } from '../providers/types.js';
 import {
   addProject, browse, findProjectForSession, isKnownProject, listProjects,
@@ -505,7 +506,11 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // session shows what it has cost rather than starting from zero.
         usage: {
           ...run.tokenTracker.getUsage(),
-          costUsd: run.tokenTracker.estimateCost(settings.model ?? defaultModel),
+          costUsd: run.tokenTracker.estimateCost(settings.model ?? defaultModel, settings),
+          costEstimated: run.tokenTracker.isEstimated(
+            settings.model ?? defaultModel, settings, activeProviderType(settings),
+          ),
+          usageEstimated: run.tokenTracker.hasEstimatedUsage(),
         },
       });
       return;

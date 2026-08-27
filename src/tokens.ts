@@ -1,4 +1,5 @@
 import { CACHE_READ_RATE_MULTIPLIER, CACHE_WRITE_RATE_MULTIPLIER } from './providers/usage.js';
+import type { AicoSettings } from './settings.js';
 
 export interface TokenUsage {
   /** TOTAL prompt tokens, inclusive of `cachedTokens` and `cacheWriteTokens`. */
@@ -73,7 +74,63 @@ const COST_RATES: Array<{ match: string; rate: CostRate }> = [
   { match: 'ollama',           rate: { input: 0.0,  output: 0.0 } },
 ];
 
+/**
+ * What an unlisted model is costed at, in the absence of anything better.
+ *
+ * These numbers are invented. They are the middle of a very wide range — real
+ * rates among models AICO can reach span from nothing at all (a local Ollama
+ * model) to $75 per million output tokens, so any single default is wrong for
+ * almost everybody, and wrong by more than an order of magnitude at both ends.
+ *
+ * That is tolerable only because every path that uses them also reports
+ * {@link isEstimated}, and every surface that shows a figure derived from them
+ * says so. A number this speculative presented as a fact is worse than no
+ * number: it invites the reader to reason about a budget that does not exist.
+ *
+ * The real fix for any given deployment is `settings.modelPricing` — the
+ * operator of an OpenAI-compatible gateway knows their rates and this file
+ * never can.
+ */
 const DEFAULT_RATE: CostRate = { input: 1.0, output: 5.0 };
+
+/**
+ * Provider types whose model ids say nothing about what they cost.
+ *
+ * A custom endpoint can serve any model under any name. `gpt-5.6-terra` on
+ * someone's gateway matches the `gpt-5` prefix in the table below and is then
+ * costed at OpenAI's list price — which is a coincidence of naming, not
+ * knowledge, and the reseller may charge half that or triple it. A local
+ * Ollama model matched against any prefix is worse still: it is free, and the
+ * table will confidently bill it.
+ *
+ * So for these, a prefix match is not treated as knowing. The rate is still
+ * used — a plausible number beside honest tokens beats no number at all — but
+ * it is reported as an estimate, and `settings.modelPricing` is how it stops
+ * being one.
+ */
+const UNPRICED_PROVIDER_TYPES = new Set(['openai-compatible', 'ollama']);
+
+/** A rate stated by the reader, which beats anything guessed here. */
+function configuredRate(model: string, settings?: AicoSettings): CostRate | undefined {
+  const entry = settings?.modelPricing?.[model];
+  if (!entry) return undefined;
+  const input = Number(entry.input);
+  const output = Number(entry.output);
+  // Both halves or neither. A rate with only one side would silently cost the
+  // other at zero, which reads as "this model's output is free" rather than as
+  // a half-finished setting.
+  if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) {
+    return undefined;
+  }
+  const cacheRead = Number(entry.cacheRead);
+  const cacheWrite = Number(entry.cacheWrite);
+  return {
+    input,
+    output,
+    ...Number.isFinite(cacheRead) && cacheRead >= 0 ? { cacheRead } : {},
+    ...Number.isFinite(cacheWrite) && cacheWrite >= 0 ? { cacheWrite } : {},
+  };
+}
 
 /**
  * Find the cost rate for a model. Exact id match wins; otherwise the longest
@@ -81,7 +138,9 @@ const DEFAULT_RATE: CostRate = { input: 1.0, output: 5.0 };
  * Returns undefined when nothing matches → caller falls back to DEFAULT_RATE
  * and flags the estimate as approximate.
  */
-function lookupCostRate(model: string): CostRate | undefined {
+function lookupCostRate(model: string, settings?: AicoSettings): CostRate | undefined {
+  const stated = configuredRate(model, settings);
+  if (stated) return stated;
   const exact = COST_RATES.find(r => r.match === model);
   if (exact) return exact.rate;
   let best: { rate: CostRate; len: number } | undefined;
@@ -99,6 +158,17 @@ export function createTokenTracker() {
   let cachedTokens = 0;
   let cacheWriteTokens = 0;
   let sessions = 0;
+  /**
+   * Requests whose numbers were counted here rather than reported by the API.
+   *
+   * A gateway that rejects `stream_options` gets it switched off for the life
+   * of the provider, after which no usage arrives at all and the turn is
+   * costed from a character-count heuristic. That is a legitimate fallback —
+   * the alternative is a turn that appears free and slips past the spend
+   * ceiling — but it is not a measurement, and reporting it as one is how
+   * "the output tokens behave differently" starts.
+   */
+  let estimatedRequests = 0;
 
   return {
     /**
@@ -106,7 +176,8 @@ export function createTokenTracker() {
      * cache counts are subsets of it — providers normalize to that convention
      * before the numbers get here (see providers/usage.ts).
      */
-    add(input: number, output: number, cached = 0, cacheWrite = 0): void {
+    add(input: number, output: number, cached = 0, cacheWrite = 0, measured = true): void {
+      if (!measured) estimatedRequests++;
       inputTokens += Math.ceil(input);
       outputTokens += Math.ceil(output);
       cachedTokens += Math.ceil(cached);
@@ -119,12 +190,27 @@ export function createTokenTracker() {
     },
 
     /**
+     * Whether any of these counts were guessed rather than reported.
+     *
+     * Separate from {@link isEstimated}, which is about not knowing the
+     * *price*. These are the two independent ways a cost figure can be soft,
+     * and a reader deserves to know which: unknown pricing still has real token
+     * counts behind it, whereas unreported usage does not.
+     */
+    hasEstimatedUsage(): boolean {
+      return estimatedRequests > 0;
+    },
+
+    /**
      * Whether the cost estimate for `model` uses the fallback default rate
      * (i.e. the model has no known pricing). Callers use this to flag the
      * estimate as approximate rather than presenting a fabricated number.
      */
-    isEstimated(model: string): boolean {
-      return lookupCostRate(model) === undefined;
+    isEstimated(model: string, settings?: AicoSettings, providerType?: string): boolean {
+      // An explicit rate is never an estimate, whoever serves the model.
+      if (configuredRate(model, settings)) return false;
+      if (providerType && UNPRICED_PROVIDER_TYPES.has(providerType)) return true;
+      return lookupCostRate(model, settings) === undefined;
     },
 
     /**
@@ -137,8 +223,8 @@ export function createTokenTracker() {
      * cold first turn is more expensive than an uncached one, and an estimate
      * that ignores that makes caching look strictly free.
      */
-    estimateCost(model: string): number {
-      const rate = lookupCostRate(model) ?? DEFAULT_RATE;
+    estimateCost(model: string, settings?: AicoSettings): number {
+      const rate = lookupCostRate(model, settings) ?? DEFAULT_RATE;
       const readMultiplier = rate.cacheRead ?? CACHE_READ_RATE_MULTIPLIER;
       const writeMultiplier = rate.cacheWrite ?? CACHE_WRITE_RATE_MULTIPLIER;
       const uncachedInput = Math.max(0, inputTokens - cachedTokens - cacheWriteTokens);
@@ -149,9 +235,9 @@ export function createTokenTracker() {
       return inputCost + outputCost + cacheReadCost + cacheWriteCost;
     },
 
-    format(model?: string): string {
-      const cost = model ? this.estimateCost(model) : 0;
-      const est = model && this.isEstimated(model) ? ' (est.)' : '';
+    format(model?: string, settings?: AicoSettings, providerType?: string): string {
+      const cost = model ? this.estimateCost(model, settings) : 0;
+      const est = model && this.isEstimated(model, settings, providerType) ? ' (est.)' : '';
       // ⚡ reads (cheap) and ✎ writes (a 1.25x premium) are shown separately —
       // collapsing them would hide that a cold turn costs more, not less.
       const cacheStr =

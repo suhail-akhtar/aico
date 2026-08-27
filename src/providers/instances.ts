@@ -382,3 +382,20 @@ export function validateInstance(
 
   return problems;
 }
+
+/**
+ * The type of the provider instance a turn will actually run on.
+ *
+ * Used to decide whether a price looked up by model name can be trusted: on a
+ * custom endpoint the name is whatever its operator chose, so a familiar
+ * prefix means nothing. Returns undefined when nothing is configured, which
+ * callers read as "no reason to doubt the table".
+ */
+export function activeProviderType(settings: AicoSettings): string | undefined {
+  const wanted = settings.activeProvider ?? settings.provider ?? '';
+  const instances = listInstances(settings);
+  const found = instances.find(i => i.id === wanted)
+    ?? instances.find(i => i.type === wanted)
+    ?? instances[0];
+  return found?.type;
+}

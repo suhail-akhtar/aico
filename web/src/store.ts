@@ -59,9 +59,29 @@ export interface Usage {
   cached: number;
   cacheWrite: number;
   costUsd: number;
+  /**
+   * Whether that figure came from a real rate or an invented one.
+   *
+   * True means nothing describes this model's pricing, so the cost is a
+   * placeholder rate applied to real token counts. Shown differently rather
+   * than hidden: the token counts are still true, and a reader comparing two
+   * runs on the same unknown model still learns something from the ratio.
+   */
+  costEstimated: boolean;
+  /**
+   * Whether the token counts themselves were guessed.
+   *
+   * Different from `costEstimated` and worth distinguishing: unknown pricing
+   * still has real counts behind it, whereas a provider that reported no usage
+   * leaves nothing measured at all. Both can be true at once.
+   */
+  usageEstimated: boolean;
 }
 
-const NO_USAGE: Usage = { input: 0, output: 0, cached: 0, cacheWrite: 0, costUsd: 0 };
+const NO_USAGE: Usage = {
+  input: 0, output: 0, cached: 0, cacheWrite: 0,
+  costUsd: 0, costEstimated: false, usageEstimated: false,
+};
 
 interface AppState {
   // ── connection ──
@@ -352,6 +372,8 @@ export const useStore = create<AppState>((set, get) => ({
             cached: Number(u.cachedTokens ?? 0),
             cacheWrite: Number(u.cacheWriteTokens ?? 0),
             costUsd: Number(u.costUsd ?? 0),
+            costEstimated: Boolean(u.costEstimated),
+            usageEstimated: Boolean(u.usageEstimated),
           },
         });
       })
@@ -1054,6 +1076,8 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
           cached: Number(data.cached ?? 0),
           cacheWrite: Number(data.cacheWrite ?? 0),
           costUsd: Number(data.costUsd ?? 0),
+          costEstimated: Boolean(data.costEstimated),
+          usageEstimated: Boolean(data.usageEstimated),
         },
       }));
       return;

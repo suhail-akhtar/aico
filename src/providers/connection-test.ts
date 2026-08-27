@@ -21,6 +21,13 @@ export interface ProviderTestResult {
   ok: boolean;
   error?: string;
   models?: string[];
+  /**
+   * Context windows the endpoint volunteered, by model id.
+   *
+   * Only the models that said. Most catalogues list an id and nothing else, so
+   * this is usually sparse or absent — which is the honest shape for it.
+   */
+  contextWindows?: Record<string, number>;
   /** How long the round trip took — surfaced so a slow endpoint is visible. */
   latencyMs?: number;
 }
@@ -92,7 +99,17 @@ export async function testProvider(
       return { ok: false, latencyMs, error: describeFailure(res.status, body) };
     }
 
-    return { ok: true, latencyMs, models: extractModels(await res.json()) };
+    const catalogue = extractCatalogue(await res.json());
+    const contextWindows: Record<string, number> = {};
+    for (const entry of catalogue) {
+      if (entry.contextWindow !== undefined) contextWindows[entry.id] = entry.contextWindow;
+    }
+    return {
+      ok: true,
+      latencyMs,
+      models: catalogue.map(entry => entry.id),
+      ...Object.keys(contextWindows).length > 0 ? { contextWindows } : {},
+    };
   } catch (err) {
     const latencyMs = Date.now() - started;
     const message = err instanceof Error ? err.message : String(err);
@@ -122,21 +139,58 @@ function describeFailure(status: number, body: string): string {
   return detail ? `${label} (${status}): ${detail}` : `${label} (${status})`;
 }
 
-/** Every catalogue shape we have seen, reduced to a sorted list of ids. */
-function extractModels(data: unknown): string[] {
+/** One entry in a provider catalogue, reduced to what AICO can use. */
+interface CatalogueEntry {
+  id: string;
+  /** Context length, when the endpoint says. Most do not. */
+  contextWindow?: number;
+}
+
+/**
+ * The names each catalogue shape uses for "how much context does this take".
+ *
+ * There is no standard. OpenRouter says `context_length`, vLLM and most
+ * self-hosted OpenAI-compatible servers say `max_model_len`, some gateways say
+ * `context_window`, Ollama nests it under model info. Reading all of them costs
+ * nothing and is the difference between knowing a model's real window and
+ * falling back to a 128K guess that is wrong in both directions — compacting a
+ * 1M-context model eight times too early, or overrunning an 8K one entirely.
+ */
+const CONTEXT_KEYS = [
+  'context_length', 'max_model_len', 'context_window',
+  'max_context_length', 'max_input_tokens', 'context_size',
+] as const;
+
+function readContextWindow(model: Record<string, unknown>): number | undefined {
+  for (const key of CONTEXT_KEYS) {
+    const value = Number(model[key]);
+    // Bounded rather than merely finite: a gateway reporting 0, or a byte
+    // count where tokens were meant, would otherwise be persisted as fact and
+    // drive compaction from then on.
+    if (Number.isInteger(value) && value >= 1_000 && value <= 20_000_000) return value;
+  }
+  return undefined;
+}
+
+/** Every catalogue shape we have seen, reduced to ids and what else was said. */
+function extractCatalogue(data: unknown): CatalogueEntry[] {
   const d = data as {
-    data?: Array<{ id?: string; name?: string }>;
-    models?: Array<{ id?: string; name?: string }>;
+    data?: Array<Record<string, unknown>>;
+    models?: Array<Record<string, unknown>>;
     // Ollama
-    tags?: Array<{ id?: string; name?: string }>;
+    tags?: Array<Record<string, unknown>>;
   };
   const raw = d?.data ?? d?.models ?? d?.tags ?? [];
   return raw
-    .map(m => m.id ?? m.name ?? '')
-    // Gemini returns "models/gemini-2.0-flash"; the bare id is what callers use.
-    .map(id => id.replace(/^models\//, ''))
-    .filter(Boolean)
-    .sort();
+    .map((model) => {
+      const id = String(model.id ?? model.name ?? '')
+        // Gemini returns "models/gemini-2.0-flash"; the bare id is what callers use.
+        .replace(/^models\//, '');
+      const contextWindow = readContextWindow(model);
+      return { id, ...contextWindow === undefined ? {} : { contextWindow } };
+    })
+    .filter(entry => entry.id)
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /**

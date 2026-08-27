@@ -205,8 +205,14 @@ export interface TokenTracker {
   /**
    * `input` is the TOTAL prompt size; `cached` (cache reads) and `cacheWrite`
    * are subsets of it, normalized by the provider — see providers/usage.ts.
+   *
+   * `measured` says whether these numbers came from the API or were counted
+   * here. Defaults to true; pass false for the heuristic fallback used when a
+   * provider reports no usage at all.
    */
-  add(input: number, output: number, cached?: number, cacheWrite?: number): void;
+  add(
+    input: number, output: number, cached?: number, cacheWrite?: number, measured?: boolean,
+  ): void;
   getUsage(): {
     inputTokens: number;
     outputTokens: number;
@@ -214,8 +220,12 @@ export interface TokenTracker {
     cacheWriteTokens: number;
     sessions: number;
   };
-  estimateCost(model: string): number;
-  format(model?: string): string;
+  estimateCost(model: string, settings?: AicoSettings): number;
+  /** Whether the *price* is unknown, so a placeholder rate was applied. */
+  isEstimated(model: string, settings?: AicoSettings, providerType?: string): boolean;
+  /** Whether the *token counts* were guessed because no usage was reported. */
+  hasEstimatedUsage(): boolean;
+  format(model?: string, settings?: AicoSettings, providerType?: string): string;
 }
 
 export interface AgentOptions {
@@ -1918,11 +1928,22 @@ const MAX_COMPLETION_NUDGES = 2;
     // free as far as the cost ceiling is concerned, which is precisely the
     // blind spot a ceiling exists to remove.
     if (committedRequests === 0) {
+      // Counted from the whole conversation, not just the opening message.
+      // The previous version summed the first user message and the system
+      // prompt, which for a turn that made a dozen tool calls under-reported
+      // the prompt by most of its actual size — and since this is also what
+      // the spend ceiling reads, the runs least likely to be measured were
+      // also the ones least likely to be stopped.
+      const promptText = transcript.messages()
+        .map(message => message.content)
+        .join('\n');
       tokenTracker.add(
-        estimateTokens(userMessage) + estimateTokens(systemPrompt),
+        estimateTokens(systemPrompt) + estimateTokens(promptText),
         estimateTokens(finalContent),
         0,
         0,
+        // Not a measurement. Every surface that shows these says so.
+        false,
       );
     }
     const inputTokens = totalInputTokens > 0

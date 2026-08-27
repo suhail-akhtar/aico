@@ -416,14 +416,49 @@ ${prefill.text}` : prefill.text));
           {usage.input > 0 && (
             <>
               <span aria-hidden>·</span>
-              <span title="Total input tokens, cached reads included">In {format(usage.input)}</span>
-              <span title="Output tokens">Out {format(usage.output)}</span>
+              {/*
+                A `~` on the counts when the provider reported no usage and
+                these came from counting characters. The gateways that reject
+                `stream_options` are exactly the ones whose numbers a reader is
+                most likely to be squinting at, so saying which are measured is
+                the whole point.
+              */}
+              <span title={usage.usageEstimated
+                ? 'Approximate — this provider reported no usage, so the prompt '
+                  + 'size was counted from the text'
+                : 'Total input tokens, cached reads included'}>
+                In {usage.usageEstimated ? '~' : ''}{format(usage.input)}
+              </span>
+              <span title={usage.usageEstimated
+                ? 'Approximate — counted from the reply text, not reported by the provider'
+                : 'Output tokens'}>
+                Out {usage.usageEstimated ? '~' : ''}{format(usage.output)}
+              </span>
               {usage.cached > 0 && (
                 <span title={`${format(usage.cached)} tokens read from cache at ~0.1× rate`}>
                   Cache {Math.round((usage.cached / usage.input) * 100)}%
                 </span>
               )}
-              {usage.costUsd > 0 && <span>${usage.costUsd.toFixed(4)}</span>}
+              {/*
+                A cost nobody has real rates for is shown as `~$0.0668?` rather
+                than `$0.0668`. The token counts either side of it are measured
+                and true; only the money is invented, and printing an invented
+                figure in the same style as a measured one is how a reader ends
+                up budgeting against a number that came from a placeholder.
+              */}
+              {usage.costUsd > 0 && (
+                <span
+                  title={usage.costEstimated
+                    ? 'Approximate — no pricing is known for this model, so a '
+                      + 'placeholder rate was applied to real token counts. Set '
+                      + 'modelPricing in settings for the true figure.'
+                    : 'Based on published rates for this model'}
+                  className={usage.costEstimated ? 'text-aico-muted' : undefined}
+                >
+                  {usage.costEstimated ? '~' : ''}${usage.costUsd.toFixed(4)}
+                  {usage.costEstimated && <span aria-label="estimated">?</span>}
+                </span>
+              )}
             </>
           )}
         </div>

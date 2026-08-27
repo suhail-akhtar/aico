@@ -27,6 +27,7 @@ import {
   currentGoal, currentAgent, feedbackBySeq, deliverables, trajectory,
 } from '../session/projections.js';
 import { personaFor, resolveAgent } from '../agents/resolve.js';
+import { activeProviderType } from '../providers/instances.js';
 import type { ImageRef } from '../providers/types.js';
 import { readFile } from 'fs/promises';
 import { summarizeLastTurn } from '../session/summary.js';
@@ -286,7 +287,13 @@ export class RunManager {
         },
         onTokens: (input, output, cached, cacheWrite) => emit('tokens', {
           input, output, cached, cacheWrite,
-          costUsd: run.tokenTracker.estimateCost(model),
+          costUsd: run.tokenTracker.estimateCost(model, settings),
+          // Sent so the reader is not shown an invented number as a fact. The
+          // engine has always known this; only the CLI ever said it.
+          costEstimated: run.tokenTracker.isEstimated(model, settings, activeProviderType(settings)),
+          // The other, independent way a figure can be soft: the provider
+          // reported no usage and these counts were derived from text length.
+          usageEstimated: run.tokenTracker.hasEstimatedUsage(),
         }),
       });
 
