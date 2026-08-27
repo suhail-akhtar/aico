@@ -230,3 +230,7 @@ export { gitTool } from './tools/git.js';
 export { matchKnowledge, renderKnowledge, meaningfulWords } from './knowledge/match.js';
 export { parseEntry, loadKnowledge, saveKnowledge, deleteKnowledge } from './knowledge/store.js';
 export { knowledgeTool } from './tools/knowledge.js';
+export {
+  beginCheckpoint, commitCheckpoint, listCheckpoints, restoreCheckpoint,
+  recordBeforeWrite, recordAfterWrite, resetCheckpoints, isRecording,
+} from './checkpoint/index.js';

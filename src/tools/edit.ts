@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'fs/promises';
 import { resolveInsideWorkspace } from './path.js';
+import { recordBeforeWrite, recordAfterWrite } from '../checkpoint/index.js';
 
 export interface EditInput {
   file_path: string;
@@ -9,6 +10,9 @@ export interface EditInput {
 
 export async function editFile(input: EditInput): Promise<string> {
   const resolved = resolveInsideWorkspace(input.file_path, 'file_path');
+  // Captured before the edit, so restore reaches the state the turn started
+  // from rather than the state before the most recent of several edits.
+  await recordBeforeWrite(resolved);
   const original = await readFile(resolved, 'utf8');
 
   const occurrences = countOccurrences(original, input.old_str);
@@ -26,6 +30,7 @@ export async function editFile(input: EditInput): Promise<string> {
 
   const updated = original.replace(input.old_str, input.new_str);
   await writeFile(resolved, updated, 'utf8');
+  await recordAfterWrite(resolved);
 
   const oldLines = input.old_str.split('\n').length;
   const newLines = input.new_str.split('\n').length;

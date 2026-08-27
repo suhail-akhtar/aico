@@ -25,6 +25,8 @@ import {
   extractSymbols, extractPurpose, overview, findSymbol, searchPurpose,
   gitTool,
   matchKnowledge, renderKnowledge, meaningfulWords, parseEntry,
+  beginCheckpoint, commitCheckpoint, listCheckpoints, restoreCheckpoint,
+  recordBeforeWrite, recordAfterWrite, resetCheckpoints, isRecording,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8997,6 +8999,111 @@ assert(renderKnowledge([]) === '', 'no matches renders nothing at all — not an
   assert(words.has('payments-service'), 'a hyphenated name stays one word');
   assert(words.has('user_id'), 'and so does a snake_case one');
   assert(!words.has('the'), 'while stopwords go');
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHECKPOINTS
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ CHECKPOINTS ══');
+
+{
+  const cpRoot = path.join(os.tmpdir(), `aico-cp-${Date.now()}`);
+  const store = path.join(cpRoot, 'store');
+  const work = path.join(cpRoot, 'work');
+  fs.mkdirSync(work, { recursive: true });
+
+  const existing = path.join(work, 'existing.txt');
+  const created = path.join(work, 'created.txt');
+  const touched = path.join(work, 'touched.txt');
+  fs.writeFileSync(existing, 'original contents');
+  fs.writeFileSync(touched, 'original too');
+
+  resetCheckpoints();
+  beginCheckpoint('a turn that changes things', store);
+
+  // A file that existed: recorded, then modified.
+  await recordBeforeWrite(existing);
+  fs.writeFileSync(existing, 'agent version');
+  await recordAfterWrite(existing);
+
+  // Modified twice — "before" must mean before the turn, not before the last
+  // edit, or restoring lands halfway through the work.
+  await recordBeforeWrite(existing);
+  fs.writeFileSync(existing, 'agent version 2');
+  await recordAfterWrite(existing);
+
+  // A file the agent created from nothing.
+  await recordBeforeWrite(created);
+  fs.writeFileSync(created, 'brand new');
+  await recordAfterWrite(created);
+
+  // One the agent wrote and somebody else has changed since.
+  await recordBeforeWrite(touched);
+  fs.writeFileSync(touched, 'agent wrote this');
+  await recordAfterWrite(touched);
+  fs.writeFileSync(touched, 'and then a human edited it');
+
+  const id = await commitCheckpoint();
+  assert(typeof id === 'string', 'the checkpoint is stored and gets an id');
+
+  const all = await listCheckpoints(store);
+  assert(all.length === 1, 'and can be listed back');
+  assert(all[0].label === 'a turn that changes things', 'with the label it was given');
+
+  // Preview must not touch anything — it is the call you make first.
+  const preview = await restoreCheckpoint(all[0], { dryRun: true });
+  assert(preview.restored.includes(existing), 'preview reports what it would restore');
+  assert(preview.removed.includes(created), 'and what it would remove');
+  assert(preview.skipped.includes(touched), 'and what it would refuse to touch');
+  assert(fs.readFileSync(existing, 'utf8') === 'agent version 2',
+    'while changing nothing on disk');
+  assert(fs.existsSync(created), 'and deleting nothing');
+
+  const report = await restoreCheckpoint(all[0]);
+
+  assert(fs.readFileSync(existing, 'utf8') === 'original contents',
+    'restore goes back to before the turn, not before the last edit');
+  assert(!fs.existsSync(created), 'a file the agent created is removed again');
+
+  // The safety property that makes the deletion above acceptable: anything
+  // changed since the agent wrote it is left completely alone.
+  assert(fs.readFileSync(touched, 'utf8') === 'and then a human edited it',
+    'a file edited after the agent wrote it is not reverted');
+  assert(report.skipped.includes(touched), 'and the report names it rather than counting it');
+  assert(report.restored.includes(existing) && report.removed.includes(created),
+    'the report says exactly what happened');
+
+  // Restoring twice is not an error and does not double-act.
+  const again = await restoreCheckpoint(all[0]);
+  assert(again.restored.length === 0 && again.removed.length === 0,
+    'a second restore finds nothing left to do');
+
+  fs.rmSync(cpRoot, { recursive: true, force: true });
+}
+
+// Recording is off unless a turn opened it, so a process with no workspace
+// captures nothing rather than failing.
+{
+  resetCheckpoints();
+  assert(isRecording() === false, 'nothing records by default');
+  const dir = path.join(os.tmpdir(), `aico-cp-none-${Date.now()}`);
+  const target = path.join(dir, 'x.txt');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(target, 'untouched');
+  await recordBeforeWrite(target);
+  assert(await commitCheckpoint() === undefined,
+    'and a checkpoint with nothing in it is not written');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// A turn that reads but never writes leaves no checkpoint behind.
+{
+  const store = path.join(os.tmpdir(), `aico-cp-empty-${Date.now()}`);
+  resetCheckpoints();
+  beginCheckpoint('a turn that only reads', store);
+  assert(isRecording() === true, 'recording is open');
+  assert(await commitCheckpoint() === undefined, 'but nothing is stored when nothing changed');
+  assert((await listCheckpoints(store)).length === 0, 'so the list stays empty');
 }
 
 // ═══════════════════════════════════════════════════════════

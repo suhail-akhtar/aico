@@ -72,6 +72,8 @@ import { setBrief } from './requirements.js';
 import { checkProjectGate, detectChecks, resetChecks } from './checks.js';
 import { skillCatalogue, matchingSkills } from './tools/skill.js';
 import { loadKnowledge } from './knowledge/store.js';
+import { beginCheckpoint, commitCheckpoint } from './checkpoint/index.js';
+import { checkpointDir } from './tools/checkpoint.js';
 import { matchKnowledge, renderKnowledge } from './knowledge/match.js';
 import { activeMemories } from './memory/store.js';
 import { currentCwd } from './run-context.js';
@@ -1361,6 +1363,20 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // the reader's screenshot.
   transcript.recordUserMessage(userMessage, undefined, opts.images);
 
+  // Recording starts here, before any tool can write, and captures each file
+  // as it was when the turn began. Only the root agent opens one: a sub-agent
+  // writes into the same tree, and its edits belong to the turn that delegated
+  // them — separate checkpoints per sub-agent would fragment one undo into
+  // several that have to be replayed in the right order.
+  //
+  // Off when there is no session workspace to write to, and off when the tool
+  // is disabled, so switching the feature off stops the recording too rather
+  // than leaving snapshots nobody can reach.
+  const checkpointStore = depth === 0 && !settings?.disabledTools?.includes('Checkpoint')
+    ? await checkpointDir().catch(() => undefined)
+    : undefined;
+  if (checkpointStore) beginCheckpoint(task.slice(0, 120), checkpointStore);
+
   let finalContent = '';
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -1974,6 +1990,11 @@ const MAX_COMPLETION_NUDGES = 2;
     if (timeoutTimer) clearTimeout(timeoutTimer);
     detachCallerAbort?.();
   }
+
+  // Written once the turn is over, so a checkpoint always describes a
+  // completed piece of work rather than a snapshot taken mid-edit. Nothing is
+  // stored when nothing was written.
+  if (checkpointStore) await commitCheckpoint();
 
   // ── Token tracking ─────────────────────────────────────────────────
   if (tokenTracker) {
