@@ -71,6 +71,8 @@ import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
 import { checkProjectGate, detectChecks, resetChecks } from './checks.js';
 import { skillCatalogue, matchingSkills } from './tools/skill.js';
+import { loadKnowledge } from './knowledge/store.js';
+import { matchKnowledge, renderKnowledge } from './knowledge/match.js';
 import { activeMemories } from './memory/store.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
@@ -1071,6 +1073,20 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         + 'If none of them actually fit, say so and carry on.',
       ].join('\n'),
     });
+  }
+
+  // Knowledge whose trigger matches this task, attached the same way and for
+  // the same reason: it varies per turn. In the system prompt it would change
+  // the prefix of every message behind it and re-bill the whole transcript —
+  // so the feature built to spend fewer tokens would spend more. Bounded in
+  // `renderKnowledge`, because it is paid in full here rather than read from
+  // cache.
+  //
+  // Honours `disabledTools`: switching the tool off switches the feature off,
+  // rather than leaving entries silently attaching with no way to inspect them.
+  if (!settings?.disabledTools?.includes('Knowledge')) {
+    const known = renderKnowledge(matchKnowledge(await loadKnowledge(currentCwd()), task, currentCwd()));
+    if (known) volatileDoc.add({ id: 'knowledge', body: known });
   }
 
   if (toolProfile === 'browser-qa') {

@@ -17,6 +17,7 @@ import { proposePlan, proposePlanDefinition } from './plan.js';
 import { runChecks, runChecksDefinition } from './run-checks.js';
 import { codeMap, codeMapDefinition } from './codemap.js';
 import { gitTool, gitDefinition } from './git.js';
+import { knowledgeTool, knowledgeDefinition } from './knowledge.js';
 import { useSkill, skillDefinition } from './skill.js';
 import { noteSourceChanged } from '../checks.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
@@ -192,6 +193,8 @@ export const toolDefinitions: ToolDefinition[] = [
   // One index, one HEAD, one staging area. Two git commands overlapping is
   // how a commit ends up containing half of somebody else's work.
   { ...gitDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
+  // Reads dominate, and a write is one small file — safe to overlap.
+  { ...knowledgeDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
   { ...webSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
   { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...todoReadDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
@@ -523,6 +526,9 @@ export async function executeTool(
       break;
     case 'Git':
       result = await gitTool(args as unknown as Parameters<typeof gitTool>[0]);
+      break;
+    case 'Knowledge':
+      result = await knowledgeTool(args as unknown as Parameters<typeof knowledgeTool>[0]);
       break;
     case 'ProposePlan':
       result = await proposePlan(args as unknown as Parameters<typeof proposePlan>[0]);

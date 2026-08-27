@@ -227,3 +227,6 @@ export {
 } from './codemap/index.js';
 export { extractSymbols, extractPurpose, languageFor } from './codemap/extract.js';
 export { gitTool } from './tools/git.js';
+export { matchKnowledge, renderKnowledge, meaningfulWords } from './knowledge/match.js';
+export { parseEntry, loadKnowledge, saveKnowledge, deleteKnowledge } from './knowledge/store.js';
+export { knowledgeTool } from './tools/knowledge.js';

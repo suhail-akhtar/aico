@@ -24,6 +24,7 @@ import {
   createChildTracker,
   extractSymbols, extractPurpose, overview, findSymbol, searchPurpose,
   gitTool,
+  matchKnowledge, renderKnowledge, meaningfulWords, parseEntry,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8895,6 +8896,107 @@ console.log('\n══ GIT TOOL GUARDS ══');
 
   const missing = await gitTool({ action: 'commit', message: '' });
   assert(missing.includes('requires a message'), 'a commit with no message says so');
+}
+
+// ═══════════════════════════════════════════════════════════
+// TRIGGER-CONDITIONED KNOWLEDGE
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ KNOWLEDGE ══');
+
+const entry = (id, trigger, content, scope) => ({
+  id, trigger, content, path: `/k/${id}.md`, ...(scope ? { scope } : {}),
+});
+
+const LIBRARY = [
+  entry('sql', 'when writing database queries in the payments service',
+    'Always use parameterised queries; never interpolate user input into SQL.'),
+  entry('css', 'when editing stylesheets or theme tokens',
+    'Use the design tokens; no raw hex values.'),
+  entry('deploy', 'when deploying to production',
+    'Deploys go through the pipeline, never by hand.'),
+];
+
+// The point of a trigger: guidance that is absent until it applies.
+{
+  const hits = matchKnowledge(LIBRARY, 'add a database query to the payments service');
+  assert(hits.length === 1 && hits[0].entry.id === 'sql', 'the relevant entry fires');
+
+  const none = matchKnowledge(LIBRARY, 'rename a variable in the logger');
+  assert(none.length === 0, 'and nothing fires when nothing applies — that is the saving');
+}
+
+// The failure that matters is a confident wrong match, so two guards: a
+// proportion of the trigger, and an absolute minimum number of words.
+{
+  const weak = matchKnowledge(LIBRARY, 'the production database is fine');
+  assert(!weak.some(h => h.entry.id === 'deploy'),
+    'one incidental word does not fire a short trigger');
+
+  const stop = matchKnowledge(LIBRARY, 'when you are in the and of it with this');
+  assert(stop.length === 0, 'stopwords carry no weight at all');
+}
+
+// Scope is a hard filter, not a weak signal: a convention for another
+// repository is the wrong answer, not a less likely one.
+{
+  const scoped = [entry('x', 'when writing database queries', 'Scoped rule.', '/repo/a')];
+  assert(matchKnowledge(scoped, 'writing database queries', '/repo/a').length === 1,
+    'it applies in its own project');
+  assert(matchKnowledge(scoped, 'writing database queries', '/repo/b').length === 0,
+    'and not in another');
+  assert(matchKnowledge(scoped, 'writing database queries').length === 0,
+    'nor outside a project at all');
+}
+
+// Ranked, so the most applicable is the one that survives the budget.
+{
+  const two = [
+    entry('broad', 'when writing queries', 'Broad.'),
+    entry('exact', 'when writing database queries in the payments service', 'Exact.'),
+  ];
+  const hits = matchKnowledge(two, 'writing database queries in the payments service');
+  assert(hits[0].entry.id === 'broad' || hits[0].score >= hits[1].score,
+    'results are ordered by score, best first');
+}
+
+// Bounded twice over, because this rides in the volatile tail and is paid in
+// full every turn. Unbounded here would cost more than the whole-file loading
+// it replaced — the exact failure the feature exists to avoid.
+{
+  const many = Array.from({ length: 30 }, (_, i) =>
+    entry(`e${i}`, 'when writing database queries', 'x'.repeat(400)));
+  const rendered = renderKnowledge(matchKnowledge(many, 'writing database queries'));
+  assert(rendered.length < 2600, `rendered block stays small (was ${rendered.length})`);
+  assert(rendered.includes('further entr'), 'and says how many it left out');
+  assert(rendered.includes('Knowledge tool'), 'pointing at how to see the rest');
+}
+assert(renderKnowledge([]) === '', 'no matches renders nothing at all — not an empty heading');
+
+// Parsing: a trigger is required. An entry without one would be an always-on
+// rule nobody wrote, applied everywhere.
+{
+  const good = parseEntry('a', '/k/a.md', '---\ntrigger: when doing X\n---\nDo it this way.');
+  assert(good && good.trigger === 'when doing X', 'frontmatter trigger is read');
+  assert(good.content === 'Do it this way.', 'and the body is the guidance');
+
+  assert(parseEntry('b', '/k/b.md', '---\nscope: all\n---\nBody.') === undefined,
+    'no trigger means the entry is skipped, not promoted to always-on');
+  assert(parseEntry('c', '/k/c.md', 'Just a body, no frontmatter.') === undefined,
+    'and a file with no frontmatter is not an entry');
+  assert(parseEntry('d', '/k/d.md', '---\ntrigger: x\n---\n\n   ') === undefined,
+    'nor one with a trigger and nothing to say');
+
+  const quoted = parseEntry('e', '/k/e.md', '---\ntrigger: "when quoted"\nscope: all\n---\nBody.');
+  assert(quoted.trigger === 'when quoted', 'quotes are stripped');
+  assert(quoted.scope === undefined, 'and scope:all means no scope rather than a project called all');
+}
+
+// Intra-word punctuation is meaning in code, not noise.
+{
+  const words = meaningfulWords('the payments-service uses user_id from v2.api');
+  assert(words.has('payments-service'), 'a hyphenated name stays one word');
+  assert(words.has('user_id'), 'and so does a snake_case one');
+  assert(!words.has('the'), 'while stopwords go');
 }
 
 // ═══════════════════════════════════════════════════════════
