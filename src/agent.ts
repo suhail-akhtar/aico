@@ -1432,10 +1432,31 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     }
 
     if (limits.maxCostPerSession && limits.maxCostPerSession > 0) {
-      const cost = tokenTracker.estimateCost(model);
+      const cost = tokenTracker.estimateCost(model, settings);
       if (cost > limits.maxCostPerSession) {
         return `cost limit reached ($${cost.toFixed(4)} > `
           + `$${limits.maxCostPerSession} maxCostPerSession)`;
+      }
+    }
+
+    // Delegated work is held to its own ceiling as well. Inside a sub-agent
+    // `tokenTracker` is that agent's own — see `createChildTracker` — so these
+    // measure what this one agent spent rather than what the session did.
+    // Without it, one looping researcher among six running in parallel is
+    // indistinguishable from six behaving normally until the whole budget is
+    // gone and the other five are cut off for its mistake.
+    if (depth > 0) {
+      if (limits.maxTokensPerSubagent && limits.maxTokensPerSubagent > 0
+          && total > limits.maxTokensPerSubagent) {
+        return `sub-agent token limit reached (${total.toLocaleString()} > `
+          + `${limits.maxTokensPerSubagent.toLocaleString()} maxTokensPerSubagent)`;
+      }
+      if (limits.maxCostPerSubagent && limits.maxCostPerSubagent > 0) {
+        const cost = tokenTracker.estimateCost(model, settings);
+        if (cost > limits.maxCostPerSubagent) {
+          return `sub-agent cost limit reached ($${cost.toFixed(4)} > `
+            + `$${limits.maxCostPerSubagent} maxCostPerSubagent)`;
+        }
       }
     }
     return undefined;

@@ -21,6 +21,7 @@ import {
   getOpenTodoCount, todoWrite, retireTodos,
   imageDimensions, describeOversize, projectImages, budgetImages,
   compareVersions, highestVersion, repoSlug, updateNotice,
+  createChildTracker,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8623,6 +8624,77 @@ assert(compareVersions('0.3.0', '0.3.1') < 0, 'and older is older');
   assert(notice.includes('0.3.0') && notice.includes('0.4.0'), 'both versions are named');
   assert(notice.includes('npx @suhail-akhtar/aico@latest'),
     'and the npx command, which is what an npx user needs and would not guess');
+}
+
+// ═══════════════════════════════════════════════════════════
+// PER-SUB-AGENT BUDGETS
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ PER-SUB-AGENT BUDGETS ══');
+
+// The case the session ceiling cannot see: several agents in parallel all
+// charge one total, so a looping one is indistinguishable from several
+// behaving normally until the whole budget is gone — and then the innocent
+// ones are cut off for its mistake.
+{
+  const parent = createTokenTracker();
+  const a = createChildTracker(parent);
+  const b = createChildTracker(parent);
+  const c = createChildTracker(parent);
+
+  a.add(1000, 100);
+  b.add(1000, 100);
+  c.add(50_000, 5000);   // the one that ran away
+
+  assert(a.getUsage().inputTokens === 1000, 'each child sees only its own spend');
+  assert(b.getUsage().inputTokens === 1000, 'and not its siblings');
+  assert(c.getUsage().inputTokens === 50_000, 'including the expensive one');
+  assert(parent.getUsage().inputTokens === 52_000,
+    'while the parent still sees the total, so session accounting is unchanged');
+  assert(parent.getUsage().outputTokens === 5200, 'output too');
+}
+
+// Cache counts and the estimated-usage flag have to survive the forwarding,
+// or a child would report cache hits its parent never learned about.
+{
+  const parent = createTokenTracker();
+  const child = createChildTracker(parent);
+  child.add(1000, 100, 800, 50);
+  assert(parent.getUsage().cachedTokens === 800, 'cache reads reach the parent');
+  assert(parent.getUsage().cacheWriteTokens === 50, 'and cache writes');
+  assert(child.getUsage().cachedTokens === 800, 'and stay on the child');
+
+  const p2 = createTokenTracker();
+  const c2 = createChildTracker(p2);
+  c2.add(10, 10, 0, 0, false);
+  assert(c2.hasEstimatedUsage() === true, 'an unmeasured child says so');
+  assert(p2.hasEstimatedUsage() === true, 'and the parent inherits the doubt');
+}
+
+// A child's cost is its own, which is what a per-agent ceiling compares against.
+{
+  const parent = createTokenTracker();
+  const cheap = createChildTracker(parent);
+  const dear = createChildTracker(parent);
+  cheap.add(100_000, 0);
+  dear.add(1_000_000, 0);
+  const settings = { modelPricing: { 'x/y': { input: 1, output: 1 } } };
+  assert(Math.abs(cheap.estimateCost('x/y', settings) - 0.1) < 0.0001,
+    'the frugal child is costed at its own usage');
+  assert(Math.abs(dear.estimateCost('x/y', settings) - 1.0) < 0.0001,
+    'and the expensive one at its own');
+  assert(Math.abs(parent.estimateCost('x/y', settings) - 1.1) < 0.0001,
+    'the parent at the sum');
+}
+
+// Grandchildren: a sub-agent that delegates further still rolls all the way up.
+{
+  const root = createTokenTracker();
+  const child = createChildTracker(root);
+  const grandchild = createChildTracker(child);
+  grandchild.add(500, 50);
+  assert(grandchild.getUsage().inputTokens === 500, 'the grandchild has its own');
+  assert(child.getUsage().inputTokens === 500, 'its parent sees it');
+  assert(root.getUsage().inputTokens === 500, 'and so does the root');
 }
 
 // ═══════════════════════════════════════════════════════════

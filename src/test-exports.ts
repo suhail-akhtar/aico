@@ -220,3 +220,4 @@ export {
   compareVersions, highestVersion, repoSlug, updateNotice,
   refreshUpdateCache, pendingUpdate,
 } from './update-check.js';
+export { createChildTracker } from './tokens.js';

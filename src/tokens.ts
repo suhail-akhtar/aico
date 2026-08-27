@@ -264,3 +264,43 @@ export function estimateTokens(text: string): number {
   }
   return Math.ceil(ascii / 4 + nonAscii / 1.5);
 }
+
+/**
+ * A tracker for one sub-agent that also feeds its parent's totals.
+ *
+ * Sub-agents used to share the parent's tracker outright, which kept session
+ * accounting correct and made per-agent accounting impossible: with four
+ * researchers running in parallel against one tracker, none of them can tell
+ * its own spend from its siblings'. A runaway agent was therefore invisible
+ * until it had consumed the whole session's budget on everyone's behalf.
+ *
+ * This keeps its own counters and forwards every entry upward, so the child
+ * can be held to a ceiling of its own while the parent still sees the total.
+ *
+ * One consequence, stated because it is a real limit rather than an oversight:
+ * inside a child, the *session* ceiling is measured against the child's own
+ * numbers and so will not fire there. The parent re-checks at its next step
+ * boundary with the full picture, and the per-sub-agent ceiling is what stops
+ * a single child before it gets that far. The two are meant to be set
+ * together.
+ */
+export function createChildTracker(parent: ReturnType<typeof createTokenTracker>) {
+  const child = createTokenTracker();
+  return {
+    ...child,
+    add(input: number, output: number, cached = 0, cacheWrite = 0, measured = true): void {
+      child.add(input, output, cached, cacheWrite, measured);
+      parent.add(input, output, cached, cacheWrite, measured);
+    },
+    // Bound explicitly rather than left to the spread: the methods above close
+    // over `child`'s own state, and a spread copies the function references
+    // without rebinding `this` for the ones that use it.
+    getUsage: () => child.getUsage(),
+    estimateCost: (model: string, settings?: AicoSettings) => child.estimateCost(model, settings),
+    isEstimated: (model: string, settings?: AicoSettings, providerType?: string) =>
+      child.isEstimated(model, settings, providerType),
+    hasEstimatedUsage: () => child.hasEstimatedUsage(),
+    format: (model?: string, settings?: AicoSettings, providerType?: string) =>
+      child.format(model, settings, providerType),
+  };
+}

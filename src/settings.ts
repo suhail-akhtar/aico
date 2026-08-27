@@ -351,7 +351,39 @@ export interface AicoSettings {
     maxCostPerSession?: number;
     /** Stop once cumulative input+output tokens exceed this. */
     maxTokensPerSession?: number;
+    /**
+     * USD, per delegated sub-agent, measured against that agent's own spend.
+     *
+     * The session ceiling cannot do this job. Six researchers running in
+     * parallel all charge the same session total, so one that loops is
+     * indistinguishable from six behaving normally until the whole budget is
+     * gone — and by then the other five have been cut off too, for someone
+     * else's fault.
+     */
+    maxCostPerSubagent?: number;
+    /** Tokens, per delegated sub-agent, measured against its own spend. */
+    maxTokensPerSubagent?: number;
   };
+  /**
+   * Which model each kind of delegated agent runs on.
+   *
+   * The largest cost lever there is, and until now unpulled: every sub-agent
+   * inherited the parent's model, so a fleet of explorers running greps and
+   * file reads was billed at the rate of the model chosen for the hardest
+   * reasoning in the session.
+   *
+   * Deliberately not defaulted. AICO cannot know which cheap model your
+   * provider serves, and silently demoting sub-agents to a weaker one would
+   * trade accuracy for budget without being asked — the two things most in
+   * tension here. Naming a model is how you make that trade explicitly.
+   *
+   * Keys are agent types: `explore`, `plan`, `qa`, `review`, `security-audit`,
+   * `architect`, `devops`, or any custom agent's name. `default` applies to
+   * any type not otherwise listed.
+   *
+   * Example: { "explore": "gpt-4o-mini", "qa": "gpt-4o-mini" }
+   */
+  agentModels?: Record<string, string>;
   /**
    * Repeat-tool loop breaker. Advisory: it never blocks a call, it injects an
    * escalating reminder when the model repeats one verbatim. The completion
@@ -408,6 +440,7 @@ const MERGED_SECTIONS = [
   'mcpSecurity', 'skills', 'memory', 'cron', 'promptCaching', 'contextWindows',
   'modelCapabilities',
   'modelPricing',
+  'agentModels',
   'completionGate', 'safetyLimits', 'repeatGuard', 'sandbox', 'sessionTitles',
 ] as const satisfies ReadonlyArray<keyof AicoSettings>;
 

@@ -1,3 +1,4 @@
+import { createChildTracker } from '../tokens.js';
 import crypto from 'crypto';
 import type { SubAgentType } from './index.js';
 import { runHooks } from '../hooks.js';
@@ -282,9 +283,19 @@ export async function runTask(
   }
 
   // ── Model resolution ──────────────────────────────────────────────
-  // Priority: explicit args.model > agent_spec.model > parent opts.model
+  //
+  // Priority: explicit args.model > agent_spec.model > settings.agentModels
+  // for this role > parent opts.model.
+  //
+  // The settings layer sits below anything explicit and above the parent's
+  // model, which is the useful place for it: a caller that named a model meant
+  // it, and everything else used to silently inherit whatever the session was
+  // set to. A fleet of explorers running greps was billed at the rate chosen
+  // for the session's hardest reasoning.
   const IMPLEMENTATION_AGENTS = new Set(['frontend', 'backend', 'qa', 'healer']);
-  const requestedModel = resolvedModel ?? args.model ?? opts.model;
+  const roleModel = opts.settings?.agentModels?.[agentType]
+    ?? opts.settings?.agentModels?.default;
+  const requestedModel = resolvedModel ?? args.model ?? roleModel ?? opts.model;
   const agentModel = (
     IMPLEMENTATION_AGENTS.has(agentType) && requestedModel.includes('haiku')
   ) ? opts.model : requestedModel;
@@ -408,7 +419,10 @@ export async function runTask(
       //   planMode     a read-only parent must not delegate writes.
       ...(opts.settings ? { settings: opts.settings } : {}),
       ...(opts.context ? { context: opts.context } : {}),
-      ...(opts.tokenTracker ? { tokenTracker: opts.tokenTracker } : {}),
+      // Its own tracker, forwarding to the parent's. Session accounting is
+      // unchanged; what this adds is the ability to tell one agent's spend
+      // from its siblings', which is what `maxCostPerSubagent` measures.
+      ...(opts.tokenTracker ? { tokenTracker: createChildTracker(opts.tokenTracker) } : {}),
       ...(opts.planMode ? { planMode: true } : {}),
       // Pass the resolved spec tools so runAgent uses the custom whitelist
       // instead of the hardcoded SUBAGENT_TOOL_SETS for this agent type.
