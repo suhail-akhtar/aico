@@ -3200,7 +3200,13 @@ console.log('\n══ 31. SUB-AGENT INHERITANCE AUDIT ══');
   assert(/settings: opts\.settings/.test(call),
     'settings are forwarded (hooks, safetyLimits, timeouts, provider config)');
   assert(/context: opts\.context/.test(call), 'capability context is forwarded');
-  assert(/tokenTracker: opts\.tokenTracker/.test(call), 'token tracker is shared');
+  // Wrapped rather than passed straight through, so the child can be held to a
+  // ceiling of its own — but it must still forward, or delegated spend would
+  // stop counting toward the session cap and the ceiling would be escapable in
+  // exactly one Task call. The assertion checks the parent's tracker is the
+  // thing being wrapped, which is what makes the forwarding real.
+  assert(/tokenTracker: createChildTracker\(opts\.tokenTracker\)/.test(call),
+    'delegated spend still reaches the session tracker, via a per-agent child');
   assert(/planMode: true/.test(call), 'plan mode is forwarded');
   assert(/abortSignal: abortController\.signal/.test(call), 'abort is wired');
 
