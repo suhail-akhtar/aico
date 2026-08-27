@@ -23,6 +23,7 @@ import {
   compareVersions, highestVersion, repoSlug, updateNotice,
   createChildTracker,
   extractSymbols, extractPurpose, overview, findSymbol, searchPurpose,
+  gitTool,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8822,6 +8823,78 @@ assert(extractSymbols('anything at all', 'cobol').length === 0,
   const miss = findSymbol(map, 'nowhere');
   assert(miss.includes('Grep'), 'a miss points at the tool that would find it');
   assert(overview(map).includes('No indexable source'), 'and an empty project says so');
+}
+
+// ═══════════════════════════════════════════════════════════
+// GIT TOOL GUARDS
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ GIT TOOL GUARDS ══');
+
+// Every assertion below runs against this repository and must not change it.
+// The refusals all return before touching git, and status/log only read.
+
+// Through Bash these rules are requests in a prompt, which a model may decline.
+// Here they are conditions on the call.
+{
+  const refused = await gitTool({ action: 'commit', message: 'straight to trunk' });
+  assert(/Refusing to commit directly to (main|master)/.test(refused),
+    'committing to the default branch is refused, not discouraged');
+  assert(refused.includes('allowDefaultBranch'),
+    'and the refusal names the way through, so it is a rule rather than a wall');
+  assert(refused.includes('branch'), 'and suggests the branch action first');
+}
+
+// The overwhelmingly common accident is a .env swept up by staging everything.
+{
+  for (const secret of ['.env', 'config/.env.production', 'deploy/id_rsa', 'certs/server.pem',
+    'gcp/service-account-key.json', '.npmrc']) {
+    const refused = await gitTool({
+      action: 'commit', message: 'x', paths: [secret], allowDefaultBranch: true,
+    });
+    assert(refused.startsWith('Refusing to commit what looks like credentials'),
+      `${secret} is refused`);
+  }
+  // Refused rather than filtered: a commit that quietly drops a file the caller
+  // named is a different commit from the one it thinks it made.
+  const mixed = await gitTool({
+    action: 'commit', message: 'x', paths: ['src/index.ts', '.env'], allowDefaultBranch: true,
+  });
+  assert(mixed.startsWith('Refusing'), 'one bad path refuses the whole commit');
+  assert(mixed.includes('.env') && !mixed.includes('src/index.ts'),
+    'and says which path was the problem');
+}
+
+// A file that merely looks similar is not a secret.
+{
+  const fine = await gitTool({
+    action: 'commit', message: 'x', paths: ['src/environment.ts'], allowDefaultBranch: true,
+  });
+  assert(!fine.startsWith('Refusing to commit what looks like credentials'),
+    'environment.ts is not a .env');
+}
+
+// A branch name is model-generated text. It reaches execFile as an argument
+// rather than a shell string, and is validated before it gets that far.
+{
+  for (const bad of ['oops; rm -rf /', 'a b', '--force', 'x$(whoami)', 'back`tick`']) {
+    const refused = await gitTool({ action: 'branch', message: bad });
+    assert(refused.startsWith('Refusing'), `${JSON.stringify(bad)} is not a branch name`);
+  }
+  assert((await gitTool({ action: 'branch', message: '' })).includes('requires a name'),
+    'and an empty one says what is missing');
+}
+
+// Reads work and are shaped, so the model is not parsing porcelain itself.
+{
+  const status = await gitTool({ action: 'status' });
+  assert(/^On \S+/.test(status), 'status leads with the branch');
+  assert(/ahead|behind|no upstream/.test(status), 'and says where it stands against upstream');
+
+  const log = await gitTool({ action: 'log' });
+  assert(log.split('\n').length <= 16, 'log is bounded');
+
+  const missing = await gitTool({ action: 'commit', message: '' });
+  assert(missing.includes('requires a message'), 'a commit with no message says so');
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -226,3 +226,4 @@ export {
   findSymbol, searchPurpose, resetCodeMapCache,
 } from './codemap/index.js';
 export { extractSymbols, extractPurpose, languageFor } from './codemap/extract.js';
+export { gitTool } from './tools/git.js';
