@@ -524,6 +524,7 @@ function resolveToolSet(opts: {
   agentSpecTools?: string[] | 'all' | 'readonly';
   toolProfile?: AgentToolProfile;
   planMode?: boolean;
+  settings?: AicoSettings;
 }): ResolvedToolSet {
   let defs: ToolDefinition[];
   let dispatch: ResolvedToolSet['dispatch'];
@@ -546,12 +547,27 @@ function resolveToolSet(opts: {
     defs = defs.filter(d => PLAN_MODE_TOOLS.has(d.name));
   }
 
+  // Last, so it overrides every selection above it. One list, applied in one
+  // place, is what makes a capability removable without editing the code that
+  // offers it — and applying it here rather than at each call site means a
+  // tool switched off for the session is also switched off for every
+  // sub-agent, which is the only reading of "off" that is not a loophole.
+  const disabled = opts.settings?.disabledTools;
+  if (disabled?.length) {
+    const off = new Set(disabled);
+    defs = defs.filter(d => !off.has(d.name));
+  }
+
   return { defs, dispatch };
 }
 
 /** Tools a plan-mode run may use. Read-only by construction. */
 const PLAN_MODE_TOOLS = new Set([
   'Read', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead',
+  // Read-only, and orientation is most of what a planning turn does. Leaving
+  // it out would make planning the one mode that still has to Glob its way
+  // around a project it could have asked about once.
+  'CodebaseMap',
   // How a planning turn ends. Without it the only way to deliver a plan was
   // prose, which can be read and cannot be answered.
   'ProposePlan',
@@ -738,6 +754,7 @@ function buildToolDefs(opts: {
   planMode?: boolean;
   toolProfile?: AgentToolProfile;
   agentSpecTools?: string[] | 'all' | 'readonly';
+  settings?: AicoSettings;
 }): ToolDef[] {
   return resolveToolSet(opts).defs.map(d => ({
     name: d.name,
@@ -1200,6 +1217,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     agentType: opts.agentType, planMode: opts.planMode, toolProfile,
     ...(toolRegistry ? { toolRegistry } : {}),
     ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
+    ...(settings ? { settings } : {}),
   });
   // Add Task tool def
   if (depth < 4 && toolProfile !== 'browser-qa') {

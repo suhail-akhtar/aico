@@ -15,6 +15,7 @@ import { terminal, terminalDefinition } from './terminal.js';
 import { observe, blockedReason } from './observation.js';
 import { proposePlan, proposePlanDefinition } from './plan.js';
 import { runChecks, runChecksDefinition } from './run-checks.js';
+import { codeMap, codeMapDefinition } from './codemap.js';
 import { useSkill, skillDefinition } from './skill.js';
 import { noteSourceChanged } from '../checks.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
@@ -127,24 +128,31 @@ export type SubAgentType =
   | 'frontend' | 'backend' | 'qa' | 'architect'
   | 'tech-writer' | 'product-owner' | 'healer' | 'studio-orchestrator';
 
-/** Tool sets by sub-agent type */
+/**
+ * Tool sets by sub-agent type.
+ *
+ * `CodebaseMap` is in every read-oriented set on purpose: those agents start
+ * their work by finding out where things are, and without it each one repeats
+ * the Glob-and-Grep opening sequence its siblings just ran — the cost a shared
+ * index exists to pay once.
+ */
 const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
   // Core
   general: 'all',
-  explore: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd']),
-  plan: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  explore: new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd']),
+  plan: new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
   // VerifyApp included: an agent whose only job is verification could not, until
   // now, open the page it was asked to verify.
   verification: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp']),
-  'security-audit': new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  'security-audit': new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
   // Project orchestrator — full access (it spawns specialists)
   project: 'all',
   // DevOps — full access to create IaC files + run infrastructure commands
   devops: 'all',
   // DevSecOps — read-only + Bash for running scanners (no file modification)
-  devsecops: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  devsecops: new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
   // Code review — read-only + Bash for running linters/tests
-  review: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite']),
+  review: new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite']),
   // Studio — implementation agents (full access)
   frontend: 'all',
   backend: 'all',
@@ -152,9 +160,9 @@ const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
   'studio-orchestrator': 'all',
   'tech-writer': 'all',
   // Studio — constrained agents
-  qa: new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers', 'ListMcpResources', 'ReadMcpResource', 'WorkspaceInfo', 'WorkspaceWrite', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead']),
-  architect: new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite']),
-  'product-owner': new Set(['Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch']),
+  qa: new Set(['CodebaseMap', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers', 'ListMcpResources', 'ReadMcpResource', 'WorkspaceInfo', 'WorkspaceWrite', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead']),
+  architect: new Set(['CodebaseMap', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite']),
+  'product-owner': new Set(['CodebaseMap', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch']),
 };
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -178,6 +186,8 @@ export const toolDefinitions: ToolDefinition[] = [
   // outputs and lock files, and the verdict the gate reads must belong to one
   // known state of the tree.
   { ...runChecksDefinition, isConcurrencySafe: false, maxResultSizeChars: 40_000 },
+  // Read-only and answered from a cached index, so several may overlap freely.
+  { ...codeMapDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
   { ...webSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
   { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...todoReadDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
@@ -503,6 +513,9 @@ export async function executeTool(
       break;
     case 'RunChecks':
       result = await runChecks(args as unknown as Parameters<typeof runChecks>[0]);
+      break;
+    case 'CodebaseMap':
+      result = await codeMap(args as unknown as Parameters<typeof codeMap>[0]);
       break;
     case 'ProposePlan':
       result = await proposePlan(args as unknown as Parameters<typeof proposePlan>[0]);

@@ -22,6 +22,7 @@ import {
   imageDimensions, describeOversize, projectImages, budgetImages,
   compareVersions, highestVersion, repoSlug, updateNotice,
   createChildTracker,
+  extractSymbols, extractPurpose, overview, findSymbol, searchPurpose,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
   maybeAutoCompactConversation,
   getContextWindow,
@@ -8701,6 +8702,126 @@ console.log('\n══ PER-SUB-AGENT BUDGETS ══');
   assert(grandchild.getUsage().inputTokens === 500, 'the grandchild has its own');
   assert(child.getUsage().inputTokens === 500, 'its parent sees it');
   assert(root.getUsage().inputTokens === 500, 'and so does the root');
+}
+
+// ═══════════════════════════════════════════════════════════
+// CODEBASE MAP
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ CODEBASE MAP ══');
+
+// Symbols: only unambiguous declarations at the start of a line. A missed
+// symbol costs one Grep; an invented one sends the agent somewhere that does
+// not exist, so the rules refuse to guess.
+{
+  const ts = [
+    'export function alpha() {}',
+    'export async function beta() {}',
+    'export class Gamma {}',
+    'export interface Delta {}',
+    'export type Epsilon = string;',
+    'export const zeta = 1;',
+    'function notExported() {}',
+    'const alsoNot = 2;',
+    '// export function commentedOut() {}',
+  ].join('\n');
+  const found = extractSymbols(ts, 'ts');
+  for (const name of ['alpha', 'beta', 'Gamma', 'Delta', 'Epsilon', 'zeta']) {
+    assert(found.includes(name), `${name} is exported and indexed`);
+  }
+  assert(!found.includes('notExported'), 'a private helper is not surfaced');
+  assert(!found.includes('alsoNot'), 'nor a private const');
+  assert(!found.includes('commentedOut'), 'nor one inside a comment');
+}
+
+// The regexes are module-level and stateful with /g. Without resetting
+// lastIndex the second call over the same source returns different results —
+// a genuinely baffling bug to meet in the wild.
+{
+  const src = 'export function only() {}';
+  const first = extractSymbols(src, 'ts');
+  const second = extractSymbols(src, 'ts');
+  assert(first.length === 1 && second.length === 1,
+    'the same input gives the same answer twice');
+  assert(first[0] === second[0], 'and it is the same answer');
+}
+
+// Other languages, each with its own idea of "exported".
+assert(extractSymbols('def handler():\n  pass\nclass Thing:\n  pass', 'py').join() === 'handler,Thing',
+  'Python takes top-level defs and classes');
+assert(extractSymbols('func Exported() {}\nfunc unexported() {}', 'go').join() === 'Exported',
+  'Go capitalisation is what exported means, and the index honours it');
+assert(extractSymbols('pub fn visible() {}\nfn hidden() {}', 'rs').join() === 'visible',
+  'Rust takes pub only');
+assert(extractSymbols('anything at all', 'cobol').length === 0,
+  'an unknown language yields nothing rather than nonsense');
+
+// Purpose: the first sentence of the file's own doc comment.
+{
+  const doc = '/**\n * Reads a thing and returns it. More detail follows here.\n *\n * @module x\n */\nexport const a = 1;';
+  assert(extractPurpose(doc, 'ts') === 'Reads a thing and returns it.',
+    'the first sentence only, not the whole paragraph');
+
+  const licensed = '/**\n * Copyright 2026 Someone. All rights reserved.\n */\n/**\n * The actual purpose.\n */';
+  assert(extractPurpose(licensed, 'ts') === 'The actual purpose.',
+    'a licence header is skipped rather than reported as the purpose');
+
+  const tagged = '/**\n * @module thing\n * What it really does.\n */';
+  assert(extractPurpose(tagged, 'ts') === 'What it really does.',
+    'a tag line describes the docs, not the code');
+
+  const slashes = '// A small helper for dates.\n// Second line.\nexport const x = 1;';
+  assert(extractPurpose(slashes, 'ts') === 'A small helper for dates.',
+    'a run of line comments counts too');
+
+  const py = '"""Talks to the database."""\nimport os';
+  assert(extractPurpose(py, 'py') === 'Talks to the database.', 'and a Python docstring');
+
+  assert(extractPurpose('export const x = 1;', 'ts') === undefined,
+    'a file with no doc comment says nothing rather than inventing a summary');
+}
+
+// A comment that is not at the top describes that part of the file, not the
+// file — presenting it as the purpose is worse than having none.
+{
+  const mid = 'import x from "y";\nexport const a = 1;\n/**\n * Helper for the loop below.\n */\n';
+  const purpose = extractPurpose(mid, 'ts');
+  assert(purpose !== 'Helper for the loop below.',
+    'a mid-file comment is not promoted to the file summary');
+}
+
+// Queries are bounded. An unbounded answer against a large map hands back more
+// than the exploration it was built to replace — the same failure by another
+// route.
+{
+  const files = Array.from({ length: 500 }, (_, i) => ({
+    path: `src/mod${i}/file.ts`,
+    purpose: 'Handles caching of things.',
+    symbols: [`sym${i}`],
+    bytes: 100,
+    mtimeMs: 0,
+  }));
+  const map = { root: '/x', builtAt: Date.now(), files, unparsed: 0, skipped: 0 };
+
+  const searched = searchPurpose(map, 'caching');
+  assert(searched.split('\n').length < 120, 'search output is capped');
+  assert(searched.includes('more'), 'and says how much it left out');
+
+  const listed = overview(map);
+  assert(listed.split('\n').length < 60, 'overview is capped too');
+
+  const exact = findSymbol(map, 'sym7');
+  assert(exact.includes('src/mod7/file.ts'), 'an exact symbol match is found');
+  assert(!exact.includes('src/mod70/file.ts') || exact.indexOf('src/mod7/file.ts') < exact.indexOf('src/mod70/file.ts'),
+    'and ranks above the ones that merely contain it');
+}
+
+// A miss says what the index does not cover, so the agent knows to use Grep
+// rather than concluding the symbol does not exist.
+{
+  const map = { root: '/x', builtAt: Date.now(), files: [], unparsed: 0, skipped: 0 };
+  const miss = findSymbol(map, 'nowhere');
+  assert(miss.includes('Grep'), 'a miss points at the tool that would find it');
+  assert(overview(map).includes('No indexable source'), 'and an empty project says so');
 }
 
 // ═══════════════════════════════════════════════════════════

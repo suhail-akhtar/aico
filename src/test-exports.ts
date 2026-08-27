@@ -221,3 +221,8 @@ export {
   refreshUpdateCache, pendingUpdate,
 } from './update-check.js';
 export { createChildTracker } from './tokens.js';
+export {
+  buildCodeMap, overview, listDirectory as codeMapListDirectory,
+  findSymbol, searchPurpose, resetCodeMapCache,
+} from './codemap/index.js';
+export { extractSymbols, extractPurpose, languageFor } from './codemap/extract.js';

@@ -384,6 +384,21 @@ export interface AicoSettings {
    * Example: { "explore": "gpt-4o-mini", "qa": "gpt-4o-mini" }
    */
   agentModels?: Record<string, string>;
+
+  /**
+   * Tools to switch off, by name.
+   *
+   * The seam that makes a capability removable without editing the code that
+   * offers it. Applied after every other tool selection and before any agent
+   * sees the list, so a tool switched off here is off for sub-agents too —
+   * the only reading of "off" that is not a loophole.
+   *
+   * Use it to drop a feature you do not want paying for in the tool schema, or
+   * to narrow what an install is allowed to do at all.
+   *
+   * Example: { "disabledTools": ["CodebaseMap", "WebSearch"] }
+   */
+  disabledTools?: string[];
   /**
    * Repeat-tool loop breaker. Advisory: it never blocks a call, it injects an
    * escalating reminder when the model repeats one verbatim. The completion
