@@ -28,7 +28,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.4.0 serve
+npx github:suhail-akhtar/aico#v0.4.1 serve
 ```
 
 ## Why this one
@@ -67,10 +67,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.4.0 serve
+npx github:suhail-akhtar/aico#v0.4.1 serve
 ```
 
-`#v0.4.0` is a tag, so it pins that release. `#release/v0.4` follows the 0.4
+`#v0.4.1` is a tag, so it pins that release. `#release/v0.4` follows the 0.4
 line as it gets fixes, and `#main` is the development trunk.
 
 From source:

@@ -3,6 +3,45 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.4.1 — 2026-08-29
+
+Everything here was found by running the thing rather than testing it. The
+suite was green for all of it, before and after.
+
+### Fixed
+
+- **A repair no longer goes on an expedition.** Pressing Fix on a diagram sent
+  the agent hunting: scratch directories, two npm installs, a thirty-one-minute
+  hang, a search for which mermaid version the renderer bundles — for a fix that
+  was one pair of quotation marks. The repair turn now carries the block's spec
+  inline, is told the parser error names where it stopped rather than what is
+  wrong, and runs with a toolset of exactly one entry. Twenty-odd tool calls
+  became zero or one, and thirty-one minutes became about ten seconds.
+- **A correction is visible without reloading.** The repair wrote the right
+  block to the log and the broken widget went on showing the failure until the
+  page was reloaded. `widgetFixes` had a frozen identity so the transcript's
+  memo would survive a streaming turn — but a memo that never breaks also does
+  not break when there is finally something new to draw. It is now keyed on the
+  replacements, which change once per repair rather than once per chunk.
+- The install instructions pointed at other people's software: `npx aico` and
+  `npm install -g aico` install an unrelated package, and the clone URL was
+  missing a hyphen and 404s.
+- `prepare` swallowed build failures. It ended in `|| exit 0` — there for a real
+  reason, since a published tarball has no `src/` to build — but it made every
+  failure succeed, so a broken build reported a successful install and surfaced
+  later as a missing `dist/index.js`.
+
+### Changed
+
+- Diagrams are themed: softer surfaces, borders carrying the identity, and
+  groups as background rather than hard dashed boxes. This was reverted in
+  0.4.0 on the belief it broke `architecture-beta`. It did not — the cause was
+  a CSS selector matching mermaid's nested per-icon SVGs. The probe that
+  cleared the theme at the time was wrong twice over: it built a two-service
+  diagram when every failure had seven, and asked whether anything rendered
+  when the symptom was rendering outside the viewBox. Both are now permanent
+  cases in the diagram matrix.
+
 ## 0.4.0 — 2026-08-28
 
 A release about the chat surface: what the agent can draw, and what happens
