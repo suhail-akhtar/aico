@@ -16,17 +16,17 @@ when a drawing goes wrong.
   back to the composer. The cut is a turn rather than a message, because a tool
   call and the result answering it can be several events apart and every
   provider rejects a request holding one without the other.
-- **Dashboards in the chat.** A ```dashboard block takes KPI tiles with
+- **Dashboards in the chat.** A `dashboard` block takes KPI tiles with
   sparklines and a responsive grid of chart, viz and table panels — one fence,
   one board, one frame. Asked for "a single dashboard view" the agent used to
   write a standalone HTML file, correctly, because chat blocks are one per fence
   and nothing else was possible.
-- **Statistical graphics** through a ```viz block (Vega-Lite). Binning,
+- **Statistical graphics** through a `viz` block (Vega-Lite). Binning,
   aggregation, regression, loess, density, quantiles, window functions, box
   plots, error bars and faceting are computed by the library from raw rows,
   rather than pre-computed by the model and emitted twice.
 - **Mathematics**, which was always rendering and was never advertised. `$x^2$`
-  inline, `$$…$$` on its own line, a ```math block with the frame's controls,
+  inline, `$$…$$` on its own line, a `math` block with the frame's controls,
   and chemistry via `\ce{2H2 + O2 -> 2H2O}`.
 - **Twenty-six diagram types instead of six.** C4 at every level including
   deployment and dynamic, cloud architecture, block, packet, requirements,
