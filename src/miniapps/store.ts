@@ -32,7 +32,7 @@
  * @module miniapps/store
  */
 
-import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import type { AicoSettings } from '../settings.js';
@@ -164,6 +164,23 @@ export async function createMiniApp(
   await mkdir(path.join(dir, 'public'), { recursive: true });
   await writeFile(path.join(dir, 'app.json'), `${JSON.stringify(app, null, 2)}\n`, 'utf8');
   return app;
+}
+
+/**
+ * Delete an app and everything it holds.
+ *
+ * Including its database — which is the point worth being loud about, since
+ * the data is the part that cannot be regenerated from a prompt. Callers are
+ * expected to have asked first.
+ */
+export async function deleteMiniApp(
+  slug: string, settings?: AicoSettings, cwd = process.cwd(),
+): Promise<boolean> {
+  if (!isSafeSlug(slug)) return false;
+  const dir = miniAppDir(slug, settings, cwd);
+  if (!existsSync(dir)) return false;
+  await rm(dir, { recursive: true, force: true });
+  return true;
 }
 
 /** Record that something changed, so the list orders by what was touched last. */

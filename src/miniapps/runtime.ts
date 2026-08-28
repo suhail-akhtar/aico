@@ -120,9 +120,41 @@ export const RUNTIME_JS = String.raw`/* aico Mini Apps runtime */
     }, kind === 'error' ? 6000 : 3000);
   }
 
+  // ── Theme ──────────────────────────────────────────────────────────
+  // Applied here, in a head script that runs before the body paints, rather
+  // than on init — set it any later and the page flashes the wrong colours.
+  var THEME_KEY = 'aico:theme';
+  function applyTheme(value) {
+    if (value === 'dark' || value === 'light') document.documentElement.setAttribute('data-theme', value);
+    else document.documentElement.removeAttribute('data-theme');
+  }
+  try { applyTheme(localStorage.getItem(THEME_KEY)); } catch (err) { /* private mode */ }
+
+  var theme = {
+    /** 'dark', 'light', or 'system' when nothing has been chosen. */
+    get: function () {
+      return document.documentElement.getAttribute('data-theme') || 'system';
+    },
+    set: function (value) {
+      applyTheme(value);
+      try {
+        if (value === 'dark' || value === 'light') localStorage.setItem(THEME_KEY, value);
+        else localStorage.removeItem(THEME_KEY);
+      } catch (err) { /* the setting just will not persist */ }
+    },
+    /** Toggle away from what is currently on screen, whichever chose it. */
+    toggle: function () {
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark'
+        || (theme.get() === 'system'
+            && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      theme.set(dark ? 'light' : 'dark');
+    },
+  };
+
   window.aico = {
     db: db,
     notify: notify,
+    theme: theme,
     /** Say it, and return false, so a catch block is one line. */
     fail: function (err) { notify(err && err.message ? err.message : String(err), 'error'); return false; },
     money: function (n, currency) {
@@ -325,8 +357,41 @@ export const RUNTIME_CSS = String.raw`/* aico Mini Apps — foundation */
   --ring: 0 0 0 3px var(--accent-soft);
 }
 
+/* Dark, twice.
+   The system setting decides by default; data-theme on <html> overrides it in
+   either direction, so an app can offer a toggle and a reader who has chosen
+   light inside a dark OS gets light. Custom properties cannot be shared
+   between two selectors without a preprocessor, so the block is repeated
+   rather than aliased — the alternative is a build step for one stylesheet. */
+:root[data-theme="dark"] {
+  --bg: #0e1116;
+  --surface: #161a21;
+  --surface-2: #1c212a;
+  --border: #262c36;
+  --border-strong: #333b47;
+
+  --text: #e8eaee;
+  --text-muted: #98a2b1;
+  --text-faint: #6c7787;
+
+  --accent: #4c8dff;
+  --accent-hover: #6ba1ff;
+  --accent-soft: #17233a;
+
+  --good: #4ecf9a;
+  --good-soft: #12241d;
+  --warn: #f0b429;
+  --warn-soft: #2a2110;
+  --bad: #f4756e;
+  --bad-soft: #2b1614;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .32);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, .5), 0 24px 48px rgba(0, 0, 0, .5);
+  --ring: 0 0 0 3px rgba(76, 141, 255, .28);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0e1116;
     --surface: #161a21;
     --surface-2: #1c212a;

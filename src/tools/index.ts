@@ -101,6 +101,8 @@ import type { McpManageInput } from '../mcp/manage-tool.js';
 import { agentManageToolDefinition, executeAgentManage } from './manage-agents.js';
 import { memoryManageToolDefinition, executeMemoryManage } from './manage-memory.js';
 import type { MemoryManageInput } from './manage-memory.js';
+import { miniAppManageToolDefinition, executeMiniAppManage } from './manage-miniapps.js';
+import type { MiniAppManageInput } from './manage-miniapps.js';
 import type { AgentManageInput } from './manage-agents.js';
 import type { SkillManageInput } from '../skills/manage.js';
 import { buildCapabilityReport } from '../capabilities.js';
@@ -239,6 +241,9 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...mcpManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...agentManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...memoryManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
+  // The authoring guide `create` returns is long on purpose, and truncating it
+  // would cut the part about the CSP — which is the part that saves an hour.
+  { ...miniAppManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   // Reading a procedure changes nothing, so several can open at once.
   { ...skillDefinition, isConcurrencySafe: true, maxResultSizeChars: 60_000 },
 ];
@@ -666,6 +671,9 @@ export async function executeTool(
       break;
     case 'McpManage':
       result = await executeMcpManage(args as unknown as McpManageInput);
+      break;
+    case 'MiniAppManage':
+      result = await executeMiniAppManage(args as unknown as MiniAppManageInput);
       break;
     case 'AgentManage':
       result = await executeAgentManage(args as unknown as AgentManageInput);
