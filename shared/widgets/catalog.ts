@@ -182,6 +182,50 @@ one view". Do not build an HTML file for that: this draws in the chat, and a
 page on disk is something the reader has to go and open.`,
   },
   {
+    id: 'math',
+    languages: ['math', 'latex', 'tex', 'katex'],
+    extension: 'tex',
+    framed: true,
+    summary: 'LaTeX set as mathematics — also available inline in ordinary prose as '
+      + '$x^2$ and as a display formula between $$ … $$; covers chemistry via \\ce{}',
+    spec: `LaTeX, rendered by KaTeX.
+
+Three places it works, and the block is only one of them:
+
+  $E = mc^2$              inline, in the middle of a sentence
+  $$\\int_0^1 x^2 dx$$      display, its own centred line
+  \`\`\`math                 a block, with copy, download and expand
+
+**Write mathematics as mathematics.** Backticks around \`2x = 10\` produce code
+formatting for something that is not code, and drawing a fraction or a balance
+scale out of ASCII art produces something no reader can follow. If it is a
+formula, set it as one — this renders in the chat.
+
+Chemistry through mhchem:
+
+  $\\ce{2H2 + O2 -> 2H2O}$          equations, arrows, states, charges
+  $\\ce{SO4^2-}$                    charges and subscripts
+  $\\pu{123 kJ//mol}$               physical units
+
+Available beyond standard KaTeX: \\deriv{y}{x}, \\pderiv{f}{x}, \\abs{x},
+\\norm{v}.
+
+Use the block for anything worth its own line — a derivation, a system of
+equations, a matrix. Use inline for a symbol or a short expression inside a
+sentence, because a formula on its own line breaks the reading otherwise.
+
+  \`\`\`math
+  \\begin{aligned}
+    3x - 2 &= 10 \\\\
+    3x &= 12 \\\\
+    x &= 4
+  \\end{aligned}
+  \`\`\`
+
+\`aligned\` with \`&=\` is how a worked solution lines up on the equals sign,
+which is what makes each step readable as a step.`,
+  },
+  {
     id: 'table',
     languages: ['table', 'datatable'],
     extension: 'json',

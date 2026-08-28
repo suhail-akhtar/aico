@@ -386,6 +386,12 @@ three most common are below; the rest are one lookup away.
 \`\`\`mermaid — Mermaid source as written. Quote node text containing brackets,
   quotes or parentheses; unquoted punctuation is why one usually fails to parse.
 
+Mathematics renders in ordinary prose too: \`$x^2 + y^2 = r^2$\` inline and
+\`$$…$$\` on its own line, chemistry via \`\\ce{2H2 + O2 -> 2H2O}\`. Write a formula
+as a formula — backticks around \`2x = 10\` format it as code, which it is not,
+and a fraction or an axis drawn in ASCII art is unreadable next to a renderer
+that would have set it properly.
+
 Reach for one when a picture or a sorted table answers better than a paragraph,
 and then do not narrate what it already shows. Everything else stays code.
 

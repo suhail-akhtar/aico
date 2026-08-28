@@ -37,6 +37,10 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+// Chemistry in prose. mhchem extends KaTeX in place rather than exporting
+// anything, so this is a side-effect import and has to come after katex is
+// already loaded — which `rehype-katex` guarantees by depending on it.
+import 'katex/dist/contrib/mhchem.mjs';
 import { CodeBlock } from './CodeBlock';
 import { Widget } from './Widget';
 import { rendererFor, widgetForLanguage } from './widget-registry';
