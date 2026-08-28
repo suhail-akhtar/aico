@@ -49,6 +49,7 @@ import { handleSystemRoute } from './api-system.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
+import { deleteMiniApp, listMiniApps } from '../miniapps/store.js';
 
 export interface ServeOptions {
   port?: number;
@@ -303,6 +304,27 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     if (route === 'groups' && req.method === 'GET') {
       send(res, 200, { groups: await listGroups() });
+      return;
+    }
+
+    if (route === 'miniapps' && req.method === 'GET') {
+      // `host` is null when the plugin is off, and the panel says so rather
+      // than listing apps behind links that would not resolve. Read live so
+      // turning the switch on and restarting is enough — no rebuild.
+      const live = await loadSettings();
+      send(res, 200, {
+        enabled: live.miniApps?.enabled === true,
+        host: miniApps?.url ?? null,
+        apps: await listMiniApps(live, cwd),
+      });
+      return;
+    }
+
+    if (route === 'miniapps/delete' && req.method === 'POST') {
+      const body = await readJson(req) as { slug?: string };
+      if (!body.slug) { send(res, 400, { error: 'slug required' }); return; }
+      const live = await loadSettings();
+      send(res, 200, { deleted: await deleteMiniApp(body.slug, live, cwd) });
       return;
     }
 

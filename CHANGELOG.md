@@ -3,6 +3,52 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Mini Apps.** Ask for an invoice ledger or a stock list and you get a real
+  single-page application with a SQLite database behind it, served at its own
+  local URL, still there tomorrow. A left-nav tab lists them; the agent builds
+  them through `MiniAppManage`.
+
+  It is a plugin and it is **off by default** — Settings → Model & context →
+  Mini Apps. It is the one feature that opens a listening socket of its own,
+  which should be opted into rather than inherited.
+
+  The second port is not a detail, it is the design. A Mini App page is
+  model-authored JavaScript; the aico API runs shell commands and keeps its
+  token in the portal's `localStorage`. Same origin would hand generated code a
+  Bash tool. Two origins, each refusing the other, and a `connect-src 'self'`
+  CSP behind that.
+
+  Apps never send SQL either. A page names a table and passes values; the
+  server builds the statement, checks every identifier against the schema that
+  actually applied, and binds every value — so a search box cannot become a
+  `WHERE` clause. Every app gets the same server; the app is the page.
+
+  Each one ships with a data client, a ready-made CRUD component, and a design
+  system with light and dark modes. `MiniAppManage create` hands that contract
+  to whoever is building — capabilities nobody mentions are capabilities that
+  get routed around badly.
+
+- `scripts/miniapp-probe.mjs`, wired into `npm test`: 31 checks over real HTTP
+  against a real database file, including encoded path traversal, a quote in a
+  value, an injected `ORDER BY`, a foreign `Origin`, and a restart to prove the
+  data outlives the process.
+
+### Changed
+
+- **Node 22.5 is now the minimum** (was 20). `node:sqlite` ships with Node from
+  22.5; the alternatives were a native module that compiles C++ on every
+  install, or WebAssembly.
+
+### Fixed
+
+- The portal's static file handler tested containment with `startsWith(root)`,
+  which also accepts a sibling — a directory named `web-dist-anything` beside
+  the real one would have been served from.
+
 ## 0.4.1 — 2026-08-29
 
 Everything here was found by running the thing rather than testing it. The

@@ -8,7 +8,7 @@
  *
  *   node scripts/miniapp-probe.mjs
  *
- * Build first: npx tsup src/miniapps/server.ts --format esm --outDir dist-test/miniapps --target node22
+ * Build first: npm run test:miniapps (or the tsup line inside it)
  */
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';

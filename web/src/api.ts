@@ -250,6 +250,10 @@ export const api = {
   memories: (scope?: string) =>
     get<{ memories: MemorySummary[] }>(`memory${scope && scope !== 'all' ? `?scope=${encodeURIComponent(scope)}` : ''}`),
 
+  miniApps: () => get<MiniAppsView>('miniapps'),
+  /** Destructive: the app's database goes with it. */
+  deleteMiniApp: (slug: string) => post<{ deleted: boolean }>('miniapps/delete', { slug }),
+
   changes: (sessionId: string) => get<ChangesReport>(`changes?id=${encodeURIComponent(sessionId)}`),
   changesDiff: (sessionId: string, file: string) =>
     get<{ diff: string }>(`changes/diff?id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(file)}`),
@@ -550,6 +554,28 @@ export interface FileChange {
   binary: boolean;
   /** True when a tool in this session wrote it. */
   bySession: boolean;
+}
+
+export interface MiniAppSummary {
+  slug: string;
+  title: string;
+  description?: string;
+  createdAt: number;
+  updatedAt: number;
+  sessionId?: string;
+  /** False until the app has a page; a claimed directory is not yet an app. */
+  built: boolean;
+}
+
+export interface MiniAppsView {
+  enabled: boolean;
+  /**
+   * The host's address, or null when the plugin is off or failed to bind.
+   * Null is the difference between "here are your apps" and a list of links
+   * that go nowhere, so the panel branches on it rather than guessing a port.
+   */
+  host: string | null;
+  apps: MiniAppSummary[];
 }
 
 export interface ChangesReport {
