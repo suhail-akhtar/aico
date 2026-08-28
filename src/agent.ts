@@ -588,6 +588,14 @@ function resolveToolSet(opts: {
     defs = defs.filter(d => PLAN_MODE_TOOLS.has(d.name));
   }
 
+  // Mini Apps are a plugin, and "off" has to mean the model cannot see the
+  // tool — not that it is told not to use it. A tool present in the list is a
+  // tool that gets called eventually, and calling it while the host is not
+  // listening builds an app nobody can open.
+  if (!opts.settings?.miniApps?.enabled) {
+    defs = defs.filter(d => d.name !== 'MiniAppManage');
+  }
+
   // Last, so it overrides every selection above it. One list, applied in one
   // place, is what makes a capability removable without editing the code that
   // offers it — and applying it here rather than at each call site means a
