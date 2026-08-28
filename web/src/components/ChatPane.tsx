@@ -218,10 +218,30 @@ export function ChatPane(): React.ReactElement {
    */
   const fixesRef = useRef(fixes);
   fixesRef.current = fixes;
+
+  /**
+   * Identity that changes when a correction lands, and only then.
+   *
+   * Never changing was wrong in the other direction. `MessageBubble` is
+   * memoised on these props, so a frozen identity meant that when a repair
+   * finally produced its correction, the broken widget's memo saw nothing new
+   * and never re-rendered — the fix sat in the log, correct and invisible,
+   * until the page was reloaded. That is the bug the stable identity created
+   * while fixing the flicker.
+   *
+   * The signature is over the *replacements*, which change once per repair,
+   * not per streamed chunk. So the memo still holds through a stream and still
+   * breaks the moment there is something new to draw.
+   */
+  const fixSignature = useMemo(
+    () => [...fixes.replacements].map(([broken, fixed]) => `${broken}:${fixed.length}`).join('|'),
+    [fixes],
+  );
   const widgetFixes = useMemo(() => ({
     replaced: (src: string) => fixesRef.current.replacements.get(widgetHash(src)),
     superseded: (src: string) => fixesRef.current.superseded.has(widgetHash(src)),
-  }), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the signature is the dependency
+  }), [fixSignature]);
 
   const status = useStore(s => s.status);
 
