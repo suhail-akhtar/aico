@@ -102,6 +102,99 @@ export function parseVizSpec(
   return { spec };
 }
 
+/** One tile in a dashboard's headline row. */
+export interface DashboardStat {
+  label: string;
+  value: string | number;
+  /** Change against the previous period, already formatted — "+17.8%". */
+  delta?: string;
+  /** Which way is being reported. Colour only follows this, never the sign. */
+  direction?: 'up' | 'down' | 'flat';
+  /** History behind the number, drawn as a sparkline. */
+  series?: number[];
+}
+
+/** One panel in a dashboard grid. */
+export interface DashboardPanel {
+  title?: string;
+  /** Which renderer draws it. Dashboards do not nest. */
+  kind: 'chart' | 'viz' | 'table';
+  /** The spec that renderer takes, exactly as the standalone block would. */
+  spec: unknown;
+  /** 1 for a half-width panel, 2 for a full-width one. */
+  span?: 1 | 2;
+  /** One line under the panel saying what it shows. */
+  note?: string;
+}
+
+export interface DashboardSpec {
+  title?: string;
+  subtitle?: string;
+  stats?: DashboardStat[];
+  panels: DashboardPanel[];
+}
+
+/** Panel kinds a dashboard may contain. Deliberately excludes `dashboard`. */
+const PANEL_KINDS = new Set(['chart', 'viz', 'table']);
+
+/**
+ * Read a dashboard block, and locate the mistake when there is one.
+ *
+ * Stricter than the other parsers because a dashboard is a composite: one bad
+ * panel out of nine should say *which* panel and why, not fail the whole board
+ * with a message about the outermost object. A reader looking at eight charts
+ * and one gap needs to know which gap.
+ */
+export function parseDashboardSpec(
+  source: string,
+): { spec?: DashboardSpec; error?: string } {
+  const text = source.trim();
+  if (!text) return { error: 'the dashboard block is empty' };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { error: `the dashboard spec is not valid JSON — ${message}` };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { error: 'a dashboard spec must be a JSON object with `panels`' };
+  }
+
+  const spec = parsed as Record<string, unknown>;
+  const panels = spec.panels;
+  if (!Array.isArray(panels) || panels.length === 0) {
+    return { error: 'no `panels` in the dashboard spec — there is nothing to lay out' };
+  }
+
+  for (let i = 0; i < panels.length; i++) {
+    const panel = panels[i] as Record<string, unknown> | null;
+    const where = `panel ${i + 1}${panel?.title ? ` ("${String(panel.title)}")` : ''}`;
+    if (!panel || typeof panel !== 'object' || Array.isArray(panel)) {
+      return { error: `${where} is not an object` };
+    }
+    if (typeof panel.kind !== 'string' || !PANEL_KINDS.has(panel.kind)) {
+      // Naming the panel kinds beats "invalid kind": the most likely mistake is
+      // reaching for a fence language rather than a panel kind, and the fix is
+      // then obvious rather than a guess.
+      return {
+        error: `${where} has kind "${String(panel.kind)}" — must be chart, viz or table. `
+          + 'Dashboards do not nest.',
+      };
+    }
+    if (panel.spec === undefined || panel.spec === null) {
+      return { error: `${where} has no \`spec\`, so there is nothing to draw in it` };
+    }
+  }
+
+  if (spec.stats !== undefined && !Array.isArray(spec.stats)) {
+    return { error: '`stats` must be an array of tiles' };
+  }
+
+  return { spec: spec as unknown as DashboardSpec };
+}
+
 /** Read a table block, and locate the mistake when there is one. */
 export function parseTableSpec(source: string): { spec?: TableSpec; error?: string } {
   const text = source.trim();

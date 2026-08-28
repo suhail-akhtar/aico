@@ -21,7 +21,7 @@ import { todosFrom, TASK_REPLY } from './dist-test/todos.mjs';
 import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
 import { loadDismissals, saveDismissals } from './dist-test/panel-memory.mjs';
 import {
-  parseChartSpec, parseTableSpec, parseVizSpec, numericValue, summarise,
+  parseChartSpec, parseTableSpec, parseVizSpec, parseDashboardSpec, numericValue, summarise,
 } from './dist-test/widget-specs.mjs';
 import {
   collectWidgetFixes, widgetHash, fixMarker, stripMarker, isFixRequest, firstBlock,
@@ -1690,6 +1690,61 @@ test('a broken figure says what is wrong with it, not with the parser', () => {
   assert.match(parseVizSpec('{oops').error, /not valid JSON/);
   assert.match(parseVizSpec('[1,2,3]').error, /must be a JSON object/,
     'an array is a plausible mistake and a specific one');
+});
+
+// ── Dashboards ─────────────────────────────────────────────────────────────
+
+const board = (spec) => parseDashboardSpec(JSON.stringify(spec));
+const onePanel = { kind: 'chart', spec: { series: [{ type: 'bar', data: [1] }] } };
+
+test('a board of panels parses', () => {
+  const { spec, error } = board({ title: 'Q3', panels: [onePanel, onePanel] });
+  assert.equal(error, undefined);
+  assert.equal(spec.panels.length, 2);
+  assert.equal(spec.title, 'Q3');
+});
+
+test('a board with no panels is refused', () => {
+  assert.match(board({ title: 'Empty' }).error, /nothing to lay out/);
+  assert.match(board({ panels: [] }).error, /nothing to lay out/,
+    'an empty array is the same mistake as a missing one');
+});
+
+test('a bad panel names itself rather than failing the whole board', () => {
+  // Eight charts and one gap: the reader needs to know which gap. An error
+  // about the outermost object tells them nothing they can act on.
+  const bad = board({ panels: [onePanel, { title: 'Peers', kind: 'chart' }] });
+  assert.match(bad.error, /panel 2/, 'says which panel');
+  assert.match(bad.error, /Peers/, 'and names it when it has a title');
+  assert.match(bad.error, /no `spec`/, 'and what is missing');
+});
+
+test('a panel cannot be a dashboard', () => {
+  // Nesting buys nothing a wider panel does not, and costs a rendering level
+  // per depth. The floor is deliberate, so the message says so.
+  const nested = board({ panels: [{ kind: 'dashboard', spec: { panels: [onePanel] } }] });
+  assert.match(nested.error, /chart, viz or table/);
+  assert.match(nested.error, /do not nest/);
+});
+
+test('the likely mistake is reaching for a fence language', () => {
+  // `echarts` and `mermaid` are fence languages, not panel kinds. Listing the
+  // three that work turns a guess into a fix.
+  for (const kind of ['echarts', 'mermaid', 'plot', 'html']) {
+    assert.match(board({ panels: [{ kind, spec: {} }] }).error, /must be chart, viz or table/,
+      `${kind} is not a panel kind`);
+  }
+});
+
+test('stats are optional but must be a list when present', () => {
+  assert.equal(board({ panels: [onePanel] }).error, undefined, 'a board needs no tiles');
+  assert.match(board({ panels: [onePanel], stats: 'lots' }).error, /must be an array/);
+});
+
+test('a broken board says what is wrong with it', () => {
+  assert.match(parseDashboardSpec('').error, /empty/);
+  assert.match(parseDashboardSpec('{oops').error, /not valid JSON/);
+  assert.match(parseDashboardSpec('[]').error, /must be a JSON object/);
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

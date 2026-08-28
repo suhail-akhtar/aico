@@ -145,6 +145,41 @@ Colours, gridlines, fonts and spacing come from the same validated palette
 checked for colourblind separation against these surfaces.`,
   },
   {
+    id: 'dashboard',
+    languages: ['dashboard', 'board'],
+    extension: 'json',
+    framed: true,
+    summary: 'several figures as one board — KPI tiles with sparklines plus a responsive '
+      + 'grid of chart/viz/table panels; use this when asked for a dashboard',
+    spec: `One board, in one block. Needs \`panels\`.
+
+{"title":"Q3 performance","subtitle":"USD millions",
+ "stats":[{"label":"Revenue","value":"$9,850M","delta":"+17.8%","direction":"up",
+           "series":[4820,5940,7120,8360,9850]}],
+ "panels":[
+  {"title":"Growth","span":2,"kind":"chart","spec":{"xAxis":{"type":"category",
+    "data":["FY24","FY25"]},"yAxis":{"type":"value"},
+    "series":[{"type":"bar","data":[8360,9850]}]}},
+  {"title":"Peers","kind":"table","spec":{"columns":["Company","Margin %"],
+    "rows":[["Aurora",22.4],["Vertex",24.0]]}}]}
+
+stats   optional headline tiles. \`value\` is already formatted — the tile does
+        no arithmetic. \`direction\` is up/down/flat and is what colours the
+        delta, NOT the sign: falling debt is good news and rising churn is not,
+        and only you know which way a given number reads. \`series\` draws a
+        sparkline.
+panels  \`kind\` is chart, viz or table, and \`spec\` is exactly what that block
+        takes on its own. \`span\`: 2 for full width, otherwise half. \`note\` is
+        one line underneath.
+
+Dashboards do not nest — a panel cannot be a dashboard. Use \`span\` for
+emphasis instead.
+
+Reach for this whenever the ask is a dashboard, an overview or "all of it in
+one view". Do not build an HTML file for that: this draws in the chat, and a
+page on disk is something the reader has to go and open.`,
+  },
+  {
     id: 'table',
     languages: ['table', 'datatable'],
     extension: 'json',

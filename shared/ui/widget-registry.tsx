@@ -34,6 +34,7 @@ import { DataTable } from './DataTable';
 import { Diagram } from './Diagram';
 import { HtmlPreview } from './HtmlPreview';
 import { Viz } from './Viz';
+import { Dashboard } from './Dashboard';
 
 export type { CatalogEntry, WidgetKind };
 export { widgetForLanguage, widgetById, WIDGET_CATALOG } from '../widgets/catalog';
@@ -71,6 +72,7 @@ export interface WidgetRenderProps {
 const RENDERERS: Record<WidgetId, React.ComponentType<WidgetRenderProps>> = {
   chart: ({ source, streaming }) => <Chart source={source} streaming={streaming ?? false} />,
   viz: ({ source, streaming }) => <Viz source={source} streaming={streaming ?? false} />,
+  dashboard: ({ source, streaming }) => <Dashboard source={source} streaming={streaming ?? false} />,
   table: ({ source }) => <DataTable source={source} />,
   diagram: ({ source, streaming }) => <Diagram source={source} streaming={streaming ?? false} />,
   html: ({ source, language }) => <HtmlPreview html={source} language={language} />,
