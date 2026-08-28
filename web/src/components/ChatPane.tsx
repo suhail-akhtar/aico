@@ -198,6 +198,7 @@ export function ChatPane(): React.ReactElement {
   const error = useStore(s => s.error);
   const clearError = useStore(s => s.clearError);
   const turnSummary = useStore(s => s.turnSummary);
+  const pendingIntents = useStore(s => s.pendingIntents);
   const feedback = useStore(s => s.feedback);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -344,6 +345,35 @@ export function ChatPane(): React.ReactElement {
               This one only appeared when *nothing* was streaming, so the
               worst case — text arrived, then silence — showed nothing. */}
           {busy && messages.length === 0 && <Working />}
+
+          {/*
+            Messages the server took but the transcript has not reached yet.
+
+            A steer arrives at the next step boundary and a queued message when
+            its turn starts, so without this the composer clears and nothing
+            else happens — for several seconds in the first case and until the
+            turn ends in the second. Silence there is indistinguishable from a
+            broken button, which is what both of these were reported as.
+
+            Drawn where the real message will appear, in the same shape, so
+            what replaces it is a change of state rather than a change of place.
+          */}
+          {pendingIntents.map(intent => (
+            <div key={intent.key} className="my-6 flex flex-col items-end">
+              <div className="max-w-[85%] rounded-2xl rounded-br-md border border-dashed
+                              border-aico-border bg-transparent px-4 py-2.5">
+                <p className="whitespace-pre-wrap break-words text-[15px] leading-[26px]
+                              text-aico-secondary">
+                  {intent.content}
+                </p>
+              </div>
+              <span className="mt-1 text-[11px] text-aico-muted">
+                {intent.mode === 'steer'
+                  ? 'steering — applies at the next step'
+                  : 'queued — runs when this turn ends'}
+              </span>
+            </div>
+          ))}
 
           {!busy && <TurnSummary summary={turnSummary} />}
 

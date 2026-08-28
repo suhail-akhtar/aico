@@ -148,6 +148,13 @@ interface AppState {
    * lets the default move without dragging a session that picked deliberately
    * along with it. Read `model ?? defaultModel` to display.
    */
+  /**
+   * Messages the server accepted that have not reached the transcript yet.
+   *
+   * A steer lands at the next step boundary and a queued message when its turn
+   * starts; until then this is the only evidence either was received.
+   */
+  pendingIntents: Array<{ key: number; mode: 'steer' | 'followup'; content: string }>;
   model: string | null;
   /** The configured default, for sessions that never expressed a preference. */
   defaultModel: string | null;
@@ -280,7 +287,7 @@ interface AppState {
   refreshProviders: () => Promise<void>;
   refreshSystem: () => Promise<void>;
   refreshSettings: () => Promise<void>;
-  setModel: (model: string) => void;
+  setModel: (model: string | null) => void;
   rename: (title: string) => Promise<void>;
   /** Rename any session, not only the open one. */
   renameSession: (id: string, title: string) => Promise<void>;
@@ -303,6 +310,10 @@ interface AppState {
 }
 
 let handle: StreamHandle | null = null;
+
+/** Distinct per accepted message, so sending the same text twice shows twice. */
+let intentSeq = 0;
+function nextIntentKey(): number { return ++intentSeq; }
 
 export const useStore = create<AppState>((set, get) => ({
   status: 'connecting',
@@ -328,6 +339,7 @@ export const useStore = create<AppState>((set, get) => ({
   pendingAttachments: [],
   lastActivityAt: 0,
   usage: NO_USAGE,
+  pendingIntents: [],
   model: null,
   defaultModel: null,
   error: null,
@@ -613,14 +625,42 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  /**
+   * Steer and queue, with something to show for it.
+   *
+   * Both used to be fire-and-forget: the composer cleared and nothing else
+   * happened. A steered message only reaches the transcript at the next step
+   * boundary, which during a long tool call is many seconds away, and a queued
+   * one not until its turn starts. For that whole time the interface said
+   * nothing at all, which is indistinguishable from the button being broken —
+   * and for Queue it *was* broken, so nobody could tell the two apart.
+   *
+   * The accepted message is held here and drawn immediately, then dropped when
+   * the real one replays from the log. Same idea as the optimistic echo on an
+   * ordinary send, for the same reason.
+   */
   steer: async (content) => {
+    const key = nextIntentKey();
+    set(s => ({ pendingIntents: [...s.pendingIntents, { key, mode: 'steer', content }] }));
     try { await api.steer(get().sessionId, content); }
-    catch (err) { set({ error: (err as Error).message }); }
+    catch (err) {
+      set(s => ({
+        error: (err as Error).message,
+        pendingIntents: s.pendingIntents.filter(p => p.key !== key),
+      }));
+    }
   },
 
   followup: async (content) => {
+    const key = nextIntentKey();
+    set(s => ({ pendingIntents: [...s.pendingIntents, { key, mode: 'followup', content }] }));
     try { await api.followup(get().sessionId, content); }
-    catch (err) { set({ error: (err as Error).message }); }
+    catch (err) {
+      set(s => ({
+        error: (err as Error).message,
+        pendingIntents: s.pendingIntents.filter(p => p.key !== key),
+      }));
+    }
   },
 
   refreshSessions: async () => {
@@ -863,6 +903,12 @@ export const useStore = create<AppState>((set, get) => ({
     // Optimistic, then durable. The picker should close on the value it was
     // clicked with rather than after a round trip, and the log is what makes
     // the choice outlive this tab.
+    //
+    // Null clears the pin, so the session follows the configured default again.
+    // Without that, a model chosen once here silently outranks every later
+    // change in settings for the life of the session — which reads as the
+    // settings screen not working, and is impossible to diagnose from the
+    // outside because nothing says the session is pinned at all.
     set({ model });
     void api.setSessionModel(get().sessionId, model)
       .catch((err: unknown) => set({ error: (err as Error).message }));
@@ -892,6 +938,14 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
           logged: applyLogEvent(state.logged, event.seq ?? 0, data),
           lastSeq: Math.max(state.lastSeq, event.seq ?? 0),
         };
+        // The real message has arrived, so the placeholder standing in for it
+        // has done its job. Matched on the text rather than an id because the
+        // server does not echo one back — good enough, since the alternative
+        // to a rare mismatch is a stale line the reader has to guess about.
+        if (data.type === 'user/message' && state.pendingIntents.length > 0) {
+          const arrived = String(data.content ?? '').trim();
+          patch.pendingIntents = state.pendingIntents.filter(p => p.content.trim() !== arrived);
+        }
         // Goal, feedback and the title are projections of the same log, so
         // replaying it restores them for free — a reopened session shows its
         // goal without a second request.

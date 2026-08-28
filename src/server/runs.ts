@@ -346,7 +346,52 @@ export class RunManager {
         delete run.pendingQuestion;
         emit('question', { question: '' });
       }
+      // Queued messages run now, as their own turns.
+      //
+      // The inbox has always had two queues: `next-step`, which the agent loop
+      // drains at step boundaries, and `next-turn`, which is the caller's to
+      // drain. Nothing ever drained it. `claimTurn` had no callers anywhere, so
+      // every message sent with Queue went into a list that was never read —
+      // it vanished, with the composer clearing as if it had been accepted.
+      //
+      // Started rather than awaited, and outside the `finally` block's own
+      // control flow, because this runs on the failure path too: a turn that
+      // was cancelled or threw must still hand back what the reader queued
+      // behind it, and awaiting here would make one turn's duration depend on
+      // every turn queued after it.
+      this.drainQueued(sessionId, cwd, model, opts);
     }
+  }
+
+  /**
+   * Run whatever was queued behind the turn that just ended, one at a time.
+   *
+   * One at a time is the point: each queued message was a separate thought and
+   * deserves its own turn, its own reply and its own place in the log. Merging
+   * them would collapse several distinct requests into one, which is exactly
+   * what `followup` exists to avoid.
+   *
+   * Recursion is through `submit`, so a message queued *during* a queued turn
+   * is picked up when that one ends. Depth is bounded by the reader's typing,
+   * not by anything here.
+   */
+  private drainQueued(
+    sessionId: string,
+    cwd: string,
+    model: string,
+    opts: Parameters<RunManager['submit']>[4],
+  ): void {
+    const run = this.runs.get(sessionId);
+    if (!run || run.busy) return;
+    const queued = run.inbox.claimTurn();
+    if (!queued) return;
+    void this.submit(sessionId, cwd, queued.content, model, opts)
+      .catch(() => {
+        // The turn's own error already reached the client through `turn-end`.
+        // Rethrowing here would be an unhandled rejection with nobody to catch
+        // it, and would stop the rest of the queue for a failure the reader has
+        // already been told about.
+      });
   }
 
   /** Explicit rename. Pins the name — automatic naming stops for this session. */
@@ -497,10 +542,10 @@ export class RunManager {
    * which keeps a log from filling with the same line every time a picker
    * re-announces its own value.
    */
-  setModel(sessionId: string, model: string): { ok: boolean; error?: string } {
+  setModel(sessionId: string, model: string | null): { ok: boolean; error?: string } {
     const run = this.runs.get(sessionId);
     if (!run) return { ok: false, error: 'no such session' };
-    if (currentModel(run.session) === model) return { ok: true };
+    if ((currentModel(run.session) ?? null) === model) return { ok: true };
     run.session.append('session/model', { model });
     this.hub.publish({ type: 'model', sessionId, data: { model } });
     return { ok: true };
