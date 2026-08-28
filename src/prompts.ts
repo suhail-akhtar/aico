@@ -22,6 +22,7 @@ import { loadMemory } from './memory/index.js';
 import type { MemoryEntry } from './memory/types.js';
 import { PromptDocument } from './prompt/index.js';
 import { currentCwd } from './run-context.js';
+import { catalogLines } from '../shared/widgets/catalog.js';
 
 const execAsync = promisify(exec);
 
@@ -353,23 +354,37 @@ carries the same information.`,
   // request of every session, so it is a signature and one worked example per
   // kind, which is what an author actually needs and fits in a fraction of the
   // tokens. It sits in the cached half deliberately: it never changes.
+  //
+  // The catalog is generated from `WIDGET_CATALOG` rather than written out
+  // here, which is the point of that file existing. The list used to be prose
+  // maintained separately from the sets the renderer matched against, so the
+  // two agreed only by coincidence — and both directions of disagreement fail
+  // silently. A block nobody renders is a wall of JSON in the transcript; a
+  // renderer nobody is told about is dead code.
+  //
+  // Only the one-line summaries are here. Full specs are fetched by
+  // `widget_spec` on the turn they are needed, because this text is billed on
+  // every request of every session whether anything is drawn or not.
   doc.add({
     id: 'rendered_blocks',
     order: 55,
     body: `These fenced languages draw in the chat instead of showing as code:
 
+${catalogLines()}
+
+Call \`widget_spec\` for the exact shape of any of them. Worked examples for the
+three most common are below; the rest are one lookup away.
+
 \`\`\`chart — an Apache ECharts option object, as JSON. Must have \`series\`.
   {"xAxis":{"type":"category","data":["Mon","Tue"]},"yAxis":{"type":"value"},
    "series":[{"type":"bar","data":[12,19]}]}
-  series types include bar, line, pie, scatter, treemap, sankey, funnel, gauge,
-  radar, heatmap, boxplot, candlestick, sunburst and graph (node-link diagrams).
 
 \`\`\`table — {"columns":["Region","Spend"],"rows":[["EU",1200],["US",980]]}
   Rows are arrays in column order, NOT objects. Numeric columns get sorting and
   a sum/mean/min/max row without you computing them.
 
-\`\`\`mermaid — flowcharts, sequence, ER, state, class and gantt diagrams. Use
-  this for architecture, network topology and component diagrams.
+\`\`\`mermaid — Mermaid source as written. Quote node text containing brackets,
+  quotes or parentheses; unquoted punctuation is why one usually fails to parse.
 
 Reach for one when a picture or a sorted table answers better than a paragraph,
 and then do not narrate what it already shows. Everything else stays code.

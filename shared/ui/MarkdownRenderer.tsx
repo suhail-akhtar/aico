@@ -38,11 +38,8 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { CodeBlock } from './CodeBlock';
-import { Diagram } from './Diagram';
-import { HtmlPreview } from './HtmlPreview';
-import { Chart } from './Chart';
-import { DataTable } from './DataTable';
 import { Widget } from './Widget';
+import { rendererFor, widgetForLanguage } from './widget-registry';
 
 export interface MarkdownRendererProps {
   content: string;
@@ -74,14 +71,10 @@ export interface MarkdownRendererProps {
   };
 }
 
-/** Fences that mean "draw this", not "show this as code". */
-const DIAGRAM_LANGUAGES = new Set(['mermaid', 'diagram', 'flowchart', 'sequence', 'gantt']);
-/** Fences that get the sandboxed preview. */
-const HTML_LANGUAGES = new Set(['html', 'htm', 'svg', 'preview']);
-/** Fences carrying an ECharts option object. */
-const CHART_LANGUAGES = new Set(['chart', 'echarts', 'plot']);
-/** Fences carrying `{ columns, rows }`. */
-const TABLE_LANGUAGES = new Set(['table', 'datatable']);
+// Which fences draw, and what draws them, now live in the widget registry —
+// one list, shared with the prompt that tells the model they exist. The sets
+// that used to be here said nothing to the server, so a kind could be added in
+// one place and be missing from the other with nothing to report it.
 
 export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   content, streaming = false, onFix, widgetFixes,
@@ -98,131 +91,122 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
    * Streaming is in the dependencies because it genuinely changes what the
    * blocks do; the other two are stable by construction at the call site.
    */
-  const components = React.useMemo((): Components => ({          code({ className, children, ...props }: CodeProps) {
-            const language = /language-(\w+)/.exec(className ?? '')?.[1] ?? '';
-            const text = String(children);
+  const components = React.useMemo((): Components => ({
+    code({ className, children, ...props }: CodeProps) {
+      const language = /language-(\w+)/.exec(className ?? '')?.[1] ?? '';
+      const text = String(children);
 
-            // react-markdown 9 no longer passes an `inline` flag, so it is
-            // derived: a fenced block always carries a `language-` class or
-            // spans lines, and `code` in running prose does neither. Trusting
-            // the removed prop rendered every inline mention as a full block
-            // with its own toolbar, which is how this was noticed.
-            const isBlock = Boolean(language) || text.includes(String.fromCharCode(10));
+      // react-markdown 9 no longer passes an `inline` flag, so it is
+      // derived: a fenced block always carries a `language-` class or
+      // spans lines, and `code` in running prose does neither. Trusting
+      // the removed prop rendered every inline mention as a full block
+      // with its own toolbar, which is how this was noticed.
+      const isBlock = Boolean(language) || text.includes(String.fromCharCode(10));
 
-            if (!isBlock) {
-              return (
-                // Inline code styling lives in theme.css so it stays
-                // consistent with prose that never reaches this component.
-                <code {...props}>
-                  {children}
-                </code>
-              );
-            }
+      if (!isBlock) {
+        return (
+          // Inline code styling lives in theme.css so it stays
+          // consistent with prose that never reaches this component.
+          <code {...props}>
+            {children}
+          </code>
+        );
+      }
 
-            const raw = text.replace(/\n$/, '');
+      const raw = text.replace(/\n$/, '');
 
-            // A block that *is* somebody's correction has already been drawn in
-            // the place it repairs. Showing it again here would put the same
-            // chart on screen twice with nothing to say which one counts.
-            if (widgetFixes?.superseded(raw)
-                && (CHART_LANGUAGES.has(language) || TABLE_LANGUAGES.has(language))) {
-              return (
-                <p className="my-2 text-[11px] text-aico-muted">
-                  ↑ corrected {language} applied above
-                </p>
-              );
-            }
+      const kind = widgetForLanguage(language);
+      const Render = kind && rendererFor(kind);
+      if (!kind || !Render) return <CodeBlock code={text} language={language} />;
 
-            // Drawn in place of the block that failed. The log still holds the
-            // broken source; only what is rendered changes.
-            const body = widgetFixes?.replaced(raw) ?? raw;
+      // A block that *is* somebody's correction has already been drawn in
+      // the place it repairs. Showing it again here would put the same
+      // chart on screen twice with nothing to say which one counts.
+      //
+      // Only framed kinds can be corrected — the offer to repair lives on
+      // the frame — so only they can supersede anything.
+      if (kind.framed && widgetFixes?.superseded(raw)) {
+        return (
+          <p className="my-2 text-[11px] text-aico-muted">
+            ↑ corrected {language} applied above
+          </p>
+        );
+      }
 
-            // Everything that *draws* goes in the widget frame, so a chart, a
-            // table and a diagram offer the same copy/download/expand/hide
-            // and, when one fails, the same repair. Diagrams and HTML previews
-            // predate the frame and carry their own chrome, so they are left
-            // alone rather than given two.
-            if (CHART_LANGUAGES.has(language)) {
-              return (
-                <Widget kind="chart" source={body} extension="json" onFix={onFix}>
-                  <Chart source={body} streaming={streaming} />
-                </Widget>
-              );
-            }
-            if (TABLE_LANGUAGES.has(language)) {
-              return (
-                <Widget kind="table" source={body} extension="json" onFix={onFix}>
-                  <DataTable source={body} />
-                </Widget>
-              );
-            }
-            if (DIAGRAM_LANGUAGES.has(language)) {
-              return <Diagram source={body} streaming={streaming} />;
-            }
-            if (HTML_LANGUAGES.has(language)) {
-              return <HtmlPreview html={body} language={language} />;
-            }
-            return <CodeBlock code={text} language={language} />;
-          },
+      // Drawn in place of the block that failed. The log still holds the
+      // broken source; only what is rendered changes.
+      const body = widgetFixes?.replaced(raw) ?? raw;
+      const drawn = <Render source={body} streaming={streaming} language={language} />;
 
-          // react-markdown wraps block code in <pre>; the block components above
-          // bring their own chrome, so a second frame around them would double
-          // the border and the background.
-          pre({ children }) {
-            return <>{children}</>;
-          },
+      // The frame carries copy, download, expand, hide and the offer to
+      // repair, so a chart and a table present the same controls. The
+      // kinds that opt out predate it and bring their own chrome; giving
+      // them the frame as well would double the border.
+      return kind.framed ? (
+        <Widget kind={kind.id} source={body} extension={kind.extension} onFix={onFix}>
+          {drawn}
+        </Widget>
+      ) : drawn;
+    },
 
-          table({ children }) {
-            // The scroll container is the table's own, never the page's: a wide
-            // result set must not make the whole transcript scroll sideways.
-            return (
-              <div className="my-4 overflow-x-auto">
-                <table>{children}</table>
-              </div>
-            );
-          },
-          a({ href, children }) {
-            const external = /^https?:\/\//i.test(href ?? '');
-            return (
-              <a
-                href={href}
-                // `noopener` severs `window.opener`, so a linked page cannot
-                // navigate this tab; `noreferrer` keeps the local URL out of
-                // the destination's logs.
-                {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-                className="underline-offset-2"
-              >
-                {children}
-              </a>
-            );
-          },
+    // react-markdown wraps block code in <pre>; the block components above
+    // bring their own chrome, so a second frame around them would double
+    // the border and the background.
+    pre({ children }) {
+      return <>{children}</>;
+    },
 
-          img({ src, alt }) {
-            return (
-              <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">
-                <img
-                  src={typeof src === 'string' ? src : undefined}
-                  alt={alt ?? ''}
-                  loading="lazy"
-                  className="my-3 max-h-[28rem] max-w-full rounded-xl border border-aico-border-subtle"
-                />
-              </a>
-            );
-          },
+    table({ children }) {
+      // The scroll container is the table's own, never the page's: a wide
+      // result set must not make the whole transcript scroll sideways.
+      return (
+        <div className="my-4 overflow-x-auto">
+          <table>{children}</table>
+        </div>
+      );
+    },
+    a({ href, children }) {
+      const external = /^https?:\/\//i.test(href ?? '');
+      return (
+        <a
+          href={href}
+          // `noopener` severs `window.opener`, so a linked page cannot
+          // navigate this tab; `noreferrer` keeps the local URL out of
+          // the destination's logs.
+          {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+          className="underline-offset-2"
+        >
+          {children}
+        </a>
+      );
+    },
 
-          input({ checked, type }) {
-            // GFM task lists. Read-only: a checkbox in a transcript records
-            // what the model wrote, and clicking it would change nothing.
-            if (type !== 'checkbox') return null;
-            return (
-              <input
-                type="checkbox"
-                checked={Boolean(checked)}
-                readOnly
-                className="mr-1.5 translate-y-[1px] accent-aico-accent"
-              />
-            );
-          },
+    img({ src, alt }) {
+      return (
+        <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">
+          <img
+            src={typeof src === 'string' ? src : undefined}
+            alt={alt ?? ''}
+            loading="lazy"
+            className="my-3 max-h-[28rem] max-w-full rounded-xl border border-aico-border-subtle"
+          />
+        </a>
+      );
+    },
+
+    input({ checked, type }) {
+      // GFM task lists. Read-only: a checkbox in a transcript records
+      // what the model wrote, and clicking it would change nothing.
+      if (type !== 'checkbox') return null;
+      return (
+        <input
+          type="checkbox"
+          checked={Boolean(checked)}
+          readOnly
+          className="mr-1.5 translate-y-[1px] accent-aico-accent"
+        />
+      );
+    },
   }), [streaming, onFix, widgetFixes]);
 
   return (

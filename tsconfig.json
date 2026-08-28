@@ -6,10 +6,12 @@
     "esModuleInterop": true,
     "strict": true,
     "outDir": "dist",
-    "rootDir": "src",
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "jsx": "react"
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*",
+    "shared/widgets/**/*"
+  ]
 }

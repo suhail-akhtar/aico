@@ -26,6 +26,7 @@ import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
 import { askUser, askUserDefinition } from './askuser.js';
 import { getWorkingDirectory, pwdDefinition } from './pwd.js';
+import { getWidgetSpec, widgetSpecDefinition } from './widget-spec.js';
 // ── New feature tool imports ─────────────────────────────────────────
 import {
   backgroundTaskToolDefinition,
@@ -205,6 +206,8 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...proposePlanDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...askUserDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...pwdDefinition, isConcurrencySafe: true, maxResultSizeChars: 1_000 },
+  // Reads a constant. Nothing to race, and the answer is a page at most.
+  { ...widgetSpecDefinition, isConcurrencySafe: true, maxResultSizeChars: 8_000 },
   // ── New feature tools ─────────────────────────────────────────────
   { ...backgroundTaskToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 1_000 },
   { ...pushNotificationToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 500 },
@@ -248,7 +251,7 @@ export function getToolsForAgent(agentType: SubAgentType = 'general'): ToolDefin
 }
 
 /** Readonly tool preset (same as the 'explore' agent set) */
-const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd']);
+const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'WidgetSpec']);
 
 /**
  * Resolve a custom tool whitelist to actual ToolDefinitions.
@@ -550,6 +553,9 @@ export async function executeTool(
       break;
     case 'Pwd':
       result = await getWorkingDirectory(args as unknown as Parameters<typeof getWorkingDirectory>[0]);
+      break;
+    case 'WidgetSpec':
+      result = getWidgetSpec(args as unknown as Parameters<typeof getWidgetSpec>[0]);
       break;
     // ── New feature tools ─────────────────────────────────────────
     case 'BackgroundTask': {

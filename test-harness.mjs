@@ -121,6 +121,7 @@ import {
   runInContext,
   currentCwd,
   forkSession,
+  WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
   spillResult,
   saveSpill,
   excerpt,
@@ -9318,6 +9319,55 @@ const noOpts = { token: '', model: 'test', autoApprove: true, verbose: false, de
     'angles are required — there is no accidental single-agent mode');
 }
 
+
+
+console.log('  -- One list of drawable blocks, read from both ends --');
+{
+  // The renderer coverage check is the type system's job — RENDERERS is a total
+  // map over the catalog, so a kind with no component does not compile. What
+  // that cannot check is the *other* direction of drift, which is what these
+  // are for: the prompt is generated text and the lookup is a runtime search.
+
+  assert(WIDGET_CATALOG.length > 0, 'there are kinds to draw');
+  assert(WIDGET_CATALOG.every(k => k.summary && k.spec && k.languages.length > 0),
+    'every kind says what it is for, what shape it takes, and what fence selects it');
+
+  // Synonyms exist because a model reaches for the obvious word rather than the
+  // documented one. A fence that resolves to nothing renders as raw JSON with
+  // no error anywhere, which is the failure this whole file is arranged around.
+  assert(widgetForLanguage('chart')?.id === 'chart', 'the canonical fence resolves');
+  assert(widgetForLanguage('echarts')?.id === 'chart', 'and so do its synonyms');
+  assert(widgetForLanguage('ECHARTS')?.id === 'chart', 'case is not the reader\'s problem');
+  assert(widgetForLanguage('python') === undefined, 'ordinary code is left as code');
+
+  // Two kinds claiming one fence would make dispatch depend on array order.
+  const claimed = WIDGET_CATALOG.flatMap(k => k.languages);
+  assert(new Set(claimed).size === claimed.length, 'no fence is claimed by two kinds');
+
+  const lines = catalogLines().split('\n');
+  assert(lines.length === WIDGET_CATALOG.length,
+    'the prompt catalog has exactly one line per kind — generated, not maintained');
+  assert(lines.every(l => l.startsWith('```')), 'each naming the fence that triggers it');
+
+  // The reason the specs are not in the prompt at all: this is prefix text
+  // billed on every request of every session, and the specs are several times
+  // its size for a capability most turns never use.
+  const specWeight = WIDGET_CATALOG.reduce((n, k) => n + k.spec.length, 0);
+  assert(specWeight > catalogLines().length * 3,
+    `specs are much heavier than the catalog (${specWeight} vs ${catalogLines().length}), `
+    + 'which is why they are fetched rather than injected');
+
+  assert(/columns/.test(getWidgetSpec({ kind: 'table' })), 'a spec by id');
+  assert(/columns/.test(getWidgetSpec({ kind: 'datatable' })), 'and by any fence it answers to');
+  assert(/series/.test(getWidgetSpec({ kind: 'CHART' })), 'and without caring about case');
+  // Asking "what can I draw" is a fair question and answering it with an error
+  // would be pedantry.
+  const listed = getWidgetSpec({});
+  assert(WIDGET_CATALOG.every(k => listed.includes(k.id)), 'no argument lists every kind');
+  assert(/No rendered block named/.test(getWidgetSpec({ kind: 'nonsense' })),
+    'and an unknown one says so rather than returning nothing');
+}
+
 // ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);
@@ -9327,4 +9377,3 @@ if (failures.length > 0) {
 }
 console.log('═'.repeat(50) + '\n');
 process.exit(failed > 0 ? 1 : 0);
-

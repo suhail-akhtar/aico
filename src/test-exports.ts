@@ -235,3 +235,7 @@ export {
   recordBeforeWrite, recordAfterWrite, resetCheckpoints, isRecording,
 } from './checkpoint/index.js';
 export { investigate, investigateDefinition, findDuplicateAngles } from './tools/investigate.js';
+export { getWidgetSpec, widgetSpecDefinition } from './tools/widget-spec.js';
+export {
+  WIDGET_CATALOG, widgetForLanguage, widgetById, catalogLines,
+} from '../shared/widgets/catalog.js';
