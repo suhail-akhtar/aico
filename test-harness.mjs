@@ -9107,6 +9107,56 @@ console.log('\n══ CHECKPOINTS ══');
 }
 
 // ═══════════════════════════════════════════════════════════
+// PROMPT-CACHE STABILITY
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ PROMPT-CACHE STABILITY ══');
+
+// Providers render tools → system → messages, so a byte of churn in the system
+// block changes the prefix of every message behind it and re-bills the whole
+// transcript. Measured on long-horizon agentic workloads, prompt caching is
+// worth 41-80% of API cost (arXiv 2601.06007) — more than any other single
+// lever available here. The split that earns it is a convention enforced by
+// nothing, which is why these assertions exist: they fail the moment someone
+// puts a moving value in the cached half.
+{
+  const render = async () => asText(await buildSystemPrompt('test-model'));
+
+  const first = await render();
+  // Something a coding agent does constantly, and the exact event that used to
+  // move git status inside the system prompt.
+  const scratch = path.resolve('./cache-stability-probe.txt');
+  fs.writeFileSync(scratch, `written at ${Date.now()}`);
+  const afterWrite = await render();
+  fs.unlinkSync(scratch);
+  const afterDelete = await render();
+
+  assert(first === afterWrite,
+    'the system prompt does not move when the working tree does — '
+    + 'this is the property prompt caching depends on');
+  assert(first === afterDelete, 'nor when a file is removed again');
+
+  // Named values rather than a hash comparison, so a failure says *what* leaked
+  // in rather than only that something did.
+  const today = new Date().toISOString().slice(0, 10);
+  assert(!first.includes(today),
+    'no date in the cached half — it changes once a day and would cost a full '
+    + 'cache miss on the first turn after midnight');
+  assert(!/Git status:/i.test(first),
+    'no git status in the cached half — it moves on almost every turn');
+  assert(!/^\s*\d{13}\s*$/m.test(first), 'no raw timestamps');
+}
+
+// The volatile half is where the moving parts belong, and it must actually
+// carry them — a split that put nothing in the tail would be stable by
+// accident rather than by design.
+{
+  const volatile = await buildVolatileContext();
+  const today = new Date().toISOString().slice(0, 10);
+  assert(volatile.includes(today), 'the date rides in the volatile tail');
+  assert(/Git status/i.test(volatile), 'and so does git status');
+}
+
+// ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);
 if (failures.length > 0) {
