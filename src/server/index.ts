@@ -48,6 +48,7 @@ import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
+import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
 
 export interface ServeOptions {
   port?: number;
@@ -841,8 +842,13 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     const rel = pathname === '/' ? 'index.html' : pathname.slice(1);
     const file = path.join(root, rel);
     // Contain path traversal: a request for ../../etc/passwd resolves outside
-    // the root, and this is the check that notices.
-    if (!file.startsWith(root)) { send(res, 403, { error: 'forbidden' }); return; }
+    // the root, and this is the check that notices. Compared against
+    // `root + separator` rather than `root`, because a bare prefix test also
+    // accepts a sibling — `web-dist-backup` starts with `web-dist`.
+    if (file !== root && !file.startsWith(root + path.sep)) {
+      send(res, 403, { error: 'forbidden' });
+      return;
+    }
 
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
       const index = path.join(root, 'index.html');
@@ -856,6 +862,27 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     streamFile(file, res);
   }
 
+  /**
+   * The Mini Apps host, when the plugin is on.
+   *
+   * Started after the main socket is bound so it can default to one port above
+   * whatever we actually got — asking for 7317 and being given 7319 should not
+   * put the apps on a port belonging to something else.
+   *
+   * A failure here is reported and survived. Mini Apps are an extra; the port
+   * being taken is not a reason the portal should refuse to start.
+   */
+  let miniApps: MiniAppServer | undefined;
+  async function startMiniApps(boundPort: number): Promise<void> {
+    if (!settings.miniApps?.enabled) return;
+    try {
+      miniApps = await startMiniAppServer({ settings, cwd, sisterPort: boundPort });
+      console.log(`  Mini Apps  ${miniApps.url}`);
+    } catch (err) {
+      console.warn(`  Mini Apps failed to start: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   await new Promise<void>((resolve) => server.listen(requestedPort, '127.0.0.1', resolve));
   // Port 0 asks the OS for any free port, so the real one has to be read back
   // rather than echoed. Without this the printed URL would say ":0" and the
@@ -865,6 +892,8 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   port = boundPort;
   const url = `http://127.0.0.1:${boundPort}/?token=${token}`;
 
+  await startMiniApps(boundPort);
+
   if (opts.open) openBrowser(url);
 
   return {
@@ -873,6 +902,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       clearInterval(heartbeat);
       hub.closeAll();
       await runs.closeAll();
+      await miniApps?.close();
       shutdownFeatures();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
