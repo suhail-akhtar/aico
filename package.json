@@ -1,7 +1,7 @@
 {
   "name": "@suhail-akhtar/aico",
   "version": "0.3.0",
-  "description": "AI Coder — multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
+  "description": "AI Coder \u2014 multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
   "keywords": [
     "ai",
     "cli",
@@ -58,6 +58,7 @@
     "diff": "^5.2.0",
     "dotenv": "^17.4.2",
     "echarts": "^6.1.0",
+    "exceljs": "^4.4.0",
     "fast-glob": "^3.3.2",
     "ink": "^6.8.0",
     "ink-text-input": "^6.0.0",
@@ -67,8 +68,7 @@
     "pdf-parse": "^2.4.5",
     "playwright-core": "^1.62.1",
     "react": "^19.2.4",
-    "strip-ansi": "^7.1.0",
-    "xlsx": "^0.18.5"
+    "strip-ansi": "^7.1.0"
   },
   "devDependencies": {
     "@types/diff": "^5.2.0",
@@ -80,7 +80,7 @@
     "mermaid": "^11.16.1",
     "react-dom": "^19.2.8",
     "react-markdown": "^9.1.0",
-    "react-syntax-highlighter": "^15.6.6",
+    "react-syntax-highlighter": "^16.1.1",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
@@ -92,5 +92,9 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "overrides": {
+    "uuid": "^11.1.1",
+    "esbuild": "^0.28.1"
   }
 }
