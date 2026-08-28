@@ -25,6 +25,9 @@ and what to do when something goes wrong.
 
 ---
 
+### npx
+``` npx github:suhail-akhtar/aico#publish serve ```
+
 ## Why this one
 
 Most agent CLIs keep the conversation as a list of strings and re-send it each
