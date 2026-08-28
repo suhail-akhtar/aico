@@ -26,6 +26,9 @@ import {
 import {
   collectWidgetFixes, widgetHash, fixMarker, stripMarker, isFixRequest, firstBlock,
 } from './dist-test/widget-fixes.mjs';
+import {
+  collectVersionGroups, applyVersions, editMarker, stripEditMarker, seqOf,
+} from './dist-test/message-versions.mjs';
 import { checksFrom } from './dist-test/checks.mjs';
 import { shouldClearBusy } from './dist-test/turn-state.mjs';
 import { searchAgents, splitAgents, mentionAt } from './dist-test/agents.mjs';
@@ -1547,6 +1550,100 @@ test('the hash is stable, since it is written in one session and read in another
   assert.equal(widgetHash('abc'), widgetHash('abc'), 'same input, same hash');
   assert.notEqual(widgetHash('abc'), widgetHash('abd'), 'different input, different hash');
   assert.match(widgetHash('anything'), /^[a-z0-9]+$/, 'and it survives the marker regex');
+});
+
+// ── Edit and resend, versioned ─────────────────────────────────────────────
+
+const m = (type, content, seq) => ({
+  id: seq === undefined ? `${type}-x${Math.random()}` : `seq-${seq}`,
+  type, content, timestamp: 0,
+});
+
+/** original question → answer → rephrased question → new answer */
+const conversation = () => ([
+  m('user', 'what is the capital of france', 1),
+  m('assistant', 'Paris.', 2),
+  m('user', 'what is the capital of germany' + editMarker(1), 3),
+  m('assistant', 'Berlin.', 4),
+]);
+
+test('a version owns its answers, not just its own words', () => {
+  const [group] = collectVersionGroups(conversation());
+  assert.equal(group.versions.length, 2, 'the original and the re-send are two versions');
+  assert.equal(group.versions[0].content, 'what is the capital of france');
+  assert.equal(group.versions[1].content, 'what is the capital of germany',
+    'and the marker is not part of what was asked');
+  assert.deepEqual(group.owned, [[1], [3]],
+    'each version owns the replies that came back from it — switching swaps a '
+    + 'stretch of conversation, not a bubble');
+});
+
+test('the newest version is what you land on', () => {
+  const view = applyVersions(conversation(), new Map());
+  const texts = view.messages.map(x => x.content);
+  assert.deepEqual(texts, ['what is the capital of germany', 'Berlin.'],
+    'you edited because the first attempt was wrong; landing on it would be backwards');
+  assert.equal(view.messages.length, 2, 'the superseded question and its answer are not shown');
+});
+
+test('the question stays where it was asked', () => {
+  const view = applyVersions(conversation(), new Map());
+  assert.equal(view.messages[0].id, 'seq-1',
+    'the newest version is drawn in the original slot, not appended at the bottom');
+  const control = view.groups.get('seq-1');
+  assert.equal(control.total, 2, 'and carries a 2-of-2 control');
+  assert.equal(control.current, 1, 'showing the second');
+});
+
+test('navigating back restores that version and its answers together', () => {
+  const view = applyVersions(conversation(), new Map([[1, 0]]));
+  assert.deepEqual(view.messages.map(x => x.content), ['what is the capital of france', 'Paris.'],
+    'an answer to a question you rephrased is not an answer to the one you asked');
+});
+
+test('three versions, and everything in between stays paired', () => {
+  const messages = [
+    m('user', 'v1', 1), m('assistant', 'a1', 2),
+    m('user', 'v2' + editMarker(1), 3), m('assistant', 'a2', 4),
+    m('user', 'v3' + editMarker(1), 5), m('assistant', 'a3', 6),
+  ];
+  const [group] = collectVersionGroups(messages);
+  assert.equal(group.versions.length, 3);
+  assert.deepEqual(group.owned, [[1], [3], [5]], 'each attempt keeps its own reply');
+
+  for (const [pick, expected] of [[0, ['v1', 'a1']], [1, ['v2', 'a2']], [2, ['v3', 'a3']]]) {
+    const view = applyVersions(messages, new Map([[1, pick]]));
+    assert.deepEqual(view.messages.map(x => x.content), expected, `version ${pick + 1}`);
+  }
+});
+
+test('an out-of-range selection is clamped rather than blanking the view', () => {
+  const view = applyVersions(conversation(), new Map([[1, 99]]));
+  assert.equal(view.messages.length, 2, 'still renders');
+  assert.equal(view.groups.get('seq-1').current, 1, 'clamped to the newest');
+});
+
+test('a conversation nobody edited is passed straight through', () => {
+  const plain = [m('user', 'hello', 1), m('assistant', 'hi', 2)];
+  const view = applyVersions(plain, new Map());
+  assert.equal(view.messages, plain,
+    'the same array, not a copy — almost every conversation takes this path');
+  assert.equal(view.groups.size, 0);
+});
+
+test('a re-send whose original is out of view renders rather than vanishing', () => {
+  // A truncated transcript, or a log that starts mid-conversation. A visible
+  // message nobody grouped beats a missing one.
+  const messages = [m('user', 'edited' + editMarker(999), 3), m('assistant', 'ok', 4)];
+  const view = applyVersions(messages, new Map());
+  assert.equal(view.messages.length, 2, 'nothing is dropped');
+});
+
+test('the marker is plumbing and never reaches the reader', () => {
+  assert.equal(stripEditMarker('rephrased' + editMarker(7)), 'rephrased');
+  assert.ok(!stripEditMarker('x' + editMarker(7)).includes('aico:edit'));
+  assert.equal(seqOf('seq-42'), 42, 'and the seq is recoverable from the id');
+  assert.equal(seqOf('draft-1'), null, 'while a draft has none');
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

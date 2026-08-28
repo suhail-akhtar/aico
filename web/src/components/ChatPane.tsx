@@ -26,6 +26,9 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { MessageBubble } from '@aico/ui';
 import { useStore } from '../store';
 import { collectWidgetFixes, fixMarker, widgetHash } from '../widget-fixes';
+import { applyVersions, editMarker } from '../message-versions';
+import { EditableMessage } from './EditableMessage';
+import { SelectionAsk, quoteForComposer } from './SelectionAsk';
 import { composeMessages } from '../reduce';
 import { TurnSummary } from './TurnSummary';
 import { MessageActions } from './MessageActions';
@@ -50,6 +53,7 @@ export function ChatPane(): React.ReactElement {
   const draft = useStore(s => s.draft);
   const busy = useStore(s => s.busy);
   const submit = useStore(s => s.submit);
+  const prefillComposer = useStore(s => s.prefillComposer);
 
   /**
    * Hand a widget that would not render back to the agent to correct.
@@ -86,7 +90,38 @@ export function ChatPane(): React.ReactElement {
       fixMarker(source, kind),
     ].join('\n'));
   };
-  const messages = useMemo(() => composeMessages(logged, draft, busy), [logged, draft, busy]);
+  const composed = useMemo(() => composeMessages(logged, draft, busy), [logged, draft, busy]);
+
+  // Which version of an edited message the reader is looking at, by the seq of
+  // the message every version replaces. Empty means "the newest of each", which
+  // is what you want after editing: you changed it because the first attempt
+  // was wrong.
+  const [versionChoice, setVersionChoice] = useState<Map<number, number>>(new Map());
+  const versioned = useMemo(
+    () => applyVersions(composed, versionChoice), [composed, versionChoice],
+  );
+  const messages = versioned.messages;
+
+  /**
+   * Ask the same question a different way.
+   *
+   * The re-send names the message it replaces, so the projection can show it as
+   * a version in place rather than a second question at the bottom — and so the
+   * answers that came back from each attempt stay with the attempt that
+   * produced them.
+   */
+  const resend = (originalSeq: number, text: string): void => {
+    // Back to the newest, which is the one about to arrive. Leaving the reader
+    // pinned to an older version while a new one streams in below would be the
+    // most confusing possible outcome of pressing Send.
+    setVersionChoice((current) => {
+      const next = new Map(current);
+      next.delete(originalSeq);
+      return next;
+    });
+    void submit(`${text}
+${editMarker(originalSeq)}`);
+  };
 
   // Recomputed from the transcript rather than stored, like every other
   // projection here: a reload rebuilds which corrections replace which widgets
@@ -140,6 +175,16 @@ export function ChatPane(): React.ReactElement {
 
   return (
     <div className="relative min-h-0 flex-1">
+      {/*
+        Quoted into the composer rather than stored as a comment: the reader can
+        see exactly what the agent will receive, and it reaches the agent
+        because it *is* the message. A comment held somewhere the assistant
+        cannot read is a promise the interface does not keep.
+      */}
+      <SelectionAsk
+        scrollRoot={scrollRef}
+        onAsk={(quote) => prefillComposer(quoteForComposer(quote))}
+      />
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto px-5 py-6">
         <div className="mx-auto w-full max-w-column">
           {status === 'lost' && (
@@ -192,17 +237,35 @@ export function ChatPane(): React.ReactElement {
             // the rating attaches to, and a streaming partial has none.
             const seq = seqOf(message.id);
             const rateable = message.type === 'assistant' && !message.streaming && seq !== null;
-            // Copy is offered on anything with words in it — including your own
-            // messages, which is the case that was missing.
-            const copyable = (message.type === 'assistant' || message.type === 'user')
+            // A sent message owns its whole footer — copy, edit and version
+            // navigation together — so only replies use the shared actions row.
+            const copyable = message.type === 'assistant'
               && !message.streaming && message.content.trim().length > 0;
             return (
               <div key={message.id} className="group/message">
-                <MessageBubble
-                  message={message}
-                  onFix={fixWidget}
-                  widgetFixes={widgetFixes}
-                />
+                {message.type === 'user' && seq !== null ? (
+                  <EditableMessage
+                    content={message.content}
+                    {...(busy ? {} : { onResend: (text: string) => resend(seq, text) })}
+                    {...(versioned.groups.has(message.id) ? {
+                      versions: {
+                        total: versioned.groups.get(message.id)!.total,
+                        current: versioned.groups.get(message.id)!.current,
+                        onSelect: (index: number) => setVersionChoice((current) => {
+                          const next = new Map(current);
+                          next.set(versioned.groups.get(message.id)!.originalSeq, index);
+                          return next;
+                        }),
+                      },
+                    } : {})}
+                  />
+                ) : (
+                  <MessageBubble
+                    message={message}
+                    onFix={fixWidget}
+                    widgetFixes={widgetFixes}
+                  />
+                )}
                 {copyable && (
                   <div className={message.type === 'user' ? 'flex justify-end' : ''}>
                     <MessageActions
