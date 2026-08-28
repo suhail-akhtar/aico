@@ -1482,6 +1482,66 @@ test('a correction is drawn where the broken widget stands, not further down', (
     + 'the same chart twice, with nothing to say which is live, is worse than the bug');
 });
 
+test('the repair itself never appears in the conversation', () => {
+  const messages = [
+    msg('assistant', '```table\n' + BROKEN + '\n```'),
+    msg('user', 'that did not render\n' + fixMarker(BROKEN, 'table')),
+    msg('reasoning', 'the rows are objects, they should be arrays'),
+    msg('assistant', '```table\n' + FIXED + '\n```'),
+  ];
+  const { hidden } = collectWidgetFixes(messages);
+
+  // One click should not cost the reader a paragraph this interface wrote and
+  // an answer already drawn in place of the broken block.
+  assert.ok(hidden.has(1), 'the request goes');
+  assert.ok(hidden.has(2), 'and the working-out with it');
+  assert.ok(hidden.has(3), 'and the reply, which is already drawn in place');
+  assert.ok(!hidden.has(0), 'the widget being repaired stays, as the record of what broke');
+});
+
+test('a repair that produced nothing stays visible, so the failure is not silent', () => {
+  // Hiding the turn either way would leave a widget marked "being fixed" with
+  // no explanation anywhere. Silence is the one outcome worse than noise.
+  const messages = [
+    msg('assistant', '```table\n' + BROKEN + '\n```'),
+    msg('user', 'fix\n' + fixMarker(BROKEN, 'table')),
+    msg('assistant', 'I cannot correct this — the data has no numeric column.'),
+  ];
+  const { hidden, replacements } = collectWidgetFixes(messages);
+
+  assert.equal(replacements.size, 0, 'nothing was corrected');
+  assert.ok(hidden.has(1), 'the machine-written request still goes — it is noise either way');
+  assert.ok(!hidden.has(2), 'but the explanation stays, or the reader is told nothing at all');
+});
+
+test('a repair still running hides its request without swallowing the rest', () => {
+  // The optimistic echo carries the marker before any reply exists. Nothing
+  // after it has arrived yet, so nothing after it may be hidden.
+  const messages = [
+    msg('assistant', '```table\n' + BROKEN + '\n```'),
+    msg('user', 'fix\n' + fixMarker(BROKEN, 'table')),
+  ];
+  const { hidden } = collectWidgetFixes(messages);
+  assert.deepEqual([...hidden], [1], 'only the request');
+});
+
+test('a correction is found in any fence the kind answers to', () => {
+  // The request names one fence and the model may reply in another — a diagram
+  // repair asks for ```diagram and gets ```mermaid back, which is a perfectly
+  // reasonable thing to write. Matching only the requested word left the widget
+  // marked "being fixed" for ever with the answer two messages away.
+  const cases = [
+    ['diagram', 'mermaid'], ['diagram', 'flowchart'],
+    ['chart', 'echarts'], ['chart', 'plot'], ['table', 'datatable'],
+    ['viz', 'vega-lite'], ['dashboard', 'board'],
+  ];
+  const NL = String.fromCharCode(10);
+  for (const [kind, fence] of cases) {
+    const found = firstBlock('```' + fence + NL + 'BODY' + NL + '```', kind);
+    assert.equal(found, 'BODY', `a ${kind} repair accepts a ${fence} reply`);
+  }
+});
+
 test('the pairing survives the tool calls that sit between request and reply', () => {
   const messages = [
     msg('assistant', '```table\n' + BROKEN + '\n```'),

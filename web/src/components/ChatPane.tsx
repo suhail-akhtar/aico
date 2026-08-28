@@ -27,6 +27,7 @@ import { MessageBubble } from '@aico/ui';
 import type { ChatMessage } from '@aico/ui';
 import { useStore } from '../store';
 import { collectWidgetFixes, fixMarker, widgetHash } from '../widget-fixes';
+import { widgetById } from '../../../shared/widgets/catalog';
 import { applyVersions, editMarker } from '../message-versions';
 import { EditableMessage } from './EditableMessage';
 import { SelectionAsk, quoteForComposer } from './SelectionAsk';
@@ -80,7 +81,9 @@ export function ChatPane(): React.ReactElement {
       '',
       'This is the block that failed:',
       '',
-      '```' + (kind === 'chart' ? 'chart' : kind),
+      // The kind's canonical fence, from the catalogue. Asking in a fence
+      // nobody writes invites a reply in one nobody is looking for.
+      '```' + (widgetById(kind)?.languages[0] ?? kind),
       source,
       '```',
       '',
@@ -163,6 +166,26 @@ export function ChatPane(): React.ReactElement {
   // projection here: a reload rebuilds which corrections replace which widgets
   // from the log alone, with nothing extra to keep in step.
   const fixes = useMemo(() => collectWidgetFixes(messages), [messages]);
+
+  /**
+   * The transcript with the repair traffic taken out.
+   *
+   * Asking for a widget to be fixed sends a paragraph this interface wrote —
+   * the failing spec, the parser's error, an instruction — and gets back the
+   * corrected block, which is already drawn in the place the broken one stood.
+   * Both in the transcript means one click costs the reader a wall of text they
+   * did not write and an answer they can already see, in the middle of whatever
+   * they were reading.
+   *
+   * The log keeps every word; only the view drops them. Same arrangement as the
+   * correction itself.
+   */
+  const visible = useMemo(
+    () => (fixes.hidden.size === 0
+      ? messages
+      : messages.filter((_, index) => !fixes.hidden.has(index))),
+    [messages, fixes],
+  );
 
   /**
    * Stable lookups over changing data.
@@ -285,9 +308,9 @@ export function ChatPane(): React.ReactElement {
             </div>
           )}
 
-          {messages.length === 0 && !busy && <EmptyState />}
+          {visible.length === 0 && !busy && <EmptyState />}
 
-          {messages.map(message => {
+          {visible.map(message => {
             // Only a finalized reply can be rated: its id encodes the log seq
             // the rating attaches to, and a streaming partial has none.
             const seq = seqOf(message.id);
@@ -344,7 +367,7 @@ export function ChatPane(): React.ReactElement {
               composer and shows while busy regardless of what is streaming.
               This one only appeared when *nothing* was streaming, so the
               worst case — text arrived, then silence — showed nothing. */}
-          {busy && messages.length === 0 && <Working />}
+          {busy && visible.length === 0 && <Working />}
 
           {/*
             Messages the server took but the transcript has not reached yet.

@@ -32,6 +32,7 @@
  */
 
 import type { ChatMessage } from '@aico/ui';
+import { widgetById } from '../../shared/widgets/catalog';
 
 /** Marker written into the Fix request. Stripped before the message is shown. */
 const MARKER = /\[\[aico:fix:([a-z0-9]+):([a-z]+)\]\]/i;
@@ -70,11 +71,13 @@ export function isFixRequest(text: string): boolean {
 
 /** The first fenced block of a given kind in some markdown. */
 export function firstBlock(markdown: string, kind: string): string | undefined {
-  // Aliases, because the renderer accepts several fences per kind and the model
-  // may answer a `chart` request with ```echarts.
-  const aliases = kind === 'chart'
-    ? ['chart', 'echarts', 'plot']
-    : kind === 'table' ? ['table', 'datatable'] : [kind];
+  // Every fence the kind answers to, taken from the catalogue rather than
+  // restated here. This was a hardcoded pair of special cases for `chart` and
+  // `table`, which meant any kind added later matched only its own name — so a
+  // diagram repair asked for ```diagram, the model sensibly replied with
+  // ```mermaid, and the correction was never found. The widget sat marked
+  // "being fixed" for ever with the answer sitting unread two messages away.
+  const aliases = widgetById(kind)?.languages ?? [kind];
   for (const alias of aliases) {
     const pattern = new RegExp('```' + alias + '\\s*\\n([\\s\\S]*?)```', 'i');
     const found = pattern.exec(markdown);
@@ -88,9 +91,26 @@ export interface WidgetFixes {
   replacements: Map<string, string>;
   /** Hashes of corrected blocks, which must not also render on their own. */
   superseded: Set<string>;
+  /**
+   * Indices of the messages that carried a repair, which are not shown.
+   *
+   * A repair is machinery, not conversation. The request is a paragraph this
+   * interface wrote — the failing spec, the parser's error, and an instruction
+   * — and the reply is the corrected block, which is already drawn where the
+   * broken one stood. Leaving both in the transcript means asking for a fix
+   * costs the reader a wall of text they did not write and an answer they can
+   * already see, in the middle of whatever they were actually reading.
+   *
+   * Hidden from the *view* only. The log still holds every word, so the export
+   * is complete, the cost is accounted, and a session can be replayed exactly
+   * — which is the whole reason drawing is a projection rather than an edit.
+   */
+  hidden: Set<number>;
 }
 
-export const NO_FIXES: WidgetFixes = { replacements: new Map(), superseded: new Set() };
+export const NO_FIXES: WidgetFixes = {
+  replacements: new Map(), superseded: new Set(), hidden: new Set(),
+};
 
 /**
  * Read the repair pairs out of a conversation.
@@ -102,6 +122,7 @@ export const NO_FIXES: WidgetFixes = { replacements: new Map(), superseded: new 
 export function collectWidgetFixes(messages: readonly ChatMessage[]): WidgetFixes {
   const replacements = new Map<string, string>();
   const superseded = new Set<string>();
+  const hidden = new Set<number>();
 
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i]!;
@@ -112,21 +133,37 @@ export function collectWidgetFixes(messages: readonly ChatMessage[]): WidgetFixe
     const [, hash, kind] = marked;
     if (!hash || !kind) continue;
 
+    // The request always goes. It is a paragraph this interface wrote, not
+    // something the reader typed, and it reads as noise whatever the outcome.
+    hidden.add(i);
+
     // The answer is the next assistant message. Tool calls and results sit
     // between them on almost every turn, so this skips rather than requiring
     // adjacency — but it stops at the next user message, because past that the
     // reader has moved on and a later block is about something else.
+    //
+    // The span is collected before it is hidden, and only hidden if a
+    // correction actually came out of it. Hiding it either way would mean a
+    // repair that failed — or that answered "I cannot fix this" — vanished
+    // completely, leaving a widget marked as being fixed and no explanation
+    // anywhere. Silence is the one outcome worse than noise.
+    const span: number[] = [];
     for (let j = i + 1; j < messages.length; j++) {
       const reply = messages[j]!;
       if (reply.type === 'user') break;
+      span.push(j);
       if (reply.type !== 'assistant') continue;
       const corrected = firstBlock(reply.content ?? '', kind);
       if (corrected === undefined) continue;
       replacements.set(hash, corrected);
       superseded.add(widgetHash(corrected));
+      // Everything the repair turn produced belongs to the repair, including
+      // the reasoning and tool calls it made on the way. Hiding only the final
+      // answer would leave the working-out behind with nothing to explain it.
+      for (const index of span) hidden.add(index);
       break;
     }
   }
 
-  return { replacements, superseded };
+  return { replacements, superseded, hidden };
 }
