@@ -104,6 +104,18 @@ export function Sidebar(
         <ResizeHandle onResize={setWidth} />
         <div className="flex items-center gap-2 px-4 pb-2 pt-4">
           <span className="text-[15px] font-semibold tracking-tight text-aico-primary">AICO</span>
+          {/*
+            Version beside the name, attribution under it. Both are the kind of
+            thing you look for once and then never again, so they take the
+            quietest weight on the page — a reader scanning for a session should
+            not have to read past them.
+          */}
+          <span
+            className="rounded bg-aico-hover px-1.5 py-0.5 text-[10px] tabular-nums text-aico-muted"
+            title={`aico ${__AICO_VERSION__} — by Suhail Akhtar`}
+          >
+            v{__AICO_VERSION__}
+          </span>
           <div className="flex-1" />
           <button
             onClick={onClose}
@@ -113,6 +125,8 @@ export function Sidebar(
             <Icon name="close" size={18} />
           </button>
         </div>
+
+        <p className="-mt-1 px-4 pb-2 text-[10px] text-aico-muted">Suhail Akhtar</p>
 
         <div className="px-3 pb-2">
           <button

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig } from 'vite';
@@ -6,12 +7,26 @@ import react from '@vitejs/plugin-react';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
 
+/**
+ * The published version, read from the package that owns it.
+ *
+ * Baked in at build time rather than fetched: it cannot disagree with the
+ * binary it shipped with, and showing it costs no round trip on a page whose
+ * first job is to open a session.
+ */
+const VERSION = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
+).version;
+
 /** Where `aico serve` looks for the built client. */
 const OUT_DIR = path.resolve(repoRoot, 'web-dist');
 /** The port `aico serve` listens on, for the dev proxy. */
 const API_PORT = Number(process.env.AICO_PORT ?? 7317);
 
 export default defineConfig({
+  define: {
+    __AICO_VERSION__: JSON.stringify(VERSION),
+  },
   plugins: [react()],
   root: here,
   base: './',
