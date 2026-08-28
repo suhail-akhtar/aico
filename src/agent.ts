@@ -468,7 +468,26 @@ export interface ToolInvocation {
 }
 
 type ToolHandler = (args: Record<string, unknown>, callId: string) => Promise<ToolInvocation>;
-type AgentToolProfile = 'default' | 'browser-qa';
+type AgentToolProfile = 'default' | 'browser-qa' | 'repair';
+
+/**
+ * What a widget repair is allowed to reach for.
+ *
+ * Correcting a fenced block needs no tools at all — the broken source and the
+ * error are both in the request, and the answer is a rewritten block. WidgetSpec
+ * is here because looking up the format is the one lookup that helps.
+ *
+ * The restriction exists because asking politely did not work. A repair request
+ * ends with "send back a corrected block and nothing else", and a model handed
+ * a misleading parser error and every tool in the box will instead try to
+ * reproduce it: temp directories, npm installs, a version hunt. That is good
+ * debugging instinct spent on a task that did not want it, and it ran for
+ * twenty tool calls on a diagram whose fix was one pair of quotation marks.
+ *
+ * A rule in the prompt competes with the model's judgement. An empty toolbox
+ * does not.
+ */
+const REPAIR_TOOLS = new Set(['WidgetSpec']);
 
 const BROWSER_QA_BUILTINS = new Set([
   'TodoRead',
@@ -489,7 +508,18 @@ function looksLikeBrowserQaTask(task: string): boolean {
   return hasUrl && wantsBrowser;
 }
 
-function selectToolProfile(task: string): AgentToolProfile {
+/**
+ * A widget repair, recognised by the marker the interface put there.
+ *
+ * The marker is ours — written by the Fix action, stripped before the message
+ * is shown, and already carried in the task text. Detecting it here means the
+ * restriction needs no new option threaded through five layers, and it cannot
+ * be spoofed into existence by a reader typing the same words.
+ */
+const FIX_MARKER = /\[\[aico:fix:[a-z0-9]+:[a-z]+\]\]/i;
+
+export function selectToolProfile(task: string): AgentToolProfile {
+  if (FIX_MARKER.test(task)) return 'repair';
   if (
     looksLikeBrowserQaTask(task) &&
     mcpRegistry.getToolsForAgent().some((t) => t.name.startsWith('mcp__playwright__'))
@@ -550,6 +580,9 @@ function resolveToolSet(opts: {
 
   if (opts.toolProfile === 'browser-qa') {
     defs = defs.filter(d => BROWSER_QA_BUILTINS.has(d.name));
+  }
+  if (opts.toolProfile === 'repair') {
+    defs = defs.filter(d => REPAIR_TOOLS.has(d.name));
   }
   if (opts.planMode) {
     defs = defs.filter(d => PLAN_MODE_TOOLS.has(d.name));

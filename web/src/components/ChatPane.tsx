@@ -87,8 +87,22 @@ export function ChatPane(): React.ReactElement {
       source,
       '```',
       '',
+      // The contract, inline. Looking it up is a tool call the repair turn now
+      // has to spend, and the answer is usually in it — the diagram that sent
+      // one repair on a twenty-call investigation needed a pair of quotation
+      // marks, which the spec says in its second sentence.
+      ...(widgetById(kind)?.spec
+        ? ['', 'This is what the block must look like:', '', widgetById(kind)!.spec]
+        : []),
+      '',
       `Send back a corrected \`${kind}\` block and nothing else — no explanation `
       + 'unless the fix needs one. Do not change what it is meant to show.',
+      // The parser error names where it stopped, not what is wrong: an
+      // unquoted label with a slash in it is reported as a bad bracket several
+      // characters earlier. Saying so stops the error being taken literally
+      // and chased.
+      'The error names where the parser stopped, which is often not where the '
+      + 'mistake is. Read it against the shape above rather than at face value.',
       // Names the block being repaired, so the correction can be drawn where
       // the broken one stands rather than several messages further down.
       // Hidden from the reader by MessageBubble; kept in the log because that

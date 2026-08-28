@@ -124,6 +124,7 @@ import {
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
+  selectToolProfile,
   spillResult,
   saveSpill,
   excerpt,
@@ -9349,6 +9350,36 @@ console.log('  -- The model a session is held with survives the tab --');
   const replayed = new Session({ id: 'model-1', cwd: process.cwd(), startedAt: Date.now() });
   for (const event of session.events) replayed.restore(structuredClone(event));
   assert(currentModel(replayed) === 'claude-opus-5', 'and a replay from the log agrees');
+}
+
+console.log('  -- A widget repair cannot go on an expedition --');
+{
+  // What this prevents, concretely. A diagram failed with a mermaid lexer
+  // error that pointed at a bracket when the real fault was an unquoted label
+  // several characters later. The repair turn — holding a misleading error and
+  // every tool in the box — tried to reproduce it: temp directories, two npm
+  // installs, a thirty-one-minute hang, a hunt for the renderer's mermaid
+  // version. Twenty tool calls for a fix that was one pair of quotation marks.
+  //
+  // Nothing was wrong with its reasoning. It never lost the goal; it just had
+  // no reason to stop, because "send back a corrected block and nothing else"
+  // is a sentence in a prompt and `npm install` was still on the table.
+
+  const marked = 'the chart does not render\n[[aico:fix:1uaiqei:diagram]]';
+  assert(selectToolProfile(marked) === 'repair',
+    'a request carrying the fix marker runs with the repair toolset');
+
+  // The marker is ours — written by the Fix action, stripped before display.
+  // A reader typing the same words does not get a restricted turn.
+  assert(selectToolProfile('please fix the chart, it does not render') === 'default',
+    'and the words alone do not, because the restriction follows the marker');
+  assert(selectToolProfile('aico:fix:something') === 'default',
+    'nor does something that merely looks like one');
+
+  for (const kind of ['chart', 'table', 'viz', 'dashboard', 'math']) {
+    assert(selectToolProfile(`broken\n[[aico:fix:abc123:${kind}]]`) === 'repair',
+      `every repairable kind gets it (${kind})`);
+  }
 }
 
 console.log('  -- The diagram index is measured, not copied from the docs --');
