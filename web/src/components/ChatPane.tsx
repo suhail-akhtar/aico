@@ -22,7 +22,7 @@
  * @module components/ChatPane
  */
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MessageBubble } from '@aico/ui';
 import { useStore } from '../store';
 import { collectWidgetFixes, fixMarker, widgetHash } from '../widget-fixes';
@@ -69,7 +69,9 @@ export function ChatPane(): React.ReactElement {
    * wrote it, but that was potentially many turns and a compaction ago, and
    * "the chart you emitted earlier" is not something it can reliably resolve.
    */
-  const fixWidget = ({ kind, source, error }: { kind: string; source: string; error: string }): void => {
+  const fixWidget = useCallback(({ kind, source, error }: {
+    kind: string; source: string; error: string;
+  }): void => {
     void submit([
       `The ${kind} you produced does not render. The error was:`,
       '',
@@ -89,7 +91,10 @@ export function ChatPane(): React.ReactElement {
       // is what makes the pairing survive a reload.
       fixMarker(source, kind),
     ].join('\n'));
-  };
+    // Stable identity. Every message receives this as a prop, and a new
+    // function each render defeats MessageBubble's memo — which during a
+    // stream means re-rendering the whole transcript on every chunk.
+  }, [submit]);
   const composed = useMemo(() => composeMessages(logged, draft, busy), [logged, draft, busy]);
 
   // Which version of an edited message the reader is looking at, by the seq of
@@ -110,7 +115,7 @@ export function ChatPane(): React.ReactElement {
    * answers that came back from each attempt stay with the attempt that
    * produced them.
    */
-  const resend = (originalSeq: number, text: string): void => {
+  const resend = useCallback((originalSeq: number, text: string): void => {
     // Back to the newest, which is the one about to arrive. Leaving the reader
     // pinned to an older version while a new one streams in below would be the
     // most confusing possible outcome of pressing Send.
@@ -119,18 +124,35 @@ export function ChatPane(): React.ReactElement {
       next.delete(originalSeq);
       return next;
     });
-    void submit(`${text}
-${editMarker(originalSeq)}`);
-  };
+    void submit(`${text}\n${editMarker(originalSeq)}`);
+  }, [submit]);
 
   // Recomputed from the transcript rather than stored, like every other
   // projection here: a reload rebuilds which corrections replace which widgets
   // from the log alone, with nothing extra to keep in step.
   const fixes = useMemo(() => collectWidgetFixes(messages), [messages]);
+
+  /**
+   * Stable lookups over changing data.
+   *
+   * `fixes` is rebuilt whenever the transcript changes, which during a stream
+   * is every chunk. Handing that object to every message as a prop broke
+   * MessageBubble's memo on all of them — and a re-render of MarkdownRenderer
+   * *remounts* each fenced block, because react-markdown's component map is
+   * rebuilt and React sees a new component type at that position.
+   *
+   * That is what made charts flicker and a hidden widget come back: the widget
+   * was not re-rendering, it was being replaced by a new one with fresh state.
+   *
+   * These functions never change identity and read the current value through a
+   * ref. The data stays live; the props stop moving.
+   */
+  const fixesRef = useRef(fixes);
+  fixesRef.current = fixes;
   const widgetFixes = useMemo(() => ({
-    replaced: (src: string) => fixes.replacements.get(widgetHash(src)),
-    superseded: (src: string) => fixes.superseded.has(widgetHash(src)),
-  }), [fixes]);
+    replaced: (src: string) => fixesRef.current.replacements.get(widgetHash(src)),
+    superseded: (src: string) => fixesRef.current.superseded.has(widgetHash(src)),
+  }), []);
 
   const status = useStore(s => s.status);
 

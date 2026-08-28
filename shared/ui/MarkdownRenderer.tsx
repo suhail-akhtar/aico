@@ -32,6 +32,7 @@
 
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -85,16 +86,19 @@ const TABLE_LANGUAGES = new Set(['table', 'datatable']);
 export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   content, streaming = false, onFix, widgetFixes,
 }: MarkdownRendererProps): React.ReactElement {
-  return (
-    <div className="markdown-body text-sm leading-relaxed text-aico-primary">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        // `throwOnError: false` matters: a model mid-derivation emits TeX that
-        // is briefly invalid, and a thrown error would take down the whole
-        // message rather than one formula.
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false, output: 'html' }]]}
-        components={{
-          code({ className, children, ...props }: CodeProps) {
+  /**
+   * Built once per distinct set of props, not once per render.
+   *
+   * react-markdown reconciles by component identity, so a map rebuilt every
+   * render presents a *new component type* at each block's position — and
+   * React responds by unmounting and remounting it. A chart re-initialised
+   * from scratch is the flicker; a widget you had hidden coming back is the
+   * same event with its state thrown away.
+   *
+   * Streaming is in the dependencies because it genuinely changes what the
+   * blocks do; the other two are stable by construction at the call site.
+   */
+  const components = React.useMemo((): Components => ({          code({ className, children, ...props }: CodeProps) {
             const language = /language-(\w+)/.exec(className ?? '')?.[1] ?? '';
             const text = String(children);
 
@@ -219,8 +223,17 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
               />
             );
           },
-        }}
-      >
+  }), [streaming, onFix, widgetFixes]);
+
+  return (
+    <div className="markdown-body text-sm leading-relaxed text-aico-primary">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        // `throwOnError: false` matters: a model mid-derivation emits TeX that
+        // is briefly invalid, and a thrown error would take down the whole
+        // message rather than one formula.
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false, output: 'html' }]]}
+        components={components}      >
         {content}
       </ReactMarkdown>
     </div>
