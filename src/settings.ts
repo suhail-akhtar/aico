@@ -247,6 +247,31 @@ export interface AicoSettings {
     maxSizePerType?: number;    // chars per type section (default: 50_000)
     watchFiles?: boolean;       // fs.watch invalidation (default: true)
   };
+  /**
+   * Mini Apps — self-contained single-page applications the agent builds and
+   * the server hosts, each with its own SQLite database.
+   *
+   * Off by default, because this is the one feature that opens a second
+   * listening socket and serves model-authored HTML from it. That is a
+   * reasonable thing to opt into and an unreasonable thing to inherit: nothing
+   * else here starts a server the user did not ask for. Turning it off stops
+   * the port being opened at all, rather than hiding a tab over a running one.
+   *
+   * The port is deliberately separate from the main server's. Mini App pages
+   * are generated JavaScript, and the aico API — which runs shell commands —
+   * authorises by origin. A different origin is what keeps a generated page
+   * from reaching it.
+   */
+  miniApps?: {
+    enabled?: boolean;          // default: false
+    /** Listening port. Default: the main server's port + 1. */
+    port?: number;
+    /**
+     * Bind address. Loopback by default; a Mini App is unauthenticated, so
+     * exposing one on a LAN interface has to be a deliberate act.
+     */
+    host?: string;              // default: '127.0.0.1'
+  };
   /** Cron/scheduling configuration */
   cron?: {
     enabled?: boolean;          // master switch (default: true)
