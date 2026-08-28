@@ -71,7 +71,7 @@ cd aico && npm install && npm run build && npm run build:web
 npm link                 # makes `aico` available globally
 ```
 
-Requires Node 18+. The web client ships in the package, so `aico serve` works
+Requires Node 20+. The web client ships in the package, so `aico serve` works
 from a bare `npx` with nothing else installed.
 
 ## Quick start

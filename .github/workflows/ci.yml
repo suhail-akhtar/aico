@@ -11,7 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20]
+        # 20 is the floor because playwright-core requires it, and the browser
+        # verification gate is not an optional part of this tool. 18 is also
+        # end-of-life. 22 is here so a break on current Node is caught before
+        # users on it are.
+        node-version: [20, 22]
     steps:
       - uses: actions/checkout@v4
 
