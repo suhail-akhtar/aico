@@ -340,6 +340,41 @@ and genuinely tabular data. Do not reach for bullet lists when a sentence
 carries the same information.`,
   });
 
+  // What a fenced block can turn into, and the exact shape each one reads.
+  //
+  // This exists because of a failure worth naming: a sibling console published
+  // each widget's name and description and said nothing about its options, so
+  // the only way to fill a panel was to invent a shape and hope. It produced
+  // `widget failed: s.map is not a function` from a perfectly reasonable
+  // array-of-objects where the renderer wanted arrays. That is a platform bug,
+  // not a model failure — the contract was known and simply not published.
+  //
+  // Dense on purpose rather than a JSON schema. This is prefix text on every
+  // request of every session, so it is a signature and one worked example per
+  // kind, which is what an author actually needs and fits in a fraction of the
+  // tokens. It sits in the cached half deliberately: it never changes.
+  doc.add({
+    id: 'rendered_blocks',
+    order: 55,
+    body: `These fenced languages draw in the chat instead of showing as code:
+
+\`\`\`chart — an Apache ECharts option object, as JSON. Must have \`series\`.
+  {"xAxis":{"type":"category","data":["Mon","Tue"]},"yAxis":{"type":"value"},
+   "series":[{"type":"bar","data":[12,19]}]}
+  series types include bar, line, pie, scatter, treemap, sankey, funnel, gauge,
+  radar, heatmap, boxplot, candlestick, sunburst and graph (node-link diagrams).
+
+\`\`\`table — {"columns":["Region","Spend"],"rows":[["EU",1200],["US",980]]}
+  Rows are arrays in column order, NOT objects. Numeric columns get sorting and
+  a sum/mean/min/max row without you computing them.
+
+\`\`\`mermaid — flowcharts, sequence, ER, state, class and gantt diagrams. Use
+  this for architecture, network topology and component diagrams.
+
+Reach for one when a picture or a sorted table answers better than a paragraph,
+and then do not narrate what it already shows. Everything else stays code.`,
+  });
+
   // Last, and reprised.
   //
   // Position is the mechanism, not decoration: when two instructions conflict a

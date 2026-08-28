@@ -20,6 +20,9 @@ import { formatResult, outcomeOf } from './dist-test/tool-result.mjs';
 import { todosFrom, TASK_REPLY } from './dist-test/todos.mjs';
 import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
 import { loadDismissals, saveDismissals } from './dist-test/panel-memory.mjs';
+import {
+  parseChartSpec, parseTableSpec, numericValue, summarise,
+} from './dist-test/widget-specs.mjs';
 import { checksFrom } from './dist-test/checks.mjs';
 import { shouldClearBusy } from './dist-test/turn-state.mjs';
 import { searchAgents, splitAgents, mentionAt } from './dist-test/agents.mjs';
@@ -1381,6 +1384,75 @@ test('and storage that throws is survivable, because a panel is not worth a cras
   };
   assert.deepEqual(loadDismissals('s1', hostile), {});
   saveDismissals('s1', { plan: 'x' }, hostile);
+});
+
+// ── Rendered widgets ───────────────────────────────────────────────────────
+
+test('a chart spec is accepted when it can actually draw something', () => {
+  const ok = parseChartSpec('{"series":[{"type":"bar","data":[1,2,3]}]}');
+  assert.equal(ok.error, undefined, 'a spec with series parses');
+  assert.equal(ok.option.series.length, 1, 'and the option survives');
+
+  // `dataset` is the other legitimate way to supply data, and refusing it would
+  // reject a whole documented ECharts idiom.
+  assert.equal(parseChartSpec('{"dataset":{"source":[[1,2]]},"xAxis":{}}').error, undefined,
+    'a dataset-driven spec is accepted too');
+});
+
+test('and refused, with a reason, when it cannot', () => {
+  assert.match(parseChartSpec('').error, /empty/, 'an empty block says so');
+  assert.match(parseChartSpec('{"xAxis":{}}').error, /nothing to draw/,
+    'no series means there is nothing to draw, which is more useful than "invalid"');
+  assert.match(parseChartSpec('[1,2,3]').error, /JSON object/,
+    'an array is not an option object');
+  assert.match(parseChartSpec('{"series":[},}').error, /not valid JSON/,
+    'and malformed JSON is named as such rather than thrown');
+});
+
+test('a table takes the shape a renderer can read, and says so when it does not', () => {
+  const ok = parseTableSpec('{"columns":["a","b"],"rows":[[1,2],[3,4]]}');
+  assert.equal(ok.error, undefined);
+  assert.equal(ok.spec.rows.length, 2);
+
+  // The exact mistake the sibling console documented: a perfectly reasonable
+  // array-of-objects, and not the shape this reads. The error has to name the
+  // difference or the next attempt is the same guess.
+  const objects = parseTableSpec('{"columns":["a"],"rows":[{"a":1}]}');
+  assert.match(objects.error, /array of arrays/, 'objects-as-rows is caught');
+  assert.match(objects.error, /not an array of objects/, 'and the wrong shape is named');
+
+  const ragged = parseTableSpec('{"columns":["a","b"],"rows":[[1,2],[3]]}');
+  assert.match(ragged.error, /row 2 has 1 cells but there are 2 columns/,
+    'a ragged row is located, not just reported');
+});
+
+test('numbers are recognised in the forms a model actually writes them', () => {
+  assert.equal(numericValue(42), 42, 'a number');
+  assert.equal(numericValue('42'), 42, 'a numeric string');
+  assert.equal(numericValue('1,024'), 1024, 'thousands separators — a column of these summing to nothing looks broken');
+  assert.equal(numericValue('$1200'), 1200, 'currency');
+  assert.equal(numericValue('92%'), 92, 'percentages');
+  assert.equal(numericValue('-3.5'), -3.5, 'negatives and decimals');
+  assert.equal(numericValue('n/a'), undefined, 'and a non-number is not coerced to zero');
+  assert.equal(numericValue(''), undefined, 'nor is an empty cell');
+  assert.equal(numericValue(null), undefined, 'nor a null');
+});
+
+test('the stats row computes what a reader would otherwise ask the model for', () => {
+  const spec = {
+    columns: ['region', 'spend'],
+    rows: [['EU', 1200], ['US', 980], ['APAC', 400]],
+  };
+  const stats = summarise(spec, 1);
+  assert.equal(stats.sum, 2580, 'sum');
+  assert.equal(stats.min, 400, 'min');
+  assert.equal(stats.max, 1200, 'max');
+  assert.equal(stats.count, 3, 'count');
+  assert.equal(Math.round(stats.mean), 860, 'mean');
+
+  // A text column has no arithmetic, and inventing some would be worse than
+  // leaving the row out.
+  assert.equal(summarise(spec, 0), undefined, 'a text column is not summarised');
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

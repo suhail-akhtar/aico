@@ -39,6 +39,9 @@ import 'katex/dist/katex.min.css';
 import { CodeBlock } from './CodeBlock';
 import { Diagram } from './Diagram';
 import { HtmlPreview } from './HtmlPreview';
+import { Chart } from './Chart';
+import { DataTable } from './DataTable';
+import { Widget } from './Widget';
 
 export interface MarkdownRendererProps {
   content: string;
@@ -47,15 +50,27 @@ export interface MarkdownRendererProps {
    * complete — diagrams especially — wait rather than flashing errors.
    */
   streaming?: boolean;
+  /**
+   * Ask the agent to repair a widget that failed to render.
+   *
+   * Threaded through rather than reached for globally, because these
+   * components also render where there is no agent — an export, a test — and a
+   * Fix button that does nothing is worse than none.
+   */
+  onFix?: (request: { kind: string; source: string; error: string }) => void;
 }
 
 /** Fences that mean "draw this", not "show this as code". */
 const DIAGRAM_LANGUAGES = new Set(['mermaid', 'diagram', 'flowchart', 'sequence', 'gantt']);
 /** Fences that get the sandboxed preview. */
 const HTML_LANGUAGES = new Set(['html', 'htm', 'svg', 'preview']);
+/** Fences carrying an ECharts option object. */
+const CHART_LANGUAGES = new Set(['chart', 'echarts', 'plot']);
+/** Fences carrying `{ columns, rows }`. */
+const TABLE_LANGUAGES = new Set(['table', 'datatable']);
 
 export const MarkdownRenderer = React.memo(function MarkdownRenderer({
-  content, streaming = false,
+  content, streaming = false, onFix,
 }: MarkdownRendererProps): React.ReactElement {
   return (
     <div className="markdown-body text-sm leading-relaxed text-aico-primary">
@@ -87,11 +102,32 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
               );
             }
 
+            const body = text.replace(/\n$/, '');
+
+            // Everything that *draws* goes in the widget frame, so a chart, a
+            // table and a diagram offer the same copy/download/expand/hide
+            // and, when one fails, the same repair. Diagrams and HTML previews
+            // predate the frame and carry their own chrome, so they are left
+            // alone rather than given two.
+            if (CHART_LANGUAGES.has(language)) {
+              return (
+                <Widget kind="chart" source={body} extension="json" onFix={onFix}>
+                  <Chart source={body} streaming={streaming} />
+                </Widget>
+              );
+            }
+            if (TABLE_LANGUAGES.has(language)) {
+              return (
+                <Widget kind="table" source={body} extension="json" onFix={onFix}>
+                  <DataTable source={body} />
+                </Widget>
+              );
+            }
             if (DIAGRAM_LANGUAGES.has(language)) {
-              return <Diagram source={text.replace(/\n$/, '')} streaming={streaming} />;
+              return <Diagram source={body} streaming={streaming} />;
             }
             if (HTML_LANGUAGES.has(language)) {
-              return <HtmlPreview html={text.replace(/\n$/, '')} language={language} />;
+              return <HtmlPreview html={body} language={language} />;
             }
             return <CodeBlock code={text} language={language} />;
           },

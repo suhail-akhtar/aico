@@ -21,6 +21,13 @@ export { MarkdownRenderer } from './MarkdownRenderer';
 export { CodeBlock } from './CodeBlock';
 export { Diagram } from './Diagram';
 export { HtmlPreview } from './HtmlPreview';
+export { Widget } from './Widget';
+export { Chart } from './Chart';
+export { DataTable } from './DataTable';
+export {
+  parseChartSpec, parseTableSpec, numericValue, numericColumns, summarise,
+} from './widget-specs';
+export type { TableSpec, ColumnSummary } from './widget-specs';
 export { HIGHLIGHT_LANGUAGES, LANGUAGE_LABELS } from './languages';
 export { ReasoningBlock } from './ReasoningBlock';
 export { FileDiff, changeFromArgs } from './FileDiff';

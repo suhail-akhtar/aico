@@ -48,6 +48,38 @@ export function ChatPane(): React.ReactElement {
   const logged = useStore(s => s.logged);
   const draft = useStore(s => s.draft);
   const busy = useStore(s => s.busy);
+  const submit = useStore(s => s.submit);
+
+  /**
+   * Hand a widget that would not render back to the agent to correct.
+   *
+   * The transcript is append-only, so this cannot literally rewrite the message
+   * that failed — and should not: the broken spec is what the agent wrote and
+   * the record of that is the point. What it does instead is give the agent
+   * everything it needs to get it right on the second try, which is the part
+   * the reader actually wanted. Without this the reader has to copy the block,
+   * paste the error and describe the problem themselves.
+   *
+   * The failing source is included verbatim rather than referred to. The agent
+   * wrote it, but that was potentially many turns and a compaction ago, and
+   * "the chart you emitted earlier" is not something it can reliably resolve.
+   */
+  const fixWidget = ({ kind, source, error }: { kind: string; source: string; error: string }): void => {
+    void submit([
+      `The ${kind} you produced does not render. The error was:`,
+      '',
+      error,
+      '',
+      'This is the block that failed:',
+      '',
+      '```' + (kind === 'chart' ? 'chart' : kind),
+      source,
+      '```',
+      '',
+      `Send back a corrected \`${kind}\` block and nothing else — no explanation `
+      + 'unless the fix needs one. Do not change what it is meant to show.',
+    ].join('\n'));
+  };
   const messages = useMemo(() => composeMessages(logged, draft, busy), [logged, draft, busy]);
 
   const status = useStore(s => s.status);
@@ -151,7 +183,7 @@ export function ChatPane(): React.ReactElement {
               && !message.streaming && message.content.trim().length > 0;
             return (
               <div key={message.id} className="group/message">
-                <MessageBubble message={message} />
+                <MessageBubble message={message} onFix={fixWidget} />
                 {copyable && (
                   <div className={message.type === 'user' ? 'flex justify-end' : ''}>
                     <MessageActions

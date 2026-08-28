@@ -22,8 +22,18 @@ import { ReasoningBlock } from './ReasoningBlock';
 import { ToolCallCard } from './ToolCallCard';
 
 export const MessageBubble = React.memo(function MessageBubble({
-  message,
-}: { message: ChatMessage }): React.ReactElement {
+  message, onFix,
+}: {
+  message: ChatMessage;
+  /**
+   * Ask the agent to repair a widget in this message that would not render.
+   *
+   * Passed down rather than reached for, so this component stays store-free
+   * like the rest of the shared UI and still works in an export or a test —
+   * where it is simply absent and no Fix button is offered.
+   */
+  onFix?: (request: { kind: string; source: string; error: string }) => void;
+}): React.ReactElement {
   if (message.type === 'tool') {
     return (
       <ToolCallCard
@@ -62,7 +72,11 @@ export const MessageBubble = React.memo(function MessageBubble({
   if (message.type === 'assistant') {
     return (
       <div className="my-5 selectable">
-        <MarkdownRenderer content={message.content} streaming={message.streaming === true} />
+        <MarkdownRenderer
+          content={message.content}
+          streaming={message.streaming === true}
+          {...(onFix ? { onFix } : {})}
+        />
         {message.streaming && <span className="stream-cursor" aria-hidden />}
       </div>
     );
