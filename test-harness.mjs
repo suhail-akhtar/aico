@@ -25,6 +25,7 @@ import {
   extractSymbols, extractPurpose, overview, findSymbol, searchPurpose,
   gitTool,
   matchKnowledge, renderKnowledge, meaningfulWords, parseEntry,
+  investigate, investigateDefinition, findDuplicateAngles,
   beginCheckpoint, commitCheckpoint, listCheckpoints, restoreCheckpoint,
   recordBeforeWrite, recordAfterWrite, resetCheckpoints, isRecording,
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal, resetCapabilityCache,
@@ -3048,14 +3049,23 @@ console.log('\n══ 30. CAPABILITY SEAMS IN THE LOOP ══');
   assert(checkSessionInvariants(session).ok, 'Custom-tool run satisfies every invariant');
 
   // The model must have been offered the composed tool set and nothing from the
-  // built-in table. `Task` is loop machinery (sub-agent dispatch), added
-  // separately by the loop, so it is expected alongside.
+  // built-in table. Sub-agent dispatch is loop machinery, added separately by
+  // the loop, so it is expected alongside.
+  //
+  // Both members are dispatch, and neither widens the surface: a composed
+  // registry is authoritative for children too (`resolveToolSet` takes it over
+  // `agentType`), so a worker spawned by either gets this same one-tool set
+  // rather than the built-in table. Named explicitly rather than counted, so
+  // that adding a third is a deliberate act with this reasoning to answer.
   const schemas = provider.toolSchemas[0];
   assert(schemas.includes('Divine'), 'Composed tool is offered to the model');
   assert(!schemas.includes('Bash') && !schemas.includes('Read') && !schemas.includes('Write'),
     `No built-in leaked into a composed tool set (${schemas.join(',')})`);
-  assert(schemas.filter(n => n !== 'Task').length === 1,
+  const LOOP_MACHINERY = ['Task', 'Investigate'];
+  assert(schemas.filter(n => !LOOP_MACHINERY.includes(n)).length === 1,
     `Only the composed tool plus loop machinery (${schemas.join(',')})`);
+  assert(schemas.filter(n => LOOP_MACHINERY.includes(n)).every(n => LOOP_MACHINERY.includes(n)),
+    'and every machinery tool present is one we intended to add');
   await ctx.dispose();
 }
 
@@ -9154,6 +9164,82 @@ console.log('\n══ PROMPT-CACHE STABILITY ══');
   const today = new Date().toISOString().slice(0, 10);
   assert(volatile.includes(today), 'the date rides in the volatile tail');
   assert(/Git status/i.test(volatile), 'and so does git status');
+}
+
+// ═══════════════════════════════════════════════════════════
+// PARALLEL INVESTIGATION
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ INVESTIGATE ══');
+
+// Every refusal below happens before a single agent is spawned, which is the
+// point: a fan-out is the most expensive call available, so the guards have to
+// be conditions on the call rather than advice in a description.
+const noOpts = { token: '', model: 'test', autoApprove: true, verbose: false, depth: 0 };
+
+{
+  const r = await investigate({ angles: ['a thing', 'another thing'] }, noOpts);
+  assert(r.includes('requires a question'), 'a fan-out with no question is refused');
+}
+
+// One angle is not a fan-out. The failure Anthropic reported in production was
+// agents spawning sub-agents for queries that never needed them.
+{
+  const r = await investigate({ question: 'q', angles: ['only one'] }, noOpts);
+  assert(r.includes('at least 2'), 'one angle is refused');
+  assert(r.includes('search directly'), 'and the cheaper alternative is named');
+}
+
+// The other end: past a point, coordination costs more than parallelism returns.
+{
+  const many = Array.from({ length: 12 }, (_, i) => `distinct angle number ${i} about ${i}`);
+  const r = await investigate({ question: 'q', angles: many }, noOpts);
+  assert(r.includes('Refusing 12 angles'), 'an oversized fan-out is refused');
+  assert(r.includes('limit is 8'), 'and says the limit');
+}
+
+// Redundant searches were the other named production failure. Each angle is a
+// full agent, so a near-duplicate is the same finding bought twice.
+{
+  const r = await investigate({
+    question: 'how does auth work',
+    angles: ['look at the authentication code', 'examine the authentication code'],
+  }, noOpts);
+  assert(r.includes('ask the same thing'), 'near-duplicate angles are refused');
+  assert(r.includes('costs a full agent'), 'and the refusal says why it matters');
+}
+
+// Genuinely different angles must get through — a guard that refused
+// everything would be worse than none.
+{
+  const pairs = findDuplicateAngles([
+    'trace how sessions are persisted to disk',
+    'check which providers support prompt caching',
+    'find where image attachments are validated',
+  ]);
+  assert(pairs.length === 0, 'three unrelated angles are not duplicates');
+}
+{
+  const pairs = findDuplicateAngles(['the auth code', 'examine the auth code for bugs']);
+  assert(pairs.length === 1, 'a narrower phrasing of the same question is caught');
+}
+{
+  // Compared against the smaller set on purpose: without that, a short angle
+  // inside a long one reads as different because the long one has more words.
+  const pairs = findDuplicateAngles(['caching', 'caching']);
+  assert(pairs.length === 1, 'identical angles are certainly duplicates');
+  assert(findDuplicateAngles(['a', 'b']).length === 0,
+    'angles with no meaningful words are not compared rather than matched blindly');
+}
+
+// The tool must describe itself as read-only and say what it is not for, since
+// that is the whole distinction from a build team.
+{
+  const d = investigateDefinition.description;
+  assert(/read-only/i.test(d), 'the description says the workers cannot write');
+  assert(/do not use it to build/i.test(d.toLowerCase()) || /NOT use it to build/i.test(d),
+    'and explicitly warns against using it to implement');
+  assert(investigateDefinition.inputSchema.required.includes('angles'),
+    'angles are required — there is no accidental single-agent mode');
 }
 
 // ═══════════════════════════════════════════════════════════

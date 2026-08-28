@@ -234,3 +234,4 @@ export {
   beginCheckpoint, commitCheckpoint, listCheckpoints, restoreCheckpoint,
   recordBeforeWrite, recordAfterWrite, resetCheckpoints, isRecording,
 } from './checkpoint/index.js';
+export { investigate, investigateDefinition, findDuplicateAngles } from './tools/investigate.js';

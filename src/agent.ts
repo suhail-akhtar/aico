@@ -57,6 +57,9 @@ function getExecutionMode(name: string): ExecutionMode {
   // The Task tool is not in `toolDefinitions` (it is added per-run), and its own
   // description promises the model that parallel Task calls run concurrently.
   if (name === taskToolDefinition.name) return 'parallel';
+  // Read-only workers touching nothing shared — that is the property that makes
+  // a fan-out safe, and it holds just as well when two fan-outs overlap.
+  if (name === investigateDefinition.name) return 'parallel';
   return 'exclusive';
 }
 import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
@@ -67,6 +70,7 @@ import { skillRegistry } from './skills/index.js';
 import { cronScheduler } from './cron/scheduler.js';
 import { getBackgroundAgents } from './background/index.js';
 import { getAgentRegistry } from './tools/task.js';
+import { investigate, investigateDefinition, type InvestigateInput } from './tools/investigate.js';
 import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
 import { checkProjectGate, detectChecks, resetChecks } from './checks.js';
@@ -1204,6 +1208,37 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         return { result: { error } };
       }
     });
+
+    // Fan-out shares Task's dispatch machinery and its depth limit, because it
+    // is the same act: it spawns sub-agents. What it adds is that they are
+    // read-only by construction, bounded in number, and refused when two ask
+    // the same question — none of which a prompt can guarantee.
+    if (!settings?.disabledTools?.includes('Investigate')) {
+      handlers.set(investigateDefinition.name, async (args: Record<string, unknown>, callId: string) => {
+        onToolCall?.(investigateDefinition.name, args, callId);
+        try {
+          const result = await investigate(args as InvestigateInput, {
+            token: opts.token ?? '',
+            model,
+            autoApprove,
+            verbose,
+            depth,
+            settings,
+            ...(opts.context ? { context: opts.context } : {}),
+            ...(tokenTracker ? { tokenTracker } : {}),
+            ...(opts.planMode ? { planMode: true } : {}),
+            onSubagentStart: opts.onSubagentStart,
+            onSubagentStop: opts.onSubagentStop,
+          });
+          onToolDone?.(investigateDefinition.name, { result }, callId);
+          return { result: { result } };
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          onToolDone?.(investigateDefinition.name, { error }, callId);
+          return { result: { error } };
+        }
+      });
+    }
   }
 
   // Add MCP tools. In browser QA mode, keep only Playwright tools in the active
@@ -1244,6 +1279,16 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       description: taskToolDefinition.description,
       inputSchema: taskToolDefinition.inputSchema,
     });
+    // Same depth gate as Task, and the same reason: it spawns sub-agents.
+    // Offered only where they can actually run, so the model is never shown a
+    // fan-out it would be refused for using.
+    if (!settings?.disabledTools?.includes('Investigate')) {
+      toolDefs.push({
+        name: investigateDefinition.name,
+        description: investigateDefinition.description,
+        inputSchema: investigateDefinition.inputSchema,
+      });
+    }
   }
   // Add MCP tool defs
   for (const t of mcpTools) {
