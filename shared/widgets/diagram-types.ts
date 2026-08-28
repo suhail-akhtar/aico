@@ -248,6 +248,26 @@ export const DIAGRAM_TYPES: readonly DiagramType[] = [
       `architecture-beta
   group r(cloud)["VPC (prod), 10.0.0.0/16"]
   service s(database)["orders-db"] in r`,
+      // Seven services in one group, which is what a real infrastructure
+      // diagram looks like. Kept because a two-service probe passed every
+      // theme variation while the browser showed an empty box, and the size of
+      // the diagram was the difference nobody had varied.
+      `architecture-beta
+  group v(cloud)["Production VPC"]
+  service igw(internet)["Internet gateway"] in v
+  service lb(server)["Load balancer"] in v
+  service a1(server)["API server 1"] in v
+  service a2(server)["API server 2"] in v
+  service db(database)["Postgres"] in v
+  service ch(disk)["Redis"] in v
+  service s3(disk)["Object store"] in v
+  igw:R --> L:lb
+  lb:R --> L:a1
+  lb:R --> L:a2
+  a1:R --> L:db
+  a2:R --> L:db
+  a1:B --> T:ch
+  a2:B --> T:s3`,
     ],
   },
   {
