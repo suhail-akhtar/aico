@@ -26,7 +26,10 @@ and what to do when something goes wrong.
 ---
 
 ### npx
-``` npx github:suhail-akhtar/aico#publish serve ```
+
+```sh
+npx github:suhail-akhtar/aico#v0.4.0 serve
+```
 
 ## Why this one
 
@@ -61,21 +64,25 @@ A real session log looks like this:
 
 ## Install
 
+Run the latest release without installing anything:
+
 ```sh
-npx aico                 # try it without installing
-npm install -g aico      # or keep it
+npx github:suhail-akhtar/aico#v0.4.0 serve
 ```
+
+`#v0.4.0` is a tag, so it pins that release. `#release/v0.4` follows the 0.4
+line as it gets fixes, and `#main` is the development trunk.
 
 From source:
 
 ```sh
-git clone https://github.com/suhailakhtar/aico.git
+git clone https://github.com/suhail-akhtar/aico.git
 cd aico && npm install && npm run build && npm run build:web
 npm link                 # makes `aico` available globally
 ```
 
-Requires Node 20+. The web client ships in the package, so `aico serve` works
-from a bare `npx` with nothing else installed.
+Requires Node 20+. The web client ships with it, so `aico serve` works from a
+bare `npx` with nothing else installed.
 
 ## Quick start
 
