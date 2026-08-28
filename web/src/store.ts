@@ -616,16 +616,27 @@ export const useStore = create<AppState>((set, get) => ({
         activeSessions: active,
         ...(projects ? { projects } : {}),
         ...(groups ? { groups } : {}),
-        // The launch directory is the answer until someone chooses otherwise.
-        ...(state.project ? {} : { project: projects?.find(p => p.isLaunch)?.path ?? null }),
+        // Deliberately NOT defaulted to the launch directory.
+        //
+        // It used to be, and the effect was that every session started from the
+        // portal ran inside whatever repository `aico serve` happened to be
+        // started in — usually AICO's own. The server already picks the
+        // workspace when no project is named, and that default was unreachable
+        // because this always named one.
+        //
+        // Null means "nothing chosen", which is a thing the server can act on.
+        // Choosing a project in the sidebar still wins; this only decides what
+        // happens when nobody has.
       }));
     } catch { /* the sidebar is not worth an error banner */ }
   },
 
   refreshProjects: async () => {
     try {
-      const { projects, launch } = await api.projects();
-      set(state => ({ projects, ...(state.project ? {} : { project: launch }) }));
+      const { projects } = await api.projects();
+      // Same reason as above: the launch directory is where the server was
+      // started, not where the reader's work belongs.
+      set({ projects });
     } catch { /* the picker will say so when it is opened */ }
   },
 
