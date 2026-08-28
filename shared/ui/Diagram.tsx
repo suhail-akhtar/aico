@@ -41,6 +41,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { IconButton } from './icons';
 import { ZoomPan } from './ZoomPan';
 import { useWidgetExpanded } from './Widget';
+import { diagramCss, diagramTheme } from './diagram-theme';
 
 /** One module-level promise, so N diagrams cost one download. */
 let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
@@ -49,45 +50,19 @@ function loadMermaid(): Promise<typeof import('mermaid').default> {
   mermaidPromise ??= import('mermaid').then(module => {
     const mermaid = module.default;
     const dark = document.documentElement.dataset.theme === 'dark';
-    // Mermaid derives a chart palette from `primaryColor` unless told
-    // otherwise, and our primary is a near-white surface tint — which produced
-    // pie charts whose slices were all the same shade of nothing. An explicit
-    // sequence is the only way to get a readable chart.
-    const palette = dark
-      ? ['#679efe', '#4ed17e', '#f7ad31', '#f25a5a', '#a78bfa', '#56b6d8', '#f472b6', '#94a3b8']
-      : ['#4176e6', '#1a9c53', '#b8791a', '#d13333', '#7c5cd6', '#2b7fa8', '#c2409c', '#64748b'];
-    const pieColors = Object.fromEntries(palette.map((c, i) => [`pie${i + 1}`, c]));
     mermaid.initialize({
       startOnLoad: false,
       // Strict removes script tags and click bindings from the output. Diagram
       // source reaches us the same way prose does, so it gets the same distrust.
       securityLevel: 'strict',
       theme: 'base',
-      themeVariables: {
-        ...pieColors,
-        // Pie labels sit on the slices, so they take the on-accent colour
-        // rather than the body text colour.
-        pieSectionTextColor: '#ffffff',
-        pieStrokeWidth: '0px',
-        pieOuterStrokeWidth: '0px',
-        pieTitleTextSize: '16px',
-        pieSectionTextSize: '13px',
-        fontFamily: 'var(--aico-font)',
-        fontSize: '14px',
-        background: 'transparent',
-        ...(dark
-          ? {
-            primaryColor: '#232733', primaryTextColor: '#e8eaed', primaryBorderColor: '#679efe',
-            lineColor: '#6f7480', secondaryColor: '#1c1f26', tertiaryColor: '#16181d',
-            textColor: '#e8eaed', mainBkg: '#232733', nodeBorder: '#679efe',
-          }
-          : {
-            primaryColor: '#eaf0fd', primaryTextColor: '#0f1115', primaryBorderColor: '#4176e6',
-            lineColor: '#8a8f98', secondaryColor: '#f4f5f7', tertiaryColor: '#f9fafb',
-            textColor: '#0f1115', mainBkg: '#eaf0fd', nodeBorder: '#4176e6',
-          }),
-      },
-      flowchart: { curve: 'basis', htmlLabels: false },
+      themeVariables: diagramTheme(dark),
+      // The few things themeVariables cannot express — corner radius, stroke
+      // weights, and stopping a group being drawn as a hard dashed box.
+      themeCSS: diagramCss(dark),
+      flowchart: { curve: 'basis', htmlLabels: false, nodeSpacing: 44, rankSpacing: 54 },
+      sequence: { actorMargin: 56, mirrorActors: false },
+      gantt: { barHeight: 22, barGap: 6, topPadding: 46 },
     });
 
     return mermaid;
