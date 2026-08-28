@@ -35,6 +35,22 @@
 import React, { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 import { IconButton } from './icons';
 
+/**
+ * Whether the frame around you is filling the window.
+ *
+ * A renderer cannot work this out from CSS: it is handed a height by its
+ * parent and has no way to ask whether that height is "a slot in the
+ * transcript" or "the whole screen". The diagram viewport needs to know,
+ * because a fixed 30rem box in a full-screen frame leaves the diagram clipped
+ * at a third of the height with the rest of the page blank — which is exactly
+ * what expanding was meant to fix.
+ */
+const ExpandedContext = React.createContext(false);
+
+export function useWidgetExpanded(): boolean {
+  return React.useContext(ExpandedContext);
+}
+
 export interface WidgetProps {
   /** Shown in the header. Falls back to the kind. */
   title?: string;
@@ -131,6 +147,20 @@ export function Widget({
    * a `key` on the Widget would also remount it on every keystroke while the
    * block streams in, which is the flicker this component was fixed for.
    */
+  // Escape leaves full screen. Every other thing that covers the window in
+  // every other application does this, so its absence reads as the expand
+  // button having trapped you — particularly since the way out is a small icon
+  // in a corner of a page that is now mostly diagram.
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') { event.stopPropagation(); setExpanded(false); }
+    };
+    // Capture, so a focused control inside the widget cannot swallow it first.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [expanded]);
+
   const lastSource = useRef(source);
   useEffect(() => {
     if (lastSource.current === source) return;
@@ -198,7 +228,12 @@ export function Widget({
       </div>
 
       {!collapsed && (
-        <div className={expanded ? 'h-[calc(100%-2rem)] overflow-auto p-2' : 'p-2'}>
+        // `min-h-0` matters: a flex child defaults to min-height:auto, which
+        // refuses to shrink below its content and quietly pushes the overflow
+        // outside the frame instead of scrolling inside it.
+        <div className={expanded
+          ? 'flex h-[calc(100%-2.25rem)] min-h-0 flex-col overflow-auto p-2'
+          : 'p-2'}>
           {failure ? (
             <div className="space-y-2">
               <p className={`text-[12px] ${repairing ? 'text-aico-muted' : 'text-aico-danger'}`}>
@@ -240,7 +275,9 @@ export function Widget({
                               leading-[15px] text-aico-muted">{source}</pre>
             </div>
           ) : (
-            <WidgetBoundary key={attempt} onError={setFailure}>{children}</WidgetBoundary>
+            <ExpandedContext.Provider value={expanded}>
+              <WidgetBoundary key={attempt} onError={setFailure}>{children}</WidgetBoundary>
+            </ExpandedContext.Provider>
           )}
         </div>
       )}

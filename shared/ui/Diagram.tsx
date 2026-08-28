@@ -37,9 +37,10 @@
  * @module shared/ui/Diagram
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { IconButton } from './icons';
 import { ZoomPan } from './ZoomPan';
+import { useWidgetExpanded } from './Widget';
 
 /** One module-level promise, so N diagrams cost one download. */
 let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
@@ -88,6 +89,7 @@ function loadMermaid(): Promise<typeof import('mermaid').default> {
       },
       flowchart: { curve: 'basis', htmlLabels: false },
     });
+
     return mermaid;
   });
   return mermaidPromise;
@@ -118,6 +120,7 @@ export const Diagram = React.memo(function Diagram({
   const [error, setError] = useState('');
   const [showSource, setShowSource] = useState(() => sourceShown.has(source));
   const container = useRef<HTMLDivElement>(null);
+  const expanded = useWidgetExpanded();
 
   useEffect(() => {
     // A half-written diagram is a syntax error by definition, so rendering
@@ -146,6 +149,28 @@ export const Diagram = React.memo(function Diagram({
     return () => { cancelled = true; };
   }, [source, streaming]);
 
+  /**
+   * Make the drawing fit the box it was given.
+   *
+   * The viewport cannot scroll — it is `overflow-hidden` so that dragging pans
+   * rather than scrolls — so a diagram taller than the frame is not clipped
+   * gracefully, it simply is not there. That is what an eight-service
+   * architecture looked like: a correct diagram, entirely below the fold, in a
+   * frame showing the empty top of its own group box.
+   *
+   * Mermaid writes `width="100%"` and an inline `max-width` in pixels, which
+   * together mean "as wide as you like, as tall as that makes me". Asking for
+   * both axes and letting `preserveAspectRatio` letterbox turns that into "as
+   * big as fits", which is what a reader wants before they reach for zoom.
+   */
+  useLayoutEffect(() => {
+    const drawing = container.current?.querySelector(':scope > svg');
+    if (!drawing) return;
+    drawing.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    drawing.setAttribute('height', '100%');
+    (drawing as SVGElement).style.maxWidth = 'none';
+  }, [svg, expanded, showSource]);
+
   const toggleSource = (): void => {
     setShowSource(current => {
       const next = !current;
@@ -169,7 +194,7 @@ export const Diagram = React.memo(function Diagram({
 
   return (
     <ZoomPan
-      className="max-h-[30rem]"
+      className="h-[28rem]"
       actions={
         <IconButton
           icon="code"
@@ -192,7 +217,31 @@ export const Diagram = React.memo(function Diagram({
           // build React elements would remove the structure that makes it a
           // diagram in the first place.
           dangerouslySetInnerHTML={{ __html: svg }}
-          className="p-2 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+          // `!max-w-none` is doing real work. Mermaid writes an inline
+          // `style="max-width: NNNpx"` on the svg it produces, which wins over
+          // any class and pins the diagram to its natural width — so expanding
+          // to full screen left it the same size in the corner of a blank
+          // page. Overriding that is the only way to let it grow.
+          // `!max-w-none` when expanded is doing real work: mermaid writes an
+          // inline `style="max-width: NNNpx"` on the svg, which beats any class
+          // and pins the diagram to its natural width — so filling the window
+          // left it the same size in the corner of a blank page.
+          //
+          // Rewriting the viewBox to crop mermaid's generous margins was tried
+          // and reverted. `getBBox` has to run after paint, the icon pack
+          // resolves asynchronously, and the measurement therefore lands before
+          // the services exist — cropping the diagram down to its empty group
+          // box. Margin is a smaller problem than a blank frame.
+          // `[&>svg]`, not `[&_svg]`. The descendant form matches every svg
+          // inside the diagram — including the nested one mermaid uses for each
+          // architecture icon — so sizing rules meant for the drawing were
+          // applied to every glyph in it and the services rendered as nothing.
+          // The child combinator reaches the diagram and stops.
+          // `[&>svg]`, not `[&_svg]`. The descendant form matches every svg
+          // inside the diagram — including the nested one mermaid uses for each
+          // architecture icon — so sizing meant for the drawing was applied to
+          // every glyph in it.
+          className="h-full w-full p-2 [&>svg]:!max-w-none [&>svg]:h-full [&>svg]:w-full"
         />
       ) : (
         <div className="p-6 text-center text-[13px] text-aico-muted">Drawing…</div>

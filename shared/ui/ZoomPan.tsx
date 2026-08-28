@@ -25,6 +25,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { IconButton } from './icons';
+import { useWidgetExpanded } from './Widget';
 
 const MIN = 0.4;
 const MAX = 6;
@@ -35,11 +36,17 @@ export interface ZoomPanProps {
   children: React.ReactNode;
   /** Extra controls, shown to the left of the zoom cluster. */
   actions?: React.ReactNode;
-  /** Height of the viewport. Expanded widgets pass a taller one. */
+  /** Height of the viewport while inline. Ignored when the frame is expanded. */
   className?: string;
 }
 
 export function ZoomPan({ children, actions, className = '' }: ZoomPanProps): React.ReactElement {
+  // Full screen means full screen. Inline, the viewport is capped so a tall
+  // diagram does not push the rest of the conversation off the page; expanded,
+  // the cap is the entire point of what the reader just asked for, and keeping
+  // it leaves the diagram clipped in the top third with the rest blank.
+  const expanded = useWidgetExpanded();
+  const viewportHeight = expanded ? 'h-full flex-1 min-h-0' : className;
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const viewport = useRef<HTMLDivElement>(null);
@@ -99,16 +106,22 @@ export function ZoomPan({ children, actions, className = '' }: ZoomPanProps): Re
   const zoomed = scale !== 1;
 
   return (
-    <div className="relative">
+    <div className={`relative ${expanded ? 'flex h-full min-h-0 flex-1 flex-col' : ''}`}>
       <div
         ref={viewport}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className={`overflow-hidden ${zoomed ? 'cursor-grab active:cursor-grabbing' : ''} ${className}`}
+        className={`flex items-center justify-center overflow-hidden ${
+          zoomed ? 'cursor-grab active:cursor-grabbing' : ''} ${viewportHeight}`}
       >
         <div
+          // Full width, or a flex child shrink-wraps its content — and mermaid
+          // writes `width="100%"` on its svg, which then resolves against a box
+          // that has collapsed to nothing. The diagram came out a third of the
+          // size it should be, centred in an empty frame.
+          className="w-full"
           style={{
             transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
             transformOrigin: 'center center',
