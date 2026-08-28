@@ -251,7 +251,25 @@ export async function revertFile(
  */
 function safeRelative(cwd: string, rel: string): string | undefined {
   if (!rel || rel.includes('\0')) return undefined;
-  const absolute = path.resolve(cwd, rel);
+  // Backslash is read as a separator on every platform, not just Windows.
+  //
+  // `path.resolve` is platform-native, so on Linux `..\..\secrets.txt` is one
+  // odd-but-legal filename rather than an escape. That is *safe* — it resolves
+  // inside the project — but it meant this function refused a shape on Windows
+  // that it waved through elsewhere, and a boundary that behaves differently by
+  // operating system is one nobody can reason about. This path deletes files,
+  // so uniform and stricter is the right direction.
+  //
+  // Normalised rather than rejected outright: a Windows caller passing
+  // `src\index.ts` means exactly what it says and has to keep working.
+  //
+  // A drive letter is absolute on any platform for our purposes. POSIX has no
+  // such concept, so `C:/Windows/win.ini` would otherwise resolve to a folder
+  // named `C:` *inside* the project — contained, but not what anyone writing
+  // that string meant, and not what a reader of this guard would expect it to
+  // allow.
+  if (/^[a-zA-Z]:[\\/]/.test(rel)) return undefined;
+  const absolute = path.resolve(cwd, rel.replace(/\\/g, '/'));
   const root = path.resolve(cwd);
   if (absolute !== root && !absolute.startsWith(root + path.sep)) return undefined;
   return path.relative(root, absolute).split(path.sep).join('/') || undefined;
