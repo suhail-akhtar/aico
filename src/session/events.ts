@@ -326,9 +326,15 @@ export interface SessionEventMap {
    * Recorded as a change rather than per turn. `request/header` already logs
    * which model actually served each request; this is the standing choice,
    * which has to survive a session with no turns in it yet.
+   *
+   * A null model means *follow the configured default again*, exactly as a null
+   * name in `session/agent` means back to the orchestrator. Without a way to
+   * say that, a pin set once outranks every later change in settings for the
+   * life of the session, and the settings screen becomes a liar for reasons
+   * nobody can see.
    */
   'session/model': {
-    model: string;
+    model: string | null;
   };
 
   /**

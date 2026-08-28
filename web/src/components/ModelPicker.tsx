@@ -31,10 +31,15 @@ import { Portal } from './Portal';
 import { Icon } from './Icon';
 
 export function ModelPicker(): React.ReactElement {
-  // The session's choice, falling back to the configured default. Null here
-  // means nobody picked, which is a different thing from picking the model
-  // that happens to be the default today.
-  const model = useStore(s => s.model ?? s.defaultModel);
+  // Two values, and the difference between them is the whole point. `pinned` is
+  // what this session chose for itself, null when it never chose; `fallback` is
+  // the configured default. A session that never chose follows the default when
+  // it moves in Settings, and a session that did chose does not — so the fact
+  // that it is pinned has to be visible, or a settings change appears to do
+  // nothing for a reason nobody can see.
+  const pinned = useStore(s => s.model);
+  const fallback = useStore(s => s.defaultModel);
+  const model = pinned ?? fallback;
   const setModel = useStore(s => s.setModel);
   const providers = useStore(s => s.providers);
   const activeProvider = useStore(s => s.activeProvider);
@@ -97,7 +102,7 @@ export function ModelPicker(): React.ReactElement {
   const needle = filter.trim().toLowerCase();
   const shown = (models ?? []).filter(m => !needle || m.toLowerCase().includes(needle));
 
-  const choose = (next: string): void => {
+  const choose = (next: string | null): void => {
     setModel(next);
     setOpen(false);
     setFilter('');
@@ -175,6 +180,22 @@ export function ModelPicker(): React.ReactElement {
                 <p className="px-3 py-3 text-[12px] text-aico-muted">Nothing matches that.</p>
               )}
 
+              {pinned && (
+                <button
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => choose(null)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left
+                             text-[12px] text-aico-secondary transition-colors
+                             hover:bg-aico-hover hover:text-aico-primary"
+                >
+                  <span className="w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">
+                    Follow the default{fallback ? ` (${fallback})` : ''}
+                  </span>
+                </button>
+              )}
+
               {shown.map(entry => (
                 <button
                   key={entry}
@@ -196,7 +217,9 @@ export function ModelPicker(): React.ReactElement {
             </div>
 
             <div className="border-t border-aico-border-subtle px-3 py-2 text-[11px] leading-relaxed text-aico-muted">
-              Applies to this session from your next message.
+              {pinned
+                ? 'Pinned to this chat, so changing the default in Settings will not move it.'
+                : 'Following the default from Settings. Choosing here pins this chat.'}
               {' '}Badges say what a model accepts beyond text; unbadged means text only,
               {' '}and a red one is not a chat model.
             </div>

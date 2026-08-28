@@ -57,7 +57,18 @@ export function ModelsPane(): React.ReactElement {
   const activate = async (instance: ProviderInstance, chosen?: string): Promise<void> => {
     const next = chosen ?? instance.defaultModel;
     await api.activateProvider(instance.id, next);
-    if (next) setModel(next);
+    // Deliberately does not pin the open session.
+    //
+    // This screen sets the *default* — what every session that has not chosen
+    // for itself will run on. It used to also write the choice into whichever
+    // conversation happened to be open, which conflated two different acts and
+    // had a nasty consequence: that session was then pinned for ever, so the
+    // next time the default changed here it silently ignored it. Changing a
+    // setting and watching nothing happen, with nothing on screen explaining
+    // why, is the worst outcome available.
+    //
+    // `refreshProviders` puts the new value in `defaultModel`, and every
+    // unpinned session follows it immediately.
     await refreshProviders();
   };
 

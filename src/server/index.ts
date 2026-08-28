@@ -754,13 +754,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       }
 
       case 'model': {
-        const { sessionId, model } = body as { sessionId?: string; model?: string };
-        if (!sessionId || !model?.trim()) {
-          send(res, 400, { error: 'sessionId and model required' });
-          return;
-        }
+        const { sessionId, model } = body as { sessionId?: string; model?: string | null };
+        if (!sessionId) { send(res, 400, { error: 'sessionId required' }); return; }
         await runs.ensure(sessionId, await resolveCwd(sessionId));
-        const result = runs.setModel(sessionId, model.trim());
+        // An explicit null is "stop pinning this session" — the same shape the
+        // agent route uses for going back to the orchestrator. A missing or
+        // blank model means the same thing rather than being an error, because
+        // there is no other sensible reading of it.
+        const result = runs.setModel(sessionId, model?.trim() ? model.trim() : null);
         send(res, result.ok ? 200 : 400, result);
         return;
       }

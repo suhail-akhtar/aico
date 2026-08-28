@@ -292,7 +292,7 @@ export const api = {
    * then reverted to the global default without saying anything. Writing it to
    * the log is what makes it survive, and what lets two sessions differ.
    */
-  setSessionModel: (sessionId: string, model: string) =>
+  setSessionModel: (sessionId: string, model: string | null) =>
     post<{ ok: boolean; error?: string }>('model', { sessionId, model }),
 
   /** URL of the transcript as a downloadable document. */
