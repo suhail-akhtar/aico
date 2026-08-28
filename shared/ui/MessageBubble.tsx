@@ -18,11 +18,22 @@
 import React from 'react';
 import type { ChatMessage } from './types';
 import { MarkdownRenderer } from './MarkdownRenderer';
+
+/**
+ * Hide the repair correlation marker.
+ *
+ * Duplicated from `web/src/widget-fixes.ts` rather than imported: the shared UI
+ * is deliberately dependency-free of the web app, and one regex is a smaller
+ * price than that edge. The pattern is asserted identical in the tests.
+ */
+function stripFixMarker(text: string): string {
+  return text.replace(/\[\[aico:fix:[a-z0-9]+:[a-z]+\]\]/i, '').trimEnd();
+}
 import { ReasoningBlock } from './ReasoningBlock';
 import { ToolCallCard } from './ToolCallCard';
 
 export const MessageBubble = React.memo(function MessageBubble({
-  message, onFix,
+  message, onFix, widgetFixes,
 }: {
   message: ChatMessage;
   /**
@@ -33,6 +44,11 @@ export const MessageBubble = React.memo(function MessageBubble({
    * where it is simply absent and no Fix button is offered.
    */
   onFix?: (request: { kind: string; source: string; error: string }) => void;
+  /** Corrections to draw in place of the blocks they repair. */
+  widgetFixes?: {
+    replaced: (source: string) => string | undefined;
+    superseded: (source: string) => boolean;
+  };
 }): React.ReactElement {
   if (message.type === 'tool') {
     return (
@@ -61,8 +77,15 @@ export const MessageBubble = React.memo(function MessageBubble({
     return (
       <div className="my-6 flex justify-end">
         <div className="max-w-[85%] rounded-2xl rounded-br-md bg-aico-elevated px-4 py-2.5 selectable">
+          {/*
+            The correlation marker a repair request carries is plumbing, not
+            something the reader wrote or should have to look at. Stripped here
+            rather than left out of the message, because the log has to keep it
+            — that marker is what pairs the correction with the widget it fixes
+            when the session is replayed.
+          */}
           <p className="whitespace-pre-wrap break-words text-[15px] leading-[26px] text-aico-primary">
-            {message.content}
+            {stripFixMarker(message.content)}
           </p>
         </div>
       </div>
@@ -76,6 +99,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           content={message.content}
           streaming={message.streaming === true}
           {...(onFix ? { onFix } : {})}
+          {...(widgetFixes ? { widgetFixes } : {})}
         />
         {message.streaming && <span className="stream-cursor" aria-hidden />}
       </div>

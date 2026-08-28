@@ -25,6 +25,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MessageBubble } from '@aico/ui';
 import { useStore } from '../store';
+import { collectWidgetFixes, fixMarker, widgetHash } from '../widget-fixes';
 import { composeMessages } from '../reduce';
 import { TurnSummary } from './TurnSummary';
 import { MessageActions } from './MessageActions';
@@ -78,9 +79,23 @@ export function ChatPane(): React.ReactElement {
       '',
       `Send back a corrected \`${kind}\` block and nothing else — no explanation `
       + 'unless the fix needs one. Do not change what it is meant to show.',
+      // Names the block being repaired, so the correction can be drawn where
+      // the broken one stands rather than several messages further down.
+      // Hidden from the reader by MessageBubble; kept in the log because that
+      // is what makes the pairing survive a reload.
+      fixMarker(source, kind),
     ].join('\n'));
   };
   const messages = useMemo(() => composeMessages(logged, draft, busy), [logged, draft, busy]);
+
+  // Recomputed from the transcript rather than stored, like every other
+  // projection here: a reload rebuilds which corrections replace which widgets
+  // from the log alone, with nothing extra to keep in step.
+  const fixes = useMemo(() => collectWidgetFixes(messages), [messages]);
+  const widgetFixes = useMemo(() => ({
+    replaced: (src: string) => fixes.replacements.get(widgetHash(src)),
+    superseded: (src: string) => fixes.superseded.has(widgetHash(src)),
+  }), [fixes]);
 
   const status = useStore(s => s.status);
 
@@ -183,7 +198,11 @@ export function ChatPane(): React.ReactElement {
               && !message.streaming && message.content.trim().length > 0;
             return (
               <div key={message.id} className="group/message">
-                <MessageBubble message={message} onFix={fixWidget} />
+                <MessageBubble
+                  message={message}
+                  onFix={fixWidget}
+                  widgetFixes={widgetFixes}
+                />
                 {copyable && (
                   <div className={message.type === 'user' ? 'flex justify-end' : ''}>
                     <MessageActions

@@ -27,6 +27,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { parseChartSpec } from './widget-specs';
+import { chartDefaults, chartTheme } from './chart-theme';
 
 /** One module-level promise, so N charts cost one download. */
 let echartsPromise: Promise<typeof import('echarts')> | null = null;
@@ -35,18 +36,6 @@ function loadECharts(): Promise<typeof import('echarts')> {
   echartsPromise ??= import('echarts');
   return echartsPromise;
 }
-
-/**
- * A palette that reads on both themes.
- *
- * ECharts' default series colours are tuned for a white page and turn muddy on
- * a dark one. Set explicitly rather than left to the library, which is the same
- * lesson the mermaid renderer learned.
- */
-const PALETTE = [
-  '#679efe', '#4ed17e', '#f7ad31', '#f25a5a',
-  '#a78bfa', '#56b6d8', '#f472b6', '#94a3b8',
-];
 
 export interface ChartProps {
   source: string;
@@ -74,14 +63,18 @@ export function Chart({ source, streaming }: ChartProps): React.ReactElement {
     void loadECharts().then((echarts) => {
       if (disposed || !host.current) return;
       const dark = document.documentElement.dataset.theme === 'dark';
+      // Registered per mode rather than per chart: ECharts keys themes by name,
+      // so this is idempotent and N charts share one registration.
+      const themeName = dark ? 'aico-dark' : 'aico-light';
+      echarts.registerTheme(themeName, chartTheme(dark));
       // SVG rather than canvas: these sit in a scrolling transcript that gets
       // zoomed and printed, and canvas goes blurry at both.
-      instance = echarts.init(host.current, dark ? 'dark' : undefined, { renderer: 'svg' });
-      // Transparent because the widget frame already supplies a background;
-      // ECharts' dark theme paints a near-black panel that sits badly on ours.
-      // Spread last so a spec that sets either of these wins — the model asked
-      // for a colour scheme, and overruling it would be surprising.
-      instance.setOption({ color: PALETTE, backgroundColor: 'transparent', ...parsed.option });
+      instance = echarts.init(host.current, themeName, { renderer: 'svg' });
+      // Defaults first, the model's option last. Everything the theme and the
+      // defaults supply is a starting point; a spec that names its own tooltip,
+      // legend or colours meant to, and overruling it would be worse than a
+      // plain chart.
+      instance.setOption({ ...chartDefaults(parsed.option!), ...parsed.option });
     }).catch((err: unknown) => {
       if (!disposed) setError(err instanceof Error ? err.message : String(err));
     });

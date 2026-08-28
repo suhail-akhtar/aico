@@ -372,7 +372,18 @@ carries the same information.`,
   this for architecture, network topology and component diagrams.
 
 Reach for one when a picture or a sorted table answers better than a paragraph,
-and then do not narrate what it already shows. Everything else stays code.`,
+and then do not narrate what it already shows. Everything else stays code.
+
+Four rules the renderer cannot enforce for you:
+- NEVER two y-axes. Two measures of different scale means two charts, or index
+  both to a common base. This is the most common charting mistake there is.
+- Do not label every point. Label the endpoint, the extreme, or the one series
+  the story is about, and let the axis and tooltip carry the rest.
+- A single number is a sentence, not a chart. One bar, or two pie slices, means
+  you wanted to state a figure.
+- Colours, gridlines, fonts and spacing are already set. Do not restyle unless
+  the data genuinely needs it — an explicit \`color\` or \`itemStyle\` overrides a
+  palette that was checked for colourblind separation against these surfaces.`,
   });
 
   // Last, and reprised.

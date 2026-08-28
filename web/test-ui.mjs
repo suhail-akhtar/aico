@@ -23,6 +23,9 @@ import { loadDismissals, saveDismissals } from './dist-test/panel-memory.mjs';
 import {
   parseChartSpec, parseTableSpec, numericValue, summarise,
 } from './dist-test/widget-specs.mjs';
+import {
+  collectWidgetFixes, widgetHash, fixMarker, stripMarker, isFixRequest, firstBlock,
+} from './dist-test/widget-fixes.mjs';
 import { checksFrom } from './dist-test/checks.mjs';
 import { shouldClearBusy } from './dist-test/turn-state.mjs';
 import { searchAgents, splitAgents, mentionAt } from './dist-test/agents.mjs';
@@ -1453,6 +1456,97 @@ test('the stats row computes what a reader would otherwise ask the model for', (
   // A text column has no arithmetic, and inventing some would be worse than
   // leaving the row out.
   assert.equal(summarise(spec, 0), undefined, 'a text column is not summarised');
+});
+
+// ── In-place widget repair ─────────────────────────────────────────────────
+
+const msg = (type, content, id) => ({ id: id ?? `${type}-${Math.random()}`, type, content, timestamp: 0 });
+const BROKEN = '{"columns":["a"],"rows":[{"a":1}]}';
+const FIXED = '{"columns":["a"],"rows":[[1]]}';
+
+test('a correction is drawn where the broken widget stands, not further down', () => {
+  const messages = [
+    msg('assistant', '```table\n' + BROKEN + '\n```'),
+    msg('user', 'that did not render\n' + fixMarker(BROKEN, 'table')),
+    msg('assistant', '```table\n' + FIXED + '\n```'),
+  ];
+  const fixes = collectWidgetFixes(messages);
+
+  assert.equal(fixes.replacements.get(widgetHash(BROKEN)), FIXED,
+    'the broken source resolves to its correction');
+  assert.ok(fixes.superseded.has(widgetHash(FIXED)),
+    'and the correction is marked so it does not also render on its own — '
+    + 'the same chart twice, with nothing to say which is live, is worse than the bug');
+});
+
+test('the pairing survives the tool calls that sit between request and reply', () => {
+  const messages = [
+    msg('assistant', '```table\n' + BROKEN + '\n```'),
+    msg('user', 'fix\n' + fixMarker(BROKEN, 'table')),
+    msg('tool', 'Read something'),
+    msg('tool', 'Grep something'),
+    msg('assistant', '```table\n' + FIXED + '\n```'),
+  ];
+  const fixes = collectWidgetFixes(messages);
+  assert.equal(fixes.replacements.get(widgetHash(BROKEN)), FIXED,
+    'a reply is still found past intervening tool messages');
+});
+
+test('but not past the next thing the reader says', () => {
+  const messages = [
+    msg('assistant', '```table\n' + BROKEN + '\n```'),
+    msg('user', 'fix\n' + fixMarker(BROKEN, 'table')),
+    msg('user', 'actually never mind, show me something else'),
+    msg('assistant', '```table\n' + FIXED + '\n```'),
+  ];
+  const fixes = collectWidgetFixes(messages);
+  assert.equal(fixes.replacements.size, 0,
+    'once the reader has moved on, a later block is about something else');
+});
+
+test('the last correction wins, because it is the one just asked for', () => {
+  const SECOND = '{"columns":["a"],"rows":[[2]]}';
+  const messages = [
+    msg('assistant', '```table\n' + BROKEN + '\n```'),
+    msg('user', 'fix\n' + fixMarker(BROKEN, 'table')),
+    msg('assistant', '```table\n' + FIXED + '\n```'),
+    msg('user', 'still wrong\n' + fixMarker(BROKEN, 'table')),
+    msg('assistant', '```table\n' + SECOND + '\n```'),
+  ];
+  const fixes = collectWidgetFixes(messages);
+  assert.equal(fixes.replacements.get(widgetHash(BROKEN)), SECOND, 'the second attempt is shown');
+});
+
+test('a chart request accepts the fences the model might answer with', () => {
+  const spec = '{"series":[{"type":"bar","data":[1]}]}';
+  assert.equal(firstBlock('```echarts\n' + spec + '\n```', 'chart'), spec,
+    'a chart request answered with ```echarts still pairs');
+  assert.equal(firstBlock('```plot\n' + spec + '\n```', 'chart'), spec, 'and with ```plot');
+  assert.equal(firstBlock('no blocks here', 'chart'), undefined, 'and prose pairs with nothing');
+});
+
+test('an ordinary message is never mistaken for a repair', () => {
+  const messages = [
+    msg('assistant', '```table\n' + BROKEN + '\n```'),
+    msg('user', 'what does this show?'),
+    msg('assistant', '```table\n' + FIXED + '\n```'),
+  ];
+  assert.equal(collectWidgetFixes(messages).replacements.size, 0,
+    'without the marker there is no pairing — two tables are just two tables');
+});
+
+test('the marker is plumbing and never reaches the reader', () => {
+  const request = 'that did not render\n' + fixMarker(BROKEN, 'table');
+  assert.ok(isFixRequest(request), 'the request is recognisable as one');
+  assert.equal(stripMarker(request), 'that did not render',
+    'and what is shown is only what the reader would have written');
+  assert.ok(!stripMarker(request).includes('aico:fix'), 'no plumbing on screen');
+});
+
+test('the hash is stable, since it is written in one session and read in another', () => {
+  assert.equal(widgetHash('abc'), widgetHash('abc'), 'same input, same hash');
+  assert.notEqual(widgetHash('abc'), widgetHash('abd'), 'different input, different hash');
+  assert.match(widgetHash('anything'), /^[a-z0-9]+$/, 'and it survives the marker regex');
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

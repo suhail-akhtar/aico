@@ -58,6 +58,19 @@ export interface MarkdownRendererProps {
    * Fix button that does nothing is worse than none.
    */
   onFix?: (request: { kind: string; source: string; error: string }) => void;
+  /**
+   * Corrections to draw in place of the blocks they repair.
+   *
+   * A projection over the transcript rather than an edit to it — see
+   * `web/src/widget-fixes.ts`. `replaced` swaps a broken source for its
+   * correction where the broken one stands; `superseded` suppresses the
+   * correction's own copy further down, so the same chart is never on screen
+   * twice with the reader guessing which is live.
+   */
+  widgetFixes?: {
+    replaced: (source: string) => string | undefined;
+    superseded: (source: string) => boolean;
+  };
 }
 
 /** Fences that mean "draw this", not "show this as code". */
@@ -70,7 +83,7 @@ const CHART_LANGUAGES = new Set(['chart', 'echarts', 'plot']);
 const TABLE_LANGUAGES = new Set(['table', 'datatable']);
 
 export const MarkdownRenderer = React.memo(function MarkdownRenderer({
-  content, streaming = false, onFix,
+  content, streaming = false, onFix, widgetFixes,
 }: MarkdownRendererProps): React.ReactElement {
   return (
     <div className="markdown-body text-sm leading-relaxed text-aico-primary">
@@ -102,7 +115,23 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
               );
             }
 
-            const body = text.replace(/\n$/, '');
+            const raw = text.replace(/\n$/, '');
+
+            // A block that *is* somebody's correction has already been drawn in
+            // the place it repairs. Showing it again here would put the same
+            // chart on screen twice with nothing to say which one counts.
+            if (widgetFixes?.superseded(raw)
+                && (CHART_LANGUAGES.has(language) || TABLE_LANGUAGES.has(language))) {
+              return (
+                <p className="my-2 text-[11px] text-aico-muted">
+                  ↑ corrected {language} applied above
+                </p>
+              );
+            }
+
+            // Drawn in place of the block that failed. The log still holds the
+            // broken source; only what is rendered changes.
+            const body = widgetFixes?.replaced(raw) ?? raw;
 
             // Everything that *draws* goes in the widget frame, so a chart, a
             // table and a diagram offer the same copy/download/expand/hide
