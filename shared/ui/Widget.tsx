@@ -23,10 +23,17 @@
  * that hands the agent the spec it wrote, the error it caused, and the
  * instruction to correct it.
  *
+ * The correction lands *here*, in place of the broken block, and the exchange
+ * that produced it never appears in the conversation. Both follow from drawing
+ * being a projection over the log rather than the log itself: the record keeps
+ * every word, and the reader sees a widget that works. See
+ * `web/src/widget-fixes.ts`.
+ *
  * @module shared/ui/Widget
  */
 
-import React, { Component, useState, type ErrorInfo, type ReactNode } from 'react';
+import React, { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import { IconButton } from './icons';
 
 export interface WidgetProps {
   /** Shown in the header. Falls back to the kind. */
@@ -110,6 +117,29 @@ export function Widget({
    */
   const [repairing, setRepairing] = useState(false);
 
+  /**
+   * A new source is a new attempt.
+   *
+   * Error boundaries latch by design, and this one latched over the repair it
+   * was offering. The correction was found, projected, and handed down as a
+   * changed `source` prop — and the frame went on showing the failure it had
+   * already caught, because `failure` is state and nothing cleared it. The
+   * widget sat saying "being fixed" for ever with the working version already
+   * in its hands.
+   *
+   * Keyed off the source rather than remounting the whole frame from outside:
+   * a `key` on the Widget would also remount it on every keystroke while the
+   * block streams in, which is the flicker this component was fixed for.
+   */
+  const lastSource = useRef(source);
+  useEffect(() => {
+    if (lastSource.current === source) return;
+    lastSource.current = source;
+    setFailure(undefined);
+    setRepairing(false);
+    setAttempt(n => n + 1);
+  }, [source]);
+
   const copy = (): void => {
     void navigator.clipboard.writeText(source).then(() => {
       setCopied(true);
@@ -117,6 +147,9 @@ export function Widget({
     });
   };
 
+  // Kept for the failure state's own controls, which are words on purpose: a
+  // reader deciding whether to have something repaired is reading, not
+  // scanning a toolbar.
   const action = 'rounded px-1.5 py-0.5 text-[11px] text-aico-muted transition-colors '
     + 'hover:bg-aico-hover hover:text-aico-primary';
 
@@ -133,30 +166,35 @@ export function Widget({
           )}
         </span>
 
-        <button onClick={copy} className={action} title="Copy the source">
-          {copied ? 'copied' : 'copy'}
-        </button>
-        <button
+        {/*
+          Icons rather than words, each with its label as both tooltip and
+          accessible name. Four words in a row above every chart is a caption
+          competing with the chart; four glyphs are a toolbar. The label is not
+          optional — an icon-only control with no accessible name is the usual
+          price of this change, and it is not one worth paying.
+        */}
+        <IconButton
+          icon={copied ? 'check' : 'copy'}
+          label={copied ? 'Copied' : 'Copy the source'}
+          onClick={copy}
+        />
+        <IconButton
+          icon="download"
+          label="Download the source"
           onClick={() => download(`${kind}-${Date.now()}.${extension}`, source)}
-          className={action}
-          title="Download the source"
-        >
-          download
-        </button>
-        <button
+        />
+        <IconButton
+          icon={expanded ? 'shrink' : 'expand'}
+          label={expanded ? 'Back into the transcript' : 'Fill the window'}
           onClick={() => setExpanded(v => !v)}
-          className={action}
-          title={expanded ? 'Back into the transcript' : 'Fill the window'}
-        >
-          {expanded ? 'restore' : 'expand'}
-        </button>
-        <button
+          active={expanded}
+        />
+        <IconButton
+          icon={collapsed ? 'show' : 'hide'}
+          label={collapsed ? 'Show it again' : 'Hide it'}
           onClick={() => setCollapsed(v => !v)}
-          className={action}
-          title={collapsed ? 'Show it again' : 'Hide it'}
-        >
-          {collapsed ? 'show' : 'hide'}
-        </button>
+          active={collapsed}
+        />
       </div>
 
       {!collapsed && (
@@ -165,8 +203,8 @@ export function Widget({
             <div className="space-y-2">
               <p className={`text-[12px] ${repairing ? 'text-aico-muted' : 'text-aico-danger'}`}>
                 {repairing
-                  ? `Asked the agent to correct this ${kind}. The working version arrives `
-                    + 'below — this one stays as the record of what went wrong.'
+                  ? `Fixing this ${kind}. The corrected version replaces it here — the `
+                    + 'exchange is kept in the log but stays out of the conversation.'
                   : `This ${kind} did not render: ${failure}`}
               </p>
               <div className="flex items-center gap-1.5">
@@ -179,7 +217,7 @@ export function Widget({
                     className="rounded-lg bg-aico-accent px-2 py-1 text-[11px] font-medium
                                text-white transition-opacity hover:opacity-90"
                   >
-                    Fix it
+                    Fix with AI
                   </button>
                 )}
                 <button

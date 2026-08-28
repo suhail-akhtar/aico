@@ -18,14 +18,28 @@
  * lost on remount, so a diagram flipped to Source would silently flip back. The
  * choice is keyed by source text and outlives the component.
  *
- * **The rendered SVG scrolls in both directions.** A wide flowchart or a tall
- * sequence diagram is genuinely bigger than the column, and clipping it is
- * worse than letting it scroll.
+ * **The rendered SVG zooms and pans.** A wide flowchart or a tall sequence
+ * diagram is genuinely bigger than the column. Scaling it to fit makes a
+ * twenty-node architecture unreadable, and letting it overflow puts half of it
+ * off the side — neither is something the diagram's author can fix, so the
+ * reader gets the controls instead. See {@link module:shared/ui/ZoomPan}.
+ *
+ * ## Inside the widget frame, not beside it
+ *
+ * This drew its own bordered figure with its own source toggle, which meant a
+ * diagram was the one drawable block with different chrome, a different place
+ * to find copy and download, and — because it rendered its own red error box —
+ * no Fix button when it failed to parse. It now throws like every other
+ * renderer and lets the frame own all of that. Only the controls belonging to
+ * the *view* rather than the block stay here, over the diagram where a reader
+ * reaching for zoom is already looking.
  *
  * @module shared/ui/Diagram
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { IconButton } from './icons';
+import { ZoomPan } from './ZoomPan';
 
 /** One module-level promise, so N diagrams cost one download. */
 let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
@@ -142,49 +156,32 @@ export const Diagram = React.memo(function Diagram({
   };
 
   if (streaming) {
-    return (
-      <figure className="my-4 rounded-xl border border-aico-border-subtle bg-aico-code p-4">
-        <figcaption className="mb-2 text-[13px] text-aico-muted aico-thinking">
-          Diagram — drawing when complete…
-        </figcaption>
-        <pre className="overflow-x-auto font-mono text-[13px] leading-[22px] text-aico-muted">
-          {source}
-        </pre>
-      </figure>
-    );
+    return <p className="p-2 text-[11px] text-aico-muted">Diagram arriving…</p>;
   }
 
   if (error) {
-    // The source is shown rather than hidden: a diagram that will not parse is
-    // still information, and the mistake is usually obvious from looking at it.
-    return (
-      <figure className="my-4 overflow-hidden rounded-xl border border-aico-danger/30">
-        <figcaption className="bg-aico-danger/8 px-4 py-2 text-[13px] text-aico-danger">
-          This diagram could not be drawn: {error.split('\n')[0]}
-        </figcaption>
-        <pre className="overflow-x-auto bg-aico-code p-4 font-mono text-[13px] leading-[22px] text-aico-secondary">
-          <code>{source}</code>
-        </pre>
-      </figure>
-    );
+    // Thrown rather than drawn, so the widget frame owns the failure and offers
+    // to have it repaired — the same path a chart takes. This used to render
+    // its own red box, which meant a diagram that would not parse was the one
+    // broken widget with no Fix button.
+    throw new Error(error.split(String.fromCharCode(10))[0]);
   }
 
   return (
-    <figure className="group/diagram my-4 overflow-hidden rounded-xl border border-aico-border-subtle bg-aico-code">
-      <figcaption className="flex items-center gap-2 px-4 py-2 text-[12px] text-aico-muted">
-        <span>diagram</span>
-        <div className="flex-1" />
-        <button
+    <ZoomPan
+      className="max-h-[30rem]"
+      actions={
+        <IconButton
+          icon="code"
+          label={showSource ? 'Back to the diagram' : 'Show the source'}
           onClick={toggleSource}
-          className="rounded px-2 py-0.5 text-[12px] text-aico-muted opacity-0 transition-opacity
-                     hover:text-aico-primary focus:opacity-100 group-hover/diagram:opacity-100"
-        >
-          {showSource ? 'Diagram' : 'Source'}
-        </button>
-      </figcaption>
-
+          active={showSource}
+        />
+      }
+    >
       {showSource ? (
-        <pre className="max-h-[28rem] overflow-auto px-4 pb-4 font-mono text-[13px] leading-[22px] text-aico-primary">
+        <pre className="max-h-[28rem] overflow-auto p-2 font-mono text-[13px]
+                        leading-[22px] text-aico-primary">
           <code>{source}</code>
         </pre>
       ) : svg ? (
@@ -195,11 +192,11 @@ export const Diagram = React.memo(function Diagram({
           // build React elements would remove the structure that makes it a
           // diagram in the first place.
           dangerouslySetInnerHTML={{ __html: svg }}
-          className="max-h-[32rem] overflow-auto px-4 pb-4 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-none"
+          className="p-2 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
         />
       ) : (
-        <div className="px-4 pb-6 text-center text-[13px] text-aico-muted">Drawing…</div>
+        <div className="p-6 text-center text-[13px] text-aico-muted">Drawing…</div>
       )}
-    </figure>
+    </ZoomPan>
   );
 });

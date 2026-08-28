@@ -196,7 +196,7 @@ sum/mean/min/max row without you computing them.`,
     id: 'diagram',
     languages: ['mermaid', 'diagram', 'flowchart', 'sequence', 'gantt'],
     extension: 'mmd',
-    framed: false,
+    framed: true,
     summary: `a Mermaid diagram — ${DIAGRAM_TYPES.length} types covering architecture (C4, `
       + 'block, cloud), behaviour (flowchart, sequence, state), structure (class, ER) '
       + 'and planning (gantt, timeline, kanban, mindmap, quadrant, requirements)',
