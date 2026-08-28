@@ -60,6 +60,26 @@ export function currentAgent(session: Session): string | undefined {
   return undefined;
 }
 
+/**
+ * The model this conversation is being held with, if one was chosen.
+ *
+ * Undefined means nobody picked, and the caller falls back to the configured
+ * default — which is different from having picked the model that happens to be
+ * the default, because the default can change underneath a session that never
+ * expressed a preference.
+ *
+ * Last write wins, like every other projection here.
+ */
+export function currentModel(session: Session): string | undefined {
+  for (let i = session.events.length - 1; i >= 0; i--) {
+    const event = session.events[i];
+    if (event?.type !== 'session/model') continue;
+    const model = (event.data as { model?: string }).model;
+    return model ? String(model) : undefined;
+  }
+  return undefined;
+}
+
 // ── feedback ─────────────────────────────────────────────────────────
 
 export interface Feedback {

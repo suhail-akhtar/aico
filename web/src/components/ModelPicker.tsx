@@ -31,7 +31,10 @@ import { Portal } from './Portal';
 import { Icon } from './Icon';
 
 export function ModelPicker(): React.ReactElement {
-  const model = useStore(s => s.model);
+  // The session's choice, falling back to the configured default. Null here
+  // means nobody picked, which is a different thing from picking the model
+  // that happens to be the default today.
+  const model = useStore(s => s.model ?? s.defaultModel);
   const setModel = useStore(s => s.setModel);
   const providers = useStore(s => s.providers);
   const activeProvider = useStore(s => s.activeProvider);

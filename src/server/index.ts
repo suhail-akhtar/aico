@@ -281,11 +281,16 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         type: 'caught-up',
         sessionId,
         seq: run.session.length,
-        // The agent rides along here rather than needing a fetch of its own:
-        // this frame already says "here is where you stand", and a reconnect
-        // that restored the transcript but forgot who you were talking to would
-        // silently put you back with the orchestrator.
-        data: { busy: run.busy, agent: runs.agentOf(sessionId) ?? null },
+        // The agent and the model ride along here rather than needing fetches
+        // of their own: this frame already says "here is where you stand", and
+        // a reconnect that restored the transcript but forgot who you were
+        // talking to — or on what — would silently put you back on the
+        // defaults without saying so.
+        data: {
+          busy: run.busy,
+          agent: runs.agentOf(sessionId) ?? null,
+          model: runs.modelOf(sessionId) ?? null,
+        },
       })}\n\n`);
       return;
     }
@@ -513,6 +518,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         seq: run.session.length,
         busy: run.busy,
         agent: runs.agentOf(sessionId) ?? null,
+        // Null means this session never expressed a preference, which is not
+        // the same as having chosen whatever the default currently is — the
+        // default can move, and a session that picked deliberately should not.
+        model: runs.modelOf(sessionId) ?? null,
         messages: deriveMessages(run.session.events),
         // Cost is not part of the raw usage record because it depends on the
         // model, which the tracker does not own. Included here so a reopened
@@ -610,7 +619,16 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         const runCwd = await resolveCwd(sessionId, (body as { project?: string }).project);
         // Resolved now, not at boot. Choosing a different model in settings
         // has to affect the next turn rather than the next restart.
-        const chosen = model ?? await currentDefaultModel();
+        //
+        // Three sources, most specific first: what this request asked for, what
+        // this session was set to, and the configured default. The middle one
+        // is what makes a session keep its model — without it a turn submitted
+        // from a client that forgot to name one silently reverted to the
+        // default, which is how the choice looked like it had been applied and
+        // then quietly had not.
+        await runs.ensure(sessionId, runCwd);
+        if (model) runs.setModel(sessionId, model);
+        const chosen = model ?? runs.modelOf(sessionId) ?? await currentDefaultModel();
 
         // Resolved to real paths and appended to the task, so the model is told
         // what it has and where, and reads any of it only if the question needs
@@ -735,6 +753,17 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         return;
       }
 
+      case 'model': {
+        const { sessionId, model } = body as { sessionId?: string; model?: string };
+        if (!sessionId || !model?.trim()) {
+          send(res, 400, { error: 'sessionId and model required' });
+          return;
+        }
+        await runs.ensure(sessionId, await resolveCwd(sessionId));
+        const result = runs.setModel(sessionId, model.trim());
+        send(res, result.ok ? 200 : 400, result);
+        return;
+      }
       case 'agent': {
         const { sessionId, name } = body as { sessionId?: string; name?: string | null };
         if (!sessionId) { send(res, 400, { error: 'sessionId required' }); return; }

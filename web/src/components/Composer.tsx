@@ -46,7 +46,7 @@ export function Composer(): React.ReactElement {
   const followup = useStore(s => s.followup);
   const cancel = useStore(s => s.cancel);
   const usage = useStore(s => s.usage);
-  const model = useStore(s => s.model);
+  const model = useStore(s => s.model ?? s.defaultModel);
 
   const [text, setText] = useState('');
   // From the store, not local state. A plan approved in the side panel turns

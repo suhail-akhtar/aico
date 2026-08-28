@@ -122,6 +122,7 @@ import {
   currentCwd,
   forkSession,
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
+  currentModel,
   spillResult,
   saveSpill,
   excerpt,
@@ -9320,6 +9321,34 @@ const noOpts = { token: '', model: 'test', autoApprove: true, verbose: false, de
 }
 
 
+
+console.log('  -- The model a session is held with survives the tab --');
+{
+  const session = new Session({ id: 'model-1', cwd: process.cwd(), startedAt: Date.now() });
+
+  // No choice is not the same as choosing the default. The default can move,
+  // and a session that never expressed a preference should move with it while
+  // one that picked deliberately should not.
+  assert(currentModel(session) === undefined, 'a fresh session has expressed no preference');
+
+  session.append('session/model', { model: 'gpt-5' });
+  assert(currentModel(session) === 'gpt-5', 'a choice is recorded');
+
+  session.append('turn/start', { turn: 1 });
+  session.append('user/message', { turn: 1, content: 'hello' });
+  assert(currentModel(session) === 'gpt-5', 'and outlives the turns that follow it');
+
+  session.append('session/model', { model: 'claude-opus-5' });
+  assert(currentModel(session) === 'claude-opus-5', 'last write wins, like every projection here');
+
+  // The property the whole change exists for: the log is the record, so a
+  // client that forgot everything can be told what this session was set to.
+  // Before this, the choice lived in a browser tab and a reload silently
+  // reverted it to the global default — which looks exactly like it worked.
+  const replayed = new Session({ id: 'model-1', cwd: process.cwd(), startedAt: Date.now() });
+  for (const event of session.events) replayed.restore(structuredClone(event));
+  assert(currentModel(replayed) === 'claude-opus-5', 'and a replay from the log agrees');
+}
 
 console.log('  -- One list of drawable blocks, read from both ends --');
 {

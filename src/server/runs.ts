@@ -24,7 +24,7 @@ import type { AicoSettings } from '../settings.js';
 import type { EventHub } from './events.js';
 import { currentTitle } from '../session/title.js';
 import {
-  currentGoal, currentAgent, feedbackBySeq, deliverables, trajectory,
+  currentGoal, currentAgent, currentModel, feedbackBySeq, deliverables, trajectory,
 } from '../session/projections.js';
 import { personaFor, resolveAgent } from '../agents/resolve.js';
 import { activeProviderType } from '../providers/instances.js';
@@ -487,6 +487,28 @@ export class RunManager {
   agentOf(sessionId: string): string | undefined {
     const run = this.runs.get(sessionId);
     return run ? currentAgent(run.session) : undefined;
+  }
+
+  /**
+   * Record the model this session should use from here on.
+   *
+   * Appended rather than assigned, so it survives a reload and so two sessions
+   * can differ. Idempotent: choosing the model already in force writes nothing,
+   * which keeps a log from filling with the same line every time a picker
+   * re-announces its own value.
+   */
+  setModel(sessionId: string, model: string): { ok: boolean; error?: string } {
+    const run = this.runs.get(sessionId);
+    if (!run) return { ok: false, error: 'no such session' };
+    if (currentModel(run.session) === model) return { ok: true };
+    run.session.append('session/model', { model });
+    this.hub.publish({ type: 'model', sessionId, data: { model } });
+    return { ok: true };
+  }
+
+  modelOf(sessionId: string): string | undefined {
+    const run = this.runs.get(sessionId);
+    return run ? currentModel(run.session) : undefined;
   }
 
   goalOf(sessionId: string): ReturnType<typeof currentGoal> {

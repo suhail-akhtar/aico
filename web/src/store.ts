@@ -141,7 +141,16 @@ interface AppState {
    */
   lastActivityAt: number;
   usage: Usage;
+  /**
+   * The model this session was explicitly set to, or null if nobody chose.
+   *
+   * Null is not "the default" — it is the absence of a choice, which is what
+   * lets the default move without dragging a session that picked deliberately
+   * along with it. Read `model ?? defaultModel` to display.
+   */
   model: string | null;
+  /** The configured default, for sessions that never expressed a preference. */
+  defaultModel: string | null;
   error: string | null;
   /** The session's standing objective, when it has one. */
   goal: Goal | null;
@@ -320,6 +329,7 @@ export const useStore = create<AppState>((set, get) => ({
   lastActivityAt: 0,
   usage: NO_USAGE,
   model: null,
+  defaultModel: null,
   error: null,
   goal: null,
   feedback: {},
@@ -753,12 +763,16 @@ export const useStore = create<AppState>((set, get) => ({
   refreshProviders: async () => {
     try {
       const { instances, types, active, model } = await api.providers();
-      set(state => ({
+      // Into `defaultModel`, not `model`. Writing the global default into the
+      // session's choice is what made a reload look like it had reverted the
+      // picker: the tab forgot what was chosen, this filled the gap with the
+      // default, and nothing anywhere could tell the two apart afterwards.
+      set({
         providers: instances,
         providerTypes: types,
         activeProvider: active,
-        model: state.model ?? model,
-      }));
+        defaultModel: model,
+      });
     } catch (err) { set({ error: (err as Error).message }); }
   },
 
@@ -845,7 +859,14 @@ export const useStore = create<AppState>((set, get) => ({
     catch (err) { set({ error: (err as Error).message }); }
   },
 
-  setModel: (model) => set({ model }),
+  setModel: (model) => {
+    // Optimistic, then durable. The picker should close on the value it was
+    // clicked with rather than after a round trip, and the log is what makes
+    // the choice outlive this tab.
+    set({ model });
+    void api.setSessionModel(get().sessionId, model)
+      .catch((err: unknown) => set({ error: (err as Error).message }));
+  },
   clearError: () => set({ error: null }),
 
 }));
@@ -913,6 +934,9 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
         status: 'live',
         busy: Boolean((data as { busy?: boolean }).busy),
         sessionAgent: (data as { agent?: string | null }).agent ?? null,
+        // Null on purpose when the session never chose: the picker then shows
+        // the default rather than whichever session was open before this one.
+        model: (data as { model?: string | null }).model ?? null,
         draft: (data as { busy?: boolean }).busy ? state.draft : emptyDraft(),
         // Drop the optimistic echo now that the real user message has replayed.
         logged: dropPending(state.logged),
@@ -922,6 +946,12 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
     // ── ephemeral: the live turn ────────────────────────────────────
     case 'agent':
       set(() => ({ sessionAgent: (data as { name?: string | null }).name ?? null }));
+      return;
+
+    // A turn that named a model records it, so a choice made in another tab —
+    // or by the turn itself — reaches this one.
+    case 'model':
+      set(() => ({ model: (data as { model?: string | null }).model ?? null }));
       return;
 
     case 'question':

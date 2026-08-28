@@ -285,6 +285,16 @@ export const api = {
   setSessionAgent: (sessionId: string, name: string | null) =>
     post<{ ok: boolean; agent?: string; error?: string }>('agent', { sessionId, name }),
 
+  /**
+   * Record the model this session should use from here on.
+   *
+   * The choice used to live only in this tab, so it lasted until a reload and
+   * then reverted to the global default without saying anything. Writing it to
+   * the log is what makes it survive, and what lets two sessions differ.
+   */
+  setSessionModel: (sessionId: string, model: string) =>
+    post<{ ok: boolean; error?: string }>('model', { sessionId, model }),
+
   /** URL of the transcript as a downloadable document. */
   exportUrl: (sessionId: string, format: 'md' | 'txt') =>
     `/api/session/export?id=${encodeURIComponent(sessionId)}&format=${format}`

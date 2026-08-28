@@ -35,7 +35,7 @@ export function ModelsPane(): React.ReactElement {
   const providers = useStore(s => s.providers);
   const providerTypes = useStore(s => s.providerTypes);
   const activeProvider = useStore(s => s.activeProvider);
-  const model = useStore(s => s.model);
+  const model = useStore(s => s.model ?? s.defaultModel);
   const refreshProviders = useStore(s => s.refreshProviders);
   const setModel = useStore(s => s.setModel);
 

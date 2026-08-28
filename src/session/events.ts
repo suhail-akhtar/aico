@@ -310,6 +310,28 @@ export interface SessionEventMap {
   };
 
   /**
+   * SURFACE. The model this conversation is being held with.
+   *
+   * Here for exactly the reason `session/agent` is: the choice outlives the
+   * turn that made it, so it belongs in the log rather than on the in-memory
+   * run or — as it was — in a browser tab.
+   *
+   * It used to live only in client state. Nothing wrote it down, so switching
+   * models held until the next reload and then silently reverted to the global
+   * default, which is the worst possible shape for a setting: it looks like it
+   * worked, and the evidence that it did not arrives much later. Sessions also
+   * could not differ from each other, because there was one value for the whole
+   * tab rather than one per conversation.
+   *
+   * Recorded as a change rather than per turn. `request/header` already logs
+   * which model actually served each request; this is the standing choice,
+   * which has to survive a session with no turns in it yet.
+   */
+  'session/model': {
+    model: string;
+  };
+
+  /**
    * RECORD. Compaction bookkeeping. The summary itself rides on a
    * `user/message` carrying `surfaceOp: {op:'replace'}`; this event records
    * what was shadowed so the reduction is auditable and reversible.
