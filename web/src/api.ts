@@ -307,8 +307,10 @@ export const api = {
     post<{ archived: boolean }>('session/archive', { sessionId, archived }),
 
   /** Branch a session: same history so far, a new id to continue from. */
-  fork: (sessionId: string) =>
-    post<{ id: string; title?: string; project?: string }>('session/fork', { sessionId }),
+  fork: (sessionId: string, throughTurn?: number) =>
+    post<{ id: string; title?: string; project?: string }>('session/fork', {
+      sessionId, ...(throughTurn === undefined ? {} : { throughTurn }),
+    }),
 
   // ── providers ──────────────────────────────────────────────────────
   providers: () => request<{

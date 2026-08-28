@@ -454,8 +454,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     }
 
     if (route === 'session/fork' && req.method === 'POST') {
-      const { sessionId } = await readJson(req) as { sessionId?: string };
+      const { sessionId, throughTurn } = await readJson(req) as {
+        sessionId?: string; throughTurn?: number;
+      };
       if (!sessionId) { send(res, 400, { error: 'sessionId required' }); return; }
+      // A branch point, when the reader picked one. Validated rather than
+      // trusted: a negative or fractional turn would silently produce an empty
+      // session, and `forkSession` compares it against real turn numbers.
+      if (throughTurn !== undefined
+          && (!Number.isInteger(throughTurn) || throughTurn < 0)) {
+        send(res, 400, { error: 'throughTurn must be a non-negative integer' });
+        return;
+      }
       const sourceCwd = await resolveCwd(sessionId);
       // A running turn is still writing the history being copied, so the fork
       // would be a transcript cut off mid-sentence. Refused rather than
@@ -469,7 +479,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       // own last words.
       await runs.release(sessionId);
       try {
-        const forked = await forkSession(sessionId, sourceCwd, `fork-${Date.now().toString(36)}`);
+        const forked = await forkSession(
+          sessionId, sourceCwd, `fork-${Date.now().toString(36)}`,
+          throughTurn === undefined ? {} : { throughTurn },
+        );
         sessionCwd.set(forked.id, sourceCwd);
         send(res, 200, { ...forked, project: sourceCwd });
       } catch (err) {

@@ -28,6 +28,15 @@ export interface ChatMessage {
   id: string;
   type: MessageType;
   content: string;
+  /**
+   * The turn this message belongs to, when it came from a stored log.
+   *
+   * Carried for branching. A branch cuts the conversation on a turn boundary
+   * rather than at this message's seq, because a turn is the unit that keeps a
+   * tool call and its result together — see `forkSession`. The UI cannot work
+   * that out from the message alone, so the reducer passes it through.
+   */
+  turn?: number;
   /** For tool messages: the tool name */
   toolName?: string;
   /** For tool messages: tool arguments */

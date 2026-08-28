@@ -234,11 +234,29 @@ export interface SessionSummary {
  *
  * The title is not copied blindly. Two identical rows in the sidebar is the one
  * outcome that would make forking useless, so the copy is marked.
+ *
+ * ## Why the cut is a turn and not a seq
+ *
+ * `throughTurn` branches from a point in the conversation rather than copying
+ * all of it — the interesting case, because the reason to branch is usually
+ * "answer this differently" rather than "keep everything".
+ *
+ * It is deliberately not a seq, even though the UI knows the seq of the message
+ * that was clicked. A turn is the atomic unit: within one, a `tool/call` and
+ * the `tool/result` that answers it can be several events apart, and every
+ * provider rejects a request containing a tool call with no result. Cutting at
+ * an arbitrary seq would therefore produce a session that looks fine in the
+ * sidebar and fails on its first request — the worst failure shape available,
+ * because the damage is invisible until someone tries to use it.
+ *
+ * Cutting on the turn boundary makes that unrepresentable: a turn is copied
+ * whole or not at all, so every pair inside it survives together.
  */
 export async function forkSession(
   sourceId: string,
   cwd: string,
   newId: string,
+  options: { throughTurn?: number } = {},
 ): Promise<{ id: string; title?: string }> {
   const from = eventLogPath(sourceId, cwd);
   const to = eventLogPath(newId, cwd);
@@ -254,6 +272,7 @@ export async function forkSession(
   // persistence writes back to the path that id names — a fork whose header
   // still said `sourceId` would, on its first turn, append its events to the
   // session it was forked from.
+  const limit = options.throughTurn;
   let maxSeq = 0;
   const lines = text.split(NEWLINE).filter(line => line.trim() !== '').map(line => {
     let record: Record<string, unknown>;
@@ -261,9 +280,16 @@ export async function forkSession(
     if (record.type === '__header__') {
       return JSON.stringify({ ...record, id: newId, startedAt: Date.now() });
     }
+    if (limit !== undefined) {
+      // Events that belong to no turn — the request header, a title, a rating —
+      // are session-level bookkeeping and are kept regardless. Only the
+      // conversation itself is cut.
+      const turn = (record.data as { turn?: unknown } | undefined)?.turn;
+      if (typeof turn === 'number' && turn > limit) return null;
+    }
     if (typeof record.seq === 'number' && record.seq > maxSeq) maxSeq = record.seq;
     return line;
-  });
+  }).filter((line): line is string => line !== null);
 
   // Name it after the original so the pair reads as a pair, and do it as an
   // ordinary title event so the fork's own log explains its name.
@@ -271,9 +297,14 @@ export async function forkSession(
   // The seq matters: events are restored in seq order regardless of file order,
   // so a title appended at seq 0 lands *before* the copied history and the
   // original name wins as the most recent. It has to be past the end.
+  //
+  // A branch says where it was cut. Two branches off one long investigation are
+  // otherwise two identical rows, which is the same problem the mark solves in
+  // the first place — and the turn is the one fact that tells them apart.
   const source = (await listSessionSummaries(cwd)).find(s => s.id === sourceId);
-  const base = source?.title?.replace(/ \(fork\)$/, '');
-  const title = base ? `${base} (fork)` : undefined;
+  const base = source?.title?.replace(/ \((fork|branch at \d+)\)$/, '');
+  const mark = limit === undefined ? 'fork' : `branch at ${limit}`;
+  const title = base ? `${base} (${mark})` : undefined;
   if (title) {
     lines.push(JSON.stringify({
       seq: maxSeq + 1, type: 'session/title', timestamp: Date.now(),

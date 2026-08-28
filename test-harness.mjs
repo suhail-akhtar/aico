@@ -4123,6 +4123,82 @@ console.log('  -- A fork is a branch point, not a duplicate --');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+console.log('  -- Branching cuts on a turn, so a tool call keeps its result --');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-branch-'));
+  const source = new Session({ id: 'src-2', cwd: dir, startedAt: Date.now() });
+  await initEventLog(source.header);
+  const attached = persistSession(source);
+  source.append('session/title', { title: 'Two ways', source: 'user' });
+
+  // Three turns, the middle one doing work. The tool call and its result are
+  // several events apart on purpose: that gap is what a seq-based cut would
+  // land in the middle of.
+  source.append('turn/start', { turn: 1 });
+  source.append('user/message', { turn: 1, content: 'question one' });
+  source.append('assistant/message', { turn: 1, step: 1, content: 'answer one' });
+  source.append('turn/end', { turn: 1, reason: 'complete' });
+
+  source.append('turn/start', { turn: 2 });
+  source.append('user/message', { turn: 2, content: 'question two' });
+  source.append('tool/call', {
+    turn: 2, step: 1, callId: 'c1', name: 'bash', arguments: '{"command":"ls"}',
+  });
+  source.append('assistant/chunk', { turn: 2, step: 1, text: 'looking…' });
+  source.append('tool/result', { turn: 2, step: 1, callId: 'c1', name: 'bash', content: 'README.md' });
+  source.append('assistant/message', { turn: 2, step: 2, content: 'answer two' });
+  source.append('turn/end', { turn: 2, reason: 'complete' });
+
+  source.append('turn/start', { turn: 3 });
+  source.append('user/message', { turn: 3, content: 'question three' });
+  source.append('assistant/message', { turn: 3, step: 1, content: 'answer three' });
+  source.append('turn/end', { turn: 3, reason: 'complete' });
+  await attached.detach();
+
+  const branch = await forkSession('src-2', dir, 'branch-1', { throughTurn: 2 });
+  const cut = await loadEventLog('branch-1', dir);
+  const said = cut.events.map(e => e.data?.content).filter(Boolean);
+
+  assert(said.includes('answer one') && said.includes('answer two'),
+    'the conversation up to the branch point is kept');
+  assert(!said.includes('question three') && !said.includes('answer three'),
+    'and everything after it is gone — that is the point of branching');
+
+  // The invariant this whole design exists to protect. Every provider rejects a
+  // request containing a tool call with no result, so a cut that separated them
+  // would produce a session that looks fine in the sidebar and 400s on its
+  // first turn — a failure nobody sees until they try to use it.
+  const calls = cut.events.filter(e => e.type === 'tool/call').map(e => e.data.callId);
+  const results = new Set(cut.events.filter(e => e.type === 'tool/result').map(e => e.data.callId));
+  assert(calls.length === 1 && calls.every(id => results.has(id)),
+    'every tool call in the branch still has the result that answers it');
+
+  assert(branch.title === 'Two ways (branch at 2)',
+    `the branch says where it was cut (got ${branch.title})`);
+
+  // Two branches off one investigation must not be two identical sidebar rows,
+  // which is the whole reason the copy is marked at all.
+  const other = await forkSession('src-2', dir, 'branch-2', { throughTurn: 1 });
+  assert(other.title === 'Two ways (branch at 1)', `and says a different where (got ${other.title})`);
+
+  const shallow = await loadEventLog('branch-2', dir);
+  assert(!shallow.events.some(e => e.data?.content === 'answer two'), 'an earlier cut keeps less');
+  assert(currentTitle(shallow)?.title === 'Two ways (branch at 1)',
+    'the branch name wins over the copied one');
+
+  // Session-level bookkeeping belongs to no turn and survives any cut.
+  assert(shallow.events.some(e => e.type === 'session/title'),
+    'a title is not part of the conversation and is not cut with it');
+
+  // No boundary is still the old behaviour, whole and unchanged.
+  const whole = await forkSession('src-2', dir, 'branch-3');
+  assert(whole.title === 'Two ways (fork)', `an uncut copy is still a fork (got ${whole.title})`);
+  const all = await loadEventLog('branch-3', dir);
+  assert(all.events.some(e => e.data?.content === 'answer three'), 'and keeps everything');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log('  -- Archiving hides a row and destroys nothing --');
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-archive-'));

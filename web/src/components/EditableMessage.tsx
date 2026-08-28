@@ -26,12 +26,21 @@ export interface EditableMessageProps {
   content: string;
   /** Absent while a turn is running: resending mid-turn would race it. */
   onResend?: (text: string) => void;
+  /**
+   * Ask this differently, somewhere else.
+   *
+   * The sibling of `onResend` and the reason both exist: resending keeps both
+   * attempts in this session under a version control, branching gives the new
+   * attempt a session of its own. Reword and stay, or take it somewhere the two
+   * lines of enquiry can develop separately.
+   */
+  onBranch?: () => void;
   /** Version navigation, when this message has been asked more than one way. */
   versions?: { total: number; current: number; onSelect: (index: number) => void };
 }
 
 export function EditableMessage({
-  content, onResend, versions,
+  content, onResend, onBranch, versions,
 }: EditableMessageProps): React.ReactElement {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(content);
@@ -166,6 +175,16 @@ export function EditableMessage({
             title="Edit this message and ask again"
           >
             edit
+          </button>
+        )}
+        {onBranch && (
+          <button
+            onClick={onBranch}
+            className="rounded px-1.5 py-0.5 transition-colors hover:bg-aico-hover
+                       hover:text-aico-primary"
+            title="Ask this differently in a new session, keeping the conversation above it"
+          >
+            branch
           </button>
         )}
       </div>

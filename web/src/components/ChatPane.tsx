@@ -24,6 +24,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MessageBubble } from '@aico/ui';
+import type { ChatMessage } from '@aico/ui';
 import { useStore } from '../store';
 import { collectWidgetFixes, fixMarker, widgetHash } from '../widget-fixes';
 import { applyVersions, editMarker } from '../message-versions';
@@ -126,6 +127,37 @@ export function ChatPane(): React.ReactElement {
     });
     void submit(`${text}\n${editMarker(originalSeq)}`);
   }, [submit]);
+
+  /**
+   * Take the conversation a second way from a point in it.
+   *
+   * The reason this is worth a button rather than "start a new session and
+   * paste" is that the value of a conversation is mostly the part you would
+   * have to reproduce: the files read, the reasoning, the dead ends already
+   * ruled out. Branching keeps all of it and changes only what comes next.
+   *
+   * The two sides mean different things and behave differently:
+   *
+   * - From a **reply**, the branch ends *with* that reply. You keep the answer
+   *   and ask something else from there.
+   * - From **your own message**, the branch ends just *before* it, and the
+   *   message comes back in the composer. Branching there means "ask this
+   *   differently", so leaving it in the transcript would leave you re-asking
+   *   a question the branch already contains.
+   *
+   * Distinct from edit-and-resend, which is the same intent in one session:
+   * versions keep both attempts in one place under a `2/2` control, and a
+   * branch gives the new attempt a session of its own. Short reword, stay;
+   * two directions worth developing separately, branch.
+   */
+  const forkSession = useStore(s => s.forkSession);
+  const sessionId = useStore(s => s.sessionId);
+  const branchFrom = useCallback((message: ChatMessage): void => {
+    if (message.turn === undefined) return;
+    void (message.type === 'user'
+      ? forkSession(sessionId, message.turn - 1, message.content)
+      : forkSession(sessionId, message.turn));
+  }, [forkSession, sessionId]);
 
   // Recomputed from the transcript rather than stored, like every other
   // projection here: a reload rebuilds which corrections replace which widgets
@@ -268,7 +300,11 @@ export function ChatPane(): React.ReactElement {
                 {message.type === 'user' && seq !== null ? (
                   <EditableMessage
                     content={message.content}
-                    {...(busy ? {} : { onResend: (text: string) => resend(seq, text) })}
+                    {...(busy ? {} : {
+                      onResend: (text: string) => resend(seq, text),
+                      ...(message.turn === undefined
+                        ? {} : { onBranch: () => branchFrom(message) }),
+                    })}
                     {...(versioned.groups.has(message.id) ? {
                       versions: {
                         total: versioned.groups.get(message.id)!.total,
@@ -292,6 +328,8 @@ export function ChatPane(): React.ReactElement {
                   <div className={message.type === 'user' ? 'flex justify-end' : ''}>
                     <MessageActions
                       text={message.content}
+                      {...(!busy && message.turn !== undefined
+                        ? { onBranch: () => branchFrom(message) } : {})}
                       {...(rateable ? { seq } : {})}
                       {...(rateable && feedback[seq] ? { feedback: feedback[seq] } : {})}
                     />

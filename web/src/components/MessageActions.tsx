@@ -23,15 +23,34 @@ export interface MessageActionsProps {
   /** Log seq, when this message can be rated. Absent for user messages. */
   seq?: number;
   feedback?: Feedback;
+  /**
+   * Continue from here in a session of its own.
+   *
+   * Absent while a turn is running — the history being copied is still being
+   * written, so a branch taken now would be cut mid-sentence.
+   */
+  onBranch?: () => void;
 }
 
-export function MessageActions({ text, seq, feedback }: MessageActionsProps): React.ReactElement {
+export function MessageActions({
+  text, seq, feedback, onBranch,
+}: MessageActionsProps): React.ReactElement {
   return (
     <div
       className="mt-1 flex items-center gap-1 opacity-0 transition-opacity
                  focus-within:opacity-100 group-hover/message:opacity-100"
     >
       <CopyButton text={text} />
+      {onBranch && (
+        <button
+          onClick={onBranch}
+          title="Continue from this reply in a new session, keeping everything above it"
+          className="rounded px-1.5 py-0.5 text-[11px] text-aico-muted transition-colors
+                     hover:bg-aico-hover hover:text-aico-primary"
+        >
+          Branch
+        </button>
+      )}
       {seq !== undefined && (
         <MessageFeedback seq={seq} {...(feedback ? { current: feedback } : {})} inline />
       )}

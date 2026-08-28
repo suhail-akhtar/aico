@@ -276,7 +276,15 @@ interface AppState {
   /** Rename any session, not only the open one. */
   renameSession: (id: string, title: string) => Promise<void>;
   archiveSession: (id: string, archived: boolean) => Promise<void>;
-  forkSession: (id: string) => Promise<void>;
+  /**
+   * Copy a session, optionally cutting it at a point in the conversation.
+   *
+   * `throughTurn` keeps the conversation through that turn and drops the rest —
+   * the branch point. `prefill` is the message to hand back to the composer,
+   * used when branching off one of the reader's own messages so the thing they
+   * are about to reword is already there.
+   */
+  forkSession: (id: string, throughTurn?: number, prefill?: string) => Promise<void>;
   /** Whether filed-away sessions are listed. */
   showArchived: boolean;
   toggleArchived: () => void;
@@ -779,15 +787,19 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  forkSession: async (id) => {
+  forkSession: async (id, throughTurn, prefill) => {
     try {
-      const forked = await api.fork(id);
+      const forked = await api.fork(id, throughTurn);
       if (forked.project) set({ project: forked.project });
       await get().refreshSessions();
       // Opened immediately: forking is something you do in order to keep
       // going, so leaving the user on the original is a second click nobody
       // wanted.
       await get().openSession(forked.id);
+      // Branching off your own message drops it and hands it back, because the
+      // reason to branch there is to ask it differently. Set after the open, or
+      // opening a session would clear the composer it just filled.
+      if (prefill) get().prefillComposer(prefill);
     } catch (err) { set({ error: (err as Error).message }); }
   },
 

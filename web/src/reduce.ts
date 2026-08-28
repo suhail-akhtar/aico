@@ -34,6 +34,9 @@ export function applyLogEvent(
   now = Date.now(),
 ): Map<number, ChatMessage> {
   const type = String(data.type ?? '');
+  // Carried onto the messages that can be branched from. Only the conversation
+  // itself has one; bookkeeping events do not, and neither do drafts.
+  const turn = typeof data.turn === 'number' ? { turn: data.turn } : {};
 
   switch (type) {
     case 'user/message': {
@@ -42,6 +45,7 @@ export function applyLogEvent(
         id: `seq-${seq}`,
         type: 'user',
         content: String(data.content ?? ''),
+        ...turn,
         timestamp: now,
       });
       return next;
@@ -113,6 +117,7 @@ export function applyLogEvent(
           id: `seq-${seq}`,
           type: 'assistant',
           content,
+          ...turn,
           timestamp: now,
         });
       }
