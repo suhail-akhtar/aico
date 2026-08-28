@@ -25,6 +25,7 @@
  */
 
 import { WIDGET_CATALOG, widgetById, widgetForLanguage } from '../../shared/widgets/catalog.js';
+import { DIAGRAM_TYPES, diagramType } from '../../shared/widgets/diagram-types.js';
 
 export interface WidgetSpecInput {
   /** The kind to describe. A fence language works too. */
@@ -45,9 +46,33 @@ export function getWidgetSpec(input: WidgetSpecInput): string {
   // By id or by any fence language it answers to, because the caller is as
   // likely to be holding the word it was about to write as the canonical name.
   const kind = widgetById(wanted.toLowerCase()) ?? widgetForLanguage(wanted);
+
+  // A diagram *type* rather than a block kind — "c4container", "gantt",
+  // "architecture". Asked for after reading the diagram index, which lists
+  // twenty-six of them, so the second question is always "how do I write that
+  // one" and answering it with the whole index again would be useless.
+  //
+  // Checked before the not-found path but after the block kinds, so `pie` —
+  // which is both a mermaid diagram and a chart series type — still resolves to
+  // the block first. Nothing is shadowed, only ordered.
+  if (!kind) {
+    const diagram = diagramType(wanted);
+    if (diagram) {
+      return [
+        `${diagram.syntax} — ${diagram.label}`,
+        `Use when: ${diagram.use}`,
+        '',
+        'Goes in a ```mermaid block:',
+        '',
+        diagram.sample,
+      ].join('\n');
+    }
+  }
+
   if (!kind) {
     return `No rendered block named "${wanted}". Available: `
-      + `${WIDGET_CATALOG.map(k => k.id).join(', ')}.`;
+      + `${WIDGET_CATALOG.map(k => k.id).join(', ')}. `
+      + `Diagram types: ${DIAGRAM_TYPES.map(d => d.syntax).join(', ')}.`;
   }
 
   return [
@@ -72,8 +97,9 @@ export const widgetSpecDefinition = {
     properties: {
       kind: {
         type: 'string',
-        description: 'Block kind or fence language, e.g. "chart" or "mermaid". '
-          + 'Omit to list every kind with a one-line summary.',
+        description: 'Block kind, fence language, or a mermaid diagram type — '
+          + '"chart", "dashboard", "c4container", "gantt", "architecture". Omit to '
+          + 'list every kind with a one-line summary.',
       },
     },
     required: [],

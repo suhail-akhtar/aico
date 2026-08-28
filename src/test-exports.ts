@@ -239,3 +239,4 @@ export { getWidgetSpec, widgetSpecDefinition } from './tools/widget-spec.js';
 export {
   WIDGET_CATALOG, widgetForLanguage, widgetById, catalogLines,
 } from '../shared/widgets/catalog.js';
+export { DIAGRAM_TYPES, diagramType, diagramIndex } from '../shared/widgets/diagram-types.js';

@@ -35,6 +35,8 @@
  * @module shared/widgets/catalog
  */
 
+import { DIAGRAM_TYPES, diagramIndex } from './diagram-types.js';
+
 export interface WidgetKind {
   /** Stable identity. Names the renderer and labels the widget frame. */
   id: string;
@@ -195,17 +197,30 @@ sum/mean/min/max row without you computing them.`,
     languages: ['mermaid', 'diagram', 'flowchart', 'sequence', 'gantt'],
     extension: 'mmd',
     framed: false,
-    summary: 'a Mermaid diagram — flowchart, sequence, ER, state, class, gantt; '
-      + 'use for architecture, network topology and component diagrams',
-    spec: `Mermaid source, exactly as Mermaid takes it.
+    summary: `a Mermaid diagram — ${DIAGRAM_TYPES.length} types covering architecture (C4, `
+      + 'block, cloud), behaviour (flowchart, sequence, state), structure (class, ER) '
+      + 'and planning (gantt, timeline, kanban, mindmap, quadrant, requirements)',
+    spec: `Mermaid source, exactly as Mermaid takes it. The first keyword picks
+the diagram; everything after it is that diagram's own syntax.
 
-graph TD
+flowchart TD
   A[Client] --> B[API]
   B --> C[(Database)]
 
-Supports flowchart, sequenceDiagram, erDiagram, stateDiagram-v2, classDiagram,
-gantt, journey and C4. Node text containing brackets, quotes or parentheses
-must be quoted, which is the single most common reason one fails to parse.`,
+Call \`WidgetSpec\` again with the type name — "c4container", "architecture",
+"gantt" — for a worked example of that one specifically. These all render in
+this build; the list is generated from the same samples a check renders on
+every run, so nothing here is aspirational:
+
+${diagramIndex()}
+
+Pick by what the diagram has to say, not by what it is called. A request for
+"the architecture" is usually C4Context or C4Container; "how does a request
+flow" is sequenceDiagram or C4Dynamic; "what runs where" is C4Deployment or
+architecture-beta; "the plan" is gantt or timeline.
+
+Node text containing brackets, quotes or parentheses must be quoted. That is
+the single most common reason a diagram fails to parse.`,
   },
   {
     id: 'html',

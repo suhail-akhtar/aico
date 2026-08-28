@@ -123,6 +123,7 @@ import {
   forkSession,
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
   currentModel,
+  DIAGRAM_TYPES, diagramType, diagramIndex,
   spillResult,
   saveSpill,
   excerpt,
@@ -9348,6 +9349,58 @@ console.log('  -- The model a session is held with survives the tab --');
   const replayed = new Session({ id: 'model-1', cwd: process.cwd(), startedAt: Date.now() });
   for (const event of session.events) replayed.restore(structuredClone(event));
   assert(currentModel(replayed) === 'claude-opus-5', 'and a replay from the log agrees');
+}
+
+console.log('  -- The diagram index is measured, not copied from the docs --');
+{
+  // Whether each of these actually *renders* is `npm run test:diagrams`, which
+  // needs a browser. What is checkable here is that the list is well formed and
+  // that nothing between it and the model drops on the floor.
+
+  assert(DIAGRAM_TYPES.length >= 20,
+    `the bundled mermaid draws far more than the six the prompt used to name (${DIAGRAM_TYPES.length})`);
+  assert(DIAGRAM_TYPES.every(d => d.id && d.syntax && d.label && d.use && d.sample),
+    'every type says what it is, when to reach for it, and how to write it');
+
+  // A sample that does not open with its own keyword is a sample for a
+  // different diagram — the single most likely way to get one wrong, and
+  // invisible until someone reads the rendered output carefully.
+  for (const d of DIAGRAM_TYPES) {
+    assert(d.sample.trimStart().startsWith(d.syntax),
+      `${d.id}'s sample opens with ${d.syntax}`);
+  }
+
+  const ids = DIAGRAM_TYPES.map(d => d.id);
+  assert(new Set(ids).size === ids.length, 'no id is claimed twice');
+
+  // Found by hand, then by lookup, because the model reaches for whichever it
+  // is holding — the id it read in the index or the keyword it is about to type.
+  assert(diagramType('c4container')?.syntax === 'C4Container', 'by id');
+  assert(diagramType('C4Container')?.syntax === 'C4Container', 'by keyword');
+  assert(diagramType('architecture-beta')?.id === 'architecture', 'including the beta suffix');
+  assert(diagramType('nonsense') === undefined, 'and an unknown name finds nothing');
+
+  // The index is generated rather than written out, so a type added here cannot
+  // be missing from what the model is told. That is the whole arrangement.
+  const index = diagramIndex();
+  for (const d of DIAGRAM_TYPES) {
+    assert(index.includes(d.syntax), `${d.syntax} reaches the prompt`);
+  }
+
+  const diagramSpec = getWidgetSpec({ kind: 'mermaid' });
+  assert(diagramSpec.includes('C4Deployment') && diagramSpec.includes('architecture-beta'),
+    'and the block spec carries the whole index, not a hand-picked few');
+
+  // Asked for one type by name, the answer is that type — not the index again.
+  // The index lists twenty-six, so the second question is always "how do I
+  // write that one".
+  const one = getWidgetSpec({ kind: 'c4deployment' });
+  assert(one.includes('Deployment_Node'), 'a named type answers with its own sample');
+  assert(!one.includes('quadrantChart'), 'and not with everything else as well');
+
+  // `pie` is both a mermaid diagram and an ECharts series type. The block kind
+  // has to win, or asking about the fence would answer about the diagram.
+  assert(/ECharts/.test(getWidgetSpec({ kind: 'chart' })), 'block kinds resolve first');
 }
 
 console.log('  -- One list of drawable blocks, read from both ends --');
