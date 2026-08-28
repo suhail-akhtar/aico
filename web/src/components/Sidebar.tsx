@@ -23,7 +23,7 @@ import { SessionRowMenu } from './SessionRowMenu';
 import { ProjectGroupHeader } from './ProjectGroupHeader';
 import { ResizeHandle, useSidebarWidth } from './ResizeHandle';
 
-export type View = 'chat' | 'changes' | 'trajectory' | 'system';
+export type View = 'chat' | 'changes' | 'trajectory' | 'system' | 'miniapps';
 
 interface Props {
   view: View;
@@ -312,11 +312,13 @@ export function Sidebar(
         </nav>
 
         {/*
-          Two entries, because there are only two *places*. Chat and Trajectory
-          are two readings of the same session and are tabs on it in the header,
-          so listing Trajectory here as well offered the same destination twice
-          and made the sidebar disagree with the header about what it selected.
-          Settings is a sheet over whatever you are doing, not somewhere to go.
+          Destinations, not views. Chat and Trajectory are two readings of the
+          same session and are tabs on it in the header, so listing Trajectory
+          here as well offered the same destination twice and made the sidebar
+          disagree with the header about what it selected. Settings is a sheet
+          over whatever you are doing, not somewhere to go. Mini Apps earns a
+          place because it outlives the session that built it — the apps are
+          still there tomorrow, in a chat that has nothing to do with them.
         */}
         <div className="border-t border-aico-border-subtle px-2 py-2">
           <NavButton
@@ -325,6 +327,13 @@ export function Sidebar(
             onClick={() => { onView(view === 'system' ? 'chat' : 'system'); onClose(); }}
           >
             System
+          </NavButton>
+          <NavButton
+            icon="bolt"
+            active={view === 'miniapps'}
+            onClick={() => { onView(view === 'miniapps' ? 'chat' : 'miniapps'); onClose(); }}
+          >
+            Mini Apps
           </NavButton>
           <NavButton icon="sliders" active={false} onClick={() => { onSettings(); onClose(); }}>
             Settings

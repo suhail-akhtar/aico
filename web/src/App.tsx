@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Sidebar, type View } from './components/Sidebar';
+import { MiniAppsPane } from './components/MiniAppsPane';
 import { ChatPane } from './components/ChatPane';
 import { Composer } from './components/Composer';
 
@@ -102,7 +103,9 @@ export function App(): React.ReactElement {
           </button>
 
           <span className="min-w-0 max-w-[40%] truncate text-[14px] font-medium text-aico-primary">
-            {view === 'system' ? 'System' : (title || 'New session')}
+            {view === 'system' ? 'System'
+              : view === 'miniapps' ? 'Mini Apps'
+              : (title || 'New session')}
           </span>
 
           {/* Three readings of one session — what was said, what it did to the
@@ -145,6 +148,7 @@ export function App(): React.ReactElement {
         {view === 'changes' && <ChangesPane />}
         {view === 'trajectory' && <Trajectory />}
         {view === 'system' && <SystemPanel />}
+        {view === 'miniapps' && <MiniAppsPane />}
       </main>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
