@@ -41,18 +41,18 @@
  */
 
 /** The validated categorical order. Never cycle it — a ninth series folds to "Other". */
-const LIGHT_SERIES = [
+export const LIGHT_SERIES = [
   '#2a78d6', '#eb6834', '#1baf7a', '#eda100',
   '#e87ba4', '#008300', '#4a3aa7', '#e34948',
 ];
 
 /** The same eight hues, stepped for a dark surface and validated against it. */
-const DARK_SERIES = [
+export const DARK_SERIES = [
   '#3987e5', '#d95926', '#199e70', '#c98500',
   '#d55181', '#008300', '#9085e9', '#e66767',
 ];
 
-interface Ink {
+export interface Ink {
   primary: string;
   secondary: string;
   muted: string;
@@ -63,7 +63,7 @@ interface Ink {
   panelBorder: string;
 }
 
-const LIGHT_INK: Ink = {
+export const LIGHT_INK: Ink = {
   primary: '#111827',
   secondary: '#4b5563',
   muted: '#6b7280',
@@ -72,7 +72,7 @@ const LIGHT_INK: Ink = {
   panelBorder: '#e5e7eb',
 };
 
-const DARK_INK: Ink = {
+export const DARK_INK: Ink = {
   primary: '#e6e8eb',
   secondary: '#9aa3af',
   muted: '#6b7280',
@@ -87,7 +87,7 @@ const DARK_INK: Ink = {
  * A chart in a system font next to prose in another is the detail that makes an
  * interface look assembled rather than designed.
  */
-const FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+export const FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /**
  * Build the theme object ECharts registers.

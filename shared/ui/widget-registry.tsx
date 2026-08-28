@@ -28,17 +28,18 @@
 
 import React from 'react';
 import { WIDGET_CATALOG } from '../widgets/catalog';
-import type { WidgetKind } from '../widgets/catalog';
+import type { CatalogEntry, WidgetKind } from '../widgets/catalog';
 import { Chart } from './Chart';
 import { DataTable } from './DataTable';
 import { Diagram } from './Diagram';
 import { HtmlPreview } from './HtmlPreview';
+import { Viz } from './Viz';
 
-export type { WidgetKind };
+export type { CatalogEntry, WidgetKind };
 export { widgetForLanguage, widgetById, WIDGET_CATALOG } from '../widgets/catalog';
 
 /** Every id in the catalog. A renderer is required for each. */
-export type WidgetId = (typeof WIDGET_CATALOG)[number]['id'];
+export type WidgetId = CatalogEntry['id'];
 
 export interface WidgetRenderProps {
   /** The block's source, after any correction has been substituted in. */
@@ -69,12 +70,13 @@ export interface WidgetRenderProps {
  */
 const RENDERERS: Record<WidgetId, React.ComponentType<WidgetRenderProps>> = {
   chart: ({ source, streaming }) => <Chart source={source} streaming={streaming ?? false} />,
+  viz: ({ source, streaming }) => <Viz source={source} streaming={streaming ?? false} />,
   table: ({ source }) => <DataTable source={source} />,
   diagram: ({ source, streaming }) => <Diagram source={source} streaming={streaming ?? false} />,
   html: ({ source, language }) => <HtmlPreview html={source} language={language} />,
 };
 
 /** The component for a kind, or undefined if the fence is ordinary code. */
-export function rendererFor(kind: WidgetKind): React.ComponentType<WidgetRenderProps> | undefined {
+export function rendererFor(kind: CatalogEntry): React.ComponentType<WidgetRenderProps> | undefined {
   return RENDERERS[kind.id];
 }

@@ -21,7 +21,7 @@ import { todosFrom, TASK_REPLY } from './dist-test/todos.mjs';
 import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
 import { loadDismissals, saveDismissals } from './dist-test/panel-memory.mjs';
 import {
-  parseChartSpec, parseTableSpec, numericValue, summarise,
+  parseChartSpec, parseTableSpec, parseVizSpec, numericValue, summarise,
 } from './dist-test/widget-specs.mjs';
 import {
   collectWidgetFixes, widgetHash, fixMarker, stripMarker, isFixRequest, firstBlock,
@@ -1644,6 +1644,52 @@ test('the marker is plumbing and never reaches the reader', () => {
   assert.ok(!stripEditMarker('x' + editMarker(7)).includes('aico:edit'));
   assert.equal(seqOf('seq-42'), 42, 'and the seq is recoverable from the id');
   assert.equal(seqOf('draft-1'), null, 'while a draft has none');
+});
+
+// ── Statistical figures ────────────────────────────────────────────────────
+
+const viz = (spec) => parseVizSpec(JSON.stringify(spec));
+const scatter = {
+  data: { values: [{ a: 1, b: 2 }] },
+  mark: 'point',
+  encoding: { x: { field: 'a' }, y: { field: 'b' } },
+};
+
+test('a well-formed figure parses', () => {
+  const { spec, error } = viz(scatter);
+  assert.equal(error, undefined);
+  assert.equal(spec.mark, 'point');
+});
+
+test('the two mistakes Vega would accept in silence are refused', () => {
+  // Both render a blank white box rather than an error, which leaves the reader
+  // nothing to act on and no Fix button to press. Refusing them here is the
+  // whole reason this parser exists rather than handing Vega the JSON.
+  const noMark = { ...scatter };
+  delete noMark.mark;
+  assert.match(viz(noMark).error, /nothing to draw/,
+    'a spec with no mark draws nothing and must say so');
+
+  assert.match(viz({ mark: 'point', encoding: {} }).error, /no `data`/,
+    'and a spec with no data has nothing to draw it from');
+});
+
+test('a composition operator counts as something to draw', () => {
+  // The marks live in the views underneath, so the top level legitimately has
+  // no `mark` of its own. Faceting and concatenation are how small multiples
+  // and cross-filtered dashboards are expressed — refusing them would rule out
+  // the figures most worth having.
+  for (const key of ['layer', 'hconcat', 'vconcat', 'concat', 'facet', 'repeat', 'spec']) {
+    assert.equal(viz({ data: scatter.data, [key]: [scatter] }).error, undefined,
+      `${key} is a way of drawing`);
+  }
+});
+
+test('a broken figure says what is wrong with it, not with the parser', () => {
+  assert.match(parseVizSpec('').error, /empty/);
+  assert.match(parseVizSpec('{oops').error, /not valid JSON/);
+  assert.match(parseVizSpec('[1,2,3]').error, /must be a JSON object/,
+    'an array is a plausible mistake and a specific one');
 });
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

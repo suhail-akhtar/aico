@@ -63,6 +63,45 @@ export function parseChartSpec(
   }
 }
 
+/**
+ * Read a viz block, and locate the mistake when there is one.
+ *
+ * The two structural checks are here rather than left to Vega because Vega
+ * accepts both mistakes and renders an empty white box. A figure that silently
+ * shows nothing is the worst outcome available: there is no error to report, no
+ * Fix button to press, and nothing for the reader to conclude except that the
+ * feature is broken. Better to fail loudly with the reason.
+ */
+export function parseVizSpec(
+  source: string,
+): { spec?: Record<string, unknown>; error?: string } {
+  const text = source.trim();
+  if (!text) return { error: 'the viz block is empty' };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { error: `the viz spec is not valid JSON — ${message}` };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { error: 'a viz spec must be a JSON object of Vega-Lite options' };
+  }
+
+  const spec = parsed as Record<string, unknown>;
+  // Any one of these means something will be drawn. Composition operators count
+  // because a concat or facet carries its marks in the views underneath.
+  const DRAWS = ['mark', 'layer', 'hconcat', 'vconcat', 'concat', 'facet', 'repeat', 'spec'];
+  if (!DRAWS.some(key => key in spec)) {
+    return { error: 'no `mark` and no composition operator in the viz spec — there is nothing to draw' };
+  }
+  if (!('data' in spec)) {
+    return { error: 'no `data` in the viz spec — use {"values": [...]} with the rows inline' };
+  }
+  return { spec };
+}
+
 /** Read a table block, and locate the mistake when there is one. */
 export function parseTableSpec(source: string): { spec?: TableSpec; error?: string } {
   const text = source.trim();

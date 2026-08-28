@@ -66,7 +66,17 @@ export interface WidgetKind {
   spec: string;
 }
 
-export const WIDGET_CATALOG: readonly WidgetKind[] = [
+/**
+ * `satisfies` rather than a type annotation, and it is load-bearing.
+ *
+ * Annotating this `readonly WidgetKind[]` would widen every `id` to `string`,
+ * and the renderer map keyed on those ids would degrade to `Record<string, …>`
+ * — which accepts anything, including nothing. The compile-time guarantee that
+ * every catalogued kind has a component would quietly become no guarantee at
+ * all, while still looking exactly like one. `satisfies` checks the shape and
+ * keeps the literals.
+ */
+export const WIDGET_CATALOG = [
   {
     id: 'chart',
     languages: ['chart', 'echarts', 'plot'],
@@ -87,6 +97,52 @@ known, \`viz\` is the cheaper block — it computes from raw rows.
 Colours, gridlines, fonts and spacing are already set. An explicit \`color\` or
 \`itemStyle\` overrides a palette checked for colourblind separation against
 these surfaces, so restyle only when the data genuinely needs it.`,
+  },
+  {
+    id: 'viz',
+    languages: ['viz', 'vega', 'vegalite', 'vega-lite'],
+    extension: 'json',
+    framed: true,
+    summary: 'a Vega-Lite spec — statistical graphics that compute from raw rows: '
+      + 'histograms, regression, density, box plots, faceted small multiples, cross-filtering',
+    spec: `A Vega-Lite v6 specification, as JSON. Needs \`data\` and a \`mark\`.
+
+{"data":{"values":[{"a":1,"b":22},{"a":2,"b":31}]},
+ "mark":"point","encoding":{"x":{"field":"a","type":"quantitative"},
+ "y":{"field":"b","type":"quantitative"}}}
+
+Reach for this instead of \`chart\` whenever the answer is statistical, because
+the library computes it and you do not. Give it the raw rows and say what you
+want shown:
+
+  binning      "x":{"field":"v","bin":true,"type":"quantitative"}
+               with "y":{"aggregate":"count"} — a histogram from raw values
+  aggregate    "y":{"aggregate":"mean","field":"v","type":"quantitative"}
+  regression   "transform":[{"regression":"y","on":"x"}] — also "loess"
+  density      "transform":[{"density":"v","bandwidth":0.3}]
+  quantile     "transform":[{"quantile":"v","probs":[0.25,0.5,0.75]}]
+  window       "transform":[{"window":[{"op":"mean","field":"v","as":"ma"}],
+               "frame":[-6,0]}] — moving averages, running totals, ranks
+  box plot     "mark":{"type":"boxplot"} — from the raw values, not five numbers
+  error bars   "mark":"errorbar" with "extent":"ci"
+  facets       "facet":{"field":"g","columns":3} wrapping a "spec" — small
+               multiples, which beat one crowded chart almost every time
+  pivot/fold   reshape wide to long and back without restating the data
+
+Interaction is declarative too. A \`params\` entry with \`"select":"point"\` plus
+an \`"opacity"\` or \`"filter"\` condition gives click-to-drill and cross-filtering
+between concatenated views, with no code:
+
+  "params":[{"name":"pick","select":{"type":"point","encodings":["x"]}}],
+  "encoding":{"opacity":{"condition":{"param":"pick","value":1},"value":0.25}}
+
+Do not pre-compute what a transform can do. Emitting bins, fitted points or box
+statistics costs tokens twice over and puts arithmetic you did by hand into a
+figure that could have derived it exactly.
+
+Colours, gridlines, fonts and spacing come from the same validated palette
+\`chart\` uses. An explicit \`config\` or \`color\` value overrides a scale that was
+checked for colourblind separation against these surfaces.`,
   },
   {
     id: 'table',
@@ -128,16 +184,19 @@ Scripts are disabled unless the reader turns them on, and the frame cannot
 reach the page around it. Do not rely on JavaScript running: anything that only
 works when scripted will look broken to a reader who never enables it.`,
   },
-];
+] as const satisfies readonly WidgetKind[];
+
+/** One catalogued kind, with its id and languages kept as literals. */
+export type CatalogEntry = (typeof WIDGET_CATALOG)[number];
 
 /** Which kind, if any, a fence language selects. */
-export function widgetForLanguage(language: string): WidgetKind | undefined {
+export function widgetForLanguage(language: string): CatalogEntry | undefined {
   const wanted = language.toLowerCase();
-  return WIDGET_CATALOG.find(kind => kind.languages.includes(wanted));
+  return WIDGET_CATALOG.find(kind => (kind.languages as readonly string[]).includes(wanted));
 }
 
 /** A kind by id, for the spec lookup. */
-export function widgetById(id: string): WidgetKind | undefined {
+export function widgetById(id: string): CatalogEntry | undefined {
   return WIDGET_CATALOG.find(kind => kind.id === id);
 }
 
