@@ -120,6 +120,25 @@
       button is the same as not asking.
     </p>
 
+    <h2>Watching what you delegated to</h2>
+    <p>
+      When a turn hands work to a sub-agent, the parent makes one call and waits
+      — and everything interesting happens inside the child. A panel lists each
+      one: what it was asked for, the tool it is inside now, how long it has run,
+      how many calls it has made. Without that, a six-minute delegation and a
+      six-minute hang look identical, which is how people end up stopping work
+      that was going fine.
+    </p>
+    <p>
+      Each running sub-agent has its own <strong>Stop</strong>, because the common
+      failure is one child looping while three siblings are fine — and cancelling
+      the whole turn to deal with one is a bad trade. The agent doing the
+      delegating can do the same through <code>AgentSupervise</code>, which reports
+      what each child is spending and terminates one by id with a stated reason.
+      A stop is recorded as <em>cancelled</em> rather than <em>failed</em>: a crash
+      invites a retry, a termination invites a re-plan.
+    </p>
+
     <h2>Forking a conversation</h2>
     <p>
       Branch from any message and carry on down a different path, with the original left

@@ -51,8 +51,38 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   its outcome are logged as `agent/spawn` and `agent/done`, so a delegation
   replays after a reload; the live ticker stays on the stream, where it belongs.
 
+- **Sub-agents can be supervised, not just watched.** Each running child has a
+  Stop button in the panel, and the orchestrator gets `AgentSupervise` — `list`
+  reports what every sub-agent is inside, how long since it last did anything
+  and what it has spent; `stop` terminates one by id while its siblings carry
+  on. A stop requires a reason and carries it through to the result, so a parent
+  can tell a deliberate termination from a crash: one invites a re-plan, the
+  other a retry. `Task` still blocks, so a parent cannot poll a child it is
+  waiting on — the tool description says so rather than letting a model discover
+  it the hard way.
+
 ### Fixed
 
+- **GLM is costed from its price list rather than its name.** `glm-5.3` and
+  `glm-5.3-flash` both matched the `glm-5` prefix and were billed identically,
+  for two models that differ by a factor of nine — flash overstated about
+  fivefold, the full model understated by half. The whole 4.5–5.3 range now
+  carries its published rates, including the cached-input discount and the free
+  tiers. `z-ai/glm-5.3-flash` matched nothing at all and fell through to the
+  invented default, which is what the `?` beside a cost meant; the lookup now
+  retries without the vendor prefix, and only after the full id has failed, so
+  `deepseek/…` on OpenRouter keeps the separate rate it is listed with.
+- **GLM is no longer capped at 8K output.** `OpenAICompatibleProvider` had one
+  hardcoded ceiling for every endpoint speaking the protocol, with no way to
+  raise it — on a model documenting a 1M context and a 128K output limit. A
+  ceiling below what the model can write does not shorten a reply, it truncates
+  the tool call, and a half-emitted call performs no action at all: the step
+  writes nothing and bills for the attempt. Z.AI now defaults to 32K and takes
+  `providers.zai.maxTokens`.
+- **A 1M-context model is no longer compacted as though it held 128K.**
+  `glm-5.3` inherited its window from the `glm-5` prefix, so compaction fired at
+  an eighth of the real budget — paying for a summary, and discarding detail, on
+  a model still holding the whole conversation.
 - **The harness no longer appears to be you.** The loop talks to the model
   through the same channel a person does — the truncation nudge, the completion
   gate, a compaction summary — and the log has always recorded which is which.
