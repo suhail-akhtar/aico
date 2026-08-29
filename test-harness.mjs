@@ -9510,6 +9510,72 @@ console.log('  -- A delegation belongs to the conversation watching it --');
   assert(Date.now() - spun < 1000, 'a cycle terminates instead of spinning');
 }
 
+console.log('  -- GLM is costed from its price list, not from its name --');
+{
+  // Two bugs lived here, in opposite directions, and both were invisible
+  // because a wrong number looks exactly like a right one.
+
+  const bill = (model, io) => {
+    const tracker = createTokenTracker();
+    tracker.add(io.input, io.output, io.cached ?? 0, 0);
+    return tracker.estimateCost(model);
+  };
+
+  // 1M in / 100k out, nothing cached.
+  const flash = bill('glm-5.3-flash', { input: 1_000_000, output: 100_000 });
+  const full  = bill('glm-5.3',       { input: 1_000_000, output: 100_000 });
+
+  // glm-5.3-flash: $0.15/M in, $0.50/M out.
+  assert(Math.abs(flash - (0.15 + 0.05)) < 0.001,
+    `flash is billed at its own rate, not the glm-5 prefix's (got ${flash})`);
+  // glm-5.3: $1.40/M in, $4.40/M out.
+  assert(Math.abs(full - (1.40 + 0.44)) < 0.001,
+    `the full model is billed at its own rate too (got ${full})`);
+
+  // The bug: both used to match the `glm-5` prefix and cost the same. A
+  // ten-to-one price difference reported as parity is how a budget goes wrong
+  // quietly.
+  assert(full > flash * 8, 'and the two are nowhere near the same price');
+
+  // The routed spelling is the same model. It matched nothing at all, so a
+  // session on `z-ai/glm-5.3-flash` was costed at the invented default rate —
+  // real tokens, made-up money, marked with a `?` nobody could act on.
+  const routed = bill('z-ai/glm-5.3-flash', { input: 1_000_000, output: 100_000 });
+  assert(Math.abs(routed - flash) < 0.001,
+    `a vendor prefix does not change the price (got ${routed} vs ${flash})`);
+
+  // The DeepSeek entries prove the fallback does not overreach: `deepseek/...`
+  // on OpenRouter is priced separately from `deepseek-...` on the platform,
+  // and stripping prefixes up front would have collapsed the two.
+  const orDeepseek = bill('deepseek/deepseek-chat', { input: 1_000_000, output: 0 });
+  assert(Math.abs(orDeepseek - 0.27) < 0.001,
+    `the routed DeepSeek keeps its own rate (got ${orDeepseek})`);
+
+  // Caching is where a GLM session actually spends. cacheRead is a fraction of
+  // input, so a fully-cached million tokens costs a fifth of a cold one.
+  const cold = bill('glm-5.3-flash', { input: 1_000_000, output: 0 });
+  const warm = bill('glm-5.3-flash', { input: 1_000_000, output: 0, cached: 1_000_000 });
+  assert(warm < cold, 'a warm cache is cheaper than a cold one');
+  assert(Math.abs(warm - cold * 0.20) < 0.001,
+    `and by the published factor, not a guessed one (${warm} vs ${cold})`);
+}
+
+console.log('  -- A 1M-context model is not compacted as though it held 128k --');
+{
+  resetContextWindowCache();
+  assert(getContextWindow('glm-5.3') === 1_000_000,
+    'glm-5.3 documents a 1M window');
+  assert(getContextWindow('z-ai/glm-5.3') === 1_000_000,
+    'and the routed spelling is the same model');
+  assert(getContextWindow('glm-4.6') === 200_000,
+    'an older one keeps its own smaller window');
+  // The bug: `glm-5.3` matched the `glm-5` prefix at 128k, so compaction fired
+  // at an eighth of the real budget — paying for a summary, and throwing away
+  // detail, on a model that could still hold the whole conversation.
+  assert(getContextWindow('glm-5.3') > getContextWindow('glm-5'),
+    'and it is not dragged down to the older line');
+}
+
 // ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);
