@@ -42,6 +42,7 @@ export {
   persistSession,
   eventLogPath,
   listEventLogs,
+  openSession,
 } from './session/index.js';
 export { SessionTranscript, LegacyTranscript } from './session/transcript.js';
 export { Inbox } from './session/inbox.js';

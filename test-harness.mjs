@@ -123,6 +123,7 @@ import {
   forkSession,
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
   owningSession, registerOwnerForTest, requestAgentStop, executeAgentSupervise,
+  openSession,
   agentSuperviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
@@ -9609,6 +9610,51 @@ console.log('  -- A supervisor can stop one sub-agent, and is told when it canno
   // poll a child it is currently blocked on and conclude the tool is broken.
   assert(/Task blocks/i.test(agentSuperviseToolDefinition.description),
     'the description states that Task blocks');
+}
+
+console.log('  -- A conversation nobody used leaves nothing behind --');
+{
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-empty-'));
+  const opened = await openSession('untouched-session', home);
+
+  // Opening is looking, not creating. Before this, merely pointing the
+  // workspace at a folder wrote a log and put a placeholder row in the sidebar
+  // that stayed there — three folders, three conversations you never had.
+  assert(!fs.existsSync(eventLogPath('untouched-session', home)),
+    'opening a session writes no file');
+  assert((await listSessionSummaries(home)).length === 0,
+    'and it is not listed');
+
+  // The first event is what makes it real, and it has to bring the header with
+  // it or the log is unreadable.
+  opened.session.append('user/message', {
+    turn: 1, content: 'build me something', source: { kind: 'human' },
+  });
+  await opened.close();
+
+  const logPath = eventLogPath('untouched-session', home);
+  assert(fs.existsSync(logPath), 'the first event creates the log');
+  const lines = fs.readFileSync(logPath, 'utf8').split(/\r?\n/).filter(Boolean);
+  assert(JSON.parse(lines[0]).type === '__header__',
+    'and the header is still the first line, ahead of the event that triggered it');
+  assert(JSON.parse(lines[1]).type === 'user/message', 'followed by the event itself');
+
+  const listed = await listSessionSummaries(home);
+  assert(listed.length === 1 && listed[0].id === 'untouched-session',
+    'a session with something in it is listed');
+  assert(listed[0].events > 0, 'and reports that it holds events');
+
+  // The safety net for logs an older version already created: a header and
+  // nothing else reports zero, which is what the sidebar filters on. Counted
+  // separately from `turns`, because a session interrupted during its first
+  // turn has events and no completed turns and must not be hidden.
+  await initEventLog({ id: 'header-only', cwd: home, startedAt: Date.now() });
+  const both = await listSessionSummaries(home);
+  const orphan = both.find(x => x.id === 'header-only');
+  assert(orphan && orphan.events === 0,
+    'a header-only log left by an earlier version reports no events');
+
+  fs.rmSync(home, { recursive: true, force: true });
 }
 
 // ═══════════════════════════════════════════════════════════
