@@ -43,7 +43,7 @@ import {
   api, streamSession,
   type StreamEvent, type StreamHandle, type SystemSnapshot,
   type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project, type Group,
-  type Goal, type Feedback, type Deliverable, type Attachment,
+  type Goal, type Feedback, type Deliverable, type Attachment, type SubAgentView,
 } from './api';
 import {
   applyLogEvent, withPending, dropPending, emptyDraft,
@@ -259,6 +259,16 @@ interface AppState {
    * scroll past is a turn that hangs.
    */
   question: string | null;
+  /**
+   * Sub-agents this session has running, and the ones it just finished.
+   *
+   * Live only — the server sends the whole set on every change, so this is
+   * replaced rather than merged. The durable half of the story lives in the log
+   * as `agent/spawn` and `agent/done`; this is the part that answers "what is
+   * it doing *right now*", which is the question a delegated turn leaves
+   * unanswered for minutes at a time.
+   */
+  subAgents: SubAgentView[];
   answer: (content: string) => Promise<void>;
   steer: (content: string) => Promise<void>;
   followup: (content: string) => Promise<void>;
@@ -347,6 +357,7 @@ export const useStore = create<AppState>((set, get) => ({
   feedback: {},
   deliverables: [],
   turnSummary: null,
+  subAgents: [],
   providers: [],
   providerTypes: [],
   activeProvider: null,
@@ -372,6 +383,8 @@ export const useStore = create<AppState>((set, get) => ({
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
+      // Another session's delegations are not this one's.
+      subAgents: [],
       // Seeded from the sidebar so a session opened from the list is named
       // immediately, rather than blank until its first title event replays.
       title: get().sessions.find(s => s.id === sessionId)?.title ?? '',
@@ -1008,6 +1021,12 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       set(() => ({ model: (data as { model?: string | null }).model ?? null }));
       return;
 
+    case 'subagents':
+      // Replaced wholesale — the server sends the full set for this session on
+      // every change, so merging would only risk keeping a stale child alive.
+      set(() => ({ subAgents: (data as { agents?: SubAgentView[] }).agents ?? [] }));
+      return;
+
     case 'question':
       // An empty question means the run is no longer waiting — answered,
       // finished, or cancelled.
@@ -1020,6 +1039,9 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       // not every time an old log is re-read.
       set(state => ({
         busy: true, draft: emptyDraft(), error: null, turnSummary: null,
+        // Last turn's children are done; showing them beside a new turn's
+        // work would read as if they had started again.
+        subAgents: [],
         turnStartedAt: state.turnStartedAt ?? Date.now(),
         lastActivityAt: Date.now(),
         sessions: promote(state.sessions, event.sessionId, Date.now(),

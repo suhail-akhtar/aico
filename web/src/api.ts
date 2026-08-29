@@ -556,6 +556,32 @@ export interface FileChange {
   bySession: boolean;
 }
 
+/**
+ * One sub-agent, as the server sees it right now.
+ *
+ * Mirrors `SubAgentRecord` minus the fields only the engine needs. Sent whole
+ * on every change rather than as a diff: the set is small, changes are frequent
+ * but cheap, and a diff protocol here would be three times the code to save
+ * bytes nobody is counting.
+ */
+export interface SubAgentView {
+  agentId: string;
+  description: string;
+  agentType: string;
+  model: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  /** The tool it is on, phrased for reading — "Read…", "Bash…". */
+  statusMessage: string;
+  startedAt: number;
+  completedAt?: number;
+  toolCallCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  error?: string;
+  /** 1 for a child of this turn, 2 for a grandchild. */
+  depth: number;
+}
+
 export interface MiniAppSummary {
   slug: string;
   title: string;

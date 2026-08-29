@@ -41,10 +41,49 @@ export function applyLogEvent(
   switch (type) {
     case 'user/message': {
       const next = new Map(logged);
+      const content = String(data.content ?? '');
+
+      /*
+        Not everything on the user channel was written by the user.
+
+        The loop speaks to the model through the same slot a person does: the
+        truncation nudge, the completion gate, a compaction summary. The log has
+        always recorded which is which, in `source` — the client just threw it
+        away and drew a user bubble around all of it.
+
+        The result was a session that appeared to argue with itself. A step cut
+        off at the output ceiling produced an empty reply, then "you" said
+        *Your previous step was cut off…*, three times over — and the honest
+        reading of that screen is that something is stuck in a loop. Nobody had
+        typed a word of it.
+
+        So anything not from a person is a system note. Same text, no longer
+        attributed to someone who did not say it.
+      */
+      const source = data.source as { kind?: string; plugin?: string; tool?: string } | undefined;
+      const kind = source?.kind ?? 'human';
+      if (kind !== 'human') {
+        next.set(seq, {
+          id: `seq-${seq}`,
+          type: 'system',
+          content: kind === 'compaction'
+            ? `Earlier turns were summarised to save context.\n\n${content}`
+            : content,
+          // Named, because "the system said this" invites the next question.
+          // A nudge you can attribute is one you can go and change.
+          systemLabel: kind === 'plugin' ? (source?.plugin ?? 'aico')
+            : kind === 'tool' ? (source?.tool ?? 'tool')
+            : 'compaction',
+          ...turn,
+          timestamp: now,
+        });
+        return next;
+      }
+
       next.set(seq, {
         id: `seq-${seq}`,
         type: 'user',
-        content: String(data.content ?? ''),
+        content,
         ...turn,
         timestamp: now,
       });

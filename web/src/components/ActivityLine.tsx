@@ -46,6 +46,7 @@ export function ActivityLine(): React.ReactElement | null {
   const lastAt = useStore(s => s.lastActivityAt);
   const usage = useStore(s => s.usage);
   const cancel = useStore(s => s.cancel);
+  const subAgents = useStore(s => s.subAgents);
 
   // Its own clock: nothing else re-renders while the agent is quiet, which is
   // exactly the stretch this exists to describe.
@@ -62,7 +63,21 @@ export function ActivityLine(): React.ReactElement | null {
   const thinking = [...draft.reasoning.values()].some(b => b.endedAt === undefined);
   const writing = draft.text.trim().length > 0;
 
-  const what = running.length > 0
+  /*
+    A delegation is the one case where the tool's name is the least informative
+    thing on offer. "Running Task" for six minutes is what made people stop a
+    turn that was working: the parent genuinely is doing nothing, and every
+    visible signal agreed with that reading. Naming the child and the tool it is
+    inside answers the actual question.
+  */
+  const busyAgents = subAgents.filter(a => a.status === 'running');
+  const delegated = busyAgents.length > 0;
+
+  const what = delegated
+    ? (busyAgents.length === 1
+        ? `${busyAgents[0]!.agentType} · ${busyAgents[0]!.statusMessage || 'working'}`
+        : `${busyAgents.length} sub-agents`)
+    : running.length > 0
     ? (running.length === 1 ? `Running ${running[0]!.toolName}` : `Running ${running.length} tools`)
     : thinking ? 'Thinking'
     : writing ? 'Writing'
@@ -91,7 +106,9 @@ export function ActivityLine(): React.ReactElement | null {
       {isQuiet && (
         <span className="min-w-0 truncate text-aico-muted">
           · nothing for {duration(quiet)}
-          {running.length > 0 ? ' — the command is still running' : ' — the model has not replied yet'}
+          {delegated ? ' — the sub-agent is still working'
+            : running.length > 0 ? ' — the command is still running'
+            : ' — the model has not replied yet'}
         </span>
       )}
 

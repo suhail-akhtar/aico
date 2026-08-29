@@ -241,3 +241,4 @@ export {
 } from '../shared/widgets/catalog.js';
 export { DIAGRAM_TYPES, diagramType, diagramIndex } from '../shared/widgets/diagram-types.js';
 export { selectToolProfile } from './agent.js';
+export { owningSession, registerOwnerForTest } from './tools/task.js';

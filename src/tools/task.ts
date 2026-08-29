@@ -4,12 +4,27 @@ import type { SubAgentType } from './index.js';
 import { runHooks } from '../hooks.js';
 import type { AicoSettings } from '../settings.js';
 import { AGENT_PROMPTS } from '../agents/prompts-registry.js';
+import { currentRunContext } from '../run-context.js';
 
 // ── Sub-agent status types (mirrors Claude Code's task states) ─────────────
 export type SubAgentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface SubAgentRecord {
   agentId: string;
+  /**
+   * The session that ultimately owns this agent.
+   *
+   * The registry is one map for the whole process, so a server driving three
+   * conversations at once has all of their sub-agents in it. Without an owner
+   * every watcher sees every agent, and a browser tab shows work belonging to
+   * a session in another window.
+   *
+   * "Ultimately" matters: a sub-agent runs under a session id of its own
+   * (`sub-<agentId>`), so an agent that spawns an agent would otherwise be
+   * owned by its parent rather than by the conversation a person is watching.
+   * Resolved through {@link OWNER_OF_SUB_SESSION} at spawn time.
+   */
+  sessionId?: string;
   description: string;
   model: string;
   status: SubAgentStatus;
@@ -58,8 +73,43 @@ function isTerminal(status: SubAgentStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
+/**
+ * `sub-<agentId>` → the conversation that owns it.
+ *
+ * Lets a nested spawn climb back to the session a person is actually looking
+ * at. Entries are kept for the life of the process alongside the record they
+ * describe; they are two small strings each, and dropping one would orphan any
+ * agent a completed agent had spawned.
+ */
+const OWNER_OF_SUB_SESSION = new Map<string, string>();
+
+/** The conversation a spawn belongs to, climbing out of any nesting. */
+export function owningSession(sessionId: string | undefined): string | undefined {
+  let current = sessionId;
+  // Bounded: a cycle here would be a bug, but an unbounded walk would be a
+  // hang, and sub-agent depth is limited to single digits anyway.
+  for (let hop = 0; hop < 16 && current; hop++) {
+    const owner = OWNER_OF_SUB_SESSION.get(current);
+    if (!owner) return current;
+    current = owner;
+  }
+  return current;
+}
+
+/**
+ * Record an ownership link without spawning anything.
+ *
+ * Exists so the resolution rules can be tested without a model call. Spawning
+ * a real sub-agent to assert that a map lookup climbs two levels would make
+ * the check cost money and depend on a provider being up.
+ */
+export function registerOwnerForTest(subSessionId: string, owner: string): void {
+  OWNER_OF_SUB_SESSION.set(subSessionId, owner);
+}
+
 function _register(record: SubAgentRecord) {
   _registry.set(record.agentId, record);
+  if (record.sessionId) OWNER_OF_SUB_SESSION.set(`sub-${record.agentId}`, record.sessionId);
   _emit();
 }
 
@@ -313,8 +363,13 @@ export async function runTask(
   }
 
   const now = Date.now();
+  // Read from the ambient run context rather than passed down through options:
+  // the Task tool executes inside its caller's context, so this is the session
+  // the spawn belongs to without every call site having to remember to say so.
+  const owner = owningSession(currentRunContext()?.sessionId);
   const record: SubAgentRecord = {
     agentId,
+    ...(owner ? { sessionId: owner } : {}),
     description: args.description,
     model: agentModel,
     status: 'running',
