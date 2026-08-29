@@ -43,8 +43,24 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   22.5; the alternatives were a native module that compiles C++ on every
   install, or WebAssembly.
 
+- **Sub-agents are visible in the browser.** A delegated turn used to go blank:
+  the parent made one `Task` call and waited, and the child's minutes of work
+  happened where the page could not see it. A panel now lists each sub-agent —
+  its brief, the tool it is inside, elapsed time and call count — and the
+  activity line names the child instead of saying "Running Task". The spawn and
+  its outcome are logged as `agent/spawn` and `agent/done`, so a delegation
+  replays after a reload; the live ticker stays on the stream, where it belongs.
+
 ### Fixed
 
+- **The harness no longer appears to be you.** The loop talks to the model
+  through the same channel a person does — the truncation nudge, the completion
+  gate, a compaction summary — and the log has always recorded which is which.
+  The client ignored that and drew a user bubble around all of it, so a step cut
+  off at the output ceiling produced an empty reply and then "you" said *Your
+  previous step was cut off…*, three times over. Read back, that looks like a
+  session stuck arguing with itself. They are system notes now, each naming the
+  part of the harness that wrote it.
 - The portal's static file handler tested containment with `startsWith(root)`,
   which also accepts a sibling — a directory named `web-dist-anything` beside
   the real one would have been served from.
