@@ -49,6 +49,7 @@ import { handleSystemRoute } from './api-system.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
+import { requestAgentStop } from '../tools/task.js';
 import { deleteMiniApp, listMiniApps } from '../miniapps/store.js';
 
 export interface ServeOptions {
@@ -304,6 +305,21 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     if (route === 'groups' && req.method === 'GET') {
       send(res, 200, { groups: await listGroups() });
+      return;
+    }
+
+    if (route === 'agents/stop' && req.method === 'POST') {
+      // Stopping one child, not the turn. The composer's Stop cancels
+      // everything; this exists because the common case is one sub-agent
+      // going wrong while its siblings are fine, and killing all of them to
+      // deal with one is a bad trade the reader should not have to make.
+      const body = await readJson(req) as { agentId?: string; reason?: string };
+      if (!body.agentId) { send(res, 400, { error: 'agentId required' }); return; }
+      const stopped = requestAgentStop(
+        body.agentId,
+        body.reason?.trim() || 'stopped from the workspace',
+      );
+      send(res, 200, { stopped });
       return;
     }
 

@@ -563,6 +563,8 @@ function resolveToolSet(opts: {
   toolProfile?: AgentToolProfile;
   planMode?: boolean;
   settings?: AicoSettings;
+  /** 0 for the conversation itself; 1 or more inside a delegation. */
+  depth?: number;
 }): ResolvedToolSet {
   let defs: ToolDefinition[];
   let dispatch: ResolvedToolSet['dispatch'];
@@ -586,6 +588,15 @@ function resolveToolSet(opts: {
   }
   if (opts.planMode) {
     defs = defs.filter(d => PLAN_MODE_TOOLS.has(d.name));
+  }
+
+  // Supervision belongs to whoever did the delegating, and that is the top of
+  // the tree. A sub-agent with this tool could stop its own siblings — work it
+  // did not commission, cannot see the brief for, and is in no position to
+  // judge. Several agent types run with the full tool set, so this has to be
+  // taken away explicitly rather than left out of a whitelist.
+  if ((opts.depth ?? 0) > 0) {
+    defs = defs.filter(d => d.name !== 'AgentSupervise');
   }
 
   // Mini Apps are a plugin, and "off" has to mean the model cannot see the
@@ -626,7 +637,7 @@ const PLAN_MODE_TOOLS = new Set([
  * Build a map of { toolName → async handler } for all tools available in this
  * agent context. Handlers include permission checks, safety checks, and hooks.
  */
-function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly' }): Map<string, ToolHandler> {
+function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly'; depth?: number }): Map<string, ToolHandler> {
   // Tool set and dispatch come from the registry when one is composed, and from
   // the historical built-in selection otherwise.
   const { defs, dispatch } = resolveToolSet(opts);
@@ -1165,11 +1176,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const pipeline = opts.context?.get('toolPolicy')?.pipeline ?? new ToolPipeline();
   const toolRegistry = opts.context?.get('tools');
 
-  const handlerOpts: ToolHandlerOpts & { toolProfile: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly' } = {
+  const handlerOpts: ToolHandlerOpts & { toolProfile: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly'; depth?: number } = {
     autoApprove, verbose, settings, onToolCall, onToolDone,
     onPermissionRequest, onAskUser, silent,
     agentType: opts.agentType, planMode: opts.planMode, toolProfile,
-    agentId, pipeline, signal: loopSignal,
+    agentId, pipeline, signal: loopSignal, depth,
     ...(toolRegistry ? { toolRegistry } : {}),
     ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
   };

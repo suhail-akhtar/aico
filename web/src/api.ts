@@ -250,6 +250,10 @@ export const api = {
   memories: (scope?: string) =>
     get<{ memories: MemorySummary[] }>(`memory${scope && scope !== 'all' ? `?scope=${encodeURIComponent(scope)}` : ''}`),
 
+  /** Stop one sub-agent without cancelling the turn its siblings are in. */
+  stopSubAgent: (agentId: string, reason: string) =>
+    post<{ stopped: boolean }>('agents/stop', { agentId, reason }),
+
   miniApps: () => get<MiniAppsView>('miniapps'),
   /** Destructive: the app's database goes with it. */
   deleteMiniApp: (slug: string) => post<{ deleted: boolean }>('miniapps/delete', { slug }),

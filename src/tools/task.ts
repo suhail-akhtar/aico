@@ -97,6 +97,45 @@ export function owningSession(sessionId: string | undefined): string | undefined
 }
 
 /**
+ * How to stop each running sub-agent, by id.
+ *
+ * Separate from the record because a record is data — it crosses the wire to a
+ * browser, gets serialised into events — and an AbortController is neither
+ * serialisable nor anyone else's to hold. Keyed the same way, cleared the
+ * moment the agent settles.
+ *
+ * Until this existed, the only thing that could stop a child was the child's
+ * own watchdog or an abort of the entire turn. A supervisor watching one
+ * sub-agent go wrong had exactly two options: wait it out, or kill everything
+ * including the siblings doing fine.
+ */
+const _stops = new Map<string, { abort: (reason: string) => void }>();
+
+/** Why a sub-agent was stopped, so the parent is told rather than left guessing. */
+const _stopReasons = new Map<string, string>();
+
+/**
+ * Ask one sub-agent to stop.
+ *
+ * Returns false when there is nothing to stop — already finished, never
+ * existed, or a stale id from a previous run. Callers report that difference
+ * rather than claiming a kill they did not make.
+ *
+ * The reason is kept, not just logged: the sub-agent's own error will say
+ * "aborted", and a parent reading that with no explanation cannot tell a
+ * deliberate termination from a crash. It has to know which, because one means
+ * "re-plan" and the other means "retry".
+ */
+export function requestAgentStop(agentId: string, reason: string): boolean {
+  const stop = _stops.get(agentId);
+  if (!stop) return false;
+  _stopReasons.set(agentId, reason);
+  _update(agentId, { statusMessage: `Stopping — ${reason}` });
+  stop.abort(reason);
+  return true;
+}
+
+/**
  * Record an ownership link without spawning anything.
  *
  * Exists so the resolution rules can be tested without a model call. Spawning
@@ -431,6 +470,10 @@ export async function runTask(
     let lastActivity = Date.now();
     let toolCallCount = 0;
     const abortController = new AbortController();
+    // Registered so a supervisor — the reader watching the panel, or the
+    // orchestrator between delegations — can stop this one child without
+    // taking its siblings down with it.
+    _stops.set(agentId, { abort: () => abortController.abort() });
     // Forward an external abort (e.g. studio pipeline cancellation) into the
     // sub-agent's internal controller so the runAgent call tears down promptly.
     let detachParentAbort: (() => void) | undefined;
@@ -553,6 +596,7 @@ export async function runTask(
     agentPromise.then(() => detachParentAbort?.(), () => detachParentAbort?.());
     let result = await Promise.race([agentPromise, heartbeatPromise]);
 
+    _stops.delete(agentId);
     _update(agentId, { status: 'completed', statusMessage: 'Done', completedAt: Date.now(), result });
     if (opts.settings) {
       await runHooks('SubagentStop', {
@@ -593,7 +637,44 @@ export async function runTask(
     return result;
 
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
+    _stops.delete(agentId);
+    /*
+      A sub-agent that was stopped on purpose is not a sub-agent that broke.
+
+      The abort surfaces here as an ordinary error reading "aborted", and
+      reporting that as a failure tells the parent the wrong thing entirely:
+      a crash invites a retry, a termination invites a re-plan. So a recorded
+      stop reason wins over the error text, and the status says `cancelled`.
+    */
+    const stopReason = _stopReasons.get(agentId);
+    _stopReasons.delete(agentId);
+    const errMsg = stopReason
+      ? `stopped by the supervisor: ${stopReason}`
+      : err instanceof Error ? err.message : String(err);
+    if (stopReason) {
+      _update(agentId, {
+        status: 'cancelled', statusMessage: 'Stopped',
+        completedAt: Date.now(), error: errMsg,
+      });
+      // Cleared on the same schedule as a failure — a reader who just stopped
+      // something wants to see that it stopped.
+      setTimeout(() => {
+        const rec = _registry.get(agentId);
+        if (rec?.status === 'cancelled') _registry.delete(agentId);
+        _emit();
+      }, 30_000);
+      if (worktreeRecord) {
+        const { worktreeManager } = await import('../worktree/index.js');
+        await worktreeManager.cleanupWorktree(worktreeRecord.worktreeId, { cwd: process.cwd() })
+          .catch(() => {});
+      }
+      // From the record, not the loop variable: the counter is scoped to the
+      // try block and this is the catch.
+      const calls = _registry.get(agentId)?.toolCallCount ?? 0;
+      return `[Sub-agent "${args.description}" was stopped: ${stopReason}. `
+        + `It made ${calls} tool call(s) before stopping — anything it had already `
+        + `written is still on disk. Decide what to do next rather than re-running it unchanged.]`;
+    }
     _update(agentId, { status: 'failed', statusMessage: 'Failed', completedAt: Date.now(), error: errMsg });
     if (opts.settings) {
       await runHooks('SubagentStop', {

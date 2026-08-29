@@ -26,7 +26,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import type { SubAgentView } from '../api';
+import { api, type SubAgentView } from '../api';
 import { Icon } from './Icon';
 
 function duration(ms: number): string {
@@ -50,6 +50,8 @@ export function AgentsCard(): React.ReactElement | null {
   // Its own clock. Nothing else re-renders while a child is quietly working,
   // which is exactly the stretch this exists to describe.
   const [now, setNow] = useState(() => Date.now());
+  /** Ids a stop has been sent for, so the button says so before the server agrees. */
+  const [stopping, setStopping] = useState<Set<string>>(() => new Set());
   const anyRunning = agents.some(a => a.status === 'running');
   useEffect(() => {
     if (!anyRunning) return;
@@ -99,6 +101,37 @@ export function AgentsCard(): React.ReactElement | null {
               <span className="min-w-0 flex-1 text-aico-primary">
                 {agent.description}
               </span>
+              {/*
+                Stops this child, not the turn. The composer's Stop cancels
+                everything, which is the wrong trade when one sub-agent is
+                looping and three others are doing fine.
+              */}
+              {agent.status === 'running' && (
+                <button
+                  onClick={() => {
+                    setStopping(prev => new Set(prev).add(agent.agentId));
+                    void api.stopSubAgent(agent.agentId, 'stopped from the workspace')
+                      .catch(() => {
+                        // It finished first, or the server said no. Either way it
+                        // is still running or already gone, and the next frame
+                        // from the server is the truth — so drop the pending mark
+                        // rather than leaving a button stuck on "Stopping".
+                        setStopping(prev => {
+                          const next = new Set(prev);
+                          next.delete(agent.agentId);
+                          return next;
+                        });
+                      });
+                  }}
+                  disabled={stopping.has(agent.agentId)}
+                  title={`Stop "${agent.description}"`}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-aico-muted
+                             transition-colors hover:bg-aico-danger/10 hover:text-aico-danger
+                             disabled:opacity-50"
+                >
+                  {stopping.has(agent.agentId) ? 'Stopping…' : 'Stop'}
+                </button>
+              )}
             </div>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 pl-4 text-[11px] text-aico-muted">
               <span className="text-aico-secondary">{agent.agentType}</span>
