@@ -91,7 +91,7 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
       onMouseDown={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Open a project"
+      aria-label="Open a workspace"
     >
       <div
         onMouseDown={e => e.stopPropagation()}
@@ -99,7 +99,7 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
                    sm:h-[min(34rem,88vh)] sm:rounded-2xl sm:border sm:border-aico-border"
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-aico-border-subtle px-5 py-3.5">
-          <h2 className="text-[16px] font-semibold tracking-tight text-aico-primary">Open a project</h2>
+          <h2 className="text-[16px] font-semibold tracking-tight text-aico-primary">Open a workspace</h2>
           <div className="flex-1" />
           <button
             onClick={onClose}

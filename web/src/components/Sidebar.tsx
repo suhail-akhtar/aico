@@ -56,8 +56,8 @@ export function Sidebar(
   const [naming, setNaming] = useState(false);
 
   // Always grouped by folder now. The date axis was better when a folder was
-  // not a thing you could choose, but a header that says Projects above a list
-  // that shows none of them is a screen disagreeing with itself.
+  // not a thing you could choose, but a header that says Workspaces above a
+  // list that shows none of them is a screen disagreeing with itself.
   const byProject = true;
   const visible = useMemo(
     () => (showArchived ? sessions : sessions.filter(s => !s.archived)),
@@ -164,7 +164,7 @@ export function Sidebar(
         */}
         <div className="flex items-center gap-0.5 px-4 pb-1 pt-2">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-aico-muted">
-            Projects
+            Workspaces
           </span>
           <div className="flex-1" />
           <HeaderButton

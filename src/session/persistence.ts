@@ -83,10 +83,26 @@ export function persistSession(session: Session): { detach: () => Promise<void> 
   const filePath = eventLogPath(session.header.id, session.header.cwd);
   let chain: Promise<void> = Promise.resolve();
   let reportedFailure = false;
+  /*
+    The header is written by the first event, not by opening the session.
+
+    Creating the file up front meant that merely *looking* at a new conversation
+    put it on disk and in the sidebar, under a placeholder name, permanently.
+    Open the app against three folders, close it again, and you have three
+    sessions you never had. A session earns a file by having something in it.
+
+    Sequenced inside the same promise chain as the appends, so the header cannot
+    lose a race with the event that triggered it and leave a headerless log.
+  */
+  let headerWritten = false;
 
   const unsubscribe = session.subscribe((event) => {
     chain = chain.then(async () => {
       try {
+        if (!headerWritten) {
+          headerWritten = true;
+          await initEventLog(session.header);
+        }
         await appendFile(filePath, JSON.stringify(event) + '\n');
       } catch (err) {
         if (!reportedFailure) {
@@ -192,6 +208,15 @@ export interface SessionSummary {
   title?: string;
   /** How the name was decided, so a UI can mark a provisional one. */
   titleSource?: 'fallback' | 'model' | 'user';
+  /**
+   * How many events the log holds.
+   *
+   * Distinct from `turns`, and the difference matters: a session killed during
+   * its first turn has events and no completed turns, and hiding it would lose
+   * work. Zero here means the file is a header and nothing else — a
+   * conversation that was opened and never used.
+   */
+  events?: number;
   /** Filed away: still on disk and still replayable, just not in the list. */
   archived?: boolean;
   /** Id of the group this session is filed under, when it is in one. */
@@ -339,6 +364,10 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
     let titleSource: SessionSummary['titleSource'];
     let updatedAt = 0;
     let turns = 0;
+    // Whether anything at all was ever recorded here, as distinct from how
+    // many turns completed. A session killed mid-first-turn has events and no
+    // turns, and must not be mistaken for one that was never used.
+    let events = 0;
 
     try {
       const text = await readFile(full, 'utf8');
@@ -360,6 +389,7 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
           if (typeof event.timestamp === 'number' && event.timestamp > updatedAt) {
             updatedAt = event.timestamp;
           }
+          if (event.type) events++;
           if (event.type === 'user/message') turns++;
           // Last one wins, exactly like the title: the log records the whole
           // history and the current state is the most recent decision in it.
@@ -385,6 +415,7 @@ export async function listSessionSummaries(cwd: string): Promise<SessionSummary[
       id,
       updatedAt,
       turns,
+      events,
       ...(title ? { title } : {}),
       ...(titleSource ? { titleSource } : {}),
       ...(archived ? { archived } : {}),

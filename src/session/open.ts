@@ -55,7 +55,9 @@ export async function openSession(
       startedAt: Date.now(),
       ...(name ? { name } : {}),
     });
-    await initEventLog(session.header).catch(() => undefined);
+    // Deliberately not written to disk yet. `persistSession` lays the header
+    // down when the first event arrives, so a conversation nobody used leaves
+    // nothing behind — see the note there.
   }
 
   let detach: (() => Promise<void>) | undefined;

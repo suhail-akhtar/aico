@@ -360,20 +360,35 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       }))).flat();
       stored.sort((a, b) => b.updatedAt - a.updatedAt);
       for (const row of stored) sessionCwd.set(row.id, row.project);
+      /*
+        Sessions nobody used are not sessions.
+
+        Opening the workspace against a folder used to put a row in the sidebar
+        under a placeholder name, and it stayed there. Do that in three folders
+        and you have three conversations you never had. A session now earns its
+        place by containing something — the log file is not even created until
+        its first event (see `persistSession`), and this drops any header-only
+        file left behind by an earlier version.
+
+        On `events`, not `turns`: a session interrupted during its first turn
+        has events and no completed turns, and hiding that would lose real work.
+      */
+      const used = stored.filter(s => s.events === undefined || s.events > 0);
+
       const open = new Map(runs.list().map(r => [r.sessionId, r]));
-      // A session opened this process but not yet written to disk still belongs
-      // in the list — otherwise a brand-new conversation is invisible in the
-      // sidebar until its first event lands.
+      // A session written this process but not yet flushed still belongs in the
+      // list — the in-memory record is ahead of the disk scan. Only if it has
+      // something in it; an empty one is the case above.
       for (const run of open.values()) {
-        if (!stored.some(s => s.id === run.sessionId)) {
-          stored.unshift({ id: run.sessionId, updatedAt: Date.now(), turns: 0, project: run.cwd });
+        if (run.session.length > 0 && !used.some(s => s.id === run.sessionId)) {
+          used.unshift({ id: run.sessionId, updatedAt: Date.now(), turns: 0, project: run.cwd });
         }
       }
       const groups = await listGroups();
       send(res, 200, {
         projects,
         groups,
-        sessions: stored.map(summary => {
+        sessions: used.map(summary => {
           // The in-process record is fresher than the log scan: a title written
           // moments ago may not have been flushed to disk yet.
           const live = runs.titleOf(summary.id);
