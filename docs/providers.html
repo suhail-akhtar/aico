@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Providers &amp; models — aico</title>
+<meta name="description" content="OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI and Ollama behind one streaming interface. Where to put your key, and how prompt caching works per provider.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.4.1</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html" aria-current="page">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="miniapps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Providers</p>
+
+  <div class="prose">
+    <h1>Providers &amp; models</h1>
+    <p class="lede">
+      Six providers behind one streaming interface. You keep your keys, you pick the
+      model, and nothing is proxied through anyone else.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Provider</th><th>Key</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><strong>OpenAI</strong></td><td><code>OPENAI_API_KEY</code></td><td>Includes the <code>/v1/responses</code> transport — see below</td></tr>
+          <tr><td><strong>Anthropic</strong></td><td><code>ANTHROPIC_API_KEY</code></td><td>Explicit <code>cache_control</code> for ~90% input savings</td></tr>
+          <tr><td><strong>OpenRouter</strong></td><td><code>OPENROUTER_API_KEY</code></td><td>Routes any model; sticky session routing keeps the cache warm</td></tr>
+          <tr><td><strong>Google Gemini</strong></td><td><code>GEMINI_API_KEY</code></td><td>Via the OpenAI-compatible endpoint</td></tr>
+          <tr><td><strong>Z.AI (GLM)</strong></td><td><code>ZAI_API_KEY</code></td><td>Implicit caching; Coding Plan endpoint supported</td></tr>
+          <tr><td><strong>Ollama</strong></td><td><em>none</em></td><td>Local, free, private</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      The <strong>model name decides the provider</strong>, overriding any configured
+      default. <code>aico -m glm-4.6</code> goes to Z.AI even if your default is
+      OpenRouter — so switching model never means also remembering to switch provider.
+    </p>
+
+    <h2 id="keys">Where to put your key</h2>
+    <p>
+      <code>aico provider add</code> writes to <code>~/.aico/settings.json</code>, which
+      works from any directory. That is the one to use.
+    </p>
+    <div class="note warn">
+      <p>
+        A <code>.env</code> file also works, but <code>dotenv</code> reads it from the
+        <em>current</em> working directory. A key in your project's <code>.env</code> will
+        not be found when you run aico anywhere else. This is the single most common
+        setup surprise.
+      </p>
+    </div>
+
+    <h2>Configuring one</h2>
+    <p>
+      <code>~/.aico/settings.json</code> is the global file; <code>.aico/settings.json</code>
+      in a project merges over it, so a repo can pin its own model without touching your
+      defaults.
+    </p>
+<pre><code>{
+  <span class="k">"model"</span>: <span class="s">"gpt-5.6-terra"</span>,
+  <span class="k">"providers"</span>: {
+    <span class="k">"openai"</span>: {
+      <span class="k">"reasoningEffort"</span>: <span class="s">"high"</span>,     <span class="c">// none | low | medium | high | xhigh | max</span>
+      <span class="k">"maxOutputTokens"</span>: <span class="w">32000</span>     <span class="c">// reasoning shares this budget with output</span>
+    },
+    <span class="k">"anthropic"</span>: {
+      <span class="k">"thinking"</span>: <span class="s">"adaptive"</span>,
+      <span class="k">"maxTokens"</span>: <span class="w">32000</span>
+    }
+  }
+}</code></pre>
+
+    <h2>gpt-5.6 needs the Responses API</h2>
+    <p>
+      The gpt-5.6 family (<code>luna</code>, <code>terra</code>, <code>sol</code>) cannot be
+      driven agentically through Chat Completions at all. It rejects
+      <code>max_tokens</code>, and refuses function tools whenever any reasoning effort is
+      set:
+    </p>
+<pre><code><span class="d">Function tools with reasoning_effort are not supported … use /v1/responses
+or set reasoning_effort to 'none'.</span></code></pre>
+    <p>
+      Setting <code>none</code> "works" but disables the reasoning you are paying for. aico
+      detects these models and speaks <code>/v1/responses</code> instead, where tools and
+      reasoning coexist. Nothing to configure. Older gpt-5.x models stay on Chat
+      Completions, which is correct for them.
+    </p>
+
+    <h2>Prompt caching</h2>
+    <p>
+      This is where the event log earns its keep. Because the prompt prefix only ever
+      grows, the cacheable part of a request is stable across turns — so caching actually
+      hits instead of being invalidated by a reshuffled history.
+    </p>
+    <ul>
+      <li><strong>Anthropic</strong> — explicit <code>cache_control</code> breakpoints, roughly 90% off repeat input.</li>
+      <li><strong>OpenAI, OpenRouter, Gemini, Z.AI</strong> — server-side caching that aico reports hit rates from rather than guesses at.</li>
+      <li><strong>OpenRouter</strong> — sticky session routing, so repeat turns land on a machine that already holds the prefix.</li>
+    </ul>
+    <p>
+      Measured across real coding sessions: <strong>79–91%</strong> of input tokens served
+      from cache. <code>/cost</code> reports it per session.
+    </p>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Switch it off with <code>"promptCaching": { "enabled": false }</code> if you are
+      debugging something and want every request built fresh.
+    </p>
+
+    <h2>Switching mid-session</h2>
+<pre><code>/model                    <span class="c"># list what is configured</span>
+/model claude-opus-5      <span class="c"># switch, keeping the session</span>
+/cost                     <span class="c"># what it has spent so far</span></code></pre>
+    <p>
+      The session survives the switch, because the transcript is a log rather than a
+      provider-shaped payload. The new model gets the same history, rendered the way it
+      expects.
+    </p>
+
+    <h2>Spending limits</h2>
+    <p>
+      Checked before every model call, so a breach stops the turn rather than reporting it
+      afterwards. Sub-agent spend counts toward the parent's ceiling.
+    </p>
+<pre><code>{
+  <span class="k">"safetyLimits"</span>: {
+    <span class="k">"maxCostPerSession"</span>: <span class="w">5.00</span>,
+    <span class="k">"maxTokensPerSession"</span>: <span class="w">2000000</span>
+  }
+}</code></pre>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Both are off unless set — no default can be guessed honestly.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="workspace.html">The web workspace →</a>
+      <a class="btn" href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Full guide →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

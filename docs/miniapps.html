@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini Apps — aico</title>
+<meta name="description" content="Single-page apps the agent builds, each with its own SQLite database, served from a second local port. A plugin, off by default.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.4.1</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="miniapps.html" aria-current="page">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Mini Apps</p>
+
+  <div class="prose">
+    <h1>Mini Apps</h1>
+    <p class="lede">
+      Ask for an invoice ledger and get one — a real single-page application with a
+      SQLite database behind it, at its own local URL, still there tomorrow. A chat
+      answer disappears into scrollback; this does not.
+    </p>
+
+    <div class="note">
+      <p>
+        <strong>On <code>main</code>, not yet in a tagged release.</strong> Run
+        <code>npx github:suhail-akhtar/aico#main serve</code> to try it, or wait for the
+        next version.
+      </p>
+    </div>
+  </div>
+
+  <div class="shots">
+    <figure>
+      <img src="assets/miniapp-light.png" alt="An invoices Mini App: three summary tiles showing outstanding, overdue and paid totals, above a ledger table with reference, customer, dates, totals and status pills." loading="lazy">
+      <figcaption>An invoices app, built to the contract every Mini App is handed.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/miniapp-dark.png" alt="The same invoices app rendered in dark mode." loading="lazy">
+      <figcaption>Dark mode follows the reader's system setting, with a toggle available.</figcaption>
+    </figure>
+  </div>
+
+  <div class="prose">
+    <h2>The second port is the design</h2>
+    <p>
+      A Mini App page is JavaScript a model wrote. The aico API runs shell commands and
+      keeps its token in the workspace's <code>localStorage</code>. Serve both from one
+      origin and generated code inherits both — not through malice, but because
+      <em>"fetch the thing at /api/"</em> is a reasonable line for a generated page to
+      contain.
+    </p>
+    <p>
+      So Mini Apps get <strong>their own port</strong>, which the browser enforces as a
+      different origin for free. The separation is structural rather than careful: the
+      module that serves Mini Apps cannot reach the agent, because it does not import it.
+      Each server refuses the other's origin, and a
+      <code>connect-src 'self'</code> CSP sits behind that.
+    </p>
+
+    <h2>Apps do not send SQL</h2>
+    <p>
+      The obvious design is an endpoint that runs whatever SQL the page sends. It is one
+      function, it supports everything, and it is wrong here: every form field becomes a
+      place where a bug turns into a statement, and a generated app that concatenates a
+      search box into a <code>WHERE</code> clause is not hypothetical — it is the most
+      likely thing for one to do.
+    </p>
+    <p>
+      Instead the page names a table and passes values. The server builds the statement,
+      checks every identifier against the schema that actually applied, and binds every
+      value. There is no path from a string in the browser to a token in a query.
+    </p>
+<pre><code><span class="k">await</span> aico.db.list(<span class="s">'invoices'</span>, { where: { status: <span class="s">'sent'</span> },
+                              orderBy: <span class="s">'issued_at'</span>, direction: <span class="s">'desc'</span> })
+<span class="k">await</span> aico.db.create(<span class="s">'invoices'</span>, { customer: <span class="s">'Acme'</span>, total: <span class="w">1200</span> })
+<span class="k">await</span> aico.db.update(<span class="s">'invoices'</span>, id, { status: <span class="s">'paid'</span> })
+<span class="k">await</span> aico.db.remove(<span class="s">'invoices'</span>, id)</code></pre>
+
+    <h2>What every app is handed</h2>
+    <p>
+      A model asked to build an invoices app will otherwise write its own fetch wrapper,
+      its own table markup, its own colours and its own idea of a form — every time,
+      differently. So the parts that should not vary are shipped, and the guide describing
+      them is returned at the moment an app is created rather than carried in the system
+      prompt on every unrelated turn.
+    </p>
+    <ul>
+      <li><strong>A data client</strong> — the only way to the database, so no page ever builds a query.</li>
+      <li><strong>A CRUD component</strong> — <code>x-data="resource('invoices', …)"</code> is a working screen: rows, loading, errors, a form with field validation, a double-submit guard, and a two-step delete that never uses a blocking browser dialog.</li>
+      <li><strong>A design system</strong> — tokens, light and dark, cards, tables, forms, dialogs, toasts, empty and skeleton states.</li>
+      <li><strong>Alpine</strong>, served locally. No CDN would load anyway: the CSP forbids it.</li>
+    </ul>
+
+    <h2>The shape on disk</h2>
+    <p>
+      A Mini App is a directory, so you can open it in an editor, diff it, copy it
+      somewhere else, or read it without the tool that made it.
+    </p>
+<pre><code>&lt;workspace&gt;/miniapps/&lt;slug&gt;/
+  app.json          <span class="c">identity and timestamps</span>
+  schema.sql        <span class="c">the tables, applied at open</span>
+  data.sqlite       <span class="c">the database</span>
+  public/
+    index.html      <span class="c">the app — one page, no build step</span></code></pre>
+    <p>
+      The schema is a file rather than an API because tables are the app's shape, and a
+      shape the running page can change is not a shape — it is a suggestion. It is also
+      reviewable: something you can read and keep, instead of a sequence of calls you would
+      have to replay to understand.
+    </p>
+
+    <h2>A plugin, off by default</h2>
+    <p>
+      It is the one feature that opens a listening socket of its own, and that should be
+      opted into rather than inherited. Turn it on under
+      <strong>Settings → Mini Apps</strong>, or:
+    </p>
+<pre><code>{
+  <span class="k">"miniApps"</span>: {
+    <span class="k">"enabled"</span>: <span class="k">true</span>,
+    <span class="k">"port"</span>: <span class="w">7318</span>          <span class="c">// default: one above the aico server's</span>
+  }
+}</code></pre>
+    <p>
+      Off means the model cannot see the tool at all — not that it is asked not to use it.
+      A tool that is present gets called eventually, and calling it while nothing is
+      listening builds an app nobody can open.
+    </p>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Bound to loopback. There is no login, because an app that could authenticate would
+      need somewhere to keep credentials and a way to be wrong about them — reachability
+      is the boundary instead.
+    </p>
+
+    <h2>Tested where it matters</h2>
+    <p>
+      31 checks over real HTTP against a real database file, run by <code>npm test</code>:
+      CRUD and column defaults, an injected <code>ORDER BY</code>, a quote in a value, a
+      table outside the schema, encoded path traversal, a foreign origin, a constraint
+      violation reported as the caller's fault — and a restart in the middle, because
+      "the data is still there" is the one claim a single process cannot make about itself.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="install.html">Install →</a>
+      <a class="btn" href="widgets.html">← Charts and diagrams</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

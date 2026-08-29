@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install — aico</title>
+<meta name="description" content="Run aico with npx, or build it from source. Requires Node 22.5 or newer.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.4.1</span></a>
+    <nav class="site-nav">
+      <a href="install.html" aria-current="page">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="miniapps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Install</p>
+
+  <div class="prose">
+    <h1>Install</h1>
+    <p class="lede">
+      One command, nothing installed globally, no account. The web client ships inside
+      the package, so <code>serve</code> works from a bare <code>npx</code>.
+    </p>
+
+    <div class="note warn">
+      <p>
+        <strong>Node 22.5 or newer.</strong> aico uses Node's built-in SQLite, which
+        arrived in 22.5. Check with <code>node --version</code>.
+      </p>
+    </div>
+
+    <h2>Run it</h2>
+    <div class="install">
+      <code>$ npx github:suhail-akhtar/aico#v0.4.1 serve</code>
+      <button type="button">Copy</button>
+    </div>
+    <p style="margin-top:1rem">
+      That prints a tokenised <code>127.0.0.1</code> URL and opens it. Drop
+      <code>serve</code> to get the terminal interface instead.
+    </p>
+
+    <h3>Which version you get</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Suffix</th><th>What it follows</th></tr></thead>
+        <tbody>
+          <tr><td><code>#v0.4.1</code></td><td>A tag. Pinned — it will not move under you.</td></tr>
+          <tr><td><code>#release/v0.4</code></td><td>The 0.4 line, as it gets fixes.</td></tr>
+          <tr><td><code>#main</code></td><td>The development trunk. Newest, least settled.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p>
+        <strong>There is a package called <code>aico</code> on npm and it is not this.</strong>
+        <code>npx aico</code> and <code>npm install -g aico</code> install unrelated software.
+        Install from GitHub with the command above.
+      </p>
+    </div>
+
+    <h2>From source</h2>
+<pre><code>git clone https://github.com/suhail-akhtar/aico.git
+cd aico
+npm install
+npm run build
+npm run build:web
+npm link          <span class="c"># makes `aico` available globally</span></code></pre>
+
+    <h2>First run</h2>
+    <ol class="steps">
+      <li>
+        <h3>Give it a provider</h3>
+        <p>An interactive wizard that writes to <code>~/.aico/settings.json</code>:</p>
+<pre><code>aico provider add</code></pre>
+        <p>
+          You need a key from at least one of OpenAI, Anthropic, OpenRouter, Google
+          Gemini or Z.AI — or a local <a href="https://ollama.com">Ollama</a>, which needs
+          no key at all. See <a href="providers.html">Providers</a>.
+        </p>
+      </li>
+      <li>
+        <h3>Point it at a project</h3>
+        <p>aico works in the directory you start it in.</p>
+<pre><code>cd ~/code/my-project
+aico serve</code></pre>
+      </li>
+      <li>
+        <h3>Ask for something small first</h3>
+        <p>
+          Something you can check in a minute — "what does this repo do?", or a failing
+          test you already know about. The first task is for learning how it reports, not
+          for saving time.
+        </p>
+      </li>
+      <li>
+        <h3>Turn on Plan mode for anything bigger</h3>
+        <p>
+          The write tools are removed for the turn, so it investigates and comes back
+          with a plan you approve or amend. Cheaper than reviewing a change you did not
+          expect.
+        </p>
+      </li>
+    </ol>
+
+    <h2>The terminal, if you prefer it</h2>
+<pre><code>aico                                   <span class="c"># interactive</span>
+aico -p <span class="s">"fix the failing tests"</span>        <span class="c"># one-shot</span>
+aico -c                                <span class="c"># continue the last session</span>
+aico -m glm-4.6                        <span class="c"># pick a model for this run</span>
+aico --agent review -p <span class="s">"review my diff"</span></code></pre>
+    <p>
+      The <strong>model name decides the provider</strong>, overriding any configured
+      default — <code>-m glm-4.6</code> goes to Z.AI even if your default is OpenRouter.
+    </p>
+
+    <h2>When something is wrong</h2>
+<pre><code>aico /doctor      <span class="c"># environment check</span>
+aico /status      <span class="c"># true context size, and how much is hidden</span>
+aico /cost        <span class="c"># what this session has spent</span></code></pre>
+    <p>
+      The most common setup surprise is a key in the wrong place — see
+      <a href="providers.html#keys">where to put your key</a>.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="providers.html">Providers &amp; models →</a>
+      <a class="btn" href="workspace.html">The web workspace →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

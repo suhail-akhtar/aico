@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The web workspace — aico</title>
+<meta name="description" content="aico serve starts a loopback server and a browser client. The run belongs to the server, so closing the tab does not stop the work.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.4.1</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html" aria-current="page">Workspace</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="miniapps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Workspace</p>
+
+  <div class="prose">
+    <h1>The web workspace</h1>
+    <p class="lede">
+      <code>aico serve</code> starts a loopback HTTP server and opens a browser client
+      against it. The important part is which of the two owns the run.
+    </p>
+  </div>
+
+  <figure>
+    <img class="crop" src="assets/portal-miniapps.jpg" alt="The aico workspace: a session sidebar on the left listing projects and recent sessions, with the main pane showing the Mini Apps view." loading="lazy">
+    <figcaption>Sessions and projects on the left; the main pane switches between chat, changes, trajectory and Mini Apps.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h2>The server owns the run</h2>
+    <p>
+      Close the tab mid-turn and the work carries on. Reopen it and the session replays
+      from its event log — real tool results, real sequence numbers, not a summary of what
+      happened. That is only possible because the transcript is a log the server holds,
+      rather than state the page was keeping.
+    </p>
+    <p>
+      It binds to <code>127.0.0.1</code> only, and every request carries a token minted at
+      startup. Reaching the port is not the same as being able to drive it, because this
+      server can run commands and edit files.
+    </p>
+
+    <h2>Chat and trajectory are one session</h2>
+    <p>
+      Two readings of the same log, not two copies. Tool calls render as cards with diffs
+      and an outcome that means something:
+    </p>
+    <ul>
+      <li>A browser check reads <strong>works</strong> or <strong>3 problems</strong>, with the worst one inline.</li>
+      <li>A persistent shell reports the directory it left you in — because a <code>cd</code> that did not take looks exactly like one that did, until something writes a file into the wrong place.</li>
+      <li>A backgrounded command reads <strong>running · pid 4321</strong> rather than a misleading <em>exit 0</em>.</li>
+    </ul>
+
+    <h2>Panels that know when to stop talking</h2>
+    <p>
+      A plan and a task list float beside the conversation when there is one. Both collapse
+      to a single line once resolved, and <em>all done</em> is never shown for a list
+      finished by cancelling half of it — that reads <strong>0 done · 5 cancelled</strong>,
+      because conflating the two is how a task list becomes a formality.
+    </p>
+    <p>
+      Closing a panel records <em>what</em> was closed, so a genuinely new plan comes back
+      on its own and the one you dismissed stays gone.
+    </p>
+
+    <h2>Steering</h2>
+    <p>
+      Type while the agent is working. The message is delivered at its next
+      <strong>step boundary</strong>, not queued behind the whole run, and the turn is
+      extended rather than cancelled — so everything it has already learned is kept.
+    </p>
+<pre><code>❯ refactor the auth module
+  ⋯ Read(src/auth.ts)
+  ⋯ Edit(src/auth.ts)
+<span class="k">actually keep the session cookie name unchanged</span>
+  <span class="c">(steering — applies at the next step)</span>
+  ⋯ Edit(src/auth.ts)</code></pre>
+    <p>
+      Queued input also stops the loop finishing: a model that was about to answer will
+      continue instead. Both queues are durable, so anything typed before a crash is still
+      owed when the session resumes.
+    </p>
+
+    <h2>Plan before you build</h2>
+    <p>
+      Turn <strong>Plan</strong> on and the turn cannot change anything — the write tools
+      are gone, not discouraged. The agent investigates and finishes with a structured plan:
+    </p>
+<pre><code><span class="k">Plan</span>   Create VERSION.txt with the version from package.json
+  1  Write VERSION.txt containing "0.4.1"
+     Create VERSION.txt in the repo root with the single line "0.4.1".
+     VERSION.txt
+  Risk: None.
+
+  [ Go ahead ]  Amend   Later                          Decline</code></pre>
+    <ul>
+      <li><strong>Go ahead</strong> turns planning off and starts work — the mode change is part of the answer, not something you have to remember.</li>
+      <li><strong>Amend</strong> puts the plan in the composer, so a correction is a sentence rather than a re-brief.</li>
+      <li><strong>Later</strong> keeps it without starting it, and offers <em>Start it now</em> whenever you come back.</li>
+    </ul>
+    <p>
+      Assumptions appear <em>above</em> the steps, because an assumption you would have
+      corrected costs a sentence now and a rewrite later — putting it beside the approve
+      button is the same as not asking.
+    </p>
+
+    <h2>Forking a conversation</h2>
+    <p>
+      Branch from any message and carry on down a different path, with the original left
+      intact. Cuts land on turn boundaries and never split a tool call from its result —
+      every provider rejects a call with no result, so a fork that cut mid-turn would
+      produce a session that cannot be resumed.
+    </p>
+
+    <h2>Sessions, projects and groups</h2>
+    <p>
+      Sessions are named automatically and pinned by renaming — a name you did not choose
+      that silently changes under you is disorienting, so a provisional one is marked as
+      such. Projects group by directory; groups are yours to arrange.
+    </p>
+    <p>
+      Transcripts export as Markdown or text, backed by the log, so they include tool calls
+      rather than only the prose. Settings — providers, permission mode, context and spend
+      ceilings — are searchable across every pane.
+    </p>
+
+    <h2>Safety, in layers</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Layer</th><th>What it actually enforces</th></tr></thead>
+        <tbody>
+          <tr><td>Permissions</td><td>Every mutating tool asks first, with a diff preview for edits</td></tr>
+          <tr><td>Bash classifier</td><td>Blocks <code>rm -rf /</code>, <code>mkfs</code>, <code>curl | bash</code>, writes to shell profiles, credential exfiltration, ~40 patterns</td></tr>
+          <tr><td>Plan mode</td><td>Read-only tools only — <strong>inherited by sub-agents</strong></td></tr>
+          <tr><td>Sandbox (opt-in)</td><td><strong>Full</strong> for aico's own file tools; <strong>partial</strong> for Bash and anything it spawns</td></tr>
+          <tr><td>Repeat guard</td><td>Catches a model looping on the same call; bookkeeping tools cannot launder the loop</td></tr>
+          <tr><td>Spend caps</td><td>Checked before every call; sub-agent spend counts</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.9rem;color:var(--muted)">
+      The sandbox is defence in depth against a confused agent, not a jail. It stops a
+      mistaken write; it does not stop deliberate evasion through a shell.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="widgets.html">Charts, maths and diagrams →</a>
+      <a class="btn" href="miniapps.html">Mini Apps →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

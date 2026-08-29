@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Charts, maths &amp; diagrams — aico</title>
+<meta name="description" content="Answers that draw themselves: ECharts and Vega-Lite, dashboards, KaTeX with chemistry, sortable tables, and 26 kinds of Mermaid diagram — each with copy, download, zoom and repair.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.4.1</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="widgets.html" aria-current="page">Visuals</a>
+      <a href="miniapps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Visuals</p>
+
+  <div class="prose">
+    <h1>Charts, maths &amp; diagrams</h1>
+    <p class="lede">
+      Ask about a trend and get a chart. Ask about a system and get an architecture
+      diagram. Ask about a derivation and get set mathematics rather than ASCII art.
+      Seven kinds of block, all rendered in the transcript.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Block</th><th>What it draws</th></tr></thead>
+        <tbody>
+          <tr><td><code>chart</code></td><td>An Apache ECharts option object — bar, line, pie, scatter, treemap, sankey, funnel, gauge, radar, heatmap, boxplot, candlestick, sunburst, graph</td></tr>
+          <tr><td><code>viz</code></td><td>A Vega-Lite spec — statistical graphics computed from raw rows: histograms, regression, density, box plots, faceted small multiples, cross-filtering</td></tr>
+          <tr><td><code>dashboard</code></td><td>Several figures as one board — KPI tiles with sparklines over a responsive grid of chart, viz and table panels</td></tr>
+          <tr><td><code>math</code></td><td>LaTeX set by KaTeX — also inline as <code>$x^2$</code> and display between <code>$$ … $$</code>; chemistry via <code>\ce{}</code></td></tr>
+          <tr><td><code>table</code></td><td>A sortable table with automatic column summaries</td></tr>
+          <tr><td><code>diagram</code></td><td>Mermaid — 26 types across architecture, behaviour, structure and planning</td></tr>
+          <tr><td><code>html</code></td><td>An HTML or SVG preview, sandboxed with scripts off and a source toggle</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Why a catalog and not a prompt</h2>
+    <p>
+      Every one of these was, at some point, a capability the model had and did not use.
+      Asked for a dashboard it wrote an HTML file; asked for a sequence diagram it drew
+      boxes out of hyphens; asked for a derivation it produced fractions made of slashes.
+      Not because it was told not to — because nothing told it the block existed.
+    </p>
+    <p>
+      So there is a single catalog of drawable blocks. A one-line summary of each rides
+      along with the turn; the <em>full</em> contract — shape, worked example, the
+      conventions a model cannot guess — is fetched on demand when it decides to draw one.
+      A capability nobody mentions is one that gets routed around badly, and a capability
+      described in full on every turn is one you pay for whether or not you wanted a chart.
+    </p>
+
+    <h2>Every figure has the same controls</h2>
+    <p>
+      Copy the source, download it, expand it to fill the page, and — on diagrams — zoom
+      and pan. Escape shrinks it back. Icons with tooltips rather than a row of words,
+      because a figure should be mostly figure.
+    </p>
+
+    <h2>When a diagram will not parse</h2>
+    <p>
+      Mermaid's error graphic tells you a diagram is broken and nothing else. A
+      <strong>Fix with AI</strong> button repairs it in place: the block is replaced where
+      it sits, and the repair conversation is not part of your chat — you asked for a
+      diagram, not for a debugging session about one.
+    </p>
+    <div class="note">
+      <p>
+        The repair turn runs with a toolset of exactly one entry. An earlier version had
+        the full set and went hunting — scratch directories, two npm installs, a
+        thirty-one-minute hang — for a fix that was one pair of quotation marks. Restricting
+        the tools was the fix; telling it to try harder was not.
+      </p>
+    </div>
+
+    <h2>26 diagram types</h2>
+    <p>
+      Software engineering diagrams specifically, not a general drawing tool:
+    </p>
+    <ul>
+      <li><strong>Architecture</strong> — C4 context and containers, block, cloud infrastructure with grouped services</li>
+      <li><strong>Behaviour</strong> — flowchart, sequence, state, user journey</li>
+      <li><strong>Structure</strong> — class, entity-relationship, packet, git graph</li>
+      <li><strong>Planning</strong> — gantt, timeline, kanban, mindmap, quadrant, requirements</li>
+    </ul>
+    <p>
+      Each carries a worked sample and the notes that stop it failing — for
+      <code>architecture-beta</code>, that any label which is not plain letters and spaces
+      must be quoted, which is most real infrastructure labels. Every sample is rendered
+      through real Mermaid in headless Chrome by
+      <code>npm run test:diagrams</code>, and Mermaid's own error graphic counts as a
+      failure, so a type that stopped parsing cannot pass quietly.
+    </p>
+
+    <h2>Themed to match</h2>
+    <p>
+      Mermaid's default is a wireframe — saturated fills, hard borders, dashed black boxes
+      around groups. Fine for debugging, wrong next to prose in a document. Fills are pulled
+      back to surfaces, the border carries the identity, and a group is background rather
+      than a participant. Light and dark both, following the workspace.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="miniapps.html">Mini Apps →</a>
+      <a class="btn" href="workspace.html">← The workspace</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>
