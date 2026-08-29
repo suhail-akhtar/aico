@@ -122,7 +122,8 @@ import {
   currentCwd,
   forkSession,
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
-  owningSession, registerOwnerForTest,
+  owningSession, registerOwnerForTest, requestAgentStop, executeAgentSupervise,
+  agentSuperviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
   selectToolProfile,
@@ -9574,6 +9575,40 @@ console.log('  -- A 1M-context model is not compacted as though it held 128k --'
   // detail, on a model that could still hold the whole conversation.
   assert(getContextWindow('glm-5.3') > getContextWindow('glm-5'),
     'and it is not dragged down to the older line');
+}
+
+console.log('  -- A supervisor can stop one sub-agent, and is told when it cannot --');
+{
+  // Stopping something that is not running is the case that matters. The
+  // window between "running" in a snapshot and already finished is small and
+  // real, and a supervisor told "stopped" for a kill that never happened will
+  // sit waiting for a result that already arrived.
+  assert(requestAgentStop('no-such-agent', 'testing') === false,
+    'stopping an unknown agent reports failure rather than claiming a kill');
+
+  // The tool refuses to act without a reason, because the sub-agent's own
+  // error only ever says "aborted" — and a parent cannot tell a deliberate
+  // termination from a crash without being told which it was.
+  const noReason = await executeAgentSupervise({ action: 'stop', agentId: 'x' });
+  assert(/reason is required/i.test(noReason),
+    `a stop with no reason is refused (got: ${noReason.slice(0, 60)})`);
+
+  const noId = await executeAgentSupervise({ action: 'stop', reason: 'looping' });
+  assert(/which agent/i.test(noId), 'and a stop with no target asks which one');
+
+  const missing = await executeAgentSupervise({
+    action: 'stop', agentId: 'ghost', reason: 'looping',
+  });
+  assert(/No sub-agent/i.test(missing),
+    `stopping an agent this session does not own is refused (got: ${missing.slice(0, 60)})`);
+
+  const empty = await executeAgentSupervise({ action: 'list' });
+  assert(/No sub-agents/i.test(empty), 'listing with none running says so plainly');
+
+  // The tool has to describe the limit it works under, or the model will try to
+  // poll a child it is currently blocked on and conclude the tool is broken.
+  assert(/Task blocks/i.test(agentSuperviseToolDefinition.description),
+    'the description states that Task blocks');
 }
 
 // ═══════════════════════════════════════════════════════════

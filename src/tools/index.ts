@@ -102,6 +102,8 @@ import { agentManageToolDefinition, executeAgentManage } from './manage-agents.j
 import { memoryManageToolDefinition, executeMemoryManage } from './manage-memory.js';
 import type { MemoryManageInput } from './manage-memory.js';
 import { miniAppManageToolDefinition, executeMiniAppManage } from './manage-miniapps.js';
+import { agentSuperviseToolDefinition, executeAgentSupervise } from './supervise-agents.js';
+import type { AgentSuperviseInput } from './supervise-agents.js';
 import type { MiniAppManageInput } from './manage-miniapps.js';
 import type { AgentManageInput } from './manage-agents.js';
 import type { SkillManageInput } from '../skills/manage.js';
@@ -244,6 +246,10 @@ export const toolDefinitions: ToolDefinition[] = [
   // The authoring guide `create` returns is long on purpose, and truncating it
   // would cut the part about the CSP — which is the part that saves an hour.
   { ...miniAppManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
+  // Concurrency-safe on purpose: the whole point is to run alongside the Task
+  // calls it is watching. An exclusive supervisor would be a barrier, and a
+  // barrier could only ever inspect agents that had already finished.
+  { ...agentSuperviseToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
   // Reading a procedure changes nothing, so several can open at once.
   { ...skillDefinition, isConcurrencySafe: true, maxResultSizeChars: 60_000 },
 ];
@@ -674,6 +680,9 @@ export async function executeTool(
       break;
     case 'MiniAppManage':
       result = await executeMiniAppManage(args as unknown as MiniAppManageInput);
+      break;
+    case 'AgentSupervise':
+      result = await executeAgentSupervise(args as unknown as AgentSuperviseInput);
       break;
     case 'AgentManage':
       result = await executeAgentManage(args as unknown as AgentManageInput);
