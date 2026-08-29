@@ -113,6 +113,17 @@ export interface OpenAICompatibleConfig {
    * instance rather than fixed on the class.
    */
   promptDialect?: PromptDialect;
+  /**
+   * Output ceiling per request, when the caller names none.
+   *
+   * Per instance rather than one constant, because "OpenAI-compatible" spans
+   * an order of magnitude: the shared 8192 is a safe floor for an unknown
+   * endpoint and badly wrong for GLM, which documents a 128K output limit. A
+   * ceiling below what the model can write does not merely shorten a reply —
+   * it truncates tool calls, and a half-emitted call performs no action at
+   * all, so the step costs money and writes nothing.
+   */
+  maxOutputTokens?: number;
 }
 
 /**
@@ -130,6 +141,7 @@ export class OpenAICompatibleProvider implements ProviderAPI {
   private readonly sessionId?: string;
   private readonly promptCacheKey?: string;
   private readonly reasoningEffort?: OpenAICompatibleConfig['reasoningEffort'];
+  private readonly maxOutputTokens: number;
   readonly promptDialect: PromptDialect;
   // Once a 400 from stream_options is seen, disable it for the life of this provider
   // so subsequent requests don't repeat the failure.
@@ -147,6 +159,7 @@ export class OpenAICompatibleProvider implements ProviderAPI {
     this.displayName = config.displayName;
     this.supportsStreamUsage = config.supportsStreamUsage ?? true;
     this.cacheControl = config.cacheControl ?? false;
+    this.maxOutputTokens = config.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
     this.sessionId = config.sessionId;
     this.promptCacheKey = config.promptCacheKey;
     // 'none' means "do not send the parameter" rather than sending the literal
@@ -187,8 +200,8 @@ export class OpenAICompatibleProvider implements ProviderAPI {
       // 400 self-heal below covers the ones that ship after this code was
       // written, because a hardcoded list always goes stale.
       ...(this.maxCompletionTokensRequired || usesMaxCompletionTokens(opts.model)
-        ? { max_completion_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS }
-        : { max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS }),
+        ? { max_completion_tokens: opts.maxTokens ?? this.maxOutputTokens }
+        : { max_tokens: opts.maxTokens ?? this.maxOutputTokens }),
       ...(this.cacheControl ? { cache_control: { type: 'ephemeral' as const } } : {}),
       ...(this.sessionId ? { session_id: this.sessionId } : {}),
       // OpenAI routes requests to a cache-warm machine by prompt_cache_key,

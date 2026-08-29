@@ -62,12 +62,38 @@ const COST_RATES: Array<{ match: string; rate: CostRate }> = [
   { match: 'deepseek-',         rate: { input: 0.14,  output: 0.28, cacheRead: 0.02, cacheWrite: 1 } },
   // ── DeepSeek (via OpenRouter) ──
   { match: 'deepseek/',        rate: { input: 0.27, output: 1.10 } },
-  // ── Z.AI GLM (glm-4.6 ~$0.60/$2.20; glm-4.5-air cheaper; glm-5 flagship) ──
-  { match: 'glm-5',            rate: { input: 0.80, output: 2.20 } },
-  { match: 'glm-4.6',          rate: { input: 0.60, output: 2.20 } },
+  // ── Z.AI GLM (docs.z.ai/guides/overview/pricing, read 2026-08-30) ──
+  // Caching is implicit and the cached rate is a real discount — around 5x on
+  // the 5.x line — so `cacheRead` is not decoration here. GLM reports
+  // cached_tokens in usage, and aico's prefixes are stable across turns, so
+  // most input on a long session is billed at the cheaper rate.
+  //
+  // `glm-5.3-flash` is listed at half price until 2026-09-09. These are the
+  // LIST prices, not the promotional ones: a promo that expires silently makes
+  // every estimate wrong the next morning, and a cost ceiling that fires a
+  // little early is a smaller problem than one that fires too late.
+  //
+  // Order matters only for readability — lookupCostRate takes the longest
+  // matching prefix, so `glm-5.3-flash` wins over `glm-5.3` over `glm-5`.
+  // Cached rates are FRACTIONS of `input`, not absolute prices — Z.AI's
+  // published cached figures divided by its input figures, which land close to
+  // a consistent 0.18-0.20 across the line.
+  { match: 'glm-5.3-flash',    rate: { input: 0.15, output: 0.50, cacheRead: 0.20, cacheWrite: 1 } },
+  { match: 'glm-5.3',          rate: { input: 1.40, output: 4.40, cacheRead: 0.186, cacheWrite: 1 } },
+  { match: 'glm-5.2',          rate: { input: 1.40, output: 4.40, cacheRead: 0.186, cacheWrite: 1 } },
+  { match: 'glm-5.1',          rate: { input: 1.40, output: 4.40, cacheRead: 0.186, cacheWrite: 1 } },
+  { match: 'glm-5',            rate: { input: 1.00, output: 3.20, cacheRead: 0.20, cacheWrite: 1 } },
+  { match: 'glm-4.7-flashx',   rate: { input: 0.07, output: 0.40, cacheRead: 0.143, cacheWrite: 1 } },
+  { match: 'glm-4.7-flash',    rate: { input: 0,    output: 0 } },
+  { match: 'glm-4.7',          rate: { input: 0.60, output: 2.20, cacheRead: 0.183, cacheWrite: 1 } },
+  { match: 'glm-4.6v-flashx',  rate: { input: 0.04, output: 0.40, cacheRead: 0.10,  cacheWrite: 1 } },
+  { match: 'glm-4.6v-flash',   rate: { input: 0,    output: 0 } },
+  { match: 'glm-4.6v',         rate: { input: 0.30, output: 0.90, cacheRead: 0.167, cacheWrite: 1 } },
+  { match: 'glm-4.6',          rate: { input: 0.60, output: 2.20, cacheRead: 0.183, cacheWrite: 1 } },
+  { match: 'glm-4.5-flash',    rate: { input: 0,    output: 0 } },
   { match: 'glm-4.5-air',      rate: { input: 0.14, output: 0.56 } },
-  { match: 'glm-4.5',          rate: { input: 0.60, output: 2.20 } },
-  { match: 'glm-',             rate: { input: 0.60, output: 2.20 } },
+  { match: 'glm-4.5',          rate: { input: 0.60, output: 2.20, cacheRead: 0.183, cacheWrite: 1 } },
+  { match: 'glm-',             rate: { input: 0.60, output: 2.20, cacheRead: 0.183, cacheWrite: 1 } },
   // ── Meta Llama (via OpenRouter) ──
   { match: 'llama',            rate: { input: 0.20, output: 0.60 } },
   // ── Local ──
@@ -141,6 +167,32 @@ function configuredRate(model: string, settings?: AicoSettings): CostRate | unde
 function lookupCostRate(model: string, settings?: AicoSettings): CostRate | undefined {
   const stated = configuredRate(model, settings);
   if (stated) return stated;
+
+  const direct = matchCostRate(model);
+  if (direct) return direct;
+
+  /*
+    Nothing matched, so try again without the vendor prefix.
+
+    A model can arrive as `glm-5.3-flash` or as `z-ai/glm-5.3-flash` — the same
+    model, one of them named the way a router names it. Every `glm-` entry
+    matches the first and none matches the second, so a session on the prefixed
+    form was costed at the invented default rate and reported with a `?`. Real
+    token counts, made-up money.
+
+    A second pass rather than stripping up front, because the prefix sometimes
+    *is* the distinguishing fact: `deepseek/...` on OpenRouter is priced
+    differently from `deepseek-...` on DeepSeek's own platform, and both are
+    listed. Trying the full id first keeps that entry winning, and this only
+    runs when the full id matched nothing at all.
+  */
+  const slash = model.indexOf('/');
+  if (slash > 0) return matchCostRate(model.slice(slash + 1));
+  return undefined;
+}
+
+/** Exact id, then the longest matching prefix. */
+function matchCostRate(model: string): CostRate | undefined {
   const exact = COST_RATES.find(r => r.match === model);
   if (exact) return exact.rate;
   let best: { rate: CostRate; len: number } | undefined;

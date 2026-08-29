@@ -298,6 +298,13 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
         // GLM caching is automatic (no cache_control needed), but session_id
         // helps with sticky routing for cache warmth.
         sessionId: 'aico-zai-' + (settings?.model ?? 'default'),
+        // Four times the shared OpenAI-compatible default, which is a floor
+        // chosen for unknown endpoints and an order of magnitude below what
+        // GLM can do — glm-5.3 documents a 1M context and a 128K output limit.
+        // At 8192 a single file write was being cut off mid-tool-call, which
+        // writes nothing and bills for the attempt; three of those in a row is
+        // what a stuck-looking session turned out to be.
+        maxOutputTokens: settings?.providers?.zai?.maxTokens ?? 32_768,
       });
     }
 

@@ -91,7 +91,29 @@ export interface AicoSettings {
        */
       maxOutputTokens?: number;
     };
-    zai?:        { apiKey?: string; baseUrl?: string; defaultModel?: string; useCodingEndpoint?: boolean };
+    zai?: {
+      apiKey?: string;
+      baseUrl?: string;
+      defaultModel?: string;
+      useCodingEndpoint?: boolean;
+      /**
+       * Output ceiling per step. Default: 32768.
+       *
+       * The shared OpenAI-compatible default is 8192, which is wrong for GLM by
+       * an order of magnitude — GLM-5.3 documents a 1M context and a 128K
+       * output limit. An 8K ceiling on a model that can write 128K is how a
+       * single file write gets cut off mid-call, and a truncated tool call
+       * performs no action at all: the model writes nothing, and you pay for
+       * the attempt.
+       *
+       * Not defaulted to the full 128K. A `max_tokens` that large is accepted
+       * by GLM but rejected by some compatible endpoints, and it reserves
+       * budget against the context window. 32K clears any single-file write
+       * with room to spare; raise it here if you are generating something
+       * genuinely enormous.
+       */
+      maxTokens?: number;
+    };
     ollama?:     { baseUrl?: string; defaultModel?: string };
   };
 

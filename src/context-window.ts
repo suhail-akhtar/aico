@@ -61,8 +61,15 @@ const BUILTIN_CONTEXT_WINDOWS: Array<{ match: string; tokens: number }> = [
   { match: 'gemini-',                 tokens: 1_000_000 },
 
   // ── Z.AI GLM ──
+  // The 5.3 line documents a 1M window (docs.z.ai/guides/llm/glm-5.3). Under
+  // the old blanket 128K, compaction fired at an eighth of the real budget —
+  // paying a summarisation call, and discarding detail, on a model that could
+  // still hold the whole conversation.
+  { match: 'glm-5.3',                 tokens: 1_000_000 },
+  { match: 'glm-5.2',                 tokens: 200_000 },
   { match: 'glm-5',                   tokens: 128_000 },
-  { match: 'glm-4.6',                 tokens: 128_000 },
+  { match: 'glm-4.7',                 tokens: 200_000 },
+  { match: 'glm-4.6',                 tokens: 200_000 },
   { match: 'glm-4.5',                 tokens: 128_000 },
   { match: 'glm-',                    tokens: 128_000 },
 
@@ -117,16 +124,32 @@ export function getContextWindow(model: string, settings?: AicoSettings): number
     return val;
   }
 
-  // 3. Built-in table — longest prefix match wins
+  // 3. Built-in table — longest prefix match wins.
+  //
+  // Tried twice: once as given, once without the vendor prefix. `glm-5.3` and
+  // `z-ai/glm-5.3` are the same model named two ways, and only the first
+  // matched anything — so the routed form silently fell back to the default
+  // window and compacted a 1M-context model as though it held 128K.
   const m = model.toLowerCase();
+  const found = matchWindow(m);
+  if (found !== undefined) return found;
+  const slash = m.indexOf('/');
+  if (slash > 0) {
+    const bare = matchWindow(m.slice(slash + 1));
+    if (bare !== undefined) return bare;
+  }
+  return DEFAULT_CONTEXT_WINDOW;
+}
+
+/** The table's answer for one spelling of a model name, if it has one. */
+function matchWindow(model: string): number | undefined {
   let best: { tokens: number; len: number } | undefined;
   for (const { match, tokens } of BUILTIN_CONTEXT_WINDOWS) {
-    if (m.startsWith(match.toLowerCase()) && match.length > (best?.len ?? 0)) {
+    if (model.startsWith(match.toLowerCase()) && match.length > (best?.len ?? 0)) {
       best = { tokens, len: match.length };
     }
   }
-  const result = best?.tokens ?? DEFAULT_CONTEXT_WINDOW;
-  return result;
+  return best?.tokens;
 }
 
 /**
