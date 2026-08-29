@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aico — the coding agent that opens what it builds</title>
+<meta name="description" content="A multi-provider coding agent for the terminal and a local web workspace. Keeps an append-only session log, verifies web work in a real browser, and steers mid-run.">
+<meta property="og:title" content="aico — the coding agent that opens what it builds">
+<meta property="og:description" content="Multi-provider coding agent with a durable session log, in-browser verification, and a local web workspace.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.4.1</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="miniapps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero">
+    <span class="eyebrow">MIT · self-hosted · bring your own model</span>
+    <h1>The coding agent that opens what it builds.</h1>
+    <p class="lede">
+      aico works in your terminal or a local web workspace. It keeps an append-only
+      log of every turn instead of a chat buffer, and it will not call a job done on a
+      page that throws when you load it.
+    </p>
+
+    <div class="install">
+      <code>$ npx github:suhail-akhtar/aico#v0.4.1 serve</code>
+      <button type="button">Copy</button>
+    </div>
+
+    <div class="actions">
+      <a class="btn btn-primary" href="install.html">Get started</a>
+      <a class="btn" href="https://github.com/suhail-akhtar/aico">Read the source</a>
+    </div>
+
+    <p style="margin-top:1.25rem;font-size:.86rem;color:var(--muted)">
+      Requires Node 22.5 or newer. Works with OpenAI, Anthropic, OpenRouter, Gemini,
+      Z.AI and local Ollama.
+    </p>
+  </section>
+
+  <hr>
+
+  <section>
+    <div class="prose">
+      <h2>A log, not a chat buffer</h2>
+      <p>
+        Most agent CLIs keep the conversation as a list of strings and re-send it every
+        turn. aico keeps an <strong>append-only event log</strong> and derives each request
+        from it. Nearly everything else here follows from that one decision.
+      </p>
+    </div>
+
+    <div class="table-wrap prose">
+      <table>
+        <thead><tr><th>Because requests derive from a log…</th><th>You get</th></tr></thead>
+        <tbody>
+          <tr><td>Tool calls and results stay structured across turns</td><td>The model can reason about what a tool returned three turns ago</td></tr>
+          <tr><td>The prompt prefix only ever grows</td><td>Provider caching actually hits — <strong>79–91% measured</strong></td></tr>
+          <tr><td>History is addressable by sequence number</td><td>Resume, fork a conversation, and compact without deleting</td></tr>
+          <tr><td>Input can be queued against a step boundary</td><td>Steer a run mid-flight instead of cancelling it</td></tr>
+          <tr><td>Every fact is an event</td><td>Replay, audit, and invariants that catch corruption</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+<pre><code><span class="c">  1</span> request/header     openai/gpt-5.6-terra tools=41
+<span class="c">  2</span> turn/start         {"turn":1}
+<span class="c">  3</span> user/message       <span class="s">"fix the failing test"</span>        src=human
+<span class="c">  4</span> step/start         {"turn":1,"step":1}
+<span class="c">  5</span> assistant/message  calls=1  usage=5537/69
+<span class="c">  6</span> tool/call          <span class="k">Bash</span> {"command":"node test.mjs"}
+<span class="c">  7</span> tool/result        <span class="k">Bash</span> -&gt; <span class="d">"AssertionError…"</span>     &lt;-seq6
+<span class="c">  8</span> step/end
+<span class="c">  …</span>
+<span class="c"> 27</span> turn/end           {"kind":"completed"}</code></pre>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>It checks its own work</h2>
+      <p>
+        This exists because of a specific failure. Three models were asked for a
+        single-file 3D space planner, and a keyword check scored two of them twelve
+        features out of twelve. Opened in a browser, one threw on load and rendered
+        nothing; the other was a shell — the toolbars were there, the app was not.
+        Nothing in the loop had ever <em>run</em> the thing.
+      </p>
+      <p>
+        <code>VerifyApp</code> opens the page in a real browser and reports what a person
+        would hit: uncaught exceptions, console errors, failed requests, what actually
+        rendered — including whether a <code>&lt;canvas&gt;</code> was ever painted — and
+        whether named controls do anything when clicked.
+      </p>
+    </div>
+
+<pre><code><span class="d">FAILED</span> — file:///…/index.html has 3 problem(s). This artifact is not finished.
+
+Problems, worst first:
+  - uncaught: THREE is not defined
+  - 1 of 1 canvas element(s) were never drawn to
+  - "brand colour picker" does not work: set a new colour, and nothing changed
+
+What rendered:
+  183 elements, 3 canvas, 0 svg, 12 interactive control(s)
+  canvas 300×240 — <span class="d">NEVER DRAWN TO</span></code></pre>
+
+    <div class="prose">
+      <p>
+        <strong>The verdict is not advisory.</strong> A turn that produced a web page cannot
+        end <code>completed</code> until a passing verdict exists for the file as it stands
+        now — so "built it, never opened it" and "verified, then edited" are both caught by
+        the loop rather than by your patience. The requirements it checks are read out of
+        <em>your</em> words, because a model that writes its own acceptance criteria writes
+        ones it has already met.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="prose">What else is in the box</h2>
+    <div class="grid">
+      <div class="card">
+        <span class="kicker">Steering</span>
+        <h3>Redirect a run without killing it</h3>
+        <p>Type while it works and the message lands at the next step boundary. The turn is extended, not cancelled, so nothing it has learned is thrown away.</p>
+      </div>
+      <div class="card">
+        <span class="kicker">Plan mode</span>
+        <h3>Look before it touches anything</h3>
+        <p>The write tools are gone, not discouraged. You get a structured plan to approve, amend or decline — and sub-agents inherit the restriction.</p>
+      </div>
+      <div class="card">
+        <span class="kicker">Long-running work</span>
+        <h3>Dev servers do not hang the turn</h3>
+        <p>Commands that are not supposed to exit get backgrounded, with the pid and the URL they printed. A persistent shell remembers your <code>cd</code>.</p>
+      </div>
+      <div class="card">
+        <span class="kicker">Safety</span>
+        <h3>Layers that say what they enforce</h3>
+        <p>Permission prompts with diffs, a bash classifier, an opt-in workspace sandbox, a repeat-call guard, and spend ceilings that include sub-agents.</p>
+      </div>
+      <div class="card">
+        <span class="kicker">Sub-agents</span>
+        <h3>17 types, and specs you write</h3>
+        <p>Each with its own prompt and tool whitelist. Every child inherits its parent's settings, hooks, sandbox policy and spend caps.</p>
+      </div>
+      <div class="card">
+        <span class="kicker">Tested</span>
+        <h3>2,029 offline assertions</h3>
+        <p>No API key needed to run them. Plus 190 web-client checks, 31 Mini Apps checks over real HTTP, and a live suite that exercises real models.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Measured, not vibed</h2>
+      <p>
+        The agent was given a written spec, a <strong>visible</strong> 7-test suite it could
+        run, and asked to implement a token-bucket rate limiter. It was graded against a
+        <strong>hidden</strong> 23-test suite it never saw, aimed at the spec clauses the
+        visible tests do not cover — fractional accrual, monotonic-clock clamping,
+        <code>TypeError</code> contracts, <code>Infinity</code> semantics.
+      </p>
+    </div>
+
+    <div class="table-wrap prose">
+      <table>
+        <thead><tr><th></th><th>gpt-5.6-luna</th><th>gpt-5.6-terra</th></tr></thead>
+        <tbody>
+          <tr><td>Wall clock</td><td>488 s</td><td><strong>70 s</strong></td></tr>
+          <tr><td>Steps / tool calls</td><td>13 / 18</td><td>10 / 15</td></tr>
+          <tr><td>Input tokens</td><td>110,409</td><td>82,921</td></tr>
+          <tr><td>Prompt-cache hit</td><td><strong>91%</strong></td><td>88%</td></tr>
+          <tr><td>Visible tests</td><td>7 / 7</td><td>7 / 7</td></tr>
+          <tr><td><strong>Hidden tests</strong></td><td><strong>23 / 23</strong></td><td><strong>23 / 23</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose" style="font-size:.9rem">
+      Both at <code>reasoningEffort: high</code>. Two different implementations, both fully
+      correct on tests neither model saw. Reproduce it yourself with
+      <code>npm run test:live</code> — it costs money, because it calls real models.
+    </p>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>A workspace, not just a prompt</h2>
+      <p>
+        <code>aico serve</code> starts a loopback server and opens a browser client against
+        it. The run belongs to the server, not the page: close the tab mid-turn and the work
+        carries on; reopen it and the session replays from its log with real tool results.
+      </p>
+    </div>
+
+    <figure>
+      <img class="crop" src="assets/portal-miniapps.jpg" alt="The aico web workspace showing the Mini Apps panel, with a session list on the left and one app listed with its local URL." loading="lazy">
+      <figcaption>The web workspace. Sessions and projects on the left, Mini Apps beside them.</figcaption>
+    </figure>
+
+    <div class="grid">
+      <a class="card" href="workspace.html">
+        <span class="kicker">Workspace</span>
+        <h3>The web client</h3>
+        <p>Sessions, projects, tool cards with diffs, plan and task panels, forking a chat from any message.</p>
+        <span class="more">How it works →</span>
+      </a>
+      <a class="card" href="widgets.html">
+        <span class="kicker">Visuals</span>
+        <h3>Charts, maths and diagrams</h3>
+        <p>Answers that draw themselves — ECharts and Vega-Lite, KaTeX with chemistry, and 26 kinds of diagram.</p>
+        <span class="more">See what it renders →</span>
+      </a>
+      <a class="card" href="miniapps.html">
+        <span class="kicker">Mini Apps</span>
+        <h3>Small apps that persist</h3>
+        <p>Ask for an invoice ledger and get a real one, with SQLite behind it, at its own local URL.</p>
+        <span class="more">Read the design →</span>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Honest limitations</h2>
+      <p>The things it does not do, in the project's own words.</p>
+      <ul>
+        <li><strong>Bash is not confined.</strong> The sandbox governs aico's own file tools completely and spawned processes not at all. Landlock and Seatbelt backends would close this; they are not written.</li>
+        <li><strong>Verification covers the web.</strong> <code>VerifyApp</code> opens HTML in a browser. A CLI tool, a library or a server has no equivalent gate.</li>
+        <li><strong>A check can be shallow.</strong> Requirements coverage forces a check per behaviour your brief named; it cannot judge whether the behaviour is any good. It closes "never built it" and "never looked", not "built it badly".</li>
+        <li><strong>Terminal is a pipe, not a pseudo-terminal.</strong> State persists; programs that demand a TTY do not work, and it says so rather than hanging.</li>
+        <li><strong>Not a sandbox for untrusted code.</strong> Review what it runs.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Try it</h2>
+      <div class="install">
+        <code>$ npx github:suhail-akhtar/aico#v0.4.1 serve</code>
+        <button type="button">Copy</button>
+      </div>
+      <p style="margin-top:1rem">
+        Nothing to install first, and no account to make.
+        <a href="install.html">The install page</a> covers running from source, pinning a
+        version, and where to put your API key.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+    <a href="https://github.com/suhail-akhtar/aico/issues">Issues</a>
+  </div>
+</footer>
+
+</body>
+</html>

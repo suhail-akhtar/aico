@@ -17,7 +17,10 @@ and local Ollama.
 ❯ _
 ```
 
-**Status:** `0.3.0-beta`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.4.1`. Used daily, tested hard, not yet 1.0.
+
+**Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
+workspace, visuals and Mini Apps.
 
 New here? [**GUIDE.md**](GUIDE.md) walks through actually using it — the web
 client, planning before building, what the checks are doing when they push back,
@@ -81,7 +84,8 @@ cd aico && npm install && npm run build && npm run build:web
 npm link                 # makes `aico` available globally
 ```
 
-Requires Node 20+. The web client ships with it, so `aico serve` works from a
+Requires Node 22.5+ — aico uses Node's built-in SQLite, which arrived in 22.5.
+The web client ships with it, so `aico serve` works from a
 bare `npx` with nothing else installed.
 
 ## Quick start
@@ -251,8 +255,8 @@ you can answer:
 
 ```
 Plan   Create VERSION.txt with the version from package.json
-  1  Write VERSION.txt containing "0.3.0-beta"
-     Create VERSION.txt in the repo root with the single line "0.3.0-beta".
+  1  Write VERSION.txt containing "0.4.1"
+     Create VERSION.txt in the repo root with the single line "0.4.1".
      VERSION.txt
   Risk: None.
 
@@ -459,7 +463,7 @@ Full reference: **[`GUIDE.md`](GUIDE.md)**.
 ## Testing
 
 ```sh
-npm test           # 666 offline assertions, no API key needed
+npm test           # 2,029 offline assertions, no API key needed
 npm run test:live  # 93 live assertions per model — costs money
 npm run typecheck
 ```
