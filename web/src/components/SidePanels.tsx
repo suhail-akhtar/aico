@@ -35,6 +35,7 @@ import { planFrom, type PlanDecision } from '../plans';
 import { checksFrom } from '../checks';
 import type { PlanAnswer } from '../store';
 import { composeMessages } from '../reduce';
+import { AgentsCard } from './AgentsCard';
 
 /**
  * The same view the conversation renders, live entries included.
@@ -542,6 +543,12 @@ export function SidePanels(): React.ReactElement {
     >
       <PlanCard />
       <ChecksCard />
+      {/*
+        Above the task list: while a delegation is running it is the only thing
+        on screen describing what is actually happening, and a reader scanning
+        for that should not have to look past a static checklist to find it.
+      */}
+      <AgentsCard />
       <TaskCard />
     </div>
   );

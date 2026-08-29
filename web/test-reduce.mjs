@@ -244,6 +244,47 @@ test('an empty reply that still reasoned shows the reasoning', () => {
 });
 
 console.log(`\n  ${'='.repeat(46)}`);
+// ── who actually said it ────────────────────────────────────────
+section('The harness speaks on the user channel, and must not be mistaken for the user');
+
+test('a message with no source is the user', () => {
+  const messages = orderMessages(fold([[1, { type: 'user/message', content: 'build a CRM' }]]));
+  assert.deepEqual(messages.map(m => m.type), ['user']);
+});
+
+test('a plugin nudge is a system note, not something you said', () => {
+  // The bug this pins: a step cut off at the output ceiling produced an empty
+  // reply, then the recovery nudge appeared in a user bubble — three times
+  // over. Reading that back, the session looks stuck in a loop arguing with
+  // itself, and none of it was typed by a person.
+  const messages = orderMessages(fold([[1, {
+    type: 'user/message',
+    content: 'Your previous step was cut off at the output-token ceiling.',
+    source: { kind: 'plugin', plugin: 'truncation-recovery' },
+  }]]));
+  assert.deepEqual(messages.map(m => m.type), ['system']);
+  assert.equal(messages[0].systemLabel, 'truncation-recovery',
+    'and it says which part of the harness said it');
+});
+
+test('a compaction summary says that is what it is', () => {
+  const messages = orderMessages(fold([[1, {
+    type: 'user/message', content: 'You were working on the parser.',
+    source: { kind: 'compaction' },
+  }]]));
+  assert.equal(messages[0].type, 'system');
+  assert.match(messages[0].content, /summarised/,
+    'a summary presented as a user instruction is how a transcript starts lying');
+});
+
+test('a tool-sourced message is attributed to the tool', () => {
+  const messages = orderMessages(fold([[1, {
+    type: 'user/message', content: 'The check failed.',
+    source: { kind: 'tool', tool: 'VerifyApp' },
+  }]]));
+  assert.equal(messages[0].systemLabel, 'VerifyApp');
+});
+
 console.log(`  WEB REDUCER: ${pass} passed, ${fail} failed`);
 console.log(`  ${'='.repeat(46)}\n`);
 process.exit(fail > 0 ? 1 : 0);

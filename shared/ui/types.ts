@@ -37,6 +37,17 @@ export interface ChatMessage {
    * that out from the message alone, so the reducer passes it through.
    */
   turn?: number;
+  /**
+   * For system notes: who is speaking.
+   *
+   * The loop talks to the model through the same channel a person does — a
+   * truncation nudge, the completion gate, a compaction summary. Without a name
+   * on it, a note from the harness reads as an unexplained voice in the
+   * conversation, and the reader's next question is "who said that". Naming it
+   * also makes it findable: a nudge you can attribute is one you can go and
+   * change.
+   */
+  systemLabel?: string;
   /** For tool messages: the tool name */
   toolName?: string;
   /** For tool messages: tool arguments */

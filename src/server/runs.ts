@@ -32,6 +32,7 @@ import type { ImageRef } from '../providers/types.js';
 import { readFile } from 'fs/promises';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
+import { subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
 
 /**
  * The project's instructions, then the group's.
@@ -207,6 +208,64 @@ export class RunManager {
       emit('question', { question });
     }));
 
+    /**
+     * Sub-agent activity, which the browser previously could not see at all.
+     *
+     * A delegated turn looked exactly like a hung one: the transcript stopped,
+     * the activity line said "Running Task", and the work — minutes of it,
+     * across a dozen tool calls — happened somewhere the page had no window
+     * onto. The registry has always tracked it; only the terminal UI ever
+     * subscribed.
+     *
+     * Split deliberately between the two channels this server already has:
+     *
+     * **The log gets the facts.** A spawn and its outcome are durable, so they
+     * replay after a reload — which has to be true, because closing the tab is
+     * supposed to be safe and a turn that delegated for six minutes would
+     * otherwise come back looking like it did nothing.
+     *
+     * **The hub gets the ticker.** Which tool a child is on changes constantly
+     * and means nothing an hour later. Writing that to an append-only log would
+     * be pure noise in the file that everything else is derived from.
+     */
+    const seenAgents = new Map<string, SubAgentStatus>();
+    const detachAgents = subscribeToAgents((records) => {
+      const mine = records.filter(r => r.sessionId === sessionId);
+
+      for (const agent of mine) {
+        const before = seenAgents.get(agent.agentId);
+        if (before === agent.status) continue;
+        seenAgents.set(agent.agentId, agent.status);
+
+        if (before === undefined) {
+          run.session.append('agent/spawn', {
+            agentId: agent.agentId,
+            agentType: agent.agentType,
+            description: agent.description,
+            model: agent.model,
+            depth: agent.depth,
+          });
+          continue;
+        }
+        if (agent.status === 'running') continue;
+
+        run.session.append('agent/done', {
+          agentId: agent.agentId,
+          status: agent.status,
+          toolCalls: agent.toolCallCount,
+          ms: (agent.completedAt ?? Date.now()) - agent.startedAt,
+          inputTokens: agent.inputTokens,
+          outputTokens: agent.outputTokens,
+          ...(agent.error ? { error: agent.error } : {}),
+        });
+      }
+
+      // Everything this session owns, running or not, so a panel can show the
+      // ones that finished during the turn rather than having them vanish the
+      // instant they succeed.
+      emit('subagents', { agents: mine });
+    });
+
     try {
       const result = await runAgent({
         task,
@@ -338,6 +397,10 @@ export class RunManager {
       throw err;
     } finally {
       run.busy = false;
+      // Before anything else in here: the registry outlives the turn, and a
+      // subscription left attached would keep publishing another turn's
+      // children into this one's stream.
+      detachAgents();
       // However the turn ended — finished, failed, cancelled — nothing is
       // waiting for an answer any more. Leaving the prompt on screen would
       // invite an answer that resolves nothing.

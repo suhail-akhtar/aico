@@ -122,6 +122,7 @@ import {
   currentCwd,
   forkSession,
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
+  owningSession, registerOwnerForTest,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
   selectToolProfile,
@@ -9479,6 +9480,34 @@ console.log('  -- One list of drawable blocks, read from both ends --');
   assert(WIDGET_CATALOG.every(k => listed.includes(k.id)), 'no argument lists every kind');
   assert(/No rendered block named/.test(getWidgetSpec({ kind: 'nonsense' })),
     'and an unknown one says so rather than returning nothing');
+}
+
+console.log('  -- A delegation belongs to the conversation watching it --');
+{
+  // The registry is one map for the whole process. Without an owner, a server
+  // driving three conversations publishes all of their sub-agents into each
+  // one's stream — which is worse than the blindness it replaced, because it is
+  // wrong rather than merely absent.
+
+  assert(owningSession('web-abc') === 'web-abc', 'a plain session owns itself');
+  assert(owningSession(undefined) === undefined, 'and nothing owns nothing');
+
+  // A sub-agent runs under a session id of its own, so an agent that spawns an
+  // agent would otherwise be owned by its parent rather than by the person
+  // watching.
+  registerOwnerForTest('sub-a1', 'web-abc');
+  assert(owningSession('sub-a1') === 'web-abc',
+    'a child resolves to the conversation that started it');
+
+  registerOwnerForTest('sub-a2', 'sub-a1');
+  assert(owningSession('sub-a2') === 'web-abc',
+    'and a grandchild climbs the whole way rather than stopping one short');
+
+  // A cycle here would be a bug; hanging on one would be a worse bug.
+  registerOwnerForTest('sub-loop', 'sub-loop');
+  const spun = Date.now();
+  owningSession('sub-loop');
+  assert(Date.now() - spun < 1000, 'a cycle terminates instead of spinning');
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -116,6 +116,13 @@ export const MessageBubble = React.memo(function MessageBubble({
   }
 
   return (
-    <div className="my-2 px-1 text-[13px] text-aico-muted selectable">{message.content}</div>
+    <div className="my-2 px-1 text-[13px] text-aico-muted selectable">
+      {message.systemLabel && (
+        <span className="mr-1.5 rounded bg-aico-hover px-1.5 py-0.5 text-[11px] text-aico-muted">
+          {message.systemLabel}
+        </span>
+      )}
+      {message.content}
+    </div>
   );
 });

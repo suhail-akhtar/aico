@@ -282,6 +282,45 @@ export interface SessionEventMap {
   };
 
   /**
+   * RECORD. Work was handed to a sub-agent.
+   *
+   * A delegated stretch of a turn is otherwise invisible in the log: the
+   * parent records one `tool/call` for `Task` and then nothing for however
+   * many minutes the child takes. Reading that back, a six-minute delegation
+   * and a six-minute hang are the same shape.
+   *
+   * Only the spawn and the outcome are logged. Which tool the child is running
+   * right now changes several times a second, means nothing once it is over,
+   * and belongs on the live stream rather than in the file every request is
+   * derived from.
+   */
+  'agent/spawn': {
+    agentId: string;
+    agentType: string;
+    /** What it was asked to do, in the parent's words. */
+    description: string;
+    model: string;
+    /** 1 for a child of the main run, 2 for a child of that, and so on. */
+    depth: number;
+  };
+
+  /**
+   * RECORD. How a delegation ended.
+   *
+   * Paired with `agent/spawn` by `agentId` rather than by position, because
+   * sub-agents run concurrently and finish out of order.
+   */
+  'agent/done': {
+    agentId: string;
+    status: 'completed' | 'failed' | 'cancelled';
+    toolCalls: number;
+    ms: number;
+    inputTokens: number;
+    outputTokens: number;
+    error?: string;
+  };
+
+  /**
    * RECORD. The standing objective for this session.
    *
    * Distinct from the last user message: a goal outlives the turn that set it
