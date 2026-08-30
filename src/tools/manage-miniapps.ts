@@ -23,8 +23,10 @@ import path from 'path';
 import { currentCwd, currentRunContext } from '../run-context.js';
 import { loadSettings } from '../settings.js';
 import { authoringContract } from '../miniapps/contract.js';
+import { nextAuthoringContract } from '../miniapps/contract-nextjs.js';
 import {
   createMiniApp, deleteMiniApp, getMiniApp, listMiniApps, miniAppDir, slugify, touchMiniApp,
+  type MiniAppKind,
 } from '../miniapps/store.js';
 import { describe as describeTables } from '../miniapps/data.js';
 
@@ -33,6 +35,8 @@ export interface MiniAppManageInput {
   /** For create: what to call it. For everything else: which one. */
   name?: string;
   description?: string;
+  /** What to build. Defaults to the single-page app. */
+  kind?: MiniAppKind;
 }
 
 /**
@@ -73,7 +77,11 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
         return withNotice('No Mini Apps yet. Create one with action "create".');
       }
       const lines = await Promise.all(apps.map(async (app) => {
-        const state = app.built ? await appUrl(app.slug) : 'not built yet';
+        // A Next.js app has no fixed address — it is given a free port when it
+        // is started — so quoting the shared host's URL for one would be wrong.
+        const state = app.kind === 'nextjs'
+          ? (app.built ? 'Next.js app — started on demand' : 'Next.js app, not scaffolded yet')
+          : (app.built ? await appUrl(app.slug) : 'not built yet');
         return `- ${app.slug} — ${app.title}${app.description ? `: ${app.description}` : ''} (${state})`;
       }));
       return withNotice([`${apps.length} Mini App${apps.length === 1 ? '' : 's'}:`, ...lines].join('\n'));
@@ -81,13 +89,20 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
 
     case 'create': {
       if (!input.name) return 'A name is required.';
+      const kind: MiniAppKind = input.kind === 'nextjs' ? 'nextjs' : 'page';
       const app = await createMiniApp({
         title: input.name,
+        kind,
         ...(input.description ? { description: input.description } : {}),
         ...(sessionId ? { sessionId } : {}),
       }, settings, cwd);
       const dir = miniAppDir(app.slug, settings, cwd);
-      return withNotice(authoringContract(app.slug, dir, await appUrl(app.slug)));
+      // Two kinds, two contracts. A Next.js author is responsible for the parts
+      // a single-page author gets for free, so handing them the wrong brief
+      // would be worse than handing them none.
+      return withNotice(kind === 'nextjs'
+        ? nextAuthoringContract(app.slug, dir)
+        : authoringContract(app.slug, dir, await appUrl(app.slug)));
     }
 
     case 'describe': {
@@ -99,10 +114,16 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
       // was to a file this tool never saw.
       await touchMiniApp(slug, {}, settings, cwd);
       const dir = miniAppDir(slug, settings, cwd);
+      const isNext = app.kind === 'nextjs';
       const state = app.built
         ? 'Built.'
-        : `Not built yet — there is no ${path.join('public', 'index.html')}.`;
-      return withNotice(`${state}\n\n${authoringContract(slug, dir, await appUrl(slug))}`);
+        : `Not built yet — there is no ${isNext ? 'package.json' : path.join('public', 'index.html')}.`;
+      // Two kinds, two contracts. A Next.js author is responsible for the parts
+      // a single-page author gets for free, so handing them the wrong brief
+      // would be worse than handing them none.
+      return withNotice(`${state}\n\n${isNext
+        ? nextAuthoringContract(slug, dir)
+        : authoringContract(slug, dir, await appUrl(slug))}`);
     }
 
     case 'tables': {
@@ -151,10 +172,15 @@ export const miniAppManageToolDefinition = {
     'Build and manage Mini Apps: self-contained single-page applications with their own SQLite',
     'database, served on their own local URL. Use this when someone asks for a small app, tool or',
     'tracker — invoices, inventory, a CRM, a habit log, anything with forms and stored records.',
-    'Start with action "create": it makes the app and returns the full authoring guide — the data',
-    'client, the ready-made CRUD component, the design system classes and the constraints. Read that',
-    'guide before writing any files; it is the difference between an app that works and one that',
-    'silently does not. Then write schema.sql and public/index.html with the normal Write tool.',
+    'Two kinds. "page" is the default and the right answer for most requests: one HTML file with',
+    'Alpine over a shared server that runs no code you write, so there is nothing to install and it',
+    'is serving the moment you save. "nextjs" is a real Node application with its own server,',
+    'routing and dependencies — choose it only when the app genuinely needs server-side logic,',
+    'several routes, or a database other than SQLite, because it costs minutes of install on first',
+    'run and you become responsible for the query safety the page kind provides for free.',
+    'Start with action "create": it makes the app and returns the authoring guide for whichever kind',
+    'you chose. Read that guide before writing any files; it is the difference between an app that',
+    'works and one that silently does not. Then write the files with the normal Write tool.',
   ].join(' '),
   inputSchema: {
     type: 'object' as const,
@@ -171,6 +197,17 @@ export const miniAppManageToolDefinition = {
       name: {
         type: 'string',
         description: 'What to call it when creating ("Invoices"), or which app for every other action.',
+      },
+      kind: {
+        type: 'string',
+        enum: ['page', 'nextjs'],
+        description:
+          'What to build, for "create". "page" (the default) is one HTML file with Alpine and a '
+          + 'shared server that runs no code you write — fastest to build, and enough for records, '
+          + 'forms and dashboards. "nextjs" is a real Node application with its own server, routing '
+          + 'and dependencies, started as its own process; choose it when the app genuinely needs '
+          + 'server-side logic, multiple routes, or a database other than SQLite. It takes minutes '
+          + 'longer on first run because dependencies install.',
       },
       description: {
         type: 'string',

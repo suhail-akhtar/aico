@@ -250,6 +250,10 @@ export const api = {
   memories: (scope?: string) =>
     get<{ memories: MemorySummary[] }>(`memory${scope && scope !== 'all' ? `?scope=${encodeURIComponent(scope)}` : ''}`),
 
+  /** Start or stop a Next.js Mini App's own process. */
+  runMiniApp: (slug: string, action: 'start' | 'stop') =>
+    post<MiniAppProcess | { stopped: boolean }>('miniapps/run', { slug, action }),
+
   /** Stop one sub-agent without cancelling the turn its siblings are in. */
   stopSubAgent: (agentId: string, reason: string) =>
     post<{ stopped: boolean }>('agents/stop', { agentId, reason }),
@@ -594,8 +598,22 @@ export interface SubAgentView {
   depth: number;
 }
 
+/** How a Mini App's process is doing. Only Next.js apps have one. */
+export interface MiniAppProcess {
+  slug: string;
+  state: 'stopped' | 'installing' | 'starting' | 'running' | 'failed';
+  port?: number;
+  url?: string;
+  error?: string;
+  /** The tail of what the process printed — the whole content of "it broke". */
+  output: string[];
+  startedAt: number;
+}
+
 export interface MiniAppSummary {
   slug: string;
+  /** Absent means the single-page kind. */
+  kind?: 'page' | 'nextjs';
   title: string;
   description?: string;
   createdAt: number;
@@ -616,6 +634,8 @@ export interface MiniAppsView {
    */
   host: string | null;
   apps: MiniAppSummary[];
+  /** Process state, for the apps that have a process. */
+  processes?: MiniAppProcess[];
 }
 
 export interface ChangesReport {

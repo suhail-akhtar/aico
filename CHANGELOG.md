@@ -63,6 +63,27 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   waiting on — the tool description says so rather than letting a model discover
   it the hard way.
 
+- **Mini Apps come in two kinds.** `page` is the original and still the default:
+  one HTML file over a shared server that runs no code the model wrote, serving
+  the moment you save. `nextjs` is a real Node application — its own server,
+  routing, dependencies and process — for when an app genuinely needs
+  server-side logic, several routes, or a database other than SQLite. Started
+  and stopped from the panel, with install and startup progress and the
+  process's own output when it fails.
+
+  That is a different bargain, not a bigger version of the same one, and it is
+  stated rather than implied. A Next.js app runs code the model wrote, so what
+  it can reach is the guarantee: its own process, its own port (its own origin,
+  so it can reach neither aico nor another app), and an environment with every
+  API key, token, password and credential stripped by pattern rather than by a
+  keep-list. What is *not* contained is said plainly too — it runs Node as you,
+  `npm install` runs postinstall scripts, and `cwd` is pinned but the filesystem
+  is not. That is the trust you extend to any repository you clone and run.
+
+  SQLite by default through Node's built-in driver — no dependency, no native
+  build — with `DATABASE_URL` honoured for Postgres or MySQL, kept in the app's
+  own `.env.local` because it is the app's credential rather than the agent's.
+
 - **Every Mini App has its own conversation.** Opening one from the panel
   rejoins the chat about that app — changes, fixes, enhancements, debugging —
   with a bar naming what is in scope and a link to the running page. The binding
@@ -97,6 +118,24 @@ and each `release/vX.Y` branch is cut from it at the version it names.
 
 ### Fixed
 
+- **Enabling Mini Apps no longer needs a restart.** The host is started and
+  stopped when the setting is written; nothing on screen used to say a restart
+  was required, which made the switch look like it did nothing.
+- **The Mini Apps port is validated.** A port you configured is a decision: if
+  something else holds it, the panel names the port and says so, in the server's
+  own words. A port aico picked is not a decision, so a busy one moves aside to
+  any free port rather than failing the feature.
+- **Memory and global instructions are followed.** They sat at prompt order 60 —
+  above the tool notes, above the safety rules, never restated — while the goal
+  and folder rules sat last and were reprised. Your own words about how you want
+  to be worked with are more specific than anything shipped in the prompt, not
+  less; they now sit with the other standing instructions and are reprised.
+- **A standing goal survives a long turn.** It appears in the system prompt once,
+  and only Gemini's dialect asks for a tail restatement — so on a twenty-step
+  turn the objective sat thousands of tokens behind every decision after the
+  first. It is now restated at the step boundary every sixth step: one sentence,
+  appended so the cached prefix is untouched, attributed to the harness rather
+  than to you.
 - **A routed model id no longer goes to a direct vendor.** With an OpenAI
   instance active, `deepseek/deepseek-v4-flash` was sent to api.openai.com,
   which answers "invalid model ID" — an error that reads like a typo and is

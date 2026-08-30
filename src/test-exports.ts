@@ -250,3 +250,6 @@ export { loadSettings } from './settings.js';
 export { createMiniApp, miniAppDir, getMiniApp, listMiniApps } from './miniapps/store.js';
 export { miniAppContext } from './miniapps/context.js';
 export { runAgent } from './agent.js';
+export {
+  scrubbedEnv, startApp, stopApp, appState, runningApps, subscribeToApps,
+} from './miniapps/process.js';

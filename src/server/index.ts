@@ -50,7 +50,8 @@ import { resolveWorkspaceRoot } from '../workspace.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
 import { requestAgentStop } from '../tools/task.js';
-import { deleteMiniApp, listMiniApps } from '../miniapps/store.js';
+import { deleteMiniApp, getMiniApp, listMiniApps, miniAppDir } from '../miniapps/store.js';
+import { runningApps, startApp, stopAllApps, stopApp } from '../miniapps/process.js';
 
 export interface ServeOptions {
   port?: number;
@@ -342,7 +343,35 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // which port was taken.
         ...(miniAppsError ? { error: miniAppsError } : {}),
         apps: await listMiniApps(live, cwd),
+        // Process state for the Next.js apps, which have one. A single-page app
+        // is served by the shared host and has nothing to report here.
+        processes: runningApps(),
       });
+      return;
+    }
+
+    if (route === 'miniapps/run' && req.method === 'POST') {
+      // Start or stop one Next.js app. Deliberately explicit rather than
+      // automatic: these install dependencies and hold a port, and starting
+      // every app a workspace has ever contained because the portal opened
+      // would be a surprising amount of machinery for a list nobody clicked.
+      const body = await readJson(req) as { slug?: string; action?: string };
+      const live = await loadSettings();
+      if (!body.slug) { send(res, 400, { error: 'slug required' }); return; }
+      if (body.action === 'stop') {
+        send(res, 200, { stopped: await stopApp(body.slug) });
+        return;
+      }
+      const app = await getMiniApp(body.slug, live, cwd);
+      if (!app) { send(res, 404, { error: `no app "${body.slug}"` }); return; }
+      if (app.kind !== 'nextjs') {
+        send(res, 400, {
+          error: 'only a Next.js Mini App has a process to run — a single-page '
+            + 'app is served by the shared host and is already up.',
+        });
+        return;
+      }
+      send(res, 200, await startApp(body.slug, miniAppDir(body.slug, live, cwd)));
       return;
     }
 
@@ -1023,6 +1052,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       hub.closeAll();
       await runs.closeAll();
       await miniApps?.close();
+      // Child dev servers are ours to clean up. Left behind they hold their
+      // ports and keep running long after the workspace that started them.
+      await stopAllApps();
       shutdownFeatures();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
