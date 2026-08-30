@@ -328,9 +328,36 @@ export function resolveInstance(
     if (!configured && !(owning.derived && !instances[0]?.derived)) return owning;
   }
 
+  /*
+    A slash-namespaced id is a router's form, and no direct vendor serves it.
+
+    Same failure as the `owning` rule above, one step further out. `vendorForModel`
+    deliberately returns null for `deepseek/deepseek-v4-flash` — the slash is
+    OpenRouter's namespacing, not a claim on DeepSeek's own API — so `owning` is
+    undefined and the active instance wins by default. With an OpenAI instance
+    configured that means sending an OpenRouter model id to api.openai.com, which
+    answers "invalid model ID": an error that reads like a typo and is actually a
+    routing decision.
+
+    The prefix is compared rather than trusted, because a vendor's own routed form
+    does belong to it — `z-ai/glm-5.3` is Z.AI's. Only when the prefix names
+    something *other* than the configured direct vendor is a gateway preferred.
+  */
+  const namespaced = opts.model?.includes('/') ? opts.model.split('/')[0]! : undefined;
+  if (namespaced && configured && isDirectVendor(configured.type)
+      && normalizeVendorPrefix(namespaced) !== configured.type) {
+    const gateway = instances.find(i => !isDirectVendor(i.type));
+    if (gateway) return gateway;
+  }
+
   if (configured) return configured;
 
   return instances[0];
+}
+
+/** `z-ai` and `zai` are the same vendor spelled two ways; so are the rest. */
+function normalizeVendorPrefix(prefix: string): string {
+  return prefix.toLowerCase().replace(/-/g, '');
 }
 
 /** Strip the secret. Every route that returns an instance goes through this. */

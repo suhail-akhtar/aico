@@ -9752,6 +9752,57 @@ console.log('  -- A detached spawn returns an id, and the result waits for you -
   }
 }
 
+console.log('  -- A routed model id never goes to a direct vendor --');
+{
+  // The bug: with an OpenAI instance configured, `deepseek/deepseek-v4-flash`
+  // was sent to api.openai.com, which answers "invalid model ID" — an error
+  // that reads like a typo and is actually a routing decision. The slash is
+  // OpenRouter's namespacing, so vendorForModel returns null for it and the
+  // active instance won by default.
+  const both = {
+    activeProvider: 'openai',
+    providerInstances: [
+      { id: 'openai', type: 'openai', apiKey: 'k', defaultModel: 'gpt-5.6-luna' },
+      { id: 'openrouter', type: 'openrouter', apiKey: 'k' },
+    ],
+  };
+  assert(resolveInstance(both, { model: 'deepseek/deepseek-v4-flash' })?.id === 'openrouter',
+    'a router-namespaced id goes to the gateway, not the active direct vendor');
+  assert(resolveInstance(both, { model: 'gpt-5.6-luna' })?.id === 'openai',
+    'and a bare id still goes to the active provider');
+
+  // A vendor's own routed form belongs to that vendor, hyphen or not.
+  const zai = {
+    activeProvider: 'zai',
+    providerInstances: [
+      { id: 'zai', type: 'zai', apiKey: 'k' },
+      { id: 'openrouter', type: 'openrouter', apiKey: 'k' },
+    ],
+  };
+  assert(resolveInstance(zai, { model: 'z-ai/glm-5.3' })?.id === 'zai',
+    'z-ai/glm-5.3 is the vendor own routed form and stays with Z.AI');
+
+  // With no gateway anywhere there is nothing better to do than try the active
+  // one. Hermetic on purpose: instances are also DERIVED from environment keys,
+  // so a machine with OPENROUTER_API_KEY exported has a gateway whether or not
+  // settings mention one — which is correct behaviour, and made the first
+  // version of this assertion wrong rather than the code.
+  const savedKeys = {};
+  for (const key of Object.keys(process.env)) {
+    if (/_API_KEY$/.test(key)) { savedKeys[key] = process.env[key]; delete process.env[key]; }
+  }
+  try {
+    const only = {
+      activeProvider: 'openai',
+      providerInstances: [{ id: 'openai', type: 'openai', apiKey: 'k' }],
+    };
+    assert(resolveInstance(only, { model: 'deepseek/deepseek-v4-flash' })?.id === 'openai',
+      'with no gateway anywhere the active instance is still used');
+  } finally {
+    Object.assign(process.env, savedKeys);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);
