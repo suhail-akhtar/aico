@@ -53,7 +53,6 @@ export {
   describeSessionContext,
 } from './session/compact.js';
 export { buildConversationSummary } from './compact.js';
-export { runAgent } from './agent.js';
 // ── Capability registry ───────────────────────────────────────────────
 export {
   Context,
@@ -248,3 +247,6 @@ export {
 } from './tools/task.js';
 export { executeAgentSupervise, agentSuperviseToolDefinition } from './tools/supervise-agents.js';
 export { loadSettings } from './settings.js';
+export { createMiniApp, miniAppDir, getMiniApp, listMiniApps } from './miniapps/store.js';
+export { miniAppContext } from './miniapps/context.js';
+export { runAgent } from './agent.js';

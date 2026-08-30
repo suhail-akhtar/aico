@@ -255,6 +255,14 @@ export const api = {
     post<{ stopped: boolean }>('agents/stop', { agentId, reason }),
 
   miniApps: () => get<MiniAppsView>('miniapps'),
+  /**
+   * Open (or rejoin) the conversation about one Mini App.
+   *
+   * The server derives the session id from the slug, so coming back to an app
+   * comes back to what you were already saying about it.
+   */
+  openMiniAppSession: (slug: string) =>
+    post<{ sessionId: string; slug: string }>('miniapps/session', { slug }),
   /** Destructive: the app's database goes with it. */
   deleteMiniApp: (slug: string) => post<{ deleted: boolean }>('miniapps/delete', { slug }),
 

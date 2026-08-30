@@ -293,6 +293,12 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           busy: run.busy,
           agent: runs.agentOf(sessionId) ?? null,
           model: runs.modelOf(sessionId) ?? null,
+          // Which Mini App this conversation is about, if any. A reload that
+          // restored the transcript but forgot the binding would leave the
+          // reader in what looks like a general chat while the agent still has
+          // one app's context — and every answer scoped to an app the screen
+          // does not name.
+          miniApp: runs.miniAppOf(sessionId) ?? null,
         },
       })}\n\n`);
       return;
@@ -333,6 +339,23 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         host: miniApps?.url ?? null,
         apps: await listMiniApps(live, cwd),
       });
+      return;
+    }
+
+    if (route === 'miniapps/session' && req.method === 'POST') {
+      // Bind a conversation to one app. The session id is derived from the
+      // slug rather than generated, so returning to an app returns to the
+      // conversation you were already having about it — which is the whole
+      // point of a dedicated section.
+      const body = await readJson(req) as { slug?: string; sessionId?: string };
+      if (!body.slug) { send(res, 400, { error: 'slug required' }); return; }
+      const target = body.sessionId ?? `miniapp-${body.slug}`;
+      const live = await loadSettings();
+      const dir = resolveWorkspaceRoot(live, cwd);
+      const bound = await runs.setMiniApp(target, body.slug, dir);
+      if (!bound.ok) { send(res, 404, { error: bound.error ?? 'could not bind' }); return; }
+      sessionCwd.set(target, dir);
+      send(res, 200, { sessionId: target, slug: body.slug });
       return;
     }
 

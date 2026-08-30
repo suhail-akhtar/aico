@@ -22,11 +22,18 @@ import { api, type MiniAppSummary, type MiniAppsView } from '../api';
 import { useStore } from '../store';
 import { Icon } from './Icon';
 
-export function MiniAppsPane(): React.ReactElement {
+interface Props {
+  /** Switch to the conversation view once an app's section is open. */
+  onOpenChat: () => void;
+}
+
+export function MiniAppsPane({ onOpenChat }: Props): React.ReactElement {
   const busy = useStore(s => s.busy);
   // Its own thread, not whatever chat is open. Building an app is a task, and
   // burying it in the middle of unrelated work loses it twice over.
   const askAgentFor = useStore(s => s.askAgentFor);
+  // Each app has one conversation, rejoined rather than restarted.
+  const openMiniApp = useStore(s => s.openMiniApp);
 
   const [view, setView] = useState<MiniAppsView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +55,10 @@ export function MiniAppsPane(): React.ReactElement {
   const build = (): void => askAgentFor(
     'Build me a Mini App. Ask me what it should do and what it needs to store before you start.',
   );
+
+  const openSection = (slug: string): void => {
+    void openMiniApp(slug).then(onOpenChat);
+  };
 
   if (error) {
     return (
@@ -112,10 +123,7 @@ export function MiniAppsPane(): React.ReactElement {
               key={app.slug}
               app={app}
               host={view?.host ?? null}
-              onOpenSession={() => askAgentFor(
-                `Let's keep working on the "${app.title}" Mini App. `
-                + `Start with MiniAppManage describe "${app.slug}" to see where it stands.`,
-              )}
+              onOpenSession={() => openSection(app.slug)}
               onDelete={() => setConfirming(app)}
             />
           ))}

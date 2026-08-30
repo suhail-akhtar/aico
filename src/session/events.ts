@@ -282,6 +282,23 @@ export interface SessionEventMap {
   };
 
   /**
+   * RECORD. This conversation is about one Mini App and nothing else.
+   *
+   * A binding rather than a topic. The app's identity, paths and schema go into
+   * the system prompt for every turn of a bound session, which is what lets
+   * "make the overdue column red" mean something without the reader restating
+   * which app they are in — and what keeps that context in the cached prefix
+   * instead of being re-sent as a message each turn.
+   *
+   * Logged so it survives a reload: a session that forgot what it was about
+   * would answer the next question against the wrong app.
+   */
+  'session/miniapp': {
+    /** The app's slug, or null to unbind and return to an ordinary session. */
+    slug: string | null;
+  };
+
+  /**
    * RECORD. Work was handed to a sub-agent.
    *
    * A delegated stretch of a turn is otherwise invisible in the log: the

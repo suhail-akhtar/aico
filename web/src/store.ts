@@ -269,6 +269,16 @@ interface AppState {
    * unanswered for minutes at a time.
    */
   subAgents: SubAgentView[];
+  /**
+   * The Mini App this conversation is about, or null for an ordinary session.
+   *
+   * Restored from `caught-up` on reconnect rather than remembered client-side:
+   * the binding is a fact in the log, and a page that guessed it from the last
+   * thing it saw would scope the screen to an app the server had moved on from.
+   */
+  miniApp: string | null;
+  /** Open the conversation about one app, binding it if this is the first time. */
+  openMiniApp: (slug: string) => Promise<void>;
   answer: (content: string) => Promise<void>;
   steer: (content: string) => Promise<void>;
   followup: (content: string) => Promise<void>;
@@ -358,11 +368,21 @@ export const useStore = create<AppState>((set, get) => ({
   deliverables: [],
   turnSummary: null,
   subAgents: [],
+  miniApp: null,
   providers: [],
   providerTypes: [],
   activeProvider: null,
   settings: {},
   system: null,
+
+  openMiniApp: async (slug) => {
+    const { sessionId } = await api.openMiniAppSession(slug);
+    // Through the ordinary open path, so the transcript, panels and composer
+    // are the same ones every other conversation gets. A Mini App section is a
+    // scoped conversation, not a second chat client.
+    await get().openSession(sessionId);
+    set({ miniApp: slug });
+  },
 
   connect: (sessionId) => {
     handle?.close();
@@ -385,6 +405,8 @@ export const useStore = create<AppState>((set, get) => ({
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
       // Another session's delegations are not this one's.
       subAgents: [],
+      // Restored by `caught-up` for the session being opened.
+      miniApp: null,
       // Seeded from the sidebar so a session opened from the list is named
       // immediately, rather than blank until its first title event replays.
       title: get().sessions.find(s => s.id === sessionId)?.title ?? '',
@@ -1004,6 +1026,9 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
         // Null on purpose when the session never chose: the picker then shows
         // the default rather than whichever session was open before this one.
         model: (data as { model?: string | null }).model ?? null,
+        // The app this conversation is about, restored from the log rather
+        // than remembered — see the field's note.
+        miniApp: (data as { miniApp?: string | null }).miniApp ?? null,
         draft: (data as { busy?: boolean }).busy ? state.draft : emptyDraft(),
         // Drop the optimistic echo now that the real user message has replayed.
         logged: dropPending(state.logged),
@@ -1019,6 +1044,10 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
     // or by the turn itself — reaches this one.
     case 'model':
       set(() => ({ model: (data as { model?: string | null }).model ?? null }));
+      return;
+
+    case 'miniapp':
+      set(() => ({ miniApp: (data as { slug?: string | null }).slug ?? null }));
       return;
 
     case 'subagents':
