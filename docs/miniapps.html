@@ -58,6 +58,39 @@
   </div>
 
   <div class="prose">
+    <h2>Two kinds</h2>
+    <p>
+      <strong>A page</strong> is the default and the right answer for most things:
+      one HTML file with Alpine over a shared server that runs no code the model
+      wrote. Nothing to install, serving the moment it is saved.
+    </p>
+    <p>
+      <strong>A Next.js app</strong> is a real Node application — its own server,
+      routing, dependencies and process — for when the job genuinely needs
+      server-side logic, several routes, or a database that is not SQLite. It is
+      started and stopped from the panel and takes a few minutes the first time
+      while its dependencies install.
+    </p>
+    <p>
+      That is a different bargain, not a bigger version of the same one. A page
+      can be trusted with a database it cannot send SQL to because it cannot send
+      anything; a Next.js app <em>is</em> server code, so the guarantee becomes
+      what it can reach: its own process, its own port — its own origin, so it can
+      reach neither aico nor another app — and an environment with every key,
+      token and password stripped by pattern rather than by a list somebody has to
+      remember to update.
+    </p>
+    <div class="note warn">
+      <p>
+        What is <em>not</em> contained: a Next.js Mini App runs Node as you.
+        <code>cwd</code> is pinned to its directory, but nothing stops server code
+        reading elsewhere on the disk, and <code>npm install</code> runs
+        third-party postinstall scripts. It is the trust you extend to any
+        repository you clone and run — not a sandbox, and calling it one would be
+        the dishonest part.
+      </p>
+    </div>
+
     <h2>The second port is the design</h2>
     <p>
       A Mini App page is JavaScript a model wrote. The aico API runs shell commands and
