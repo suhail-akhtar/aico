@@ -153,13 +153,30 @@ check('it uses node:sqlite rather than adding a driver',
   saying so here matters, because a check whose limits are unwritten gets
   trusted past them.
 */
-const SQL_INTERPOLATION = /(SELECT|INSERT INTO|UPDATE|DELETE FROM)[\s\S]{0,200}?\$\{([^}]*)\}/gi;
+/*
+  Look at SQL sites, not at English.
+
+  The version before this searched for the words SELECT/UPDATE/DELETE anywhere
+  in a file and then for an interpolation within two hundred characters. In a
+  React component that matches `updateTitle`, `onDelete` and
+  `fetch('/api/tasks/update')` — so it condemned a client component containing
+  no SQL whatsoever. Twice in a row it failed for a reason that had nothing to
+  do with what it was checking.
+
+  SQL reaches the database through `prepare(...)` or `exec(...)` and nowhere
+  else, so that is what is read: the literal handed to one of those calls.
+*/
+const SQL_SITE = /\b(?:prepare|exec)\s*\(\s*(`[^`]*`|'[^']*'|"[^"]*")/g;
 const concatenated = sources.filter(({ text }) => {
-  for (const match of text.matchAll(SQL_INTERPOLATION)) {
-    if (!/\.join\s*\(/.test(match[2] ?? '')) return true;
+  for (const [, literal] of text.matchAll(SQL_SITE)) {
+    for (const [, expression] of literal.matchAll(/\$\{([^}]*)\}/g)) {
+      // A joined list of fragments is how a partial UPDATE is built correctly;
+      // the values still travel as placeholders. Anything else is a value.
+      if (!/\.join\s*\(/.test(expression)) return true;
+    }
   }
-  // The other shape: a value glued on with +.
-  return /(SELECT|INSERT INTO|UPDATE|DELETE FROM)[^\n`]*['"]\s*\+\s*[a-z_$]/i.test(text);
+  // The other shape: a value glued on with + rather than interpolated.
+  return /\b(?:prepare|exec)\s*\(\s*['"][^'"]*['"]\s*\+\s*[a-z_$]/i.test(text);
 });
 check('no value is concatenated into SQL',
   concatenated.length === 0,
