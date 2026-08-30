@@ -254,10 +254,38 @@ export async function startMiniAppServer(
 </body></html>`, contentSecurityPolicy());
   }
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(requestedPort, host, () => { server.off('error', reject); resolve(); });
+  /*
+    Bind, and treat a busy port differently depending on who chose it.
+
+    A port the reader configured is a decision: if it is taken, saying so is the
+    only honest answer — silently moving to another one would leave every
+    bookmark and every link they had wrong, with nothing on screen to explain
+    it. A port *we* chose (one above the portal's) is not a decision, and
+    failing the whole feature because something else happens to be on it would
+    be a poor trade. So that one falls back to whatever the OS has free, and
+    the address is reported rather than assumed.
+  */
+  const chosenByReader = settings?.miniApps?.port !== undefined;
+  const bind = (target: number): Promise<void> => new Promise((resolve, reject) => {
+    const onError = (err: unknown): void => reject(err);
+    server.once('error', onError);
+    server.listen(target, host, () => { server.off('error', onError); resolve(); });
   });
+
+  try {
+    await bind(requestedPort);
+  } catch (err) {
+    const busy = (err as { code?: string })?.code === 'EADDRINUSE';
+    if (!busy || chosenByReader) {
+      throw busy
+        ? new Error(
+          `port ${requestedPort} is already in use. Something else is on it — `
+          + 'choose another under miniApps.port, or clear the setting to let one be picked.')
+        : err;
+    }
+    await bind(0);
+  }
+
   const address = server.address();
   port = typeof address === 'object' && address ? address.port : requestedPort;
 

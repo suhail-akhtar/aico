@@ -93,18 +93,29 @@ export function MiniAppsPane({ onOpenChat }: Props): React.ReactElement {
         <div className="mx-5 mt-4 rounded-lg border border-aico-border-subtle bg-aico-hover/40 px-4 py-3">
           <p className="text-[13px] text-aico-primary">Mini Apps are switched off.</p>
           <p className="mt-1 text-[12px] text-aico-muted">
-            Nothing is being served. Turn on Mini Apps in Settings and restart aico —
-            anything listed here will still be waiting.
+            Nothing is being served. Turn them on in Settings — it takes effect
+            straight away, no restart — and anything listed here will be waiting.
           </p>
         </div>
       )}
 
       {view?.enabled && !view.host && (
         <div className="mx-5 mt-4 rounded-lg border border-aico-danger/30 bg-aico-danger/5 px-4 py-3">
-          <p className="text-[13px] text-aico-danger">The Mini Apps host did not start.</p>
+          <p className="text-[13px] text-aico-danger">The Mini Apps host is not running.</p>
+          {/*
+            The server's own reason, not a guess. "Did not start" sent the
+            reader to the terminal to find out which port was taken.
+          */}
           <p className="mt-1 text-[12px] text-aico-muted">
-            Usually the port is taken. Set a different one under miniApps.port and restart.
+            {view.error ?? 'It did not start, and gave no reason.'}
           </p>
+          <button
+            onClick={() => void refresh()}
+            className="mt-2 rounded-lg border border-aico-border bg-aico-bg px-2.5 py-1
+                       text-[12px] text-aico-primary transition-colors hover:bg-aico-hover"
+          >
+            Try again
+          </button>
         </div>
       )}
 

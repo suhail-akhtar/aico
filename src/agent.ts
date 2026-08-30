@@ -1654,6 +1654,15 @@ const MAX_CHECKS_NUDGES = 3;
 
 const MAX_COMPLETION_NUDGES = 2;
 
+/**
+ * How often a standing objective is restated inside a long turn.
+ *
+ * Six steps is a judgement, not a measurement: frequent enough that the goal is
+ * never far behind the decision, rare enough that a twenty-step turn pays for
+ * three short sentences rather than twenty.
+ */
+const GOAL_REMINDER_EVERY = 6;
+
     while (true) {
       throwIfLoopAborted();
 
@@ -2050,6 +2059,34 @@ const MAX_COMPLETION_NUDGES = 2;
         const steered = drainSteeredInput();
         if (steered > 0 && !silent) {
           showError(`Steering: ${steered} message(s) received — applying at this step.`);
+        }
+
+        /*
+          Restate the goal, occasionally, where the next decision is made.
+
+          The goal is in the system prompt, and on most vendors that is the only
+          place it appears: only Gemini's dialect asks for a tail restatement,
+          and those choices are researched rather than arbitrary. So on a turn
+          that runs twenty steps, a standing objective sits thousands of tokens
+          behind every decision after the first — which is what "I set a goal
+          and it was ignored" actually looks like from inside.
+
+          A goal is meant to constrain the whole turn, so it is repeated in the
+          turn rather than only in the prompt. Every sixth step, one sentence:
+          often enough to stay in view, rare and short enough that it costs
+          almost nothing, and appended rather than inserted so the cached prefix
+          is untouched.
+
+          It is recorded as a plugin message, so a reader sees a system note
+          naming what wrote it rather than words they appear to have typed.
+        */
+        if (opts.goal?.trim() && iterations > 0 && iterations % GOAL_REMINDER_EVERY === 0) {
+          transcript.recordUserMessage(
+            `Standing objective for this session: ${opts.goal.trim()}
+`
+            + 'If the next step does not serve it, say so instead of doing it.',
+            { kind: 'plugin', plugin: 'session-goal' },
+          );
         }
 
         // Back to thinking for next iteration
