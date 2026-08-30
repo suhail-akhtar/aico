@@ -32,15 +32,20 @@
 
 import { currentRunContext } from '../run-context.js';
 import {
-  getAgentRegistry, owningSession, requestAgentStop, type SubAgentRecord,
+  detachedRun, getAgentRegistry, guideAgent, owningSession, requestAgentStop,
+  type SubAgentRecord,
 } from './task.js';
 
 export interface AgentSuperviseInput {
-  action: 'list' | 'stop';
-  /** Which agent, for `stop`. The id `list` reports. */
+  action: 'list' | 'stop' | 'guide' | 'wait';
+  /** Which agent. The id `list` reports. */
   agentId?: string;
-  /** Why it is being stopped. Required — see the module note. */
+  /** Why it is being stopped. Required for `stop` — see the module note. */
   reason?: string;
+  /** The correction, for `guide`. */
+  message?: string;
+  /** Seconds to wait before giving up and leaving it running. Default 600. */
+  timeoutSeconds?: number;
 }
 
 function seconds(ms: number): string {
@@ -113,6 +118,85 @@ export async function executeAgentSupervise(input: AgentSuperviseInput): Promise
         : `Sub-agent "${input.agentId}" finished before the stop reached it. Nothing was cancelled.`;
     }
 
+    case 'guide': {
+      if (!input.agentId) return 'Which agent? Use action "list" to see the ids.';
+      if (!input.message) return 'What correction? Pass it as "message".';
+      const target = visible.find(a => a.agentId === input.agentId);
+      if (!target) {
+        return `No sub-agent "${input.agentId}" belongs to this session. Use action "list".`;
+      }
+      if (target.status !== 'running') {
+        return `Sub-agent "${input.agentId}" already ${target.status} — too late to correct it. `
+          + 'Judge the result instead, and re-delegate if it is wrong.';
+      }
+      const delivered = guideAgent(input.agentId, input.message);
+      return delivered
+        ? `Correction queued for "${input.agentId}". It arrives at that agent's next step `
+          + 'boundary, so it keeps everything it has already learned rather than starting over. '
+          + 'It has not seen the message yet — nothing has changed as of this moment.'
+        // A child whose session could not be opened runs without an inbox. It
+        // is still working; it simply cannot be talked to.
+        : `Sub-agent "${input.agentId}" has no channel to receive corrections. `
+          + 'Stop it and re-delegate with a better brief, or let it finish and judge the result.';
+    }
+
+    case 'wait': {
+      if (!input.agentId) return 'Which agent? Use action "list" to see the ids.';
+      /*
+        Ownership checked against the id map rather than the registry.
+
+        The registry drops a finished agent after ten seconds, so by the time a
+        parent comes back to collect a result its record is usually gone — and
+        an ownership test that only consults the registry would refuse the
+        legitimate late collection while still letting an unknown id through.
+        The `sub-<id>` mapping outlives the record.
+      */
+      const belongsHere = !mine || owningSession(`sub-${input.agentId}`) === mine;
+      if (!belongsHere) {
+        return `No sub-agent "${input.agentId}" belongs to this session. Use action "list".`;
+      }
+      const running = detachedRun(input.agentId);
+      const known = visible.find(a => a.agentId === input.agentId);
+      if (!running) {
+        if (known?.result) return known.result;
+        if (known) {
+          return `Sub-agent "${input.agentId}" ${known.status}`
+            + `${known.error ? `: ${known.error}` : ''}.`;
+        }
+        return `Nothing to wait for: "${input.agentId}" is not a detached sub-agent of this `
+          + 'session. Only agents spawned with detach:true can be waited on.';
+      }
+
+      /*
+        Bounded, and honest when the bound is hit.
+
+        An unbounded wait would reintroduce exactly the hang this feature exists
+        to make visible — and worse, one the supervisor chose. On timeout the
+        agent keeps running: the parent is told it is still going, and can look
+        again, correct it, or stop it. Killing something because a caller ran
+        out of patience would throw away work nobody asked to discard.
+      */
+      const limitMs = Math.min(Math.max((input.timeoutSeconds ?? 600) * 1000, 1_000), 3_600_000);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const expired = Symbol('timeout');
+      const outcome = await Promise.race([
+        running,
+        new Promise<typeof expired>(resolve => {
+          timer = setTimeout(() => resolve(expired), limitMs);
+          timer.unref?.();
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+
+      if (outcome === expired) {
+        const live = getAgentRegistry().find(a => a.agentId === input.agentId);
+        return `Still running after ${Math.round(limitMs / 1000)}s`
+          + `${live ? ` — ${live.statusMessage}, ${live.toolCallCount} tool call(s) so far` : ''}. `
+          + 'It has NOT been stopped. Wait again, correct it with "guide", or end it with "stop".';
+      }
+      return outcome;
+    }
+
     default:
       return `Unknown action "${String(input.action)}".`;
   }
@@ -124,21 +208,40 @@ export const agentSuperviseToolDefinition = {
     'Watch and stop the sub-agents you delegated to with Task.',
     'Use "list" to see what each one is doing right now — the tool it is inside, how long it has',
     'run, how many calls it has made, what it has cost, and how long since it last did anything.',
+    'Use "guide" to correct one that is going wrong without restarting it — the message arrives at',
+    'its next step boundary, so it keeps every tool result it has already gathered.',
     'Use "stop" to terminate one that has stalled, gone down the wrong path, or is burning tokens',
-    'without progress; the others keep running.',
-    'Note that Task blocks: you cannot poll a sub-agent while waiting on it in the same call.',
-    'This is for siblings running alongside a supervise call, for anything still running from an',
-    'earlier step, and for deciding what to do after a delegation returns.',
+    'without progress; the others keep running. Use "wait" to collect a detached agent\'s result.',
+    'To supervise a delegation while it happens, spawn it with Task detach:true — an ordinary Task',
+    'blocks, and while you are waiting on one you are suspended inside it and cannot look at',
+    'anything. Without detaching, this still covers siblings running alongside a supervise call,',
+    'anything still going from an earlier step, and the decision after a delegation returns.',
   ].join(' '),
   inputSchema: {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'stop'],
+        enum: ['list', 'stop', 'guide', 'wait'],
         description:
           'list: every sub-agent of this session, running or just finished, with what it is doing '
-          + 'and what it has spent. stop: terminate one by id.',
+          + 'and what it has spent. guide: send a correction to a running one — it arrives at that '
+          + "agent's next step boundary and keeps everything it has already learned, which "
+          + 'stopping and re-delegating would throw away. stop: terminate one by id. '
+          + 'wait: block until a detached sub-agent finishes, and return its result.',
+      },
+      message: {
+        type: 'string',
+        description:
+          'The correction, for "guide". Say what to do differently — "the schema has to exist '
+          + 'before the page can read it", "stop rewriting app.js and fix the failing test". It '
+          + 'reaches the agent as an instruction from its supervisor.',
+      },
+      timeoutSeconds: {
+        type: 'number',
+        description:
+          'For "wait": how long to wait before returning. Default 600. On timeout the agent keeps '
+          + 'running and you are told so — nothing is cancelled.',
       },
       agentId: {
         type: 'string',

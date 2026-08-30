@@ -32,7 +32,7 @@ import type { ImageRef } from '../providers/types.js';
 import { readFile } from 'fs/promises';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
-import { subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
+import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
 
 /**
  * The project's instructions, then the group's.
@@ -229,6 +229,18 @@ export class RunManager {
      * be pure noise in the file that everything else is derived from.
      */
     const seenAgents = new Map<string, SubAgentStatus>();
+    /*
+      Set when the turn ends, so the subscription can outlive it exactly as long
+      as the work does.
+
+      A detached sub-agent keeps running after the turn that spawned it returns
+      — that is the whole point of detaching. Tearing the subscription down at
+      turn end would freeze the panel on whatever the child was doing at that
+      instant, which is worse than showing nothing: it reads as a live view and
+      is not one.
+    */
+    let turnOver = false;
+    let releaseAgents: (() => void) | undefined;
     const detachAgents = subscribeToAgents((records) => {
       const mine = records.filter(r => r.sessionId === sessionId);
 
@@ -264,7 +276,16 @@ export class RunManager {
       // ones that finished during the turn rather than having them vanish the
       // instant they succeed.
       emit('subagents', { agents: mine });
+
+      // Once the turn is over and nothing of this session's is still running,
+      // there is nothing left to report. Released from inside the subscriber so
+      // the last frame — the one saying it finished — always gets out first.
+      if (turnOver && !mine.some(a => a.status === 'running')) releaseAgents?.();
     });
+    releaseAgents = () => {
+      detachAgents();
+      releaseAgents = undefined;
+    };
 
     try {
       const result = await runAgent({
@@ -397,10 +418,19 @@ export class RunManager {
       throw err;
     } finally {
       run.busy = false;
-      // Before anything else in here: the registry outlives the turn, and a
-      // subscription left attached would keep publishing another turn's
-      // children into this one's stream.
-      detachAgents();
+      /*
+        The subscription is released when the work is, not when the turn is.
+
+        Anything this session detached is still going, and still worth
+        watching. Only when nothing of ours is running does the listener go —
+        immediately here if that is already true, otherwise from the subscriber
+        itself once the last child settles. Left attached unconditionally it
+        would publish the *next* turn's children into this turn's stream.
+      */
+      turnOver = true;
+      if (!getAgentRegistry().some(a => a.sessionId === sessionId && a.status === 'running')) {
+        releaseAgents?.();
+      }
       // However the turn ended — finished, failed, cancelled — nothing is
       // waiting for an answer any more. Leaving the prompt on screen would
       // invite an answer that resolves nothing.

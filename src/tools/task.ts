@@ -4,7 +4,9 @@ import type { SubAgentType } from './index.js';
 import { runHooks } from '../hooks.js';
 import type { AicoSettings } from '../settings.js';
 import { AGENT_PROMPTS } from '../agents/prompts-registry.js';
-import { currentRunContext } from '../run-context.js';
+import { currentCwd, currentRunContext } from '../run-context.js';
+import { openSession } from '../session/open.js';
+import { Inbox } from '../session/inbox.js';
 
 // ── Sub-agent status types (mirrors Claude Code's task states) ─────────────
 export type SubAgentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
@@ -113,6 +115,40 @@ const _stops = new Map<string, { abort: (reason: string) => void }>();
 
 /** Why a sub-agent was stopped, so the parent is told rather than left guessing. */
 const _stopReasons = new Map<string, string>();
+
+/**
+ * Each running sub-agent's inbox, so a correction can reach it mid-run.
+ *
+ * Delivery is at the child's next step boundary, which is the only point where
+ * an instruction can land without discarding what it has already learned.
+ * Cancelling and re-briefing throws away every tool result it has gathered;
+ * this does not.
+ */
+const _inboxes = new Map<string, Inbox>();
+
+/**
+ * Detached runs, so a parent that spawned without waiting can come back for
+ * the result.
+ *
+ * Holding the promise is what makes `wait` possible at all — the work is
+ * already in flight, and there is otherwise nothing to await.
+ */
+const _detached = new Map<string, Promise<string>>();
+
+/** Deliver a correction to a running sub-agent. False when it has no inbox. */
+export function guideAgent(agentId: string, message: string): boolean {
+  const inbox = _inboxes.get(agentId);
+  if (!inbox) return false;
+  // `inject`, not `steer`: the distinction is recorded in the log, and a
+  // correction from the orchestrator is not something a person typed.
+  inbox.inject(message, { kind: 'plugin', plugin: 'supervisor' });
+  return true;
+}
+
+/** The promise for a detached run, if one is still tracked. */
+export function detachedRun(agentId: string): Promise<string> | undefined {
+  return _detached.get(agentId);
+}
 
 /**
  * Ask one sub-agent to stop.
@@ -269,6 +305,17 @@ export const taskToolDefinition = {
         enum: ['worktree'],
         description: 'Optional: run this sub-agent in an isolated git worktree. Pass "worktree" to enable. The worktree is automatically cleaned up when the agent finishes; if it has changes the branch is preserved.',
       },
+      detach: {
+        type: 'boolean',
+        description:
+          'Return as soon as the sub-agent starts instead of waiting for it. Default false, and '
+          + 'false is right for most work — you get the result straight back from the call. '
+          + 'Set true only when you intend to supervise: while you are waiting on a Task you are '
+          + 'suspended inside it and cannot look at anything. Detached, you can watch it with '
+          + 'AgentSupervise, correct it mid-run without losing what it has learned, stop it, and '
+          + 'collect the result with "wait". If you detach, you MUST wait before treating the '
+          + 'work as done — a detached call returns an id, never an answer.',
+      },
     },
     required: ['description', 'prompt'],
   },
@@ -330,6 +377,16 @@ export async function runTask(
     agent_spec?: { instructions?: string; tools?: string[] | 'all' | 'readonly'; model?: string; role?: string };
     timeout?: number;
     isolation?: 'worktree';
+    /**
+     * Return as soon as it starts, rather than when it finishes.
+     *
+     * Opt-in, and off by default, because a blocking `Task` is what every
+     * existing caller and every agent prompt already expects: the result comes
+     * back from the call. Detaching is for the case those cannot express —
+     * supervising a child while it works, which is impossible while suspended
+     * inside the call that spawned it.
+     */
+    detach?: boolean;
   },
   opts: RunTaskOpts,
 ): Promise<string> {
@@ -434,18 +491,66 @@ export async function runTask(
   }
   opts.onSubagentStart?.(record);
 
+  /*
+    The parent's directory, not the process's.
+
+    `runAgent` was called without a cwd, so `runInContext` fell back to
+    `process.cwd()` — which on a server driving several workspaces is wherever
+    it happened to be launched, not the project the delegation belongs to. A
+    sub-agent asked to read a file was reading the wrong repository's copy of
+    it. This is also where the child's log is filed, so it has to be right
+    before that starts.
+  */
+  const parentCwd = currentCwd();
+
+  /*
+    A session of the child's own, and an inbox on top of it.
+
+    The inbox is what makes a correction possible at all: it delivers at the
+    child's next step boundary, so an instruction lands without discarding the
+    tool results it has already gathered. Cancelling and re-briefing throws all
+    of that away.
+
+    The log is a side effect worth having on its own. A delegated agent used to
+    be a black box that returned a paragraph; now what it actually did is on
+    disk beside the conversation that asked for it. Nothing is written unless
+    the child records something — see `persistSession`.
+
+    Failing to open one is not fatal. The child runs without steering rather
+    than not running.
+  */
+  let sub: Awaited<ReturnType<typeof openSession>> | undefined;
+  let inbox: Inbox | undefined;
+  try {
+    sub = await openSession(`sub-${agentId}`, parentCwd);
+    inbox = new Inbox(sub.session);
+    _inboxes.set(agentId, inbox);
+  } catch {
+    // No transcript and no steering for this one; the work still happens.
+  }
+
   // Optional worktree isolation
   let worktreeRecord: import('../worktree/index.js').WorktreeRecord | undefined;
   if (args.isolation === 'worktree') {
     try {
       const { worktreeManager } = await import('../worktree/index.js');
-      worktreeRecord = await worktreeManager.createWorktree(agentId, process.cwd());
+      worktreeRecord = await worktreeManager.createWorktree(agentId, parentCwd);
     } catch (err) {
       // Worktree creation failed — continue without isolation, emit warning
       _update(agentId, { statusMessage: `Worktree failed, running in-place: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
 
+  /*
+    The whole run, as one promise.
+
+    Named so it can either be awaited — the default, and what every existing
+    caller still gets — or left in flight while the parent carries on. The
+    detached form is the only way an orchestrator can supervise: `Task` blocks
+    its own step, so a parent waiting on a child is suspended and cannot look at
+    it.
+  */
+  const settle = async (): Promise<string> => {
   try {
     // Dynamic import avoids circular dependency
     const { runAgent } = await import('../agent.js');
@@ -499,6 +604,9 @@ export async function runTask(
       showPlan: false,
       conversationHistory: [],
       sessionId: `sub-${agentId}`,
+      cwd: parentCwd,
+      ...(sub ? { session: sub.session } : {}),
+      ...(inbox ? { inbox } : {}),
       silent: true,
       depth: opts.depth + 1,
       agentType,
@@ -697,7 +805,46 @@ export async function runTask(
       await worktreeManager.cleanupWorktree(worktreeRecord.worktreeId, { cwd: process.cwd() }).catch(() => {});
     }
     return `[Sub-agent "${args.description}" failed: ${errMsg}]`;
+  } finally {
+    // Whatever happened, this child can no longer be steered, and its log is
+    // flushed. Leaving the inbox behind would let a later `guide` queue an
+    // instruction for an agent that will never read it and report success.
+    _inboxes.delete(agentId);
+    await sub?.close().catch(() => undefined);
   }
+  };
+
+  if (!args.detach) return settle();
+
+  /*
+    Detached: started, not awaited.
+
+    The result is kept so `AgentSupervise wait` can come back for it — the work
+    is already in flight and there would otherwise be nothing to await. The
+    `catch` is attached immediately and separately: an unhandled rejection here
+    would take the process down, and the rejection is genuinely handled, by
+    whoever calls `wait`.
+  */
+  const running = settle();
+  _detached.set(agentId, running);
+  running.catch(() => undefined);
+  /*
+    Kept well past the finish, then dropped.
+
+    The registry clears a completed agent after ten seconds so the panel stays
+    tidy, which would otherwise make a late `wait` report "nothing to wait for"
+    about work that succeeded. Ten minutes is long enough for any parent that
+    means to collect a result, and short enough that a server left running for
+    days does not accumulate every delegation it ever made.
+  */
+  void running.finally(() => {
+    const forget = setTimeout(() => _detached.delete(agentId), 600_000);
+    forget.unref?.();
+  });
+  return `[Spawned "${args.description}" as sub-agent ${agentId}, running in the background. `
+    + 'It is NOT finished and has produced nothing yet. Use AgentSupervise to watch it '
+    + `("list"), correct it without restarting it ("guide"), stop it ("stop"), or collect `
+    + `its result ("wait"). Do not report this task as done until you have waited for it.]`;
 }
 
 // ── Verification nudge ──────────────────────────────────────────────────────
