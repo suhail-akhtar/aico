@@ -124,7 +124,7 @@ import {
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
   owningSession, registerOwnerForTest, requestAgentStop, executeAgentSupervise,
   guideAgent, detachedRun, taskToolDefinition, runTask,
-  openSession,
+  openSession, scrubbedEnv, startApp, appState,
   agentSuperviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
@@ -9867,6 +9867,60 @@ console.log('  -- A standing objective is restated where decisions are made --')
   // Only when there is one. A session with no objective must not pay for this.
   assert(/opts\.goal\?\.trim\(\) && iterations > 0/.test(agentSource),
     'and only fires when a goal is actually set');
+}
+
+console.log('  -- A Mini App process gets nothing of yours --');
+{
+  // This is the load-bearing claim of the whole Next.js kind. A single-page
+  // Mini App runs no code the model wrote; this one does, so what it can reach
+  // is the only guarantee left, and it has to be checked rather than asserted
+  // in a comment.
+  const env = scrubbedEnv({
+    PATH: '/usr/bin',
+    HOME: '/home/someone',
+    OPENAI_API_KEY: 'sk-secret',
+    ANTHROPIC_API_KEY: 'sk-ant-secret',
+    DEEPSEEK_API_KEY: 'ds-secret',
+    AICO_TOKEN: 'tok',
+    AICO_ANYTHING: 'nope',
+    GITHUB_TOKEN: 'ghp_secret',
+    NPM_TOKEN: 'npm_secret',
+    DB_PASSWORD: 'hunter2',
+    AWS_SECRET_ACCESS_KEY: 'aws-secret',
+    SOME_PRIVATE_KEY: 'pk',
+    MY_CREDENTIAL: 'c',
+  });
+
+  assert(env.PATH === '/usr/bin', 'the things a process needs to run survive');
+  assert(env.HOME === '/home/someone', 'and so does the home directory');
+
+  for (const leaked of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'DEEPSEEK_API_KEY']) {
+    assert(env[leaked] === undefined, `${leaked} does not reach the child`);
+  }
+  assert(env.AICO_TOKEN === undefined, 'nor the aico token');
+  assert(env.AICO_ANYTHING === undefined, 'nor anything else of aico’s');
+  assert(env.GITHUB_TOKEN === undefined, 'nor a GitHub token');
+  assert(env.NPM_TOKEN === undefined, 'nor an npm token');
+  assert(env.DB_PASSWORD === undefined, 'nor a password');
+  assert(env.AWS_SECRET_ACCESS_KEY === undefined, 'nor a cloud secret');
+  assert(env.SOME_PRIVATE_KEY === undefined, 'nor anything ending in _KEY');
+  assert(env.MY_CREDENTIAL === undefined, 'nor anything calling itself a credential');
+
+  // Removed by pattern rather than by a keep-list, so a provider added next
+  // year is covered without anyone remembering to update this. The failure
+  // mode of forgetting a keep-list is handing out a key.
+  const future = scrubbedEnv({ SOMEVENDOR_API_KEY: 'x', PATH: '/bin' });
+  assert(future.SOMEVENDOR_API_KEY === undefined,
+    'including a provider nobody has heard of yet');
+
+  // Not a scaffolded app: it must say so rather than spawning something that
+  // fails minutes later inside npm.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-nextapp-'));
+  const started = await startApp('not-scaffolded', home);
+  assert(started.state === 'failed', 'starting an app with no package.json fails immediately');
+  assert(/package\.json/.test(started.error ?? ''), 'and says which file is missing');
+  assert(appState('not-scaffolded')?.state === 'failed', 'and the state is readable afterwards');
+  fs.rmSync(home, { recursive: true, force: true });
 }
 
 // ═══════════════════════════════════════════════════════════

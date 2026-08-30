@@ -38,9 +38,26 @@ import path from 'path';
 import type { AicoSettings } from '../settings.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 
+/**
+ * What kind of application a Mini App is.
+ *
+ * `page` is the original: one HTML file, Alpine, and a shared server that runs
+ * no code the model wrote. `nextjs` is a real Node application with its own
+ * server, its own dependencies and its own process — which is a different
+ * bargain, not a bigger version of the same one, and is why the type is
+ * recorded rather than inferred from what happens to be in the directory.
+ */
+export type MiniAppKind = 'page' | 'nextjs';
+
 export interface MiniApp {
   /** URL and directory name. Derived from the title, never supplied directly. */
   slug: string;
+  /**
+   * Absent means `page`. Apps created before there was a choice are
+   * single-page apps, and rewriting their files to say so would be a migration
+   * with no benefit.
+   */
+  kind?: MiniAppKind;
   title: string;
   /** One line for the list. */
   description?: string;
@@ -96,9 +113,19 @@ async function readApp(dir: string): Promise<MiniApp | null> {
   try {
     const raw = await readFile(path.join(dir, 'app.json'), 'utf8');
     const app = JSON.parse(raw) as MiniApp;
-    // Recomputed rather than trusted: the flag records whether a page exists,
-    // and the only honest source for that is whether a page exists.
-    return { ...app, built: existsSync(path.join(dir, 'public', 'index.html')) };
+    /*
+      Recomputed rather than trusted: the flag records whether there is an app
+      to open, and the only honest source for that is whether the files exist.
+
+      What counts differs by kind. A single-page app is its `index.html`; a
+      Next.js app is a `package.json` — the thing that makes it installable and
+      runnable at all. Reading the stored flag instead would let a half-written
+      app claim to be finished for as long as nobody corrected the file.
+    */
+    const built = app.kind === 'nextjs'
+      ? existsSync(path.join(dir, 'package.json'))
+      : existsSync(path.join(dir, 'public', 'index.html'));
+    return { ...app, built };
   } catch {
     return null;
   }
@@ -138,7 +165,7 @@ export async function getMiniApp(
  * to invent names for the tool's benefit.
  */
 export async function createMiniApp(
-  input: { title: string; description?: string; sessionId?: string },
+  input: { title: string; description?: string; sessionId?: string; kind?: MiniAppKind },
   settings?: AicoSettings,
   cwd = process.cwd(),
 ): Promise<MiniApp> {
@@ -152,6 +179,7 @@ export async function createMiniApp(
   const now = Date.now();
   const app: MiniApp = {
     slug,
+    ...(input.kind && input.kind !== 'page' ? { kind: input.kind } : {}),
     title: input.title.trim() || slug,
     ...(input.description ? { description: input.description } : {}),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),

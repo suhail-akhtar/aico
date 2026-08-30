@@ -18,7 +18,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, type MiniAppSummary, type MiniAppsView } from '../api';
+import { api, type MiniAppProcess, type MiniAppSummary, type MiniAppsView } from '../api';
 import { useStore } from '../store';
 import { Icon } from './Icon';
 
@@ -51,6 +51,22 @@ export function MiniAppsPane({ onOpenChat }: Props): React.ReactElement {
   // On open, and again when a turn ends — an agent that just built one should
   // not need a manual refresh to make it appear.
   useEffect(() => { void refresh(); }, [refresh, busy]);
+
+  /*
+    While something is installing or starting, keep asking.
+
+    A first `npm install` runs for minutes and prints nothing this side of the
+    process boundary. A card that does not change during it is indistinguishable
+    from one that has hung, which is the reading people act on. Polling stops the
+    moment nothing is in flight, so an idle panel costs nothing.
+  */
+  const inFlight = (view?.processes ?? []).some(
+    p => p.state === 'installing' || p.state === 'starting');
+  useEffect(() => {
+    if (!inFlight) return;
+    const timer = setInterval(() => { void refresh(); }, 2000);
+    return () => clearInterval(timer);
+  }, [inFlight, refresh]);
 
   const build = (): void => askAgentFor(
     'Build me a Mini App. Ask me what it should do and what it needs to store before you start.',
@@ -134,6 +150,11 @@ export function MiniAppsPane({ onOpenChat }: Props): React.ReactElement {
               key={app.slug}
               app={app}
               host={view?.host ?? null}
+              process={(view?.processes ?? []).find(p => p.slug === app.slug)}
+              onRun={async (action) => {
+                await api.runMiniApp(app.slug, action).catch(() => undefined);
+                void refresh();
+              }}
               onOpenSession={() => openSection(app.slug)}
               onDelete={() => setConfirming(app)}
             />
@@ -156,16 +177,37 @@ export function MiniAppsPane({ onOpenChat }: Props): React.ReactElement {
   );
 }
 
+const PROCESS_LABEL: Record<MiniAppProcess['state'], string> = {
+  stopped: 'stopped',
+  installing: 'installing dependencies…',
+  starting: 'starting…',
+  running: 'running',
+  failed: 'failed',
+};
+
 function AppCard(
-  { app, host, onOpenSession, onDelete }: {
+  { app, host, process, onRun, onOpenSession, onDelete }: {
     app: MiniAppSummary;
     host: string | null;
+    process?: MiniAppProcess;
+    onRun: (action: 'start' | 'stop') => void;
     onOpenSession: () => void;
     onDelete: () => void;
   },
 ): React.ReactElement {
-  const url = host ? `${host}/${app.slug}/` : null;
+  const isNext = app.kind === 'nextjs';
+  /*
+    Two kinds, two ideas of "where it is".
+
+    A single-page app lives at a fixed address on the shared host and is up
+    whenever that host is. A Next.js app is a process: it has no address until
+    it is started, and quoting one before then would be a link to nothing.
+  */
+  const url = isNext
+    ? (process?.state === 'running' ? process.url ?? null : null)
+    : (host ? `${host}/${app.slug}/` : null);
   const openable = Boolean(url) && app.built;
+  const busyState = process?.state === 'installing' || process?.state === 'starting';
 
   return (
     <div className="group flex flex-col rounded-xl border border-aico-border-subtle bg-aico-surface p-4">
@@ -184,8 +226,27 @@ function AppCard(
       </div>
 
       <p className="mt-2 truncate font-mono text-[11px] text-aico-muted" title={url ?? undefined}>
-        {url ?? 'not being served'}
+        {url ?? (isNext
+          ? (process ? PROCESS_LABEL[process.state] : 'not running')
+          : 'not being served')}
       </p>
+
+      {/*
+        The process's own words when it fails. "Failed to start" sends the
+        reader to a terminal; the last lines of output usually name the file
+        and the line.
+      */}
+      {isNext && process?.state === 'failed' && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[11px] text-aico-danger">
+            {process.error ?? 'it did not start'}
+          </summary>
+          <pre className="mt-1 max-h-40 overflow-auto rounded bg-aico-bg p-2
+                          font-mono text-[10px] leading-relaxed text-aico-secondary">
+            {process.output.slice(-20).join('\n') || 'no output'}
+          </pre>
+        </details>
+      )}
 
       <div className="mt-3 flex items-center gap-1.5">
         {/*
@@ -207,6 +268,18 @@ function AppCard(
         >
           Open
         </a>
+        {isNext && (
+          <button
+            onClick={() => onRun(process?.state === 'running' ? 'stop' : 'start')}
+            disabled={busyState}
+            className="rounded-lg px-2.5 py-1.5 text-[12px] text-aico-secondary
+                       transition-colors hover:bg-aico-hover hover:text-aico-primary
+                       disabled:opacity-50"
+          >
+            {busyState ? PROCESS_LABEL[process!.state]
+              : process?.state === 'running' ? 'Stop' : 'Start'}
+          </button>
+        )}
         <button
           onClick={onOpenSession}
           className="rounded-lg px-2.5 py-1.5 text-[12px] text-aico-secondary
