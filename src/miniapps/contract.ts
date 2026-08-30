@@ -155,6 +155,14 @@ is the part that is specific to this app, so spend the effort there:
     start with arithmetic.
   · ONE PRIMARY ACTION per screen, and make it obvious. Everything else
     is quieter. Five buttons of equal weight is the same as none.
+  · THE PRIMARY ACTION IS THE ONE DONE MOST OFTEN, not the one done
+    first. A habit tracker is opened every day to tick something off and
+    once a month to add a habit — so ticking off is the button, and "New
+    habit" is the quiet one. Getting this backwards produces a screen
+    that looks right and is wrong to use: the thing you came for is
+    missing or buried, and the thing you rarely need is the loudest
+    element on the page. Ask what the reader does on their tenth visit,
+    not their first.
   · SORT BY WHAT MATTERS, not by id. Newest first, or most urgent first.
     An id ordering is the database's convenience showing through.
   · NUMBERS RIGHT-ALIGNED AND TABULAR (.num), currency formatted, dates
@@ -205,6 +213,12 @@ Do this first, before writing any file:
 Then build. Then check it in a browser and fix what you find.
 
 ── Build it properly ───────────────────────────────────────────────────
+Before you finish, re-read the request and check every verb in it. If it
+says the reader can add, tick, untick, edit, archive or export something,
+each of those needs a control they can find. An app that displays the
+data beautifully and cannot change it is not the app that was asked for,
+and it is the most common way one of these goes wrong.
+
 This is a real application, not a demo. Cover the whole thing:
 
   · every screen the job needs, not just a table — a summary, filters,
