@@ -39,6 +39,8 @@ and each `release/vX.Y` branch is cut from it at the version it names.
 
 ### Changed
 
+- The left navigation says **Workspaces** rather than Projects; the button
+  beside it already said "Add workspace", so the header was the odd one out.
 - **Node 22.5 is now the minimum** (was 20). `node:sqlite` ships with Node from
   22.5; the alternatives were a native module that compiles C++ on every
   install, or WebAssembly.
@@ -61,8 +63,33 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   waiting on — the tool description says so rather than letting a model discover
   it the hard way.
 
+- **Sub-agents can be corrected mid-run.** `Task` gains `detach: true`, which
+  returns an agent id instead of blocking — the only way a parent can supervise,
+  since waiting on a child suspends it inside the same call. `AgentSupervise`
+  gains `guide`, which delivers a correction at the child's next step boundary
+  so it keeps every tool result it has already gathered, and `wait`, which
+  collects a detached result and is honest when its own timeout expires: the
+  agent keeps running rather than being killed for a caller's impatience.
+  Detaching is opt-in and blocking stays the default, so every existing
+  delegation behaves exactly as before.
+- Sub-agents now get their own session log, filed beside the conversation that
+  spawned them, so what a delegated agent actually did is on disk rather than
+  summarised in a paragraph.
+
 ### Fixed
 
+- **Sub-agents ran in the wrong directory.** `runAgent` was called without a
+  `cwd`, so a delegated agent worked in `process.cwd()` — on a server driving
+  several workspaces, wherever it was launched rather than the project the
+  delegation belonged to. A sub-agent asked to read a file was reading another
+  repository's copy of it.
+- **Sessions nobody used are no longer saved.** Opening the workspace against a
+  folder wrote a log immediately, so merely looking at a new chat put a
+  placeholder row in the sidebar permanently — three folders, three
+  conversations you never had. The file is now created by the first event, and
+  the listing drops header-only logs left by earlier versions. Filtered on event
+  count rather than turn count, so a session interrupted during its first turn
+  is still kept.
 - **GLM is costed from its price list rather than its name.** `glm-5.3` and
   `glm-5.3-flash` both matched the `glm-5` prefix and were billed identically,
   for two models that differ by a factor of nine — flash overstated about
