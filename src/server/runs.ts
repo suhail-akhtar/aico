@@ -33,6 +33,43 @@ import { readFile } from 'fs/promises';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
 import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
+import { currentMiniApp } from '../session/projections.js';
+import { miniAppContext } from '../miniapps/context.js';
+import { getMiniApp, miniAppDir } from '../miniapps/store.js';
+
+/**
+ * The app context for a session bound to a Mini App, or nothing.
+ *
+ * Resolved per turn rather than captured when the session opened: the schema
+ * and the file list are exactly what a build session keeps changing, and a
+ * prefix describing the app as it was an hour ago is worse than none.
+ */
+async function miniAppInstructions(
+  session: Session,
+  settings: AicoSettings,
+  cwd: string,
+): Promise<string | undefined> {
+  const slug = currentMiniApp(session);
+  if (!slug) return undefined;
+  try {
+    const app = await getMiniApp(slug, settings, cwd);
+    if (!app) return undefined;
+    const host = settings.miniApps?.port
+      ? `http://${settings.miniApps.host ?? '127.0.0.1'}:${settings.miniApps.port}`
+      : 'http://127.0.0.1:<aico port + 1>';
+    // Whether anything is actually listening. An agent told to open a URL that
+    // answers nothing goes looking for the server rather than concluding the
+    // plugin is off — see the note on `served`.
+    const served = settings.miniApps?.enabled === true;
+    return await miniAppContext(
+      app, miniAppDir(slug, settings, cwd), `${host}/${slug}/`, served,
+    );
+  } catch {
+    // A session bound to an app that has since been deleted still works; it
+    // simply behaves as an ordinary conversation rather than refusing to run.
+    return undefined;
+  }
+}
 
 /**
  * The project's instructions, then the group's.
@@ -324,8 +361,24 @@ export class RunManager {
         cwd: run.cwd,
         // Whatever the user attached to this folder, re-read per turn so an
         // edit takes effect on the next message rather than the next restart.
-        ...(await combinedInstructions(run.cwd, this.groupOf(sessionId) ?? undefined)
-          .then(v => (v ? { projectInstructions: v } : {}))),
+        /*
+          Folder instructions, group instructions, and — for a session bound to
+          a Mini App — everything about that app.
+
+          All of it lands in the system prompt, which is the cached prefix. A
+          bound session therefore pays for the app's schema, file list and
+          contract once and reads them from cache on every turn after, rather
+          than re-sending a couple of thousand tokens per message. Putting them
+          in the messages instead would cost full price every turn *and* change
+          the tail each time, which is the thing that stops a cache hitting.
+        */
+        ...(await (async () => {
+          const parts = [
+            await combinedInstructions(run.cwd, this.groupOf(sessionId) ?? undefined),
+            await miniAppInstructions(run.session, settings, run.cwd),
+          ].filter(Boolean);
+          return parts.length ? { projectInstructions: parts.join('\n\n') } : {};
+        })()),
         // Only while active. A paused goal is one the user explicitly set
         // aside, and telling the model to pursue it anyway would make the
         // pause button a lie.
@@ -599,6 +652,33 @@ export class RunManager {
    * missing agent would answer every message as though nothing had been set,
    * which is indistinguishable from the feature not working.
    */
+  /**
+   * Bind a session to one Mini App, or unbind it.
+   *
+   * The binding is a log event, so it survives a reload — a session that forgot
+   * what it was about would answer the next question against the wrong app,
+   * silently and plausibly.
+   */
+  async setMiniApp(
+    sessionId: string, slug: string | null, cwd: string,
+  ): Promise<{ ok: boolean; error?: string; slug?: string | null }> {
+    const run = await this.ensure(sessionId, cwd);
+    if (slug) {
+      const settings = await this.currentSettings();
+      const app = await getMiniApp(slug, settings, run.cwd);
+      if (!app) return { ok: false, error: `There is no Mini App called "${slug}".` };
+    }
+    run.session.append('session/miniapp', { slug });
+    this.hub.publish({ type: 'miniapp', sessionId, data: { slug } });
+    return { ok: true, slug };
+  }
+
+  /** Which app a session is bound to, for the client to render its scope. */
+  miniAppOf(sessionId: string): string | undefined {
+    const run = this.runs.get(sessionId);
+    return run ? currentMiniApp(run.session) : undefined;
+  }
+
   async setAgent(sessionId: string, name: string | null): Promise<{ ok: boolean; error?: string; agent?: string }> {
     const run = this.runs.get(sessionId);
     if (!run) return { ok: false, error: 'no such session' };

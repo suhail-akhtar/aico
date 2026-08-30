@@ -12,6 +12,7 @@
 import React, { useEffect, useState } from 'react';
 import { Sidebar, type View } from './components/Sidebar';
 import { MiniAppsPane } from './components/MiniAppsPane';
+import { MiniAppScope } from './components/MiniAppScope';
 import { ChatPane } from './components/ChatPane';
 import { Composer } from './components/Composer';
 
@@ -138,6 +139,9 @@ export function App(): React.ReactElement {
 
         {view === 'chat' && (
           <>
+            {/* Above the transcript: the scope has to be readable before the
+                first message is, not discovered at the bottom of the page. */}
+            <MiniAppScope />
             <ChatPane />
             <SidePanels />
             <GoalBar />
@@ -148,7 +152,7 @@ export function App(): React.ReactElement {
         {view === 'changes' && <ChangesPane />}
         {view === 'trajectory' && <Trajectory />}
         {view === 'system' && <SystemPanel />}
-        {view === 'miniapps' && <MiniAppsPane />}
+        {view === 'miniapps' && <MiniAppsPane onOpenChat={() => setView('chat')} />}
       </main>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}

@@ -61,6 +61,23 @@ export function currentAgent(session: Session): string | undefined {
 }
 
 /**
+ * The Mini App this conversation is bound to, if any.
+ *
+ * Last decision wins, same as every other projection here. Unbinding writes
+ * `null` rather than deleting, so the log still explains why a session that was
+ * about Invoices yesterday is a general conversation today.
+ */
+export function currentMiniApp(session: Session): string | undefined {
+  for (let i = session.events.length - 1; i >= 0; i--) {
+    const event = session.events[i];
+    if (event?.type !== 'session/miniapp') continue;
+    const slug = (event.data as { slug?: string | null }).slug;
+    return slug ? String(slug) : undefined;
+  }
+  return undefined;
+}
+
+/**
  * The model this conversation is being held with, if one was chosen.
  *
  * Undefined means nobody picked, and the caller falls back to the configured
