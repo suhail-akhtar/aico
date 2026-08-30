@@ -244,6 +244,7 @@ export { DIAGRAM_TYPES, diagramType, diagramIndex } from '../shared/widgets/diag
 export { selectToolProfile } from './agent.js';
 export {
   owningSession, registerOwnerForTest, requestAgentStop, guideAgent, detachedRun,
-  taskToolDefinition, runTask,
+  taskToolDefinition, runTask, getAgentRegistry,
 } from './tools/task.js';
 export { executeAgentSupervise, agentSuperviseToolDefinition } from './tools/supervise-agents.js';
+export { loadSettings } from './settings.js';
