@@ -123,6 +123,7 @@ import {
   forkSession,
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
   owningSession, registerOwnerForTest, requestAgentStop, executeAgentSupervise,
+  guideAgent, detachedRun, taskToolDefinition, runTask,
   openSession,
   agentSuperviseToolDefinition,
   currentModel,
@@ -9655,6 +9656,100 @@ console.log('  -- A conversation nobody used leaves nothing behind --');
     'a header-only log left by an earlier version reports no events');
 
   fs.rmSync(home, { recursive: true, force: true });
+}
+
+console.log('  -- Correcting a sub-agent instead of starting it over --');
+{
+  // A correction with nowhere to go is the case that has to be honest. A child
+  // whose session could not be opened runs without an inbox; telling the
+  // supervisor "queued" would leave it waiting for a behaviour change that can
+  // never arrive.
+  assert(guideAgent('never-spawned', 'do it differently') === false,
+    'guiding an agent with no inbox reports failure rather than pretending');
+
+  const noMessage = await executeAgentSupervise({ action: 'guide', agentId: 'x' });
+  assert(/What correction/i.test(noMessage), 'a guide with no message is refused');
+
+  const noTarget = await executeAgentSupervise({ action: 'guide', message: 'try again' });
+  assert(/Which agent/i.test(noTarget), 'and a guide with no target asks which one');
+
+  const unknown = await executeAgentSupervise({
+    action: 'guide', agentId: 'ghost', message: 'try again',
+  });
+  assert(/No sub-agent/i.test(unknown), 'guiding an agent from another session is refused');
+
+  // Waiting on something that was never detached must say so rather than
+  // hanging or claiming success.
+  assert(detachedRun('never-spawned') === undefined, 'nothing is tracked for an unknown id');
+  const nothing = await executeAgentSupervise({ action: 'wait', agentId: 'never-spawned' });
+  assert(/Nothing to wait for/i.test(nothing),
+    `waiting on a non-detached agent says so (got: ${nothing.slice(0, 50)})`);
+
+  // Detaching is opt-in and has to stay that way: every existing caller and
+  // every agent prompt expects the result to come back from the Task call.
+  const detach = taskToolDefinition.inputSchema.properties.detach;
+  assert(detach && detach.type === 'boolean', 'Task exposes detach');
+  assert(!taskToolDefinition.inputSchema.required.includes('detach'),
+    'and it is not required — blocking stays the default');
+  assert(/Default false/i.test(detach.description),
+    'the schema says which way the default falls');
+  // A detached call returns an id, not an answer. A model that treats it as a
+  // result reports work as done that has not started.
+  assert(/MUST wait/i.test(detach.description),
+    'and that a detached spawn has to be waited on before the work counts as done');
+}
+
+console.log('  -- A detached spawn returns an id, and the result waits for you --');
+{
+  // Driven with no provider configured, so runAgent fails almost immediately.
+  // What is under test is the plumbing, not the model: does detach return
+  // straight away, is the promise recoverable, does a failure inside a
+  // background run stay handled, and is the child cleaned up afterwards.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-detach-'));
+  const saved = { ...process.env };
+  for (const key of Object.keys(process.env)) {
+    if (/_API_KEY$/.test(key)) delete process.env[key];
+  }
+
+  try {
+    const answer = await runInContext({ cwd: home, sessionId: 'web-detach-test' }, () =>
+      runTask(
+        { description: 'a job nobody waits for', prompt: 'do nothing', detach: true },
+        { model: 'glm-5.3-flash', autoApprove: true, verbose: false, depth: 0 },
+      ));
+
+    assert(/Spawned/.test(answer),
+      `a detached spawn says it started (got: ${answer.slice(0, 60)})`);
+    const id = (answer.match(/sub-agent (\S+),/) || [])[1];
+    assert(id, `and names the id so it can be supervised (got: ${answer.slice(0, 80)})`);
+    // The single most important word in that reply. A model that reads a
+    // detached spawn as a result reports work finished that has not begun.
+    assert(/NOT finished/.test(answer), 'and says plainly that nothing is done yet');
+
+    const pending = detachedRun(id);
+    assert(pending instanceof Promise, 'the run is recoverable by id');
+
+    // Resolves rather than rejects, however it ended. An unhandled rejection
+    // from a background run would take the process down.
+    const outcome = await pending;
+    assert(typeof outcome === 'string',
+      `a detached run resolves to a string rather than throwing (got ${typeof outcome})`);
+
+    // Waiting after it has already finished still returns the outcome — a
+    // parent should not have to race its own child to collect a result.
+    const collected = await runInContext({ cwd: home, sessionId: 'web-detach-test' }, () =>
+      executeAgentSupervise({ action: 'wait', agentId: id }));
+    assert(typeof collected === 'string' && collected.length > 0,
+      'and waiting afterwards still answers');
+
+    // Nothing left steerable: a later guide must not queue an instruction for
+    // an agent that will never read it.
+    assert(guideAgent(id, 'too late') === false,
+      'a finished agent can no longer be guided');
+  } finally {
+    Object.assign(process.env, saved);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
