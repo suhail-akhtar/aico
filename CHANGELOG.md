@@ -118,6 +118,15 @@ and each `release/vX.Y` branch is cut from it at the version it names.
 
 ### Fixed
 
+- **A Mini App's schema can change.** `CREATE TABLE IF NOT EXISTS` cannot add a
+  column to a table that already exists, and the open database handle was never
+  re-reading the file — so an edit was never applied and `MiniAppManage tables`
+  reported the schema from an hour ago. Found the hard way: asked to add a
+  column, an agent edited the schema, could not see the change, concluded the
+  app was broken, deleted it and rebuilt it under a new name, taking the data
+  with it. Schemas are now re-applied when the file changes, `ALTER TABLE …
+  ADD COLUMN` is documented as the way to evolve one and its repeat-application
+  error is tolerated, and a session bound to an app refuses to delete that app.
 - **Enabling Mini Apps no longer needs a restart.** The host is started and
   stopped when the setting is written; nothing on screen used to say a restart
   was required, which made the switch look like it did nothing.
