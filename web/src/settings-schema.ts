@@ -356,7 +356,9 @@ export const PANES: Pane[] = [
           {
             path: 'miniApps.port',
             label: 'Port',
-            hint: 'Leave empty to use one above the aico server\'s port.',
+            hint: 'Leave empty and one is picked — the aico port plus one, or any free port if '
+              + 'that is taken. Set one and it is used as given: if something else is already on '
+              + 'it, the host says so rather than quietly moving somewhere your links do not point.',
             kind: 'number',
             min: 1024,
             max: 65535,

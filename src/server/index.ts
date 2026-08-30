@@ -337,6 +337,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       send(res, 200, {
         enabled: live.miniApps?.enabled === true,
         host: miniApps?.url ?? null,
+        // Why it is not up, when it should be. A panel that can only say "the
+        // host did not start" sends the reader to the terminal to find out
+        // which port was taken.
+        ...(miniAppsError ? { error: miniAppsError } : {}),
         apps: await listMiniApps(live, cwd),
       });
       return;
@@ -619,7 +623,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     // POST guard because several of these are reads.
     const systemBody = req.method === 'POST' ? await readJson(req) : {};
     const handled = await handleSystemRoute(route, req.method ?? 'GET', systemBody as Record<string, unknown>, url.searchParams);
-    if (handled) { send(res, handled.status, handled.body); return; }
+    if (handled) {
+      // A settings write can turn the Mini Apps host on, off, or move it. Doing
+      // that here rather than asking the reader to restart is the difference
+      // between a switch and a note about a switch.
+      if (route === 'settings' && req.method === 'POST') await reconcileMiniApps(port);
+      send(res, handled.status, handled.body);
+      return;
+    }
 
     if (req.method !== 'POST') { send(res, 405, { error: 'method not allowed' }); return; }
     const body = systemBody;
@@ -949,13 +960,46 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
    * being taken is not a reason the portal should refuse to start.
    */
   let miniApps: MiniAppServer | undefined;
-  async function startMiniApps(boundPort: number): Promise<void> {
-    if (!settings.miniApps?.enabled) return;
+  /** Why the host is not up, when it should be. Surfaced by `/api/miniapps`. */
+  let miniAppsError: string | undefined;
+  /** What the host was started with, so a settings change can be compared to it. */
+  let miniAppsConfig = '';
+
+  /**
+   * Bring the host into line with the settings, whatever they now say.
+   *
+   * Called at startup and again whenever settings are written. Turning the
+   * plugin on used to require restarting aico — with nothing on screen saying
+   * so, which meant the switch appeared to do nothing at all. There is no
+   * reason for that: this server can open and close a socket while it runs, and
+   * a setting that takes effect when you set it is the only behaviour anyone
+   * expects from a switch.
+   */
+  async function reconcileMiniApps(boundPort: number): Promise<void> {
+    const live = await loadSettings().catch(() => settings);
+    const wanted = live.miniApps?.enabled === true;
+    // Identity of the configuration, so a port or host change is a restart and
+    // an unrelated settings write is not.
+    const config = `${live.miniApps?.host ?? '127.0.0.1'}:${live.miniApps?.port ?? 'auto'}`;
+
+    if (miniApps && (!wanted || config !== miniAppsConfig)) {
+      await miniApps.close().catch(() => undefined);
+      miniApps = undefined;
+    }
+    if (!wanted) { miniAppsError = undefined; miniAppsConfig = config; return; }
+    if (miniApps) return;
+
     try {
-      miniApps = await startMiniAppServer({ settings, cwd, sisterPort: boundPort });
+      miniApps = await startMiniAppServer({ settings: live, cwd, sisterPort: boundPort });
+      miniAppsError = undefined;
+      miniAppsConfig = config;
       console.log(`  Mini Apps  ${miniApps.url}`);
     } catch (err) {
-      console.warn(`  Mini Apps failed to start: ${err instanceof Error ? err.message : String(err)}`);
+      // Kept rather than only logged: the reader is in a browser, and a reason
+      // printed on the server's terminal is a reason they will never read.
+      miniAppsError = err instanceof Error ? err.message : String(err);
+      miniAppsConfig = config;
+      console.warn(`  Mini Apps failed to start: ${miniAppsError}`);
     }
   }
 
@@ -968,7 +1012,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   port = boundPort;
   const url = `http://127.0.0.1:${boundPort}/?token=${token}`;
 
-  await startMiniApps(boundPort);
+  await reconcileMiniApps(boundPort);
 
   if (opts.open) openBrowser(url);
 

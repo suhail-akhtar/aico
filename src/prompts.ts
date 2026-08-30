@@ -448,15 +448,33 @@ Four rules the renderer cannot enforce for you:
     });
   }
 
-  // One section per memory source rather than one pre-formatted blob, so each
-  // is labelled in the active dialect and can be targeted or overridden by id.
+  /*
+    Memory — the reader's standing instructions — placed with the other
+    standing instructions rather than in the middle of general guidance.
+
+    It used to sit at order 60, ahead of the tool notes and the safety rules
+    and never reprised. That is the wrong place for it twice over. These are
+    the reader's own words about how they want to be worked with, which makes
+    them more specific than anything shipped in this prompt, not less; and
+    burying them a thousand tokens above the decision is exactly the argument
+    the goal and the project instructions already make for sitting last.
+
+    Reprised for the same reason they are. "Never add comments to my code" read
+    once at the top and never again competes badly with a paragraph of general
+    guidance restated at the tail — and losing that competition looks, from
+    outside, like the setting doing nothing.
+
+    Ordered just before the project instructions, so the gradient still runs
+    general → specific: how the reader works, then this folder, then this
+    conversation's objective.
+  */
   const cwd = currentCwd();
   memory.sections.forEach((entry: MemoryEntry, index: number) => {
     if (!entry.content.trim()) return;
     const { id, title } = memoryLabel(entry, cwd);
     // `append` rather than `add`: several files can share a label (multiple
     // project rules), and the later one must not silently replace the earlier.
-    doc.append(id, entry.content, { title, order: 60 + index });
+    doc.append(id, entry.content, { title, order: 850 + index, reprise: true });
   });
 
   return doc;

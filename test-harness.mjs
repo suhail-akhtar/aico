@@ -9803,6 +9803,72 @@ console.log('  -- A routed model id never goes to a direct vendor --');
   }
 }
 
+console.log('  -- What the reader told you sits where instructions belong --');
+{
+  // The bug: memory landed at order 60 — above the tool notes, above the
+  // safety rules, and never reprised — while the goal and the folder rules sat
+  // last and were restated at the tail. "Never add comments to my code" read
+  // once a thousand tokens above the decision competes badly with general
+  // guidance restated beside it, and losing that competition looks from
+  // outside like the setting doing nothing at all.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-memory-'));
+  const RULE = 'ALWAYS-USE-TABS-NEVER-SPACES';
+  fs.writeFileSync(path.join(home, 'AICO.md'), `# House rules
+
+${RULE}
+`);
+
+  const INSTR = 'FOLDER-RULE-MARKER';
+  const GOAL = 'SESSION-GOAL-MARKER';
+  const doc = await runInContext({ cwd: home }, () =>
+    buildSystemPrompt('m', undefined, INSTR, GOAL));
+  const full = asText(doc, ANTHROPIC_DIALECT, 'anthropic');
+
+  assert(full.includes(RULE), 'the memory the reader wrote reaches the prompt');
+
+  // General → how the reader works → this folder → this conversation. Order is
+  // the mechanism: a model follows the later instruction when two conflict.
+  assert(full.indexOf('<behaviour>') < full.indexOf(RULE),
+    'general behaviour comes before the standing instructions');
+  assert(full.indexOf(RULE) < full.indexOf(INSTR),
+    'and those instructions before the folder rules');
+  assert(full.indexOf(INSTR) < full.indexOf(GOAL),
+    'and the folder rules before the session goal');
+
+  // Restated at the tail wherever the vendor asks for one, so it is in view at
+  // the moment of the next decision rather than only at the start.
+  const gemini = renderPrompt(doc, GEMINI_DIALECT, 'gemini');
+  assert(gemini.reprise.includes(RULE),
+    'and it is restated in the tail, like the goal and the folder rules');
+
+  fs.rmSync(home, { recursive: true, force: true });
+}
+
+console.log('  -- A standing objective is restated where decisions are made --');
+{
+  // The goal reaches the system prompt, and on most vendors that is the only
+  // place it ever appears: only Gemini asks for a tail restatement. On a
+  // twenty-step turn that puts it thousands of tokens behind every decision
+  // after the first, which is exactly what "I set a goal and it was ignored"
+  // looks like from inside.
+  const agentSource = fs.readFileSync('src/agent.ts', 'utf8');
+  assert(/GOAL_REMINDER_EVERY/.test(agentSource), 'the loop knows how often to restate it');
+  assert(/plugin: 'session-goal'/.test(agentSource),
+    'and records it as a plugin message, not as words the reader typed');
+
+  // Appended at a step boundary, so the cached prefix is untouched — a goal
+  // restated by rewriting the system prompt would invalidate the cache on
+  // every turn it fired.
+  const at = agentSource.indexOf('GOAL_REMINDER_EVERY === 0');
+  const boundary = agentSource.indexOf('Step boundary: deliver anything steered in');
+  assert(at > boundary && at - boundary < 2500,
+    'the reminder sits at the step boundary rather than in the prompt builder');
+
+  // Only when there is one. A session with no objective must not pay for this.
+  assert(/opts\.goal\?\.trim\(\) && iterations > 0/.test(agentSource),
+    'and only fires when a goal is actually set');
+}
+
 // ═══════════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);

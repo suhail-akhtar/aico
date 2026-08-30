@@ -607,6 +607,8 @@ export interface MiniAppSummary {
 
 export interface MiniAppsView {
   enabled: boolean;
+  /** Why the host is not listening, when it should be — a taken port, usually. */
+  error?: string;
   /**
    * The host's address, or null when the plugin is off or failed to bind.
    * Null is the difference between "here are your apps" and a list of links

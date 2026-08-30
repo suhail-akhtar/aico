@@ -670,6 +670,23 @@ export class RunManager {
     }
     run.session.append('session/miniapp', { slug });
     this.hub.publish({ type: 'miniapp', sessionId, data: { slug } });
+
+    /*
+      Name it after the app, once.
+
+      Binding writes an event, which makes the session no longer empty and puts
+      it in the sidebar — under its raw id, `miniapp-reading-log`, because
+      nothing had named it. A dedicated section that appears as a slug is the
+      sort of detail that makes a feature feel unfinished.
+
+      Only when it has no name yet: a session the reader renamed is theirs, and
+      re-binding must not undo that.
+    */
+    if (slug && !currentTitle(run.session)) {
+      const app = await getMiniApp(slug, await this.currentSettings(), run.cwd);
+      const named = writeUserTitle(run.session, app?.title ?? slug);
+      if (named) this.hub.publish({ type: 'title', sessionId, data: named });
+    }
     return { ok: true, slug };
   }
 
