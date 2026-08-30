@@ -46,6 +46,27 @@ Put the real constraints in: NOT NULL, DEFAULT, CHECK, REFERENCES.
 Foreign keys are enforced. A constraint the database holds is one the
 page cannot forget.
 
+CHANGING A SCHEMA THAT ALREADY HAS DATA IS DIFFERENT. Editing the CREATE
+TABLE does nothing — "IF NOT EXISTS" means exactly that, so the table
+already there is left alone and your change appears to have been made
+while nothing happened. To add a column, append a line:
+
+  ALTER TABLE books ADD COLUMN rating INTEGER;
+
+Leave the CREATE TABLE alone, or update it too so a fresh database gets
+the same shape — both is best. The file is applied on every open and the
+duplicate-column error that causes is expected and ignored, so ALTER
+lines are safe to leave in place permanently. Append them in the order
+they happened; the file is the migration history.
+
+A new column cannot be NOT NULL without a DEFAULT — the rows already
+there have no value for it. Give it a default, or allow NULL.
+
+After any schema change, run MiniAppManage tables and READ THE ANSWER.
+If your column is not in it, the change did not apply. Fix the file. Do
+NOT delete the app and start again: that destroys the reader's data, and
+it has never once been the right repair.
+
 ── public/index.html ───────────────────────────────────────────────────
 Load the runtime in this order. aico.js must come before alpine.js — it
 registers components on alpine:init, and a deferred script would lose

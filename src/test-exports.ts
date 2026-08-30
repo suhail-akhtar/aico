@@ -253,3 +253,6 @@ export { runAgent } from './agent.js';
 export {
   scrubbedEnv, startApp, stopApp, appState, runningApps, subscribeToApps,
 } from './miniapps/process.js';
+export { nextAuthoringContract } from './miniapps/contract-nextjs.js';
+export { splitStatements } from './miniapps/data.js';
+export { executeMiniAppManage } from './tools/manage-miniapps.js';

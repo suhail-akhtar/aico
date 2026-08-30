@@ -143,6 +143,61 @@ check('a NOT NULL violation is a 400 with a message',
   violating.status === 400 && typeof violating.json?.error === 'string',
   `${violating.status} ${violating.text}`);
 
+// ── a schema that has to change ─────────────────────────────────────
+//
+// The bug this pins cost a live run its app. `CREATE TABLE IF NOT EXISTS`
+// cannot add a column to a table that already exists, and the open handle was
+// never re-reading the file — so an agent that edited the schema, checked, and
+// saw nothing concluded the app was broken, deleted it, and rebuilt it under a
+// new name. Both halves are tested: that ALTER is the way, and that the change
+// is visible without restarting anything.
+
+writeFileSync(path.join(dir, 'schema.sql'), `
+CREATE TABLE IF NOT EXISTS invoices (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer TEXT    NOT NULL,
+  total    REAL    NOT NULL DEFAULT 0,
+  status   TEXT    NOT NULL DEFAULT 'draft'
+);
+-- Appended, exactly as the contract tells an author to append one. Applied on
+-- every open, so the second application must be tolerated rather than fatal.
+ALTER TABLE invoices ADD COLUMN rating INTEGER;
+`);
+
+const evolved = await get('/invoices/api/tables');
+const columns = (evolved.json?.[0]?.columns ?? []).map(c => c.name);
+check('a schema change is visible without restarting', columns.includes('rating'),
+  `columns: ${columns.join(', ')}`);
+
+// Applied again on the very next request. Without tolerating the duplicate
+// column error this is where everything starts failing.
+const again = await get('/invoices/api/invoices');
+check('and re-applying the same ALTER does not break the app',
+  again.status === 200 && Array.isArray(again.json),
+  `${again.status} ${again.text.slice(0, 100)}`);
+
+check('the rows that were already there survived it',
+  Array.isArray(again.json) && again.json.length === 3,
+  `${(again.json ?? []).length} rows — a migration that drops data is worse than one that fails`);
+
+// A statement that is genuinely wrong must still be reported. Tolerating one
+// specific error must not turn into tolerating all of them.
+writeFileSync(path.join(dir, 'schema.sql'), 'CREATE TABLE oops (this is not sql);');
+const broken = await get('/invoices/api/tables');
+check('a genuinely broken schema is still reported', broken.status === 400,
+  `${broken.status} ${broken.text.slice(0, 120)}`);
+
+// Put it back so the checks below run against a working app.
+writeFileSync(path.join(dir, 'schema.sql'), `
+CREATE TABLE IF NOT EXISTS invoices (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer TEXT    NOT NULL,
+  total    REAL    NOT NULL DEFAULT 0,
+  status   TEXT    NOT NULL DEFAULT 'draft'
+);
+ALTER TABLE invoices ADD COLUMN rating INTEGER;
+`);
+
 // ── serving ─────────────────────────────────────────────────────────
 
 const page = await get('/invoices/');
