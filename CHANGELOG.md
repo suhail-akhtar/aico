@@ -63,6 +63,25 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   waiting on — the tool description says so rather than letting a model discover
   it the hard way.
 
+- **Every Mini App has its own conversation.** Opening one from the panel
+  rejoins the chat about that app — changes, fixes, enhancements, debugging —
+  with a bar naming what is in scope and a link to the running page. The binding
+  is a log event, so it survives a reload rather than leaving a session quietly
+  answering about the wrong app.
+
+  Its identity, directory, schema and file list go into the **system prompt**,
+  not into a message: that is the cached prefix, written once and read back at a
+  fifth to a tenth of the price on every turn after. Sending it per turn would
+  cost full price and change the tail each time, which is what stops a cache
+  hitting. File contents are deliberately excluded — a prefix embedding
+  `index.html` is invalidated by every edit.
+
+  The contract now asks for the work before the work: research what the app
+  actually needs, read an existing one, ask only what cannot be inferred, and
+  write the schema and screens down before any file exists. It also states the
+  bar for the interface — lead with the answer, one primary action, sort by what
+  matters, teach in the empty state.
+
 - **Sub-agents can be corrected mid-run.** `Task` gains `detach: true`, which
   returns an agent id instead of blocking — the only way a parent can supervise,
   since waiting on a child suspends it inside the same call. `AgentSupervise`
@@ -78,6 +97,11 @@ and each `release/vX.Y` branch is cut from it at the version it names.
 
 ### Fixed
 
+- **A routed model id no longer goes to a direct vendor.** With an OpenAI
+  instance active, `deepseek/deepseek-v4-flash` was sent to api.openai.com,
+  which answers "invalid model ID" — an error that reads like a typo and is
+  actually a routing decision. A vendor's own routed form still belongs to it,
+  so `z-ai/glm-5.3` stays with Z.AI.
 - **Sub-agents ran in the wrong directory.** `runAgent` was called without a
   `cwd`, so a delegated agent worked in `process.cwd()` — on a server driving
   several workspaces, wherever it was launched rather than the project the

@@ -14,6 +14,11 @@
  *   node scripts/miniapp-build-live.mjs
  *
  * Costs money. Uses deepseek-v4-flash through OpenRouter.
+ *
+ * Do NOT run `npm test` while this is in flight: that rebuilds dist-test with
+ * --clean, and this script imports from it. A run killed that way looks exactly
+ * like a run that hung — the host stops answering and the verdict never
+ * prints. Learned the expensive way.
  */
 
 import 'dotenv/config';
