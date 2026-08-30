@@ -101,6 +101,31 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
 
     case 'create': {
       if (!input.name) return 'A name is required.';
+
+      /*
+        A bound session already has an app. It does not need another.
+
+        Watched happening: handed a contract naming the directory, the agent
+        called `create` anyway — because this tool's own description says
+        "start with create" — got a suffixed slug, and built the whole app in
+        `habit-tracker-2` while `habit-tracker` sat empty beside it. The
+        suffixing is deliberate and right for a person naming two things the
+        same; it is exactly wrong for an agent duplicating the app it was just
+        given.
+
+        So in a session about one app, `create` points back at it instead.
+      */
+      if (bound) {
+        const already = await getMiniApp(bound, settings, cwd);
+        if (already) {
+          return `This conversation is already about "${already.slug}" — you do not need to `
+            + `create anything. Work in ${miniAppDir(already.slug, settings, cwd)}, which is `
+            + 'the directory in your instructions above.\n\n'
+            + 'Calling create here would make a SECOND app with a suffixed name and leave '
+            + 'this one empty. If you genuinely need a different app, say so and let the '
+            + 'reader decide.';
+        }
+      }
       const kind: MiniAppKind = input.kind === 'nextjs' ? 'nextjs' : 'page';
       const app = await createMiniApp({
         title: input.name,

@@ -9986,6 +9986,18 @@ console.log('  -- The app a conversation is about cannot be deleted from inside 
   assert(/fix it in place/i.test(refused), 'the refusal says what to do instead');
   assert(/tables/.test(refused), 'naming the tool that checks whether a change applied');
 
+  // And it will not create a second one either. Watched happening: handed a
+  // contract naming the directory, the agent called create anyway — because the
+  // tool description says to start with it — and built the whole app in
+  // "habit-tracker-2" while "habit-tracker" sat empty beside it.
+  const duplicate = await runInContext(
+    { cwd: ws, sessionId: `miniapp-${made.slug}`, settings },
+    () => executeMiniAppManage({ action: 'create', name: 'Reading Log' }));
+  assert(/already about/.test(duplicate),
+    `creating inside a bound session points back at it (got: ${duplicate.slice(0, 80)})`);
+  assert(!fs.existsSync(miniAppDir('reading-log-2', settings, ws)),
+    'and no suffixed second app is made');
+
   // An unrelated app is still deletable — this is a guard on one thing, not a
   // ban on the verb.
   const other = await createMiniApp({ title: 'Something Else' }, settings, ws);

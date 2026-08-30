@@ -256,3 +256,4 @@ export {
 export { nextAuthoringContract } from './miniapps/contract-nextjs.js';
 export { splitStatements } from './miniapps/data.js';
 export { executeMiniAppManage } from './tools/manage-miniapps.js';
+export { authoringContract } from './miniapps/contract.js';
