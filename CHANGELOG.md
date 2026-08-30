@@ -3,7 +3,10 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.5.0 — 2026-08-31
+
+A minor rather than a patch: the minimum Node version moves from 20 to
+22.5, which will stop an older install dead. Everything else is additive.
 
 ### Added
 
