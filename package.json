@@ -54,7 +54,9 @@
     "test:diagrams": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node18 && npx esbuild shared/widgets/diagram-types.ts --bundle --format=esm --outfile=dist-test/diagram-types.mjs --log-level=error && node scripts/diagram-matrix.mjs",
     "test:miniapps": "npx tsup src/miniapps/server.ts --format esm --outDir dist-test/miniapps --target node22 --silent && node scripts/miniapp-probe.mjs",
     "test:supervision": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/supervision-live.mjs",
-    "test:nextapp": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/nextapp-probe.mjs"
+    "test:nextapp": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/nextapp-probe.mjs",
+    "test:nextbuild": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/nextapp-build-live.mjs",
+    "test:section": "node scripts/miniapp-section-live.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.51.0",

@@ -115,10 +115,18 @@ const hasLayout = ['app/layout.tsx', 'app/layout.jsx', 'app/layout.js'].some(has
 check('it wrote an app router page', hasPage, list.join(', ').slice(0, 200));
 check('and a layout', hasLayout);
 
-// Everything under the app directory, so a query built by string concatenation
-// shows up wherever it was written.
+// Source the agent wrote, not build output. `.next` holds Next's own compiled
+// bundles — webpack runtime, polyfills, framework chunks — and judging the
+// agent's SQL habits by reading those is judging the wrong author.
+const GENERATED = new Set(['.next', 'node_modules', 'dist', 'build']);
 const sources = list
-  .map(f => path.join(dir, String(f)))
+  // Filtered on the RELATIVE path, before joining. Matching a directory name
+  // inside an absolute path means caring about separators and about whatever
+  // the temp directory happens to be called; the first segment of the relative
+  // path says the same thing and cannot be argued with.
+  .map(f => String(f))
+  .filter(rel => !rel.split(/[\\/]/).some(seg => GENERATED.has(seg)))
+  .map(rel => path.join(dir, rel))
   .filter(f => /\.(ts|tsx|js|jsx|mjs)$/.test(f) && fs.statSync(f).isFile())
   .map(f => ({ f, text: fs.readFileSync(f, 'utf8') }));
 
@@ -126,10 +134,33 @@ check('it uses node:sqlite rather than adding a driver',
   sources.some(s => /node:sqlite/.test(s.text)) || deps.some(d => /sqlite|pg|mysql/.test(d)),
   'no database access found at all');
 
-// The contract's sharpest rule, and the one a page kind never had to worry
-// about because it could not write a query at all.
-const concatenated = sources.filter(s =>
-  /(SELECT|INSERT|UPDATE|DELETE)[^\n`'"]*(\$\{|['"]\s*\+)/i.test(s.text));
+/*
+  The contract's sharpest rule, and the one a page kind never had to worry
+  about because it could not write a query at all.
+
+  Interpolation is not injection, and the first version of this check could not
+  tell the difference. It flagged
+
+    db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
+
+  which is the correct way to build a partial UPDATE: the fragments are
+  literals the function itself wrote ("title = ?"), and every value still goes
+  through a placeholder. Condemning that alongside `${id}` teaches a reader to
+  ignore the check, which is worse than not having one.
+
+  So an interpolation is suspect unless it is a joined list of fragments. That
+  is a heuristic, not a proof — `${values.join(',')}` would slip past it — and
+  saying so here matters, because a check whose limits are unwritten gets
+  trusted past them.
+*/
+const SQL_INTERPOLATION = /(SELECT|INSERT INTO|UPDATE|DELETE FROM)[\s\S]{0,200}?\$\{([^}]*)\}/gi;
+const concatenated = sources.filter(({ text }) => {
+  for (const match of text.matchAll(SQL_INTERPOLATION)) {
+    if (!/\.join\s*\(/.test(match[2] ?? '')) return true;
+  }
+  // The other shape: a value glued on with +.
+  return /(SELECT|INSERT INTO|UPDATE|DELETE FROM)[^\n`]*['"]\s*\+\s*[a-z_$]/i.test(text);
+});
 check('no value is concatenated into SQL',
   concatenated.length === 0,
   concatenated.map(s => path.basename(s.f)).join(', '));
@@ -157,14 +188,28 @@ check('it starts', ready?.state === 'running',
   + (ready?.output ?? []).slice(-15).map(l => `        ${l}`).join('\n'));
 
 if (ready?.state === 'running' && ready.url) {
-  const html = await fetch(ready.url).then(r => r.text()).catch(e => `fetch failed: ${e.message}`);
-  check('and serves a page', /<html|<body|<main|<div/i.test(html), html.slice(0, 200));
-  // A Next error page is still HTML, so "it rendered" is not enough on its own.
-  check('that is not an error screen',
-    !/Application error|Unhandled Runtime Error|call stack/i.test(html),
-    html.slice(0, 300));
-  const seeded = /todo|doing|done/i.test(html);
-  check('with the board on it', seeded, html.slice(0, 300));
+  /*
+    Fetch the status, not just the body.
+
+    A Next.js page that throws still answers with HTML — the dev error shell —
+    so "it rendered something" passed while the app was returning 500 on every
+    request. The status is the thing that cannot be argued with. Retried a few
+    times because the dev server compiles a route on first request.
+  */
+  let res = { status: 0, html: '' };
+  for (let attempt = 0; attempt < 5; attempt++) {
+    res = await fetch(ready.url)
+      .then(async r => ({ status: r.status, html: await r.text() }))
+      .catch(e => ({ status: 0, html: `fetch failed: ${e.message}` }));
+    if (res.status === 200) break;
+    await new Promise(r => setTimeout(r, 4000));
+  }
+
+  check('it answers 200 rather than an error page', res.status === 200,
+    `HTTP ${res.status} — a page that throws still returns HTML, so the status is the check\n`
+    + (ready.output ?? []).slice(-12).map(l => `        ${l}`).join('\n'));
+  check('and serves a page', /<html|<body|<main|<div/i.test(res.html), res.html.slice(0, 160));
+  check('with the board on it', /todo|doing|done/i.test(res.html), res.html.slice(0, 240));
 }
 
 await stopApp(app.slug);
