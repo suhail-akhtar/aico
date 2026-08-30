@@ -42,14 +42,54 @@ Dependencies are installed on first run. Keep the list short.
 
 ── The database ────────────────────────────────────────────────────────
 Default to SQLite through Node's built-in driver. No dependency, no
-native build, and the file sits beside the app where it can be inspected:
+native build, and the file sits beside the app where it can be inspected.
+
+node:sqlite IS NOT better-sqlite3. It looks close enough that the wrong
+API is the obvious thing to write, and the mistake costs a 500 at
+runtime rather than a compile error. There is no db.transaction(), no
+db.pragma(), and no db.function() in the shape you are thinking of. This
+is the whole surface you need:
 
   import { DatabaseSync } from 'node:sqlite';
+
   const db = new DatabaseSync('data.sqlite');
+  db.exec('PRAGMA journal_mode = WAL');        // pragmas go through exec
+  db.exec('CREATE TABLE IF NOT EXISTS ...');   // any statement, no result
+
+  const rows   = db.prepare('SELECT * FROM t WHERE s = ?').all(status);
+  const one    = db.prepare('SELECT * FROM t WHERE id = ?').get(id);
+  const result = db.prepare('INSERT INTO t (a) VALUES (?)').run(value);
+  result.lastInsertRowid;  result.changes;
+
+  // Transactions are statements, not a wrapper function:
+  db.exec('BEGIN');
+  try { /* ... */ db.exec('COMMIT'); }
+  catch (err) { db.exec('ROLLBACK'); throw err; }
+
+ROWS COME BACK WITH A NULL PROTOTYPE, and React will not send those from
+a Server Component to a Client Component. The page renders, the request
+returns 500, and the message is "Only plain objects, and a few built-ins,
+can be passed to Client Components" — which reads like a problem with
+your component and is a property of the driver. Spread every row before
+it crosses that boundary:
+
+  const rows = db.prepare('SELECT * FROM tasks').all().map(r => ({ ...r }));
+
+Do it at the query, once, rather than at each use. It is the single most
+likely reason a Next.js Mini App returns 500 on a page that looks right.
 
 Open it ONCE per process and export the handle. A module that opens a
 connection per request will exhaust file handles under any real use, and
 the failure arrives long after the code that caused it.
+
+Next's dev server re-evaluates modules; guard the handle so it is created
+once:
+
+  let handle;
+  export function db() {
+    if (!handle) { handle = new DatabaseSync('data.sqlite'); /* migrate */ }
+    return handle;
+  }
 
 If DATABASE_URL is set, honour it instead — Postgres or MySQL — and put
 it in .env.local, never in a file you commit and never in aico's
@@ -108,5 +148,9 @@ use.
 ── Before you call it done ─────────────────────────────────────────────
 Start it (the reader can, from the Mini Apps panel), open it, and click
 through it. A Next.js app that compiles is not an app that works, and
-the first thing a reader does is exactly the thing you did not try.`;
+the first thing a reader does is exactly the thing you did not try.
+
+A page that returns 500 still returns HTML, so "it served something" is
+not the check. Look at what came back. If it is Next's error screen, the
+message names the file and the line.`;
 }
