@@ -124,7 +124,8 @@ import {
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
   owningSession, registerOwnerForTest, requestAgentStop, executeAgentSupervise,
   guideAgent, detachedRun, taskToolDefinition, runTask,
-  openSession, scrubbedEnv, startApp, appState,
+  openSession, scrubbedEnv, startApp, appState, splitStatements, executeMiniAppManage,
+  createMiniApp, miniAppDir,
   agentSuperviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
@@ -9921,6 +9922,79 @@ console.log('  -- A Mini App process gets nothing of yours --');
   assert(/package\.json/.test(started.error ?? ''), 'and says which file is missing');
   assert(appState('not-scaffolded')?.state === 'failed', 'and the state is readable afterwards');
   fs.rmSync(home, { recursive: true, force: true });
+}
+
+console.log('  -- A schema file is split on the semicolons that end a statement --');
+{
+  // The naive split is `sql.split(';')`, and it is wrong in two ways that both
+  // appear in real schemas: a semicolon inside a string literal, and one inside
+  // a trigger body. Either would tear a valid file in half and report a syntax
+  // error in something perfectly correct.
+  assert(splitStatements('CREATE TABLE a (x); CREATE TABLE b (y);').length === 2,
+    'two ordinary statements are two statements');
+
+  const literal = splitStatements("INSERT INTO t VALUES ('a;b'); SELECT 1;");
+  assert(literal.length === 2,
+    `a semicolon inside a string does not end a statement (got ${literal.length})`);
+  assert(literal[0].includes("'a;b'"), 'and the literal survives intact');
+
+  // Doubled quotes are an escaped quote, not the end of the string.
+  const escaped = splitStatements("INSERT INTO t VALUES ('it''s; fine'); SELECT 2;");
+  assert(escaped.length === 2, `an escaped quote does not end the literal (got ${escaped.length})`);
+
+  const trigger = splitStatements(`
+    CREATE TRIGGER touch AFTER UPDATE ON t BEGIN
+      UPDATE t SET updated_at = datetime('now') WHERE id = NEW.id;
+    END;
+    CREATE TABLE after (x);
+  `);
+  assert(trigger.length === 2,
+    `a trigger body is one statement, not two (got ${trigger.length})`);
+  assert(/END/i.test(trigger[0]), 'and it keeps its END');
+
+  // Comments must not be mistaken for anything, and an empty file is not one
+  // empty statement.
+  const commented = splitStatements(['-- a; comment', 'SELECT 1;'].join('\n'));
+  assert(commented.length === 1, `a semicolon in a comment is not a statement (got ${commented.length})`);
+  assert(splitStatements(' \n \t ').length === 0, 'an empty file has no statements');
+}
+
+console.log('  -- The app a conversation is about cannot be deleted from inside it --');
+{
+  // What this prevents actually happened. Asked to add a column, an agent could
+  // not see its schema change take effect, decided the app was broken, deleted
+  // it, and rebuilt it under a new name — taking the reader's data with it.
+  // A real app in a real workspace. The first version of this ran against a
+  // directory with no app in it, so `delete` returned "no such app" and the
+  // assertion passed without ever reaching the refusal — a check that is green
+  // for the wrong reason is worse than no check, because it is evidence.
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-bounddelete-'));
+  const settings = { workspace: { path: ws } };
+  const made = await createMiniApp({ title: 'Reading Log' }, settings, ws);
+  assert(made.slug === 'reading-log', 'the app exists before we try to delete it');
+
+  const refused = await runInContext(
+    { cwd: ws, sessionId: `miniapp-${made.slug}`, settings },
+    () => executeMiniAppManage({ action: 'delete', name: made.slug }));
+  assert(/Refusing to delete/.test(refused),
+    `deleting the bound app is refused (got: ${refused.slice(0, 90)})`);
+  assert(fs.existsSync(miniAppDir(made.slug, settings, ws)),
+    'and the app is still on disk');
+
+  // The message has to name the alternative, or the model simply looks for
+  // another way to do the same thing.
+  assert(/fix it in place/i.test(refused), 'the refusal says what to do instead');
+  assert(/tables/.test(refused), 'naming the tool that checks whether a change applied');
+
+  // An unrelated app is still deletable — this is a guard on one thing, not a
+  // ban on the verb.
+  const other = await createMiniApp({ title: 'Something Else' }, settings, ws);
+  const allowed = await runInContext(
+    { cwd: ws, sessionId: `miniapp-${made.slug}`, settings },
+    () => executeMiniAppManage({ action: 'delete', name: other.slug }));
+  assert(/Deleted/.test(allowed), `another app can still be deleted (got: ${allowed.slice(0, 70)})`);
+
+  fs.rmSync(ws, { recursive: true, force: true });
 }
 
 // ═══════════════════════════════════════════════════════════

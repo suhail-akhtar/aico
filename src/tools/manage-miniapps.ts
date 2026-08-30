@@ -48,7 +48,7 @@ export interface MiniAppManageInput {
  * printing a specific port that might be wrong.
  */
 async function appUrl(slug: string): Promise<string> {
-  const settings = await loadSettings();
+  const settings = currentRunContext()?.settings ?? await loadSettings();
   const port = settings.miniApps?.port;
   const host = settings.miniApps?.host ?? '127.0.0.1';
   return port ? `http://${host}:${port}/${slug}/` : `http://${host}:<aico port + 1>/${slug}/`;
@@ -56,7 +56,7 @@ async function appUrl(slug: string): Promise<string> {
 
 /** Say it once, wherever the user might be about to build something inert. */
 async function disabledNotice(): Promise<string | null> {
-  const settings = await loadSettings();
+  const settings = currentRunContext()?.settings ?? await loadSettings();
   if (settings.miniApps?.enabled) return null;
   return 'Note: Mini Apps are switched off, so nothing is being served right now. '
     + 'Turn on Settings → Mini Apps (or set miniApps.enabled to true) and restart aico. '
@@ -66,7 +66,19 @@ async function disabledNotice(): Promise<string | null> {
 export async function executeMiniAppManage(input: MiniAppManageInput): Promise<string> {
   const cwd = currentCwd();
   const sessionId = currentRunContext()?.sessionId;
-  const settings = await loadSettings();
+  // Which app this conversation is about, when it is about one. Derived from
+  // the session id the binding route uses, so the tool needs no new plumbing.
+  const bound = sessionId?.startsWith('miniapp-') ? sessionId.slice('miniapp-'.length) : undefined;
+  /*
+    The run's settings, falling back to the file.
+
+    The run already resolved these — a project's own `.aico/settings.json` can
+    move `workspace.path`, and the server re-reads them every turn. Reading the
+    file again here would ignore that and look for apps in a different
+    workspace than the one the turn is working in: the tool would report no
+    such app about an app that plainly exists.
+  */
+  const settings = currentRunContext()?.settings ?? await loadSettings();
   const notice = await disabledNotice();
   const withNotice = (body: string) => (notice ? `${body}\n\n${notice}` : body);
 
@@ -155,6 +167,28 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
       const slug = slugify(input.name);
       const app = await getMiniApp(slug, settings, cwd);
       if (!app) return `No Mini App called "${slug}".`;
+
+      /*
+        Refuse to delete the app this conversation is about.
+
+        Not a hypothetical. Asked to add a column, an agent edited schema.sql,
+        could not see the change take effect — a separate bug, since fixed —
+        concluded the app was broken, deleted it, and rebuilt it from scratch
+        under a new name. The reader lost their app and their data to a
+        recovery step nobody asked for.
+
+        Deleting is a reasonable thing to want and a terrible thing to reach for
+        when something looks wrong. In the one place where "something looks
+        wrong" is most likely, it is refused and the alternative is named.
+      */
+      if (bound && slugify(bound) === slug) {
+        return `Refusing to delete "${slug}": this conversation is about that app, `
+          + 'and deleting it would take its database with it.\n\n'
+          + 'If something looks broken, fix it in place — read the files, correct them, '
+          + 'and check with action "tables". Starting over is almost never the repair, '
+          + 'and it is never the repair for a schema that did not seem to apply.\n\n'
+          + 'If the reader genuinely wants it gone, they can delete it from the Mini Apps panel.';
+      }
       const gone = await deleteMiniApp(slug, settings, cwd);
       return gone
         ? `Deleted "${slug}", including its database. That data is not recoverable.`

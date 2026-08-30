@@ -100,11 +100,11 @@ export interface TableInfo {
  * every keystroke of a type-ahead. Apps are small and few; holding them open is
  * cheaper than the alternative and simpler than a pool.
  */
-const open = new Map<string, DatabaseSync>();
+const open = new Map<string, { db: DatabaseSync; schema: string }>();
 
 export function closeAll(): void {
-  for (const db of open.values()) {
-    try { db.close(); } catch { /* already gone; nothing to salvage */ }
+  for (const entry of open.values()) {
+    try { entry.db.close(); } catch { /* already gone; nothing to salvage */ }
   }
   open.clear();
 }
@@ -119,8 +119,32 @@ export function closeAll(): void {
  * the author would follow anyway.
  */
 export async function database(dir: string): Promise<DatabaseSync> {
+  const schemaPath = path.join(dir, 'schema.sql');
+  const schema = existsSync(schemaPath) ? await readFile(schemaPath, 'utf8') : '';
+
   const existing = open.get(dir);
-  if (existing) return existing;
+  if (existing) {
+    /*
+      Re-apply the schema when the file has changed since it was last applied.
+
+      This is not an optimisation, it is the difference between an app that can
+      evolve and one that cannot. The handle is cached for the life of the
+      process, so a schema edited during a session was never applied — and
+      `MiniAppManage tables`, which the contract tells the agent to use to
+      confirm a change, went on reporting the schema from an hour ago.
+
+      Watched live, that is worse than it sounds. An agent asked to add a column
+      edited schema.sql, checked, saw its change missing, checked again,
+      concluded the app was broken, deleted it, and rebuilt it from scratch
+      under a new name. A tool that lies about the state of the world does not
+      merely fail to help; it actively directs the work into a ditch.
+    */
+    if (schema !== existing.schema) {
+      applySchema(existing.db, schema);
+      existing.schema = schema;
+    }
+    return existing.db;
+  }
 
   const db = new DatabaseSync(path.join(dir, 'data.sqlite'));
   // Write-ahead logging, so a read during a write does not block. These apps
@@ -128,15 +152,98 @@ export async function database(dir: string): Promise<DatabaseSync> {
   // as far as SQLite is concerned.
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
+  applySchema(db, schema);
 
-  const schemaPath = path.join(dir, 'schema.sql');
-  if (existsSync(schemaPath)) {
-    const schema = await readFile(schemaPath, 'utf8');
-    if (schema.trim()) db.exec(schema);
-  }
-
-  open.set(dir, db);
+  open.set(dir, { db, schema });
   return db;
+}
+
+/**
+ * Statements of a schema file, split on the semicolons that actually end one.
+ *
+ * A semicolon inside a string literal does not end a statement, and neither
+ * does one inside a `BEGIN … END` trigger body. Both appear in real schemas —
+ * a default of `';'`, a trigger that updates a timestamp — and splitting
+ * naively would tear them in half and report a syntax error in a file that is
+ * perfectly valid.
+ */
+export function splitStatements(sql: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  let depth = 0;               // BEGIN … END nesting
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]!;
+    const next = sql[i + 1];
+
+    if (lineComment) { current += ch; if (ch === '\n') lineComment = false; continue; }
+    if (blockComment) {
+      current += ch;
+      if (ch === '*' && next === '/') { current += next; i++; blockComment = false; }
+      continue;
+    }
+    if (quote) {
+      current += ch;
+      // Doubled quotes are an escaped quote, not the end of the literal.
+      if (ch === quote) {
+        if (next === quote) { current += next; i++; } else quote = null;
+      }
+      continue;
+    }
+    if (ch === '-' && next === '-') { current += ch; lineComment = true; continue; }
+    if (ch === '/' && next === '*') { current += ch; blockComment = true; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; current += ch; continue; }
+
+    if (/[a-z]/i.test(ch)) {
+      const word = sql.slice(i).match(/^[a-z]+/i)?.[0] ?? '';
+      const before = current.slice(-1);
+      const after = sql[i + word.length];
+      const isWord = !/[a-z0-9_]/i.test(before || ' ') && !/[a-z0-9_]/i.test(after || ' ');
+      if (isWord && /^begin$/i.test(word)) depth++;
+      if (isWord && /^end$/i.test(word) && depth > 0) depth--;
+    }
+
+    if (ch === ';' && depth === 0) {
+      if (current.trim()) out.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) out.push(current.trim());
+  return out;
+}
+
+/**
+ * Apply a schema file, tolerating the one error that idempotence cannot express.
+ *
+ * `CREATE TABLE IF NOT EXISTS` says "only if new" and therefore does nothing at
+ * all to a table that already exists — so adding a column by editing the CREATE
+ * is a change that appears to be made and never is. The way to add one is
+ * `ALTER TABLE … ADD COLUMN`, and SQLite has no `IF NOT EXISTS` for it: run it
+ * twice and the second raises "duplicate column name".
+ *
+ * Since the file is applied on every open, "twice" is the normal case. So that
+ * one error is swallowed and everything else is raised. Statement by statement,
+ * because a failure halfway through `exec` of a whole file leaves the rest
+ * unapplied with nothing said.
+ */
+function applySchema(db: DatabaseSync, schema: string): void {
+  if (!schema.trim()) return;
+  for (const statement of splitStatements(schema)) {
+    try {
+      db.exec(statement);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // The only tolerated failure: an ALTER that has already been applied.
+      if (/duplicate column name/i.test(message)) continue;
+      throw new Error(`${message}
+  in: ${statement.slice(0, 120)}`);
+    }
+  }
 }
 
 /**
