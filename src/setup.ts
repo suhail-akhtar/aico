@@ -12,6 +12,7 @@ import chalk from 'chalk';
 import path from 'path';
 import os from 'os';
 import { readFile, writeFile, mkdir } from 'fs/promises';
+import { testProvider } from './providers/connection-test.js';
 
 // ── Provider catalogue ───────────────────────────────────────────────
 
@@ -221,6 +222,28 @@ async function _wizard(rl: readline.Interface): Promise<void> {
     const default_ = spec.urlDefault ?? 'http://localhost:11434/v1';
     const raw = (await ask(rl, chalk.green(`❯ ${label} [${default_}]: `))).trim();
     providerEntry.baseUrl = raw || default_;
+
+    // The endpoint is the one answer the wizard cannot check by reading it, and
+    // getting it wrong is silent: a base URL missing its version segment saves
+    // without complaint and then 404s on the first turn, several minutes later,
+    // as an error from inside a provider. So probe it here and keep the root
+    // that actually answered.
+    process.stdout.write(chalk.gray('  Checking the endpoint… '));
+    const probe = await testProvider(spec.id, providerEntry.apiKey ?? '', providerEntry.baseUrl);
+    if (probe.ok) {
+      if (probe.baseUrl && probe.baseUrl !== providerEntry.baseUrl) {
+        providerEntry.baseUrl = probe.baseUrl;
+        console.log(chalk.yellow(`corrected to ${probe.baseUrl}`));
+      } else {
+        console.log(chalk.green(`${probe.models?.length ?? 0} models available`));
+      }
+    } else {
+      // Reported, not enforced. The endpoint may be a server that is simply not
+      // running yet, and refusing to save would leave nothing to start it with.
+      console.log(chalk.yellow('could not reach it'));
+      console.log(chalk.gray(`  ${probe.error}`));
+      console.log(chalk.gray('  Saved anyway — run /provider add again to change it.'));
+    }
     console.log('');
   }
 

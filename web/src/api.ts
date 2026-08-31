@@ -395,6 +395,8 @@ export interface ProviderTestResult {
   error?: string;
   models?: string[];
   latencyMs?: number;
+  /** The root that answered, when the probe had to correct the one supplied. */
+  baseUrl?: string;
 }
 
 /** One configured provider, as the server reports it — never with a key. */

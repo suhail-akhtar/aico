@@ -142,6 +142,7 @@ import {
   redactInstance,
   validateInstance,
   providerFromInstance,
+  testProvider,
   currentGoal,
   feedbackBySeq,
   deliverables,
@@ -5965,6 +5966,84 @@ console.log('  -- Validation names every bad field at once --');
     'a non-http endpoint is refused');
   const many = validateInstance({ id: '', type: 'openai-compatible' }, existing, { isNew: true });
   assert(many.length >= 2, `several problems are reported together (${many.length}), not one save at a time`);
+}
+
+console.log('  -- Finding the catalogue under a gateway base URL --');
+{
+  // A real server rather than a stubbed fetch, because the bug being pinned
+  // here is a *transport* one: a gateway that answers an unknown path with its
+  // console's index.html and a 200. Nothing about that is visible to a test
+  // that hands the prober a JSON object.
+  const http = await import('http');
+  const CATALOGUE = JSON.stringify({
+    object: 'list',
+    data: [{ id: 'gpt-4', object: 'model' }, { id: 'claude-opus-5', object: 'model' }],
+  });
+  const INDEX_PAGE = '<!doctype html><html><body><div id="root"></div></body></html>';
+
+  // What `/v1/models` does. Everything else behaves the way New API does:
+  // 404 under /v1 and /api, and the single-page console for any other path.
+  let v1 = () => ({ status: 200, type: 'application/json', body: CATALOGUE });
+
+  const server = http.createServer((req, res) => {
+    const route = req.url.split('?')[0];
+    const send = (status, type, body) => {
+      res.writeHead(status, { 'Content-Type': type });
+      res.end(body);
+    };
+    if (route === '/v1/models') { const r = v1(); return send(r.status, r.type, r.body); }
+    if (route.startsWith('/v1') || route.startsWith('/api')) {
+      return send(404, 'application/json', JSON.stringify({ error: { message: 'not found' } }));
+    }
+    send(200, 'text/html; charset=utf-8', INDEX_PAGE);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+
+  const bareHost = await testProvider('openai-compatible', 'sk-test', origin);
+  assert(bareHost.ok, `the bare host connects by falling back to /v1/models (${bareHost.error ?? ''})`);
+  assert(bareHost.models.join(',') === 'claude-opus-5,gpt-4',
+    'and returns the catalogue it found, sorted');
+  assert(bareHost.baseUrl === `${origin}/v1`,
+    'reporting the root that answered, so the form saves the URL that works');
+
+  const versioned = await testProvider('openai-compatible', 'sk-test', `${origin}/v1`);
+  assert(versioned.ok, 'a base that already carries /v1 connects on the first candidate');
+  assert(versioned.baseUrl === undefined,
+    'with no correction reported — handing the input back would only be noise');
+
+  const trailing = await testProvider('openai-compatible', 'sk-test', `${origin}/v1/`);
+  assert(trailing.ok && trailing.baseUrl === undefined, 'a trailing slash is not a difference');
+
+  const pastedEndpoint = await testProvider('openai-compatible', 'sk-test', `${origin}/v1/models`);
+  assert(pastedEndpoint.ok, 'pasting the full endpoint URL from a docs page also connects');
+  assert(pastedEndpoint.baseUrl === `${origin}/v1`,
+    'and is corrected to the root, since the SDK appends its own path');
+
+  // The ranking rule: something that speaks API outranks "nothing at that path".
+  v1 = () => ({
+    status: 401, type: 'application/json',
+    body: JSON.stringify({ error: { message: 'invalid api key' } }),
+  });
+  const badKey = await testProvider('openai-compatible', 'sk-wrong', origin);
+  assert(!badKey.ok, 'a rejected key still fails');
+  assert(/Key rejected/i.test(badKey.error) && /invalid api key/i.test(badKey.error),
+    `the 401 is reported, not the console page the first candidate returned (${badKey.error})`);
+
+  v1 = () => ({ status: 200, type: 'application/json', body: JSON.stringify({ object: 'list', data: [] }) });
+  const empty = await testProvider('openai-compatible', 'sk-test', origin);
+  assert(empty.ok && empty.models.length === 0,
+    'authenticated with an empty catalogue is a success, not a failure');
+
+  v1 = () => ({ status: 404, type: 'application/json', body: JSON.stringify({ error: 'nope' }) });
+  const nowhere = await testProvider('openai-compatible', 'sk-test', origin);
+  assert(!nowhere.ok, 'no catalogue anywhere is a failure');
+  assert(!/Unexpected token|not valid JSON/i.test(nowhere.error),
+    `and never a JSON parse error — that describes our parser, not their endpoint (${nowhere.error})`);
+  assert(/\/v1|version segment|Endpoint not found/i.test(nowhere.error),
+    `it says where to look instead (${nowhere.error})`);
+
+  await new Promise(resolve => server.close(resolve));
 }
 
 console.log('  -- Adapters are built from instances --');

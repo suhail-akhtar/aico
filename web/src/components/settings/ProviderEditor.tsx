@@ -107,12 +107,25 @@ export function ProviderEditor({
         ...(apiKey ? { apiKey } : {}),
         ...(baseUrl ? { baseUrl } : {}),
       });
+      // The probe tries `<base>/models` and `<base>/v1/models`, so a base that
+      // was missing its version segment can still connect. Adopting the root
+      // that answered is the whole value of that: a green test against a URL
+      // the form then discards would send every later request to the path that
+      // did not work.
+      const corrected = result.ok && result.baseUrl && result.baseUrl !== baseUrl.trim()
+        ? result.baseUrl
+        : undefined;
+      if (corrected) { setBaseUrl(corrected); markTouched('baseUrl'); }
+
       setTest({
         running: false,
         ok: result.ok,
-        message: result.error ?? (result.models?.length
-          ? `Connected — ${result.models.length} models available`
-          : 'Connected, but this key has no models'),
+        message: result.error ?? (
+          (result.models?.length
+            ? `Connected — ${result.models.length} models available`
+            : 'Connected, but this key has no models')
+          + (corrected ? ` · endpoint corrected to ${corrected}` : '')
+        ),
         ...(result.models ? { models: result.models } : {}),
         ...(result.latencyMs !== undefined ? { latencyMs: result.latencyMs } : {}),
       });
