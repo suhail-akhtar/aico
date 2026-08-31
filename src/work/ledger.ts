@@ -235,6 +235,26 @@ class Ledger {
     return true;
   }
 
+  /**
+   * Re-tag who asked for this.
+   *
+   * Exists for one case: work admitted over MCP is started through the same
+   * background-agent path as work the model starts itself, so the mirror
+   * records it as `model`. It is not — it came from another process, possibly
+   * another machine's operator, and a user reading their own ledger has every
+   * right to see which rows they did not cause. Retagging afterwards is
+   * cheaper than threading an origin through the whole spawn path for one
+   * caller.
+   */
+  setOrigin(id: string, origin: WorkOrigin): boolean {
+    const record = this.records.get(id);
+    if (!record) return false;
+    record.origin = origin;
+    this.persist(id, { origin });
+    this.emit();
+    return true;
+  }
+
   /** Attach or replace a supervision policy on live work. */
   setPolicy(id: string, policy: SupervisionPolicy): boolean {
     const record = this.records.get(id);

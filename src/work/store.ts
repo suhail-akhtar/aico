@@ -25,8 +25,17 @@ import { isTerminal } from './types.js';
 
 const LF = '\n';
 
-/** Overridable so tests get a real file without touching the user's ledger. */
-let storePath = path.join(os.homedir(), '.aico', 'work.jsonl');
+/**
+ * Where the ledger is written.
+ *
+ * `AICO_WORK_LOG` overrides it. That exists so a live test can exercise the
+ * real code path — a real file, real appends, a real reconcile — without
+ * writing into the ledger the user's own sessions depend on. It is also the
+ * honest way to run two instances against separate state, which is what anyone
+ * testing an MCP integration ends up wanting.
+ */
+let storePath = process.env.AICO_WORK_LOG?.trim()
+  || path.join(os.homedir(), '.aico', 'work.jsonl');
 
 export function workStorePath(): string {
   return storePath;

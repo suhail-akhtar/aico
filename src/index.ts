@@ -315,6 +315,19 @@ program
     process.on('SIGTERM', () => void shutdown());
   });
 
+program
+  .command('mcp-serve')
+  .description('speak MCP on stdin/stdout, so another AI can hand aico work')
+  .option('-C, --cwd <dir>', 'directory the work runs in')
+  .action(async (cmdOpts: { cwd?: string }) => {
+    // Nothing may be printed before this point. stdout is the protocol stream
+    // from the moment the client spawns us, and a banner in it is a parse error
+    // at the other end rather than a cosmetic problem.
+    const { serveMcpOverStdio } = await import('./mcp-server/index.js');
+    await serveMcpOverStdio({ ...(cmdOpts.cwd ? { cwd: cmdOpts.cwd } : {}) });
+    process.exit(0);
+  });
+
 // ── provider subcommand ───────────────────────────────────────────────
 const providerCmd = program
   .command('provider')

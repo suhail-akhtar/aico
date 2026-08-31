@@ -83,16 +83,18 @@ function reflectAgent(
     registerStopHandle(opts.id, (_mode, reason) => opts.stop(reason));
   }
 
-  const tokens = 'inputTokens' in source
-    ? source.inputTokens + source.outputTokens
-    : 0;
-  const usd = 'inputTokens' in source
-    ? costFor(source.model, {
-      inputTokens: source.inputTokens,
-      outputTokens: source.outputTokens,
-      cachedTokens: source.cachedTokens,
-    }, settings)
-    : 0;
+  // Both registries now carry the same four counters. Read defensively anyway:
+  // this runs against records built elsewhere, and a missing counter costing
+  // zero silently disables the spend ceiling rather than failing loudly — which
+  // is exactly the bug that shipped when background agents had no counters at
+  // all and `maxCostUsd` compared a limit against nothing.
+  const tokens = source.inputTokens + source.outputTokens;
+  const usd = costFor(source.model, {
+    inputTokens: source.inputTokens,
+    outputTokens: source.outputTokens,
+    cachedTokens: source.cachedTokens,
+    ...('cacheWriteTokens' in source ? { cacheWriteTokens: source.cacheWriteTokens } : {}),
+  }, settings);
 
   if (state === 'done' || state === 'failed' || state === 'cancelled') {
     // Final counts before the close, or the record lands terminal with the

@@ -165,6 +165,12 @@ export {
 } from './work/watchers.js';
 export { registerBackgroundProcess, closeBackgroundProcess, openCronRun, closeCronRun } from './work/register.js';
 export { isTerminal as isTerminalWorkState } from './work/types.js';
+export { renderRunningWork } from './work/projection.js';
+export { stopWork } from './work/handles.js';
+export { buildMcpTools } from './mcp-server/tools.js';
+export { attachMcpHandlers } from './mcp-server/index.js';
+export { Rpc as McpRpc, textResult as mcpTextResult } from './mcp-server/protocol.js';
+export { McpStdioClient } from './mcp/stdio.js';
 export { costFor } from './tokens.js';
 // -- Session titles --
 export {

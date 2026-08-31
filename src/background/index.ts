@@ -19,6 +19,19 @@ export interface BackgroundAgentRecord {
   currentTool?: string;
   /** Whether the completion notification has been pushed */
   notified: boolean;
+  /**
+   * Cumulative token usage, the same four counters a sub-agent keeps.
+   *
+   * Added because a background agent that reported no spend could not be given
+   * a spend ceiling — the supervisor compared a limit against a cost of zero
+   * and never fired. That mattered most for the case with the least oversight:
+   * work submitted over MCP by another process, which is bounded by a
+   * `maxCostUsd` that was silently unenforceable until these existed.
+   */
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  cacheWriteTokens: number;
 }
 
 const _bgRegistry = new Map<string, BackgroundAgentRecord>();
@@ -97,6 +110,10 @@ export function spawnBackgroundAgent(
     toolCallCount: 0,
     lastActivityAt: Date.now(),
     notified: false,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+    cacheWriteTokens: 0,
   };
 
   _bgRegistry.set(agentId, rec);
@@ -171,6 +188,20 @@ export function spawnBackgroundAgent(
             lastActivity = Date.now();
             r.statusMessage = text.trim() ? 'Responding…' : 'Thinking…';
             r.lastActivityAt = lastActivity;
+            _emit();
+          }
+        },
+        // Accumulated across API calls, matching the sub-agent registry: the
+        // provider reports totals for the call that just finished, and an agent
+        // makes many. Emitting keeps the ledger mirror's cost current, which is
+        // what a spend ceiling is compared against.
+        onTokens: (input, output, cached, cacheWrite) => {
+          const r = _bgRegistry.get(agentId);
+          if (r && !isTerminal(r.status)) {
+            r.inputTokens += input;
+            r.outputTokens += output;
+            r.cachedTokens += cached;
+            r.cacheWriteTokens += cacheWrite;
             _emit();
           }
         },

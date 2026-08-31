@@ -37,26 +37,52 @@ export function hasStopHandle(id: string): boolean {
 }
 
 /**
- * Try to stop one piece of work.
+ * Stop one piece of work, recording *why* before it can be recorded otherwise.
+ *
+ * The ordering here is the whole point, and it was wrong once. Stopping a
+ * background agent flips its own registry to `cancelled` with its own message
+ * ("Cancelled by user"), which the ledger mirror writes to the record on the
+ * very next emit — synchronously, inside the stop call. A caller that stopped
+ * first and recorded its reason second found the record already terminal and
+ * its reason silently dropped. The supervisor's reason, and every reason typed
+ * into `Supervise stop`, was being replaced by a generic one.
+ *
+ * So: take the handle, let the caller write the outcome, *then* stop. `close`
+ * clears the handle, which is why it has to be taken rather than read.
  *
  * Returns false when there is nothing to stop — already finished, never
  * registered, or a stale id from a previous process. Callers report that
- * difference rather than claiming a kill they did not make, because "stopped 3
- * agents" when two of them had already exited is a report that makes the next
- * decision wrong.
+ * difference rather than claiming a kill they did not make: "stopped 3 agents"
+ * when two had already exited is a report that makes the next decision wrong.
  */
-export async function invokeStop(id: string, mode: StopMode, reason: string): Promise<boolean> {
+export async function stopWork(
+  id: string,
+  mode: StopMode,
+  reason: string,
+  recordOutcome: () => void,
+): Promise<boolean> {
   const handle = handles.get(id);
+  handles.delete(id);
+  recordOutcome();
   if (!handle) return false;
   try {
     await handle(mode, reason);
-    return true;
   } catch {
-    // A handle that throws has still been asked. Reporting failure here would
-    // send a supervisor round a retry loop against something that may well be
-    // on its way down.
-    return true;
+    // A handle that throws has still been asked. Reporting failure would send a
+    // supervisor round a retry loop against something already on its way down.
   }
+  return true;
+}
+
+/**
+ * Stop without recording an outcome first.
+ *
+ * For callers that are not writing to the ledger themselves. Prefer
+ * {@link stopWork} — this leaves whatever the stopped subsystem says about
+ * itself as the recorded reason.
+ */
+export async function invokeStop(id: string, mode: StopMode, reason: string): Promise<boolean> {
+  return stopWork(id, mode, reason, () => { /* caller records nothing */ });
 }
 
 /** Tests only. */

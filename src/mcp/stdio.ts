@@ -16,19 +16,45 @@ export class McpStdioClient extends McpBaseClient {
   private msgId = 1;
   private buffer = '';
   private _dead = false;
+  /** The tail of what the server printed, so a failure can say why. */
+  private stderrTail = '';
 
   constructor(config: McpServerConfigV2) {
     super();
     if (!config.command) throw new Error('McpStdioClient requires config.command');
 
-    this.proc = spawn(config.command, config.args ?? [], {
+    /*
+      Windows needs a shell so `.cmd` shims work — `npx`, `pnpm dlx` and most
+      globally installed servers are batch files, which `spawn` cannot execute
+      directly. But `shell: true` hands the command and its arguments to
+      `cmd.exe` as one joined string *without quoting them*, so anything
+      containing a space is split at the space.
+
+      That is not an edge case on Windows: the default Node installation lives
+      in `C:\Program Files\nodejs`, so a server configured to run
+      `"C:\Program Files\nodejs\node.exe" server.mjs` was executed as
+      `C:\Program` with `Files\nodejs\node.exe` as an argument. It failed
+      instantly, and the only symptom was "MCP process exited unexpectedly" —
+      a message with nothing in it to act on.
+    */
+    const needsShell = process.platform === 'win32';
+    const quote = (value: string): string =>
+      needsShell && /\s/.test(value) && !value.startsWith('"') ? `"${value}"` : value;
+
+    this.proc = spawn(quote(config.command), (config.args ?? []).map(quote), {
       env: { ...process.env, ...(config.env ?? {}) } as NodeJS.ProcessEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
+      shell: needsShell,
     });
 
     this.proc.stdout!.on('data', (chunk: Buffer) => this.handleData(chunk.toString()));
-    this.proc.stderr!.on('data', () => { /* silently consume */ });
+    // Kept rather than discarded. A server that will not start says why on
+    // stderr — a missing module, a bad key, a port already taken — and that
+    // message is the entire content of "it did not work". Throwing it away left
+    // every startup failure looking identical.
+    this.proc.stderr!.on('data', (chunk: Buffer) => {
+      this.stderrTail = (this.stderrTail + chunk.toString()).slice(-2000);
+    });
 
     this.proc.on('error', (err) => {
       this._dead = true;
@@ -38,10 +64,13 @@ export class McpStdioClient extends McpBaseClient {
       this.pendingRequests.clear();
     });
 
-    this.proc.on('exit', () => {
+    this.proc.on('exit', (code) => {
       this._dead = true;
+      const why = this.stderrTail.trim().split('\n').slice(-4).join(' | ').slice(0, 400);
+      const detail = `MCP server exited (code ${code ?? 'unknown'})`
+        + (why ? `: ${why}` : ' with nothing on stderr — check the command and its arguments');
       for (const { reject } of this.pendingRequests.values()) {
-        reject(new Error('MCP process exited unexpectedly'));
+        reject(new Error(detail));
       }
       this.pendingRequests.clear();
     });

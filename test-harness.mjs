@@ -187,7 +187,8 @@ import {
   registerStopHandle, resetStopHandlesForTest,
   watch, unwatch, setWakeDelivery, activeWatcherCount, resetWatchersForTest,
   registerBackgroundProcess, closeBackgroundProcess,
-  costFor, isTerminalWorkState,
+  costFor, isTerminalWorkState, renderRunningWork, stopWork,
+  buildMcpTools, attachMcpHandlers, McpRpc,
 } from './dist-test/test-exports.js';
 
 import nodePath from 'path';
@@ -6217,6 +6218,191 @@ console.log('  -- Cost is computed once, not twice --');
     'and both account for the cache discount rather than charging list price twice');
   assert(costFor('an-unknown-model-xyz', usage) > 0,
     'an unpriced model still costs something rather than reading as free');
+}
+
+console.log('  -- What the turn is told about running work --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+
+  assert(renderRunningWork() === '',
+    'nothing running renders nothing at all — a permanent "0 items" block would be '
+    + 'paid for on every turn of every session to say nothing');
+
+  const a = ledger.open({ kind: 'agent', title: 'refactor auth', origin: 'model', sessionId: 's1' });
+  ledger.beat(a, { steps: 4, lastTool: 'Edit' }, { usd: 0.12, tokens: 9000 });
+  const block = renderRunningWork({ sessionId: 's1' });
+  assert(/<running_work>/.test(block), 'live work renders a block');
+  assert(block.includes(a), 'naming the id, so it can be acted on without another call');
+  assert(/steps="4"/.test(block) && /in="Edit"/.test(block), 'with progress and what it is inside');
+  assert(/cost="\$0\.120"/.test(block), 'and what it has spent');
+  assert(/Supervise/.test(block), 'pointing at the tool that controls it');
+  assert(/watcher costs one turn/.test(block),
+    'and telling it to watch rather than poll — the whole point of the feature');
+
+  assert(renderRunningWork({ sessionId: 'someone-else' }) === '',
+    'another session sees none of it');
+
+  ledger.close(a, 'failed', 'tests still red');
+  const after = renderRunningWork({ sessionId: 's1' });
+  assert(/<finished count="1"/.test(after), 'a finished job moves to the finished list');
+  assert(/tests still red/.test(after), 'carrying its outcome, not just its name');
+  assert(/acknowledge/.test(after), 'and saying how to clear it');
+  ledger.acknowledge([a]);
+  assert(renderRunningWork({ sessionId: 's1' }) === '',
+    'acknowledging it empties the block again');
+}
+
+console.log('  -- A big fan-out degrades instead of flooding the prompt --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  const ids = [];
+  for (let i = 0; i < 40; i++) {
+    ids.push(ledger.open({
+      kind: 'agent', origin: 'model', sessionId: 's1',
+      title: `a fairly long description of sub-agent number ${i} doing something specific`,
+    }));
+  }
+  const block = renderRunningWork({ sessionId: 's1' });
+  assert(block.length < 1600, `the block stays bounded (${block.length} chars)`);
+  assert(/count="40"/.test(block), 'and still reports the true count');
+  // Losing rows silently is the failure mode that matters: an orchestrator
+  // acting on a roster it believes is complete, and is not.
+  const named = ids.filter(id => block.includes(id)).length;
+  assert(named === 40 || /too many to list/.test(block),
+    `either every id is named (${named}/40) or it says outright that they are not`);
+}
+
+console.log('  -- A stop records the reason that was given for it --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+
+  // The real bug this guards: stopping a background agent flips its own
+  // registry to "Cancelled by user", which the mirror writes to the record
+  // synchronously — so a caller that stopped first and recorded second found
+  // the record already terminal and its reason silently dropped.
+  const id = ledger.open({ kind: 'agent', title: 'runaway', origin: 'model' });
+  let handleSaw = '';
+  registerStopHandle(id, (_mode, reason) => {
+    handleSaw = reason;
+    // Exactly what the mirror does on the registry's own emit.
+    ledger.close(id, 'cancelled', 'Cancelled by user');
+  });
+
+  const ok = await stopWork(id, 'stop', 'looping on the same edit',
+    () => { ledger.close(id, 'cancelled', 'looping on the same edit'); });
+  assert(ok, 'the handle was invoked');
+  assert(handleSaw === 'looping on the same edit', 'and was given the reason');
+  assert(ledger.get(id).error === 'looping on the same edit',
+    `the caller's reason is what ended up on the record (${ledger.get(id).error})`);
+
+  const gone = await stopWork('nope', 'stop', 'x', () => {});
+  assert(gone === false, 'stopping something with no handle reports the miss');
+}
+
+console.log('  -- A spend ceiling fires when the cost changes, not five seconds later --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+  supervisor.resetForTest();
+  supervisor.start();
+
+  const id = ledger.open({ kind: 'agent', title: 'expensive', origin: 'remote' });
+  let stopped = false;
+  registerStopHandle(id, () => { stopped = true; });
+  ledger.setPolicy(id, { maxCostUsd: 0.10, onBreach: 'stop', notify: 'never' });
+
+  ledger.beat(id, { steps: 1 }, { usd: 0.05, tokens: 100 });
+  await new Promise(r => setTimeout(r, 20));
+  assert(!stopped && ledger.get(id).state === 'running', 'under the ceiling, nothing happens');
+
+  ledger.beat(id, { steps: 2 }, { usd: 0.99, tokens: 9000 });
+  await new Promise(r => setTimeout(r, 50));
+  // A live probe found a job that breached its ceiling, finished, and was never
+  // noticed — the whole breach happened inside one five-second sweep window.
+  assert(stopped, 'crossing it acts immediately rather than waiting for the sweep');
+  assert(ledger.get(id).state === 'cancelled', 'and the record is closed');
+  assert(/ceiling/.test(ledger.get(id).error ?? ''),
+    `naming the limit (${ledger.get(id).error})`);
+
+  // A deadline is the sweep's business: it becomes true by the passage of time,
+  // and acting on it from inside another record's heartbeat would make the
+  // reported reason depend on which unrelated thing beat first.
+  const timed = ledger.open({ kind: 'agent', title: 'slow', origin: 'model' });
+  registerStopHandle(timed, () => {});
+  ledger.setPolicy(timed, { deadlineMs: 0, onBreach: 'stop', notify: 'never' });
+  ledger.beat(timed, { steps: 1 }, { usd: 0, tokens: 0 });
+  await new Promise(r => setTimeout(r, 50));
+  assert(ledger.get(timed).state === 'running',
+    'a deadline is not acted on from inside a heartbeat');
+  await sweepOnce(Date.now() + 10_000);
+  assert(ledger.get(timed).state === 'cancelled', 'but the sweep still catches it');
+
+  supervisor.resetForTest();
+}
+
+console.log('  -- The MCP surface is delegation, not remote control --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+
+  const tools = buildMcpTools();
+  const names = tools.map(t => t.name);
+  assert(names.length === 6, `six tools, deliberately (${names.join(', ')})`);
+  // The line that matters: exposing Read/Bash/Edit would move every safety
+  // property aico has to the wrong side of the boundary.
+  assert(!names.some(n => /read|write|bash|edit|shell|exec/i.test(n)),
+    'and none of them is a file or shell primitive');
+  assert(tools.every(t => t.inputSchema.type === 'object'),
+    'every tool has an object schema a client can validate against');
+
+  const sent = [];
+  const rpc = attachMcpHandlers(new McpRpc(line => sent.push(JSON.parse(line))), tools);
+
+  await rpc.feed(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+  assert(sent[0]?.result?.serverInfo?.name === 'aico', 'initialize identifies the server');
+
+  await rpc.feed(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) + '\n');
+  assert(sent[1]?.result?.tools?.length === 6, 'tools/list advertises all six');
+
+  await rpc.feed(JSON.stringify({
+    jsonrpc: '2.0', id: 3, method: 'tools/call',
+    params: { name: 'aico_status', arguments: {} },
+  }) + '\n');
+  assert(/idle/i.test(sent[2]?.result?.content?.[0]?.text ?? ''), 'a call runs and answers');
+
+  await rpc.feed(JSON.stringify({
+    jsonrpc: '2.0', id: 4, method: 'tools/call',
+    params: { name: 'aico_stop', arguments: { id: 'x' } },
+  }) + '\n');
+  assert(sent[3]?.result?.isError === true,
+    'a bad argument is an isError result, not a transport failure — the caller has to '
+    + 'be able to tell "your call was malformed" from "the work did not succeed"');
+
+  await rpc.feed(JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'nope', params: {} }) + '\n');
+  assert(sent[4]?.error?.code === -32601, 'but an unknown method is a protocol error');
+
+  const before = sent.length;
+  await rpc.feed(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled' }) + '\n');
+  assert(sent.length === before,
+    'a notification with no id is never answered — a response to one is a protocol violation');
+
+  // Framing: a request split across feeds must not be parsed as two.
+  const payload = JSON.stringify({ jsonrpc: '2.0', id: 6, method: 'ping', params: {} });
+  await rpc.feed(payload.slice(0, 10));
+  assert(sent.length === before, 'half a message produces nothing');
+  await rpc.feed(payload.slice(10) + '\n');
+  assert(sent[sent.length - 1]?.id === 6, 'and the other half completes it');
+
+  await rpc.feed('not json at all\n');
+  assert(sent[sent.length - 1]?.error?.code === -32700,
+    'an unparseable line is reported against a null id rather than crashing the stream');
 }
 
 console.log('  -- Redaction --');

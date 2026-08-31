@@ -57,7 +57,9 @@
     "test:nextapp": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/nextapp-probe.mjs",
     "test:nextbuild": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/nextapp-build-live.mjs",
     "test:section": "node scripts/miniapp-section-live.mjs",
-    "test:watchers": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/watcher-live.mjs"
+    "test:watchers": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/watcher-live.mjs",
+    "test:mcp": "npm run build && npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/mcp-server-live.mjs && node scripts/mcp-client-live.mjs",
+    "test:mcp:model": "npm run build && node scripts/mcp-submit-live.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.51.0",
