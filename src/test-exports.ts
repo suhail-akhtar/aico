@@ -172,6 +172,8 @@ export { attachMcpHandlers } from './mcp-server/index.js';
 export { Rpc as McpRpc, textResult as mcpTextResult } from './mcp-server/protocol.js';
 export { McpStdioClient } from './mcp/stdio.js';
 export { costFor } from './tokens.js';
+export { decideHeadlessPermission } from './background/index.js';
+export { setMcpPermissions, mcpPermissions } from './mcp-server/tools.js';
 // -- Session titles --
 export {
   normalizeSessionTitle, fallbackSessionTitle, parseModelTitle, truncateTitleUtf8,
@@ -265,7 +267,7 @@ export {
   owningSession, registerOwnerForTest, requestAgentStop, guideAgent, detachedRun,
   taskToolDefinition, runTask, getAgentRegistry,
 } from './tools/task.js';
-export { executeAgentSupervise, agentSuperviseToolDefinition } from './tools/supervise-agents.js';
+export { executeSupervise, superviseToolDefinition } from './tools/supervise.js';
 export { loadSettings } from './settings.js';
 export { createMiniApp, miniAppDir, getMiniApp, listMiniApps } from './miniapps/store.js';
 export { miniAppContext } from './miniapps/context.js';

@@ -18,7 +18,7 @@
 import { loadSettings } from '../settings.js';
 import { initializeFeatures } from '../bootstrap.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
-import { buildMcpTools, type McpToolSpec } from './tools.js';
+import { buildMcpTools, setMcpPermissions, type McpToolSpec } from './tools.js';
 import { claimStdout, Rpc, textResult } from './protocol.js';
 
 /** The protocol revision aico's own client speaks, so both ends agree. */
@@ -27,6 +27,16 @@ const PROTOCOL_VERSION = '2024-11-05';
 export interface McpServeOptions {
   /** Where work runs. Defaults to the process's directory. */
   cwd?: string;
+  /**
+   * Let submitted work run commands and change files.
+   *
+   * Off unless asked for, and the asking is deliberately a flag on the command
+   * line rather than something a caller can request. Consent does not transfer:
+   * a user who turned on `autoApprove` did so for their own session with a
+   * terminal in front of them, which is not the same as letting an unattended
+   * process on the other end of a pipe edit their repository.
+   */
+  allowWrites?: boolean;
   /** Injected by tests to drive the endpoint without a real process. */
   transport?: { write: (line: string) => void };
 }
@@ -117,9 +127,27 @@ export async function serveMcpOverStdio(opts: McpServeOptions = {}): Promise<voi
     process.stderr.write(`aico mcp-serve: startup warning: ${String(err)}\n`);
   });
 
+  // Decided before the tool list is built, so the descriptions can state the
+  // posture as fact rather than hedge about it.
+  const writes = opts.allowWrites === true
+    || (settings as { mcpServer?: { allowWrites?: boolean } }).mcpServer?.allowWrites === true;
+  setMcpPermissions(writes ? 'full' : 'readonly');
+
   const rpc = attachMcpHandlers(new Rpc(stdout.write), buildMcpTools());
 
-  process.stderr.write('aico mcp-serve: ready on stdio\n');
+  // Announced every time, on stderr. A security posture nobody is told about is
+  // one that surprises someone eventually — and the surprising direction here
+  // would be discovering afterwards that a pipe had write access to a repo.
+  process.stderr.write(
+    `aico mcp-serve: ready on stdio · ${writes ? 'WRITE ACCESS' : 'read-only'}`
+    + ` · work runs in ${process.cwd()}\n`,
+  );
+  if (!writes) {
+    process.stderr.write(
+      'aico mcp-serve: submitted work cannot run commands or change files. '
+      + 'Start with --allow-writes to permit it.\n',
+    );
+  }
 
   await new Promise<void>(resolve => {
     process.stdin.setEncoding('utf8');

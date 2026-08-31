@@ -3,6 +3,83 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **One work ledger.** Sub-agents, background agents, backgrounded shell
+  commands, Mini App servers, cron firings and watchers now share one record
+  shape, one id space and one append-only log at `~/.aico/work.jsonl`. Before
+  this there were five separate registries, so nothing could answer "what is
+  running right now?" — there was nowhere to ask.
+
+  The log is replayed at startup, and anything it says was running is settled:
+  a process whose pid is still alive keeps running (a detached dev server
+  legitimately outlives the session that started it), and everything else is
+  marked `lost`. A crash used to drop in-flight work silently, with "it
+  finished" and "it never came back" looking identical afterwards.
+
+- **`Supervise`** replaces `AgentSupervise`, which could see sub-agents and
+  nothing else. One tool, eight actions — `list`, `stop`, `guide`, `wait`,
+  `watch`, `unwatch`, `policy`, `ack` — and every id argument accepts an array,
+  so stopping three runaway children is one call rather than three.
+
+  Outcomes stay listed until acknowledged. Reading does not clear them, because
+  losing a failure to whichever turn happened to glance at it is how a
+  background job becomes a mystery an hour later.
+
+- **Supervision policies the platform enforces.** Set `deadlineMs`,
+  `maxCostUsd`, `maxSteps` or `idleMs` once with an `onBreach` of `report`,
+  `stop` or `kill`, and stop checking back. `idleMs` is deliberately separate
+  from a deadline: an agent that has worked hard for an hour and one that has
+  made no call in ten minutes are different failures, and one timeout kills the
+  wrong one.
+
+  There is no `pause`. An LLM turn cannot be suspended — the provider stream is
+  a single open request — and a control that silently cancels would be worse
+  than not offering one.
+
+- **Watchers.** Wait for a file, a process, an HTTP endpoint, a command, a log
+  pattern or another piece of work, and be woken when it happens. An agent
+  waiting on a build today runs, sleeps and runs again — a full turn per check.
+  A watcher costs one turn to register and one to be woken by.
+
+- **`aico mcp-serve`.** aico speaks MCP on stdin/stdout, so Claude Code,
+  another aico, or any MCP client can hand it work. **Nothing listens** — no
+  socket, no port — which is why it needs no authentication to be safe.
+
+  Six tools, and deliberately not `Read`/`Bash`/`Edit`: the surface is
+  delegation, not remote control. It runs **read-only by default**; start it
+  with `--allow-writes` (or set `mcpServer.allowWrites`) to let submitted work
+  run commands and change files. The posture is printed to stderr at startup
+  either way.
+
+- **A running-work block in the prompt** when there is something running or
+  something finished you have not acknowledged, and nothing at all otherwise.
+
+### Fixed
+
+- **Background agents could hang forever on a permission prompt.** With
+  `autoApprove` off — the default — any background agent, cron job or
+  MCP-submitted job that needed `Bash`, `Write` or `Edit` fell through to an
+  interactive prompt, written to `process.stdout` and read from `stdin`. Under
+  `aico serve` that is a terminal nobody is watching; under `aico mcp-serve`
+  those are both halves of the JSON-RPC stream. Headless work now gets a
+  decision from policy, and the denial says what to do instead.
+
+- **Background agents reported no token usage**, so a spend ceiling compared a
+  limit against zero and could never fire.
+
+- **A stop's reason was being discarded.** Stopping a background agent flips its
+  own registry to "Cancelled by user", which reached the record first — so every
+  supervisor reason, and every reason typed into a stop, was replaced by a
+  generic one.
+
+- **MCP servers with a space in their command failed on Windows.** `shell: true`
+  passes the command to `cmd.exe` unquoted, and the default Node install lives
+  in `C:\Program Files\nodejs`. The only symptom was "MCP process exited
+  unexpectedly"; server stderr is now kept so a failure can say why.
+
 ## 0.5.0 — 2026-08-31
 
 A minor rather than a patch: the minimum Node version moves from 20 to

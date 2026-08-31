@@ -122,11 +122,11 @@ import {
   currentCwd,
   forkSession,
   WIDGET_CATALOG, widgetForLanguage, catalogLines, getWidgetSpec,
-  owningSession, registerOwnerForTest, requestAgentStop, executeAgentSupervise,
+  owningSession, registerOwnerForTest, requestAgentStop, executeSupervise,
   guideAgent, detachedRun, taskToolDefinition, runTask,
   openSession, scrubbedEnv, startApp, appState, splitStatements, executeMiniAppManage,
   createMiniApp, miniAppDir,
-  agentSuperviseToolDefinition,
+  superviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
   selectToolProfile,
@@ -189,6 +189,7 @@ import {
   registerBackgroundProcess, closeBackgroundProcess,
   costFor, isTerminalWorkState, renderRunningWork, stopWork,
   buildMcpTools, attachMcpHandlers, McpRpc,
+  decideHeadlessPermission, setMcpPermissions, mcpPermissions,
 } from './dist-test/test-exports.js';
 
 import nodePath from 'path';
@@ -6405,6 +6406,63 @@ console.log('  -- The MCP surface is delegation, not remote control --');
     'an unparseable line is reported against a null id rather than crashing the stream');
 }
 
+console.log('  -- A headless job gets a decision, never a question --');
+{
+  // The bug: with no onPermissionRequest, runAgent falls back to
+  // checkPermission, which writes to process.stdout and blocks reading stdin.
+  // Under `aico mcp-serve` those are both halves of the JSON-RPC stream, so the
+  // prompt corrupted the protocol and the read ate the client's own messages.
+  // Verified against a real server: a job asked to write one file never
+  // returned — aico_wait timed out at 200s.
+  const ungated = decideHeadlessPermission('Read', 'inherit', false);
+  assert(ungated.allowed, 'a read-only tool never needs a decision');
+
+  const denied = decideHeadlessPermission('Write', 'readonly', true);
+  assert(!denied.allowed,
+    'readonly refuses a write even when the user has auto-approve on — consent to '
+    + 'act on your own behalf is not consent for an unattended process');
+  assert(/Report what you found/i.test(denied.reason ?? ''),
+    `and tells the model what to do instead (${denied.reason?.slice(0, 60)})`);
+
+  assert(decideHeadlessPermission('Bash', 'full', false).allowed,
+    'full approves regardless of the user setting — it is the explicit opt-in');
+
+  assert(decideHeadlessPermission('Bash', 'inherit', true).allowed,
+    'inherit follows the user when they have auto-approve on');
+  const hung = decideHeadlessPermission('Bash', 'inherit', false);
+  assert(!hung.allowed, 'and denies when they do not');
+  assert(/nobody to ask/i.test(hung.reason ?? ''),
+    `saying why, rather than hanging forever waiting for an answer `
+    + `(${hung.reason?.slice(0, 60)})`);
+
+  for (const tool of ['Bash', 'Write', 'Edit', 'MultiEdit', 'WorkspaceWrite']) {
+    assert(!decideHeadlessPermission(tool, 'readonly', true).allowed,
+      `  ${tool} is gated under readonly`);
+  }
+}
+
+console.log('  -- The MCP server is read-only unless told otherwise --');
+{
+  setMcpPermissions('readonly');
+  assert(mcpPermissions() === 'readonly', 'read-only is the posture');
+  const readonlyDesc = buildMcpTools().find(t => t.name === 'aico_submit').description;
+  assert(/READ-ONLY/.test(readonlyDesc),
+    'and the tool description states it as fact, so a caller asks for findings '
+    + 'rather than discovering the refusal three minutes in');
+  assert(!/unless/i.test(readonlyDesc.split('IMPORTANT')[1] ?? ''),
+    'stated, not hedged');
+
+  setMcpPermissions('full');
+  const fullDesc = buildMcpTools().find(t => t.name === 'aico_submit').description;
+  assert(/WRITE ACCESS/.test(fullDesc), 'the escalated posture is stated just as plainly');
+
+  // A caller must not be able to choose its own restriction.
+  const schema = buildMcpTools().find(t => t.name === 'aico_submit').inputSchema;
+  assert(!('permissions' in schema.properties) && !('allowWrites' in schema.properties),
+    'and there is no argument for a caller to raise it with');
+  setMcpPermissions('readonly');
+}
+
 console.log('  -- Redaction --');
 {
   const withKey = normalizeInstance({ id: 'a', type: 'openai', name: 'A', apiKey: 'sk-secret-value' });
@@ -10141,26 +10199,43 @@ console.log('  -- A supervisor can stop one sub-agent, and is told when it canno
   // The tool refuses to act without a reason, because the sub-agent's own
   // error only ever says "aborted" — and a parent cannot tell a deliberate
   // termination from a crash without being told which it was.
-  const noReason = await executeAgentSupervise({ action: 'stop', agentId: 'x' });
+  const noReason = await executeSupervise({ action: 'stop', id: 'x' });
   assert(/reason is required/i.test(noReason),
     `a stop with no reason is refused (got: ${noReason.slice(0, 60)})`);
 
-  const noId = await executeAgentSupervise({ action: 'stop', reason: 'looping' });
-  assert(/which agent/i.test(noId), 'and a stop with no target asks which one');
+  const noId = await executeSupervise({ action: 'stop', reason: 'looping' });
+  assert(/which ids/i.test(noId), 'and a stop with no target asks which one');
 
-  const missing = await executeAgentSupervise({
-    action: 'stop', agentId: 'ghost', reason: 'looping',
+  const missing = await executeSupervise({
+    action: 'stop', id: 'ghost', reason: 'looping',
   });
-  assert(/No sub-agent/i.test(missing),
-    `stopping an agent this session does not own is refused (got: ${missing.slice(0, 60)})`);
+  assert(/Not found/i.test(missing),
+    `stopping work this session does not own reports the miss (got: ${missing.slice(0, 60)})`);
 
-  const empty = await executeAgentSupervise({ action: 'list' });
-  assert(/No sub-agents/i.test(empty), 'listing with none running says so plainly');
+  const noMsg = await executeSupervise({ action: 'guide', id: 'agent:x' });
+  assert(/message is required/i.test(noMsg), 'guiding with nothing to say is refused');
 
-  // The tool has to describe the limit it works under, or the model will try to
-  // poll a child it is currently blocked on and conclude the tool is broken.
-  assert(/Task blocks/i.test(agentSuperviseToolDefinition.description),
-    'the description states that Task blocks');
+  // Only a sub-agent has an inbox. Saying so beats a silent no-op that reads as
+  // success and changes nothing.
+  ledger.resetForTest();
+  const bgId = ledger.open({ kind: 'agent', title: 'headless', origin: 'remote' });
+  const cannot = await executeSupervise({
+    action: 'guide', id: bgId, message: 'try the other approach',
+  });
+  assert(/cannot be guided|no inbox|Not delivered/i.test(cannot),
+    `guiding something with no inbox says so (got: ${cannot.slice(0, 80)})`);
+  ledger.resetForTest();
+
+  const empty = await executeSupervise({ action: 'list' });
+  assert(/Nothing running/i.test(empty), 'listing with none running says so plainly');
+
+  // One tool, not eight. The saving is a schema per request and a name the
+  // model no longer has to choose between.
+  const actions = superviseToolDefinition.inputSchema.properties.action.enum;
+  assert(actions.length === 8 && actions.includes('guide') && actions.includes('watch'),
+    `every action lives on one tool (${actions.join(', ')})`);
+  assert(/INSTEAD OF POLLING/i.test(superviseToolDefinition.description),
+    'and the description tells the model to watch rather than poll');
 }
 
 console.log('  -- A conversation nobody used leaves nothing behind --');
@@ -10217,23 +10292,23 @@ console.log('  -- Correcting a sub-agent instead of starting it over --');
   assert(guideAgent('never-spawned', 'do it differently') === false,
     'guiding an agent with no inbox reports failure rather than pretending');
 
-  const noMessage = await executeAgentSupervise({ action: 'guide', agentId: 'x' });
-  assert(/What correction/i.test(noMessage), 'a guide with no message is refused');
+  const noMessage = await executeSupervise({ action: 'guide', id: 'agent:x' });
+  assert(/message is required/i.test(noMessage), 'a guide with no message is refused');
 
-  const noTarget = await executeAgentSupervise({ action: 'guide', message: 'try again' });
-  assert(/Which agent/i.test(noTarget), 'and a guide with no target asks which one');
+  const noTarget = await executeSupervise({ action: 'guide', message: 'try again' });
+  assert(/Which ids/i.test(noTarget), 'and a guide with no target asks which one');
 
-  const unknown = await executeAgentSupervise({
-    action: 'guide', agentId: 'ghost', message: 'try again',
+  const unknown = await executeSupervise({
+    action: 'guide', id: 'agent:ghost', message: 'try again',
   });
-  assert(/No sub-agent/i.test(unknown), 'guiding an agent from another session is refused');
+  assert(/Not delivered/i.test(unknown), 'guiding an agent from another session is refused');
 
   // Waiting on something that was never detached must say so rather than
   // hanging or claiming success.
   assert(detachedRun('never-spawned') === undefined, 'nothing is tracked for an unknown id');
-  const nothing = await executeAgentSupervise({ action: 'wait', agentId: 'never-spawned' });
-  assert(/Nothing to wait for/i.test(nothing),
-    `waiting on a non-detached agent says so (got: ${nothing.slice(0, 50)})`);
+  const nothing = await executeSupervise({ action: 'wait', id: 'agent:never-spawned' });
+  assert(/not found/i.test(nothing),
+    `waiting on work that does not exist says so (got: ${nothing.slice(0, 60)})`);
 
   // Detaching is opt-in and has to stay that way: every existing caller and
   // every agent prompt expects the result to come back from the Task call.
@@ -10288,7 +10363,7 @@ console.log('  -- A detached spawn returns an id, and the result waits for you -
     // Waiting after it has already finished still returns the outcome — a
     // parent should not have to race its own child to collect a result.
     const collected = await runInContext({ cwd: home, sessionId: 'web-detach-test' }, () =>
-      executeAgentSupervise({ action: 'wait', agentId: id }));
+      executeSupervise({ action: 'wait', id: `agent:${id}` }));
     assert(typeof collected === 'string' && collected.length > 0,
       'and waiting afterwards still answers');
 

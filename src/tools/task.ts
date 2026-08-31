@@ -312,7 +312,7 @@ export const taskToolDefinition = {
           + 'false is right for most work — you get the result straight back from the call. '
           + 'Set true only when you intend to supervise: while you are waiting on a Task you are '
           + 'suspended inside it and cannot look at anything. Detached, you can watch it with '
-          + 'AgentSupervise, correct it mid-run without losing what it has learned, stop it, and '
+          + 'Supervise, correct it mid-run without losing what it has learned, stop it, and '
           + 'collect the result with "wait". If you detach, you MUST wait before treating the '
           + 'work as done — a detached call returns an id, never an answer.',
       },
@@ -819,7 +819,7 @@ export async function runTask(
   /*
     Detached: started, not awaited.
 
-    The result is kept so `AgentSupervise wait` can come back for it — the work
+    The result is kept so `Supervise wait` can come back for it — the work
     is already in flight and there would otherwise be nothing to await. The
     `catch` is attached immediately and separately: an unhandled rejection here
     would take the process down, and the rejection is genuinely handled, by
@@ -842,7 +842,7 @@ export async function runTask(
     forget.unref?.();
   });
   return `[Spawned "${args.description}" as sub-agent ${agentId}, running in the background. `
-    + 'It is NOT finished and has produced nothing yet. Use AgentSupervise to watch it '
+    + 'It is NOT finished and has produced nothing yet. Use Supervise to watch it '
     + `("list"), correct it without restarting it ("guide"), stop it ("stop"), or collect `
     + `its result ("wait"). Do not report this task as done until you have waited for it.]`;
 }

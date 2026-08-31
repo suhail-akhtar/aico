@@ -1,7 +1,7 @@
 /**
  * `Supervise` — one tool over everything that is running.
  *
- * `AgentSupervise` could see sub-agents and nothing else. A turn that had also
+ * It replaces `AgentSupervise`, which could see sub-agents and nothing else. A turn that had also
  * backgrounded a dev server, scheduled a job and spawned a background agent had
  * to reach for a different tool for each — and had no way at all to ask the
  * question that actually matters between turns: *what is still going, and what
@@ -9,8 +9,8 @@
  *
  * ## Why one tool and not seven
  *
- * Every action here is `list`, `stop`, `wait`, `watch` or `policy` against an
- * id. Seven tools would be seven schemas in every request, seven names for the
+ * Every action here is `list`, `stop`, `guide`, `wait`, `watch` or `policy`
+ * against an id. Eight tools would be eight schemas in every request, eight names for the
  * model to choose between, and — the part that costs real turns — seven round
  * trips when a step needs two of them. One tool with an `action` and **array
  * arguments** means stopping three runaway children is one call, not three.
@@ -31,16 +31,18 @@ import { stopWork } from '../work/handles.js';
 import { ledger } from '../work/ledger.js';
 import { supervisor } from '../work/supervisor.js';
 import { unwatch, watch } from '../work/watchers.js';
-import { owningSession } from './task.js';
+import { guideAgent, owningSession } from './task.js';
 import type { SupervisionPolicy, WatchSpec, WorkRecord } from '../work/types.js';
 import { isTerminal } from '../work/types.js';
 
 export interface SuperviseInput {
-  action: 'list' | 'stop' | 'wait' | 'watch' | 'unwatch' | 'policy' | 'ack';
+  action: 'list' | 'stop' | 'guide' | 'wait' | 'watch' | 'unwatch' | 'policy' | 'ack';
   /** One id, or several. Every id-taking action accepts a batch. */
   id?: string | string[];
   /** Why. Required for `stop` — see the note in the stop branch. */
   reason?: string;
+  /** The correction, for `guide`. */
+  message?: string;
   /** For `list`: include finished work that has already been acknowledged. */
   all?: boolean;
   /** For `wait`: seconds before giving up and leaving the work running. */
@@ -149,8 +151,7 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
     case 'stop': {
       if (!targets.length) return 'Which ids? Use action "list" to see them.';
       if (!input.reason) {
-        // The same rule AgentSupervise established, for the same reason: an
-        // abort surfaces inside the work as "aborted", and a reader who cannot
+        // An abort surfaces inside the work as "aborted", and a reader who cannot
         // tell a deliberate stop from a crash will retry something that was
         // stopped on purpose.
         return 'A reason is required. A stopped agent\'s own error only says "aborted", and '
@@ -195,6 +196,38 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
       if (already.length) parts.push(`Already finished, nothing cancelled: ${already.join(', ')}.`);
       if (missing.length) parts.push(`Not found in this session: ${missing.join(', ')}.`);
       return parts.join(' ');
+    }
+
+    case 'guide': {
+      if (!targets.length) return 'Which ids? Use action "list" to see them.';
+      if (!input.message) {
+        return 'A message is required — the correction to deliver.';
+      }
+      const delivered: string[] = [];
+      const cannot: string[] = [];
+      for (const id of targets) {
+        const record = byId.get(id);
+        if (!record) { cannot.push(`${id} (not found)`); continue; }
+        if (isTerminal(record.state)) { cannot.push(`${id} (${record.state})`); continue; }
+        // Only sub-agents have an inbox. A background agent runs headless with
+        // nothing listening, and a process has no notion of being told
+        // anything — saying so is better than a silent no-op that reads as
+        // success and changes nothing.
+        if (!id.startsWith('agent:')) {
+          cannot.push(`${id} (a ${record.kind} cannot be guided — stop it and re-brief instead)`);
+          continue;
+        }
+        if (guideAgent(id.slice('agent:'.length), input.message)) delivered.push(id);
+        else cannot.push(`${id} (no inbox — it may have just finished)`);
+      }
+      return [
+        delivered.length
+          ? `Delivered to ${delivered.join(', ')}. It lands at the next step boundary, so `
+            + 'everything already learned is kept — unlike cancelling and re-briefing, '
+            + 'which throws away every tool result gathered so far.'
+          : '',
+        cannot.length ? `Not delivered: ${cannot.join(', ')}.` : '',
+      ].filter(Boolean).join(' ');
     }
 
     case 'policy': {
@@ -333,7 +366,7 @@ export const superviseToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'stop', 'wait', 'watch', 'unwatch', 'policy', 'ack'],
+        enum: ['list', 'stop', 'guide', 'wait', 'watch', 'unwatch', 'policy', 'ack'],
       },
       id: {
         oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
@@ -345,6 +378,11 @@ export const superviseToolDefinition = {
           + 'tell a deliberate termination from a crash.',
       },
       all: { type: 'boolean', description: 'list: include already-acked outcomes.' },
+      message: {
+        type: 'string',
+        description: 'guide: the correction to deliver. Lands at the next step boundary of '
+          + 'the sub-agent, keeping everything it has already learned.',
+      },
       timeoutSeconds: { type: 'number', description: 'wait: default 600.' },
       force: { type: 'boolean', description: 'stop: signal immediately rather than asking.' },
       policy: {
