@@ -27,7 +27,7 @@
  */
 
 import { currentRunContext } from '../run-context.js';
-import { stopWork } from '../work/handles.js';
+import { stopWork, takeStopHandle } from '../work/handles.js';
 import { ledger } from '../work/ledger.js';
 import { supervisor } from '../work/supervisor.js';
 import { unwatch, watch } from '../work/watchers.js';
@@ -168,20 +168,32 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
         if (!record) { missing.push(id); continue; }
         if (isTerminal(record.state)) { already.push(`${id} (${record.state})`); continue; }
 
-        // Children first: stopping a parent that is blocked inside a child
-        // leaves the child running and the parent's abort landing on nothing.
+        /*
+          Record the parent's outcome BEFORE stopping anything.
+
+          Stopping a child can close the parent through a follower — a cron
+          firing follows its agent's state — and that follower has only the
+          child's generic message to work with. A caller that stopped children
+          first found its own reason already overwritten by "Cancelled by user".
+          Recording first, signalling after, keeps the stated reason authoritative
+          while preserving the child-before-parent *signal* order that stops a
+          parent blocked inside a child from being left with nothing to abort.
+        */
+        const handle = takeStopHandle(id);
+        ledger.close(id, 'cancelled', input.reason);
+
         for (const child of ledger.descendants(id).reverse()) {
           if (isTerminal(child.state)) continue;
           await stopWork(child.id, mode, `parent ${id} stopped — ${input.reason}`,
             () => { ledger.close(child.id, 'cancelled', `Stopped with parent: ${input.reason}`); });
         }
 
-        // The outcome is written before the stop lands — otherwise the stopped
-        // subsystem's own "Cancelled by user" reaches the record first through
-        // the ledger mirror, and the reason typed here is lost.
-        const stopped = await stopWork(id, mode, input.reason,
-          () => { ledger.close(id, 'cancelled', input.reason); });
-        done.push(stopped ? id : `${id} (no handle — recorded, not signalled)`);
+        if (handle) {
+          try {
+            await handle(mode, input.reason);
+          } catch { /* asked; a throwing handle is still on its way down */ }
+        }
+        done.push(handle ? id : `${id} (no handle — recorded, not signalled)`);
       }
 
       const parts: string[] = [];

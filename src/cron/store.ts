@@ -4,7 +4,17 @@ import path from 'path';
 import os from 'os';
 import type { CronJob, CronStore } from './types.js';
 
-const STORE_PATH = path.join(os.homedir(), '.aico', 'cron.json');
+/**
+ * Where scheduled jobs are kept.
+ *
+ * `AICO_CRON_STORE` overrides it, for the same reason the work ledger has an
+ * override: a live test that exercises the real scheduler must not write real
+ * jobs into the user's own store. Without this, a probe that creates a job
+ * running "every minute" leaves it there — firing forever, on their machine,
+ * long after the test has finished.
+ */
+const STORE_PATH = process.env.AICO_CRON_STORE?.trim()
+  || path.join(os.homedir(), '.aico', 'cron.json');
 
 async function readStore(): Promise<CronStore> {
   if (!existsSync(STORE_PATH)) return { jobs: [], version: 1 };

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { NO_ONE_TO_ASK } from '../tools/askuser.js';
 import { runHooks } from '../hooks.js';
 import { pushNotification } from './notifications.js';
 import type { AicoSettings } from '../settings.js';
@@ -216,6 +217,23 @@ export function spawnBackgroundAgent(
       const absoluteMaxMs = Math.max(idleTimeoutMs * 3, 600_000);
 
       const agentPromise = runAgent({
+        /*
+          Run where the job said to run.
+
+          `opts.cwd` was declared on this options type and never forwarded, so
+          every background agent — and therefore every cron job — ran in the
+          *server's* working directory. A nightly job pointed at a repository
+          wrote its files somewhere else entirely and looked, from that
+          repository, as though it had done nothing at all. A live probe caught
+          it: the file the job was asked to create appeared in aico's own
+          checkout instead of the job's directory.
+
+          Passing it here rather than wrapping the call in `runInContext` is the
+          fix that works: `runAgent` establishes its own context from this very
+          field, defaulting to `process.cwd()`, so an outer context is simply
+          overwritten. That was the first attempt, and the probe caught that too.
+        */
+        cwd: opts.cwd,
         task: args.prompt,
         token: opts.token,
         model,
@@ -234,6 +252,22 @@ export function spawnBackgroundAgent(
         conversationHistory: [],
         settings: opts.settings,
         silent: true,
+        // No human is attached to this run. Declared rather than inferred: a
+        // global askUser callback may well be registered by the web server
+        // while this particular run is a 3am cron firing, and routing its
+        // question to a browser tab nobody has open is a hang wearing a
+        // different hat.
+        headless: true,
+        onAskUser: async (question: string) => {
+          const r = _bgRegistry.get(agentId);
+          if (r && !isTerminal(r.status)) {
+            r.statusMessage = 'Asked a question with nobody to answer';
+            _emit();
+          }
+          return `${NO_ONE_TO_ASK}
+
+(You asked: ${question})`;
+        },
         agentType: opts.agentType,
         abortSignal: abortController.signal,
         onToolCall: (name) => {

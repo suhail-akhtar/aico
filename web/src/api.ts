@@ -386,6 +386,10 @@ export const api = {
 
   system: () => request<SystemSnapshot>('system'),
   cancelBackgroundAgent: (agentId: string) => post<{ cancelled: boolean }>('background/cancel', { agentId }),
+  /** Stop anything in the ledger by id — agent, process, watcher or schedule. */
+  stopWork: (id: string, reason?: string) =>
+    post<{ stopped: boolean; state: string; reason?: string }>('work/stop', { id, reason }),
+  ackWork: (id: string[]) => post<{ acknowledged: number }>('work/ack', { id }),
   cronAction: (action: 'delete' | 'pause' | 'resume', jobId: string) =>
     post<Record<string, unknown>>(`cron/${action}`, { jobId }),
 };
@@ -703,7 +707,20 @@ export interface SystemSnapshot {
     completedAt?: number; toolCallCount: number; currentTool?: string;
     resultPreview?: string; error?: string;
   }>;
-  cron: Array<{ id: string; schedule: string; prompt?: string; task?: string; paused?: boolean; nextRun?: number }>;
+  cron: Array<{
+    id: string; schedule: string; prompt?: string; task?: string;
+    paused?: boolean; nextRun?: number;
+    permissions?: 'full' | 'readonly' | 'inherit';
+    /**
+     * What the last firing did — state, spend, and its outcome.
+     *
+     * From the work ledger rather than the cron store, because the store only
+     * knows when a job last *started*. A schedule that reports its next fire
+     * time and nothing else is how a job that had been failing every night for
+     * a week still looked healthy.
+     */
+    lastOutcome?: string;
+  }>;
   worktrees: Array<{ path?: string; branch?: string; agentId?: string; [k: string]: unknown }>;
   skills: Array<{ name: string; description: string; builtin: boolean }>;
   mcpServers: Array<{
@@ -715,6 +732,31 @@ export interface SystemSnapshot {
     resourceCount: number;
   }>;
   workspace?: WorkspaceInfo;
+  /**
+   * Everything the work ledger holds — one list across sub-agents, background
+   * agents, scheduled firings, backgrounded processes, Mini App servers and
+   * watchers. Live work first, then what recently settled.
+   */
+  work?: WorkRow[];
+}
+
+export interface WorkRow {
+  id: string;
+  kind: 'agent' | 'run' | 'process' | 'watcher' | 'schedule' | 'remote';
+  title: string;
+  state: 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled' | 'lost';
+  origin: 'user' | 'model' | 'cron' | 'remote' | 'watcher';
+  parent?: string;
+  startedAt: number;
+  endedAt?: number;
+  heartbeatAt: number;
+  steps?: number;
+  lastTool?: string;
+  note?: string;
+  costUsd?: number;
+  pid?: number;
+  reported: boolean;
+  outcome?: string;
 }
 
 // ── the event stream ─────────────────────────────────────────────────
