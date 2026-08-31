@@ -191,6 +191,52 @@ function lookupCostRate(model: string, settings?: AicoSettings): CostRate | unde
   return undefined;
 }
 
+/** Token counts to be costed. Every field optional; absent means zero. */
+export interface CostableUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+}
+
+/**
+ * What a given set of token counts costs, in dollars.
+ *
+ * Standalone because supervision needs it: a spend ceiling is enforced against
+ * a sub-agent's cumulative tokens, and that sub-agent's counts live in a
+ * registry record rather than in a tracker instance. Extracted from the
+ * tracker's own `estimateCost` rather than reimplemented beside it — two copies
+ * of a pricing formula is how a ceiling starts firing at a different number
+ * from the one `/cost` reports.
+ *
+ * `inputTokens` is the whole prompt, so the cache counts are subtracted out and
+ * re-added at their own rates rather than charged twice. Cache writes cost
+ * *more* than plain input (1.25x on Anthropic's default 5-minute TTL), which is
+ * why they are a separate term and not folded in — a cold first turn is more
+ * expensive than an uncached one, and an estimate that ignores that makes
+ * caching look strictly free.
+ */
+export function costFor(
+  model: string,
+  usage: CostableUsage,
+  settings?: AicoSettings,
+): number {
+  const inputTokens = usage.inputTokens ?? 0;
+  const outputTokens = usage.outputTokens ?? 0;
+  const cachedTokens = usage.cachedTokens ?? 0;
+  const cacheWriteTokens = usage.cacheWriteTokens ?? 0;
+
+  const rate = lookupCostRate(model, settings) ?? DEFAULT_RATE;
+  const readMultiplier = rate.cacheRead ?? CACHE_READ_RATE_MULTIPLIER;
+  const writeMultiplier = rate.cacheWrite ?? CACHE_WRITE_RATE_MULTIPLIER;
+  const uncachedInput = Math.max(0, inputTokens - cachedTokens - cacheWriteTokens);
+  const inputCost = (uncachedInput / 1_000_000) * rate.input;
+  const cacheReadCost = (cachedTokens / 1_000_000) * (rate.input * readMultiplier);
+  const cacheWriteCost = (cacheWriteTokens / 1_000_000) * (rate.input * writeMultiplier);
+  const outputCost = (outputTokens / 1_000_000) * rate.output;
+  return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+}
+
 /** Exact id, then the longest matching prefix. */
 function matchCostRate(model: string): CostRate | undefined {
   const exact = COST_RATES.find(r => r.match === model);
@@ -276,15 +322,9 @@ export function createTokenTracker() {
      * that ignores that makes caching look strictly free.
      */
     estimateCost(model: string, settings?: AicoSettings): number {
-      const rate = lookupCostRate(model, settings) ?? DEFAULT_RATE;
-      const readMultiplier = rate.cacheRead ?? CACHE_READ_RATE_MULTIPLIER;
-      const writeMultiplier = rate.cacheWrite ?? CACHE_WRITE_RATE_MULTIPLIER;
-      const uncachedInput = Math.max(0, inputTokens - cachedTokens - cacheWriteTokens);
-      const inputCost = (uncachedInput / 1_000_000) * rate.input;
-      const cacheReadCost = (cachedTokens / 1_000_000) * (rate.input * readMultiplier);
-      const cacheWriteCost = (cacheWriteTokens / 1_000_000) * (rate.input * writeMultiplier);
-      const outputCost = (outputTokens / 1_000_000) * rate.output;
-      return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+      return costFor(model, {
+        inputTokens, outputTokens, cachedTokens, cacheWriteTokens,
+      }, settings);
     },
 
     format(model?: string, settings?: AicoSettings, providerType?: string): string {

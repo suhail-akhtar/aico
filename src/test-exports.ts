@@ -153,6 +153,19 @@ export {
 } from './providers/instances.js';
 export { providerFromInstance } from './providers/index.js';
 export { testProvider } from './providers/connection-test.js';
+// -- Work ledger, supervisor and watchers --
+export { ledger } from './work/ledger.js';
+export { setWorkStorePath, readWorkLog, compactWorkLog, pidAlive } from './work/store.js';
+export { evaluate as evaluateBreach, sweepOnce, supervisor } from './work/supervisor.js';
+export {
+  registerStopHandle, clearStopHandle, invokeStop, resetStopHandlesForTest,
+} from './work/handles.js';
+export {
+  watch, unwatch, setWakeDelivery, activeWatcherCount, resetWatchersForTest,
+} from './work/watchers.js';
+export { registerBackgroundProcess, closeBackgroundProcess, openCronRun, closeCronRun } from './work/register.js';
+export { isTerminal as isTerminalWorkState } from './work/types.js';
+export { costFor } from './tokens.js';
 // -- Session titles --
 export {
   normalizeSessionTitle, fallbackSessionTitle, parseModelTitle, truncateTitleUtf8,

@@ -823,6 +823,27 @@ export class RunManager {
     return true;
   }
 
+  /**
+   * Deliver a watcher's wake-up.
+   *
+   * `inject`, not `steer`. The source of every queued message is recorded in
+   * the session log, and a message from a watcher is not something a person
+   * typed — a transcript that claims otherwise is one you cannot audit, and
+   * "why did I say that?" is a bad question to leave a user holding.
+   *
+   * Returns false when the session has no live run, which is the ordinary case
+   * for a watcher that fires long after the conversation moved on. The caller
+   * falls back to a notification rather than dropping it.
+   */
+  wake(sessionId: string, content: string, as: 'steer' | 'followup'): boolean {
+    const run = this.runs.get(sessionId);
+    if (!run) return false;
+    const source = { kind: 'plugin', plugin: 'watcher' } as const;
+    if (as === 'followup') run.inbox.followup(content, source);
+    else run.inbox.inject(content, source);
+    return true;
+  }
+
   /** Flush every session's log. Called on shutdown so nothing is lost. */
   async closeAll(): Promise<void> {
     await Promise.allSettled([...this.runs.values()].map(r => r.close()));

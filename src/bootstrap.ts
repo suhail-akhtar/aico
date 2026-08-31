@@ -20,6 +20,9 @@ import { mcpRegistry } from './mcp/index.js';
 import { cronScheduler } from './cron/scheduler.js';
 import { setBackgroundAgentOpts } from './background/index.js';
 import { setMemoryCacheTtl, stopMemoryWatcher } from './memory/index.js';
+import { ledger } from './work/ledger.js';
+import { setAdapterSettings, startLedgerMirroring, stopLedgerMirroring } from './work/adapters.js';
+import { supervisor } from './work/supervisor.js';
 import type { AicoSettings } from './settings.js';
 import type { McpServerConfigV2 } from './mcp/index.js';
 
@@ -51,6 +54,32 @@ export async function initializeFeatures(opts: BootstrapOptions): Promise<void> 
   const autoApprove = opts.autoApprove ?? settings.autoApprove ?? false;
 
   if (settings.memory?.cacheTtl) setMemoryCacheTtl(settings.memory.cacheTtl);
+
+  /*
+    The ledger comes up before anything that can register with it.
+
+    Loading it is also the only chance to settle what the *last* process left
+    behind. Anything the log says was running is either a detached process whose
+    pid is still alive — a dev server that correctly outlived us — or work that
+    died with the process and has been invisible until now. Reporting the second
+    kind is the whole reason this is persisted: before it, a crash mid-delegation
+    left no trace at all, and "it finished" and "it never came back" looked
+    identical from the next session.
+  */
+  const { recovered, lost } = await ledger.load()
+    .catch((err: unknown) => {
+      warn(`  ⚠ Work ledger failed to load: ${String(err)}`);
+      return { recovered: [], lost: [] };
+    });
+  if (recovered.length) {
+    warn(`  ↻ ${recovered.length} process(es) still running from a previous session`);
+  }
+  if (lost.length) {
+    warn(`  ⚠ ${lost.length} item(s) were interrupted by a restart and are marked lost`);
+  }
+  setAdapterSettings(settings);
+  startLedgerMirroring();
+  supervisor.start();
 
   await skillRegistry.load({
     disableBuiltins: settings.skills?.disableBuiltins,
@@ -89,6 +118,11 @@ export function shutdownFeatures(): void {
   mcpRegistry.stopAll();
   cronScheduler.stop();
   stopMemoryWatcher();
+  supervisor.stop();
+  stopLedgerMirroring();
+  // The ledger itself is deliberately not cleared. Its records outlive this
+  // process by design — that is what makes the next boot able to say what was
+  // interrupted rather than starting from an empty map.
 }
 
 /** Test seam: forget that startup happened, so a suite can run it again. */

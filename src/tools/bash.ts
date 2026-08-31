@@ -17,6 +17,7 @@
 
 import { spawn, execFile, execFileSync } from 'child_process';
 import { currentCwd } from '../run-context.js';
+import { closeBackgroundProcess, registerBackgroundProcess } from '../work/register.js';
 
 export interface BashInput {
   command: string;
@@ -314,6 +315,15 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
     const startupTimer = !inBackground ? undefined : setTimeout(() => {
       if (settled || child.pid === undefined) return;
       running.set(child.pid, { command: input.command, startedAt });
+      // Also into the ledger, so a backgrounded server is visible to
+      // supervision and survives a restart as a pid that can be checked. The
+      // local `running` map stays: it is what `killAllBackground` walks, and it
+      // is reachable without importing the work subsystem into the shell tool.
+      registerBackgroundProcess({
+        pid: child.pid,
+        command: input.command,
+        kill: () => killTree(child.pid),
+      });
       installExitHook();
       // Detached from the parent's event loop so a live server cannot keep the
       // process from exiting on its own.
@@ -407,7 +417,10 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
     });
 
     child.on('close', (code) => {
-      if (child.pid !== undefined) running.delete(child.pid);
+      if (child.pid !== undefined) {
+        running.delete(child.pid);
+        closeBackgroundProcess(child.pid, `Exited ${code ?? 0}`);
+      }
       if (cancelled) { finish(code ?? 1, cancelMessage); return; }
       if (timedOut) {
         finish(code ?? 1, timeoutMessage);

@@ -182,6 +182,12 @@ import {
   detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck,
   checkProjectGate, newestSourceChange, touchedFiles,
   checkVerificationGate, resetVerification, recordVerification, noteFileWritten, webArtifacts,
+  ledger, setWorkStorePath, readWorkLog, pidAlive,
+  evaluateBreach, sweepOnce, supervisor,
+  registerStopHandle, resetStopHandlesForTest,
+  watch, unwatch, setWakeDelivery, activeWatcherCount, resetWatchersForTest,
+  registerBackgroundProcess, closeBackgroundProcess,
+  costFor, isTerminalWorkState,
 } from './dist-test/test-exports.js';
 
 import nodePath from 'path';
@@ -5933,6 +5939,284 @@ console.log('  -- Resolution order --');
   assert(resolveInstance(settings).id === 'first', 'otherwise the first usable one');
   assert(resolveInstance({ ...settings, provider: 'anthropic' }).id === 'second',
     'a legacy provider name resolves by family');
+}
+
+console.log('\n=== WORK LEDGER, SUPERVISION AND WATCHERS ===\n');
+
+console.log('  -- One ledger, one id space --');
+{
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-'));
+  setWorkStorePath(nodePath.join(dir, 'work.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+
+  const parent = ledger.open({ kind: 'agent', title: 'research', origin: 'model', sessionId: 's1' });
+  const child = ledger.open({ kind: 'agent', title: 'sub', origin: 'model', sessionId: 's1', parent });
+  const grand = ledger.open({ kind: 'agent', title: 'sub-sub', origin: 'model', parent: child });
+  const proc = ledger.open({ kind: 'process', title: 'dev server', origin: 'model', pid: 4242, sessionId: 's2' });
+
+  assert(ledger.query({ live: true }).length === 4, 'everything opened is live');
+  assert(ledger.query({ sessionId: 's1' }).length === 2,
+    'one session never sees another session\'s work');
+  assert(ledger.query({ kind: 'process' })[0].id === proc, 'kinds are queryable');
+
+  const tree = ledger.descendants(parent).map(r => r.id);
+  assert(tree.length === 2 && tree.includes(child) && tree.includes(grand),
+    'descendants walks the whole tree, not just direct children');
+
+  ledger.close(child, 'done', 'finished');
+  assert(ledger.get(child).state === 'done', 'closing sets the state');
+  assert(ledger.close(child, 'failed') === false,
+    'and a second close is refused — an outcome is written once');
+
+  // A cycle is data, and a supervisor that hangs while tidying up is worse
+  // than one that misses a child.
+  const a = ledger.open({ kind: 'agent', title: 'a', origin: 'model' });
+  const b = ledger.open({ kind: 'agent', title: 'b', origin: 'model', parent: a });
+  ledger.get(a).parent = b;
+  assert(ledger.descendants(a).length === 1, 'a parent cycle terminates instead of looping');
+}
+
+console.log('  -- Finished is not the same as reported --');
+{
+  const done = ledger.open({ kind: 'agent', title: 'nightly', origin: 'cron' });
+  ledger.close(done, 'failed', 'exit 1');
+  assert(ledger.query({ unreported: true }).some(r => r.id === done),
+    'a finished job is offered until it is acknowledged');
+  assert(ledger.query({ unreported: true }).every(r => isTerminalWorkState(r.state)),
+    'and only finished work is ever offered — running work is not an outcome');
+  ledger.acknowledge([done]);
+  assert(!ledger.query({ unreported: true }).some(r => r.id === done),
+    'acking removes it, so the same failure is not re-reported every turn');
+  assert(ledger.acknowledge([done]) === 0, 'acking twice is a no-op');
+}
+
+console.log('  -- The log survives the process --');
+{
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-'));
+  const file = nodePath.join(dir, 'work.jsonl');
+  setWorkStorePath(file);
+  ledger.resetForTest();
+
+  const live = ledger.open({ kind: 'process', title: 'server', origin: 'model', pid: process.pid });
+  const dead = ledger.open({ kind: 'process', title: 'gone', origin: 'model', pid: 999_999 });
+  const agent = ledger.open({ kind: 'agent', title: 'in-flight', origin: 'model' });
+  const finished = ledger.open({ kind: 'agent', title: 'already done', origin: 'model' });
+  ledger.close(finished, 'done', 'ok');
+
+  // Give the fire-and-forget appends a tick to land before reading the file.
+  await new Promise(r => setTimeout(r, 60));
+  const persisted = await readWorkLog();
+  assert(persisted.records.length === 4, `all four records are on disk (${persisted.records.length})`);
+
+  // The restart.
+  ledger.resetForTest();
+  const { recovered, lost } = await ledger.load();
+
+  assert(recovered.length === 1 && recovered[0].id === live,
+    'a process whose pid is still alive is still running — a detached server '
+    + 'legitimately outlives the session that started it');
+  assert(ledger.get(live).state === 'running', 'and is left running, not reaped');
+  assert(ledger.get(dead).state === 'lost', 'a process whose pid is gone is lost');
+  assert(ledger.get(agent).state === 'lost',
+    'an agent is lost without a pid check — it lived in the process that died');
+  assert(/restart/i.test(ledger.get(agent).error),
+    `and says why, rather than just ending (${ledger.get(agent).error})`);
+  assert(ledger.get(finished).state === 'done',
+    'work that had already finished is left exactly as it was');
+  assert(lost.length === 2, `both interrupted items are reported (${lost.length})`);
+
+  // The heartbeat of a recovered process must not carry the age of the outage.
+  assert(Date.now() - ledger.get(live).heartbeatAt < 1000,
+    'a recovered process gets a fresh heartbeat, or the idle timer would kill it '
+    + 'for having been alive while we were down');
+}
+
+console.log('  -- Limits are enforced by the loop, not asked of the model --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+  supervisor.resetForTest();
+  const now = Date.now();
+
+  const overtime = ledger.open({ kind: 'agent', title: 'slow', origin: 'model' });
+  ledger.setPolicy(overtime, { deadlineMs: 1000, onBreach: 'report' });
+  assert(evaluateBreach(ledger.get(overtime), now + 5000).kind === 'deadline', 'a deadline fires');
+  assert(evaluateBreach(ledger.get(overtime), now + 500) === undefined, 'and not before it is due');
+
+  const pricey = ledger.open({ kind: 'agent', title: 'expensive', origin: 'model' });
+  ledger.setPolicy(pricey, { maxCostUsd: 1, onBreach: 'report' });
+  ledger.beat(pricey, { steps: 1 }, { usd: 2.5, tokens: 100 });
+  assert(evaluateBreach(ledger.get(pricey), now).kind === 'cost', 'a spend ceiling fires');
+
+  const looping = ledger.open({ kind: 'agent', title: 'looping', origin: 'model' });
+  ledger.setPolicy(looping, { maxSteps: 3, onBreach: 'report' });
+  ledger.beat(looping, { steps: 9 });
+  assert(evaluateBreach(ledger.get(looping), now).kind === 'steps', 'a step ceiling fires');
+
+  // The distinction that matters: an agent that has worked hard for an hour and
+  // one that has done nothing for ten minutes are different failures.
+  const stuck = ledger.open({ kind: 'agent', title: 'hung', origin: 'model' });
+  ledger.setPolicy(stuck, { idleMs: 1000, onBreach: 'report' });
+  assert(evaluateBreach(ledger.get(stuck), now + 5000).kind === 'idle', 'an idle timer fires');
+  ledger.beat(stuck, { steps: 1 });
+  assert(evaluateBreach(ledger.get(stuck), Date.now() + 500) === undefined,
+    'and a heartbeat resets it — progress is what it measures, not age');
+
+  const unpoliced = ledger.open({ kind: 'agent', title: 'free', origin: 'model' });
+  assert(evaluateBreach(ledger.get(unpoliced), now + 9_999_999) === undefined,
+    'work with no policy is never breached, however long it runs');
+}
+
+console.log('  -- A breach acts, and acts once --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+  supervisor.resetForTest();
+
+  const stops = [];
+  const parent = ledger.open({ kind: 'agent', title: 'parent', origin: 'model' });
+  const child = ledger.open({ kind: 'agent', title: 'child', origin: 'model', parent });
+  registerStopHandle(parent, (mode, reason) => stops.push(`parent:${mode}:${reason}`));
+  registerStopHandle(child, (mode) => stops.push(`child:${mode}`));
+  ledger.setPolicy(parent, { deadlineMs: 0, onBreach: 'stop', notify: 'never' });
+
+  const first = await sweepOnce(Date.now() + 10_000);
+  assert(first.length === 1 && first[0].kind === 'deadline', 'the sweep finds the breach');
+  assert(stops.some(s => s.startsWith('child:')), 'the child is stopped too');
+  assert(stops.indexOf(stops.find(s => s.startsWith('child:')))
+       < stops.indexOf(stops.find(s => s.startsWith('parent:'))),
+    'children first — stopping a parent blocked inside a child leaves the child running');
+  assert(ledger.get(parent).state === 'cancelled' && ledger.get(child).state === 'cancelled',
+    'both are recorded as cancelled, not failed — a stop invites a re-plan, a crash a retry');
+  assert(/Supervisor/.test(ledger.get(parent).error),
+    `the reason survives into the record (${ledger.get(parent).error})`);
+
+  const second = await sweepOnce(Date.now() + 20_000);
+  assert(second.length === 0, 'a settled breach does not fire again on every sweep');
+
+  // `report` is the ceiling you want to know about rather than enforce.
+  const watched = ledger.open({ kind: 'agent', title: 'noisy', origin: 'model' });
+  ledger.setPolicy(watched, { deadlineMs: 0, onBreach: 'report', notify: 'never' });
+  await sweepOnce(Date.now() + 10_000);
+  assert(ledger.get(watched).state === 'running', 'report leaves it running');
+  assert(/over limit/.test(ledger.get(watched).progress.note ?? ''),
+    'but flags it, so the next listing does not look untouched');
+
+  // A watcher is waiting on purpose, and must not be killed for waiting.
+  const parked = ledger.open({ kind: 'watcher', title: 'waiting', origin: 'model', state: 'blocked' });
+  ledger.setPolicy(parked, { idleMs: 0, onBreach: 'kill', notify: 'never' });
+  await sweepOnce(Date.now() + 10_000);
+  assert(ledger.get(parked).state === 'blocked',
+    'blocked work is skipped — an idle timer on something deliberately parked '
+    + 'would kill a watcher for watching');
+}
+
+console.log('  -- Watchers fire, and wake the session that asked --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+  resetWatchersForTest();
+
+  const woken = [];
+  setWakeDelivery({
+    steer: (sessionId, message) => { woken.push(['steer', sessionId, message]); return true; },
+    followup: (sessionId, message) => { woken.push(['followup', sessionId, message]); return true; },
+  });
+
+  // Waiting on a sibling: the case that would otherwise be a polling loop.
+  const target = ledger.open({ kind: 'agent', title: 'the build', origin: 'model' });
+  const w = watch({
+    condition: { kind: 'work', workId: target, states: ['done'] },
+    wake: { sessionId: 'sess-1', as: 'steer', message: 'build finished' },
+  });
+  assert(ledger.get(w).kind === 'watcher', 'a watcher is a ledger record like anything else');
+  assert(ledger.get(w).state === 'blocked',
+    'and starts blocked, so the supervisor does not treat waiting as hanging');
+  assert(woken.length === 0, 'nothing fires while the condition is unmet');
+
+  ledger.close(target, 'done', 'built');
+  assert(woken.length === 1, 'closing the target fires the watcher');
+  assert(woken[0][0] === 'steer' && woken[0][1] === 'sess-1',
+    'delivered the way it was asked for, to the session that asked');
+  assert(/build finished/.test(woken[0][2]), 'carrying the message it was given');
+  assert(ledger.get(w).state === 'done', 'and the watcher closes, having done its job');
+  assert(activeWatcherCount() === 0, 'a "first" watcher disarms rather than lingering');
+
+  // A file that does not exist yet is the common case for "tell me when the
+  // build writes this", and fs.watch throws on it.
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-watch-'));
+  const pending = nodePath.join(dir, 'not-yet.txt');
+  const fw = watch({
+    condition: { kind: 'file', path: pending, debounceMs: 10 },
+    wake: { sessionId: 'sess-1', as: 'followup' },
+  });
+  assert(activeWatcherCount() === 1, 'watching a path that does not exist yet is armed, not refused');
+  unwatch(fw, 'done testing');
+  assert(activeWatcherCount() === 0, 'and can be stopped');
+  assert(ledger.get(fw).state === 'cancelled', 'leaving a recorded outcome');
+
+  // No delivery wired — the CLI case. It must still be recorded, not dropped.
+  setWakeDelivery(undefined);
+  const target2 = ledger.open({ kind: 'agent', title: 'second', origin: 'model' });
+  const w2 = watch({
+    condition: { kind: 'work', workId: target2 },
+    wake: { sessionId: 'gone', as: 'steer' },
+  });
+  ledger.close(target2, 'failed', 'boom');
+  assert(ledger.get(w2).state === 'done',
+    'a watcher whose session cannot be reached still completes rather than hanging');
+  resetWatchersForTest();
+}
+
+console.log('  -- Backgrounded processes are visible and killable --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+
+  let killed = 0;
+  const id = registerBackgroundProcess({ pid: 31337, command: 'node server.js', kill: () => killed++ });
+  assert(ledger.get(id).kind === 'process' && ledger.get(id).pid === 31337,
+    'a backgrounded command lands in the ledger with its pid');
+  assert(registerBackgroundProcess({ pid: 31337, command: 'node server.js', kill: () => killed++ }) === id,
+    'registering the same pid twice does not duplicate it');
+
+  const long = 'node '.padEnd(200, 'x');
+  const longId = registerBackgroundProcess({ pid: 31338, command: long, kill: () => {} });
+  assert(ledger.get(longId).title.length <= 80,
+    'a very long command line is truncated rather than filling the listing');
+
+  closeBackgroundProcess(31337, 'Exited 0');
+  assert(ledger.get(id).state === 'done', 'and closes when the process exits');
+
+  assert(pidAlive(process.pid), 'our own pid reads as alive');
+  assert(!pidAlive(999_999), 'a pid that does not exist does not');
+  assert(!pidAlive(-1) && !pidAlive(0), 'and nonsense pids are not alive either');
+}
+
+console.log('  -- Cost is computed once, not twice --');
+{
+  // The supervisor enforces a spend ceiling against the same figure /cost
+  // reports. Two copies of a pricing formula is how a ceiling starts firing at
+  // a different number from the one the user was shown.
+  const usage = {
+    inputTokens: 1_000_000, outputTokens: 1_000_000,
+    cachedTokens: 400_000, cacheWriteTokens: 100_000,
+  };
+  const tracked = createTokenTracker();
+  tracked.add(usage.inputTokens, usage.outputTokens, usage.cachedTokens, usage.cacheWriteTokens);
+  assert(Math.abs(costFor('gpt-4o', usage) - tracked.estimateCost('gpt-4o')) < 1e-9,
+    'the standalone cost helper and the tracker agree exactly');
+  // Cached input is cheaper than fresh input, and the ceiling has to see that
+  // or a well-cached agent gets killed for spending money it did not spend.
+  assert(costFor('gpt-4o', usage) < costFor('gpt-4o', { ...usage, cachedTokens: 0, cacheWriteTokens: 0 }),
+    'and both account for the cache discount rather than charging list price twice');
+  assert(costFor('an-unknown-model-xyz', usage) > 0,
+    'an unpriced model still costs something rather than reading as free');
 }
 
 console.log('  -- Redaction --');
