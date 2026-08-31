@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://suhail-akhtar.github.io/aico/sitemap.xml
