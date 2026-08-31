@@ -65,6 +65,7 @@ function getExecutionMode(name: string): ExecutionMode {
 import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
 import { runInContext } from './run-context.js';
 import { buildRuntimeAwareness } from './capabilities.js';
+import { renderRunningWork } from './work/projection.js';
 import { listAgentSpecs } from './agents/registry.js';
 import { skillRegistry } from './skills/index.js';
 import { cronScheduler } from './cron/scheduler.js';
@@ -1112,6 +1113,17 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const volatileDoc = new PromptDocument()
     .add({ id: 'working_tree', body: await buildVolatileContext() })
     .add({ id: 'runtime_awareness', body: runtimeAwareness });
+
+  // What is still running, and what settled without anyone being told.
+  //
+  // Empty — and therefore absent — whenever nothing is in flight, which is most
+  // turns. Placed late so it sits near the request rather than behind the
+  // roster: a background agent that failed while the user was away is context
+  // for what they are about to ask, not an inventory item.
+  const runningWork = renderRunningWork({
+    ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+  });
+  if (runningWork) volatileDoc.add({ id: 'running_work', body: runningWork, order: 900 });
 
   // A skill whose trigger matches this request is named as a match rather than
   // left sitting in a list of twenty descriptions. "Prefer a skill when one

@@ -27,7 +27,7 @@
  */
 
 import { currentRunContext } from '../run-context.js';
-import { invokeStop } from '../work/handles.js';
+import { stopWork } from '../work/handles.js';
 import { ledger } from '../work/ledger.js';
 import { supervisor } from '../work/supervisor.js';
 import { unwatch, watch } from '../work/watchers.js';
@@ -171,12 +171,15 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
         // leaves the child running and the parent's abort landing on nothing.
         for (const child of ledger.descendants(id).reverse()) {
           if (isTerminal(child.state)) continue;
-          await invokeStop(child.id, mode, `parent ${id} stopped — ${input.reason}`);
-          ledger.close(child.id, 'cancelled', `Stopped with parent: ${input.reason}`);
+          await stopWork(child.id, mode, `parent ${id} stopped — ${input.reason}`,
+            () => { ledger.close(child.id, 'cancelled', `Stopped with parent: ${input.reason}`); });
         }
 
-        const stopped = await invokeStop(id, mode, input.reason);
-        ledger.close(id, 'cancelled', input.reason);
+        // The outcome is written before the stop lands — otherwise the stopped
+        // subsystem's own "Cancelled by user" reaches the record first through
+        // the ledger mirror, and the reason typed here is lost.
+        const stopped = await stopWork(id, mode, input.reason,
+          () => { ledger.close(id, 'cancelled', input.reason); });
         done.push(stopped ? id : `${id} (no handle — recorded, not signalled)`);
       }
 

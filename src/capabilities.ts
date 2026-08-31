@@ -154,8 +154,12 @@ export function buildRuntimeAwareness(input: {
     `  <skills>${skills}</skills>`,
     `  <mcp_servers>${mcp}</mcp_servers>`,
     `  <cron_jobs>${cron}</cron_jobs>`,
-    `  <background_agents>${bg}</background_agents>`,
-    `  <sub_agents>${subs}</sub_agents>`,
+    // Background and sub-agent rosters used to be listed here as well. They are
+    // not any more: the `<running_work>` block built from the work ledger is
+    // the one view, and it knows things these lines could not — processes,
+    // watchers, cost, idle time, and which outcomes nobody has read yet. Two
+    // sources for the same fact is exactly the failure the ledger exists to
+    // remove, and the stale one would have been this.
     memories,
     '  <operating_processes>',
     '    <process name="single-agent">Use direct tools for small or tightly-coupled work.</process>',

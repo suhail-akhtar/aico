@@ -29,8 +29,9 @@
  */
 
 import { pushNotification } from '../background/notifications.js';
-import { invokeStop } from './handles.js';
+import { stopWork } from './handles.js';
 import { ledger } from './ledger.js';
+import { isTerminal } from './types.js';
 import type { SupervisionPolicy, WorkRecord } from './types.js';
 
 /** How often the ledger is swept. */
@@ -108,6 +109,17 @@ class Supervisor {
   private timer: NodeJS.Timeout | undefined;
   /** Ids already acted on, so one breach does not fire on every sweep. */
   private acted = new Set<string>();
+  /**
+   * Re-entrancy guard for the subscriber.
+   *
+   * Acting on a breach closes a record, which emits, which re-enters the
+   * subscriber. Without this the second pass would run against a half-finished
+   * first one, and a parent stopping its children would recurse through every
+   * emit each child produced on its way down.
+   */
+  private checking = false;
+
+  private unsubscribe: (() => void) | undefined;
 
   start(): void {
     if (this.timer) return;
@@ -115,12 +127,54 @@ class Supervisor {
     // Supervision must never be the reason the process stays up. If the only
     // thing left running is the thing watching for things to run, exit.
     this.timer.unref?.();
+
+    /*
+      Cost and step ceilings are also checked the moment they change.
+
+      The sweep alone is enough for `deadlineMs` and `idleMs`, which become true
+      by the passage of time and cannot be missed by waiting. It is not enough
+      for `maxCostUsd` and `maxSteps`: those become true at a token report, and
+      a five-second sweep window is five seconds of unbounded spend on a fast
+      model — or, as a live probe found, a job that breached its ceiling,
+      finished, and was never noticed at all.
+
+      Cheap enough to run on every beat: it looks only at records that carry a
+      policy, and each check is a pair of comparisons.
+    */
+    this.unsubscribe = ledger.subscribe(records => {
+      if (this.checking) return;
+      const now = Date.now();
+      const hot = records.filter(r =>
+        r.policy && !this.acted.has(r.id) && !isTerminal(r.state) && r.state !== 'blocked'
+        && (r.policy.maxCostUsd !== undefined || r.policy.maxSteps !== undefined));
+      if (!hot.length) return;
+      this.checking = true;
+      void (async () => {
+        try {
+          for (const record of hot) {
+            const breach = evaluate(record, now);
+            // Only the event-driven limits act here. A deadline that expires
+            // during someone else's heartbeat is the sweep's business, and
+            // acting on it from inside a subscriber would make the reason
+            // depend on which unrelated record happened to beat first.
+            if (!breach || (breach.kind !== 'cost' && breach.kind !== 'steps')) continue;
+            this.acted.add(record.id);
+            await this.act(breach);
+          }
+        } finally {
+          this.checking = false;
+        }
+      })();
+    });
   }
 
   stop(): void {
-    if (!this.timer) return;
-    clearInterval(this.timer);
-    this.timer = undefined;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
   }
 
   /**
@@ -184,16 +238,23 @@ class Supervisor {
     for (const child of ledger.descendants(record.id).reverse()) {
       if (child.state === 'done' || child.state === 'failed'
         || child.state === 'cancelled' || child.state === 'lost') continue;
-      await invokeStop(child.id, action, `parent ${record.id} stopped — ${detail}`);
-      ledger.close(child.id, 'cancelled', `Stopped with parent: ${detail}`);
+      await stopWork(child.id, action, `parent ${record.id} stopped — ${detail}`,
+        () => { ledger.close(child.id, 'cancelled', `Stopped with parent: ${detail}`); });
     }
 
-    const stopped = await invokeStop(record.id, action, reason);
-    // Closed whether or not a handle answered. Work with no handle is work
-    // nothing can stop, and leaving it `running` forever would mean the
+    let stopped = false;
+    await stopWork(record.id, action, reason, () => {
+      // Written before the stop lands, so this reason is the one on the record
+      // rather than whatever the stopped subsystem says about itself.
+      ledger.close(record.id, 'cancelled', reason);
+    }).then(ok => { stopped = ok; });
+    // Work with no handle is work nothing can stop. It is still closed — above,
+    // before the attempt — because leaving it `running` forever would mean the
     // supervisor reports the same breach on every sweep for the rest of the
-    // process's life.
-    ledger.close(record.id, 'cancelled', stopped ? reason : `${reason} (no stop handle)`);
+    // process's life. The note only says so.
+    if (!stopped) {
+      ledger.beat(record.id, { note: `${reason} (no stop handle — recorded, not signalled)` });
+    }
   }
 
   /** Tests only. */
