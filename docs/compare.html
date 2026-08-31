@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aico vs Claude Code, OpenCode, Aider and Cline — compared</title>
+<meta name="description" content="An honest comparison of the aico AI coding agent with Claude Code, OpenCode, Aider, Cline and Cursor — what is genuinely different, and where the alternatives are clearly ahead.">
+<!-- seo:start -->
+<link rel="canonical" href="https://suhail-akhtar.github.io/aico/compare.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aico">
+<meta property="og:url" content="https://suhail-akhtar.github.io/aico/compare.html">
+<meta property="og:title" content="aico vs Claude Code, OpenCode, Aider and Cline — compared">
+<meta property="og:description" content="An honest comparison of the aico AI coding agent with Claude Code, OpenCode, Aider, Cline and Cursor — what is genuinely different, and where the alternatives are clearly ahead.">
+<meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="aico vs Claude Code, OpenCode, Aider and Cline — compared">
+<meta name="twitter:description" content="An honest comparison of the aico AI coding agent with Claude Code, OpenCode, Aider, Cline and Cursor — what is genuinely different, and where the alternatives are clearly ahead.">
+<meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<!-- seo:end -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script><!-- blocking on purpose: sets the theme before first paint -->
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.6.0</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="automation.html">Automation</a>
+      <a href="compare.html" aria-current="page">Compare</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="miniapps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Compare</p>
+
+  <div class="prose">
+    <h1>aico vs the alternatives</h1>
+    <p class="lede">
+      There are a lot of good AI coding agents. This page is about where aico is
+      genuinely different, and — because a comparison that only flatters itself is
+      worthless — where the alternatives are ahead.
+    </p>
+
+    <div class="note warn">
+      <p>
+        <strong>Start with the honest part.</strong> Claude Code, OpenCode,
+        OpenHands, Cline and Aider have between tens of thousands and a hundred
+        thousand-plus users each. aico does not. If what you want is the
+        best-supported tool with the largest community, the most extensions and
+        the most Stack Overflow answers, one of those is the better choice today
+        and it is not close.
+      </p>
+      <p>
+        What follows is about design decisions, not popularity.
+      </p>
+    </div>
+
+    <h2>At a glance</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>&nbsp;</th><th>aico</th><th>Claude Code</th><th>OpenCode</th>
+            <th>Aider</th><th>Cline</th><th>Cursor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Open source</td><td>MIT</td><td>No</td><td>MIT</td><td>Apache</td><td>Apache</td><td>No</td></tr>
+          <tr><td>Bring your own key</td><td>Yes</td><td>Anthropic</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Subscription</td></tr>
+          <tr><td>Runs local models</td><td>Yes</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Limited</td></tr>
+          <tr><td>Terminal</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td><td>No</td></tr>
+          <tr><td>Own web UI</td><td>Yes</td><td>No</td><td>Desktop app</td><td>No</td><td>In VS&nbsp;Code</td><td>Is an editor</td></tr>
+          <tr><td>Editor extension</td><td>No</td><td>Yes</td><td>Yes</td><td>No</td><td>Yes</td><td>n/a</td></tr>
+          <tr><td>Community size</td><td>New</td><td>Very large</td><td>Very large</td><td>Large</td><td>Large</td><td>Very large</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Compiled August 2026 from each project's own documentation. Fast-moving
+      software — check the source before relying on a row.
+    </p>
+
+    <h2>What is actually different about aico</h2>
+
+    <h3>It opens what it builds</h3>
+    <p>
+      This exists because of a specific failure: three models were asked for a
+      single-file 3D space planner, and a keyword check scored two of them twelve
+      features out of twelve. Opened in a browser, one threw on load and rendered
+      nothing; the other was a shell. Nothing in the loop had ever
+      <em>run</em> the thing.
+    </p>
+    <p>
+      <code>VerifyApp</code> opens the page in a real browser and reports what a
+      person would hit — uncaught exceptions, console errors, failed requests,
+      whether a <code>&lt;canvas&gt;</code> was ever painted, and whether named
+      controls do anything when clicked. Most agents check that the code looks
+      right. This one checks that it works.
+    </p>
+
+    <h3>The session is a log, not a chat buffer</h3>
+    <p>
+      Every fact is an append-only event with a sequence number. That is not
+      architecture for its own sake — it is what makes a session resumable after a
+      crash with real tool results rather than a summary, forkable from any
+      message, and compactable without deleting anything. It is also why prompt
+      caching actually hits: the cacheable prefix only ever grows.
+    </p>
+
+    <h3>One ledger for everything running</h3>
+    <p>
+      Sub-agents, background jobs, dev servers, scheduled runs and watchers share
+      one record and one id space, and it survives a restart. You can ask "what is
+      running, and what failed while I was away?" and get an answer. Limits —
+      spend, deadline, idle — are set once and enforced by the platform rather
+      than checked by the model.
+      <a href="automation.html">How that works</a>.
+    </p>
+
+    <h3>It waits without burning turns</h3>
+    <p>
+      Asking most agents to wait for a build means a command, a sleep, and another
+      command — a full turn and a full prompt per check. aico registers a watcher
+      and stops; the platform wakes it. One turn to set, one to be woken by.
+    </p>
+
+    <h3>It can be driven by another AI</h3>
+    <p>
+      <code>aico mcp-serve</code> speaks MCP on stdin and stdout, so Claude Code or
+      any MCP client can delegate a task to it and collect the result. Nothing
+      listens on a port. Several tools <em>consume</em> MCP servers; being one is
+      less common.
+    </p>
+
+    <h2>Where the alternatives are ahead</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>If you want…</th><th>Use</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>The largest community, most extensions, most answers when stuck</td>
+            <td><a href="https://github.com/sst/opencode" rel="noopener">OpenCode</a> or
+                <a href="https://www.anthropic.com/claude-code" rel="noopener">Claude Code</a></td>
+          </tr>
+          <tr>
+            <td>Disciplined, git-native editing where every change is a reviewable commit</td>
+            <td><a href="https://aider.chat" rel="noopener">Aider</a></td>
+          </tr>
+          <tr>
+            <td>To stay inside VS Code, with an extension marketplace</td>
+            <td><a href="https://cline.bot" rel="noopener">Cline</a></td>
+          </tr>
+          <tr>
+            <td>A polished editor with inline completion and a company behind it</td>
+            <td><a href="https://cursor.com" rel="noopener">Cursor</a></td>
+          </tr>
+          <tr>
+            <td>A managed cloud service, or Kubernetes deployment for a team</td>
+            <td><a href="https://www.openhands.dev" rel="noopener">OpenHands</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      aico has no editor extension and no hosted service, and there is no plan for
+      either. It is a terminal agent plus its own local web workspace.
+    </p>
+
+    <h2>Who it is actually for</h2>
+    <ul>
+      <li>You want to <strong>keep your keys</strong> and pay providers directly, or run a local model.</li>
+      <li>You want the agent to <strong>prove web work runs</strong>, not assert that it does.</li>
+      <li>You run <strong>long or background work</strong> and want to see and bound it.</li>
+      <li>You want to <strong>read the code</strong> that is running as you — it is MIT and heavily commented about <em>why</em>.</li>
+    </ul>
+    <p>
+      If none of those is a live problem for you, one of the tools above is
+      probably the better pick, and saying so is more useful than pretending
+      otherwise.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="install.html">Install it →</a>
+      <a class="btn" href="automation.html">Supervision &amp; automation →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

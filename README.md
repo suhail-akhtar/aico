@@ -1,8 +1,13 @@
-# aico — AI Coder CLI
+# aico — open-source AI coding agent
 
-A multi-provider coding agent for the terminal, with a durable session log at
-its core. Works with OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI (GLM),
-and local Ollama.
+An **AI coding agent** for the terminal and a local web workspace, with a
+durable session log at its core. Self-hosted and MIT licensed: **bring your own
+API key** for OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI (GLM) or
+DeepSeek — or run it entirely offline against a local **Ollama** model.
+
+It opens what it builds in a real browser before calling a turn done, keeps one
+supervised ledger of everything running in the background, and speaks **MCP**
+so another AI can hand it work.
 
 ```
   ✻ aico  (AI Coder)
@@ -20,7 +25,11 @@ and local Ollama.
 **Status:** `0.6.0`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
-workspace, visuals and Mini Apps.
+workspace, background supervision, visuals and Mini Apps.
+
+**How does it compare to Claude Code, OpenCode, Aider or Cline?**
+[There is an honest page for that](https://suhail-akhtar.github.io/aico/compare.html),
+including where those are clearly ahead.
 
 New here? [**GUIDE.md**](GUIDE.md) walks through actually using it — the web
 client, planning before building, what the checks are doing when they push back,

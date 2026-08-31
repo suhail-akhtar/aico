@@ -3,23 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aico — the coding agent that opens what it builds</title>
-<meta name="description" content="A multi-provider coding agent for the terminal and a local web workspace. Keeps an append-only session log, verifies web work in a real browser, and steers mid-run.">
+<title>aico — open-source AI coding agent for the terminal and browser</title>
+<meta name="description" content="A free, self-hosted AI coding agent. Bring your own key for Claude, GPT, Gemini, DeepSeek or a local Ollama model. Append-only session log, in-browser verification of what it builds, and supervision for background work.">
 <!-- seo:start -->
 <link rel="canonical" href="https://suhail-akhtar.github.io/aico/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="aico">
 <meta property="og:url" content="https://suhail-akhtar.github.io/aico/">
-<meta property="og:title" content="aico — the coding agent that opens what it builds">
-<meta property="og:description" content="A multi-provider coding agent for the terminal and a local web workspace. Keeps an append-only session log, verifies web work in a real browser, and steers mid-run.">
+<meta property="og:title" content="aico — open-source AI coding agent for the terminal and browser">
+<meta property="og:description" content="A free, self-hosted AI coding agent. Bring your own key for Claude, GPT, Gemini, DeepSeek or a local Ollama model. Append-only session log, in-browser verification of what it builds, and supervision for background work.">
 <meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="aico — the coding agent that opens what it builds">
-<meta name="twitter:description" content="A multi-provider coding agent for the terminal and a local web workspace. Keeps an append-only session log, verifies web work in a real browser, and steers mid-run.">
+<meta name="twitter:title" content="aico — open-source AI coding agent for the terminal and browser">
+<meta name="twitter:description" content="A free, self-hosted AI coding agent. Bring your own key for Claude, GPT, Gemini, DeepSeek or a local Ollama model. Append-only session log, in-browser verification of what it builds, and supervision for background work.">
 <meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<meta name="google-site-verification" content="gpRc3scUpPI39z-lj7Nzrw1MfbZGQKTOK8gErO6jtxQ">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -45,6 +46,78 @@
   }
 }
 </script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is aico free and open source?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — MIT licensed, and there is no account, no telemetry and no hosted service in the middle. You pay whichever model provider you choose, directly, at their prices. Running it against a local Ollama model costs nothing at all."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is it different from Claude Code or Cursor?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It is model-agnostic and local-first: you bring your own API key for Claude, GPT, Gemini, DeepSeek, GLM or a local model, and the whole thing runs on your machine. The design differences that matter are an append-only session log you can resume after a crash, a browser verification step that opens what it builds, and one ledger supervising everything running in the background. A fuller comparison is here, including where the alternatives are ahead."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which AI models can it use?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, and local models through Ollama. The model name decides the provider, so switching model never means also remembering to switch provider. See Providers."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it work in the terminal, or does it need an editor?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Both, and neither is an extension. aico is a terminal agent; aico serve starts a local web workspace on 127.0.0.1. There is no VS Code plugin — the same engine drives both surfaces."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can another AI use aico?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. aico mcp-serve speaks MCP over stdin and stdout, so Claude Code or any MCP client can hand it a task and collect the result. Nothing listens on a port, and submitted work is read-only unless you start it with --allow-writes, which the automation page explains in full."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I stop an AI agent running up a bill?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Set a spend ceiling, a deadline or an idle timeout once, and the platform enforces it — including for sub-agents and background work. Cost is checked the moment it changes rather than on a timer, and the supervision page covers every limit."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens if it crashes in the middle of a task?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The session is an append-only event log, so it replays with real tool results rather than a summary. Anything that was running is reconciled at startup: a background process still alive keeps running, and everything else is reported as interrupted rather than vanishing."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is it safe to let it run shell commands?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "There are layers — per-tool permission prompts with diffs, a bash classifier, plan mode that removes the write tools entirely, and spend caps. The project states the limit plainly rather than claiming a sandbox it does not have: the opt-in sandbox governs aico's own file tools fully and spawned processes only partially."
+      }
+    }
+  ]
+}
+</script>
 <!-- seo:end -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
 <link rel="stylesheet" href="assets/site.css">
@@ -60,6 +133,7 @@
       <a href="providers.html">Providers</a>
       <a href="workspace.html">Workspace</a>
       <a href="automation.html">Automation</a>
+      <a href="compare.html">Compare</a>
       <a href="widgets.html">Visuals</a>
       <a href="miniapps.html">Mini Apps</a>
       <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
@@ -72,7 +146,7 @@
 
   <section class="hero">
     <span class="eyebrow">MIT · self-hosted · bring your own model</span>
-    <h1>The coding agent that opens what it builds.</h1>
+    <h1>The AI coding agent that opens what it builds.</h1>
     <p class="lede">
       aico works in your terminal or a local web workspace. It keeps an append-only
       log of every turn instead of a chat buffer, and it will not call a job done on a
@@ -286,6 +360,105 @@ What rendered:
         <p>Ask for an invoice ledger and get a real one, with SQLite behind it, at its own local URL.</p>
         <span class="more">Read the design →</span>
       </a>
+    </div>
+  </section>
+
+  <!--
+    Questions people actually type, answered plainly.
+
+    The FAQPage structured data on this page is generated *from* this markup by
+    scripts/seo-heads.mjs, so the two can never disagree — which is both what
+    Google requires and the only way a schema block stays true after an edit.
+  -->
+  <section class="faq">
+    <div class="prose">
+      <h2>Questions</h2>
+
+      <h3>Is aico free and open source?</h3>
+      <div class="a">
+        <p>
+          Yes — MIT licensed, and there is no account, no telemetry and no hosted
+          service in the middle. You pay whichever model provider you choose,
+          directly, at their prices. Running it against a local
+          <a href="providers.html">Ollama</a> model costs nothing at all.
+        </p>
+      </div>
+
+      <h3>How is it different from Claude Code or Cursor?</h3>
+      <div class="a">
+        <p>
+          It is model-agnostic and local-first: you bring your own API key for
+          Claude, GPT, Gemini, DeepSeek, GLM or a local model, and the whole thing
+          runs on your machine. The design differences that matter are an
+          append-only session log you can resume after a crash, a browser
+          verification step that opens what it builds, and one ledger supervising
+          everything running in the background.
+          <a href="compare.html">A fuller comparison is here</a>, including where
+          the alternatives are ahead.
+        </p>
+      </div>
+
+      <h3>Which AI models can it use?</h3>
+      <div class="a">
+        <p>
+          OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI GLM, DeepSeek, any
+          OpenAI-compatible endpoint, and local models through Ollama. The model
+          name decides the provider, so switching model never means also
+          remembering to switch provider. See <a href="providers.html">Providers</a>.
+        </p>
+      </div>
+
+      <h3>Does it work in the terminal, or does it need an editor?</h3>
+      <div class="a">
+        <p>
+          Both, and neither is an extension. <code>aico</code> is a terminal
+          agent; <code>aico serve</code> starts a local web workspace on
+          <code>127.0.0.1</code>. There is no VS Code plugin — the same engine
+          drives both surfaces.
+        </p>
+      </div>
+
+      <h3>Can another AI use aico?</h3>
+      <div class="a">
+        <p>
+          Yes. <code>aico mcp-serve</code> speaks MCP over stdin and stdout, so
+          Claude Code or any MCP client can hand it a task and collect the result.
+          Nothing listens on a port, and submitted work is read-only unless you
+          start it with <code>--allow-writes</code>, which the
+          <a href="automation.html#mcp">automation page</a> explains in full.
+        </p>
+      </div>
+
+      <h3>How do I stop an AI agent running up a bill?</h3>
+      <div class="a">
+        <p>
+          Set a spend ceiling, a deadline or an idle timeout once, and the platform
+          enforces it — including for sub-agents and background work. Cost is
+          checked the moment it changes rather than on a timer, and the
+          <a href="automation.html">supervision page</a> covers every limit.
+        </p>
+      </div>
+
+      <h3>What happens if it crashes in the middle of a task?</h3>
+      <div class="a">
+        <p>
+          The session is an append-only event log, so it replays with real tool
+          results rather than a summary. Anything that was running is reconciled
+          at startup: a background process still alive keeps running, and
+          everything else is reported as interrupted rather than vanishing.
+        </p>
+      </div>
+
+      <h3>Is it safe to let it run shell commands?</h3>
+      <div class="a">
+        <p>
+          There are layers — per-tool permission prompts with diffs, a bash
+          classifier, plan mode that removes the write tools entirely, and spend
+          caps. The project states the limit plainly rather than claiming a
+          sandbox it does not have: the opt-in sandbox governs aico's own file
+          tools fully and spawned processes only partially.
+        </p>
+      </div>
     </div>
   </section>
 
