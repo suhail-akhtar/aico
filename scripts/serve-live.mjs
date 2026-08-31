@@ -58,6 +58,25 @@ function killPid(pid) {
 }
 
 /**
+ * Where a session's event log landed, decoded back to the directory it names.
+ *
+ * The only externally visible evidence of which cwd a run resolved to — session
+ * logs are filed under a hash of it, so reading the hash back answers the
+ * question without needing the server to expose it.
+ */
+function sessionCwd(sessionId) {
+  const base = path.join(os.homedir(), '.aico', 'projects');
+  if (!fs.existsSync(base)) return undefined;
+  for (const dir of fs.readdirSync(base)) {
+    if (fs.existsSync(path.join(base, dir, 'sessions', `${sessionId}.events.jsonl`))) {
+      return Buffer.from(dir.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+        .toString('utf8').replace(/\?+$/, '');
+    }
+  }
+  return undefined;
+}
+
+/**
  * Start a server and resolve once it prints its URL.
  *
  * `port` may be omitted, which is not the same as passing one: an explicit
@@ -67,12 +86,12 @@ function killPid(pid) {
  * The port is read back out of the printed URL rather than assumed, because on
  * the fallback path it is not the number that was requested.
  */
-function startServe(port, extraEnv = {}) {
+function startServe(port, extraEnv = {}, extraArgs = []) {
   return new Promise((resolve, reject) => {
     const label = port ?? `auto-${servers.length}`;
     const logFile = path.join(workdir, `serve-${label}.log`);
     const out = fs.openSync(logFile, 'a');
-    const args = [entry, 'serve', '--no-open'];
+    const args = [entry, 'serve', '--no-open', ...extraArgs];
     if (port) args.push('--port', String(port));
 
     const proc = spawn(process.execPath, args, {
@@ -98,6 +117,13 @@ function startServe(port, extraEnv = {}) {
       }
     }, 500);
   });
+}
+
+async function api(s, route) {
+  const res = await fetch(`http://127.0.0.1:${s.port}/api/${route}`, {
+    headers: { 'x-aico-token': s.token },
+  });
+  return res.json();
 }
 
 async function apiSystem(s) {
@@ -232,6 +258,47 @@ try {
     s.proc.kill();
     await new Promise(r => { s.proc.on('exit', r); setTimeout(r, 8000); });
   }
+  console.log('\n-- --project makes the folder the subject --');
+  {
+    /*
+      A web session that names no project falls back to aico's scratch
+      workspace. That is right for a browser reaching a portal which has been up
+      for days and has no idea where the process started — and wrong for
+      something that started the server *for* this folder moments ago.
+
+      The VS Code extension is the second case, and without `--project` every
+      `Read` of a project file was refused for being outside the run's roots
+      while `Bash` — which is not path-confined — kept working. A confusing way
+      to look broken, and exactly what happened the first time it ran.
+    */
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-proj-'));
+    fs.writeFileSync(path.join(projectDir, 'README.md'), '# Subject Project\n');
+
+    const s = await startServe(undefined, {}, ['--project', projectDir]);
+    const projects = await api(s, 'projects');
+    check((projects.projects ?? []).some(p => p.path === projectDir),
+      'the directory is registered as a known project');
+
+    const sessionId = `web-proj-${Date.now().toString(36)}`;
+    await fetch(`http://127.0.0.1:${s.port}/api/submit`, {
+      method: 'POST',
+      headers: { 'x-aico-token': s.token, 'Content-Type': 'application/json' },
+      // No `project` field, on purpose: the default is what is being tested.
+      body: JSON.stringify({
+        sessionId,
+        task: 'Reply with exactly the single word HERE. No tools, no explanation.',
+      }),
+    });
+
+    const landed = await until(() => sessionCwd(sessionId), 120_000);
+    check(landed === projectDir,
+      `a session naming no project lands in it rather than the workspace (${landed})`);
+
+    s.proc.kill();
+    await new Promise(r => setTimeout(r, 3000));
+    try { fs.rmSync(projectDir, { recursive: true, force: true }); } catch { /* locked */ }
+  }
+
   console.log('\n-- a busy port is handled, not fatal --');
   {
     /*

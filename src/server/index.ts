@@ -66,6 +66,23 @@ export interface ServeOptions {
    * suite people stop running.
    */
   open?: boolean;
+  /**
+   * This directory *is* the subject — treat it as the project, not a launch
+   * directory that happens to be somewhere.
+   *
+   * The default below deliberately falls back to the workspace rather than to
+   * wherever the process started, because a portal left running for days and
+   * reached from a browser has no idea where that was. That reasoning inverts
+   * when something starts the server *for* a folder and immediately shows it to
+   * you: the VS Code extension knows exactly which project is meant, and
+   * without a way to say so every `Read` of a project file was refused for
+   * being outside the run's roots while `Bash` — which is not path-confined —
+   * worked, which is a confusing way to look broken.
+   *
+   * Setting this registers the directory as a known project and makes it the
+   * default for sessions that name none. Browser behaviour is unchanged.
+   */
+  project?: string;
 }
 
 /**
@@ -206,7 +223,23 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
    * places the agent is meant to write. Picking a project in the sidebar still
    * wins; this only decides what happens when nothing was picked.
    */
-  const webDefaultDir = resolveWorkspaceRoot(settings, cwd);
+  /*
+    When a caller names the project, that wins over the workspace fallback.
+
+    Registered as a known project too, because `resolveCwd` only honours a
+    requested directory that is already known — so without this the `project`
+    field on a submit would be silently ignored and the session would land back
+    in the workspace.
+  */
+  const namedProject = opts.project ? normalizeProjectPath(opts.project) : undefined;
+  if (namedProject) {
+    await addProject(namedProject).catch(() => {
+      // Already registered, or unreadable. Neither is worth refusing to start
+      // over — `resolveCwd` falls back exactly as it did before.
+    });
+  }
+
+  const webDefaultDir = namedProject ?? resolveWorkspaceRoot(settings, cwd);
   try {
     // Created up front: a default directory that does not exist turns the
     // first tool call into an error about a path nobody chose.

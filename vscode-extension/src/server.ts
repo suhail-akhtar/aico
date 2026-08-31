@@ -80,7 +80,20 @@ export class ServerManager implements vscode.Disposable {
       throw new Error('Open a folder first — aico runs against a project directory.');
     }
 
-    const args = [...extraArgs, 'serve', '--no-open'];
+    /*
+      `--project` is the important one.
+
+      Without it a web session falls back to aico's scratch workspace rather
+      than the folder you have open, and every `Read` of a project file is
+      refused for being outside the run's roots — while `Bash`, which is not
+      path-confined, keeps working. That combination is a confusing way to look
+      broken, and it is exactly what happened the first time this ran.
+
+      The fallback is right for a browser reaching a portal that has been up for
+      days; it is wrong here, because this server was started for this folder
+      moments ago.
+    */
+    const args = [...extraArgs, 'serve', '--no-open', '--project', cwd];
     /*
       Port 0 means "leave it alone", not "pass 0".
 
