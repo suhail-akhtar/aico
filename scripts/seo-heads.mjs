@@ -32,6 +32,85 @@ const START = '<!-- seo:start -->';
 const END = '<!-- seo:end -->';
 
 /**
+ * Proves ownership to Google Search Console. Home page only — that is where the
+ * HTML-tag method looks for a URL-prefix property.
+ */
+const GOOGLE_VERIFICATION = 'gpRc3scUpPI39z-lj7Nzrw1MfbZGQKTOK8gErO6jtxQ';
+
+/**
+ * The title and description for every page, owned here.
+ *
+ * Kept in one place because the social block below mirrors them, and two copies
+ * of a sentence drift. They are written to be *read* first and to carry the
+ * terms people search second — a title stuffed with keywords loses the click it
+ * was optimised to win, which is the only thing a title is for.
+ *
+ * The terms are chosen from what this project can plausibly rank for. Head
+ * terms like "best AI coding assistant" belong to third-party listicles and to
+ * projects with a hundred thousand users; chasing them here would be effort
+ * spent losing. What is winnable is the long tail where the differences
+ * actually live: bring-your-own-key, self-hosted, terminal, MCP server, session
+ * resume, spend limits.
+ */
+const META = {
+  'index.html': {
+    title: 'aico — open-source AI coding agent for the terminal and browser',
+    description:
+      'A free, self-hosted AI coding agent. Bring your own key for Claude, GPT, Gemini, '
+      + 'DeepSeek or a local Ollama model. Append-only session log, in-browser verification '
+      + 'of what it builds, and supervision for background work.',
+  },
+  'install.html': {
+    title: 'Install aico — AI coding agent for macOS, Linux and Windows',
+    description:
+      'Install the aico AI coding agent with one npx command — no account, nothing global. '
+      + 'Requires Node 22.5 or newer. Add a provider key and start in five minutes.',
+  },
+  'providers.html': {
+    title: 'Bring your own API key — Claude, GPT, Gemini, Ollama | aico',
+    description:
+      'Run the aico coding agent on OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI GLM, '
+      + 'DeepSeek, any OpenAI-compatible endpoint, or a local Ollama model. BYOK, prompt '
+      + 'caching, and spending limits you set.',
+  },
+  'workspace.html': {
+    title: 'A local web workspace for your AI coding agent — aico',
+    description:
+      'aico serve runs a loopback server and a browser client, and the server owns the run — '
+      + 'close the tab and the work carries on. Plan mode, mid-run steering, forking a '
+      + 'conversation, and a session log you can resume.',
+  },
+  'automation.html': {
+    title: 'Background AI agents, watchers and scheduled jobs — aico',
+    description:
+      'One ledger for every running agent, dev server, scheduled job and watcher, surviving '
+      + 'a restart. Spend and idle limits the platform enforces, and an MCP server so '
+      + 'another AI can delegate work to aico.',
+  },
+  'compare.html': {
+    title: 'aico vs Claude Code, OpenCode, Aider and Cline — compared',
+    description:
+      'An honest comparison of the aico AI coding agent with Claude Code, OpenCode, Aider, '
+      + 'Cline and Cursor — what is genuinely different, and where the alternatives are '
+      + 'clearly ahead.',
+  },
+  'widgets.html': {
+    title: 'Charts, diagrams and maths in AI agent answers — aico',
+    description:
+      'The aico coding agent renders ECharts, Vega-Lite dashboards, KaTeX maths and 26 kinds '
+      + 'of Mermaid diagram directly in the transcript — with a repair step when one will '
+      + 'not parse.',
+  },
+  'miniapps.html': {
+    title: 'Mini Apps — SQLite-backed apps your AI coding agent builds',
+    description:
+      'Ask the aico agent for an invoice ledger and get a real single-page app with a SQLite '
+      + 'database behind it, at its own local URL. Two kinds: a static page, or a full '
+      + 'Next.js application.',
+  },
+};
+
+/**
  * Matches either line ending, and this is not a detail.
  *
  * Six of these files are CRLF and one is LF. Written as a bare `\n`, the
@@ -89,6 +168,44 @@ function structuredData() {
   }, null, 2);
 }
 
+/**
+ * Build FAQPage data from the page's own visible FAQ.
+ *
+ * Derived rather than hand-written, for two reasons. Google requires the marked-up
+ * answer to match what a visitor actually reads, and a hand-kept copy would drift
+ * from the prose the first time either was edited — leaving a schema block that
+ * quietly asserts something the page no longer says.
+ *
+ * Returns nothing when the page has no FAQ, so the tag is absent rather than empty.
+ */
+function faqData(html) {
+  const section = /<section class="faq">([\s\S]*?)<\/section>/.exec(html)?.[1];
+  if (!section) return undefined;
+
+  const entries = [];
+  const re = /<h3>([\s\S]*?)<\/h3>\s*<div class="a">([\s\S]*?)<\/div>/g;
+  let m;
+  while ((m = re.exec(section)) !== null) {
+    const question = decode(m[1].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+    // Links are stripped for the schema — it wants the answer as text, and a
+    // half-tagged fragment is worse than a clean sentence.
+    const answer = decode(m[2].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+    if (question && answer) {
+      entries.push({
+        '@type': 'Question',
+        name: question,
+        acceptedAnswer: { '@type': 'Answer', text: answer },
+      });
+    }
+  }
+  if (!entries.length) return undefined;
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: entries,
+  }, null, 2);
+}
+
 const THEME_NOTE = '<!-- blocking on purpose: sets the theme before first paint -->';
 
 const pages = fs.readdirSync(docs).filter(f => f.endsWith('.html')).sort();
@@ -99,14 +216,25 @@ for (const file of pages) {
   let html = fs.readFileSync(full, 'utf8');
   const before = html;
 
-  const title = /<title>([\s\S]*?)<\/title>/.exec(html)?.[1]?.trim();
-  const descRaw = /<meta name="description" content="([\s\S]*?)">/.exec(html)?.[1];
-  if (!title || !descRaw) {
-    console.error(`  ! ${file}: no title or description — skipped`);
+  const meta = META[file];
+  if (!meta) {
+    console.error(`  ! ${file}: no entry in META — add one, or it ships unoptimised`);
+    process.exitCode = 1;
     continue;
   }
-  const desc = descRaw.replace(/\s+/g, ' ').trim();
+  const { title } = meta;
+  const desc = meta.description.replace(/\s+/g, ' ').trim();
+
+  // The page's own tags are rewritten from META too, so the title a searcher
+  // sees and the og:title a social card shows cannot disagree.
+  html = html.replace(/<title>[\s\S]*?<\/title>/, () => `<title>${attr(title)}</title>`);
+  html = html.replace(
+    /<meta name="description" content="[\s\S]*?">/,
+    () => `<meta name="description" content="${attr(desc)}">`,
+  );
   const url = BASE + (file === 'index.html' ? '' : file);
+  // Read before the block is written, so it reflects the prose as it stands.
+  const faq = faqData(html);
   // Match the file's own ending, so a mixed repository does not turn into a
   // diff of every line.
   const eol = html.includes('\r\n') ? '\r\n' : '\n';
@@ -128,8 +256,12 @@ for (const file of pages) {
     `<meta name="twitter:description" content="${attr(desc)}">`,
     `<meta name="twitter:image" content="${BASE}assets/og-card.png">`,
     ...(file === 'index.html'
-      ? ['<script type="application/ld+json">', structuredData(), '</script>']
+      ? [
+        `<meta name="google-site-verification" content="${GOOGLE_VERIFICATION}">`,
+        '<script type="application/ld+json">', structuredData(), '</script>',
+      ]
       : []),
+    ...(faq ? ['<script type="application/ld+json">', faq, '</script>'] : []),
     END,
   ].join(eol);
 
