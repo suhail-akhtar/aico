@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Background work &amp; automation — aico</title>
+<meta name="description" content="One ledger for everything running: sub-agents, background jobs, dev servers, schedules and watchers. Limits the platform enforces, waiting without burning turns, and aico as an MCP server.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.6.0</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="automation.html" aria-current="page">Automation</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="miniapps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Automation</p>
+
+  <div class="prose">
+    <h1>Background work &amp; automation</h1>
+    <p class="lede">
+      Work that outlives the turn that started it — sub-agents, background jobs,
+      dev servers, schedules, watchers — in one place, with limits the platform
+      enforces and outcomes that do not go missing.
+    </p>
+
+    <h2>Five registries became one</h2>
+    <p>
+      Sub-agents lived in one map, background agents in another, cron firings in a
+      store, backgrounded shell commands in a pid table, Mini App servers in a
+      fifth. Each had its own shape and its own idea of what "running" meant.
+    </p>
+    <p>
+      That is survivable until something has to answer <em>"what is running right
+      now?"</em> — and then it is impossible, because there is nowhere to ask. So
+      there is one record, one id space, and one append-only log at
+      <code>~/.aico/work.jsonl</code>.
+    </p>
+<pre><code>bg:84bf0996  <span class="k">[running]</span>  agent    refactor the auth module
+  ran 4m · 22 steps · $0.31 · now: Edit
+proc:41820   <span class="k">[running]</span>  process  npm run dev
+  ran 12m · pid 41820
+cron:9c2f…   <span class="d">[failed]</span>   schedule nightly dependency scan
+  3 vulnerabilities, 1 high</code></pre>
+
+    <h2>A restart no longer loses work silently</h2>
+    <p>
+      The log is replayed at startup and anything it says was running is settled.
+      A process whose pid is still alive keeps running — a detached dev server
+      legitimately outlives the session that started it. Everything else is marked
+      <strong>lost</strong>, with a reason.
+    </p>
+    <div class="note">
+      <p>
+        Before this, a crash mid-delegation left no trace at all: "it finished"
+        and "it never came back" looked identical from the next session.
+      </p>
+    </div>
+
+    <h2>Outcomes wait to be read</h2>
+    <p>
+      Finished work stays on the list until it is acknowledged. Reading does not
+      clear it — because losing a failure to whichever turn happened to glance at
+      it is how a background job becomes a mystery an hour later. A job that failed
+      at 3am is still there in the morning.
+    </p>
+
+    <h2>Limits the platform enforces</h2>
+    <p>
+      Rather than remembering to check on something, put a limit on it once:
+    </p>
+<pre><code>Give that background agent a $2 ceiling and stop it if it goes
+ten minutes without doing anything.</code></pre>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Limit</th><th>What it catches</th></tr></thead>
+        <tbody>
+          <tr><td><code>deadlineMs</code></td><td>Wall clock — work that has run too long</td></tr>
+          <tr><td><code>maxCostUsd</code></td><td>Spend, checked the moment it changes rather than on a sweep</td></tr>
+          <tr><td><code>maxSteps</code></td><td>A loop that is progressing but going nowhere</td></tr>
+          <tr><td><code>idleMs</code></td><td>No activity at all — <em>not</em> the same as slow</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Idle is deliberately separate from a deadline. An agent that has worked hard
+      for an hour and one that has made no call in ten minutes are different
+      failures, and a single timeout kills the wrong one. It applies only to work
+      that reports progress — a detached server has no heartbeat to give, and a
+      warning that is always on is a warning nobody reads.
+    </p>
+    <p style="font-size:.9rem;color:var(--muted)">
+      The action is <code>report</code>, <code>stop</code> or <code>kill</code>.
+      There is no <em>pause</em>: an LLM turn cannot be suspended, because the
+      provider stream is a single open request — and a control that silently
+      cancels would be worse than not offering one.
+    </p>
+
+    <h2>Waiting without burning turns</h2>
+    <p>
+      Asking an agent to "wait for the build" means it runs a command, sleeps, and
+      runs it again — a full turn and a full prompt per check. And the common
+      failure is not the cost: it is the agent that checks twice, decides it is
+      probably fine, and moves on.
+    </p>
+<pre><code>❯ start the build and tell me when it's done
+
+  Watching dist/bundle.js — you will be woken when it appears.
+  <span class="c">(turn ends; nothing is being polled)</span>
+
+  → dist/bundle.js appeared</code></pre>
+    <p>
+      Watchers cover files, processes, HTTP endpoints, commands, log patterns and
+      other work. One turn to register, one to be woken by. The wake arrives at
+      the next step boundary, so nothing the turn has already learned is discarded.
+    </p>
+
+    <h2>Scheduled jobs report what they did</h2>
+    <p>
+      A firing is real work, not a receipt: it stays open as long as its run does,
+      adopts the agent it started, and closes with that agent's verdict. So
+      <strong>done</strong>, <strong>failed</strong>, <strong>stopped by you</strong>
+      and <strong>stopped by a limit</strong> are four visible states rather than
+      one, and the schedule carries what the run cost.
+    </p>
+    <div class="note warn">
+      <p>
+        <strong>Scheduled runs get full tool access by default.</strong> Nobody can
+        approve anything at 3am, so the alternatives are "act" or "silently do
+        nothing" — and a job that refuses itself every night is worse than one that
+        acts, because it looks like it is working. Writing the prompt and choosing
+        the schedule is the authorization. Set <code>permissions: "readonly"</code>
+        on a job that only needs to report.
+      </p>
+    </div>
+
+    <h2 id="mcp">Letting another AI use aico</h2>
+    <p>
+      <code>aico mcp-serve</code> speaks MCP on stdin and stdout, so Claude Code —
+      or another aico, or any MCP client — can hand it work:
+    </p>
+<pre><code>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"aico"</span>: { <span class="k">"command"</span>: <span class="s">"aico"</span>,
+              <span class="k">"args"</span>: [<span class="s">"mcp-serve"</span>, <span class="s">"--cwd"</span>, <span class="s">"/path/to/repo"</span>] }
+  }
+}</code></pre>
+    <p>
+      <strong>Nothing listens.</strong> There is no socket and no port: the
+      transport is the pipe the client opened by starting the process, which is why
+      it needs no password to be safe — reaching it already requires being able to
+      run programs as you.
+    </p>
+    <p>
+      What the caller gets is <em>delegation</em>, not remote control: submit a
+      task, ask about it, collect the result, stop it. It deliberately does not
+      expose <code>Read</code>, <code>Bash</code> or <code>Edit</code> — those
+      would make aico a worse version of the caller's own tools, and would move
+      every safety rule aico has to the wrong side of the boundary. Every submitted
+      job carries a spend ceiling and a deadline.
+    </p>
+    <div class="note warn">
+      <p>
+        <strong>Read-only unless you say otherwise.</strong> Submitted work can
+        read, search and analyse; it cannot run commands or change files until the
+        server is started with <code>--allow-writes</code>.
+      </p>
+      <p>
+        It is not inherited from your own <code>autoApprove</code>, because consent
+        does not transfer. Ticking auto-approve for your own session, with a
+        terminal in front of you, is not the same decision as letting an unattended
+        process on the other end of a pipe edit your repository. The posture is
+        printed to stderr every time the server starts, so it is never a surprise
+        in either direction.
+      </p>
+    </div>
+
+    <h2>Nothing headless waits for a person</h2>
+    <p>
+      A prompt with nobody there is not a question — it is a hang. Background
+      agents, scheduled jobs and submitted work now get a <em>decision</em> from
+      policy, never a dialog, and the refusal says what to do instead. The
+      question-asking tool is removed from those runs entirely rather than left
+      present with a disclaimer, because a tool that is present gets called
+      eventually.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="workspace.html">The web workspace →</a>
+      <a class="btn" href="miniapps.html">Mini Apps →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>
