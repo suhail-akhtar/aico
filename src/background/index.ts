@@ -78,7 +78,73 @@ export function cancelBackgroundAgent(agentId: string): boolean {
   return true;
 }
 
+/**
+ * What a background agent may do without anyone to ask.
+ *
+ * - `inherit` — follow the user's own `autoApprove`. Right for work the user
+ *   started themselves: a cron job they wrote, a `Task` they delegated.
+ * - `readonly` — refuse every tool that needs permission. The posture for work
+ *   arriving from outside, where "the user ticked auto-approve for their own
+ *   interactive session" is not consent for an unattended process to run shell
+ *   commands.
+ * - `full` — approve everything, regardless of `autoApprove`. Explicit opt-in.
+ */
+export type BackgroundPermissions = 'inherit' | 'readonly' | 'full';
+
+/** Tools that do something irreversible and therefore need a decision. */
+const GATED_TOOLS = new Set([
+  'Bash', 'Write', 'Edit', 'MultiEdit', 'McpAddServer', 'McpRemoveServer',
+  'McpReloadServers', 'WorkspaceSetPath', 'WorkspaceWrite', 'AgentCreate',
+]);
+
+/**
+ * Decide a permission with no human present.
+ *
+ * This exists because the fallback did not. With no `onPermissionRequest`,
+ * `runAgent` calls `checkPermission`, which writes the prompt to
+ * `process.stdout` and then blocks reading `stdin`. For a background agent
+ * there is nobody at either end:
+ *
+ *   - under `aico serve`, the prompt lands in a terminal nobody is watching and
+ *     the job waits until its idle timeout kills it;
+ *   - under `aico mcp-serve`, stdout **is** the JSON-RPC stream, so the prompt
+ *     corrupts it and the read then eats the client's own messages as an answer.
+ *
+ * A reproduction confirmed both: a submitted job asked to write one file never
+ * returned at all. So the decision is made from policy here, and it is always a
+ * decision — never a question.
+ *
+ * The denial text matters as much as the denial. A model told "denied: this job
+ * may not write files" can say so in its result; a model that never gets a
+ * reply produces nothing at all.
+ */
+export function decideHeadlessPermission(
+  toolName: string,
+  permissions: BackgroundPermissions,
+  autoApprove: boolean,
+): { allowed: boolean; reason?: string } {
+  if (!GATED_TOOLS.has(toolName)) return { allowed: true };
+  if (permissions === 'full') return { allowed: true };
+  if (permissions === 'readonly') {
+    return {
+      allowed: false,
+      reason: `Denied: ${toolName} is not available to this job. It was started from `
+        + 'outside this machine\'s session and runs read-only. Report what you found '
+        + 'and what you would have changed, rather than trying another way to change it.',
+    };
+  }
+  if (autoApprove) return { allowed: true };
+  return {
+    allowed: false,
+    reason: `Denied: ${toolName} needs approval and there is nobody to ask — this job is `
+      + 'running in the background. Report what you would have done. To let background '
+      + 'work make changes, set "autoApprove": true in settings.',
+  };
+}
+
 export interface SpawnBackgroundAgentOptions {
+  /** See {@link BackgroundPermissions}. Defaults to `inherit`. */
+  permissions?: BackgroundPermissions;
   token: string;
   model: string;
   autoApprove: boolean;
@@ -154,7 +220,16 @@ export function spawnBackgroundAgent(
         token: opts.token,
         model,
         showPlan: false,
-        autoApprove: opts.autoApprove,
+        /*
+          `runAgent`'s permission guard short-circuits on `autoApprove` *before*
+          it consults the callback, so a readonly job under a user with
+          auto-approval on would have sailed straight past its own restriction.
+          The flag is therefore derived from the posture rather than passed
+          through: readonly forces the callback to run, full skips it, and
+          inherit behaves exactly as it always did.
+        */
+        autoApprove: (opts.permissions ?? 'inherit') === 'readonly' ? false
+          : (opts.permissions === 'full' ? true : opts.autoApprove),
         verbose: opts.verbose,
         conversationHistory: [],
         settings: opts.settings,
@@ -195,6 +270,22 @@ export function spawnBackgroundAgent(
         // provider reports totals for the call that just finished, and an agent
         // makes many. Emitting keeps the ledger mirror's cost current, which is
         // what a spend ceiling is compared against.
+        // Always supplied, even when `autoApprove` would short-circuit it —
+        // supplying it is what keeps `runAgent` from ever reaching the
+        // interactive fallback. See decideHeadlessPermission.
+        onPermissionRequest: async (toolName) => {
+          const verdict = decideHeadlessPermission(
+            toolName, opts.permissions ?? 'inherit', opts.autoApprove,
+          );
+          if (!verdict.allowed) {
+            const r = _bgRegistry.get(agentId);
+            if (r && !isTerminal(r.status)) {
+              r.statusMessage = `Denied ${toolName}`;
+              _emit();
+            }
+          }
+          return verdict.allowed;
+        },
         onTokens: (input, output, cached, cacheWrite) => {
           const r = _bgRegistry.get(agentId);
           if (r && !isTerminal(r.status)) {

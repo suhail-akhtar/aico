@@ -154,6 +154,97 @@ purpose.
 
 ---
 
+## Knowing what is still running
+
+Everything long-lived goes into one place: sub-agents, background agents,
+backgrounded shell commands, Mini App servers, scheduled runs and watchers. When
+there is something in flight, or something finished while you were away, the
+agent is told about it at the start of the turn — and when there is nothing, it
+is told nothing at all.
+
+```
+❯ what's still going?
+
+  bg:84bf0996  [running]  agent  refactor the auth module
+    ran 4m · 22 step(s) · $0.31 · now: Edit
+  proc:41820   [running]  process  npm run dev
+    ran 12m · pid 41820
+```
+
+Outcomes stay listed until they are acknowledged. Reading does not clear them,
+which is deliberate: a background job that failed at 3am should still be there
+in the morning, not lost to whichever turn happened to glance at it.
+
+### Limits the platform enforces for you
+
+Rather than remembering to check on something, put a limit on it:
+
+```
+Give that background agent a $2 ceiling and stop it if it goes ten minutes
+without doing anything.
+```
+
+`deadlineMs`, `maxCostUsd`, `maxSteps` and `idleMs`, with an action of *report*,
+*stop* or *kill*. Idle is deliberately separate from a deadline — an agent that
+has worked hard for an hour and one that has made no call in ten minutes are
+different problems, and a single timeout kills the wrong one.
+
+### Waiting without burning turns
+
+Asking an agent to "wait for the build" means it runs a command, sleeps, and
+runs it again — a full turn and a full prompt per check. Instead it can register
+a watcher and stop:
+
+```
+❯ start the build and tell me when it's done
+
+  Watching dist/bundle.js — you will be woken when it appears.
+  (turn ends; nothing is being polled)
+
+  → dist/bundle.js appeared
+```
+
+Watchers cover files, processes, HTTP endpoints, commands, log patterns and
+other work. The wake arrives at the next step boundary, so nothing the turn has
+already learned is thrown away.
+
+---
+
+## Letting another AI use aico
+
+`aico mcp-serve` speaks MCP on stdin and stdout, so Claude Code — or another
+aico, or any MCP client — can hand it work:
+
+```jsonc
+{
+  "mcpServers": {
+    "aico": { "command": "aico", "args": ["mcp-serve", "--cwd", "/path/to/repo"] }
+  }
+}
+```
+
+Nothing listens. There is no socket and no port: the transport is the pipe the
+client opened by starting the process, which is why it needs no password to be
+safe — reaching it already requires being able to run programs as you.
+
+**It is read-only by default.** Submitted work can read, search and analyse, but
+cannot run commands or change files. Add `--allow-writes` to permit that.
+
+> The reason it is not inherited from your own `autoApprove` is that consent does
+> not transfer. Ticking auto-approve for your own session, with a terminal in
+> front of you, is not the same decision as letting an unattended process on the
+> other end of a pipe edit your repository. The posture is printed to stderr
+> every time the server starts, so it is never a surprise in either direction.
+
+What the caller gets is *delegation*, not remote control — submit a task, ask
+about it, collect the result, stop it. It deliberately does not expose `Read`,
+`Bash` or `Edit`: those would make aico a worse version of the caller's own
+tools, and would move every safety rule aico has to the wrong side of the
+boundary. Every submitted job carries a spend ceiling and a deadline and is
+stopped automatically if it passes either.
+
+---
+
 ## Keeping a shell
 
 `Terminal` keeps one shell alive per session. Use it when state has to persist:

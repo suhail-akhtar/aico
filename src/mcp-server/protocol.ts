@@ -66,9 +66,41 @@ export function claimStdout(): { write: (line: string) => void; restore: () => v
   console.error = toStderr;
   console.debug = toStderr;
 
+  /*
+    Redirecting `console` is not enough, and finding that out was the lesson.
+
+    The interactive permission prompt writes with `process.stdout.write`
+    directly, not through `console` — so it went straight into the JSON-RPC
+    stream past every guard here. Anything else in a large dependency tree can
+    do the same: a progress bar, a deprecation notice, a library's debug output.
+
+    So stdout is taken outright. The only path to it is the writer returned
+    below, which flips the gate for exactly one call. Everything else — from any
+    module, at any depth — lands on stderr, where it is visible to an operator
+    and harmless to the protocol.
+  */
+  const realWrite = process.stdout.write.bind(process.stdout);
+  let protocolWrite = false;
+  process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+    if (protocolWrite) return (realWrite as (...a: unknown[]) => boolean)(chunk, ...rest);
+    return (process.stderr.write as (...a: unknown[]) => boolean)(chunk, ...rest);
+  }) as typeof process.stdout.write;
+
   return {
-    write: (line: string) => { process.stdout.write(line + '\n'); },
-    restore: () => { Object.assign(console, original); },
+    write: (line: string) => {
+      protocolWrite = true;
+      try {
+        realWrite(line + '\n');
+      } finally {
+        // In a `finally`, because a failed write must not leave the gate open
+        // for whatever writes next.
+        protocolWrite = false;
+      }
+    },
+    restore: () => {
+      Object.assign(console, original);
+      process.stdout.write = realWrite as typeof process.stdout.write;
+    },
   };
 }
 

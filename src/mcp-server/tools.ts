@@ -46,6 +46,30 @@ const DEFAULT_MAX_COST_USD = 2.0;
 /** And how long it may run. Same reasoning; a stuck job must not be forever. */
 const DEFAULT_DEADLINE_MS = 30 * 60_000;
 
+/**
+ * What submitted work may do.
+ *
+ * Set once when the server starts, never per request — a caller must not be
+ * able to choose its own permissions, which is the whole point of the setting.
+ *
+ * `readonly` is the default, and the reasoning is that consent does not
+ * transfer: a user who set `autoApprove` did so for their own interactive
+ * session, with a terminal in front of them. That is not the same decision as
+ * letting an unattended process on the other end of a pipe run shell commands
+ * in their repository. Inheriting it silently would have meant this machine —
+ * where `autoApprove` is on — handed every MCP caller full Bash and Write
+ * access the moment the server started, with nothing anywhere saying so.
+ */
+let permissions: 'readonly' | 'full' = 'readonly';
+
+export function setMcpPermissions(next: 'readonly' | 'full'): void {
+  permissions = next;
+}
+
+export function mcpPermissions(): 'readonly' | 'full' {
+  return permissions;
+}
+
 export interface McpToolSpec {
   name: string;
   description: string;
@@ -69,7 +93,19 @@ function age(ms: number): string {
   return `${Math.floor(ms / 3_600_000)}h${Math.floor((ms % 3_600_000) / 60_000)}m`;
 }
 
-function describe(record: WorkRecord, now = Date.now()): string {
+/**
+ * One record as text.
+ *
+ * `full` controls whether the result is given whole or clipped, and the
+ * asymmetry is deliberate. A *listing* is a scan — twenty jobs at full length
+ * would bury the one being looked for. But `aico_wait` is a caller asking for
+ * one specific outcome, and clipping that is lossy delegation: hand aico an
+ * analysis, get back the first 800 characters of it and no way to reach the
+ * rest. That gap is what makes people ask for a transcript reader, and giving
+ * the caller its own result in full is the answer to it that does not also hand
+ * over every unrelated conversation on the machine.
+ */
+function describe(record: WorkRecord, now = Date.now(), full = false): string {
   const bits = [
     `${record.id}  [${record.state}]  ${record.kind}  ${record.title}`,
     `  ran ${age((record.endedAt ?? now) - record.startedAt)}`
@@ -83,7 +119,14 @@ function describe(record: WorkRecord, now = Date.now()): string {
     else if (record.progress?.lastTool) bits.push(`  now: ${record.progress.lastTool}`);
   }
   if (record.error) bits.push(`  error: ${record.error}`);
-  else if (record.result) bits.push(`  result: ${record.result.slice(0, 800)}`);
+  else if (record.result) {
+    bits.push(full
+      ? `  result:\n${record.result}`
+      : `  result: ${record.result.slice(0, 800)}`
+        + (record.result.length > 800
+          ? `\n  … ${record.result.length - 800} more characters — aico_wait returns it whole`
+          : ''));
+  }
   return bits.join('\n');
 }
 
@@ -119,7 +162,17 @@ export function buildMcpTools(): McpToolSpec[] {
         + 'Returns a work id immediately; the task keeps running after this call returns. '
         + 'Use aico_wait to collect the result, or aico_status to check without blocking. '
         + 'Every submitted job carries a spend ceiling and a deadline, and is stopped '
-        + 'automatically if it passes either.',
+        + 'automatically if it passes either.\n\n'
+        // Stated as fact rather than as a caveat, because the tool list is built
+        // after the posture is decided. A caller that knows it cannot get edits
+        // asks for findings instead of discovering the refusal three minutes in.
+        + (permissions === 'readonly'
+          ? 'IMPORTANT: this server is READ-ONLY. Submitted work can read, search and '
+            + 'analyse, but cannot run shell commands or change files. Ask for findings '
+            + 'and recommendations, not edits — a job asked to edit will report that it '
+            + 'was refused. The operator can start it with --allow-writes to change this.'
+          : 'This server is running with WRITE ACCESS: submitted work can run shell '
+            + 'commands and change files in its workspace. Be specific about scope.'),
       inputSchema: {
         type: 'object',
         properties: {
@@ -151,7 +204,10 @@ export function buildMcpTools(): McpToolSpec[] {
 
         const agentId = spawnBackgroundAgent(
           { description, prompt, ...(model ? { model } : {}) },
-          opts,
+          // The posture is the server's, not the caller's. A `permissions`
+          // argument on this tool would let the thing being restricted choose
+          // its own restriction.
+          { ...opts, permissions },
         );
         // The mirror creates this synchronously on the registry's emit, so the
         // record exists by the time spawn returns.
@@ -229,7 +285,8 @@ export function buildMcpTools(): McpToolSpec[] {
         const settled = await waitFor(ids.filter(id => ledger.get(id)), timeoutMs);
         const lines = ids.map(id => {
           const record = ledger.get(id);
-          return record ? describe(record) : `${id}: not found.`;
+          // Whole, not clipped — the caller asked for this specific outcome.
+          return record ? describe(record, Date.now(), true) : `${id}: not found.`;
         });
         return settled
           ? lines.join('\n\n')

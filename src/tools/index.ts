@@ -102,8 +102,6 @@ import { agentManageToolDefinition, executeAgentManage } from './manage-agents.j
 import { memoryManageToolDefinition, executeMemoryManage } from './manage-memory.js';
 import type { MemoryManageInput } from './manage-memory.js';
 import { miniAppManageToolDefinition, executeMiniAppManage } from './manage-miniapps.js';
-import { agentSuperviseToolDefinition, executeAgentSupervise } from './supervise-agents.js';
-import type { AgentSuperviseInput } from './supervise-agents.js';
 import { superviseToolDefinition, executeSupervise } from './supervise.js';
 import type { SuperviseInput } from './supervise.js';
 import type { MiniAppManageInput } from './manage-miniapps.js';
@@ -251,10 +249,11 @@ export const toolDefinitions: ToolDefinition[] = [
   // Concurrency-safe on purpose: the whole point is to run alongside the Task
   // calls it is watching. An exclusive supervisor would be a barrier, and a
   // barrier could only ever inspect agents that had already finished.
-  { ...agentSuperviseToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
-  // Same reasoning as AgentSupervise, which it supersedes: watching has to be
-  // able to run beside the work it watches. `wait` is the one blocking action,
-  // and it blocks on a subscription rather than holding a slot busy.
+  // Concurrency-safe on purpose: the whole point is to run alongside the Task
+  // calls it is watching. An exclusive supervisor would be a barrier, and a
+  // barrier could only ever inspect work that had already finished. `wait` is
+  // the one blocking action, and it blocks on a subscription rather than
+  // holding a slot busy.
   { ...superviseToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
   // Reading a procedure changes nothing, so several can open at once.
   { ...skillDefinition, isConcurrencySafe: true, maxResultSizeChars: 60_000 },
@@ -686,9 +685,6 @@ export async function executeTool(
       break;
     case 'MiniAppManage':
       result = await executeMiniAppManage(args as unknown as MiniAppManageInput);
-      break;
-    case 'AgentSupervise':
-      result = await executeAgentSupervise(args as unknown as AgentSuperviseInput);
       break;
     case 'Supervise':
       result = await executeSupervise(args as unknown as SuperviseInput);

@@ -597,7 +597,7 @@ function resolveToolSet(opts: {
   // judge. Several agent types run with the full tool set, so this has to be
   // taken away explicitly rather than left out of a whitelist.
   if ((opts.depth ?? 0) > 0) {
-    defs = defs.filter(d => d.name !== 'AgentSupervise');
+    defs = defs.filter(d => d.name !== 'Supervise');
   }
 
   // Mini Apps are a plugin, and "off" has to mean the model cannot see the
