@@ -152,6 +152,7 @@ export {
   validateInstance,
 } from './providers/instances.js';
 export { providerFromInstance } from './providers/index.js';
+export { testProvider } from './providers/connection-test.js';
 // -- Session titles --
 export {
   normalizeSessionTitle, fallbackSessionTitle, parseModelTitle, truncateTitleUtf8,

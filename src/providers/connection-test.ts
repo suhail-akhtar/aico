@@ -30,6 +30,14 @@ export interface ProviderTestResult {
   contextWindows?: Record<string, number>;
   /** How long the round trip took — surfaced so a slow endpoint is visible. */
   latencyMs?: number;
+  /**
+   * The API root that actually answered, when it is not the one that was typed.
+   *
+   * A test that goes green against a URL the caller then throws away is worse
+   * than a red one: every later request would go to the path that did not work.
+   * So the root is reported and the caller saves *this* rather than the input.
+   */
+  baseUrl?: string;
 }
 
 /** Where each provider lists its models, and how it wants to be addressed. */
@@ -50,11 +58,53 @@ const PROBES: Record<string, { url: string; auth: 'bearer' | 'x-api-key' | 'quer
 const TIMEOUT_MS = 15_000;
 
 /**
+ * Where to look for a catalogue under a supplied base URL, likeliest first.
+ *
+ * "Base URL" is documented two incompatible ways and users paste both. OpenAI,
+ * DeepSeek and most single-vendor endpoints publish a base that *already ends
+ * in the version segment* — `https://api.deepseek.com/v1` — so `/models` is
+ * simply appended. Self-hosted gateways publish the bare host as the base and
+ * document the route as `/v1/models`, so appending `/models` asks for a path
+ * that does not exist on them.
+ *
+ * That second case used to fail in the least helpful way available. A gateway
+ * serving a console SPA answers an unknown path with its `index.html` and a
+ * **200**, so the probe parsed HTML as JSON and the user got
+ * `Unexpected token '<'` — a message about our parser, describing nothing they
+ * could act on, for a provider whose only real problem was a missing `/v1`.
+ *
+ * So both are tried, and the root that answered comes back with the result.
+ */
+function probeCandidates(base: string): Array<{ url: string; root: string }> {
+  // A pasted *endpoint* URL carries the same information as its parent root,
+  // and pasting the full URL from a docs page is at least as common as pasting
+  // the base. Normalising here means it is also what gets saved.
+  const root = base.replace(/\/+$/, '').replace(/\/models$/, '');
+  const candidates = [{ url: `${root}/models`, root }];
+  if (!/\/v\d+[a-z0-9]*$/i.test(root)) {
+    candidates.push({ url: `${root}/v1/models`, root: `${root}/v1` });
+  }
+  return candidates;
+}
+
+/**
+ * How much a failed attempt is worth saying out loud.
+ *
+ * With more than one candidate, the failures have to be ranked or the wrong one
+ * gets reported: a gateway that serves its console at `/models` and a real 401
+ * at `/v1/models` should say "key rejected", not "there is no API here". So
+ * anything that proves something is *listening and speaking API* outranks
+ * "nothing at that path", and the first attempt only wins ties.
+ */
+const SPOKE_API = 2;
+const NOTHING_HERE = 1;
+
+/**
  * Probe a provider with the key the user just typed.
  *
- * `baseUrl` overrides the built-in endpoint for self-hosted or proxied setups;
- * it is treated as an API root, so `/models` is appended the way the
- * OpenAI-compatible convention expects.
+ * `baseUrl` overrides the built-in endpoint for self-hosted or proxied setups.
+ * A built-in probe URL is already complete; a supplied one is resolved against
+ * {@link probeCandidates}.
  */
 export async function testProvider(
   providerId: string,
@@ -71,13 +121,13 @@ export async function testProvider(
     return { ok: false, error: 'An API key is required for this provider' };
   }
 
-  const root = baseUrl?.trim() || probe?.url;
-  if (!root) {
+  const supplied = baseUrl?.trim();
+  if (!supplied && !probe?.url) {
     return { ok: false, error: 'This provider needs an endpoint before it can be tested' };
   }
-  // A supplied base URL is an API root, so `/models` is appended the way the
-  // OpenAI-compatible convention expects. A built-in probe URL is already complete.
-  let url = baseUrl?.trim() ? `${baseUrl.trim().replace(/\/+$/, '')}/models` : root;
+  const candidates = supplied
+    ? probeCandidates(supplied)
+    : [{ url: probe!.url, root: '' }];
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (auth === 'bearer') headers.Authorization = `Bearer ${apiKey}`;
@@ -87,37 +137,113 @@ export async function testProvider(
     // that reads as a bad key.
     headers['anthropic-version'] = '2023-06-01';
   }
-  if (auth === 'query') url += `?key=${encodeURIComponent(apiKey)}`;
 
+  let best: { rank: number; result: ProviderTestResult } | undefined;
+  for (const candidate of candidates) {
+    const url = auth === 'query'
+      ? `${candidate.url}?key=${encodeURIComponent(apiKey)}`
+      : candidate.url;
+    const attempt = await probeOnce(url, headers, providerId);
+    if (attempt.result.ok) {
+      // Only worth reporting when it is not what was asked for — an unchanged
+      // root would just be the caller's own input handed back.
+      const moved = candidate.root && candidate.root !== supplied?.replace(/\/+$/, '');
+      return moved ? { ...attempt.result, baseUrl: candidate.root } : attempt.result;
+    }
+    if (!best || attempt.rank > best.rank) best = attempt;
+    // A host that cannot be reached at all will not be reached under a
+    // different path either — and each candidate costs a full timeout.
+    if (attempt.fatal) break;
+  }
+  return best!.result;
+}
+
+/** One request, classified by whether anything at that path spoke API. */
+async function probeOnce(
+  url: string,
+  headers: Record<string, string>,
+  providerId: string,
+): Promise<{ rank: number; fatal?: boolean; result: ProviderTestResult }> {
   const started = Date.now();
   try {
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
     const latencyMs = Date.now() - started;
+    const body = await res.text().catch(() => '');
 
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      return { ok: false, latencyMs, error: describeFailure(res.status, body) };
+      return {
+        // A 404 says "not at this path", which the next candidate may fix. Every
+        // other status is about the endpoint itself and is the real answer.
+        rank: res.status === 404 ? NOTHING_HERE : SPOKE_API,
+        result: { ok: false, latencyMs, error: describeFailure(res.status, body) },
+      };
     }
 
-    const catalogue = extractCatalogue(await res.json());
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return {
+        rank: NOTHING_HERE,
+        result: {
+          ok: false, latencyMs,
+          error: 'That address returned a web page, not an API response — the endpoint is '
+               + 'probably missing its version segment (try adding /v1).',
+        },
+      };
+    }
+
+    if (!hasCatalogueEnvelope(parsed)) {
+      return {
+        rank: NOTHING_HERE,
+        result: {
+          ok: false, latencyMs,
+          error: 'The endpoint answered, but with no model list in it — check the base URL.',
+        },
+      };
+    }
+
+    const catalogue = extractCatalogue(parsed);
     const contextWindows: Record<string, number> = {};
     for (const entry of catalogue) {
       if (entry.contextWindow !== undefined) contextWindows[entry.id] = entry.contextWindow;
     }
     return {
-      ok: true,
-      latencyMs,
-      models: catalogue.map(entry => entry.id),
-      ...Object.keys(contextWindows).length > 0 ? { contextWindows } : {},
+      rank: SPOKE_API,
+      result: {
+        ok: true,
+        latencyMs,
+        models: catalogue.map(entry => entry.id),
+        ...Object.keys(contextWindows).length > 0 ? { contextWindows } : {},
+      },
     };
   } catch (err) {
     const latencyMs = Date.now() - started;
     const message = err instanceof Error ? err.message : String(err);
+    // A transport failure is about the host, not the path, so trying another
+    // path under the same host cannot improve on it.
     if (providerId === 'ollama' && /fetch failed|ECONNREFUSED/i.test(message)) {
-      return { ok: false, latencyMs, error: 'No Ollama server answered on localhost:11434 — is it running?' };
+      return {
+        rank: SPOKE_API, fatal: true,
+        result: { ok: false, latencyMs, error: 'No Ollama server answered on localhost:11434 — is it running?' },
+      };
     }
-    return { ok: false, latencyMs, error: message };
+    return { rank: SPOKE_API, fatal: true, result: { ok: false, latencyMs, error: message } };
   }
+}
+
+/**
+ * Does this JSON look like a catalogue at all?
+ *
+ * An empty catalogue is a success — "authenticated, but no models for you" is a
+ * real and reportable state. A body with no list *anywhere* in it is not: it is
+ * some other endpoint answering, and saying so lets the next candidate run
+ * instead of accepting zero models as the truth about the provider.
+ */
+function hasCatalogueEnvelope(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const d = data as Record<string, unknown>;
+  return Array.isArray(d.data) || Array.isArray(d.models) || Array.isArray(d.tags);
 }
 
 /**
