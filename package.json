@@ -1,7 +1,7 @@
 {
   "name": "@suhail-akhtar/aico",
   "version": "0.6.0",
-  "description": "AI Coder \u2014 multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
+  "description": "AI Coder — multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
   "keywords": [
     "ai",
     "cli",
@@ -61,7 +61,9 @@
     "test:mcp": "npm run build && npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/mcp-server-live.mjs && node scripts/mcp-client-live.mjs",
     "test:mcp:model": "npm run build && node scripts/mcp-submit-live.mjs && node scripts/mcp-permission-live.mjs",
     "test:cron": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/cron-live.mjs",
-    "test:serve": "npm run build && node scripts/serve-live.mjs"
+    "test:serve": "npm run build && node scripts/serve-live.mjs",
+    "test:vscode": "cd vscode-extension && npx tsc -p ./ && cd .. && node scripts/vscode-ext-live.mjs",
+    "build:vscode": "cd vscode-extension && npm install && npx tsc -p ./ && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.51.0",

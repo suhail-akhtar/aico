@@ -57,12 +57,25 @@ function killPid(pid) {
   } catch { /* already gone */ }
 }
 
-/** Start a server on `port` and resolve once it prints its token. */
+/**
+ * Start a server and resolve once it prints its URL.
+ *
+ * `port` may be omitted, which is not the same as passing one: an explicit
+ * `--port` makes a clash fail loudly, while the default falls back to a free
+ * one. Both paths need exercising, so the flag is only added when asked for.
+ *
+ * The port is read back out of the printed URL rather than assumed, because on
+ * the fallback path it is not the number that was requested.
+ */
 function startServe(port, extraEnv = {}) {
   return new Promise((resolve, reject) => {
-    const logFile = path.join(workdir, `serve-${port}.log`);
+    const label = port ?? `auto-${servers.length}`;
+    const logFile = path.join(workdir, `serve-${label}.log`);
     const out = fs.openSync(logFile, 'a');
-    const proc = spawn(process.execPath, [entry, 'serve', '--port', String(port), '--no-open'], {
+    const args = [entry, 'serve', '--no-open'];
+    if (port) args.push('--port', String(port));
+
+    const proc = spawn(process.execPath, args, {
       cwd: workdir,
       stdio: ['ignore', out, out],
       env: { ...process.env, AICO_WORK_LOG: workLog, AICO_CRON_STORE: cronStore, ...extraEnv },
@@ -72,13 +85,16 @@ function startServe(port, extraEnv = {}) {
     const deadline = Date.now() + 90_000;
     const poll = setInterval(() => {
       const text = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
-      const token = /token=([A-Za-z0-9_-]+)/.exec(text)?.[1];
-      if (token) {
+      const match = /http:\/\/127\.0\.0\.1:(\d+)\/\?token=([A-Za-z0-9_-]+)/.exec(text);
+      if (match) {
         clearInterval(poll);
-        resolve({ proc, token, port, log: () => fs.readFileSync(logFile, 'utf8') });
+        resolve({
+          proc, token: match[2], port: Number(match[1]),
+          log: () => fs.readFileSync(logFile, 'utf8'),
+        });
       } else if (Date.now() > deadline) {
         clearInterval(poll);
-        reject(new Error(`server on ${port} never became ready:\n${text.slice(-500)}`));
+        reject(new Error(`server (${label}) never became ready:\n${text.slice(-500)}`));
       }
     }, 500);
   });
@@ -215,6 +231,41 @@ try {
 
     s.proc.kill();
     await new Promise(r => { s.proc.on('exit', r); setTimeout(r, 8000); });
+  }
+  console.log('\n-- a busy port is handled, not fatal --');
+  {
+    /*
+      `listen` had no error handler at all, so a second `aico serve` — or a
+      first one after a crash left the port held — died with an unhandled
+      EADDRINUSE and exit code 1, saying nothing a user could act on.
+
+      The VS Code extension found it, because it starts a server for you: "the
+      port is already busy" is its normal case rather than an edge one.
+    */
+    const first = await startServe();
+    check(Boolean(first.token), `one server is up on ${first.port}`);
+
+    // Also without --port, so this must fall back rather than die.
+    const second = await startServe();
+    check(Boolean(second.token), 'a second start succeeds instead of exiting 1');
+    check(second.port !== first.port,
+      `taking a different port (${first.port} then ${second.port})`);
+    check(/in use; taking a free one/.test(second.log()),
+      'and saying so, rather than moving silently');
+
+    const sys = await apiSystem(second);
+    check(Array.isArray(sys.work), 'and the fallback server is fully functional');
+
+    // An explicitly requested port is the opposite case: somebody chose that
+    // number, probably because something points at it, so moving quietly would
+    // break them. It has to fail loudly instead.
+    const clash = await startServe(second.port).then(() => 'started', () => 'refused');
+    check(clash === 'refused',
+      'while an explicit --port that is taken refuses rather than moving');
+
+    first.proc.kill();
+    second.proc.kill();
+    await new Promise(r => setTimeout(r, 3000));
   }
 } catch (err) {
   failed++;
