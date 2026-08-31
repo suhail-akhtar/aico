@@ -59,7 +59,8 @@
     "test:section": "node scripts/miniapp-section-live.mjs",
     "test:watchers": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/watcher-live.mjs",
     "test:mcp": "npm run build && npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/mcp-server-live.mjs && node scripts/mcp-client-live.mjs",
-    "test:mcp:model": "npm run build && node scripts/mcp-submit-live.mjs && node scripts/mcp-permission-live.mjs"
+    "test:mcp:model": "npm run build && node scripts/mcp-submit-live.mjs && node scripts/mcp-permission-live.mjs",
+    "test:cron": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/cron-live.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.51.0",

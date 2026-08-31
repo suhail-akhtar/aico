@@ -23,6 +23,9 @@ import { getBackgroundAgents, cancelBackgroundAgent } from '../background/index.
 import { worktreeManager } from '../worktree/index.js';
 import { skillRegistry } from '../skills/index.js';
 import { mcpRegistry } from '../mcp/registry.js';
+import { ledger } from '../work/ledger.js';
+import { isTerminal as isTerminalWork } from '../work/types.js';
+import { stopWork } from '../work/handles.js';
 import { disabledIn } from '../registry-state.js';
 import { executeCronList, executeCronDelete, executeCronPause, executeCronResume } from '../cron/tools.js';
 import { testProvider, testInstance } from '../providers/connection-test.js';
@@ -68,6 +71,41 @@ export async function systemSnapshot(): Promise<Record<string, unknown>> {
       error: a.error,
     })),
     cron: executeCronList(),
+    /*
+      Everything the ledger holds: sub-agents, background agents, scheduled
+      firings, backgrounded processes, Mini App servers and watchers.
+
+      Live work plus recently settled work, because "what failed while I was
+      away?" is the question the panel exists to answer and a list of only
+      what is running now cannot answer it. Bounded so a long-lived install
+      does not ship its whole history on every poll.
+    */
+    work: [
+      ...ledger.query({ live: true }),
+      ...ledger.all()
+        .filter(r => isTerminalWork(r.state))
+        .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt))
+        .slice(0, 30),
+    ].map(r => ({
+      id: r.id,
+      kind: r.kind,
+      title: r.title,
+      state: r.state,
+      origin: r.origin,
+      parent: r.parent,
+      startedAt: r.startedAt,
+      endedAt: r.endedAt,
+      heartbeatAt: r.heartbeatAt,
+      steps: r.progress?.steps,
+      lastTool: r.progress?.lastTool,
+      note: r.progress?.note,
+      costUsd: r.cost?.usd,
+      pid: r.pid,
+      reported: r.reported,
+      // The panel lists; it does not read. A whole essay of a result would
+      // make every other row unreachable.
+      outcome: (r.error ?? r.result)?.slice(0, 300),
+    })),
     worktrees: worktreeManager.getAll(),
     skills: skillRegistry.list().map(s => ({
       name: s.frontmatter.name,
@@ -653,6 +691,46 @@ ${content || 'Describe the procedure here.'}
         await saveUserSetting(key, value);
       }
       return { status: 200, body: redactSettings(await loadSettings()) };
+    }
+
+    /*
+      Stop anything in the ledger, by id.
+
+      One route rather than one per kind: the ledger already knows how to stop
+      each thing, and a UI that needed a different endpoint for an agent, a
+      process and a scheduled run would be the five-registries problem again,
+      wearing an HTTP hat.
+    */
+    case 'work/stop': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const id = typeof body.id === 'string' ? body.id : '';
+      if (!id) return { status: 400, body: { error: 'id required' } };
+      const record = ledger.get(id);
+      if (!record) return { status: 404, body: { error: `No work "${id}"` } };
+      if (isTerminalWork(record.state)) {
+        return { status: 200, body: { stopped: false, state: record.state, reason: 'already finished' } };
+      }
+      const reason = typeof body.reason === 'string' && body.reason.trim()
+        ? body.reason.trim()
+        : 'Stopped from the panel';
+
+      for (const child of ledger.descendants(id).reverse()) {
+        if (isTerminalWork(child.state)) continue;
+        await stopWork(child.id, 'stop', `parent ${id} stopped — ${reason}`,
+          () => { ledger.close(child.id, 'cancelled', `Stopped with parent: ${reason}`); });
+      }
+      // Outcome first, then the signal, so the reason recorded is this one and
+      // not whatever the stopped subsystem says about itself.
+      const stopped = await stopWork(id, 'stop', reason,
+        () => { ledger.close(id, 'cancelled', reason); });
+      return { status: 200, body: { stopped, state: 'cancelled' } };
+    }
+
+    case 'work/ack': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const raw = body.id;
+      const idList = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : [];
+      return { status: 200, body: { acknowledged: ledger.acknowledge(idList) } };
     }
 
     case 'background/cancel': {

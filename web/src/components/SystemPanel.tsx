@@ -35,6 +35,11 @@ export function SystemPanel(): React.ReactElement {
   }
 
   const { backgroundAgents, cron, worktrees, skills, mcpServers, workspace } = system;
+  const work = system.work ?? [];
+  const live = work.filter(w => !SETTLED.has(w.state));
+  // Only what has not been acknowledged. Everything else is history, and a
+  // panel that never forgets is one nobody reads twice.
+  const settled = work.filter(w => SETTLED.has(w.state) && !w.reported).slice(0, 12);
 
   return (
     <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
@@ -69,6 +74,93 @@ export function SystemPanel(): React.ReactElement {
               </div>
             </Row>
           </section>
+        )}
+
+        {/*
+          One list across every kind of long-lived work.
+
+          The sections below it are still here because each shows something this
+          cannot — a schedule's cron expression, a worktree's branch. But "what
+          is running, and what failed while I was away?" is one question, and
+          answering it used to mean reading three lists and knowing that
+          backgrounded shell commands and watchers appeared in none of them.
+        */}
+        <Section title="Running work" count={live.length}>
+          {live.length === 0 && <Empty>Nothing running.</Empty>}
+          {live.map(row => (
+            <Row key={row.id}>
+              <div className="flex items-start gap-3">
+                <span className={stateColour(row.state)}>{stateGlyph(row.state)}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm text-aico-primary">{row.title}</div>
+                  <div className="mt-0.5 text-xs text-aico-muted">
+                    <span className="font-mono">{row.kind}</span>
+                    {row.origin === 'cron' ? ' · scheduled' : null}
+                    {row.origin === 'remote' ? ' · started over MCP' : null}
+                    {' · '}{ago(row.startedAt)}
+                    {row.steps ? ` · ${row.steps} step${row.steps === 1 ? '' : 's'}` : null}
+                    {row.costUsd ? ` · $${row.costUsd.toFixed(4)}` : null}
+                    {row.pid ? ` · pid ${row.pid}` : null}
+                  </div>
+                  {/*
+                    The number that separates "working hard" from "stuck". Shown
+                    only once it is long enough to mean something, so it does not
+                    become noise on every healthy row.
+                  */}
+                  {Date.now() - row.heartbeatAt > 30_000 && (
+                    <div className="mt-0.5 text-xs text-aico-warning">
+                      nothing for {ago(row.heartbeatAt)}
+                      {row.lastTool ? ` — last inside ${row.lastTool}` : ''}
+                    </div>
+                  )}
+                  {row.lastTool && Date.now() - row.heartbeatAt <= 30_000 && (
+                    <div className="mt-0.5 truncate text-xs text-aico-secondary">
+                      now: {row.lastTool}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={async () => {
+                    await api.stopWork(row.id, 'Stopped from the panel');
+                    void refreshSystem();
+                  }}
+                  className="shrink-0 rounded border border-aico-danger/40 px-2 py-1 text-xs
+                             text-aico-danger hover:bg-aico-danger/10"
+                >
+                  Stop
+                </button>
+              </div>
+            </Row>
+          ))}
+        </Section>
+
+        {settled.length > 0 && (
+          <Section title="Recently finished" count={settled.length}>
+            {settled.map(row => (
+              <Row key={row.id}>
+                <div className="flex items-start gap-3">
+                  <span className={stateColour(row.state)}>{stateGlyph(row.state)}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-aico-primary">{row.title}</div>
+                    <div className="mt-0.5 text-xs text-aico-muted">
+                      <span className="font-mono">{row.kind}</span>
+                      {' · '}{row.state}
+                      {row.origin === 'cron' ? ' · scheduled' : null}
+                      {row.endedAt ? ` · ${ago(row.endedAt)} ago` : null}
+                      {row.costUsd ? ` · $${row.costUsd.toFixed(4)}` : null}
+                    </div>
+                    {row.outcome && (
+                      <div className={`mt-0.5 line-clamp-2 text-xs ${
+                        row.state === 'failed' || row.state === 'lost'
+                          ? 'text-aico-danger' : 'text-aico-secondary'}`}>
+                        {row.outcome}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Row>
+            ))}
+          </Section>
         )}
 
         <Section title="Background agents" count={backgroundAgents.length}>
@@ -131,7 +223,26 @@ export function SystemPanel(): React.ReactElement {
                   <div className="mt-0.5 text-xs text-aico-muted">
                     <span className="font-mono">{job.schedule}</span>
                     {job.nextRun ? <> · next {new Date(job.nextRun).toLocaleString()}</> : null}
+                    {job.permissions === 'readonly' ? <> · read-only</> : null}
                   </div>
+                  {/*
+                    What the last run actually did, not merely that it started.
+                    "Is my nightly job working?" is a question about the
+                    outcome, and a schedule that only reports its next fire time
+                    answers a different question — which is how a job that had
+                    been failing every night for a week still looked healthy.
+                  */}
+                  {job.lastOutcome ? (
+                    <div className={`mt-0.5 truncate text-xs ${
+                      /^(failed|lost)/.test(job.lastOutcome) ? 'text-aico-danger'
+                      : /^cancelled/.test(job.lastOutcome) ? 'text-aico-muted'
+                      : /^running/.test(job.lastOutcome) ? 'text-aico-accent'
+                      : 'text-aico-secondary'}`}>
+                      last run: {job.lastOutcome}
+                    </div>
+                  ) : (
+                    <div className="mt-0.5 text-xs text-aico-muted">has not run yet</div>
+                  )}
                 </div>
                 <button
                   onClick={async () => {
@@ -341,4 +452,40 @@ function elapsed(startedAt: number, completedAt?: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
   return `${Math.round(ms / 60_000)}m`;
+}
+
+/** The ledger states nothing further happens from. */
+const SETTLED = new Set(['done', 'failed', 'cancelled', 'lost']);
+
+/**
+ * Four outcomes that are genuinely different, shown as four different things.
+ *
+ * `cancelled` and `failed` in particular: one means somebody or some limit
+ * stopped it deliberately, the other means it broke. Rendering both as "not
+ * done" is what makes a user retry work that was stopped on purpose.
+ */
+function stateGlyph(state: string): string {
+  return state === 'running' ? '●'
+    : state === 'queued' ? '○'
+    : state === 'blocked' ? '⏸'
+    : state === 'done' ? '✓'
+    : state === 'cancelled' ? '⊘'
+    : state === 'lost' ? '?'
+    : '✕';
+}
+
+function stateColour(state: string): string {
+  return state === 'running' ? 'text-aico-success animate-pulse-soft'
+    : state === 'queued' ? 'text-aico-warning'
+    : state === 'blocked' ? 'text-aico-info'
+    : state === 'done' ? 'text-aico-success'
+    : state === 'cancelled' ? 'text-aico-muted'
+    : 'text-aico-danger';
+}
+
+function ago(at: number): string {
+  const ms = Math.max(0, Date.now() - at);
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+  return `${Math.floor(ms / 3_600_000)}h${Math.floor((ms % 3_600_000) / 60_000)}m`;
 }

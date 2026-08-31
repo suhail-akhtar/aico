@@ -190,6 +190,7 @@ import {
   costFor, isTerminalWorkState, renderRunningWork, stopWork,
   buildMcpTools, attachMcpHandlers, McpRpc,
   decideHeadlessPermission, setMcpPermissions, mcpPermissions,
+  canAskUser, NO_ONE_TO_ASK, cronFiringInFlight, cronFiringSummary, liveCronFirings,
 } from './dist-test/test-exports.js';
 
 import nodePath from 'path';
@@ -6461,6 +6462,59 @@ console.log('  -- The MCP server is read-only unless told otherwise --');
   assert(!('permissions' in schema.properties) && !('allowWrites' in schema.properties),
     'and there is no argument for a caller to raise it with');
   setMcpPermissions('readonly');
+}
+
+console.log('  -- Nothing headless waits for a person --');
+{
+  // Two prompts could block forever with nobody there: the permission gate and
+  // AskUserQuestion. Both wrote to process.stdout and read stdin — which under
+  // `aico mcp-serve` are the two halves of the JSON-RPC stream. A live probe
+  // caught a scheduled job that needed Write and never returned at all.
+  assert(typeof NO_ONE_TO_ASK === 'string' && /nobody to ask/i.test(NO_ONE_TO_ASK),
+    'a headless run is told plainly that nobody can answer');
+  assert(/Decide using what you have/i.test(NO_ONE_TO_ASK),
+    'and what to do instead — a refusal with no instruction just gets asked again');
+  assert(/Do not ask again/i.test(NO_ONE_TO_ASK),
+    'including not to repeat the question, which is the loop this replaces');
+  // Not asserted as a fixed boolean: the harness may or may not run on a TTY,
+  // and the property that matters is that the answer is decidable at all
+  // rather than discovered by hanging.
+  assert(typeof canAskUser() === 'boolean',
+    'whether anyone could answer is a question with an answer, not a wait');
+}
+
+console.log('  -- A schedule reports what its run did, not that it started --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+
+  assert(cronFiringInFlight(undefined) === false, 'a job that has never run has nothing in flight');
+  assert(cronFiringSummary(undefined) === undefined, 'and nothing to report');
+
+  const firing = ledger.open({ kind: 'schedule', title: 'nightly', origin: 'cron' });
+  assert(cronFiringInFlight(firing), 'a live firing is in flight');
+  assert(liveCronFirings() === 1, 'and is counted');
+  // The tally this replaces was incremented on fire and decremented in the
+  // dispatch's finally — but dispatch is fire-and-forget, so it only ever
+  // counted dispatches in progress and limited nothing.
+  assert(/^running/.test(cronFiringSummary(firing) ?? ''),
+    `a running firing says so (${cronFiringSummary(firing)})`);
+
+  ledger.close(firing, 'failed', 'exit 1 from the test suite');
+  assert(cronFiringInFlight(firing) === false, 'a finished firing is not in flight');
+  assert(liveCronFirings() === 0, 'and is no longer counted');
+  const summary = cronFiringSummary(firing) ?? '';
+  assert(/^failed/.test(summary) && /exit 1/.test(summary),
+    `and the summary carries the outcome, not just the state (${summary})`);
+
+  // The four states a schedule listing has to keep apart. Conflating a run the
+  // user stopped with one that crashed is what makes somebody retry work that
+  // was stopped on purpose.
+  const stopped = ledger.open({ kind: 'schedule', title: 'stopped one', origin: 'cron' });
+  ledger.close(stopped, 'cancelled', 'Stopped from the panel');
+  assert(/^cancelled/.test(cronFiringSummary(stopped) ?? ''), 'a stopped run reads as cancelled');
+  assert(/panel/.test(cronFiringSummary(stopped) ?? ''), 'saying who stopped it');
 }
 
 console.log('  -- Redaction --');

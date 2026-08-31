@@ -1,9 +1,18 @@
 import { cronScheduler } from './scheduler.js';
+import { cronFiringSummary } from '../work/cron-run.js';
 import type { CronJob } from './types.js';
 
 export const cronCreateToolDefinition = {
   name: 'CronCreate',
-  description: 'Create a scheduled cron job that runs a prompt on a recurring schedule.',
+  description:
+    'Create a scheduled job that runs a prompt on a recurring schedule.\n\n'
+    + 'Scheduled runs are unattended: nothing can ask the user anything, so the job is '
+    + 'given full tool access by default — writing the prompt and choosing the schedule '
+    + 'IS the authorization. Set permissions to "readonly" for a job that only needs to '
+    + 'report (a nightly summary, a dependency scan), which is safer and just as useful '
+    + 'for those.\n\n'
+    + 'A run that is still going does not start a second copy of itself, and every firing '
+    + 'is visible through Supervise with its own outcome.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -23,6 +32,13 @@ export const cronCreateToolDefinition = {
       cwd: {
         type: 'string',
         description: 'Working directory for the job (default: current directory)',
+      },
+      permissions: {
+        type: 'string',
+        enum: ['full', 'readonly'],
+        description: 'What the run may do. "full" (default) can run commands and change '
+          + 'files; "readonly" can only read and report. There is no third option that '
+          + 'asks — nobody is there to answer.',
       },
     },
     required: ['name', 'schedule', 'prompt'],
@@ -82,6 +98,7 @@ export async function executeCronCreate(args: {
   prompt: string;
   model?: string;
   cwd?: string;
+  permissions?: CronJob['permissions'];
 }): Promise<CronJob> {
   return cronScheduler.createJob(args);
 }
@@ -91,8 +108,20 @@ export async function executeCronDelete(args: { job_id: string }): Promise<{ del
   return { deleted: true };
 }
 
-export function executeCronList(): CronJob[] {
-  return cronScheduler.getJobs();
+/**
+ * Every job, with what its last firing actually did.
+ *
+ * The store records when a job last *started*. That is not the question anyone
+ * is asking: "is my nightly job working?" needs to know whether the run
+ * finished, failed, was stopped, or is still going four hours later — and only
+ * the ledger knows that. Folding it in here is what turns a schedule listing
+ * into an answer.
+ */
+export function executeCronList(): Array<CronJob & { lastOutcome?: string }> {
+  return cronScheduler.getJobs().map(job => {
+    const lastOutcome = cronFiringSummary(job.lastRunId);
+    return lastOutcome ? { ...job, lastOutcome } : { ...job };
+  });
 }
 
 export async function executeCronPause(args: { job_id: string }): Promise<{ paused: boolean }> {

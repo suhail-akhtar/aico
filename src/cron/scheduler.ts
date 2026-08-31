@@ -3,7 +3,9 @@ import type { CronJob } from './types.js';
 import { loadCronStore, persistJob, removePersistedJob } from './store.js';
 import { pushNotification } from '../background/notifications.js';
 import { runHooks } from '../hooks.js';
-import { closeCronRun, openCronRun } from '../work/register.js';
+import {
+  cronFiringInFlight, failCronFiring, followCronFiring, liveCronFirings, openCronFiring,
+} from '../work/cron-run.js';
 import type { AicoSettings } from '../settings.js';
 
 type SubscriberFn = (jobs: CronJob[]) => void;
@@ -108,7 +110,11 @@ class CronScheduler {
 
     for (const job of this._jobs.values()) {
       if (job.status !== 'enabled') continue;
-      if (this._runningCount >= maxJobs) break;
+      // Counted from the ledger, not from a tally. The tally was incremented on
+      // fire and decremented in the dispatch's `finally` — but dispatch is
+      // fire-and-forget and returns in milliseconds, so it only ever counted
+      // dispatches in progress and limited nothing.
+      if (liveCronFirings() >= maxJobs) break;
       if (!job.nextRun || now < job.nextRun) continue;
 
       void this._runJob(job);
@@ -117,6 +123,22 @@ class CronScheduler {
 
   private async _runJob(job: CronJob): Promise<void> {
     if (!this._opts) return;
+
+    /*
+      A job whose previous run has not finished does not start another.
+
+      Guarded here rather than in the tick, because the tick is not the only way
+      in — `runJobNow` calls this directly, and a guard on one path is a guard
+      that the other path proves does not exist. One job scheduled every minute
+      that takes an hour would otherwise stack sixty copies of itself, each
+      making the next slower, and the run already going is doing the work this
+      one was for.
+    */
+    if (cronFiringInFlight(job.lastRunId)) {
+      job.nextRun = parseNextRun(job.schedule);
+      this._emit();
+      return;
+    }
 
     this._runningCount++;
     job.status = 'running';
@@ -128,13 +150,17 @@ class CronScheduler {
       await runHooks('CronJobStart', { event: 'CronJobStart', agentId: job.id }, this._opts.settings).catch(() => {});
     }
 
-    // The firing, as distinct from the job. The job is configuration and lives
-    // in the store; this is the occurrence, and it is what an audit answers
-    // from — "did the 3am job fire, and what did it start?" The *work* is the
-    // background agent spawned below, which the ledger mirror tracks in its own
-    // right; this record exists so that agent can be traced back to a schedule
-    // rather than appearing from nowhere at 3am.
-    const firingId = openCronRun(job);
+    /*
+      The firing, as distinct from the job.
+
+      The job is configuration and lives in the store; this is the occurrence.
+      It stays open for as long as the work does — an earlier version closed it
+      the moment it had dispatched, which meant the ledger showed a scheduled
+      job as *done* while its agent was still running, and a job that failed at
+      3am appeared nowhere near its schedule.
+    */
+    const firingId = openCronFiring(job);
+    job.lastRunId = firingId;
 
     try {
       // Use dynamic import to avoid circular dependency
@@ -148,10 +174,19 @@ class CronScheduler {
           verbose: false,
           settings: this._opts.settings,
           cwd: job.cwd,
+          // Nobody can approve anything at 3am, so the alternatives are "act"
+          // or "silently do nothing" — and a job that refuses itself every
+          // night is worse than one that acts, because it looks like it is
+          // working. The user wrote the prompt and chose the schedule; that is
+          // the authorization. Set `permissions: 'readonly'` on a job that only
+          // needs to report.
+          permissions: job.permissions ?? 'full',
         },
       );
 
-      closeCronRun(firingId, true, `Started background agent ${spawnedId}`);
+      // The firing now follows the agent to its end, so stopping the schedule
+      // stops the run and the outcome lands back on the schedule's own record.
+      followCronFiring(firingId, spawnedId);
 
       job.status = 'enabled';
       job.runCount++;
@@ -167,7 +202,7 @@ class CronScheduler {
       job.runCount++;
       job.lastError = err instanceof Error ? err.message : String(err);
       job.nextRun = parseNextRun(job.schedule);
-      closeCronRun(firingId, false, job.lastError);
+      failCronFiring(firingId, job.lastError);
       await persistJob(job);
 
       pushNotification({
@@ -192,6 +227,7 @@ class CronScheduler {
     prompt: string;
     model?: string;
     cwd?: string;
+    permissions?: CronJob['permissions'];
   }): Promise<CronJob> {
     const job: CronJob = {
       id: randomUUID(),
@@ -200,6 +236,7 @@ class CronScheduler {
       prompt: params.prompt,
       model: params.model,
       cwd: params.cwd ?? process.cwd(),
+      permissions: params.permissions ?? 'full',
       status: 'enabled',
       createdAt: Date.now(),
       nextRun: parseNextRun(params.schedule),

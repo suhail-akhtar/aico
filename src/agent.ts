@@ -9,7 +9,7 @@ import { taskToolDefinition, runTask } from './tools/task.js';
 import { mcpRegistry } from './mcp.js';
 import { checkPermission } from './permissions.js';
 import { classifyBashCommand, isBashReadOnly } from './safety.js';
-import { setAskUserCallback } from './tools/askuser.js';
+import { canAskUser, setAskUserCallback } from './tools/askuser.js';
 import { getOpenTodoCount } from './tools/todo.js';
 import {
   showToolCall,
@@ -323,6 +323,16 @@ export interface AgentOptions {
   onPermissionRequest?: (toolName: string, detail: string, fileDiff?: { path: string; added?: string[]; removed?: string[]; preview?: string }) => Promise<boolean>;
   /** Ink UI AskUser callback — agent pauses to ask human a question */
   onAskUser?: (question: string) => Promise<string>;
+  /**
+   * There is no human attached to this run.
+   *
+   * Set by every unattended caller — background agents, cron firings, work
+   * submitted over MCP. It cannot be inferred: a global `askUser` callback may
+   * well be registered by the web server while the run in question is a 3am
+   * cron job, and routing its question to a browser tab nobody has open is a
+   * hang wearing a different hat.
+   */
+  headless?: boolean;
   /** Called when a sub-agent starts (Task tool) */
   onSubagentStart?: (rec: import('./tools/task.js').SubAgentRecord) => void;
   /** Called when a sub-agent finishes (Task tool) */
@@ -561,6 +571,8 @@ function resolveToolSet(opts: {
   toolRegistry?: ToolRegistryCapability;
   agentType?: SubAgentType;
   agentSpecTools?: string[] | 'all' | 'readonly';
+  /** No human attached — removes the tools that would wait for one. */
+  headless?: boolean;
   toolProfile?: AgentToolProfile;
   planMode?: boolean;
   settings?: AicoSettings;
@@ -598,6 +610,20 @@ function resolveToolSet(opts: {
   // taken away explicitly rather than left out of a whitelist.
   if ((opts.depth ?? 0) > 0) {
     defs = defs.filter(d => d.name !== 'Supervise');
+  }
+
+  /*
+    A question nobody can answer is a hang, so the tool is removed rather than
+    left present with a disclaimer.
+
+    "Off means the model cannot see the tool, not that it is told not to use it"
+    is the rule this repo already applies to Mini Apps, and it applies here for
+    the same reason: a tool in the list gets called eventually. `askUser` now
+    also refuses rather than blocking, but that is the second line — by then the
+    run has already spent a turn asking into the void.
+  */
+  if (opts.headless || !canAskUser()) {
+    defs = defs.filter(d => d.name !== 'AskUserQuestion');
   }
 
   // Mini Apps are a plugin, and "off" has to mean the model cannot see the

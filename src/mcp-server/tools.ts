@@ -30,7 +30,7 @@
 
 import { spawnBackgroundAgent, getBackgroundAgentOpts } from '../background/index.js';
 import { listSessionSummaries } from '../session/persistence.js';
-import { stopWork } from '../work/handles.js';
+import { stopWork, takeStopHandle } from '../work/handles.js';
 import { ledger } from '../work/ledger.js';
 import { isTerminal } from '../work/types.js';
 import type { WorkRecord } from '../work/types.js';
@@ -328,16 +328,31 @@ export function buildMcpTools(): McpToolSpec[] {
           const record = ledger.get(id);
           if (!record) { missing.push(id); continue; }
           if (isTerminal(record.state)) { already.push(`${id} (${record.state})`); continue; }
+          /*
+            Record the parent's outcome BEFORE stopping anything.
+
+            Stopping a child can close the parent through a follower — a cron
+            firing follows its agent's state — and that follower has only the
+            child's generic message to work with. A caller that stopped children
+            first found its own reason already overwritten by "Cancelled by user".
+            Recording first, signalling after, keeps the stated reason authoritative
+            while preserving the child-before-parent *signal* order that stops a
+            parent blocked inside a child from being left with nothing to abort.
+          */
+          const handle = takeStopHandle(id);
+          ledger.close(id, 'cancelled', reason);
+
           for (const child of ledger.descendants(id).reverse()) {
             if (isTerminal(child.state)) continue;
             await stopWork(child.id, mode, `parent ${id} stopped — ${reason}`,
               () => { ledger.close(child.id, 'cancelled', `Stopped with parent: ${reason}`); });
           }
-          // Outcome first, then the signal — see stopWork. Otherwise the
-          // agent's own "Cancelled by user" wins the race and the caller's
-          // reason never reaches the record.
-          await stopWork(id, mode, reason,
-            () => { ledger.close(id, 'cancelled', reason); });
+
+          if (handle) {
+            try {
+              await handle(mode, reason);
+            } catch { /* asked; a throwing handle is still on its way down */ }
+          }
           stopped.push(id);
         }
 

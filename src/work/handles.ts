@@ -37,6 +37,21 @@ export function hasStopHandle(id: string): boolean {
 }
 
 /**
+ * Take the handle out, so the caller can order recording and signalling itself.
+ *
+ * Needed because `ledger.close` clears the handle, and there is a case where the
+ * outcome must be written *before* anything is signalled at all: a cron firing
+ * follows its agent, so stopping the agent closes the firing — using the
+ * agent's own generic message. A caller that stopped children first found its
+ * reason already overwritten by the time it reached the parent.
+ */
+export function takeStopHandle(id: string): StopHandle | undefined {
+  const handle = handles.get(id);
+  handles.delete(id);
+  return handle;
+}
+
+/**
  * Stop one piece of work, recording *why* before it can be recorded otherwise.
  *
  * The ordering here is the whole point, and it was wrong once. Stopping a

@@ -57,7 +57,53 @@ and each `release/vX.Y` branch is cut from it at the version it names.
 - **A running-work block in the prompt** when there is something running or
   something finished you have not acknowledged, and nothing at all otherwise.
 
+- **Scheduled jobs are supervised work.** A firing now stays open for as long
+  as its run does, adopts the agent it started as a child, and closes with that
+  agent's outcome — so *done*, *failed*, *stopped by you* and *stopped by a
+  limit* are four visible states rather than one. Stopping the schedule stops
+  the run under it, and the spend is rolled up onto the schedule.
+
+  `CronList` and the System panel now report **what the last run did**, not just
+  when the next one is due. A job that had been failing every night looked
+  perfectly healthy before.
+
+- **Per-job cron permissions.** Scheduled runs default to full tool access:
+  nobody can approve anything at 3am, so the alternatives are "act" or "silently
+  do nothing", and a job that refuses itself every night is worse than one that
+  acts because it looks like it is working. Writing the prompt and choosing the
+  schedule is the authorization. Set `permissions: "readonly"` on a job that
+  only needs to report.
+
+- **A "Running work" view** in the System panel, across every kind of long-lived
+  work, with a Stop button and an idle warning — plus `work/stop` and `work/ack`
+  routes behind it.
+
 ### Fixed
+
+- **`AskUserQuestion` could hang a headless run forever.** With no callback
+  registered it opened a readline on stdin and waited — under `aico mcp-serve`,
+  on the JSON-RPC stream itself. It is now removed from the toolset of any run
+  with nobody attached, and refuses immediately if it is reached anyway.
+
+- **Background agents ignored their working directory.** `cwd` was declared on
+  the spawn options and never forwarded to `runAgent`, so every background agent
+  and every cron job ran in the *server's* directory. A nightly job pointed at a
+  repository wrote its files somewhere else entirely and looked, from that
+  repository, as though it had done nothing.
+
+- **`maxConcurrentJobs` limited nothing.** The tally was incremented on fire and
+  decremented in the dispatch's `finally`, but dispatch is fire-and-forget — so
+  it counted dispatches in progress, which is never more than one. Counted from
+  the ledger now.
+
+- **A slow job could stack copies of itself.** One scheduled every minute that
+  takes an hour started sixty. A run that is still going now skips the next
+  firing.
+
+- **A stop's reason was still being lost in one path.** Stopping a child closes
+  its parent through a follower — a cron firing follows its agent — using the
+  child's generic message. The outcome is now recorded before anything is
+  signalled.
 
 - **Background agents could hang forever on a permission prompt.** With
   `autoApprove` off — the default — any background agent, cron job or

@@ -173,6 +173,13 @@ export { Rpc as McpRpc, textResult as mcpTextResult } from './mcp-server/protoco
 export { McpStdioClient } from './mcp/stdio.js';
 export { costFor } from './tokens.js';
 export { decideHeadlessPermission } from './background/index.js';
+export { cronScheduler } from './cron/scheduler.js';
+export { canAskUser, NO_ONE_TO_ASK } from './tools/askuser.js';
+export { startLedgerMirroring, stopLedgerMirroring, setAdapterSettings } from './work/adapters.js';
+export { executeCronCreate, executeCronList } from './cron/tools.js';
+export {
+  openCronFiring, followCronFiring, cronFiringSummary, cronFiringInFlight, liveCronFirings,
+} from './work/cron-run.js';
 export { setMcpPermissions, mcpPermissions } from './mcp-server/tools.js';
 // -- Session titles --
 export {
