@@ -16,11 +16,12 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.5.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.6.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
       <a href="workspace.html">Workspace</a>
+      <a href="automation.html">Automation</a>
       <a href="widgets.html">Visuals</a>
       <a href="miniapps.html">Mini Apps</a>
       <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
@@ -41,7 +42,7 @@
     </p>
 
     <div class="install">
-      <code>$ npx github:suhail-akhtar/aico#v0.5.0 serve</code>
+      <code>$ npx github:suhail-akhtar/aico#v0.6.0 serve</code>
       <button type="button">Copy</button>
     </div>
 
@@ -153,6 +154,16 @@ What rendered:
         <p>Commands that are not supposed to exit get backgrounded, with the pid and the URL they printed. A persistent shell remembers your <code>cd</code>.</p>
       </div>
       <div class="card">
+        <span class="kicker"><a href="automation.html">Supervision</a></span>
+        <h3>One list of what is running</h3>
+        <p>Agents, dev servers, schedules and watchers in one ledger that survives a restart. Set a spend ceiling or an idle timeout once and the platform enforces it.</p>
+      </div>
+      <div class="card">
+        <span class="kicker"><a href="automation.html#mcp">MCP server</a></span>
+        <h3>Another AI can hand it work</h3>
+        <p><code>aico mcp-serve</code> speaks MCP on stdin and stdout — nothing listens, no port. Read-only until you say <code>--allow-writes</code>.</p>
+      </div>
+      <div class="card">
         <span class="kicker">Safety</span>
         <h3>Layers that say what they enforce</h3>
         <p>Permission prompts with diffs, a bash classifier, an opt-in workspace sandbox, a repeat-call guard, and spend ceilings that include sub-agents.</p>
@@ -164,8 +175,8 @@ What rendered:
       </div>
       <div class="card">
         <span class="kicker">Tested</span>
-        <h3>2,029 offline assertions</h3>
-        <p>No API key needed to run them. Plus 190 web-client checks, 31 Mini Apps checks over real HTTP, and a live suite that exercises real models.</p>
+        <h3>2,273 offline assertions</h3>
+        <p>No API key needed to run them. Plus 190 web-client checks, 35 Mini Apps checks over real HTTP, and live suites that drive real servers, real processes and real models.</p>
       </div>
     </div>
   </section>
@@ -258,7 +269,7 @@ What rendered:
     <div class="prose">
       <h2>Try it</h2>
       <div class="install">
-        <code>$ npx github:suhail-akhtar/aico#v0.5.0 serve</code>
+        <code>$ npx github:suhail-akhtar/aico#v0.6.0 serve</code>
         <button type="button">Copy</button>
       </div>
       <p style="margin-top:1rem">

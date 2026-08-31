@@ -17,7 +17,7 @@ and local Ollama.
 ❯ _
 ```
 
-**Status:** `0.5.0`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.6.0`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, visuals and Mini Apps.
@@ -31,7 +31,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.5.0 serve
+npx github:suhail-akhtar/aico#v0.6.0 serve
 ```
 
 ## Why this one
@@ -70,10 +70,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.5.0 serve
+npx github:suhail-akhtar/aico#v0.6.0 serve
 ```
 
-`#v0.5.0` is a tag, so it pins that release. `#release/v0.5` follows the 0.5
+`#v0.6.0` is a tag, so it pins that release. `#release/v0.6` follows the 0.6
 line as it gets fixes, and `#main` is the development trunk.
 
 From source:

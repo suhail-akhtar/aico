@@ -136,6 +136,12 @@ try {
 
   check(init?.protocolVersion === '2024-11-05', 'initialize agrees on the protocol version');
   check(init?.serverInfo?.name === 'aico', 'and identifies itself as aico');
+  // The literal that used to be here drifted from package.json within one
+  // release. A server that misreports its own version is a bug report nobody
+  // can reproduce, so the handshake is checked against the real thing.
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  check(init?.serverInfo?.version === pkgVersion,
+    `reporting the version it actually is (${init?.serverInfo?.version} vs ${pkgVersion})`);
   check(init?.capabilities?.tools !== undefined, 'declaring a tools capability');
 
   const initialized = await client.send('notifications/initialized', {});

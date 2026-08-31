@@ -15,6 +15,7 @@
  * @module mcp-server
  */
 
+import { createRequire } from 'node:module';
 import { loadSettings } from '../settings.js';
 import { initializeFeatures } from '../bootstrap.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
@@ -23,6 +24,21 @@ import { claimStdout, Rpc, textResult } from './protocol.js';
 
 /** The protocol revision aico's own client speaks, so both ends agree. */
 const PROTOCOL_VERSION = '2024-11-05';
+
+/**
+ * Reported in the handshake.
+ *
+ * Read rather than restated: the literal that was here had already drifted from
+ * `package.json` by the first release after it was written, and a server that
+ * misreports its own version is a bug report nobody can reproduce.
+ *
+ * The path is relative to the *bundle*, not to this source file — every build
+ * output (`dist/`, `dist-test/`) sits one level below the repository root, which
+ * is the same assumption `src/index.ts` already makes. Getting it wrong is not
+ * silent: the live probe asserts the handshake matches `package.json`.
+ */
+const AICO_VERSION: string =
+  (createRequire(import.meta.url)('../package.json') as { version: string }).version;
 
 export interface McpServeOptions {
   /** Where work runs. Defaults to the process's directory. */
@@ -55,7 +71,7 @@ export function attachMcpHandlers(rpc: Rpc, tools: McpToolSpec[]): Rpc {
   rpc.on('initialize', () => ({
     protocolVersion: PROTOCOL_VERSION,
     capabilities: { tools: {} },
-    serverInfo: { name: 'aico', version: '0.5.0' },
+    serverInfo: { name: 'aico', version: AICO_VERSION },
   }));
 
   // Answered rather than ignored, because aico's own client sends this as a
