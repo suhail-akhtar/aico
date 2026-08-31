@@ -52,6 +52,7 @@ import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
 import { requestAgentStop } from '../tools/task.js';
 import { deleteMiniApp, getMiniApp, listMiniApps, miniAppDir } from '../miniapps/store.js';
 import { runningApps, startApp, stopAllApps, stopApp } from '../miniapps/process.js';
+import { setWakeDelivery } from '../work/watchers.js';
 
 export interface ServeOptions {
   port?: number;
@@ -141,6 +142,16 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   }
 
   const runs = new RunManager(hub, settings);
+
+  // Watchers know when a condition fires; they do not know how to reach a
+  // conversation. Wired here rather than imported there so the work subsystem
+  // stays independent of the server — the CLI has no RunManager, and a watcher
+  // registered from the terminal falls back to a notification instead of
+  // failing to load.
+  setWakeDelivery({
+    steer: (sessionId, message) => runs.wake(sessionId, message, 'steer'),
+    followup: (sessionId, message) => runs.wake(sessionId, message, 'followup'),
+  });
 
   /**
    * Which directory each session belongs to.

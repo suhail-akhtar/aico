@@ -3,6 +3,7 @@ import type { CronJob } from './types.js';
 import { loadCronStore, persistJob, removePersistedJob } from './store.js';
 import { pushNotification } from '../background/notifications.js';
 import { runHooks } from '../hooks.js';
+import { closeCronRun, openCronRun } from '../work/register.js';
 import type { AicoSettings } from '../settings.js';
 
 type SubscriberFn = (jobs: CronJob[]) => void;
@@ -127,10 +128,18 @@ class CronScheduler {
       await runHooks('CronJobStart', { event: 'CronJobStart', agentId: job.id }, this._opts.settings).catch(() => {});
     }
 
+    // The firing, as distinct from the job. The job is configuration and lives
+    // in the store; this is the occurrence, and it is what an audit answers
+    // from — "did the 3am job fire, and what did it start?" The *work* is the
+    // background agent spawned below, which the ledger mirror tracks in its own
+    // right; this record exists so that agent can be traced back to a schedule
+    // rather than appearing from nowhere at 3am.
+    const firingId = openCronRun(job);
+
     try {
       // Use dynamic import to avoid circular dependency
       const { spawnBackgroundAgent } = await import('../background/index.js');
-      spawnBackgroundAgent(
+      const spawnedId = spawnBackgroundAgent(
         { description: `[cron] ${job.name}`, prompt: job.prompt, model: job.model },
         {
           token: this._opts.token,
@@ -141,6 +150,8 @@ class CronScheduler {
           cwd: job.cwd,
         },
       );
+
+      closeCronRun(firingId, true, `Started background agent ${spawnedId}`);
 
       job.status = 'enabled';
       job.runCount++;
@@ -156,6 +167,7 @@ class CronScheduler {
       job.runCount++;
       job.lastError = err instanceof Error ? err.message : String(err);
       job.nextRun = parseNextRun(job.schedule);
+      closeCronRun(firingId, false, job.lastError);
       await persistJob(job);
 
       pushNotification({
