@@ -33,7 +33,7 @@ import { supervisor } from '../work/supervisor.js';
 import { unwatch, watch } from '../work/watchers.js';
 import { guideAgent, owningSession } from './task.js';
 import type { SupervisionPolicy, WatchSpec, WorkRecord } from '../work/types.js';
-import { isTerminal } from '../work/types.js';
+import { isTerminal, reportsProgress } from '../work/types.js';
 
 export interface SuperviseInput {
   action: 'list' | 'stop' | 'guide' | 'wait' | 'watch' | 'unwatch' | 'policy' | 'ack';
@@ -90,7 +90,8 @@ function line(record: WorkRecord, now: number): string {
     // The single most useful number for judging a stall. Something that has not
     // moved in four minutes is either on a very long call or stuck, and the
     // orchestrator is better placed to know which than a fixed timeout is.
-    const stalled = idle > 30_000 ? `  (nothing for ${seconds(idle)})` : '';
+    const stalled = idle > 30_000 && reportsProgress(record.kind)
+      ? `  (nothing for ${seconds(idle)})` : '';
     if (now_ || stalled) bits.push(`  now: ${now_ ?? '—'}${stalled}`);
   }
   if (record.error) bits.push(`  error: ${record.error}`);

@@ -45,7 +45,10 @@ try {
     const client = new McpStdioClient({
       command: process.execPath,
       args: [entry, 'mcp-serve', '--cwd', workdir],
-      env: { AICO_WORK_LOG: path.join(workdir, 'work.jsonl') },
+      env: {
+        AICO_WORK_LOG: path.join(workdir, 'work.jsonl'),
+        AICO_CRON_STORE: path.join(workdir, 'cron.json'),
+      },
     });
     clients.push(client);
 

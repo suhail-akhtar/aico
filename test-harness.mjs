@@ -191,6 +191,7 @@ import {
   buildMcpTools, attachMcpHandlers, McpRpc,
   decideHeadlessPermission, setMcpPermissions, mcpPermissions,
   canAskUser, NO_ONE_TO_ASK, cronFiringInFlight, cronFiringSummary, liveCronFirings,
+  reportsProgress,
 } from './dist-test/test-exports.js';
 
 import nodePath from 'path';
@@ -6515,6 +6516,45 @@ console.log('  -- A schedule reports what its run did, not that it started --');
   ledger.close(stopped, 'cancelled', 'Stopped from the panel');
   assert(/^cancelled/.test(cronFiringSummary(stopped) ?? ''), 'a stopped run reads as cancelled');
   assert(/panel/.test(cronFiringSummary(stopped) ?? ''), 'saying who stopped it');
+}
+
+console.log('  -- Idle only means something where there is a heartbeat --');
+{
+  setWorkStorePath(nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aico-work-')), 'w.jsonl'));
+  ledger.resetForTest();
+  resetStopHandlesForTest();
+  supervisor.resetForTest();
+
+  assert(reportsProgress('agent') && reportsProgress('schedule'),
+    'agents and scheduled runs report progress');
+  assert(!reportsProgress('process') && !reportsProgress('watcher'),
+    'a process and a watcher do not — a detached server has no heartbeat to give, '
+    + 'because there is nothing to observe between "the pid exists" and "it does not"');
+
+  // Found by looking at the panel: a healthy background server showed a
+  // permanent amber "nothing for 1m", and a warning that is always on is a
+  // warning nobody reads.
+  const server = ledger.open({ kind: 'process', title: 'dev server', origin: 'model', pid: 4242 });
+  ledger.setPolicy(server, { idleMs: 1, onBreach: 'kill', notify: 'never' });
+  assert(evaluateBreach(ledger.get(server), Date.now() + 600_000) === undefined,
+    'so an idle rule never fires on one, however long it is quiet');
+  await sweepOnce(Date.now() + 600_000);
+  assert(ledger.get(server).state === 'running',
+    'and the sweep leaves a healthy server alone');
+
+  const agent = ledger.open({ kind: 'agent', title: 'stuck', origin: 'model' });
+  ledger.setPolicy(agent, { idleMs: 1, onBreach: 'report', notify: 'never' });
+  assert(evaluateBreach(ledger.get(agent), Date.now() + 600_000)?.kind === 'idle',
+    'while an agent that has gone quiet still trips it');
+
+  // The prompt projection follows the same rule, or the model reads a stall
+  // warning on every server it ever starts.
+  const block = renderRunningWork({ now: Date.now() + 600_000 });
+  assert(/id="[^"]*"[^>]*kind="process"/.test(block), 'the process is still listed');
+  assert(!/kind="process"[^>]*idle=/.test(block),
+    `without an idle attribute (${(/(<work [^>]*kind="process"[^>]*>)/.exec(block) ?? [])[1]})`);
+  assert(/kind="agent"[^>]*idle=/.test(block), 'while the agent carries one');
+  supervisor.resetForTest();
 }
 
 console.log('  -- Redaction --');

@@ -164,7 +164,7 @@ export {
   watch, unwatch, setWakeDelivery, activeWatcherCount, resetWatchersForTest,
 } from './work/watchers.js';
 export { registerBackgroundProcess, closeBackgroundProcess, openCronRun, closeCronRun } from './work/register.js';
-export { isTerminal as isTerminalWorkState } from './work/types.js';
+export { isTerminal as isTerminalWorkState, reportsProgress } from './work/types.js';
 export { renderRunningWork } from './work/projection.js';
 export { stopWork } from './work/handles.js';
 export { buildMcpTools } from './mcp-server/tools.js';
