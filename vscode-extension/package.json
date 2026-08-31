@@ -1,0 +1,111 @@
+{
+  "name": "aico-vscode",
+  "displayName": "aico — AI coding agent",
+  "description": "Run the aico coding agent inside VS Code. Ask about a selection, watch background work in the status bar, and keep the full workspace in a panel.",
+  "version": "0.1.0",
+  "publisher": "suhail-akhtar",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/suhail-akhtar/aico.git",
+    "directory": "vscode-extension"
+  },
+  "homepage": "https://suhail-akhtar.github.io/aico/",
+  "categories": ["AI", "Programming Languages", "Other"],
+  "keywords": ["ai", "coding agent", "agent", "llm", "claude", "ollama", "mcp"],
+  "engines": { "vscode": "^1.90.0" },
+  "main": "./out/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "aico.open",
+        "title": "Open Workspace",
+        "category": "aico"
+      },
+      {
+        "command": "aico.askAboutSelection",
+        "title": "Ask aico about this selection",
+        "category": "aico"
+      },
+      {
+        "command": "aico.newSession",
+        "title": "New Session",
+        "category": "aico"
+      },
+      {
+        "command": "aico.stopServer",
+        "title": "Stop the Server",
+        "category": "aico"
+      },
+      {
+        "command": "aico.openInBrowser",
+        "title": "Open Workspace in Browser",
+        "category": "aico"
+      },
+      {
+        "command": "aico.showOutput",
+        "title": "Show Server Log",
+        "category": "aico"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "aico.askAboutSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@99"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "aico.askAboutSelection",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "aico",
+      "properties": {
+        "aico.command": {
+          "type": "string",
+          "default": "aico",
+          "markdownDescription": "How to launch aico. Use an absolute path if it is not on your `PATH`. To run a checkout rather than an install, point this at `node` and set `#aico.args#` to the built entry point."
+        },
+        "aico.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Arguments inserted before 'serve'. Mostly for running a local checkout."
+        },
+        "aico.port": {
+          "type": "number",
+          "default": 0,
+          "markdownDescription": "Port for the aico server. `0` picks a free one, which is the right default — a fixed port collides with an aico you started in a terminal."
+        },
+        "aico.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the server automatically the first time it is needed, rather than asking."
+        },
+        "aico.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show running background work in the status bar."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1043,7 +1043,43 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     }
   }
 
-  await new Promise<void>((resolve) => server.listen(requestedPort, '127.0.0.1', resolve));
+  /*
+    Bind, and survive the port already being taken.
+
+    `listen` used to be awaited with no error handler at all, so a second
+    `aico serve` — or a first one after a crash left the port held — died with
+    an unhandled `EADDRINUSE` and exit code 1, saying nothing a user could act
+    on. The VS Code extension found it: it starts a server for you, so "the port
+    is busy" is its *normal* case rather than an edge one.
+
+    What happens next depends on whether the port was asked for. A caller who
+    wrote `--port 8080` usually has something pointed at 8080, and quietly
+    moving them to 8081 breaks that silently — so an explicit port fails loudly.
+    The default is just a default, and falling back to a free one is what
+    somebody who typed `aico serve` twice actually wants.
+  */
+  const explicitPort = opts.port !== undefined;
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: NodeJS.ErrnoException): void => {
+      if (err.code !== 'EADDRINUSE') { reject(err); return; }
+      if (explicitPort) {
+        reject(new Error(
+          `Port ${requestedPort} is already in use. Another aico may be running — `
+          + 'stop it, or start this one with a different --port.',
+        ));
+        return;
+      }
+      console.warn(`  Port ${requestedPort} is in use; taking a free one instead.`);
+      // Port 0 asks the OS for anything free. The bound port is read back below,
+      // so everything downstream — the URL, the Origin check — follows it.
+      server.listen(0, '127.0.0.1', resolve);
+    };
+    server.once('error', onError);
+    server.listen(requestedPort, '127.0.0.1', () => {
+      server.removeListener('error', onError);
+      resolve();
+    });
+  });
   // Port 0 asks the OS for any free port, so the real one has to be read back
   // rather than echoed. Without this the printed URL would say ":0" and the
   // Origin check would compare against a port nothing is listening on.

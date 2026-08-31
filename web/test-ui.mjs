@@ -508,6 +508,30 @@ test('an empty stored value is ignored', () => {
   assert.equal(initialSessionId(makeStore({ 'aico.session': '' }), () => 'safe'), 'safe');
 });
 
+test('a session named in the URL wins over the remembered one', () => {
+  // What lets something outside the page choose the conversation: the VS Code
+  // extension submits through the API and then has to open *that* session, not
+  // whichever one the browser happened to be in last.
+  const store = makeStore();
+  rememberSession('web-remembered', store);
+  assert.equal(initialSessionId(store, () => 'fresh', 'web-fromurl'), 'web-fromurl');
+});
+
+test('and is validated exactly like the stored one', () => {
+  // It arrives from a URL, so it is the least trustworthy input on the page.
+  const store = makeStore();
+  rememberSession('web-remembered', store);
+  assert.equal(initialSessionId(store, () => 'fresh', '../../etc/passwd'), 'web-remembered');
+  assert.equal(initialSessionId(store, () => 'fresh', ''), 'web-remembered');
+});
+
+test('with no session in the URL nothing changes', () => {
+  const store = makeStore();
+  rememberSession('web-remembered', store);
+  assert.equal(initialSessionId(store, () => 'fresh', null), 'web-remembered');
+  assert.equal(initialSessionId(makeStore(), () => 'fresh', null), 'fresh');
+});
+
 test('an invalid id is never written', () => {
   const store = makeStore();
   rememberSession('has spaces and /slashes', store);

@@ -286,12 +286,18 @@ program
 program
   .command('serve')
   .description('serve the web interface on localhost')
-  .option('-p, --port <port>', 'port to listen on', '7317')
+  // Deliberately no default here. `serve` applies 7317 itself, and the
+  // difference between "the user chose 7317" and "the user said nothing" is
+  // load-bearing: an explicit port that is taken fails loudly, because
+  // something is probably pointed at that number, while the default falls back
+  // to a free one. A default on this option erased that distinction, so the
+  // fallback path could never be reached from the command line.
+  .option('-p, --port <port>', 'port to listen on (default: 7317, or the next free one)')
   .option('--no-open', 'do not open a browser')
-  .action(async (cmdOpts: { port: string; open?: boolean }) => {
+  .action(async (cmdOpts: { port?: string; open?: boolean }) => {
     const { serve } = await import('./server/index.js');
     const { url, close } = await serve({
-      port: Number(cmdOpts.port),
+      ...(cmdOpts.port === undefined ? {} : { port: Number(cmdOpts.port) }),
       open: cmdOpts.open !== false,
     });
 

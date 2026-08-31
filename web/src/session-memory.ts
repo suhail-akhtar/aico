@@ -49,7 +49,20 @@ export function freshSessionId(now = Date.now(), random = Math.random): string {
 export function initialSessionId(
   store: SessionStore | null = defaultStore(),
   makeId: () => string = () => freshSessionId(),
+  /**
+   * A session named in the URL, which wins over the remembered one.
+   *
+   * Exists so something outside the page can point it at a conversation —
+   * the VS Code extension submits a question through the API and then needs to
+   * open *that* session rather than whichever one was last used. It also makes
+   * a session bookmarkable, which is worth having on its own.
+   *
+   * Validated like the stored value, and for the same reason: this arrives
+   * from a URL, so it is the least trustworthy input on the page.
+   */
+  requested: string | null = requestedSessionId(),
 ): string {
+  if (requested && isValidSessionId(requested)) return requested;
   try {
     const remembered = store?.getItem(LAST_SESSION_KEY);
     if (remembered && isValidSessionId(remembered)) return remembered;
@@ -57,6 +70,27 @@ export function initialSessionId(
     // Reading can throw even when the object exists (Safari private mode).
   }
   return makeId();
+}
+
+/**
+ * Read `?session=` and take it out of the address bar.
+ *
+ * Removed for the same reason the token is: a URL that keeps accumulating
+ * parameters gets copied, shared and bookmarked with them, and a stale session
+ * id in a bookmark silently reopens the wrong conversation months later.
+ */
+export function requestedSessionId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const url = new URL(window.location.href);
+    const requested = url.searchParams.get('session');
+    if (!requested) return null;
+    url.searchParams.delete('session');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    return requested;
+  } catch {
+    return null;
+  }
 }
 
 /** Record the session now being shown. */
