@@ -194,7 +194,9 @@ export const api = {
     seq: number;
     busy: boolean;
     messages: Array<{ role: string; content: string }>;
-    usage: Record<string, number>;
+    // Mixed on purpose: counts, two estimate flags, and the window's
+    // provenance as a string. Typed loosely here and narrowed where it is read.
+    usage: Record<string, unknown>;
   }>(`session?id=${encodeURIComponent(id)}`),
 
   submit: (opts: SubmitOptions) => post<{ accepted: boolean }>('submit', opts),

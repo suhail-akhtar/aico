@@ -66,6 +66,7 @@ import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
 import { runInContext } from './run-context.js';
 import { buildRuntimeAwareness } from './capabilities.js';
 import { renderRunningWork } from './work/projection.js';
+import { noteWindowFromError } from './context-window.js';
 import { listAgentSpecs } from './agents/registry.js';
 import { skillRegistry } from './skills/index.js';
 import { cronScheduler } from './cron/scheduler.js';
@@ -2146,6 +2147,31 @@ const GOAL_REMINDER_EVERY = 6;
     // moment someone is trying to work out what went wrong.
     const reason = classifyTurnEnd(err, loopSignal.aborted);
     transcript.endTurn(reason);
+
+    /*
+      Take the model's real context window out of the rejection.
+
+      A provider that refuses an oversized request nearly always states the
+      limit — "this model's maximum context length is N tokens". That sentence
+      is authoritative, arrives at no cost because the request has already
+      failed, and works for models that did not exist when this was written,
+      which is the case no built-in table can ever cover.
+
+      Fire-and-forget: learning the number must never be able to change how the
+      failure itself is reported.
+      */
+    if (reason.kind === 'error') {
+      void noteWindowFromError(model, reason.message, settings)
+        .then(learned => {
+          if (learned !== undefined && !silent) {
+            showError(
+              `Noted: ${model} holds ${learned.toLocaleString()} tokens. `
+              + 'Recorded, so this will not happen again.',
+            );
+          }
+        })
+        .catch(() => { /* a failed lesson is not worth a second error */ });
+    }
     if (reason.kind === 'aborted' && opts.inbox) {
       // Steering input was addressed to a turn that no longer exists, so
       // delivering it to the next one would apply a correction out of context.

@@ -38,13 +38,29 @@ const BUILTIN_CONTEXT_WINDOWS: Array<{ match: string; tokens: number }> = [
   { match: 'deepseek-',               tokens: 128_000 },
 
   // ── Anthropic Claude ──
+  // The 5 family holds 1M, not 200K. Confirmed against Anthropic's own
+  // `/v1/models`, which reports `max_input_tokens: 1000000` — and which the
+  // detector above now reads directly, so these are only the fallback for a
+  // run with no key to ask with. The blanket `claude-` entry claiming 200K was
+  // five times too small for every current model.
+  { match: 'claude-opus-5',           tokens: 1_000_000 },
+  { match: 'claude-sonnet-5',         tokens: 1_000_000 },
+  { match: 'claude-fable-5',          tokens: 1_000_000 },
+  { match: 'claude-opus-4',           tokens: 200_000 },
+  { match: 'claude-sonnet-4',         tokens: 200_000 },
+  { match: 'claude-haiku-4',          tokens: 200_000 },
   { match: 'claude-opus',             tokens: 200_000 },
   { match: 'claude-sonnet',           tokens: 200_000 },
   { match: 'claude-haiku',            tokens: 200_000 },
   { match: 'claude-',                 tokens: 200_000 },
 
   // ── OpenAI GPT ──
-  { match: 'gpt-5',                   tokens: 400_000 },  // GPT-5: ~400K
+  // OpenAI's `/v1/models` reports no length at all — verified against the live
+  // endpoint — so these come from published documentation and carry the date
+  // they were checked. They are the entries most likely to go stale, because
+  // nothing here can refresh them automatically.
+  { match: 'gpt-5.6',                 tokens: 1_048_576 },  // 5.6 family, checked 2026-09
+  { match: 'gpt-5',                   tokens: 400_000 },    // earlier 5.x
   { match: 'gpt-4.1-mini',            tokens: 1_000_000 },
   { match: 'gpt-4.1',                 tokens: 1_000_000 },
   { match: 'gpt-4o-mini',             tokens: 128_000 },
@@ -98,10 +114,85 @@ const DEFAULT_CONTEXT_WINDOW = 128_000;
 const RESERVED_OUTPUT_TOKENS = 8_192;
 
 /**
- * In-memory cache of model → context window.
- * Populated from settings on first lookup, updated by runtime detection.
+ * Where a context window came from, best first.
+ *
+ * The point of recording this is that a number alone cannot be re-evaluated.
+ * A table entry written in September and a figure the vendor's API returned
+ * this morning are not the same kind of fact, and treating them alike is how a
+ * stale guess outlives the model it describes.
+ *
+ * - `user`    — set deliberately in settings. Final, never expires, never
+ *               overwritten by detection. Somebody decided; that ends it.
+ * - `api`     — the provider's own endpoint said so. Authoritative, but
+ *               re-checked, because vendors change windows on live models.
+ * - `learned` — parsed out of the provider's own "maximum context length is N"
+ *               rejection. Just as authoritative as `api`, costs nothing, and
+ *               is the only source that works for a model released tomorrow.
+ * - `table`   — the built-in list. A dated guess. Always replaceable.
+ * - `assumed` — nothing knew. Flagged so it can be shown as a guess rather
+ *               than printed in the same style as a measured number.
  */
-const _runtimeCache = new Map<string, number>();
+export type WindowSource = 'user' | 'api' | 'learned' | 'table' | 'assumed';
+
+export interface WindowFact {
+  tokens: number;
+  source: WindowSource;
+  /** When it was established. Absent for the table and the assumption. */
+  at?: number;
+}
+
+/**
+ * How long a detected or tabulated window is trusted before it is checked again.
+ *
+ * The reason this is not "forever": a model's window is not a constant.
+ * Anthropic moved Claude from 200K to 1M on ids that already existed, and a
+ * value persisted permanently on the old number would have kept compacting at a
+ * fifth of the real window indefinitely, with nothing to make anyone look.
+ *
+ * A week is short enough that a change is picked up in a working cycle and long
+ * enough that nobody notices the check.
+ */
+const WINDOW_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Facts for this process, keyed by model. */
+const _runtimeCache = new Map<string, WindowFact>();
+
+/** Whether a fact is old enough to be worth re-establishing. */
+export function isStale(fact: WindowFact | undefined, now = Date.now()): boolean {
+  if (!fact) return true;
+  // A person's decision does not go stale, and an assumption is already the
+  // weakest thing available — re-checking either changes nothing.
+  if (fact.source === 'user') return false;
+  if (fact.source === 'table' || fact.source === 'assumed') return true;
+  return fact.at === undefined || now - fact.at > WINDOW_TTL_MS;
+}
+
+/**
+ * Read a stored entry, accepting both shapes.
+ *
+ * Older settings hold a bare number, because that is all this used to record.
+ * Those are treated as `api` with no timestamp — which `isStale` reports as
+ * stale, so the first run after upgrading re-establishes them instead of
+ * inheriting a figure of unknown age.
+ */
+function storedFact(value: unknown): WindowFact | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return { tokens: value, source: 'api' };
+  }
+  if (value && typeof value === 'object') {
+    const v = value as { tokens?: unknown; source?: unknown; at?: unknown };
+    const tokens = Number(v.tokens);
+    if (Number.isFinite(tokens) && tokens > 0) {
+      return {
+        tokens,
+        source: (['user', 'api', 'learned', 'table', 'assumed'] as const)
+          .includes(v.source as WindowSource) ? v.source as WindowSource : 'api',
+        ...(typeof v.at === 'number' ? { at: v.at } : {}),
+      };
+    }
+  }
+  return undefined;
+}
 
 /**
  * Look up the context window for a model.
@@ -113,32 +204,119 @@ const _runtimeCache = new Map<string, number>();
  *   4. DEFAULT_CONTEXT_WINDOW (128K)
  */
 export function getContextWindow(model: string, settings?: AicoSettings): number {
-  // 1. Runtime cache
+  return resolveWindow(model, settings).tokens;
+}
+
+/**
+ * The window *and* where it came from.
+ *
+ * Separate from `getContextWindow` so callers that only need a number are not
+ * forced to care, while the ones that should — the UI, and anything deciding
+ * whether to go and ask the provider — can tell a measured figure from a guess.
+ */
+export function resolveWindow(model: string, settings?: AicoSettings): WindowFact {
   const cached = _runtimeCache.get(model);
   if (cached) return cached;
 
-  // 2. Settings override (permanent)
-  if (settings?.contextWindows?.[model]) {
-    const val = settings.contextWindows[model];
-    _runtimeCache.set(model, val);
-    return val;
+  // A value written into settings by hand outranks everything, including a
+  // live answer from the vendor. Somebody looked at this and decided.
+  const stored = storedFact(settings?.contextWindows?.[model]);
+  if (stored) {
+    _runtimeCache.set(model, stored);
+    return stored;
   }
 
-  // 3. Built-in table — longest prefix match wins.
+  // The table — longest prefix match wins.
   //
   // Tried twice: once as given, once without the vendor prefix. `glm-5.3` and
   // `z-ai/glm-5.3` are the same model named two ways, and only the first
   // matched anything — so the routed form silently fell back to the default
   // window and compacted a 1M-context model as though it held 128K.
   const m = model.toLowerCase();
-  const found = matchWindow(m);
-  if (found !== undefined) return found;
-  const slash = m.indexOf('/');
-  if (slash > 0) {
-    const bare = matchWindow(m.slice(slash + 1));
-    if (bare !== undefined) return bare;
+  const found = matchWindow(m) ?? (m.includes('/') ? matchWindow(m.slice(m.indexOf('/') + 1)) : undefined);
+  if (found !== undefined) return { tokens: found, source: 'table' };
+
+  /*
+    Nothing knew, so this is a guess and is labelled one.
+
+    A model released after this build exists is the normal case, not an edge
+    one, and printing 128K for it in the same style as a measured number is how
+    somebody ends up trusting it. Detection and error-learning both replace
+    this the first time either gets a chance.
+  */
+  return { tokens: DEFAULT_CONTEXT_WINDOW, source: 'assumed' };
+}
+
+/**
+ * Patterns that state a real limit inside a provider's rejection.
+ *
+ * Each must capture the *window*, never the request size — the two appear in
+ * the same sentence and getting them the wrong way round would persist a number
+ * that shrinks every time it is learned.
+ *
+ * Deliberately anchored on the vendor's own wording rather than "any number
+ * near the word tokens", because these strings are read once and then written
+ * to a user's settings as fact.
+ */
+const LIMIT_PATTERNS: RegExp[] = [
+  // OpenAI: "This model's maximum context length is 128000 tokens, however you
+  // requested 130000 tokens..."
+  /maximum context length is\s+(\d[\d,_]*)\s*tokens/i,
+  // Anthropic: "prompt is too long: 250000 tokens > 200000 maximum"
+  /(?:>|exceeds)\s*(\d[\d,_]*)\s*maximum/i,
+  // Google: "input token count (X) exceeds the maximum number of tokens allowed (Y)"
+  /maximum number of tokens allowed\s*\((\d[\d,_]*)\)/i,
+  // vLLM and several gateways: "maximum context length is 32768 tokens"
+  /context (?:length|window)(?: is)?(?: limited to)?\s*(\d[\d,_]*)/i,
+  // Mistral / others: "max_tokens_limit: 32000"
+  /max(?:imum)?[ _-]?(?:context|model)[ _-]?len(?:gth)?["'\s:=]+(\d[\d,_]*)/i,
+];
+
+/**
+ * Take a model's real window from the error it just produced.
+ *
+ * This is the source that keeps working without anybody maintaining anything.
+ * A provider that rejects an oversized request nearly always says what the
+ * limit *is*, and that sentence is authoritative, free, and available for
+ * models that did not exist when this code was written — which is the case a
+ * built-in table can never cover.
+ *
+ * Returns the learned figure, or nothing if the message says no such thing.
+ * Refusing to guess is the whole point: a wrong number here is persisted and
+ * then trusted.
+ */
+export function learnWindowFromError(message: string): number | undefined {
+  for (const pattern of LIMIT_PATTERNS) {
+    const found = pattern.exec(message);
+    if (!found) continue;
+    const value = plausibleWindow(found[1]?.replace(/[,_]/g, ''));
+    if (value !== undefined) return value;
   }
-  return DEFAULT_CONTEXT_WINDOW;
+  return undefined;
+}
+
+/**
+ * Record what an error revealed, if it revealed anything.
+ *
+ * Called from the failure path rather than a probe, so it costs nothing: the
+ * request had already been made and had already failed.
+ */
+export async function noteWindowFromError(
+  model: string,
+  message: string,
+  settings?: AicoSettings,
+): Promise<number | undefined> {
+  const learned = learnWindowFromError(message);
+  if (learned === undefined) return undefined;
+
+  // A deliberate setting is not overruled by an error message. If somebody
+  // wrote a smaller number on purpose — to cap spend, to leave headroom — a
+  // rejection at the real limit is not evidence they were wrong.
+  const current = resolveWindow(model, settings);
+  if (current.source === 'user') return undefined;
+
+  await setContextWindow(model, learned, { source: 'learned' });
+  return learned;
 }
 
 /** The table's answer for one spelling of a model name, if it has one. */
@@ -171,14 +349,18 @@ export function getEffectiveContextBudget(model: string, settings?: AicoSettings
 export async function setContextWindow(
   model: string,
   tokens: number,
-  options?: { silent?: boolean },
+  options?: { silent?: boolean; source?: WindowSource },
 ): Promise<void> {
-  _runtimeCache.set(model, tokens);
+  // Stamped, so it can expire. A figure with no age is a figure nothing can
+  // ever decide to re-check, which is how a value written when a model held
+  // 200K survives the day it becomes 1M.
+  const fact: WindowFact = { tokens, source: options?.source ?? 'api', at: Date.now() };
+  _runtimeCache.set(model, fact);
 
   if (options?.silent) return;
 
   try {
-    await persistContextWindow(model, tokens);
+    await persistContextWindow(model, fact);
   } catch {
     // Persist failure is non-fatal — the runtime cache still holds the value
   }
@@ -188,7 +370,7 @@ export async function setContextWindow(
  * Persist a context-window override to ~/.aico/settings.json.
  * Merges into the contextWindows map without clobbering other entries.
  */
-async function persistContextWindow(model: string, tokens: number): Promise<void> {
+async function persistContextWindow(model: string, fact: WindowFact): Promise<void> {
   const dir = path.join(os.homedir(), '.aico');
   await mkdir(dir, { recursive: true });
   const filePath = path.join(dir, 'settings.json');
@@ -202,8 +384,11 @@ async function persistContextWindow(model: string, tokens: number): Promise<void
   }
 
   // Merge into contextWindows map
-  const ctxMap = (existing.contextWindows as Record<string, number>) ?? {};
-  ctxMap[model] = tokens;
+  // Written as an object rather than a bare number so the provenance and the
+  // timestamp survive a restart. A hand-written number still reads correctly —
+  // `storedFact` accepts both shapes — so nobody's existing settings break.
+  const ctxMap = (existing.contextWindows as Record<string, unknown>) ?? {};
+  ctxMap[model] = { tokens: fact.tokens, source: fact.source, at: fact.at };
   existing.contextWindows = ctxMap;
 
   await writeFile(filePath, JSON.stringify(existing, null, 2));
@@ -260,8 +445,32 @@ export async function detectContextWindow(
         );
         break;
       }
-      // OpenAI, Anthropic, Gemini don't expose context_length in their
-      // model list endpoints in a reliable way — rely on built-in table
+      /*
+        Anthropic publishes it, and the comment here used to say otherwise.
+
+        `GET /v1/models` returns `max_input_tokens` per model. That was checked
+        against the live endpoint rather than assumed, and it matters: it
+        reports 1,000,000 for the current Claude models while the table below
+        had `claude-` at 200,000. Five times too small means compaction fires at
+        a fifth of the real window — the transcript gets summarised away while
+        four fifths of the context sits unused.
+
+        A hardcoded table is a snapshot of the day it was written. Where a
+        vendor will tell us, ask.
+      */
+      case 'anthropic': {
+        detected = await detectViaAnthropic(model, settings);
+        break;
+      }
+      // Gemini reports `inputTokenLimit` on its models endpoint, in its own
+      // shape rather than the OpenAI one.
+      case 'gemini': {
+        detected = await detectViaGemini(model, settings);
+        break;
+      }
+      // OpenAI genuinely does not expose it: `/v1/models` returns id, object,
+      // created, owned_by and a shutdown date, and nothing about length.
+      // Verified against the live endpoint. The table is the only source.
       default:
         return undefined;
     }
@@ -308,6 +517,73 @@ async function detectViaOllama(model: string, settings?: AicoSettings): Promise<
 }
 
 /** Generic OpenAI-compatible /models endpoint with context_length field */
+/**
+ * How wide a reported number may be before it is disbelieved.
+ *
+ * Bounded rather than merely finite: a server reporting 0, or a byte count
+ * where tokens were meant, would otherwise be persisted as fact and drive
+ * compaction from then on. Shared so every detector applies the same standard
+ * to the number it found.
+ */
+function plausibleWindow(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1_000 && n <= 20_000_000 ? n : undefined;
+}
+
+/**
+ * Anthropic: `GET /v1/models` reports `max_input_tokens` per model.
+ *
+ * Authoritative, and the reason this exists: the built-in table said every
+ * `claude-` model held 200K, while the vendor's own endpoint says the current
+ * ones hold 1M.
+ *
+ * `max_tokens` is also present and is deliberately not used — that is the
+ * maximum *output*, and treating it as the window would shrink the budget to a
+ * tenth rather than expanding it.
+ */
+async function detectViaAnthropic(
+  model: string,
+  settings?: AicoSettings,
+): Promise<number | undefined> {
+  const instance = listInstances(settings ?? {}).find(i => i.type === 'anthropic');
+  const apiKey = (instance ? resolveApiKey(instance) : '') || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return undefined;
+
+  const res = await fetch('https://api.anthropic.com/v1/models?limit=1000', {
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+  });
+  if (!res.ok) return undefined;
+  const body = await res.json() as { data?: Array<Record<string, unknown>> };
+  const found = body.data?.find(m => m.id === model);
+  return found ? plausibleWindow(found.max_input_tokens) : undefined;
+}
+
+/**
+ * Gemini: `GET /v1beta/models` reports `inputTokenLimit`.
+ *
+ * Its own shape rather than the OpenAI one — the key is camelCase, ids are
+ * prefixed `models/`, and the key rides in the query string because the
+ * endpoint takes no bearer token.
+ */
+async function detectViaGemini(
+  model: string,
+  settings?: AicoSettings,
+): Promise<number | undefined> {
+  const instance = listInstances(settings ?? {}).find(i => i.type === 'gemini');
+  const apiKey = (instance ? resolveApiKey(instance) : '')
+    || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!apiKey) return undefined;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(apiKey)}`,
+  );
+  if (!res.ok) return undefined;
+  const body = await res.json() as { models?: Array<Record<string, unknown>> };
+  // Gemini returns `models/gemini-2.5-pro`; callers use the bare id.
+  const found = body.models?.find(m => String(m.name ?? '').replace(/^models\//, '') === model);
+  return found ? plausibleWindow(found.inputTokenLimit) : undefined;
+}
+
 async function detectViaOpenAICompatible(
   _model: string,
   url: string,
@@ -350,27 +626,31 @@ export async function ensureContextWindow(
   provider: string,
   settings?: AicoSettings,
 ): Promise<number> {
-  // Check if we already have a permanent override
-  if (settings?.contextWindows?.[model]) {
-    return getContextWindow(model, settings);
-  }
-  // Check runtime cache (detection already ran this session)
-  if (_runtimeCache.has(model)) {
-    return _runtimeCache.get(model)!;
-  }
+  /*
+    Ask again when what we hold is not good enough, rather than never.
 
-  // Attempt detection — this persists on success
+    The old rule was "if anything is stored, stop" — which meant a figure
+    written months ago outlived the model it described, and a `table` guess was
+    treated as settled fact that detection would never get another chance to
+    improve. `isStale` encodes when it is worth looking: a deliberate user
+    setting never is; a detected value is after a week; a guess always is.
+  */
+  const known = resolveWindow(model, settings);
+  if (!isStale(known)) return known.tokens;
+
   const detected = await detectContextWindow(model, provider, settings);
-  if (detected && detected > 0) {
-    // Detection succeeded — context window is now permanent
-    return detected;
-  }
+  if (detected && detected > 0) return detected;
 
-  // Detection failed or unsupported — use built-in table
-  // Mark as "known" so we don't retry detection every turn
-  const builtin = getContextWindow(model, settings);
-  _runtimeCache.set(model, builtin);
-  return builtin;
+  /*
+    Nothing answered. Hold the fallback for this process so every turn does not
+    re-attempt a detection that is not going to work — but do *not* persist it.
+
+    Writing a guess to disk is how it stops looking like a guess: the next run
+    would read it back as a stored fact, and the model's real window would never
+    be asked for again.
+  */
+  _runtimeCache.set(model, known);
+  return known.tokens;
 }
 
 /**

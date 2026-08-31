@@ -47,6 +47,7 @@ import { createGroup, deleteGroup, listGroups, updateGroup } from './groups.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
+import { getContextWindow } from '../context-window.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
 import { requestAgentStop } from '../tools/task.js';
@@ -687,6 +688,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
             settings.model ?? defaultModel, settings, activeProviderType(settings),
           ),
           usageEstimated: run.tokenTracker.hasEstimatedUsage(),
+          contextWindow: getContextWindow(
+            runs.modelOf(sessionId) ?? settings.model ?? defaultModel, settings,
+          ),
         },
       });
       return;

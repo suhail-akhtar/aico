@@ -76,11 +76,33 @@ export interface Usage {
    * leaves nothing measured at all. Both can be true at once.
    */
   usageEstimated: boolean;
+  /**
+   * How much room this model has, in tokens.
+   *
+   * Sent so occupancy can be shown rather than a bare count. A number of tokens
+   * means nothing on its own: 180k is comfortable in a million-token window and
+   * nearly fatal in a two-hundred-thousand one, and nobody reading "In 180k"
+   * can tell which they are in.
+   *
+   * Zero when the server has not said — an older server, or a session that has
+   * not run a turn yet. The meter is hidden rather than guessed at.
+   */
+  contextWindow: number;
+  /**
+   * Whether that window is measured or guessed.
+   *
+   * `assumed` in particular has to reach the reader: it means no source knew
+   * this model, so the bar is drawn against a fallback. Showing that
+   * identically to a figure the vendor returned is how somebody comes to trust
+   * a number nothing stands behind.
+   */
+  contextSource: 'user' | 'api' | 'learned' | 'table' | 'assumed' | '';
 }
 
 const NO_USAGE: Usage = {
   input: 0, output: 0, cached: 0, cacheWrite: 0,
   costUsd: 0, costEstimated: false, usageEstimated: false,
+  contextWindow: 0, contextSource: '',
 };
 
 interface AppState {
@@ -439,6 +461,8 @@ export const useStore = create<AppState>((set, get) => ({
             costUsd: Number(u.costUsd ?? 0),
             costEstimated: Boolean(u.costEstimated),
             usageEstimated: Boolean(u.usageEstimated),
+            contextWindow: Number(u.contextWindow ?? 0),
+            contextSource: (u.contextSource as Usage['contextSource']) ?? '',
           },
         });
       })
@@ -1236,6 +1260,8 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
           costUsd: Number(data.costUsd ?? 0),
           costEstimated: Boolean(data.costEstimated),
           usageEstimated: Boolean(data.usageEstimated),
+          contextWindow: Number(data.contextWindow ?? 0),
+          contextSource: (data.contextSource as Usage['contextSource']) ?? '',
         },
       }));
       return;
