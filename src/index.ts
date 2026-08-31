@@ -294,10 +294,16 @@ program
   // fallback path could never be reached from the command line.
   .option('-p, --port <port>', 'port to listen on (default: 7317, or the next free one)')
   .option('--no-open', 'do not open a browser')
-  .action(async (cmdOpts: { port?: string; open?: boolean }) => {
+  // For an embedder that knows which folder is the subject — the VS Code
+  // extension, chiefly. Without it a web session falls back to the workspace
+  // rather than the launch directory, which is correct for a browser reaching a
+  // long-running portal and wrong for something started for this folder just now.
+  .option('--project <dir>', 'treat this directory as the project, not just where the server started')
+  .action(async (cmdOpts: { port?: string; open?: boolean; project?: string }) => {
     const { serve } = await import('./server/index.js');
     const { url, close } = await serve({
       ...(cmdOpts.port === undefined ? {} : { port: Number(cmdOpts.port) }),
+      ...(cmdOpts.project === undefined ? {} : { project: cmdOpts.project }),
       open: cmdOpts.open !== false,
     });
 

@@ -99,6 +99,40 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('aico.showOutput', () => output.show(true)),
+
+    /*
+      Prove the extension is alive.
+
+      Added because the first failure was invisible: the extension was installed
+      but the window predated it, so nothing had loaded it and every keypress
+      did nothing. From inside the editor that is indistinguishable from a
+      broken extension, and there was no way to tell them apart.
+
+      If this command is missing from the palette, the window needs reloading.
+      If it runs, the answer it gives says what is actually wrong.
+    */
+    vscode.commands.registerCommand('aico.doctor', async () => {
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const running = server.current();
+      const lines = [
+        `Extension: v${context.extension.packageJSON.version as string} — loaded and running.`,
+        `Folder: ${folder ?? 'none open — aico needs a folder to work in.'}`,
+        `Server: ${running ? `running on port ${running.port}` : 'not started yet'}`,
+        `Command: ${vscode.workspace.getConfiguration('aico').get<string>('command', 'aico')}`,
+      ];
+
+      if (!running) {
+        lines.push('', 'Starting it now to check it works…');
+        output.appendLine(lines.join('\n'));
+        const started = await ready();
+        output.appendLine(started
+          ? `OK — server started on port ${started.port}.`
+          : 'FAILED — see the error above.');
+      } else {
+        output.appendLine(lines.join('\n'));
+      }
+      output.show(true);
+    }),
   );
 
   status.start();
@@ -116,9 +150,26 @@ async function askAboutSelection(
   server: ServerManager,
   ready: () => Promise<ReturnType<ServerManager['current']>>,
 ): Promise<void> {
+  /*
+    Answer the keypress even when there is nothing to act on.
+
+    The keybinding used to be gated on `editorHasSelection`, which meant
+    pressing it with no selection did *nothing at all* — no message, no hint,
+    no way to tell a missing selection from a broken extension. That is exactly
+    how it failed the first time somebody tried it.
+
+    So the binding fires whenever the editor has focus, and the reason lives
+    here where it can be said out loud.
+  */
   const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.selection.isEmpty) {
-    vscode.window.showWarningMessage('Select some code first.');
+  if (!editor) {
+    vscode.window.showWarningMessage('aico: open a file and select some code first.');
+    return;
+  }
+  if (editor.selection.isEmpty) {
+    vscode.window.showWarningMessage(
+      'aico: select the code you want to ask about, then press it again.',
+    );
     return;
   }
 

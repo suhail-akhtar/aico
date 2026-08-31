@@ -2,7 +2,7 @@
   "name": "aico-vscode",
   "displayName": "aico — AI coding agent",
   "description": "Run the aico coding agent inside VS Code. Ask about a selection, watch background work in the status bar, and keep the full workspace in a panel.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "publisher": "suhail-akhtar",
   "license": "MIT",
   "repository": {
@@ -11,11 +11,27 @@
     "directory": "vscode-extension"
   },
   "homepage": "https://suhail-akhtar.github.io/aico/",
-  "categories": ["AI", "Programming Languages", "Other"],
-  "keywords": ["ai", "coding agent", "agent", "llm", "claude", "ollama", "mcp"],
-  "engines": { "vscode": "^1.90.0" },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding agent",
+    "agent",
+    "llm",
+    "claude",
+    "ollama",
+    "mcp"
+  ],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
   "main": "./out/extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
       {
@@ -47,6 +63,11 @@
         "command": "aico.showOutput",
         "title": "Show Server Log",
         "category": "aico"
+      },
+      {
+        "command": "aico.doctor",
+        "title": "Check the Setup (Doctor)",
+        "category": "aico"
       }
     ],
     "menus": {
@@ -63,7 +84,7 @@
         "command": "aico.askAboutSelection",
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
-        "when": "editorHasSelection"
+        "when": "editorTextFocus"
       }
     ],
     "configuration": {
@@ -76,7 +97,9 @@
         },
         "aico.args": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Arguments inserted before 'serve'. Mostly for running a local checkout."
         },
