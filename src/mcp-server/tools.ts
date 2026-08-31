@@ -32,7 +32,7 @@ import { spawnBackgroundAgent, getBackgroundAgentOpts } from '../background/inde
 import { listSessionSummaries } from '../session/persistence.js';
 import { stopWork, takeStopHandle } from '../work/handles.js';
 import { ledger } from '../work/ledger.js';
-import { isTerminal } from '../work/types.js';
+import { isTerminal, reportsProgress } from '../work/types.js';
 import type { WorkRecord } from '../work/types.js';
 
 /**
@@ -115,7 +115,7 @@ function describe(record: WorkRecord, now = Date.now(), full = false): string {
   ];
   if (!isTerminal(record.state)) {
     const idle = now - record.heartbeatAt;
-    if (idle > 30_000) bits.push(`  nothing for ${age(idle)}`);
+    if (idle > 30_000 && reportsProgress(record.kind)) bits.push(`  nothing for ${age(idle)}`);
     else if (record.progress?.lastTool) bits.push(`  now: ${record.progress.lastTool}`);
   }
   if (record.error) bits.push(`  error: ${record.error}`);

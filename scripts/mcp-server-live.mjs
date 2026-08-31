@@ -114,6 +114,15 @@ try {
   child = spawn(process.execPath, [entry, 'mcp-serve', '--cwd', workdir], {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: root,
+    // A ledger and a cron store of its own. Without these the probe reads the
+    // user's real ones, and "an idle instance says so" fails the moment they
+    // have anything running — which is a test asserting something about the
+    // machine it happens to run on rather than about the code.
+    env: {
+      ...process.env,
+      AICO_WORK_LOG: path.join(workdir, 'work.jsonl'),
+      AICO_CRON_STORE: path.join(workdir, 'cron.json'),
+    },
   });
   const client = new Client(child);
 

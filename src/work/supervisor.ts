@@ -31,7 +31,7 @@
 import { pushNotification } from '../background/notifications.js';
 import { stopWork } from './handles.js';
 import { ledger } from './ledger.js';
-import { isTerminal } from './types.js';
+import { isTerminal, reportsProgress } from './types.js';
 import type { SupervisionPolicy, WorkRecord } from './types.js';
 
 /** How often the ledger is swept. */
@@ -84,7 +84,10 @@ export function evaluate(record: WorkRecord, now: number): Breach | undefined {
     };
   }
 
-  if (policy.idleMs !== undefined) {
+  // Only where silence means something. A process has no heartbeat to give —
+  // its liveness is the pid — so an idle rule on one would fire on every
+  // healthy server after the first interval.
+  if (policy.idleMs !== undefined && reportsProgress(record.kind)) {
     const idle = now - record.heartbeatAt;
     if (idle > policy.idleMs) {
       return {

@@ -63,6 +63,26 @@ export type WorkState =
   /** Was running when the process died, and is provably not running now. */
   | 'lost';
 
+/**
+ * Kinds that report progress, and for which silence therefore means something.
+ *
+ * An agent that has not touched a tool in ten minutes is probably stuck. A
+ * detached server that has not touched a tool in ten minutes is a server: it
+ * has no heartbeat to give, because there is nothing to observe between "the
+ * pid exists" and "it does not".
+ *
+ * Applying an idle rule to those was visibly wrong the moment it was looked at
+ * — a healthy background server showed a permanent amber "nothing for 1m", and
+ * a warning that is always on is a warning nobody reads. So idle time is shown,
+ * and enforced, only where it can distinguish anything.
+ */
+export const HEARTBEAT_KINDS: ReadonlySet<WorkKind> =
+  new Set<WorkKind>(['agent', 'run', 'schedule', 'remote']);
+
+export function reportsProgress(kind: WorkKind): boolean {
+  return HEARTBEAT_KINDS.has(kind);
+}
+
 /** The states nothing further will happen from. */
 export const TERMINAL_STATES: ReadonlySet<WorkState> =
   new Set<WorkState>(['done', 'failed', 'cancelled', 'lost']);

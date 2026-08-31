@@ -25,7 +25,7 @@
  */
 
 import { ledger } from './ledger.js';
-import { isTerminal } from './types.js';
+import { isTerminal, reportsProgress } from './types.js';
 import type { WorkRecord } from './types.js';
 
 /**
@@ -63,7 +63,7 @@ function attrs(record: WorkRecord, now: number): string {
   // healthy row.
   if (!isTerminal(record.state)) {
     const idle = now - record.heartbeatAt;
-    if (idle > STALL_MS) bits.push(`idle="${age(idle)}"`);
+    if (idle > STALL_MS && reportsProgress(record.kind)) bits.push(`idle="${age(idle)}"`);
     if (record.progress?.lastTool) bits.push(`in="${record.progress.lastTool}"`);
   }
   return bits.join(' ');

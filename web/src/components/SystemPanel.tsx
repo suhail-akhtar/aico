@@ -103,17 +103,20 @@ export function SystemPanel(): React.ReactElement {
                     {row.pid ? ` · pid ${row.pid}` : null}
                   </div>
                   {/*
-                    The number that separates "working hard" from "stuck". Shown
-                    only once it is long enough to mean something, so it does not
-                    become noise on every healthy row.
+                    The number that separates "working hard" from "stuck" — but
+                    only for work that reports progress at all. A detached
+                    server has no heartbeat to give, so this warned on every
+                    healthy one after thirty seconds, and a warning that is
+                    always on is a warning nobody reads.
                   */}
-                  {Date.now() - row.heartbeatAt > 30_000 && (
+                  {HEARTBEATS.has(row.kind) && Date.now() - row.heartbeatAt > 30_000 && (
                     <div className="mt-0.5 text-xs text-aico-warning">
                       nothing for {ago(row.heartbeatAt)}
                       {row.lastTool ? ` — last inside ${row.lastTool}` : ''}
                     </div>
                   )}
-                  {row.lastTool && Date.now() - row.heartbeatAt <= 30_000 && (
+                  {row.lastTool && !(HEARTBEATS.has(row.kind)
+                    && Date.now() - row.heartbeatAt > 30_000) && (
                     <div className="mt-0.5 truncate text-xs text-aico-secondary">
                       now: {row.lastTool}
                     </div>
@@ -456,6 +459,15 @@ function elapsed(startedAt: number, completedAt?: number): string {
 
 /** The ledger states nothing further happens from. */
 const SETTLED = new Set(['done', 'failed', 'cancelled', 'lost']);
+
+/**
+ * Kinds that report progress, and for which silence therefore means something.
+ *
+ * Mirrors `HEARTBEAT_KINDS` on the server. A process's liveness is its pid, not
+ * a heartbeat — there is nothing to observe between "the pid exists" and "it
+ * does not".
+ */
+const HEARTBEATS = new Set(['agent', 'run', 'schedule', 'remote']);
 
 /**
  * Four outcomes that are genuinely different, shown as four different things.
