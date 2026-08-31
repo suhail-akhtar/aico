@@ -21,7 +21,11 @@ export {
   resetCapabilityCache, MODALITIES,
 } from './model-capabilities.js';
 export { maybeAutoCompactConversation, getCompactionThreshold } from './compact.js';
-export { getContextWindow, getEffectiveContextBudget, resetContextWindowCache } from './context-window.js';
+export {
+  getContextWindow, getEffectiveContextBudget, resetContextWindowCache,
+  detectContextWindow, ensureContextWindow,
+  resolveWindow, isStale, learnWindowFromError, setContextWindow,
+} from './context-window.js';
 export { AGENT_PROMPTS } from './agents/prompts-registry.js';
 // ── Session event log ─────────────────────────────────────────────────
 export {

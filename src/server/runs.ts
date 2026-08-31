@@ -13,6 +13,7 @@
 import { runAgent } from '../agent.js';
 import { setBashProgressSink } from '../tools/bash.js';
 import { createTokenTracker } from '../tokens.js';
+import { getContextWindow, resolveWindow } from '../context-window.js';
 import { openSession } from '../session/open.js';
 import { loadSettings } from '../settings.js';
 import { instructionsFor } from './projects.js';
@@ -427,6 +428,15 @@ export class RunManager {
           // The other, independent way a figure can be soft: the provider
           // reported no usage and these counts were derived from text length.
           usageEstimated: run.tokenTracker.hasEstimatedUsage(),
+          // How much room this model actually has, so the client can show
+          // occupancy rather than a bare token count. A number of tokens means
+          // nothing on its own — 180k is comfortable in a 1M window and nearly
+          // fatal in a 200k one, and the reader cannot tell which without this.
+          contextWindow: getContextWindow(model, settings),
+          // Whether that number is measured or guessed. Sent because a bar
+          // drawn against an assumption should not look identical to one drawn
+          // against the vendor's own figure.
+          contextSource: resolveWindow(model, settings).source,
         }),
       });
 

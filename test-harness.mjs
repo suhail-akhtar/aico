@@ -34,6 +34,7 @@ import {
   getEffectiveContextBudget,
   getCompactionThreshold,
   resetContextWindowCache,
+  resolveWindow, isStale, learnWindowFromError,
   skillRegistry,
   Session,
   canonicalHeader,
@@ -863,6 +864,91 @@ const overridden = getContextWindow('claude-sonnet-4-6', {
   contextWindows: { 'claude-sonnet-4-6': 500_000 },
 });
 assert(overridden === 500_000, `Settings override → 500K (got ${overridden})`);
+
+console.log('\n  -- A window knows where it came from --');
+{
+  /*
+    A number alone cannot be re-evaluated, and that is the whole problem a
+    table has: an entry written in September and a figure the vendor returned
+    this morning are not the same kind of fact. Recording which is which is
+    what lets a stale one be replaced instead of outliving the model.
+  */
+  resetContextWindowCache();
+  assert(resolveWindow('claude-opus-5', {}).source === 'table',
+    'the built-in list is marked as a guess, not as measurement');
+
+  // The case a hardcoded list can never cover: a model released after this
+  // build exists. It must not be printed in the same style as a real figure.
+  resetContextWindowCache();
+  const unknown = resolveWindow('some-model-released-next-year', {});
+  assert(unknown.source === 'assumed',
+    `an unknown model is an assumption (got ${unknown.source})`);
+  assert(unknown.tokens === 128_000, 'falling back to 128K, but labelled');
+
+  resetContextWindowCache();
+  const chosen = resolveWindow('claude-opus-5', { contextWindows: { 'claude-opus-5': 42_000 } });
+  assert(chosen.source === 'user' || chosen.tokens === 42_000,
+    'a bare number in settings is a deliberate decision and wins');
+
+  // Both shapes read, so nobody's existing settings break on upgrade.
+  resetContextWindowCache();
+  const structured = resolveWindow('m', {
+    contextWindows: { m: { tokens: 777_000, source: 'learned', at: Date.now() } },
+  });
+  assert(structured.tokens === 777_000 && structured.source === 'learned',
+    'and the object form carries its provenance back');
+}
+
+console.log('\n  -- Staleness is what stops a value outliving its model --');
+{
+  const now = Date.now();
+  const week = 7 * 24 * 60 * 60 * 1000;
+
+  assert(isStale(undefined) === true, 'knowing nothing is always worth asking about');
+  assert(isStale({ tokens: 1, source: 'table' }, now) === true,
+    'a table guess is always worth improving on');
+  assert(isStale({ tokens: 1, source: 'assumed' }, now) === true,
+    'and so is an assumption');
+  // Anthropic moved Claude from 200K to 1M on ids that already existed. A value
+  // persisted permanently would have kept compacting at a fifth of the real
+  // window for ever, with nothing to prompt anyone to look.
+  assert(isStale({ tokens: 1, source: 'api', at: now - week - 1 }, now) === true,
+    'a detected value is re-checked after a week, because vendors change them');
+  assert(isStale({ tokens: 1, source: 'api', at: now - 1000 }, now) === false,
+    'but not on every turn');
+  assert(isStale({ tokens: 1, source: 'user', at: 0 }, now) === false,
+    'a person\'s decision never goes stale — they looked, and they decided');
+  assert(isStale({ tokens: 1, source: 'api' }, now) === true,
+    'a stored number with no age is treated as unknown age, not as fresh');
+}
+
+console.log('\n  -- The provider states its own limit when it refuses --');
+{
+  /*
+    The source that keeps working with nobody maintaining anything. A refusal
+    nearly always names the limit, it costs nothing because the request already
+    failed, and it works for models that did not exist when this was written.
+  */
+  const cases = [
+    ["This model's maximum context length is 128000 tokens, however you requested 130000 tokens", 128_000],
+    ['prompt is too long: 250000 tokens > 200000 maximum', 200_000],
+    ['input token count (1200000) exceeds the maximum number of tokens allowed (1048576)', 1_048_576],
+    ["This model's maximum context length is 1,048,576 tokens", 1_048_576],
+  ];
+  for (const [message, expected] of cases) {
+    const learned = learnWindowFromError(message);
+    assert(learned === expected,
+      `reads ${expected.toLocaleString()} from "${message.slice(0, 46)}…" (got ${learned})`);
+  }
+
+  // Refusing to guess is the point: whatever is learned here is written to a
+  // user's settings and then trusted.
+  assert(learnWindowFromError('rate limit exceeded, please retry') === undefined,
+    'an unrelated error teaches nothing');
+  assert(learnWindowFromError('API error 500') === undefined, 'and neither does a bare status');
+  assert(learnWindowFromError('maximum context length is 12 tokens') === undefined,
+    'an implausible figure is refused rather than persisted as fact');
+}
 
 // Effective budget subtracts output headroom
 resetContextWindowCache();

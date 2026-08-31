@@ -413,6 +413,29 @@ ${prefill.text}` : prefill.text));
               ? 'Enter steers · ⌘/Ctrl+Enter queues'
               : 'Enter to send · Shift+Enter for a newline'}
           </span>
+          {/*
+            How full the window is, which is the number people actually want.
+
+            "In 180k" says nothing on its own — that is comfortable in a
+            million-token window and nearly fatal in a two-hundred-thousand one,
+            and the reader cannot tell which they are in. The most recent
+            request's input tokens *are* the current occupancy, because the whole
+            conversation is resent every turn.
+
+            Hidden entirely until the server has said how big the window is, so
+            an older server shows the counts it always did rather than a bar
+            drawn against a guess.
+          */}
+          {usage.input > 0 && usage.contextWindow > 0 && (
+            <>
+              <span aria-hidden>·</span>
+              <ContextMeter
+                used={usage.input}
+                total={usage.contextWindow}
+                source={usage.contextSource}
+              />
+            </>
+          )}
           {usage.input > 0 && (
             <>
               <span aria-hidden>·</span>
@@ -478,4 +501,71 @@ function format(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
   return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+/** What each provenance means, for the tooltip. */
+const WINDOW_SOURCE: Record<string, string> = {
+  user: 'Window size: set by you in settings.',
+  api: 'Window size: reported by the provider itself.',
+  learned: 'Window size: taken from a limit error the provider itself returned.',
+  table: 'Window size: from the built-in list — a guess that detection will replace.',
+  assumed: 'Window size: UNKNOWN for this model, so 128K is assumed. '
+    + 'Set contextWindows in settings if you know the real figure.',
+};
+
+/**
+ * How full the context window is.
+ *
+ * A bar rather than only a percentage, because the thing being communicated is
+ * *headroom*, and headroom is a length. The number is there too for anyone who
+ * wants the actual figure.
+ *
+ * Colour changes only near the end. A meter that is amber at 50% trains people
+ * to ignore it, and the honest reading of half-full is that nothing is wrong —
+ * compaction is a normal part of a long conversation, not a failure. Amber at
+ * 75% means "this will compact soon"; red at 90% means "it is about to".
+ */
+function ContextMeter(
+  { used, total, source }: { used: number; total: number; source: string },
+): React.ReactElement {
+  // Clamped, because a provider that under-reports its own window would
+  // otherwise render a bar wider than its track.
+  const fraction = Math.min(1, Math.max(0, used / total));
+  const percent = Math.round(fraction * 100);
+
+  const tone = fraction >= 0.9 ? 'bg-aico-danger'
+    : fraction >= 0.75 ? 'bg-aico-warning'
+      : 'bg-aico-accent';
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5"
+      title={`${used.toLocaleString()} of ${total.toLocaleString()} tokens in the context `
+        + `window (${percent}%). The whole conversation is resent each turn, so this is `
+        + 'how full it is right now. Older turns are summarised automatically before it fills.'
+        + `
+
+${WINDOW_SOURCE[source] ?? ''}`}
+    >
+      <span
+        className="relative inline-block h-1.5 w-10 overflow-hidden rounded-full bg-aico-hover"
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Context window used"
+      >
+        <span
+          className={`absolute inset-y-0 left-0 rounded-full ${tone}`}
+          style={{ width: `${Math.max(percent, 2)}%` }}
+        />
+      </span>
+      {/*
+        A guessed window is marked. Nothing knew this model, so the bar is drawn
+        against a fallback — and a bar that looks identical to a measured one is
+        how somebody comes to trust a number nothing stands behind.
+      */}
+      <span>{percent}% of {format(total)}{source === 'assumed' ? '?' : ''}</span>
+    </span>
+  );
 }

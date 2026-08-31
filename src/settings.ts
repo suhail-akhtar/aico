@@ -318,7 +318,16 @@ export interface AicoSettings {
    *
    * Example: { "deepseek/deepseek-v4-flash": 1000000 }
    */
-  contextWindows?: Record<string, number>;
+  /**
+   * Known context windows, by model.
+   *
+   * Two shapes are accepted. A bare number is a deliberate override and is
+   * treated as final — nothing detected will replace it. The object form is
+   * what aico writes itself: `{ tokens, source, at }`, so a figure it worked
+   * out can be aged out and re-established when a vendor changes a model's
+   * window, which they do on ids that already exist.
+   */
+  contextWindows?: Record<string, number | { tokens: number; source?: string; at?: number }>;
   /**
    * What a model takes and returns, when the built-in table is wrong or silent.
    *
