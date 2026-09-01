@@ -106,6 +106,9 @@
 * { box-sizing: border-box; }
 
 html { scroll-behavior: smooth; }
+/* The header is sticky and 60px tall, so an anchor jump would otherwise land the
+   target heading exactly underneath it — invisible, which reads as a dead link. */
+html { scroll-padding-top: 76px; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 
 body {
@@ -273,6 +276,9 @@ pre .d { color: var(--danger); }
 
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .grid-2 { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+/* Four cards in a three-column grid leaves one stranded on its own row, which
+   reads as unfinished. A wider minimum settles to 2×2 at the prose width. */
+.grid-4 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 
 .card {
   border: 1px solid var(--border-subtle); border-radius: var(--radius);

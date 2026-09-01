@@ -135,6 +135,31 @@ aico serve</code></pre>
       </li>
     </ol>
 
+    <h2>In VS Code</h2>
+    <p>
+      A thin extension: it starts the server against your open folder, embeds the
+      same workspace in a panel, and adds asking about a selection and a status
+      bar for background work. Not on the Marketplace yet, so it is built from the
+      repository:
+    </p>
+<pre><code>cd aico/vscode-extension
+npm install
+npx tsc -p ./
+npx @vscode/vsce package
+code --install-extension aico-vscode-*.vsix</code></pre>
+    <p>
+      Then <strong>reload the window</strong> — VS Code does not load a newly
+      installed extension into windows that are already open, and a keypress in
+      one of those does nothing at all. Run
+      <code>aico: Check the Setup</code> from the command palette to confirm it is
+      live; if that command is missing, the window still needs reloading.
+    </p>
+    <p style="font-size:.9rem;color:var(--muted)">
+      It needs <code>aico</code> on your <code>PATH</code>, or
+      <code>aico.command</code> pointed at it. See
+      <a href="compare.html#vscode">what it does and deliberately does not do</a>.
+    </p>
+
     <h2>The terminal, if you prefer it</h2>
 <pre><code>aico                                   <span class="c"># interactive</span>
 aico -p <span class="s">"fix the failing tests"</span>        <span class="c"># one-shot</span>

@@ -84,7 +84,8 @@
           <tr><td>Runs local models</td><td>Yes</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Limited</td></tr>
           <tr><td>Terminal</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td><td>No</td></tr>
           <tr><td>Own web UI</td><td>Yes</td><td>No</td><td>Desktop app</td><td>No</td><td>In VS&nbsp;Code</td><td>Is an editor</td></tr>
-          <tr><td>Editor extension</td><td>No</td><td>Yes</td><td>Yes</td><td>No</td><td>Yes</td><td>n/a</td></tr>
+          <tr><td>Editor extension</td><td>VS&nbsp;Code</td><td>Yes</td><td>Yes</td><td>No</td><td>Yes</td><td>n/a</td></tr>
+          <tr><td>Inline completion</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>Yes</td></tr>
           <tr><td>Community size</td><td>New</td><td>Very large</td><td>Very large</td><td>Large</td><td>Large</td><td>Very large</td></tr>
         </tbody>
       </table>
@@ -146,6 +147,41 @@
       less common.
     </p>
 
+    <h3 id="vscode">In VS Code, deliberately thin</h3>
+    <p>
+      The extension does not reimplement the agent. aico's server already owns
+      runs, survives a closed tab and ships the whole workspace, so the extension
+      starts it against your open folder, embeds that workspace in a panel, and
+      adds the three things an editor can do that a browser cannot:
+    </p>
+    <ul>
+      <li>
+        <strong>Ask about a selection</strong> — highlight code, press
+        <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>, and the file and line numbers
+        go with the question, so the agent is not sent hunting for what your
+        editor already knew.
+      </li>
+      <li>
+        <strong>Background work in the status bar</strong> — a run started an hour
+        ago, or a scheduled job that failed overnight, without opening anything.
+      </li>
+      <li>
+        <strong>Server lifecycle</strong> — started for the folder you have open,
+        stopped when you are done.
+      </li>
+    </ul>
+    <p>
+      That is the whole of it. Rebuilding the conversation UI natively would
+      duplicate several thousand lines to arrive somewhere worse, and there is no
+      inline-completion feature — that is a different product, and Cursor and
+      Copilot do it well.
+    </p>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Not on the Marketplace yet; it is built from
+      <a href="https://github.com/suhail-akhtar/aico/tree/main/vscode-extension" rel="noopener">the
+      repository</a>.
+    </p>
+
     <h2>Where the alternatives are ahead</h2>
     <div class="table-wrap">
       <table>
@@ -176,8 +212,11 @@
       </table>
     </div>
     <p>
-      aico has no editor extension and no hosted service, and there is no plan for
-      either. It is a terminal agent plus its own local web workspace.
+      aico has no hosted service and no plan for one. There <em>is</em> a
+      <a href="#vscode">VS Code extension</a>, but it is a thin one — it starts the
+      server, embeds the same workspace in a panel, and adds the few things an
+      editor can do that a browser cannot. It is not a second implementation of
+      the agent, and it is not an inline-completion tool.
     </p>
 
     <h2>Who it is actually for</h2>

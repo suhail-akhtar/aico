@@ -80,7 +80,7 @@
       "name": "Does it work in the terminal, or does it need an editor?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Both, and neither is an extension. aico is a terminal agent; aico serve starts a local web workspace on 127.0.0.1. There is no VS Code plugin — the same engine drives both surfaces."
+        "text": "Either. aico is a terminal agent; aico serve starts a local web workspace on 127.0.0.1. There is also a VS Code extension, but it is a thin one — it embeds that same workspace and adds asking about a selection and a status bar for background work. One engine drives all three surfaces; none of them is a separate implementation, and there is no inline completion."
       }
     },
     {
@@ -341,7 +341,7 @@ What rendered:
       <figcaption>The web workspace. Sessions and projects on the left, Mini Apps beside them.</figcaption>
     </figure>
 
-    <div class="grid">
+    <div class="grid grid-4">
       <a class="card" href="workspace.html">
         <span class="kicker">Workspace</span>
         <h3>The web client</h3>
@@ -359,6 +359,12 @@ What rendered:
         <h3>Small apps that persist</h3>
         <p>Ask for an invoice ledger and get a real one, with SQLite behind it, at its own local URL.</p>
         <span class="more">Read the design →</span>
+      </a>
+      <a class="card" href="compare.html#vscode">
+        <span class="kicker">VS Code</span>
+        <h3>The same workspace, in the editor</h3>
+        <p>A thin extension: it embeds the workspace, asks about a selection with its file and lines, and keeps background work in the status bar.</p>
+        <span class="more">What it does and does not do →</span>
       </a>
     </div>
   </section>
@@ -411,10 +417,13 @@ What rendered:
       <h3>Does it work in the terminal, or does it need an editor?</h3>
       <div class="a">
         <p>
-          Both, and neither is an extension. <code>aico</code> is a terminal
-          agent; <code>aico serve</code> starts a local web workspace on
-          <code>127.0.0.1</code>. There is no VS Code plugin — the same engine
-          drives both surfaces.
+          Either. <code>aico</code> is a terminal agent; <code>aico serve</code>
+          starts a local web workspace on <code>127.0.0.1</code>. There is also a
+          <a href="compare.html#vscode">VS Code extension</a>, but it is a thin
+          one — it embeds that same workspace and adds asking about a selection
+          and a status bar for background work. One engine drives all three
+          surfaces; none of them is a separate implementation, and there is no
+          inline completion.
         </p>
       </div>
 

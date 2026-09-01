@@ -69,6 +69,13 @@ carries the outcome:
 | `running · pid 4321` | Started in the background and still going |
 | `failed` | It did not work. No diff is drawn for a write that did not happen |
 
+If you live in VS Code, the extension in `vscode-extension/` puts this same
+client in a panel rather than a tab. Two things change: selecting code and
+pressing <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> sends the file and line
+numbers with your question, so nobody has to go looking for what your editor
+already knew; and anything running in the background shows in the status bar. The
+README has the build steps — it is not on the Marketplace yet.
+
 ---
 
 ## Planning something first
