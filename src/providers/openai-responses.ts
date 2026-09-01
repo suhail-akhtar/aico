@@ -45,6 +45,8 @@
  */
 
 import OpenAI, { APIError } from 'openai';
+import { resolvedEffort } from '../run-context.js';
+import { supportsReasoning } from '../../shared/reasoning.js';
 import { normalizeUsage } from './usage.js';
 import { OPENAI_DIALECT } from '../prompt/dialects.js';
 import type {
@@ -106,6 +108,9 @@ export class OpenAIResponsesProvider implements ProviderAPI {
   async *chat(opts: ProviderChatOptions): AsyncGenerator<ChatEvent> {
     const input = toResponsesInput(opts.messages, opts.volatileContext);
     const tools = toResponsesTools(opts.tools);
+    const effortForRequest = supportsReasoning(opts.model)
+      ? (resolvedEffort(opts.model) ?? this.reasoningEffort)
+      : undefined;
 
     const body: Record<string, unknown> = {
       model: opts.model,
@@ -116,7 +121,17 @@ export class OpenAIResponsesProvider implements ProviderAPI {
       ...(tools.length > 0 ? { tools } : {}),
       // Omit the field entirely for 'none' rather than sending it: a model that
       // does not accept the parameter should not receive it at all.
-      ...(this.reasoningEffort === 'none' ? {} : { reasoning: { effort: this.reasoningEffort } }),
+      /*
+        The run's choice first, then the configured one.
+
+        Missed on the first pass: gpt-5 models route here rather than through
+        the Chat Completions adapter, so wiring only that one left the entire
+        OpenAI path ignoring the picker. A local probe recording the request
+        body caught it; nothing else could have.
+      */
+      ...(effortForRequest === 'none' || !effortForRequest
+        ? {}
+        : { reasoning: { effort: effortForRequest } }),
       // Never persist server-side. The session log is the source of truth, and
       // a stored response would create a second one that can drift from it.
       store: false,

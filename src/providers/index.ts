@@ -170,6 +170,7 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
       //    warm cache instead of a cold backend.
       return new OpenAICompatibleProvider({
         id: 'openrouter',
+        reasoningShape: 'openrouter',
         displayName: 'OpenRouter',
         apiKey: key,
         baseURL: 'https://openrouter.ai/api/v1',
@@ -248,6 +249,7 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
       }
       return new OpenAICompatibleProvider({
         id: 'openai',
+        reasoningShape: 'openai',
         displayName: 'OpenAI',
         apiKey: key,
         ...(baseURL ? { baseURL } : {}),
@@ -290,6 +292,7 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
         ?? (codingBase ? 'https://api.z.ai/api/coding/paas/v4' : 'https://api.z.ai/api/paas/v4');
       return new OpenAICompatibleProvider({
         id: 'zai',
+        reasoningShape: 'zai',
         displayName: 'Z.AI (GLM)',
         apiKey: key,
         baseURL,
@@ -412,6 +415,7 @@ export function providerFromInstance(
       }
       return new OpenAICompatibleProvider({
         id: instance.id,
+        reasoningShape: 'openai',
         displayName: instance.name,
         apiKey,
         baseURL,
@@ -429,12 +433,26 @@ export function providerFromInstance(
         // Gemini's OpenAI-compatible surface lives under /openai; the bare
         // v1beta root is the native API and answers 404 to these requests.
         baseURL: instance.baseUrl ? baseURL : 'https://generativelanguage.googleapis.com/v1beta/openai',
+        /*
+          No `reasoningShape`, and that is a decision rather than an omission.
+
+          Gemini's reasoning control is `thinking_level` on the *native* API.
+          What its OpenAI-compatible surface accepts — whether it maps
+          `reasoning_effort`, ignores it, or 400s — has not been read from
+          Google's documentation, and a guess here fails every request rather
+          than degrading. Reasoning stays unsent until somebody checks.
+
+          The table in `shared/reasoning` still describes Gemini's levels, so
+          the picker can show what the model is capable of; this is only about
+          what we are willing to put on the wire.
+        */
         promptDialect: GEMINI_DIALECT,
       });
 
     case 'openrouter':
       return new OpenAICompatibleProvider({
         id: instance.id,
+        reasoningShape: 'openrouter',
         displayName: instance.name,
         apiKey,
         baseURL,
@@ -451,6 +469,7 @@ export function providerFromInstance(
     case 'zai':
       return new OpenAICompatibleProvider({
         id: instance.id,
+        reasoningShape: 'zai',
         displayName: instance.name,
         apiKey,
         baseURL,
