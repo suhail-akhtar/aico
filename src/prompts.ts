@@ -17,6 +17,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
+import { detectShell } from './tools/shell-choice.js';
 import path from 'path';
 import { loadMemory } from './memory/index.js';
 import type { MemoryEntry } from './memory/types.js';
@@ -173,9 +174,20 @@ someone's repository.`,
     // while the prompt named the folder the server was launched in, so the
     // model confidently reported the wrong location and reasoned about paths
     // relative to a directory it was not in.
+    /*
+      The shell is named, not left to be inferred from the platform.
+
+      `Platform: win32` was all this said, and it is not enough: a tool called
+      `Bash` whose description says "shell command" was running `cmd.exe`, so a
+      model wrote `ls -la` and got "'ls' is not recognized", then wrote
+      `| head -50` and got the same. Naming the shell — and, when it is not
+      POSIX, saying which commands are missing — is the difference between the
+      model adapting on the first line and discovering it one failure at a time.
+    */
     body: `Working directory: ${currentCwd()}
 Platform: ${process.platform}
-OS: ${os.version()}`,
+OS: ${os.version()}
+${detectShell().describe}`,
   });
 
   // Scope, separately from execution, and reprised.

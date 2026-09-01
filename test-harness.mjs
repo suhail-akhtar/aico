@@ -166,7 +166,7 @@ import {
   looksLikeServer, resolveTimeout, backgroundProcesses, stopBackgroundProcesses,
   extractRequirements, coverageOf, setBrief,
   withTimeout, timeoutFor, ToolTimeoutError,
-  terminal, closeAllTerminals,
+  terminal, closeAllTerminals, detectShell,
   observe, blockedReason, resetObservations, isObserved,
   todoRead,
   runScoped, currentRequirements,
@@ -196,6 +196,18 @@ import {
 } from './dist-test/test-exports.js';
 
 import nodePath from 'path';
+
+/**
+ * Whether the shell these tests will actually get understands POSIX.
+ *
+ * Not `process.platform === 'win32'`. Windows stopped implying `cmd.exe` when
+ * Git Bash became the preferred shell, and the two questions had been the same
+ * for long enough that every shell-script branch in this file asked the wrong
+ * one. The visible symptom was mild and the invisible one was not: `ping >nul`
+ * under bash does not discard output, it creates a file called `nul` in the
+ * repository — which git then cannot index at all.
+ */
+const POSIX_SHELL = ['posix', 'git-bash'].includes(detectShell().kind);
 
 let passed = 0;
 let failed = 0;
@@ -5725,7 +5737,7 @@ console.log('  -- Command output streams while the command runs --');
 
   // Three writes with pauses, so output genuinely arrives over time rather
   // than all at once at exit.
-  const script = process.platform === 'win32'
+  const script = !POSIX_SHELL
     ? 'echo one && ping -n 2 127.0.0.1 >nul && echo two && ping -n 2 127.0.0.1 >nul && echo three'
     : 'echo one; sleep 0.5; echo two; sleep 0.5; echo three';
 
@@ -5752,8 +5764,16 @@ console.log('  -- Command output streams while the command runs --');
 
 console.log('  -- A failing command reports its exit code and stderr --');
 {
+  /*
+    Keyed on the shell, not the platform.
+
+    These were the same question only while Windows meant `cmd.exe`. Git Bash is
+    preferred now where it exists, and `exit /b 3` is a cmd builtin that bash
+    reports as a syntax error — so a test written for the platform fails on a
+    machine where the product is working better than it used to.
+  */
   const result = await bash({
-    command: process.platform === 'win32' ? 'exit /b 3' : 'exit 3',
+    command: POSIX_SHELL ? 'exit 3' : 'exit /b 3',
     timeout: 30,
   });
   assert(result.exit_code === 3, `the exit code survives (${result.exit_code})`);
@@ -5764,7 +5784,7 @@ console.log('  -- A timeout actually stops the work --');
   // `child.kill()` signals only the shell, so a killed `sh -c`/`cmd /c` used
   // to leave its children running and holding the pipes open: a 2s limit
   // returned after 5s, and the command it was supposed to stop carried on.
-  const longCommand = process.platform === 'win32'
+  const longCommand = !POSIX_SHELL
     ? 'ping -n 8 127.0.0.1'
     : 'sleep 8';
 
@@ -5783,7 +5803,7 @@ console.log('  -- A timeout actually stops the work --');
   assert(new RegExp(String(2) + 's').test(result.stderr), 'and names the limit that was hit');
 
   // The case the substitution bug hid: output of its own, *and* a timeout.
-  const noisy = process.platform === 'win32'
+  const noisy = !POSIX_SHELL
     ? 'echo talking 1>&2 && ping -n 8 127.0.0.1'
     : 'echo talking 1>&2; sleep 8';
   const both = await bash({ command: noisy, timeout: 2 });
@@ -8463,8 +8483,14 @@ console.log('\n══ READ BEFORE YOU WRITE ══');
 console.log('\n══ A SHELL THAT REMEMBERS ══');
 
 {
-  const win = process.platform === 'win32';
-  // Platform-neutral phrasing of the same four ideas.
+  /*
+    Phrased for the shell that is actually running, not for the platform.
+
+    Windows no longer implies `cmd.exe` — Git Bash is preferred where it is
+    installed, which is most machines with a git checkout on them. Asking the
+    platform sent `%AICO_KEEP%` to bash, which echoes it back literally.
+  */
+  const win = !POSIX_SHELL;
   const pwd = win ? 'cd' : 'pwd';
   const setVar = win ? 'set AICO_KEEP=survived' : 'export AICO_KEEP=survived';
   const readVar = win ? 'echo %AICO_KEEP%' : 'echo $AICO_KEEP';
@@ -8520,6 +8546,16 @@ console.log('\n══ A SHELL THAT REMEMBERS ══');
         'So it is reported rather than passed off as success');
       assert(/\/d/.test(noop.stderr), 'With the flag that would have worked');
     }
+  } else if (process.platform === 'win32') {
+    /*
+      Said out loud rather than skipped in silence.
+
+      Three assertions about cmd's drive-crossing trap do not apply to Git Bash,
+      which has no drives to cross. A run that quietly dropped them would report
+      a smaller total with no explanation — and "the count went down" is exactly
+      how a genuinely disabled test hides.
+    */
+    console.log(`  -- 3 cmd-only drive-crossing checks skipped: shell is ${detectShell().kind} --`);
   }
 
   // Failures are failures.

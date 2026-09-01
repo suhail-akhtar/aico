@@ -39,6 +39,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
 import { currentCwd, currentRunContext } from '../run-context.js';
+import { detectShell } from './shell-choice.js';
 import { looksLikeServer } from './bash.js';
 
 /** How long a single command may hold the shell before it is presumed wedged. */
@@ -106,9 +107,13 @@ function open(cwd: string, key: string): Shell {
   // Non-interactive bash on POSIX: it reads commands from stdin and keeps every
   // bit of state that matters, without printing a prompt at all. `-i` would add
   // prompts and job-control warnings to buy interactivity nothing here uses.
-  const child = isWindows
-    ? spawn('cmd.exe', ['/q', '/k'], { cwd })
-    : spawn('/bin/bash', [], { cwd, detached: true });
+  const choice = detectShell();
+  const child = spawn(choice.command, choice.interactive, {
+    cwd,
+    // A process group of its own on POSIX, so closing the shell takes its
+    // children with it. Windows has no equivalent and kills the shell directly.
+    ...(isWindows ? {} : { detached: true }),
+  });
 
   const shell = {
     child, stdout: '', stderr: '', cwd, busy: false, usedAt: Date.now(),
@@ -120,12 +125,9 @@ function open(cwd: string, key: string): Shell {
   // rather than writing into a closed pipe.
   child.once('exit', () => { if (shells.get(key) === shell) shells.delete(key); });
 
-  if (isWindows) {
-    // `@echo off` stops cmd repeating each command back, and `prompt $_` reduces
-    // the prompt to a bare newline. Without the second one every result is
-    // prefixed with `C:\some\path>`, which is not output and reads like it is.
-    child.stdin?.write('@echo off\r\nprompt $_\r\n');
-  }
+  // Whatever this shell needs to stop narrating. Empty for POSIX, which does
+  // not narrate. See `shell-choice.ts` for what each one sends and why.
+  if (choice.setup) child.stdin?.write(choice.setup + choice.eol);
 
   // Read past the greeting before anything real is written.
   const primer = `__AICO_READY_${randomBytes(4).toString('hex')}__`;
@@ -142,7 +144,7 @@ function open(cwd: string, key: string): Shell {
       resolve();
     }, 15);
     poll.unref?.();
-    child.stdin?.write(isWindows ? `echo ${primer}\r\n` : `echo ${primer}\n`);
+    child.stdin?.write(`echo ${primer}${choice.eol}`);
   });
 
   return shell;
@@ -267,9 +269,16 @@ export async function terminal(input: TerminalInput): Promise<TerminalResult> {
   shell.stderr = '';
   shell.busy = true;
 
-  const line = isWindows
-    ? `${input.command}\r\necho ${marker} %ERRORLEVEL% %CD%\r\n`
-    : `${input.command}\nprintf '%s %s %s\\n' '${marker}' "$?" "$PWD"\n`;
+  /*
+    The command, then a line reporting how it went and where it left us.
+
+    Keyed on the shell rather than on the platform. Those were the same question
+    only while Windows meant cmd — with Git Bash preferred, asking `isWindows`
+    would send `%ERRORLEVEL%` to bash, which prints it literally, never matches
+    the pattern, and reports every command as a timeout.
+  */
+  const choice = detectShell();
+  const line = `${input.command}${choice.eol}${choice.report(marker)}${choice.eol}`;
 
   let died = false;
   try {
