@@ -520,6 +520,27 @@ Sessions are named automatically and can be pinned by renaming, transcripts
 export as Markdown or text, and settings — providers, permission mode, context
 and spend ceilings — are searchable across every pane.
 
+### In VS Code
+
+The extension in [`vscode-extension/`](vscode-extension/) does not reimplement
+any of that. The server already owns the runs and ships the whole client, so the
+extension starts it against your open folder, embeds that workspace in a panel,
+and adds the two things an editor can do that a browser cannot: asking about a
+selection with its file and line numbers attached
+(<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>), and background work in the status
+bar. There is no inline completion; that is a different product.
+
+```sh
+cd vscode-extension && npm install && npx tsc -p ./
+npx @vscode/vsce package
+code --install-extension aico-vscode-*.vsix
+```
+
+Reload the window afterwards — VS Code does not load a newly installed extension
+into windows that are already open, and a keypress in one of those does nothing
+at all. `aico: Check the Setup` in the command palette reports whether the
+binary was found and where the server is.
+
 ---
 
 ## Honest limitations

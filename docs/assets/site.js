@@ -1,5 +1,5 @@
 /*
- * Two behaviours, and no framework to carry them.
+ * Three behaviours, and no framework to carry them.
  *
  * The theme applies from a head script before the body paints — set it any
  * later and every visitor on dark gets a white flash first.
@@ -63,5 +63,22 @@
         navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
       });
     });
+  });
+
+  // Arriving on a deep link — compare.html#vscode from the landing page, say.
+  //
+  // Chrome scrolls to the fragment while the document is still loading, and
+  // `scroll-behavior: smooth` turns that into an animation that late layout
+  // routinely cancels: the visitor lands at the top of a long page instead of
+  // the section they clicked. Redoing it once everything has settled is the
+  // difference between a working link and one that looks broken. `scrollIntoView`
+  // honours the scroll-padding that clears the sticky header, and instant
+  // behaviour is right here — nobody wants to watch a page they have not seen
+  // yet scroll past.
+  window.addEventListener('load', function () {
+    if (!location.hash || location.hash === '#') return;
+    var target;
+    try { target = document.querySelector(location.hash); } catch (err) { return; } // not a selector
+    if (target) target.scrollIntoView({ behavior: 'instant', block: 'start' });
   });
 })();

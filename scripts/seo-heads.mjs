@@ -15,6 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -302,14 +303,36 @@ for (const file of pages) {
 // ── sitemap.xml ────────────────────────────────────────────────────────
 // Submitted to Search Console, this is what gets every page crawled rather
 // than only the ones the home page happens to link prominently.
-const today = new Date().toISOString().slice(0, 10);
+//
+// `lastmod` is per page and comes from git, not from the clock. Stamping every
+// page with today's date on every run is a lie that costs something real:
+// Google says it ignores lastmod outright once a site's values stop matching
+// what actually changed, and this script runs on every docs edit. The working
+// tree is the fallback for a page that git does not know about yet.
+const lastModified = (file) => {
+  const abs = path.join(docs, file);
+  try {
+    const out = execFileSync('git', ['log', '-1', '--format=%cs', '--', abs], {
+      cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(out)) {
+      // Uncommitted edits are newer than the last commit touching the file.
+      const dirty = execFileSync('git', ['status', '--porcelain', '--', abs], {
+        cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      if (!dirty) return out;
+    }
+  } catch { /* no git, or not a repo — fall through to mtime */ }
+  return new Date(fs.statSync(abs).mtime).toISOString().slice(0, 10);
+};
+
 fs.writeFileSync(path.join(docs, 'sitemap.xml'), [
   '<?xml version="1.0" encoding="UTF-8"?>',
   '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
   ...pages.map(file => [
     '  <url>',
     `    <loc>${BASE}${file === 'index.html' ? '' : file}</loc>`,
-    `    <lastmod>${today}</lastmod>`,
+    `    <lastmod>${lastModified(file)}</lastmod>`,
     `    <priority>${file === 'index.html' ? '1.0' : '0.8'}</priority>`,
     '  </url>',
   ].join('\n')),
