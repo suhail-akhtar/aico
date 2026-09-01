@@ -3,6 +3,81 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Tools only the editor can run.** `VSCodeDiagnostics`, `VSCodeTasks` and
+  `VSCodeWorkspace` — read the Problems panel, list and run the project's own
+  `tasks.json` commands, and create, add or open a folder. These are things
+  nothing outside VS Code can do: the diagnostics live in a language server the
+  editor is talking to and nobody else is.
+
+  They round-trip on the mechanism permissions and native edits already use — a
+  promise held on the server, released by an HTTP answer — rather than a second
+  protocol. And they are **offered only while an editor is attached**, declared
+  per turn, because the same conversation reopened in a browser tab has no
+  editor and a tool that can only answer "there is no editor here" costs a turn
+  and two retries to discover.
+
+  There is deliberately no "run any VS Code command" tool. That surface reaches
+  deleting files and installing extensions, and no permission prompt can
+  describe it honestly. There is no editor terminal either: commands run on the
+  fixed shell, which is visible in the transcript and the same on every surface.
+
+  `VSCodeDiagnostics` is available in Plan mode — "what is already broken here?"
+  is the first question of most plans, and answering it from the language server
+  beats guessing from a grep. Adding a workspace folder or opening one always
+  confirms natively first, whatever the approval mode says.
+
+- **The panel caught up with the browser client.** Delegation is visible (a
+  strip of sub-agents that collapses when they finish and stays open when one
+  fails); `@` addresses a specialist; a conversation can be renamed, forked or
+  archived; a message can be copied, rated, branched from, or **edited and sent
+  again** with arrows to move between versions; there is a session goal, and a
+  provider switcher.
+
+  All of it is view code over state that already existed — `planFrom`,
+  `todosFrom`, `searchAgents`, `applyVersions`, `editMarker` are imported
+  unchanged — so the two surfaces cannot disagree about what the agent committed
+  to or what was said back.
+
+- **Plan mode can be answered in VS Code.** The panel had the Plan/Build toggle
+  and nowhere to accept a plan, so approving one meant typing a sentence and
+  hoping it read as approval. Go ahead, Amend, Later and Decline now send the
+  exact wording `PLAN_REPLY` has always defined — which is what lets a plan
+  agreed in the editor still read as agreed when the log replays in a browser.
+
+- **Reasoning effort, per model, from a verified table.** `auto`, `off`,
+  `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, sent in each provider's own
+  shape: `output_config.effort` for Anthropic, `reasoning_effort` on OpenAI Chat,
+  `reasoning.effort` on Responses and OpenRouter, `thinking.type` for Z.AI.
+  `auto` means *send nothing* — which for several vendors is adaptive per
+  request, not a hidden default we should be overriding.
+
+  Gemini's OpenAI-compatibility surface is deliberately left alone: its
+  `thinking_level` is documented for the native API and unverified on the compat
+  endpoint, and a probe asserts we stay silent there rather than guessing.
+
+- **A shell whose commands exist.** On Windows the engine ran everything through
+  `cmd.exe` while the tool the model sees is called `Bash`, so `ls` and `head`
+  came back "not recognized" and the run burned turns rediscovering it. Git Bash
+  is preferred, then PowerShell, then `cmd`, and the prompt names which one.
+  `AICO_SHELL` overrides.
+
+### Fixed
+
+- **A flood of command output froze the editor.** A wide `find` produces
+  megabytes, `Bash` retains up to 10MB of it, and progress fired every 400ms —
+  so the panel rebuilt a `<pre>` from the whole buffer several times a second
+  until VS Code offered to close the window. Two independent bounds now: the
+  stream carries a tail, and the renderer draws a bounded tail of whatever it is
+  given.
+
+- **The composer's controls made the panel scroll sideways.** A flex row that
+  cannot fit does not clip — it widens the document and drags the whole
+  conversation with it. The toolbar wraps.
+
 ## 0.7.0 — 2026-09-01
 
 ### Added

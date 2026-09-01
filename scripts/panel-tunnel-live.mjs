@@ -548,6 +548,106 @@ try {
   handedStream.close();
 
   /*
+    ── a tool only the editor can run ────────────────────────────────────
+
+    The whole of Phase 5 in one round trip. The engine has no way to read a
+    Problems panel, so `VSCodeDiagnostics` suspends the tool call, the server
+    holds its resolver, and whatever is driving answers over HTTP — the same
+    shape as a permission and a native edit, which is the point: one mechanism,
+    used three times, rather than three protocols.
+
+    Answered here by the probe rather than by VS Code. What is being checked is
+    the channel, not the editor's implementation of it, and driving a real
+    language server would make this assert on how fast tsserver starts.
+  */
+  const hostSession = `host-probe-${Date.now().toString(36)}`;
+  const hostCalls = [];
+  const hostSeen = [];
+  const hostStream = streamSession(
+    hostSession,
+    (event) => {
+      hostSeen.push(event.type);
+      if (event.type === 'host-call' && event.data?.id) hostCalls.push(event.data);
+    },
+    undefined,
+    0,
+    workspace,
+  );
+
+  await api.submit({
+    sessionId: hostSession,
+    task: 'Use the VSCodeDiagnostics tool to check whether this project has any errors. '
+      + 'Do not read files or run commands — just call that one tool and report what it says.',
+    project: workspace,
+    hostTools: ['VSCodeDiagnostics', 'VSCodeTasks', 'VSCodeWorkspace'],
+  }).catch(() => { /* reported earlier if the provider is unavailable */ });
+
+  const gotCall = await until(() => hostCalls.length > 0, 120_000);
+  check(
+    gotCall,
+    'a declared host tool is offered, and calling it reaches the client'
+    + (gotCall ? '' : ` (saw: ${[...new Set(hostSeen)].join(',') || 'nothing'})`),
+  );
+
+  if (gotCall) {
+    const call = hostCalls[0];
+    check(call.tool === 'VSCodeDiagnostics', `the call names the tool (${call.tool})`);
+    check(
+      call.input !== null && typeof call.input === 'object',
+      'and carries its arguments as an object, not a string',
+    );
+
+    const wrongId = await api.hostAnswer(hostSession, 'not-the-id', { ok: true, result: {} });
+    check(wrongId.ok === false, 'an answer for a different call is refused');
+
+    const accepted = await api.hostAnswer(hostSession, call.id, {
+      ok: true,
+      result: { problems: [{ file: 'src/only.ts', line: 7, severity: 'error', message: 'probe-planted problem' }] },
+    });
+    check(accepted.ok === true, 'answering the outstanding call is accepted');
+
+    await until(async () => {
+      try { return !(await api.session(hostSession)).busy; } catch { return false; }
+    }, 120_000);
+
+    /*
+      The answer has to reach the *model*, which is the only thing that makes
+      this a tool rather than a message. Asserted on the transcript for the same
+      reason the refused-edit check is: what matters is what the run was told,
+      not what the server recorded internally.
+    */
+    const transcript = JSON.stringify(await api.session(hostSession).catch(() => ({})));
+    check(
+      transcript.includes('probe-planted problem'),
+      'the editor\'s answer comes back as the tool result the model sees',
+    );
+  }
+  hostStream.close();
+
+  /*
+    A client that declares nothing is offered nothing — and this is the half
+    that protects every other surface. The browser workspace and the CLI submit
+    without `hostTools`, and a model offered `VSCodeDiagnostics` there would
+    spend a turn discovering there is no editor to ask.
+  */
+  const bareSession = `no-host-probe-${Date.now().toString(36)}`;
+  await api.submit({
+    sessionId: bareSession,
+    task: 'List the tool names available to you, exactly, one per line. Do not call any of them.',
+    project: workspace,
+  }).catch(() => { /* reported earlier if the provider is unavailable */ });
+
+  await until(async () => {
+    try { return !(await api.session(bareSession)).busy; } catch { return false; }
+  }, 120_000);
+
+  const bareTranscript = JSON.stringify(await api.session(bareSession).catch(() => ({})));
+  check(
+    !/VSCodeDiagnostics|VSCodeTasks|VSCodeWorkspace/.test(bareTranscript),
+    'a turn submitted without hostTools never sees them',
+  );
+
+  /*
     ── a flood of output must not reach the client whole ─────────────────
 
     The bug this guards froze VS Code: a wide `find` produced megabytes of

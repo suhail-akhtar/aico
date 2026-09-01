@@ -26,6 +26,7 @@ import { ContextMeter } from './ContextMeter';
 import { ApprovalMenu, type ApprovalMode } from './ApprovalMenu';
 import { EffortMenu } from './EffortMenu';
 import { SetGoalButton } from './GoalBar';
+import { HOST_TOOLS } from '../../../../shared/host-tools';
 import type { EffortChoice } from '@aico/reasoning';
 import { mentionAt } from '@web/agents';
 import { api, type AgentSpec } from '@web/api';
@@ -147,7 +148,17 @@ export function Composer(): React.ReactElement {
       Control view. There is no reason anybody in VS Code would want the
       external-change behaviour instead, so it is not a setting.
     */
-    void submit(value, { planMode, approval, applyEdits: true, effort });
+    void submit(value, {
+      planMode, approval, applyEdits: true, effort,
+      /*
+        What this panel can do that no other client can.
+
+        Declared per turn, and only from here: the same conversation opened in
+        a browser tab has no editor, and a tool advertised there would suspend
+        on a question nobody can hear. `HostBridge` is what answers them.
+      */
+      hostTools: HOST_TOOLS,
+    });
   };
 
   const send = (): void => {

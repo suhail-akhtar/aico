@@ -60,3 +60,12 @@ tmp-wire-*/
 # nothing. Left on disk rather than deleted; ignored so it stops showing up as
 # untracked on every status.
 public/
+
+# Emitted beside the source, not written there.
+#
+# `shared/` is TypeScript imported by three builds, and the extension host's
+# `tsc -p ./` has no rootDir — so the moment one of its files imports up into
+# shared/, TypeScript computes a common root above the extension and drops the
+# compiled .js next to the .ts. It was committed once before this line existed.
+shared/**/*.js
+shared/**/*.js.map

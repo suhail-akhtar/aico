@@ -29,6 +29,7 @@
  */
 
 import { transportFetch } from './transport';
+import type { HostAnswer, HostCall, HostToolName } from '../../shared/host-tools';
 
 const TOKEN_KEY = 'aico.token';
 
@@ -147,6 +148,15 @@ export interface SubmitOptions {
    */
   applyEdits?: boolean;
   /**
+   * Editor-backed tools this client can service, by name.
+   *
+   * Same contract as `applyEdits`: say it only if you will answer every
+   * `host-call` event, because the tool call blocks until you do. Sent per turn
+   * rather than per session, because it describes who is driving now — the same
+   * conversation reopened in a browser tab has no editor.
+   */
+  hostTools?: readonly HostToolName[];
+  /**
    * How hard to think, for models that can be asked.
    *
    * `auto` and omission both mean "send nothing, let the platform decide" —
@@ -242,6 +252,10 @@ export const api = {
    */
   edited: (sessionId: string, id: string, applied: boolean, reason?: string) =>
     post<{ ok: boolean }>('edit', { sessionId, id, applied, reason }),
+
+  /** What the editor did with a host tool call it was handed. */
+  hostAnswer: (sessionId: string, id: string, answer: HostAnswer) =>
+    post<{ ok: boolean }>('host-answer', { sessionId, ...answer, id }),
 
   /** What differs from the last commit, with this session's own edits marked. */
   // ── skills ─────────────────────────────────────────────────────────
@@ -818,6 +832,9 @@ export interface PermissionRequest {
 }
 
 /** A file write the client was asked to apply itself. */
+/** Re-exported so a client can name the type without a second import path. */
+export type { HostAnswer, HostCall, HostToolName };
+
 export interface EditRequest {
   id: string;
   /** Absolute path, already resolved inside the workspace by the engine. */

@@ -39,6 +39,7 @@ import { GoalBar } from './components/GoalBar';
 import { Composer } from './components/Composer';
 import { PermissionBridge } from './components/PermissionBridge';
 import { EditBridge } from './components/EditBridge';
+import { HostBridge } from './components/HostBridge';
 
 export function Panel(): React.ReactElement {
   const [boot, setBoot] = useState<BootInfo | null>(null);
@@ -267,6 +268,7 @@ export function Panel(): React.ReactElement {
       <Composer />
       <PermissionBridge />
       <EditBridge />
+      <HostBridge />
     </div>
   );
 }

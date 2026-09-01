@@ -26,7 +26,21 @@ import { AsyncLocalStorage } from 'async_hooks';
 import path from 'path';
 import type { AicoSettings } from './settings.js';
 import type { FileWriter } from './tools/file-writer.js';
+import type { HostAnswer, HostCall, HostToolName } from '../shared/host-tools.js';
 import { effortToSend, type EffortChoice, type EffortLevel } from '../shared/reasoning.js';
+
+/**
+ * Somewhere to send a tool call the engine cannot service itself.
+ *
+ * A function rather than an object with methods, because there is exactly one
+ * operation — ask, and wait — and the `tools` list it carries is what decides
+ * which tools the model is even shown.
+ */
+export interface HostBridge {
+  (call: Omit<HostCall, 'id'>): Promise<HostAnswer>;
+  /** Which of the host tools this client can actually service. */
+  tools: readonly HostToolName[];
+}
 
 export interface RunContext {
   /** Absolute path the run treats as the project root. */
@@ -44,6 +58,18 @@ export interface RunContext {
    * Undefined is the normal case and means `fs`. See `tools/file-writer`.
    */
   applyEdit?: FileWriter;
+  /**
+   * The editor driving this run, if one is.
+   *
+   * Set only when a client has said it can service host tools, and it says so
+   * per turn — the same session can be picked up in a browser tab tomorrow,
+   * where none of this exists. Undefined is the normal case and means the
+   * `VSCode*` tools are not offered at all, which is the only honest way to
+   * switch a tool off: present-but-failing teaches a model to keep retrying.
+   *
+   * See `shared/host-tools` for what can be asked and why the list is short.
+   */
+  host?: HostBridge;
   /**
    * How hard this run asks the model to think, when the model can be asked.
    *

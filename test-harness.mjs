@@ -35,6 +35,8 @@ import {
   getCompactionThreshold,
   resetContextWindowCache,
   resolveWindow, isStale, learnWindowFromError,
+  resolveToolSet, HOST_TOOLS, hostToolsFrom, isHostTool,
+  vsCodeDiagnostics, vsCodeTasks, vsCodeWorkspace,
   skillRegistry,
   Session,
   canonicalHeader,
@@ -10956,6 +10958,103 @@ console.log('\n══ HOW HARD TO THINK ══');
     'and the choice does not outlive the run that made it');
 
   resetReasoningForTest();
+}
+
+// ═══════════════════════════════════════════════════════════
+// 44. TOOLS ONLY AN EDITOR CAN RUN
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ 44. TOOLS ONLY AN EDITOR CAN RUN ══');
+
+console.log('  -- Off means the model cannot see them --');
+{
+  /*
+    The rule this repo keeps relearning. A tool present in the list is a tool
+    that gets called eventually, and one that can only answer "no editor is
+    attached" costs a turn — and a retry, and often a second retry — to
+    discover. Mini Apps and AskUserQuestion are filtered for the same reason.
+  */
+  const bare = resolveToolSet({}).defs.map(d => d.name);
+  assert(HOST_TOOLS.every(name => !bare.includes(name)),
+    'a run with no editor is not offered VSCode* at all');
+
+  await runInContext({
+    cwd: process.cwd(),
+    host: Object.assign(async () => ({ ok: true }), { tools: ['VSCodeDiagnostics'] }),
+  }, async () => {
+    const offered = resolveToolSet({}).defs.map(d => d.name);
+    assert(offered.includes('VSCodeDiagnostics'),
+      'a run with an editor is offered what that editor declared');
+    assert(!offered.includes('VSCodeTasks') && !offered.includes('VSCodeWorkspace'),
+      'and only what it declared — a client that can do one thing is not credited with three');
+  });
+}
+
+console.log('  -- The capability list is filtered, not trusted --');
+{
+  assert(hostToolsFrom(['VSCodeTasks', 'RunAnything', 42]).join() === 'VSCodeTasks',
+    'a client claiming a tool this server never heard of advertises nothing extra');
+  assert(hostToolsFrom(undefined).length === 0, 'and an absent list is an empty one, not a crash');
+  assert(isHostTool('VSCodeWorkspace') && !isHostTool('Bash'),
+    'the ordinary tools are not host tools');
+}
+
+console.log('  -- Without an editor the refusal names the way out --');
+{
+  let message = '';
+  try { await vsCodeDiagnostics({}); } catch (err) { message = err.message; }
+  /*
+    The wording is the assertion. "Failed" invites the model to try the same
+    call twice more; naming the surface and the alternative ends the attempt.
+  */
+  assert(/editor attached/.test(message) && /file and shell tools/.test(message),
+    `the error says why, and what to do instead (${JSON.stringify(message)})`);
+}
+
+console.log('  -- A call round-trips, and a refusal is a failure --');
+{
+  const seen = [];
+  const host = Object.assign(
+    async (call) => {
+      seen.push(call);
+      return call.tool === 'VSCodeWorkspace'
+        ? { ok: false, error: 'the user declined to open the folder' }
+        : { ok: true, result: { problems: [] } };
+    },
+    { tools: HOST_TOOLS },
+  );
+
+  await runInContext({ cwd: process.cwd(), host }, async () => {
+    const result = await vsCodeDiagnostics({ path: 'src/agent.ts', severity: 'error' });
+    assert(result.problems.length === 0, 'the answer comes back as the tool result');
+    assert(seen[0].tool === 'VSCodeDiagnostics' && seen[0].input.severity === 'error',
+      'and the input reaches the editor intact');
+
+    /*
+      A declined action has to reach the model as a failed tool call. Reporting
+      it as success is how a model comes to believe it opened a folder it did
+      not — and then reasons for the rest of the turn from a window that never
+      changed.
+    */
+    let refusal = '';
+    try {
+      await vsCodeWorkspace({ action: 'openFolder', path: '/tmp/new' });
+    } catch (err) { refusal = err.message; }
+    assert(/declined/.test(refusal), `a refusal is an error, not a quiet success (${refusal})`);
+  });
+}
+
+console.log('  -- Arguments that cannot work are refused before the round trip --');
+{
+  const host = Object.assign(async () => ({ ok: true, result: 'ran' }), { tools: HOST_TOOLS });
+  await runInContext({ cwd: process.cwd(), host }, async () => {
+    let named = '';
+    try { await vsCodeTasks({ action: 'run' }); } catch (err) { named = err.message; }
+    assert(/needs its name/.test(named), 'running a task with no name says so rather than asking');
+
+    let pathless = '';
+    try { await vsCodeWorkspace({ action: 'createFolder' }); } catch (err) { pathless = err.message; }
+    assert(/needs a path/.test(pathless), 'and neither does creating a folder nowhere');
+  });
 }
 
 console.log('\n' + '═'.repeat(50));

@@ -37,6 +37,9 @@ import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../too
 import { currentMiniApp } from '../session/projections.js';
 import { miniAppContext } from '../miniapps/context.js';
 import { getMiniApp, miniAppDir } from '../miniapps/store.js';
+import {
+  hostToolsFrom, type HostAnswer, type HostCall, type HostToolName,
+} from '../../shared/host-tools.js';
 
 /**
  * The app context for a session bound to a Mini App, or nothing.
@@ -128,6 +131,15 @@ export interface ActiveRun {
    * reaches this.
    */
   pendingEdit?: PendingEdit;
+  /**
+   * A tool call the editor is servicing, and the promise holding it.
+   *
+   * One slot, like the two above it and for the same reason: the resolver lives
+   * here, so a second call in flight would overwrite the first and hang the turn
+   * on whichever lost. The host tools are declared `isConcurrencySafe: false`
+   * precisely so the engine never schedules two.
+   */
+  pendingHostCall?: PendingHostCall;
   /** How this run's tool calls are approved. Fixed for the turn. */
   approval: ApprovalMode;
   conversationHistory: Array<{ role: string; content: string }>;
@@ -138,6 +150,14 @@ export interface PendingEdit {
   path: string;
   after: string;
   resolve: (outcome: { applied: boolean; reason?: string }) => void;
+  at: number;
+}
+
+export interface PendingHostCall {
+  id: string;
+  tool: HostToolName;
+  input: Record<string, unknown>;
+  resolve: (answer: HostAnswer) => void;
   at: number;
 }
 
@@ -277,6 +297,16 @@ export class RunManager {
        * inferred from anything.
        */
       applyEdits?: boolean;
+      /**
+       * Host tools this client can service, by name.
+       *
+       * Declared per turn rather than per session, because it describes who is
+       * driving *now*. The same conversation reopened in a browser tab has no
+       * editor, and a tool advertised there would suspend on a question nobody
+       * can hear. Anything unrecognised is dropped rather than trusted — the
+       * list decides which tools the model is shown.
+       */
+      hostTools?: readonly string[];
       /** Images the reader attached to this turn, by attachment id. */
       images?: ImageRef[];
     } = {},
@@ -365,6 +395,33 @@ export class RunManager {
         run.pendingEdit = pending;
         emit('edit', { id: pending.id, path: file, after });
       });
+
+    /**
+     * Hand a host tool's work to the editor, and wait for the answer.
+     *
+     * The refusal path matters more than the success one. An editor that has
+     * closed, a call that arrives while another is outstanding, or a turn that
+     * ends mid-flight all resolve as `ok: false` with a reason — which becomes
+     * a failed tool call the model can read and route around. Leaving the
+     * promise unresolved instead would hang the turn for as long as the tool's
+     * timeout allows, with nothing on screen saying why.
+     */
+    const declared = hostToolsFrom(opts.hostTools);
+    const callHost = Object.assign(
+      ({ tool, input }: Omit<HostCall, 'id'>) => new Promise<HostAnswer>((resolve) => {
+        if (run.pendingHostCall) {
+          resolve({ ok: false, error: 'another editor call is already in flight' });
+          return;
+        }
+        const pending: PendingHostCall = {
+          id: `host-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          tool, input, resolve, at: Date.now(),
+        };
+        run.pendingHostCall = pending;
+        emit('host-call', { id: pending.id, tool, input });
+      }),
+      { tools: declared as readonly HostToolName[] },
+    );
 
     /**
      * Ask before a tool runs, when the turn was submitted that way.
@@ -568,6 +625,10 @@ export class RunManager {
         autoApprove: run.approval === 'auto' ? (opts.autoApprove ?? true) : false,
         ...(onPermissionRequest ? { onPermissionRequest } : {}),
         ...(opts.applyEdits ? { applyEdit: applyEditThroughClient } : {}),
+        // Only when the client named at least one tool it can service. An empty
+        // list is the same as no editor, and passing a bridge for it would
+        // advertise nothing while still costing a check per tool call.
+        ...(declared.length ? { host: callHost } : {}),
         planMode: opts.planMode ?? false,
         ...(opts.effort ? { effort: opts.effort } : {}),
         abortSignal: run.abort.signal,
@@ -711,6 +772,12 @@ export class RunManager {
         run.pendingEdit.resolve({ applied: false, reason: 'the turn ended before it was applied' });
         delete run.pendingEdit;
         emit('edit', { id: '', path: '', after: '' });
+      }
+      // Same reasoning: a call the editor never answered did not happen.
+      if (run.pendingHostCall) {
+        run.pendingHostCall.resolve({ ok: false, error: 'the turn ended before the editor answered' });
+        delete run.pendingHostCall;
+        emit('host-call', { id: '', tool: '', input: {} });
       }
       // Queued messages run now, as their own turns.
       //
@@ -1060,6 +1127,30 @@ export class RunManager {
     this.hub.publish({ type: 'edit', sessionId, data: { id: '', path: '', after: '' } });
     resolve({ applied, ...(reason ? { reason } : {}) });
     return true;
+  }
+
+  /**
+   * Report what the editor did with a call it was handed.
+   *
+   * The id must match, for the same reason an edit's must: a reconnecting
+   * client replays the outstanding call, and a stale answer could otherwise
+   * release a different one than the one it actually serviced.
+   */
+  hostAnswered(sessionId: string, id: string, answer: HostAnswer): boolean {
+    const run = this.runs.get(sessionId);
+    if (!run?.pendingHostCall || run.pendingHostCall.id !== id) return false;
+    const { resolve } = run.pendingHostCall;
+    delete run.pendingHostCall;
+    this.hub.publish({ type: 'host-call', sessionId, data: { id: '', tool: '', input: {} } });
+    resolve(answer);
+    return true;
+  }
+
+  /** The editor call this session is waiting on, if any. */
+  hostCallOf(sessionId: string): HostCall | undefined {
+    const pending = this.runs.get(sessionId)?.pendingHostCall;
+    if (!pending) return undefined;
+    return { id: pending.id, tool: pending.tool, input: pending.input };
   }
 
   /** The write this session is waiting on, if any. */

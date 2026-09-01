@@ -30,6 +30,7 @@ import { EditorContextSource, type EditorContext } from '../context/editor';
 import { find, type FindResult } from '../context/find';
 import { askPermission, type PermissionRequest } from './permission';
 import { applyEdit, type EditRequest } from './apply-edit';
+import { runHostCall, type HostAnswer, type HostCall } from './host-tools';
 
 /** Keys in `workspaceState`. Per folder, which is what makes them useful. */
 const LAST_SESSION = 'aico.lastSession';
@@ -53,7 +54,8 @@ type HostMessage =
   | { t: 'context'; context: EditorContext }
   | { t: 'find:result'; id: number; results: FindResult[] }
   | { t: 'permission:decided'; id: string; allow: boolean }
-  | { t: 'edit:done'; id: string; applied: boolean; reason?: string };
+  | { t: 'edit:done'; id: string; applied: boolean; reason?: string }
+  | { t: 'host:done'; id: string; answer: HostAnswer };
 
 export class AicoViewProvider implements vscode.WebviewViewProvider {
   /** Both registered ids resolve to this one provider; only one ever appears. */
@@ -236,6 +238,30 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
             ...(outcome.reason ? { reason: outcome.reason } : {}),
           });
         });
+        return;
+      }
+
+      /*
+        A tool call only the editor can service.
+
+        Answered on every path, including the ones that fail. The run is
+        holding a promise on this — the engine's tool call is blocked, the
+        server is holding its resolver — so a call that never reports back is a
+        turn that never finishes.
+
+        The folder is read here rather than trusted from the message: it is
+        what every path in the call resolves against, and a value that crossed
+        the webview boundary is a value the panel could have been asked to
+        change.
+      */
+      if (message?.t === 'host') {
+        const call = (message as unknown as { call: HostCall }).call;
+        if (!call?.id) return;
+        const folder = vscode.workspace.workspaceFolders?.[0];
+        const answer = folder
+          ? runHostCall(call, canonicalFolder(folder.uri.fsPath))
+          : Promise.resolve<HostAnswer>({ ok: false, error: 'no folder is open in this window' });
+        void answer.then(outcome => this.send({ t: 'host:done', id: call.id, answer: outcome }));
         return;
       }
 

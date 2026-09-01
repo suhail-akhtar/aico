@@ -45,6 +45,7 @@ import {
   type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project, type Group,
   type Goal, type Feedback, type Deliverable, type Attachment, type SubAgentView,
   type PermissionRequest, type EditRequest,
+  type HostAnswer, type HostCall, type HostToolName,
 } from './api';
 import {
   applyLogEvent, withPending, dropPending, emptyDraft,
@@ -211,6 +212,8 @@ interface AppState {
     approval?: 'auto' | 'edits' | 'ask';
     /** This client will apply the run's file writes itself. See `edit`. */
     applyEdits?: boolean;
+    /** Editor-backed tools this client will service. See `hostCall`. */
+    hostTools?: readonly HostToolName[];
     /** How hard to think. Omitted and `auto` both send nothing. */
     effort?: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   }) => Promise<void>;
@@ -310,6 +313,17 @@ interface AppState {
   /** Report the outcome and release the tool call. */
   reportEdit: (id: string, applied: boolean, reason?: string) => Promise<void>;
   /**
+   * A tool call the editor is being asked to service.
+   *
+   * Third of the same shape as `permission` and `edit`, and null for every
+   * client that did not declare `hostTools` — which is all of them except the
+   * VS Code panel. Like `edit` it is work rather than a question, and the run
+   * waits until it is answered.
+   */
+  hostCall: HostCall | null;
+  /** Answer it and release the tool call. */
+  reportHostCall: (id: string, answer: HostAnswer) => Promise<void>;
+  /**
    * Sub-agents this session has running, and the ones it just finished.
    *
    * Live only — the server sends the whole set on every change, so this is
@@ -404,6 +418,7 @@ export const useStore = create<AppState>((set, get) => ({
   question: null,
   permission: null,
   edit: null,
+  hostCall: null,
   planMode: false,
   busy: false,
   turnStartedAt: null,
@@ -451,7 +466,7 @@ export const useStore = create<AppState>((set, get) => ({
       // the sidebar never inherits the previous one's persona.
       sessionAgent: null,
       pendingAttachments: [],
-      question: null, permission: null, edit: null,
+      question: null, permission: null, edit: null, hostCall: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
@@ -607,6 +622,14 @@ export const useStore = create<AppState>((set, get) => ({
     await api.answer(sessionId, content);
   },
 
+  reportHostCall: async (id, answer) => {
+    const { sessionId } = get();
+    // Cleared first, like `reportEdit`: the run resumes as soon as the server
+    // has this, and a second answer for the same id would be refused anyway.
+    set({ hostCall: null });
+    await api.hostAnswer(sessionId, id, answer);
+  },
+
   reportEdit: async (id, applied, reason) => {
     const { sessionId } = get();
     // Cleared first: the run resumes as soon as the server has this, and a
@@ -662,6 +685,9 @@ export const useStore = create<AppState>((set, get) => ({
         ...(opts.approval && opts.approval !== 'auto' ? { approval: opts.approval } : {}),
         // Only when true, so an older server sees the request it always saw.
         ...(opts.applyEdits ? { applyEdits: true } : {}),
+        // Only when there is something to declare, so a server that predates
+        // host tools sees exactly the request it always saw.
+        ...(opts.hostTools?.length ? { hostTools: opts.hostTools } : {}),
         // Only when it is a real choice, so a server that predates this sees
         // exactly the request it always saw.
         ...(opts.effort && opts.effort !== 'auto' ? { effort: opts.effort } : {}),
@@ -1116,6 +1142,9 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
         // A write handed over and not yet reported on, restored for the same
         // reason: a reload must not leave the tool call blocked in silence.
         edit: (data as { edit?: EditRequest | null }).edit ?? null,
+        // And an editor call outstanding at reconnect. Same reason again: a
+        // reload must not turn a pause into a hang with nothing on screen.
+        hostCall: (data as { hostCall?: HostCall | null }).hostCall ?? null,
         draft: (data as { busy?: boolean }).busy ? state.draft : emptyDraft(),
         // Drop the optimistic echo now that the real user message has replayed.
         logged: dropPending(state.logged),
@@ -1154,6 +1183,13 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       // turn ended underneath it.
       const wanted = data as unknown as EditRequest;
       set(() => ({ edit: wanted?.id ? wanted : null }));
+      return;
+    }
+
+    case 'host-call': {
+      // Empty id, same meaning: answered, or the turn ended underneath it.
+      const wanted = data as unknown as HostCall;
+      set(() => ({ hostCall: wanted?.id ? wanted : null }));
       return;
     }
 
