@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.8.0 — 2026-09-02
 
 ### Added
 
@@ -66,6 +66,27 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   `AICO_SHELL` overrides.
 
 ### Fixed
+
+- **Every multi-line edit failed on Windows.** `git config core.autocrlf`
+  defaults to true there, so a checked-out file holds `
+` — and `Read` was
+  splitting on `
+` and leaving a carriage return on the end of every line it
+  showed the model. A model cannot see one and does not reproduce it, so the
+  `old_str` it sent back never matched and `Edit` reported *"the string to
+  replace was not found"*, which reads as the model having invented the snippet.
+
+  Re-reading changed nothing, so an agent would read, fail, read, fail. Only
+  single-line edits worked, because a needle with no newline in it has nothing
+  to disagree about. `Read` now normalises, `Edit` matches in the file's own
+  endings and writes them back unchanged, and `Write` keeps the endings a file
+  already had — overwriting a CRLF file with `
+` turned a two-line change into
+  a diff claiming every line changed.
+
+  The error is also more useful when it does fire: a snippet that differs only
+  in whitespace or line endings now says so, rather than being indistinguishable
+  from one that is genuinely absent.
 
 - **A flood of command output froze the editor.** A wide `find` produces
   megabytes, `Bash` retains up to 10MB of it, and progress fired every 400ms —
