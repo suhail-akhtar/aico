@@ -34,7 +34,24 @@ import { useStore } from './store';
 export function App(): React.ReactElement {
   const [view, setView] = useState<View>('chat');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  /*
+    Openable by link, so another surface can send someone straight here.
+
+    The VS Code panel is 300px and the wrong shape for eight settings panes, so
+    its gear opens *this* client in an editor tab with `?settings=1` rather than
+    cramming providers, MCP and skills into a column. Read once at mount: a
+    deep link is an entry point, not a mode, and leaving it in the URL would
+    reopen the modal on every later navigation.
+  */
+  const [settingsOpen, setSettingsOpen] = useState(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('settings') !== '1') return false;
+      url.searchParams.delete('settings');
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      return true;
+    } catch { return false; }
+  });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hasToken, setHasToken] = useState(Boolean(getToken()));
   /** True when a token we had was refused — a restarted server, not a first visit. */

@@ -1,6 +1,6 @@
 {
   "name": "aico-vscode",
-  "displayName": "aico — AI coding agent",
+  "displayName": "aico \u2014 AI coding agent",
   "description": "A native aico panel in VS Code: its own view beside Chat, with the session list, tool cards and diffs drawn in your editor theme. Ask about a selection, watch background work in the status bar, and open the full workspace when you want the width.",
   "version": "0.5.1",
   "publisher": "suhail-akhtar",
@@ -35,7 +35,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "aico runs an agent that reads and writes files in this folder and can execute shell commands, so it stays off until you trust the workspace. Declared explicitly so Restricted Mode says the panel is disabled and offers a Trust button — rather than the panel silently not appearing."
+      "description": "aico runs an agent that reads and writes files in this folder and can execute shell commands, so it stays off until you trust the workspace. Declared explicitly so Restricted Mode says the panel is disabled and offers a Trust button \u2014 rather than the panel silently not appearing."
     }
   },
   "contributes": {
@@ -84,6 +84,11 @@
       {
         "command": "aico.open",
         "title": "Open the Full Workspace",
+        "category": "aico"
+      },
+      {
+        "command": "aico.openSettings",
+        "title": "Settings (providers, models, MCP)",
         "category": "aico"
       },
       {
@@ -153,7 +158,7 @@
         "aico.port": {
           "type": "number",
           "default": 0,
-          "markdownDescription": "Port for the aico server. `0` picks a free one, which is the right default — a fixed port collides with an aico you started in a terminal."
+          "markdownDescription": "Port for the aico server. `0` picks a free one, which is the right default \u2014 a fixed port collides with an aico you started in a terminal."
         },
         "aico.autoStart": {
           "type": "boolean",
