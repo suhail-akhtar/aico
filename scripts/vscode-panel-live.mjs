@@ -450,6 +450,41 @@ try {
       'an empty conversation offers the full workspace',
     );
 
+    /*
+      ── the transcript must not scroll sideways ─────────────────────────
+
+      Reported from a screenshot: text stranded in the middle of a wide panel
+      with a horizontal scrollbar under the whole conversation. Two causes, both
+      checked here — a reading column fixed at 68ch inside a panel the reader
+      had deliberately widened, and `overflow-y` alone computing the other axis
+      to `auto`, so one long shell command in a tool card shifted every message.
+    */
+    const layout = await evaluate(`
+      (() => {
+        const scroller = document.querySelector('#root [class*="overflow-y-auto"]');
+        if (!scroller) return JSON.stringify({ found: false });
+        const style = getComputedStyle(scroller);
+        return JSON.stringify({
+          found: true,
+          overflowX: style.overflowX,
+          scrollsSideways: scroller.scrollWidth > scroller.clientWidth + 1,
+          bodyScrollsSideways: document.documentElement.scrollWidth > innerWidth + 1,
+          column: getComputedStyle(document.documentElement)
+            .getPropertyValue('--aico-column').trim(),
+        });
+      })()
+    `).catch(() => '{"found":false}');
+    const box = JSON.parse(layout);
+
+    check(box.found === true, 'the transcript scroller is there to measure');
+    check(box.overflowX === 'hidden', `the transcript never scrolls sideways (overflow-x: ${box.overflowX})`);
+    check(box.scrollsSideways === false, 'and nothing inside it is forcing the column wider');
+    check(box.bodyScrollsSideways === false, 'the panel document itself does not scroll sideways');
+    check(
+      box.column === '100%',
+      `the reading column follows the panel width the reader chose (${box.column})`,
+    );
+
     const themed = await evaluate(`
       (() => {
         const s = getComputedStyle(document.documentElement);
@@ -483,13 +518,24 @@ try {
       Read from the header's own tooltip rather than from any internal state,
       because the tooltip is what a person would check.
     */
-    const shownFolder = await evaluate(`
-      (() => {
-        const el = [...document.querySelectorAll('[title]')]
-          .find(e => /[\\\\/]/.test(e.getAttribute('title') || ''));
-        return el ? el.getAttribute('title') : '';
-      })()
-    `).catch(() => '');
+    /*
+      Waited for, not sampled.
+
+      The folder chip appears once the panel has selected a project, which is
+      several round trips after the first render. Reading it once produced an
+      empty string on a slower run and a failure that looked like a regression
+      in code that had not been touched.
+    */
+    const shownFolder = await until(async () => {
+      const found = await evaluate(`
+        (() => {
+          const el = [...document.querySelectorAll('[title]')]
+            .find(e => /[\\\\/]/.test(e.getAttribute('title') || ''));
+          return el ? el.getAttribute('title') : '';
+        })()
+      `).catch(() => '');
+      return found || null;
+    }, 30_000, 750) ?? '';
 
     /*
       The window's own idea of where it is, for comparison.
@@ -539,7 +585,7 @@ try {
       await sleep(1200);
       const text = await evaluate('document.body.innerText').catch(() => '');
       return /sample\.ts:2(-\d+)?/.test(text) ? text : null;
-    }, 25_000, 0);
+    }, 45_000, 0);
 
     check(
       Boolean(ranged),

@@ -76,14 +76,19 @@
   --aico-font-mono: var(--vscode-editor-font-family, ui-monospace, monospace);
 
   /*
-   * The reading column, narrowed for a side bar.
+   * The reading column: whatever the panel is.
    *
-   * The browser client sets this for a full-width page. A panel is often 300px,
-   * and a max-width written for a 900px window simply never applies — but it
-   * does apply the moment somebody drags the panel wide or moves it to the
-   * editor area, and at that point an unbounded column is unreadable.
+   * This was 68ch, borrowed from the browser client where a fixed column is
+   * right because the window is not a decision — a page is as wide as the
+   * screen. A side panel is the opposite: its width is something the reader
+   * dragged to that size on purpose. Holding text to 68ch inside a panel they
+   * widened to 1000px left a third of it empty and the text stranded, which is
+   * exactly what it looked like.
+   *
+   * So the panel's width is the answer, and `px-3` supplies the margin. Anyone
+   * who wants a narrower column has the most direct control there is.
    */
-  --aico-column: 68ch;
+  --aico-column: 100%;
 }
 
 /* ── the panel itself ───────────────────────────────────────────── */
