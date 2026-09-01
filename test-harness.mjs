@@ -11057,6 +11057,152 @@ console.log('  -- Arguments that cannot work are refused before the round trip -
   });
 }
 
+// ═══════════════════════════════════════════════════════════
+// 45. CRLF FILES CAN ACTUALLY BE EDITED
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ 45. CRLF FILES CAN ACTUALLY BE EDITED ══');
+
+console.log('  -- Read never shows a carriage return --');
+{
+  /*
+    Reported from VS Code on Windows: four `Edit` calls in a row failed with
+    "the string to replace was not found", each one after a successful `Read` of
+    the same file. The file was fine and the model was right; `Read` was
+    splitting raw text on \n and leaving a \r on the end of every line, which a
+    model cannot see and does not reproduce.
+
+    `git config core.autocrlf` defaults to true on Windows, so this was every
+    checked-out file on the platform — not an edge case.
+  */
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-eol-'));
+  const file = path.join(dir, 'Dock.tsx');
+  const crlf = 'export function Dock() {\r\n  return null;\r\n}\r\n';
+  fs.writeFileSync(file, crlf);
+
+  await runInContext({ cwd: dir }, async () => {
+    const shown = await executeTool('Read', { file_path: file });
+    assert(!String(shown).includes('\r'),
+      'a CRLF file is shown to the model without carriage returns');
+
+    /*
+      The needle built the way a model builds one: take what Read printed,
+      drop the line numbers, join with \n. Before the fix this found nothing.
+    */
+    const oldStr = String(shown)
+      .split('\n')
+      .map(l => l.replace(/^\d+: /, ''))
+      .slice(0, 2)
+      .join('\n');
+
+    const outcome = await executeTool('Edit', {
+      file_path: file,
+      old_str: oldStr,
+      new_str: 'export function Dock() {\n  return <nav />;',
+    });
+    assert(/Successfully edited/.test(String(outcome)),
+      `a multi-line edit to a CRLF file succeeds (${String(outcome).slice(0, 70)})`);
+
+    const after = fs.readFileSync(file, 'utf8');
+    assert(after.includes('<nav />'), 'and the replacement actually landed');
+    /*
+      The other half. Matching in LF and writing back in LF would leave the
+      file mixed, which makes the *next* edit fail for the mirror-image reason
+      and turns a two-line change into a whole-file diff.
+    */
+    assert(!/[^\r]\n/.test(after), 'and the file keeps its CRLF endings throughout');
+  });
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- An LF file is left alone --');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-eol-'));
+  const file = path.join(dir, 'plain.ts');
+  fs.writeFileSync(file, 'const a = 1;\nconst b = 2;\n');
+
+  await runInContext({ cwd: dir }, async () => {
+    // Read first: an edit to a file this session has not looked at is refused,
+    // which is a separate guard and a correct one.
+    await executeTool('Read', { file_path: file });
+    await executeTool('Edit', {
+      file_path: file,
+      old_str: 'const a = 1;\nconst b = 2;',
+      new_str: 'const a = 1;\nconst b = 3;',
+    });
+    const after = fs.readFileSync(file, 'utf8');
+    assert(!after.includes('\r'), 'an LF file does not acquire carriage returns');
+    assert(after.includes('const b = 3;'), 'and the edit landed');
+  });
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- Write preserves the endings a file already had --');
+{
+  /*
+    The mirror of the Edit bug. A model writes \n, so overwriting a CRLF file
+    wholesale produced a diff claiming every line changed — which buries the
+    edit that was actually made.
+  */
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-eol-'));
+  const existing = path.join(dir, 'existing.ts');
+  const fresh = path.join(dir, 'fresh.ts');
+  fs.writeFileSync(existing, 'one\r\ntwo\r\n');
+
+  await runInContext({ cwd: dir }, async () => {
+    // Overwriting an unread file is refused too, for the stronger reason: it
+    // would discard whatever is in it.
+    await executeTool('Read', { file_path: existing });
+    await executeTool('Write', { file_path: existing, content: 'one\ntwo\nthree\n' });
+    const after = fs.readFileSync(existing, 'utf8');
+    assert(!/[^\r]\n/.test(after), 'rewriting a CRLF file keeps CRLF');
+    assert(after.includes('three'), 'and the new content is there');
+
+    await executeTool('Write', { file_path: fresh, content: 'a\nb\n' });
+    assert(!fs.readFileSync(fresh, 'utf8').includes('\r'),
+      'a brand-new file gets LF, because there is nothing to preserve');
+  });
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- A whitespace-only mismatch says so --');
+{
+  /*
+    The error that would have ended the reported session in one step instead of
+    four. A wrong snippet and a right snippet with different endings produced
+    the identical message, so the one explanation the reader needed was the one
+    thing the error could not say.
+  */
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-eol-'));
+  const file = path.join(dir, 'spaced.ts');
+  fs.writeFileSync(file, 'const a = 1;\n\tconst b = 2;\n');
+
+  await runInContext({ cwd: dir }, async () => {
+    await executeTool('Read', { file_path: file });
+    let message = '';
+    try {
+      await executeTool('Edit', {
+        file_path: file,
+        old_str: 'const a = 1;\n    const b = 2;',
+        new_str: 'x',
+      });
+    } catch (err) { message = err.message; }
+    assert(/whitespace or line endings/.test(message),
+      `a near-miss is named as one (${JSON.stringify(message.slice(0, 90))})`);
+
+    let missing = '';
+    try {
+      await executeTool('Edit', { file_path: file, old_str: 'nothing like this', new_str: 'x' });
+    } catch (err) { missing = err.message; }
+    assert(/was not found/.test(missing) && !/whitespace/.test(missing),
+      'and a genuinely absent string still says it was not found');
+  });
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);
 if (failures.length > 0) {
