@@ -19,6 +19,7 @@
 
 import { spawn, type ChildProcess } from 'child_process';
 import * as vscode from 'vscode';
+import { canonicalFolder } from './paths';
 
 export interface RunningServer {
   url: string;
@@ -75,10 +76,17 @@ export class ServerManager implements vscode.Disposable {
       launched from, which is rarely the project — the same class of bug that
       made every cron job write its files into the wrong folder.
     */
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!cwd) {
+    /*
+      Canonicalised, because `uri.fsPath` lowercases the Windows drive letter and
+      aico's project registry compares paths as strings. Started as `e:\work` the
+      server files its sessions under a project the terminal calls `E:\work`, and
+      the same repository quietly becomes two. See `paths.ts`.
+    */
+    const raw = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!raw) {
       throw new Error('Open a folder first — aico runs against a project directory.');
     }
+    const cwd = canonicalFolder(raw);
 
     /*
       `--project` is the important one.

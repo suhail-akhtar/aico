@@ -28,6 +28,8 @@
  * @module api
  */
 
+import { transportFetch } from './transport';
+
 const TOKEN_KEY = 'aico.token';
 
 /** Storage can be unavailable — private mode, blocked cookies, a locked profile. */
@@ -91,7 +93,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`/api/${path}`, {
+  const res = await transportFetch(`/api/${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -808,7 +810,7 @@ export function streamSession(
     controller = new AbortController();
 
     try {
-      const res = await fetch(
+      const res = await transportFetch(
         `/api/events?session=${encodeURIComponent(sessionId)}&since=${since}`
         + `&token=${encodeURIComponent(getToken())}`
         + (project ? `&project=${encodeURIComponent(project)}` : ''),

@@ -1,8 +1,8 @@
 {
   "name": "aico-vscode",
   "displayName": "aico — AI coding agent",
-  "description": "Run the aico coding agent inside VS Code. Ask about a selection, watch background work in the status bar, and keep the full workspace in a panel.",
-  "version": "0.1.2",
+  "description": "A native aico panel in VS Code: its own view beside Chat, with the session list, tool cards and diffs drawn in your editor theme. Ask about a selection, watch background work in the status bar, and open the full workspace when you want the width.",
+  "version": "0.2.1",
   "publisher": "suhail-akhtar",
   "license": "MIT",
   "repository": {
@@ -26,17 +26,58 @@
     "mcp"
   ],
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.94.0"
   },
   "main": "./out/extension.js",
   "activationEvents": [
     "onStartupFinished"
   ],
   "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "aicoSecondary",
+          "title": "aico",
+          "icon": "resources/aico.svg",
+          "when": "!aico:noSecondarySidebar"
+        }
+      ],
+      "activitybar": [
+        {
+          "id": "aicoPrimary",
+          "title": "aico",
+          "icon": "resources/aico.svg",
+          "when": "aico:noSecondarySidebar"
+        }
+      ]
+    },
+    "views": {
+      "aicoSecondary": [
+        {
+          "id": "aico.chatSecondary",
+          "type": "webview",
+          "name": "aico",
+          "when": "!aico:noSecondarySidebar"
+        }
+      ],
+      "aicoPrimary": [
+        {
+          "id": "aico.chat",
+          "type": "webview",
+          "name": "aico",
+          "when": "aico:noSecondarySidebar"
+        }
+      ]
+    },
     "commands": [
       {
+        "command": "aico.focus",
+        "title": "Focus the Panel",
+        "category": "aico"
+      },
+      {
         "command": "aico.open",
-        "title": "Open Workspace",
+        "title": "Open the Full Workspace",
         "category": "aico"
       },
       {
@@ -122,13 +163,15 @@
     }
   },
   "scripts": {
+    "build": "npm run build:panel && npm run compile",
+    "build:panel": "npm --prefix webview run build",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "npx --yes @vscode/vsce package --no-dependencies"
+    "package": "npm run build && npx --yes @vscode/vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "^1.94.0",
     "typescript": "^5.6.0"
   }
 }

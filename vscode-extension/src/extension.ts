@@ -1,16 +1,21 @@
 /**
  * aico in VS Code.
  *
- * The extension is deliberately thin. aico's server already owns runs, survives
- * a closed tab, and ships a complete web workspace; reimplementing any of that
- * natively would duplicate thousands of lines to land somewhere worse. So this
- * does three things the web client cannot do for itself:
+ * The engine is not reimplemented here and never will be: aico's server owns the
+ * runs, survives a closed window, and replays a session from its event log. What
+ * the extension owns is everything that only makes sense inside an editor.
  *
- * - starts and stops the server against the open folder;
- * - turns the current selection into a question, with the file and line numbers
- *   attached, so the agent is not asked to guess what "this" refers to;
- * - surfaces background work in the status bar, so a run started an hour ago is
- *   visible without opening anything.
+ * - a panel of its own, beside Chat, drawn natively rather than embedded;
+ * - the server's lifecycle, against the folder that is actually open;
+ * - the current selection as a question, with its file and line numbers, so the
+ *   agent is not asked to guess what "this" refers to;
+ * - background work in the status bar, so a run started an hour ago is visible
+ *   without opening anything.
+ *
+ * The full web workspace is still reachable in a tab. It is better than a 300px
+ * column at the things that want width — Mini Apps, the trajectory view, the
+ * whole settings surface — and worse at being an editor panel, which is why both
+ * exist.
  *
  * @module extension
  */
@@ -19,6 +24,7 @@ import * as vscode from 'vscode';
 import { ServerManager } from './server';
 import { WorkspacePanel } from './panel';
 import { StatusBar } from './status';
+import { AicoViewProvider, supportsSecondarySidebar } from './view/provider';
 
 /**
  * Activated on `onStartupFinished`, not on first command.
@@ -37,6 +43,43 @@ export function activate(context: vscode.ExtensionContext): void {
   const status = new StatusBar(server);
 
   context.subscriptions.push(output, server, status);
+
+  /*
+    Which side bar the panel lives in, decided before any view resolves.
+
+    Both containers are declared in the manifest and each is gated on this key,
+    so exactly one is ever real. It has to be set here rather than left to
+    default, because an unset context key is falsy — which would silently put
+    every user on the Secondary Side Bar branch, including the ones whose VS Code
+    does not have one.
+  */
+  void vscode.commands.executeCommand(
+    'setContext', 'aico:noSecondarySidebar', !supportsSecondarySidebar(),
+  );
+
+  const panel = new AicoViewProvider(context, server, output);
+  context.subscriptions.push(
+    panel,
+    /*
+      Registered under both ids.
+
+      Only one container exists at a time, so only one of these ever resolves —
+      but which one is not known until the context key above has been applied,
+      and a view whose provider was never registered renders as a permanently
+      empty pane with no error anywhere.
+
+      `retainContextWhenHidden` is the expensive option and the right one: the
+      panel holds a live SSE subscription to a running agent, and a webview that
+      is torn down when you switch to the Explorer would drop it and reconnect —
+      replaying the session from its log on every glance at the file tree.
+    */
+    vscode.window.registerWebviewViewProvider(AicoViewProvider.PRIMARY_ID, panel, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.window.registerWebviewViewProvider(AicoViewProvider.SECONDARY_ID, panel, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+  );
 
   /**
    * Bring the server up, reporting failure once and clearly.
@@ -67,6 +110,8 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('aico.focus', () => panel.reveal()),
+
     vscode.commands.registerCommand('aico.open', async () => {
       const running = await ready();
       if (running) {
@@ -75,16 +120,17 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
-    vscode.commands.registerCommand('aico.newSession', async () => {
-      const running = await ready();
-      if (!running) return;
-      // A fresh id in the client's own format. Generated here rather than asked
-      // for, because the server has no notion of an empty session until
-      // something is submitted to one.
-      WorkspacePanel.show(running, `web-${Math.random().toString(36).slice(2, 10)}`);
-    }),
+    /*
+      A new session belongs to the panel now.
 
-    vscode.commands.registerCommand('aico.askAboutSelection', () => askAboutSelection(server, ready)),
+      It used to open the workspace tab on a freshly minted id, which was the
+      only surface there was. The panel owns its own session list and mints ids
+      in the same format, so asking it is both simpler and correct — the tab
+      would otherwise start a *second* conversation beside the one on screen.
+    */
+    vscode.commands.registerCommand('aico.newSession', () => panel.newSession()),
+
+    vscode.commands.registerCommand('aico.askAboutSelection', () => askAboutSelection(panel)),
 
     vscode.commands.registerCommand('aico.stopServer', () => {
       server.stop();
@@ -146,10 +192,7 @@ export function activate(context: vscode.ExtensionContext): void {
  * was already looking at — several tool calls to rediscover what the editor
  * knew all along.
  */
-async function askAboutSelection(
-  server: ServerManager,
-  ready: () => Promise<ReturnType<ServerManager['current']>>,
-): Promise<void> {
+async function askAboutSelection(panel: AicoViewProvider): Promise<void> {
   /*
     Answer the keypress even when there is nothing to act on.
 
@@ -182,9 +225,6 @@ async function askAboutSelection(
   // user pressed enter with nothing typed, which is also not a question.
   if (!question?.trim()) return;
 
-  const running = await ready();
-  if (!running) return;
-
   const document = editor.document;
   const selection = editor.selection;
   const relative = vscode.workspace.asRelativePath(document.uri, false);
@@ -203,29 +243,20 @@ async function askAboutSelection(
     '```',
   ].join('\n');
 
-  // One session per file, so asking three questions about the same module
-  // continues a conversation rather than starting three that each rediscover
-  // the same context. Non-word characters are collapsed because the id travels
-  // in a URL and is validated at the other end.
-  const sessionId = `web-vsc-${relative.replace(/[^a-zA-Z0-9]+/g, '-').slice(-40)}`.toLowerCase();
+  /*
+    It goes to the conversation on screen, not to a session of its own.
 
-  try {
-    await server.api('submit', {
-      method: 'POST',
-      body: {
-        sessionId,
-        task,
-        project: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-      },
-    });
-  } catch (err) {
-    vscode.window.showErrorMessage(
-      `aico could not accept that: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return;
-  }
+    This used to mint one session per file, so that three questions about the
+    same module continued one conversation. The panel changes what the right
+    answer is: there is now a visible current conversation, and quietly sending a
+    question somewhere else — while the panel carries on showing something else
+    entirely — is indistinguishable from the question being lost.
 
-  WorkspacePanel.show(running, sessionId);
+    Continuity is still there, and better than it was: the panel keeps the
+    session it was on, so the follow-up lands in the same place the first
+    question did without anyone having to name a session for it.
+  */
+  await panel.ask(task, true);
 }
 
 export function deactivate(): void {

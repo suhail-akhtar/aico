@@ -1,0 +1,16 @@
+/*
+ * The panel's stylesheet.
+ *
+ * `@import` must precede every other rule, which conveniently matches the order
+ * these are wanted in: `theme.css` brings aico's markdown, diff and code styling
+ * along with its default palette, and `vscode-theme.css` then redefines the same
+ * custom properties in terms of the user's VS Code theme. Both write to `:root`,
+ * so the later one wins and every shared component restyles without being
+ * touched.
+ */
+@import '@aico/ui/theme.css';
+@import './vscode-theme.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
