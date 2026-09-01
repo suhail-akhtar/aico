@@ -29,11 +29,12 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.7.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.8.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
       <a href="workspace.html">Workspace</a>
+      <a href="vscode.html">VS Code</a>
       <a href="automation.html">Automation</a>
       <a href="compare.html" aria-current="page">Compare</a>
       <a href="widgets.html">Visuals</a>
@@ -228,10 +229,11 @@
     </div>
     <p>
       aico has no hosted service and no plan for one. There <em>is</em> a
-      <a href="#vscode">VS Code extension</a>, but it is a thin one — it starts the
-      server, embeds the same workspace in a panel, and adds the few things an
-      editor can do that a browser cannot. It is not a second implementation of
-      the agent, and it is not an inline-completion tool.
+      <a href="vscode.html">VS Code extension</a>, and it is a native panel rather
+      than the web workspace in a frame — but it is still one engine. The server
+      owns the run and the panel is a view over the browser client's own state
+      layer, so it is not a second implementation of the agent, and it is not an
+      inline-completion tool.
     </p>
 
     <h2>Who it is actually for</h2>

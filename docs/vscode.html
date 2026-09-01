@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aico in VS Code — a native panel, not a web page in a frame</title>
+<meta name="description" content="aico runs in a tab of its own in the VS Code Secondary Side Bar. Edits land as WorkspaceEdits so Ctrl+Z takes them back, approvals are native modals, and the agent can read your Problems panel and run your tasks.json tasks.">
+<!-- seo:start -->
+<link rel="canonical" href="https://suhail-akhtar.github.io/aico/vscode.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aico">
+<meta property="og:url" content="https://suhail-akhtar.github.io/aico/vscode.html">
+<meta property="og:title" content="aico in VS Code — a native panel, not a web page in a frame">
+<meta property="og:description" content="aico runs in a tab of its own in the VS Code Secondary Side Bar. Edits land as WorkspaceEdits so Ctrl+Z takes them back, approvals are native modals, and the agent can read your Problems panel and run your tasks.json tasks.">
+<meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="aico in VS Code — a native panel, not a web page in a frame">
+<meta name="twitter:description" content="aico runs in a tab of its own in the VS Code Secondary Side Bar. Edits land as WorkspaceEdits so Ctrl+Z takes them back, approvals are native modals, and the agent can read your Problems panel and run your tasks.json tasks.">
+<meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<!-- seo:end -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script><!-- blocking on purpose: sets the theme before first paint -->
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.8.0</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="vscode.html" aria-current="page">VS Code</a>
+      <a href="automation.html">Automation</a>
+      <a href="compare.html">Compare</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="miniapps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → VS Code</p>
+
+  <div class="prose">
+    <h1>aico in VS Code</h1>
+    <p class="lede">
+      A tab of its own in the Secondary Side Bar, beside Chat. Drawn natively, styled from
+      your theme's own colours, and aware of what you have open — not the web workspace in
+      an iframe.
+    </p>
+
+    <h2>Install it</h2>
+    <p>
+      The extension needs <code>aico</code> on your <code>PATH</code> and Node 22.5+. It is
+      not on the Marketplace yet, so install the packaged build:
+    </p>
+<pre><code>npm install -g @suhail-akhtar/aico
+code --install-extension aico-vscode-0.6.0.vsix</code></pre>
+    <p>
+      The <code>.vsix</code> is attached to each
+      <a href="https://github.com/suhail-akhtar/aico/releases">release</a>. Reload the window
+      afterwards — an editor that was already open predates the extension and has not loaded
+      it, which from the inside is indistinguishable from a broken install. If a keypress
+      does nothing, run <strong>aico: Check the Setup</strong> from the command palette; it
+      reports the version, the folder, the server and the command it would run.
+    </p>
+    <p>
+      aico needs a folder open. A session's log is filed under one and its file tools are
+      confined to it, so an empty window offers you a folder picker rather than a chat box.
+    </p>
+
+    <h2>The server still owns the run</h2>
+    <p>
+      Closing the panel, or the whole window, does not stop the work. The extension does not
+      reimplement the engine — it starts <code>aico serve</code> for the folder you have open
+      and talks to it. Reopen the panel and the session replays from its event log, and it is
+      the <em>same</em> session you can pick up in a browser tab.
+    </p>
+    <p>
+      The webview never sees the server or its token. Every request is tunnelled through the
+      extension host, which is what lets the panel be a plain UI rather than a browser page
+      that happens to be hosted in an editor.
+    </p>
+
+    <h2>It knows what you are looking at</h2>
+    <p>
+      The active file, your selection with its line range, and that file's Problems arrive as
+      chips above the composer. Every chip is removable, and a removal sticks — so what gets
+      sent is on screen <em>before</em> you send it.
+    </p>
+    <ul>
+      <li><strong><code>#</code></strong> points at another file or a workspace symbol.</li>
+      <li><strong><code>@</code></strong> addresses a specialist agent for the rest of the session.</li>
+      <li><strong>Ctrl+Alt+A</strong> puts the cursor in the composer with the selection already attached.</li>
+    </ul>
+    <p>
+      The rule behind the chips: inline what nothing else can recover — a selection, a language
+      server's diagnostics — and merely <em>name</em> files, because aico has <code>Read</code>
+      and can fetch exactly the part that matters. Getting that backwards is how an editor
+      integration sends fifteen thousand tokens of open tabs with every "hello".
+    </p>
+
+    <h2>Edits land in the editor</h2>
+    <p>
+      A write is applied as a <code>WorkspaceEdit</code>, not written behind VS Code's back. So
+      <strong>Ctrl+Z</strong> takes it back, Source Control shows it, and the file opens where
+      it changed.
+    </p>
+    <p>
+      Declining one is a real answer. The tool call fails, the agent is told why, and it takes
+      another route — rather than carrying on believing it wrote a file that is not there.
+    </p>
+
+    <h2>Approve as much or as little as you like</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Mode</th><th>What it asks about</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Auto</strong></td><td>Nothing. The default, and what every session did before this existed.</td></tr>
+          <tr><td><strong>Ask, not for edits</strong></td><td>File writes go through; commands, fetches and delegation are put to you.</td></tr>
+          <tr><td><strong>Ask every time</strong></td><td>Every tool call waits for a decision. Thorough, and slow by design.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Prompts are native modals rather than cards in the panel — a card can be scrolled past
+      while the turn sits blocked on it. <code>Terminal</code> is deliberately <em>not</em> in
+      the middle mode's pass-through list: a shell command can do everything a file write can
+      and more, so "auto-accept edits" would be a lie if it also ran commands.
+    </p>
+
+    <h2>The editor as a tool</h2>
+    <p>
+      Three things the engine cannot do from outside VS Code, which it can do from inside it.
+      They are offered only while an editor is attached — the same conversation opened in a
+      browser tab has none, and a tool that can only answer "there is no editor here" costs a
+      turn to discover.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>VSCodeDiagnostics</code></td>
+            <td>Reads your Problems panel. After an edit the agent can ask the language server what it thinks, instead of grepping for the shape of an error or running a full build.</td>
+          </tr>
+          <tr>
+            <td><code>VSCodeTasks</code></td>
+            <td>Lists and runs the commands already in your <code>tasks.json</code>, so the project's own flags and environment are used rather than a command line the model invented.</td>
+          </tr>
+          <tr>
+            <td><code>VSCodeWorkspace</code></td>
+            <td>Reports, creates, adds and opens folders — enough to finish setting a project up so you land in it.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <code>VSCodeDiagnostics</code> works in Plan mode too, because "what is already broken
+      here?" is the first question of most plans and the language server answers it better
+      than a grep. Adding a workspace folder or opening one always confirms first, whatever
+      the approval mode says — opening a folder replaces the window.
+    </p>
+    <p style="font-size:.9rem;color:var(--muted)">
+      There is deliberately no "run any VS Code command" tool: that surface reaches deleting
+      files and installing extensions, and no permission prompt can describe it honestly.
+      There is no editor terminal either — commands run on aico's own shell, which is visible
+      in the transcript and identical on every surface.
+    </p>
+
+    <h2>Windows gets a shell whose commands exist</h2>
+    <p>
+      The tool a model sees is called <code>Bash</code>, so it writes <code>ls</code> and
+      <code>head</code>. Running those through <code>cmd.exe</code> returns
+      <em>'ls' is not recognized</em> and the run burns turns rediscovering it. aico prefers
+      Git Bash, then PowerShell, then <code>cmd</code> — and the prompt names which one it
+      picked. <code>AICO_SHELL</code> overrides.
+    </p>
+
+    <h2>The shape of a run, on screen</h2>
+    <ul>
+      <li><strong>Task list</strong> — collapses to one line once resolved, and never claims <em>all done</em> for a list finished by cancelling half of it.</li>
+      <li><strong>Delegation</strong> — a strip of sub-agents that collapses when they finish and stays open when one fails.</li>
+      <li><strong>Plans</strong> — Go ahead, Amend, Later, Decline. The wording sent is the same the browser client uses, so a plan agreed in the editor still reads as agreed when the log replays in a tab.</li>
+      <li><strong>Context meter</strong> — how much of the window is spent, with auto-compaction when it fills.</li>
+      <li><strong>Goal</strong> — one standing objective, pinned above the composer where it is read.</li>
+    </ul>
+    <p>
+      Messages can be copied, rated, branched from, and <strong>edited and sent again</strong>
+      with arrows to move between versions. The conversation itself can be renamed in place,
+      forked, or archived from the <code>⋯</code> menu.
+    </p>
+
+    <h2>Settings: basic here, the rest on the web</h2>
+    <p>
+      The model and the active provider are switchable from the composer. Keys, endpoints, MCP
+      servers, skills, memory and agents are a form and a pasted secret — a 300px column does
+      neither well — so <strong>Settings</strong> in the <code>⋯</code> menu opens the web
+      workspace straight onto them. VS Code's own settings hold the extension's behaviour:
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Setting</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>aico.command</code></td><td>How to run aico, when it is not on your <code>PATH</code>.</td></tr>
+          <tr><td><code>aico.autoStart</code></td><td>Start the server for a folder without asking. On by default.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Two surfaces, one core</h2>
+    <p>
+      The panel is not a second product. The state layer — the reducer, the store, the turn
+      projection, plans and task lists — is imported unchanged from the browser client, so a
+      fix to how a failed edit is drawn lands in both. What differs is the view: VS Code gets
+      an editor panel, and the browser gets width, which is what Mini Apps, the trajectory
+      view and the settings screens actually need.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="workspace.html">The web workspace →</a>
+      <a class="btn" href="install.html">Install →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>
