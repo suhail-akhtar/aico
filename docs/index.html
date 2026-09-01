@@ -28,7 +28,7 @@
   "name": "aico",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
-  "softwareVersion": "0.6.0",
+  "softwareVersion": "0.7.0",
   "url": "https://suhail-akhtar.github.io/aico/",
   "downloadUrl": "https://github.com/suhail-akhtar/aico",
   "codeRepository": "https://github.com/suhail-akhtar/aico",
@@ -80,7 +80,7 @@
       "name": "Does it work in the terminal, or does it need an editor?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Either. aico is a terminal agent; aico serve starts a local web workspace on 127.0.0.1. There is also a VS Code extension, but it is a thin one — it embeds that same workspace and adds asking about a selection and a status bar for background work. One engine drives all three surfaces; none of them is a separate implementation, and there is no inline completion."
+        "text": "Either. aico is a terminal agent; aico serve starts a local web workspace on 127.0.0.1; and the VS Code extension gives it a panel of its own beside Chat, where edits apply as workspace edits you can undo and your selection travels with the question. One engine drives all three, and the panel shares the browser client's state layer and transcript rather than reimplementing them. There is no inline completion — that is a different product."
       }
     },
     {
@@ -127,7 +127,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.6.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.7.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -154,7 +154,7 @@
     </p>
 
     <div class="install">
-      <code>$ npx github:suhail-akhtar/aico#v0.6.0 serve</code>
+      <code>$ npx github:suhail-akhtar/aico#v0.7.0 serve</code>
       <button type="button">Copy</button>
     </div>
 
@@ -418,12 +418,13 @@ What rendered:
       <div class="a">
         <p>
           Either. <code>aico</code> is a terminal agent; <code>aico serve</code>
-          starts a local web workspace on <code>127.0.0.1</code>. There is also a
-          <a href="compare.html#vscode">VS Code extension</a>, but it is a thin
-          one — it embeds that same workspace and adds asking about a selection
-          and a status bar for background work. One engine drives all three
-          surfaces; none of them is a separate implementation, and there is no
-          inline completion.
+          starts a local web workspace on <code>127.0.0.1</code>; and the
+          <a href="compare.html#vscode">VS Code extension</a> gives it a panel of
+          its own beside Chat, where edits apply as workspace edits you can undo
+          and your selection travels with the question. One engine drives all
+          three, and the panel shares the browser client's state layer and
+          transcript rather than reimplementing them. There is no inline
+          completion — that is a different product.
         </p>
       </div>
 
@@ -489,7 +490,7 @@ What rendered:
     <div class="prose">
       <h2>Try it</h2>
       <div class="install">
-        <code>$ npx github:suhail-akhtar/aico#v0.6.0 serve</code>
+        <code>$ npx github:suhail-akhtar/aico#v0.7.0 serve</code>
         <button type="button">Copy</button>
       </div>
       <p style="margin-top:1rem">

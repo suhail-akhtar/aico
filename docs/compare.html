@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.6.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.7.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -147,34 +147,49 @@
       less common.
     </p>
 
-    <h3 id="vscode">In VS Code, deliberately thin</h3>
+    <h3 id="vscode">In VS Code, a panel of its own</h3>
     <p>
-      The extension does not reimplement the agent. aico's server already owns
-      runs, survives a closed tab and ships the whole workspace, so the extension
-      starts it against your open folder, embeds that workspace in a panel, and
-      adds the three things an editor can do that a browser cannot:
+      aico gets its own tab in the Secondary Side Bar, beside Chat — the same
+      mechanism Claude Code and Codex use. It is not the web workspace in a
+      frame: the panel is drawn for the editor and styled from your theme, so
+      tool cards and diffs match the colours of the file next to them.
+    </p>
+    <p>
+      It is not a second implementation either, and that distinction is the
+      reason it was worth building. The state layer, the reducer and every
+      transcript component are the browser client's, imported unchanged; the
+      panel is a view over them. A fix to how a failed <code>Edit</code> is drawn
+      lands in both surfaces because there is only one place it is drawn.
     </p>
     <ul>
       <li>
-        <strong>Ask about a selection</strong> — highlight code, press
-        <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>, and the file and line numbers
-        go with the question, so the agent is not sent hunting for what your
-        editor already knew.
+        <strong>Edits arrive through the front door</strong> — a write is applied
+        as a <code>WorkspaceEdit</code>, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it
+        back and it shows in Source Control. A file changed behind the editor's
+        back can do neither.
+      </li>
+      <li>
+        <strong>It knows what you are looking at</strong> — the active file, your
+        selection with its line range, and the Problems for that file, shown as
+        chips so it is never a guess what a message will carry. Type
+        <code>#</code> to point at another file or a symbol.
+      </li>
+      <li>
+        <strong>Approvals are real dialogs</strong> — <em>Auto</em>,
+        <em>ask but not for edits</em>, or <em>ask every time</em>. A card in a
+        panel can be scrolled past while a turn sits blocked on it; a modal
+        cannot.
       </li>
       <li>
         <strong>Background work in the status bar</strong> — a run started an hour
         ago, or a scheduled job that failed overnight, without opening anything.
       </li>
-      <li>
-        <strong>Server lifecycle</strong> — started for the folder you have open,
-        stopped when you are done.
-      </li>
     </ul>
     <p>
-      That is the whole of it. Rebuilding the conversation UI natively would
-      duplicate several thousand lines to arrive somewhere worse, and there is no
-      inline-completion feature — that is a different product, and Cursor and
-      Copilot do it well.
+      What it deliberately does not do is inline completion. That is a different
+      product, and Cursor and Copilot do it well. The full workspace is still one
+      click away for the things a 300px column is the wrong shape for — Mini
+      Apps, the trajectory view, the whole settings surface.
     </p>
     <p style="font-size:.9rem;color:var(--muted)">
       Not on the Marketplace yet; it is built from

@@ -31,6 +31,10 @@ import { find, type FindResult } from '../context/find';
 import { askPermission, type PermissionRequest } from './permission';
 import { applyEdit, type EditRequest } from './apply-edit';
 
+/** Keys in `workspaceState`. Per folder, which is what makes them useful. */
+const LAST_SESSION = 'aico.lastSession';
+const LAST_MODEL = 'aico.lastModel';
+
 /** Whether this editor can host the panel beside Chat. See `vscode-version`. */
 export function supportsSecondarySidebar(version = vscode.version): boolean {
   return supports(version);
@@ -38,7 +42,11 @@ export function supportsSecondarySidebar(version = vscode.version): boolean {
 
 /** Messages the host sends the panel that are not tunnel traffic. */
 type HostMessage =
-  | { t: 'boot'; folder: string | null; folderName: string | null; version: string }
+  | {
+    t: 'boot'; folder: string | null; folderName: string | null; version: string;
+    /** The conversation this folder was last on, and the model it was using. */
+    lastSession: string | null; lastModel: string | null;
+  }
   | { t: 'ask'; text: string; send: boolean }
   | { t: 'new-session' }
   | { t: 'focus-composer' }
@@ -231,6 +239,26 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      /*
+        Remember where this folder is, so reopening the panel resumes rather
+        than restarts.
+
+        Without it the panel minted a fresh session on every load — losing the
+        conversation, and with it the model pinned to that session, which is
+        stored per session by design. The symptom was "it forgets my model";
+        the cause was that it forgot the session the model was pinned to.
+      */
+      if (message?.t === 'remember') {
+        const remember = message as unknown as { sessionId?: string; model?: string | null };
+        if (typeof remember.sessionId === 'string') {
+          void this.context.workspaceState.update(LAST_SESSION, remember.sessionId);
+        }
+        if (remember.model !== undefined) {
+          void this.context.workspaceState.update(LAST_MODEL, remember.model ?? undefined);
+        }
+        return;
+      }
+
       if (message?.t === 'open-settings') {
         void vscode.commands.executeCommand(
           'workbench.action.openSettings', '@ext:suhail-akhtar.aico-vscode',
@@ -264,6 +292,15 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
       folder: folder ? canonicalFolder(folder.uri.fsPath) : null,
       folderName: folder?.name ?? null,
       version: this.context.extension.packageJSON.version as string,
+      /*
+        Where this folder left off.
+
+        `workspaceState` rather than `globalState`, because both answers are
+        per-project: the conversation belongs to this repository, and so does
+        the model somebody chose for working in it.
+      */
+      lastSession: this.context.workspaceState.get<string>(LAST_SESSION) ?? null,
+      lastModel: this.context.workspaceState.get<string>(LAST_MODEL) ?? null,
     });
     const queued = this.pending;
     this.pending = [];

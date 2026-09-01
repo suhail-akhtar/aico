@@ -438,6 +438,18 @@ try {
       `the panel rendered its own UI (${JSON.stringify(text.replace(/\s+/g, ' ').slice(0, 70))})`,
     );
 
+    /*
+      The way through to the wide surface, offered where it is useful.
+
+      A 300px column is the wrong shape for Mini Apps, the trajectory view and
+      the settings screens, and a toolbar icon nobody has learned does not tell
+      a new reader that a second surface exists at all.
+    */
+    check(
+      /open the full workspace/i.test(text),
+      'an empty conversation offers the full workspace',
+    );
+
     const themed = await evaluate(`
       (() => {
         const s = getComputedStyle(document.documentElement);

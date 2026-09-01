@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.6.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.7.0</span></a>
     <nav class="site-nav">
       <a href="install.html" aria-current="page">Install</a>
       <a href="providers.html">Providers</a>
@@ -63,7 +63,7 @@
 
     <h2>Run it</h2>
     <div class="install">
-      <code>$ npx github:suhail-akhtar/aico#v0.6.0 serve</code>
+      <code>$ npx github:suhail-akhtar/aico#v0.7.0 serve</code>
       <button type="button">Copy</button>
     </div>
     <p style="margin-top:1rem">
@@ -76,8 +76,8 @@
       <table>
         <thead><tr><th>Suffix</th><th>What it follows</th></tr></thead>
         <tbody>
-          <tr><td><code>#v0.6.0</code></td><td>A tag. Pinned — it will not move under you.</td></tr>
-          <tr><td><code>#release/v0.6</code></td><td>The 0.6 line, as it gets fixes.</td></tr>
+          <tr><td><code>#v0.7.0</code></td><td>A tag. Pinned — it will not move under you.</td></tr>
+          <tr><td><code>#release/v0.7</code></td><td>The 0.7 line, as it gets fixes.</td></tr>
           <tr><td><code>#main</code></td><td>The development trunk. Newest, least settled.</td></tr>
         </tbody>
       </table>
@@ -137,15 +137,16 @@ aico serve</code></pre>
 
     <h2>In VS Code</h2>
     <p>
-      A thin extension: it starts the server against your open folder, embeds the
-      same workspace in a panel, and adds asking about a selection and a status
-      bar for background work. Not on the Marketplace yet, so it is built from the
-      repository:
+      A panel of its own beside Chat, drawn for the editor and styled from your
+      theme. Edits apply as <code>WorkspaceEdit</code>s so <kbd>Ctrl</kbd>+<kbd>Z</kbd>
+      takes them back, the active file and selection travel with your questions,
+      and tool approvals are real dialogs. Not on the Marketplace yet, so it is
+      built from the repository:
     </p>
 <pre><code>cd aico/vscode-extension
 npm install
-npx tsc -p ./
-npx @vscode/vsce package
+npm --prefix webview install    <span class="c"># the panel has its own build</span>
+npm run package
 code --install-extension aico-vscode-*.vsix</code></pre>
     <p>
       Then <strong>reload the window</strong> — VS Code does not load a newly

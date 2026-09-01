@@ -522,17 +522,30 @@ and spend ceilings — are searchable across every pane.
 
 ### In VS Code
 
-The extension in [`vscode-extension/`](vscode-extension/) does not reimplement
-any of that. The server already owns the runs and ships the whole client, so the
-extension starts it against your open folder, embeds that workspace in a panel,
-and adds the two things an editor can do that a browser cannot: asking about a
-selection with its file and line numbers attached
-(<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>), and background work in the status
-bar. There is no inline completion; that is a different product.
+The extension in [`vscode-extension/`](vscode-extension/) gives aico a tab of its
+own in the Secondary Side Bar, beside Chat. It is drawn for the editor and styled
+from your theme — not the web workspace in a frame — but it is not a second
+implementation either: the state layer, the reducer and every transcript
+component are the browser client's, imported unchanged.
+
+Four things it does that a browser cannot:
+
+- **Edits arrive through the front door.** A write is applied as a
+  `WorkspaceEdit`, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back and it shows in
+  Source Control. A file changed behind the editor's back can do neither.
+- **It knows what you are looking at.** Active file, selection with its line
+  range, and that file's Problems — shown as chips, so it is never a guess what a
+  message will carry. `#` points at another file or a symbol.
+- **Approvals are real dialogs.** Auto, ask-but-not-for-edits, or ask every time.
+- **Background work in the status bar**, without opening anything.
+
+There is no inline completion; that is a different product. The full workspace
+stays one click away for Mini Apps, the trajectory view and the settings screens.
 
 ```sh
-cd vscode-extension && npm install && npx tsc -p ./
-npx @vscode/vsce package
+cd vscode-extension && npm install
+npm --prefix webview install
+npm run package
 code --install-extension aico-vscode-*.vsix
 ```
 

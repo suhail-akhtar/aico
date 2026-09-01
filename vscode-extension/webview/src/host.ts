@@ -20,6 +20,10 @@ export interface BootInfo {
   folder: string | null;
   folderName: string | null;
   version: string;
+  /** The conversation this folder was last on, if it is still around. */
+  lastSession: string | null;
+  /** The model last chosen here, applied to a new conversation in this folder. */
+  lastModel: string | null;
 }
 
 /** A question routed in from the editor, and whether it should go straight out. */
@@ -83,7 +87,13 @@ let lastBoot: BootInfo | null = null;
 window.addEventListener('message', (event: MessageEvent) => {
   const message = event.data as HostMessage | undefined;
   if (message?.t === 'boot') {
-    lastBoot = { folder: message.folder, folderName: message.folderName, version: message.version };
+    lastBoot = {
+      folder: message.folder,
+      folderName: message.folderName,
+      version: message.version,
+      lastSession: message.lastSession ?? null,
+      lastModel: message.lastModel ?? null,
+    };
     for (const listener of bootListeners) listener(lastBoot);
   }
   if (message?.t === 'ask') {
@@ -171,6 +181,16 @@ export function onEditDone(listener: Listener<EditOutcome>): () => void {
  */
 export function requestEdit(request: EditRequest): void {
   vscodeApi.postMessage({ t: 'edit', request });
+}
+
+/**
+ * Record where this folder is, so reopening the panel resumes it.
+ *
+ * Fire and forget. Losing one of these costs a session that starts fresh, which
+ * is the old behaviour — not worth a round trip to confirm.
+ */
+export function remember(what: { sessionId?: string; model?: string | null }): void {
+  vscodeApi.postMessage({ t: 'remember', ...what });
 }
 
 export const host = {

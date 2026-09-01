@@ -27,7 +27,7 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '@web/store';
 import { setTokenRejectedHandler } from '@web/api';
-import { onBoot, signalReady, host, type BootInfo } from './host';
+import { onBoot, signalReady, host, remember, type BootInfo } from './host';
 import { sameFolder } from './paths';
 import { Header } from './components/Header';
 import { SessionList } from './components/SessionList';
@@ -58,6 +58,23 @@ export function Panel(): React.ReactElement {
 
   useEffect(() => onBoot(setBoot), []);
   useEffect(() => { signalReady(); }, []);
+
+  /*
+    Keep the folder's memory current as the conversation and the model change.
+
+    Written on every change rather than on unload: a webview is disposed without
+    warning when the view is hidden, and `beforeunload` is not reliable there —
+    so anything saved only on the way out is saved only sometimes.
+
+    Guarded on `boot` so the values recorded are ones this panel actually
+    established. Writing during the first render would store the store's initial
+    placeholders over the very thing being restored.
+  */
+  const model = useStore(s => s.model);
+  useEffect(() => {
+    if (!boot?.folder) return;
+    remember({ sessionId, model });
+  }, [boot, sessionId, model]);
 
   /*
     A rejected token means the server restarted and minted a new one. In the
@@ -112,6 +129,39 @@ export function Panel(): React.ReactElement {
         */
         connect(useStore.getState().sessionId);
         await refreshSessions();
+        if (cancelled) return;
+
+        /*
+          Pick up where this folder left off.
+
+          Opening the panel used to mint a brand-new conversation every single
+          time — and with it lose the model, which the server pins *per session*
+          by design. The complaint was "it forgets my model"; the cause was that
+          it forgot the session the model was pinned to.
+
+          Only a conversation with something in it is resumed. A remembered id
+          for a session nobody ever wrote to would restore an empty screen and
+          look like nothing happened.
+        */
+        const remembered = boot.lastSession
+          ? useStore.getState().sessions.find(s =>
+            s.id === boot.lastSession && !s.archived && (s.turns ?? 0) > 0)
+          : undefined;
+
+        if (remembered) {
+          await useStore.getState().openSession(remembered.id);
+        } else if (boot.lastModel) {
+          /*
+            A new conversation inherits the model, not the default.
+
+            Choosing a model is a statement about the work in this folder, not
+            about one conversation in it — so a fresh session in the same
+            project starts on it rather than reverting and making the choice
+            something you re-make every morning.
+          */
+          useStore.getState().setModel(boot.lastModel);
+        }
+
         void refreshProviders();
         void refreshSettings();
       } catch (err) {
