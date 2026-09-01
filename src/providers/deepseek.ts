@@ -63,6 +63,8 @@
 
 import OpenAI, { APIError } from 'openai';
 import { normalizeUsage } from './usage.js';
+import type { EffortLevel } from '../../shared/reasoning.js';
+import { resolvedEffort } from '../run-context.js';
 import { DEEPSEEK_DIALECT } from '../prompt/dialects.js';
 import type {
   AicoMessage,
@@ -159,9 +161,16 @@ export class DeepSeekProvider implements ProviderAPI {
       stream: true as const,
       ...(includeStreamUsage ? { stream_options: { include_usage: true } } : {}),
       max_tokens: opts.maxTokens ?? this.maxOutputTokens,
-      thinking: this.thinking === 'off'
-        ? { type: 'disabled' as const }
-        : { type: 'enabled' as const, reasoning_effort: this.thinking },
+      /*
+        The run's choice first, then the configured one.
+
+        DeepSeek's platform default is `high` and it has no adaptive setting, so
+        every step of a long tool loop thought as hard as the hardest one —
+        including the step that reads a line of `git status`. `resolvedEffort`
+        returns undefined for `auto`, which keeps exactly that behaviour for
+        anyone who has not asked for anything else.
+      */
+      thinking: thinkingFor(resolvedEffort(opts.model) ?? this.thinking),
     });
 
     const wantStreamUsage = !this.streamUsageDisabled;
@@ -452,4 +461,19 @@ function tryParseToolArgs(raw: string): {
       parseError: `Tool arguments were not valid JSON (${reason}). Raw: ${snippet}`,
     };
   }
+}
+
+/**
+ * One reasoning level, in DeepSeek's shape.
+ *
+ * `off` is a distinct request — `{type: 'disabled'}` — rather than the absence
+ * of the field, because omitting it gets the platform default, which is `high`.
+ * Anything the ladder offers that DeepSeek does not is stepped by
+ * `effortToSend` before it reaches here, so this only ever sees a value the API
+ * accepts.
+ */
+function thinkingFor(level: EffortLevel | 'low' | 'high' | 'max' | 'off'):
+  { type: 'disabled' } | { type: 'enabled'; reasoning_effort: string } {
+  if (level === 'off') return { type: 'disabled' };
+  return { type: 'enabled', reasoning_effort: level };
 }

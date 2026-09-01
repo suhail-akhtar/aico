@@ -211,6 +211,8 @@ interface AppState {
     approval?: 'auto' | 'edits' | 'ask';
     /** This client will apply the run's file writes itself. See `edit`. */
     applyEdits?: boolean;
+    /** How hard to think. Omitted and `auto` both send nothing. */
+    effort?: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   }) => Promise<void>;
   /**
    * Files uploaded to this session and not yet sent with a turn.
@@ -660,6 +662,9 @@ export const useStore = create<AppState>((set, get) => ({
         ...(opts.approval && opts.approval !== 'auto' ? { approval: opts.approval } : {}),
         // Only when true, so an older server sees the request it always saw.
         ...(opts.applyEdits ? { applyEdits: true } : {}),
+        // Only when it is a real choice, so a server that predates this sees
+        // exactly the request it always saw.
+        ...(opts.effort && opts.effort !== 'auto' ? { effort: opts.effort } : {}),
         ...(opts.retireTasks ? { retireTasks: opts.retireTasks } : {}),
         ...(get().pendingAttachments.length
           ? { attachmentIds: get().pendingAttachments.map(a => a.id) }

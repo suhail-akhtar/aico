@@ -31,6 +31,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@aico/ui': path.resolve(repoRoot, 'shared/ui'),
+      // The reasoning capability table is shared with the engine and the browser
+      // client. Duplicating it here would be the one way to make it wrong.
+      '@aico/reasoning': path.resolve(repoRoot, 'shared/reasoning.ts'),
       '@web': path.resolve(repoRoot, 'web/src'),
       '@': path.resolve(here, 'src'),
     },

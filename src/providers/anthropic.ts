@@ -8,6 +8,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { learnFromError } from '../../shared/reasoning.js';
+import { resolvedEffort } from '../run-context.js';
 import type { ProviderAPI, ProviderChatOptions, ChatEvent, AicoMessage, ToolDef, FinishReason } from './types.js';
 import { normalizeUsage } from './usage.js';
 import { ANTHROPIC_DIALECT } from '../prompt/dialects.js';
@@ -42,6 +44,31 @@ function normalizeStopReason(reason: string): FinishReason {
  */
 export function supportsAdaptiveThinking(model: string): boolean {
   return /^claude-(opus-(4-[678]|5)|sonnet-(4-6|5)|fable-5|mythos-5)/i.test(model);
+}
+
+/**
+ * One rung of the shared ladder, in Anthropic's vocabulary.
+ *
+ * The ladder spans every vendor and so includes rungs Anthropic has no word
+ * for. `off` is the one that matters: there is no "do not think" effort here —
+ * the way to stop Claude thinking is `thinking: {type:'disabled'}`, which is a
+ * different field — so it maps to the lowest effort that exists rather than
+ * being sent as a value the API would refuse.
+ *
+ * The type checker found this, which is the argument for keeping the wire
+ * shapes with their providers instead of in the shared table.
+ */
+function anthropicEffort(level: string | undefined): AnthropicConfig['effort'] | undefined {
+  switch (level) {
+    case 'off':
+    case 'minimal':
+    case 'low': return 'low';
+    case 'medium': return 'medium';
+    case 'high': return 'high';
+    case 'xhigh': return 'xhigh';
+    case 'max': return 'max';
+    default: return undefined;
+  }
 }
 
 /**
@@ -123,8 +150,19 @@ export class AnthropicProvider implements ProviderAPI {
       : opts.systemPrompt;
 
     let response: Awaited<ReturnType<typeof this.client.messages.create>>;
+    /*
+      Declared outside the try so the catch can tell the reasoning table what
+      was refused.
+
+      This is the wiring the context window's equivalent never got:
+      `learnWindowFromError` was written, tested, and called from nowhere, so it
+      has not corrected a single window in production. A parser with no caller
+      is a comment that costs a test run.
+    */
+    let effortForRequest: AnthropicConfig['effort'] | undefined;
     try {
       const adaptive = this.thinking === 'adaptive' && supportsAdaptiveThinking(opts.model);
+      effortForRequest = anthropicEffort(resolvedEffort(opts.model)) ?? this.effort;
       response = await this.client.messages.create({
         model: opts.model,
         system,
@@ -135,9 +173,21 @@ export class AnthropicProvider implements ProviderAPI {
         ...(adaptive
           ? { thinking: { type: 'adaptive', display: 'summarized' } }
           : {}),
-        ...(this.effort ? { output_config: { effort: this.effort } } : {}),
+        /*
+          The run's choice outranks the configured one, and `auto` sends
+          neither. That matters more here than elsewhere: 4.6 and later think
+          adaptively when nothing is sent, so pinning a level replaces a
+          per-request decision with one made once, by someone who could not see
+          the request.
+        */
+        ...(effortForRequest ? { output_config: { effort: effortForRequest } } : {}),
       } as never, { signal: opts.signal });
     } catch (err) {
+      // A refused effort level teaches the table, so the next request does not
+      // send the same rejected value. Only when we actually sent one.
+      if (effortForRequest) {
+        learnFromError(opts.model, err instanceof Error ? err.message : String(err));
+      }
       throw normalizeAnthropicError(err);
     }
 

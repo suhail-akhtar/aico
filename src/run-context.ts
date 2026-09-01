@@ -26,6 +26,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import path from 'path';
 import type { AicoSettings } from './settings.js';
 import type { FileWriter } from './tools/file-writer.js';
+import { effortToSend, type EffortChoice, type EffortLevel } from '../shared/reasoning.js';
 
 export interface RunContext {
   /** Absolute path the run treats as the project root. */
@@ -43,6 +44,15 @@ export interface RunContext {
    * Undefined is the normal case and means `fs`. See `tools/file-writer`.
    */
   applyEdit?: FileWriter;
+  /**
+   * How hard this run asks the model to think, when the model can be asked.
+   *
+   * Per run rather than per process for the same reason `cwd` is: one server
+   * drives several sessions, and a module-level answer would be whichever
+   * session spoke last. `auto` — and the absence of a value — both mean "send
+   * nothing and let the platform decide". See `reasoning.ts`.
+   */
+  effort?: EffortChoice;
 }
 
 const storage = new AsyncLocalStorage<RunContext>();
@@ -72,4 +82,20 @@ export function currentRunContext(): RunContext | undefined {
  */
 export function currentCwd(): string {
   return storage.getStore()?.cwd ?? path.resolve(process.cwd());
+}
+
+/**
+ * The reasoning level this run should send for `model`, or undefined.
+ *
+ * Lives here rather than beside the capability table, and the split is the
+ * design: *what a model accepts* is one fact for the whole process and belongs
+ * in `shared/reasoning`, which the browser client and the VS Code panel import
+ * too. *What this run wants* is per session — one server drives several — so it
+ * belongs on the context that already answers per-session questions.
+ *
+ * Keeping them together would have forced `AsyncLocalStorage` into a module the
+ * webview imports, which is where this was noticed.
+ */
+export function resolvedEffort(model: string): EffortLevel | undefined {
+  return effortToSend(model, storage.getStore()?.effort);
 }

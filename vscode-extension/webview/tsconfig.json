@@ -28,6 +28,7 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
+      "@aico/reasoning": ["../../shared/reasoning.ts"],
       "@aico/ui": [
         "../../shared/ui/index.ts"
       ],

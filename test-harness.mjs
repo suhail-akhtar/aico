@@ -167,6 +167,8 @@ import {
   extractRequirements, coverageOf, setBrief,
   withTimeout, timeoutFor, ToolTimeoutError,
   terminal, closeAllTerminals, detectShell,
+  reasoningFor, supportsReasoning, effortToSend, resolvedEffort,
+  learnFromError, resetReasoningForTest,
   observe, blockedReason, resetObservations, isObserved,
   todoRead,
   runScoped, currentRequirements,
@@ -10850,6 +10852,104 @@ console.log('  -- The app a conversation is about cannot be deleted from inside 
 }
 
 // ═══════════════════════════════════════════════════════════
+console.log('\n══ HOW HARD TO THINK ══');
+{
+  resetReasoningForTest();
+
+  // ── the table answers, and says where it came from ────────────────
+  const opus = reasoningFor('claude-opus-5');
+  assert(opus.levels.includes('xhigh'), 'Anthropic offers xhigh');
+  assert(opus.fallback === 'adaptive',
+    'and thinks adaptively when nothing is sent, which is what makes auto worth having');
+  assert(opus.source === 'table', 'sourced, so a stale entry is visible as one');
+
+  /*
+    The finding that forced this to be per model rather than per provider:
+    two Gemini models in the same family accept different sets, and one of
+    them has thinking off by default.
+  */
+  const flashLite = reasoningFor('gemini-2.5-flash-lite');
+  const flash37 = reasoningFor('gemini-3.7-flash');
+  assert(flashLite.fallback === 'off', 'gemini-2.5-flash-lite does not think unless asked');
+  assert(!flash37.levels.includes('minimal') && flashLite.levels.includes('low'),
+    'and two models in one family accept different sets — a per-provider setting cannot express this');
+
+  assert(reasoningFor('deepseek-v4-flash').fallback === 'high',
+    'DeepSeek pins high when nothing is sent, which is why small tasks think hard');
+
+  assert(reasoningFor('glm-4.6').levels.length === 2,
+    'GLM is a switch, offered as two levels rather than a ladder it does not have');
+
+  // ── an unknown model offers nothing rather than guessing ──────────
+  const stranger = reasoningFor('some-model-nobody-has-heard-of');
+  assert(stranger.levels.length === 0 && stranger.source === 'unknown',
+    'an unknown model offers no levels — abstaining costs an option, guessing costs a turn');
+  assert(!supportsReasoning('some-model-nobody-has-heard-of'),
+    'and reports that plainly, so a picker can hide itself');
+
+  // ── what actually goes on the wire ────────────────────────────────
+  assert(effortToSend('claude-opus-5', 'auto') === undefined,
+    'auto sends nothing, letting the platform decide');
+  assert(effortToSend('claude-opus-5', undefined) === undefined, 'and so does no choice at all');
+  assert(effortToSend('claude-opus-5', 'high') === 'high', 'a supported level is sent as asked');
+  assert(effortToSend('some-model-nobody-has-heard-of', 'high') === undefined,
+    'an unknown model is never sent a level');
+
+  /*
+    A choice outliving the model it was made for is the failure this guards:
+    pick xhigh on Opus, switch the session to GLM, and the value 400s on a
+    setting nobody can see. Stepping to the nearest rung keeps the intent.
+  */
+  assert(effortToSend('glm-4.6', 'xhigh') === 'high',
+    'a level the model lacks steps to the nearest one it has, rather than failing');
+  assert(effortToSend('gemini-3.7-flash', 'minimal') === 'low',
+    'and steps the other way just as readily');
+
+  // ── learning from a refusal ───────────────────────────────────────
+  resetReasoningForTest();
+  const taught = learnFromError('gpt-5.6',
+    "Invalid value: 'xhigh'. Supported values are: 'low', 'medium', and 'high'.");
+  assert(Array.isArray(taught) && taught.join(',') === 'low,medium,high',
+    `a refusal teaches the real set (${taught})`);
+  assert(reasoningFor('gpt-5.6').source === 'learned',
+    'and the answer says it was learned rather than tabulated');
+  assert(effortToSend('gpt-5.6', 'xhigh') === 'high',
+    'so the value that was refused is never sent again');
+
+  resetReasoningForTest();
+  assert(learnFromError('gpt-5.6', 'Rate limit exceeded') === undefined,
+    'an unrelated failure teaches nothing — a loose pattern would narrow a real capability');
+  assert(reasoningFor('gpt-5.6').source === 'table',
+    'and leaves the table where it was');
+
+  /*
+    ── the choice lives on the run, not on the process ────────────────
+
+    One server drives several sessions at once. A module-level choice would be
+    whichever session spoke last — the same class of bug that `cwd` on the run
+    context exists to prevent, and the reason this is tested through
+    `runInContext` rather than a setter.
+  */
+  resetReasoningForTest();
+  assert(resolvedEffort('claude-opus-5') === undefined,
+    'outside a run, nothing is sent');
+
+  await runInContext({ cwd: process.cwd(), effort: 'low' }, async () => {
+    assert(resolvedEffort('claude-opus-5') === 'low', 'the run\'s choice is what gets sent');
+    assert(resolvedEffort('some-model-nobody-has-heard-of') === undefined,
+      'and is still withheld from a model that cannot take it');
+  });
+
+  await runInContext({ cwd: process.cwd(), effort: 'auto' }, async () => {
+    assert(resolvedEffort('claude-opus-5') === undefined, 'auto sends nothing from inside a run too');
+  });
+
+  assert(resolvedEffort('claude-opus-5') === undefined,
+    'and the choice does not outlive the run that made it');
+
+  resetReasoningForTest();
+}
+
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);
 if (failures.length > 0) {
