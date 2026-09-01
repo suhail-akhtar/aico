@@ -32,6 +32,7 @@ import { sameFolder } from './paths';
 import { Header } from './components/Header';
 import { SessionList } from './components/SessionList';
 import { Transcript } from './components/Transcript';
+import { Progress } from './components/Progress';
 import { Composer } from './components/Composer';
 import { PermissionBridge } from './components/PermissionBridge';
 import { EditBridge } from './components/EditBridge';
@@ -207,6 +208,7 @@ export function Panel(): React.ReactElement {
         />
       )}
       <Transcript />
+      <Progress />
       <Composer />
       <PermissionBridge />
       <EditBridge />

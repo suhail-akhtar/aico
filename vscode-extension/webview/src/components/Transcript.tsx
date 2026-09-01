@@ -90,14 +90,28 @@ export function Transcript(): React.ReactElement {
 
   return (
     <div className="relative min-h-0 flex-1">
+      {/*
+        `overflow-x-hidden` is the important half.
+
+        Setting only `overflow-y` computes the other axis to `auto`, so anything
+        too wide — a long shell command in a tool card, an unbreakable path —
+        gave the whole transcript a horizontal scrollbar and shifted every
+        message sideways. Wide content is supposed to scroll inside its own box;
+        the column itself never should.
+
+        `min-w-0` on the inner div is what makes that possible rather than merely
+        hidden: without it a flex/grid child takes its width from its widest
+        content, so the overflow is pushed outward and clipped instead of being
+        handled by the block that owns it.
+      */}
       <div
         ref={scroller}
         onScroll={onScroll}
-        className="h-full overflow-y-auto px-3 py-3"
+        className="h-full overflow-y-auto overflow-x-hidden px-3 py-3"
       >
         {messages.length === 0 && !busy && <Blank />}
 
-        <div className="mx-auto w-full max-w-column">
+        <div className="w-full min-w-0 max-w-column">
           {messages.map(message => (
             <MessageBubble key={message.id} message={message} />
           ))}
