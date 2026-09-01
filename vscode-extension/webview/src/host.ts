@@ -31,13 +31,15 @@ export interface AskRequest {
 type HostMessage =
   | ({ t: 'boot' } & BootInfo)
   | ({ t: 'ask' } & AskRequest)
-  | { t: 'new-session' };
+  | { t: 'new-session' }
+  | { t: 'focus-composer' };
 
 type Listener<T> = (value: T) => void;
 
 const bootListeners = new Set<Listener<BootInfo>>();
 const askListeners = new Set<Listener<AskRequest>>();
 const newSessionListeners = new Set<Listener<void>>();
+const focusListeners = new Set<Listener<void>>();
 
 /**
  * The boot frame, remembered.
@@ -60,6 +62,9 @@ window.addEventListener('message', (event: MessageEvent) => {
   if (message?.t === 'new-session') {
     for (const listener of newSessionListeners) listener();
   }
+  if (message?.t === 'focus-composer') {
+    for (const listener of focusListeners) listener();
+  }
 });
 
 export function onBoot(listener: Listener<BootInfo>): () => void {
@@ -79,6 +84,12 @@ export function onNewSession(listener: Listener<void>): () => void {
   return () => newSessionListeners.delete(listener);
 }
 
+/** The editor asked for the caret — "ask about this selection" and friends. */
+export function onFocusComposer(listener: Listener<void>): () => void {
+  focusListeners.add(listener);
+  return () => focusListeners.delete(listener);
+}
+
 /**
  * Tell the host the panel has mounted.
  *
@@ -93,4 +104,5 @@ export function signalReady(): void {
 export const host = {
   openWorkspace: () => vscodeApi.postMessage({ t: 'open-workspace' }),
   openSettings: () => vscodeApi.postMessage({ t: 'open-settings' }),
+  openFolder: () => vscodeApi.postMessage({ t: 'open-folder' }),
 };

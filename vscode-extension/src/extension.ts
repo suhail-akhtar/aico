@@ -185,12 +185,20 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 /**
- * Turn the selection into a question the agent can answer without guessing.
+ * Put the cursor in the composer, with the selection already attached.
  *
- * The context is the point. "Explain this" with no file, no line numbers and no
- * code sends the agent hunting through the repository for something the user
- * was already looking at — several tool calls to rediscover what the editor
- * knew all along.
+ * This used to prompt for a question in a modal input box and build a context
+ * block by hand. Both jobs moved: the panel watches the editor and shows the
+ * selection as a chip, and the composer attaches it when the message is sent.
+ *
+ * Leaving the old path in place would have sent the selection **twice** — once
+ * inlined by this function and once by the chip — which is the kind of duplicate
+ * that costs context and reads, to the model, as emphasis.
+ *
+ * What is left is better than what it replaced. A modal box cannot be edited
+ * against the code, cannot be abandoned halfway without losing what was typed,
+ * and offers no chance to add a second file before asking. The composer does all
+ * three, and the chip says exactly what will be sent.
  */
 async function askAboutSelection(panel: AicoViewProvider): Promise<void> {
   /*
@@ -216,47 +224,12 @@ async function askAboutSelection(panel: AicoViewProvider): Promise<void> {
     return;
   }
 
-  const question = await vscode.window.showInputBox({
-    prompt: 'What should aico do with this selection?',
-    placeHolder: 'Explain this / find the bug / add tests for it',
-    ignoreFocusOut: true,
-  });
-  // Undefined means escape, which is a cancellation. An empty string means the
-  // user pressed enter with nothing typed, which is also not a question.
-  if (!question?.trim()) return;
-
-  const document = editor.document;
-  const selection = editor.selection;
-  const relative = vscode.workspace.asRelativePath(document.uri, false);
-  const from = selection.start.line + 1;
-  const to = selection.end.line + 1;
-  const where = from === to ? `line ${from}` : `lines ${from}-${to}`;
-  const language = document.languageId;
-
-  const task = [
-    question.trim(),
-    '',
-    `Context — \`${relative}\`, ${where}:`,
-    '',
-    '```' + language,
-    document.getText(selection),
-    '```',
-  ].join('\n');
-
   /*
-    It goes to the conversation on screen, not to a session of its own.
-
-    This used to mint one session per file, so that three questions about the
-    same module continued one conversation. The panel changes what the right
-    answer is: there is now a visible current conversation, and quietly sending a
-    question somewhere else — while the panel carries on showing something else
-    entirely — is indistinguishable from the question being lost.
-
-    Continuity is still there, and better than it was: the panel keeps the
-    session it was on, so the follow-up lands in the same place the first
-    question did without anyone having to name a session for it.
+    Revealing focuses the composer, and the panel's own watcher has already
+    turned the selection into a chip — so by the time the caret lands, what will
+    be sent is on screen and can be amended before a word is typed.
   */
-  await panel.ask(task, true);
+  await panel.focusComposer();
 }
 
 export function deactivate(): void {

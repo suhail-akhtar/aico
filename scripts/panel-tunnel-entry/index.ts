@@ -20,6 +20,9 @@ import { outbound, toPanel } from './shim';
 import { HttpTunnel } from '../../vscode-extension/src/view/http-tunnel';
 import { supportsSecondarySidebar } from '../../vscode-extension/src/view/vscode-version';
 import { sameFolder } from '../../vscode-extension/webview/src/paths';
+import {
+  buildContextBlock, chipKey, EMPTY, NO_ATTACHMENTS,
+} from '../../vscode-extension/webview/src/context';
 import { tunnelFetch } from '../../vscode-extension/webview/src/tunnel';
 import { configureTransport } from '../../web/src/transport';
 import { api, streamSession, type StreamEvent } from '../../web/src/api';
@@ -70,5 +73,8 @@ export function wire(port: number, token: string): Wiring {
   };
 }
 
-export { api, streamSession, supportsSecondarySidebar, sameFolder };
+export {
+  api, streamSession, supportsSecondarySidebar, sameFolder,
+  buildContextBlock, chipKey, EMPTY, NO_ATTACHMENTS,
+};
 export type { StreamEvent };
