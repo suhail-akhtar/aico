@@ -109,8 +109,54 @@ export interface ActiveRun {
    * that asked, and so two sessions asking at once cannot answer each other.
    */
   pendingQuestion?: { question: string; resolve: (answer: string) => void; at: number };
+  /**
+   * A tool call waiting to be allowed, and the promise holding the turn.
+   *
+   * Same shape and same reasoning as `pendingQuestion`, with one addition: an
+   * `id`. A question can be answered by whatever is on screen, because there is
+   * only ever one. A permission decision must name the call it is deciding —
+   * a reconnecting client that answers the *previous* prompt would allow a tool
+   * the reader never saw.
+   */
+  pendingPermission?: PendingPermission;
+  /** How this run's tool calls are approved. Fixed for the turn. */
+  approval: ApprovalMode;
   conversationHistory: Array<{ role: string; content: string }>;
 }
+
+export interface PendingPermission {
+  id: string;
+  tool: string;
+  detail: string;
+  fileDiff?: { path: string; added?: string[]; removed?: string[]; preview?: string };
+  resolve: (allowed: boolean) => void;
+  at: number;
+}
+
+/**
+ * How much a run asks before acting.
+ *
+ * `auto` is the default and is what every web session has always done — the
+ * browser workspace has never prompted, and changing that silently would turn
+ * every existing user's next run into a series of modal dialogs.
+ *
+ * `edits` exists because the two risks are not the same. Writing a file inside
+ * a project you opened is the work; running a shell command is the thing worth
+ * being asked about. Collapsing them into one switch means people turn the whole
+ * thing off after the fourth dialog about a file they expected to change.
+ */
+export type ApprovalMode = 'auto' | 'edits' | 'ask';
+
+/**
+ * Tools that `edits` lets through without asking.
+ *
+ * Deliberately only the file writers. `Terminal` is absent and should stay
+ * absent: a shell command can do anything a file write can and everything it
+ * cannot, and "auto-accept edits" would be a lie if it also ran commands.
+ */
+const EDIT_TOOLS = new Set([
+  'Edit', 'Write', 'MultiEdit', 'NotebookEdit',
+]);
 
 export class RunManager {
   private readonly runs = new Map<string, ActiveRun>();
@@ -161,6 +207,10 @@ export class RunManager {
       abort: new AbortController(),
       close: opened.close,
       busy: false,
+      // Until a turn says otherwise. Every web session before this existed ran
+      // this way, and a default of anything else would change their behaviour
+      // without anyone asking for it.
+      approval: 'auto',
       conversationHistory: [],
     };
     this.runs.set(sessionId, run);
@@ -190,12 +240,15 @@ export class RunManager {
     model: string,
     opts: {
       planMode?: boolean; autoApprove?: boolean; effort?: string;
+      /** How much to ask before acting. Defaults to `auto`, as it always was. */
+      approval?: ApprovalMode;
       /** Images the reader attached to this turn, by attachment id. */
       images?: ImageRef[];
     } = {},
   ): Promise<string> {
     const run = await this.ensure(sessionId, cwd);
     if (run.busy) throw new Error('A turn is already running — use steer or followup');
+    run.approval = opts.approval ?? 'auto';
 
     const settings = await this.currentSettings();
     const goal = currentGoal(run.session);
@@ -245,6 +298,45 @@ export class RunManager {
       run.pendingQuestion = { question, resolve, at: Date.now() };
       emit('question', { question });
     }));
+
+    /**
+     * Ask before a tool runs, when the turn was submitted that way.
+     *
+     * Undefined for `auto`, and that matters: the engine only consults a
+     * callback when `autoApprove` is false, and passing one that always
+     * resolves true would be a slower way of doing nothing while making every
+     * tool call wait for a promise.
+     *
+     * The absence of this used to be a trap. Without a callback the engine falls
+     * back to `checkPermission`, which reads stdin and writes stdout — fine in a
+     * terminal, and in a server a turn blocked for ever on input nobody could
+     * see. That is why `approval` and this callback are set together and never
+     * separately.
+     */
+    const onPermissionRequest = run.approval === 'auto' ? undefined
+      : (tool: string, detail: string, fileDiff?: PendingPermission['fileDiff']) =>
+        new Promise<boolean>((resolve) => {
+          if (run.approval === 'edits' && EDIT_TOOLS.has(tool)) { resolve(true); return; }
+
+          /*
+            One prompt at a time.
+
+            Tool calls can run up to eight in parallel, and a second prompt
+            would overwrite the first — leaving its promise unresolved and the
+            turn hung on a dialog nobody will ever see. Refusing the second is
+            recoverable: the model is told it was denied and can ask again.
+          */
+          if (run.pendingPermission) { resolve(false); return; }
+
+          const pending: PendingPermission = {
+            id: `perm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+            tool, detail, fileDiff, resolve, at: Date.now(),
+          };
+          run.pendingPermission = pending;
+          emit('permission', {
+            id: pending.id, tool, detail, ...(fileDiff ? { fileDiff } : {}),
+          });
+        });
 
     /**
      * Sub-agent activity, which the browser previously could not see at all.
@@ -398,7 +490,16 @@ export class RunManager {
         // whether it was delegated to or is being spoken to directly.
         ...(agent.persona ? { agentPersona: agent.persona } : {}),
         ...(agent.tools?.length ? { agentSpecTools: agent.tools } : {}),
-        autoApprove: opts.autoApprove ?? true,
+        /*
+          The two halves of one decision.
+
+          `approval: 'auto'` keeps the historical behaviour exactly — nothing is
+          asked. Anything else turns the engine's gate on *and* supplies the
+          callback that answers it, which is the pairing that must never come
+          apart: a gate with no callback falls through to stdin.
+        */
+        autoApprove: run.approval === 'auto' ? (opts.autoApprove ?? true) : false,
+        ...(onPermissionRequest ? { onPermissionRequest } : {}),
         planMode: opts.planMode ?? false,
         ...(opts.effort ? { effort: opts.effort } : {}),
         abortSignal: run.abort.signal,
@@ -501,6 +602,19 @@ export class RunManager {
         run.pendingQuestion.resolve('');
         delete run.pendingQuestion;
         emit('question', { question: '' });
+      }
+      /*
+        A pending approval is denied rather than abandoned.
+
+        The same cleanup, with a stricter default. An unanswered question can
+        resolve to an empty string and the turn carries on; an unanswered
+        *permission* has to mean no. Resolving true would let a cancelled run's
+        last act be the tool call the reader was still deciding about.
+      */
+      if (run.pendingPermission) {
+        run.pendingPermission.resolve(false);
+        delete run.pendingPermission;
+        emit('permission', { id: '', tool: '', detail: '' });
       }
       // Queued messages run now, as their own turns.
       //
@@ -815,6 +929,41 @@ export class RunManager {
   /** The question this session is waiting on, if any. */
   questionOf(sessionId: string): string | undefined {
     return this.runs.get(sessionId)?.pendingQuestion?.question;
+  }
+
+  /**
+   * Decide the tool call this run is blocked on.
+   *
+   * The id must match. A client that reconnects mid-prompt replays the pending
+   * request and answers *that*; without the check, a decision made about one
+   * tool call could allow whichever call happened to be waiting when it arrived
+   * — which is precisely the mistake a permission prompt exists to prevent.
+   */
+  decide(sessionId: string, id: string, allowed: boolean): boolean {
+    const run = this.runs.get(sessionId);
+    if (!run?.pendingPermission || run.pendingPermission.id !== id) return false;
+    const { resolve } = run.pendingPermission;
+    delete run.pendingPermission;
+    this.hub.publish({ type: 'permission', sessionId, data: { id: '', tool: '', detail: '' } });
+    resolve(allowed);
+    return true;
+  }
+
+  /**
+   * The approval this session is waiting on, if any.
+   *
+   * Read on reconnect. A prompt that vanished because a tab was reloaded would
+   * leave the turn blocked with nothing on screen explaining why.
+   */
+  permissionOf(sessionId: string): Omit<PendingPermission, 'resolve' | 'at'> | undefined {
+    const pending = this.runs.get(sessionId)?.pendingPermission;
+    if (!pending) return undefined;
+    return {
+      id: pending.id,
+      tool: pending.tool,
+      detail: pending.detail,
+      ...(pending.fileDiff ? { fileDiff: pending.fileDiff } : {}),
+    };
   }
 
   /** Deliver into the running turn at its next step boundary. */

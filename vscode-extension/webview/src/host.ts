@@ -28,11 +28,25 @@ export interface AskRequest {
   send: boolean;
 }
 
+/** A tool call the run is blocked on, as the panel forwards it. */
+export interface PermissionRequest {
+  id: string;
+  tool: string;
+  detail: string;
+  fileDiff?: { path: string; added?: string[]; removed?: string[]; preview?: string };
+}
+
+export interface PermissionDecision {
+  id: string;
+  allow: boolean;
+}
+
 type HostMessage =
   | ({ t: 'boot' } & BootInfo)
   | ({ t: 'ask' } & AskRequest)
   | { t: 'new-session' }
-  | { t: 'focus-composer' };
+  | { t: 'focus-composer' }
+  | ({ t: 'permission:decided' } & PermissionDecision);
 
 type Listener<T> = (value: T) => void;
 
@@ -40,6 +54,7 @@ const bootListeners = new Set<Listener<BootInfo>>();
 const askListeners = new Set<Listener<AskRequest>>();
 const newSessionListeners = new Set<Listener<void>>();
 const focusListeners = new Set<Listener<void>>();
+const decisionListeners = new Set<Listener<PermissionDecision>>();
 
 /**
  * The boot frame, remembered.
@@ -64,6 +79,9 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
   if (message?.t === 'focus-composer') {
     for (const listener of focusListeners) listener();
+  }
+  if (message?.t === 'permission:decided') {
+    for (const listener of decisionListeners) listener({ id: message.id, allow: message.allow });
   }
 });
 
@@ -99,6 +117,23 @@ export function onFocusComposer(listener: Listener<void>): () => void {
  */
 export function signalReady(): void {
   vscodeApi.postMessage({ t: 'ready' });
+}
+
+/** VS Code's answer to a tool approval. */
+export function onPermissionDecided(listener: Listener<PermissionDecision>): () => void {
+  decisionListeners.add(listener);
+  return () => decisionListeners.delete(listener);
+}
+
+/**
+ * Ask VS Code to put a tool approval to the user.
+ *
+ * Fire and forget: the answer arrives as `permission:decided`, because a modal
+ * can stay open for as long as somebody takes to read it and a promise held
+ * across that would have to survive the panel being hidden and shown again.
+ */
+export function requestPermission(request: PermissionRequest): void {
+  vscodeApi.postMessage({ t: 'permission', request });
 }
 
 export const host = {

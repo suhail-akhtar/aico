@@ -28,6 +28,7 @@ import { supportsSecondarySidebar as supports } from './vscode-version';
 import { canonicalFolder } from '../paths';
 import { EditorContextSource, type EditorContext } from '../context/editor';
 import { find, type FindResult } from '../context/find';
+import { askPermission, type PermissionRequest } from './permission';
 
 /** Whether this editor can host the panel beside Chat. See `vscode-version`. */
 export function supportsSecondarySidebar(version = vscode.version): boolean {
@@ -41,7 +42,8 @@ type HostMessage =
   | { t: 'new-session' }
   | { t: 'focus-composer' }
   | { t: 'context'; context: EditorContext }
-  | { t: 'find:result'; id: number; results: FindResult[] };
+  | { t: 'find:result'; id: number; results: FindResult[] }
+  | { t: 'permission:decided'; id: string; allow: boolean };
 
 export class AicoViewProvider implements vscode.WebviewViewProvider {
   /** Both registered ids resolve to this one provider; only one ever appears. */
@@ -189,6 +191,22 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
       */
       if (message?.t === 'open-folder') {
         void vscode.commands.executeCommand('vscode.openFolder');
+        return;
+      }
+
+      /*
+        A tool call the run is blocked on.
+
+        Asked here rather than drawn in the panel so it behaves like every other
+        decision VS Code puts to a person: modal, focused, and impossible to
+        scroll past while a turn waits on it.
+      */
+      if (message?.t === 'permission') {
+        const request = (message as unknown as { request: PermissionRequest }).request;
+        if (!request?.id) return;
+        void askPermission(request).then(allow => {
+          this.send({ t: 'permission:decided', id: request.id, allow });
+        });
         return;
       }
 

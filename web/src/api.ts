@@ -137,6 +137,8 @@ export interface SubmitOptions {
   model?: string;
   planMode?: boolean;
   autoApprove?: boolean;
+  /** How much to ask before acting. Omitted means `auto`, as it always was. */
+  approval?: 'auto' | 'edits' | 'ask';
   /**
    * Settle this session's open tasks as part of accepting the message.
    *
@@ -206,6 +208,16 @@ export const api = {
   steer: (sessionId: string, content: string) => post<{ ok: boolean }>('steer', { sessionId, content }),
   /** Resolve the question a blocked turn is waiting on. */
   answer: (sessionId: string, content: string) => post<{ ok: boolean }>('answer', { sessionId, content }),
+
+  /**
+   * Allow or refuse the tool call a run is blocked on.
+   *
+   * `id` names the call being decided. A reconnecting client replays the
+   * pending request and answers that one; without the id, a decision made
+   * about a `Write` could arrive in time to allow whatever is waiting.
+   */
+  permit: (sessionId: string, id: string, allow: boolean) =>
+    post<{ ok: boolean }>('permission', { sessionId, id, allow }),
 
   /** What differs from the last commit, with this session's own edits marked. */
   // ── skills ─────────────────────────────────────────────────────────
@@ -764,6 +776,22 @@ export interface WorkRow {
 }
 
 // ── the event stream ─────────────────────────────────────────────────
+
+/**
+ * A tool call waiting on a decision.
+ *
+ * `id` is what makes a decision safe to act on. Tool calls can run in parallel
+ * and a client can reconnect mid-prompt, so a bare yes could otherwise be
+ * applied to a call other than the one that was shown.
+ */
+export interface PermissionRequest {
+  id: string;
+  tool: string;
+  /** The command, path or URL — whatever the call is actually about. */
+  detail: string;
+  /** Present for the write tools, so a diff can be shown before allowing it. */
+  fileDiff?: { path: string; added?: string[]; removed?: string[]; preview?: string };
+}
 
 export interface StreamEvent {
   type: string;

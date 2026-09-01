@@ -44,6 +44,7 @@ import {
   type StreamEvent, type StreamHandle, type SystemSnapshot,
   type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project, type Group,
   type Goal, type Feedback, type Deliverable, type Attachment, type SubAgentView,
+  type PermissionRequest,
 } from './api';
 import {
   applyLogEvent, withPending, dropPending, emptyDraft,
@@ -206,6 +207,8 @@ interface AppState {
   openSession: (id: string) => Promise<void>;
   submit: (task: string, opts?: {
     planMode?: boolean; model?: string; retireTasks?: 'done' | 'cancelled';
+    /** How much to ask before acting. Omitted means `auto`, as it always was. */
+    approval?: 'auto' | 'edits' | 'ask';
   }) => Promise<void>;
   /**
    * Files uploaded to this session and not yet sent with a turn.
@@ -281,6 +284,17 @@ interface AppState {
    * scroll past is a turn that hangs.
    */
   question: string | null;
+  /**
+   * A tool call the run is blocked on, when the turn asked to be asked.
+   *
+   * Null for every `auto` run, which is all of them unless a client opts in.
+   * Distinct from `question` because it names *what* is being decided and
+   * carries a diff for a write — and because the answer is a yes or a no rather
+   * than prose.
+   */
+  permission: PermissionRequest | null;
+  /** Allow or refuse it. */
+  permit: (allow: boolean) => Promise<void>;
   /**
    * Sub-agents this session has running, and the ones it just finished.
    *
@@ -374,6 +388,7 @@ export const useStore = create<AppState>((set, get) => ({
   composerPrefill: null,
   dismissed: {},
   question: null,
+  permission: null,
   planMode: false,
   busy: false,
   turnStartedAt: null,
@@ -421,7 +436,7 @@ export const useStore = create<AppState>((set, get) => ({
       // the sidebar never inherits the previous one's persona.
       sessionAgent: null,
       pendingAttachments: [],
-      question: null,
+      question: null, permission: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
@@ -577,6 +592,15 @@ export const useStore = create<AppState>((set, get) => ({
     await api.answer(sessionId, content);
   },
 
+  permit: async (allow) => {
+    const { sessionId, permission } = get();
+    if (!permission) return;
+    // Same optimism, same reason. The id travels with it so a decision cannot
+    // land on a different call than the one that was shown.
+    set({ permission: null });
+    await api.permit(sessionId, permission.id, allow);
+  },
+
   answerPlan: async (decision) => {
     // Approving, or starting a deferred plan, is the moment planning ends.
     // Declining ends it too — there is nothing left to plan. Deferring does
@@ -609,6 +633,10 @@ export const useStore = create<AppState>((set, get) => ({
         ...(get().project ? { project: get().project! } : {}),
         ...(opts.model ?? model ? { model: opts.model ?? model! } : {}),
         planMode: opts.planMode ?? false,
+        // Sent only when it is not the default, so an older server — which
+        // would reject an unknown field or ignore it — sees exactly the request
+        // it saw before this existed.
+        ...(opts.approval && opts.approval !== 'auto' ? { approval: opts.approval } : {}),
         ...(opts.retireTasks ? { retireTasks: opts.retireTasks } : {}),
         ...(get().pendingAttachments.length
           ? { attachmentIds: get().pendingAttachments.map(a => a.id) }
@@ -1053,6 +1081,10 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
         // The app this conversation is about, restored from the log rather
         // than remembered — see the field's note.
         miniApp: (data as { miniApp?: string | null }).miniApp ?? null,
+        // A tool call still waiting on a decision, restored rather than lost.
+        // A reload during a prompt otherwise leaves the turn blocked with
+        // nothing on screen to say why it stopped.
+        permission: (data as { permission?: PermissionRequest | null }).permission ?? null,
         draft: (data as { busy?: boolean }).busy ? state.draft : emptyDraft(),
         // Drop the optimistic echo now that the real user message has replayed.
         logged: dropPending(state.logged),
@@ -1085,6 +1117,15 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       // finished, or cancelled.
       set(() => ({ question: String((data as { question?: string }).question ?? '') || null }));
       return;
+
+    case 'permission': {
+      // An empty id means the same thing an empty question does: nothing is
+      // waiting any more, so whatever is on screen should stop offering to
+      // decide something that has already been decided.
+      const asked = data as unknown as PermissionRequest;
+      set(() => ({ permission: asked?.id ? asked : null }));
+      return;
+    }
 
     case 'turn-start':
       // Ephemeral events are never replayed, which is precisely what makes

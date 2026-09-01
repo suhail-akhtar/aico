@@ -294,6 +294,112 @@ try {
     );
   }
 
+  /*
+    ── a tool call that has to be allowed ────────────────────────────────
+
+    The part of Phase 3 that cannot be checked any other way. A permission
+    prompt is a *blocked turn*: the engine is holding a promise, the server is
+    holding the resolver, and the client has to name the right call to release
+    it. Every step of that is invisible to types.
+
+    The trap this guards is specific and was live in the code before this
+    feature: with `autoApprove: false` and no callback registered, the engine
+    falls through to `checkPermission`, which reads stdin — in a server, a turn
+    blocked for ever on input nobody can see.
+  */
+  const askSession = `perm-probe-${Date.now().toString(36)}`;
+  const asked = [];
+  const askStream = streamSession(
+    askSession,
+    (event) => { if (event.type === 'permission') asked.push(event.data); },
+    undefined,
+    0,
+    workspace,
+  );
+
+  await api.submit({
+    sessionId: askSession,
+    task: 'Create a file called probe.txt containing the word ping. Use the Write tool.',
+    project: workspace,
+    approval: 'ask',
+  }).catch(err => {
+    console.log(`  … submit refused (${err.message}); approval assertions skipped`);
+  });
+
+  const prompted = await until(() => asked.some(a => a?.id), 60_000);
+  check(prompted, 'a run submitted with approval:ask blocks and asks rather than hanging');
+
+  if (prompted) {
+    const request = asked.find(a => a?.id);
+    check(
+      typeof request.tool === 'string' && request.tool.length > 0,
+      `the prompt names the tool it is about (${request.tool})`,
+    );
+
+    // A decision that names the wrong call must not release the right one.
+    const wrong = await api.permit(askSession, 'not-the-id', true);
+    check(wrong.ok === false, 'a decision for a different call id is refused');
+
+    const stillWaiting = await until(() => asked.some(a => a?.id), 2_000);
+    check(stillWaiting, 'and the run is still waiting after that refusal');
+
+    const denied = await api.permit(askSession, request.id, false);
+    check(denied.ok === true, 'denying the right call is accepted');
+
+    const cleared = await until(
+      () => asked.some(a => a && !a.id), 20_000,
+    );
+    check(cleared, 'the prompt clears once decided, so nothing stale stays on screen');
+
+    /*
+      Denial has to be a *tool failure the model can act on*, not a silent
+      success. The file must not exist.
+    */
+    await until(async () => {
+      try { return !(await api.session(askSession)).busy; } catch { return false; }
+    }, 60_000);
+    check(
+      !fs.existsSync(path.join(workspace, 'probe.txt')),
+      'a denied Write does not write the file',
+    );
+  }
+  askStream.close();
+
+  /*
+    ── "ask, not for edits" has to actually let edits through ────────────
+
+    The mode exists so that the common, expected action — writing a file in a
+    project you opened — does not generate a dialog, while the genuinely
+    different risk still does. If it prompted for a Write it would be `ask`
+    wearing a different label, and people would turn it off.
+  */
+  const editsSession = `perm-edits-${Date.now().toString(36)}`;
+  const editPrompts = [];
+  const editStream = streamSession(
+    editsSession,
+    (event) => { if (event.type === 'permission' && event.data?.id) editPrompts.push(event.data); },
+    undefined,
+    0,
+    workspace,
+  );
+
+  await api.submit({
+    sessionId: editsSession,
+    task: 'Create a file called allowed.txt containing the word ok. Use the Write tool.',
+    project: workspace,
+    approval: 'edits',
+  }).catch(() => { /* reported above if the provider is unavailable */ });
+
+  const wroteIt = await until(
+    () => fs.existsSync(path.join(workspace, 'allowed.txt')), 90_000,
+  );
+  check(wroteIt, 'approval:edits writes a file without asking');
+  check(
+    editPrompts.length === 0,
+    `and raised no prompt for it (${editPrompts.length} seen)`,
+  );
+  editStream.close();
+
   // ── closing a stream must not look like a failure ───────────────────
   const before = wiring.frames.length;
   handle.close();

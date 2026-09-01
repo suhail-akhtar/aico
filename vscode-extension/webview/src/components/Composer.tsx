@@ -23,6 +23,7 @@ import {
 } from '../context';
 import { ModelMenu } from './ModelMenu';
 import { ContextMeter } from './ContextMeter';
+import { ApprovalMenu, type ApprovalMode } from './ApprovalMenu';
 import { ContextChips } from './ContextChips';
 import { FindMenu } from './FindMenu';
 
@@ -54,6 +55,12 @@ export function Composer(): React.ReactElement {
   const [attached, setAttached] = useState<Attachments>(NO_ATTACHMENTS);
   const [find, setFind] = useState<{ query: string; from: number } | null>(null);
   const [findSelected, setFindSelected] = useState(0);
+  /*
+    Held here rather than in the shared store, because it is a property of the
+    *next* message rather than of the session. It survives sending — somebody
+    who turned asking on wants it on for the message after this one too.
+  */
+  const [approval, setApproval] = useState<ApprovalMode>('auto');
 
   useEffect(() => onEditorContext(setEditor), []);
 
@@ -94,7 +101,7 @@ export function Composer(): React.ReactElement {
     if (!value.trim()) return;
     if (question) { void answer(value); return; }
     if (busy) { void steer(value); return; }
-    void submit(value, { planMode });
+    void submit(value, { planMode, approval });
   };
 
   const send = (): void => {
@@ -311,6 +318,8 @@ export function Composer(): React.ReactElement {
           >
             {planMode ? 'Plan' : 'Build'}
           </button>
+
+          <ApprovalMenu mode={approval} onChange={setApproval} />
 
           <span className="flex-1" />
 

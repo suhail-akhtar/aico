@@ -345,6 +345,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           // one app's context — and every answer scoped to an app the screen
           // does not name.
           miniApp: runs.miniAppOf(sessionId) ?? null,
+          // A tool call still waiting to be allowed. Without this a reload
+          // during a prompt leaves the turn blocked with nothing on screen to
+          // say why — the run is fine, the reason for the pause is not.
+          permission: runs.permissionOf(sessionId) ?? null,
         },
       })}\n\n`);
       return;
@@ -854,6 +858,16 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         void runs.submit(sessionId, runCwd, task2, chosen, {
           planMode: (body as { planMode?: boolean }).planMode ?? false,
           autoApprove: (body as { autoApprove?: boolean }).autoApprove ?? true,
+          /*
+            Unrecognised values fall back to `auto`, not to asking.
+
+            An older client sends nothing and must keep working exactly as it
+            did; a newer one sending a mode this server does not know should not
+            be answered by blocking the turn on a dialog that client has no code
+            to render.
+          */
+          approval: (['auto', 'edits', 'ask'] as const)
+            .find(m => m === (body as { approval?: string }).approval) ?? 'auto',
           ...(pictures.length ? { images: pictures } : {}),
         }).catch(() => { /* already reported on the stream as turn-end */ });
         return;
@@ -983,6 +997,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           send(res, 400, { error: 'sessionId and content required' }); return;
         }
         send(res, 200, { ok: runs.answer(sessionId, content) });
+        return;
+      }
+      case 'permission': {
+        // Separate from `answer` for the same reason `answer` is separate from
+        // `steer`: it resolves one specific waiting promise, and it names which.
+        const { sessionId, id, allow } = body as {
+          sessionId?: string; id?: string; allow?: boolean;
+        };
+        if (!sessionId || !id || typeof allow !== 'boolean') {
+          send(res, 400, { error: 'sessionId, id and allow required' }); return;
+        }
+        send(res, 200, { ok: runs.decide(sessionId, id, allow) });
         return;
       }
       case 'steer':
