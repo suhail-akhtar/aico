@@ -163,12 +163,96 @@ class Cdp {
 
 const targets = () => fetch(`http://127.0.0.1:${PORT}/json`).then(r => r.json()).catch(() => []);
 
+/**
+ * Shut down the editor this probe started, and only that one.
+ *
+ * Killing the spawned pid is not enough, and the reason is the same one that
+ * already bit the extension's own `stop()`: on Windows `code` is a `.cmd` shim,
+ * `shell: true` means the pid belongs to `cmd.exe`, and the real `Code.exe` is
+ * launched detached — so `taskkill /T` walks a tree the editor is not in. Runs
+ * leaked an editor apiece until twenty-five were running.
+ *
+ * The `--user-data-dir` is unique per run and appears in the command line of
+ * every process belonging to that instance, which makes it both a precise handle
+ * and a safe one: it cannot match a window the user opened themselves. Killing
+ * by image name would have been simpler and would close their editor.
+ */
+async function killEditor() {
+  if (process.platform !== 'win32') {
+    try { editor?.kill('SIGKILL'); } catch { /* already gone */ }
+    return;
+  }
+  await new Promise((resolve) => {
+    const script = `Get-CimInstance Win32_Process -Filter "Name='Code.exe'" `
+      + `| Where-Object { $_.CommandLine -like '*${path.basename(userData)}*' } `
+      + '| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }';
+    const p = spawn('powershell', ['-NoProfile', '-Command', script], { stdio: 'ignore' });
+    p.on('exit', resolve);
+    p.on('error', resolve);
+  });
+}
+
+/**
+ * Open a file in the running window and select a line.
+ *
+ * `code --goto` rather than driving the command palette. The palette needs
+ * keystrokes to land in a quick-input that may not have focus yet, and a
+ * mis-timed one silently types into the editor instead — which looks exactly
+ * like the feature under test not working. `--goto` is a supported entry point
+ * that either opens the file or fails loudly.
+ *
+ * The selection itself still needs keys: `--goto` places a caret, and a caret is
+ * not a selection. Shift+Down against the focused editor is the smallest thing
+ * that produces one.
+ */
+async function openFile(file, line) {
+  await new Promise((resolve) => {
+    const p = spawn('code', [
+      '--user-data-dir', userData, '--extensions-dir', extensions,
+      '--reuse-window', '--goto', `${file}:${line}:1`,
+    ], { shell: process.platform === 'win32', stdio: 'ignore' });
+    p.on('exit', resolve);
+    p.on('error', resolve);
+  });
+  await sleep(3000);
+}
+
+/** Extend the selection by a line. `--goto` leaves a caret, and a caret is not a selection. */
+async function selectDown(cdp) {
+  for (const type of ['keyDown', 'keyUp']) {
+    await cdp.send('Input.dispatchKeyEvent', {
+      type,
+      key: 'ArrowDown',
+      code: 'ArrowDown',
+      windowsVirtualKeyCode: 40,
+      nativeVirtualKeyCode: 40,
+      modifiers: 8, // Shift
+    }).catch(() => { /* the window may be busy; the retry loop covers it */ });
+  }
+}
+
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-vsc-live-'));
 const userData = path.join(root, 'data');
 const extensions = path.join(root, 'ext');
 const workspace = path.join(root, 'ws');
 fs.mkdirSync(workspace, { recursive: true });
 fs.writeFileSync(path.join(workspace, 'README.md'), '# probe workspace\n');
+/*
+  A real source file, so the editor context has something to report.
+
+  TypeScript rather than plain text: VS Code's built-in language features give
+  it a symbol provider and diagnostics, which is what the `#` search and the
+  Problems chip are actually reading. A workspace of markdown would exercise
+  neither and pass anyway.
+*/
+fs.writeFileSync(path.join(workspace, 'sample.ts'), [
+  'export function greet(name: string): string {',
+  '  return `hello ${name}`;',
+  '}',
+  '',
+  'export const answer = 42;',
+  '',
+].join('\n'));
 
 let editor;
 let workbench;
@@ -199,7 +283,15 @@ try {
   // ── launch with a debugger attached ─────────────────────────────────
   editor = spawn('code', [
     '--user-data-dir', userData, '--extensions-dir', extensions,
-    `--remote-debugging-port=${PORT}`, '--new-window', workspace,
+    `--remote-debugging-port=${PORT}`,
+    /*
+      A throwaway folder is an untrusted one, and VS Code disables every
+      extension in Restricted Mode — including this one, deliberately. Without
+      this flag the probe tests a window where nothing of ours is running and
+      reports it as "the view container never registered".
+    */
+    '--disable-workspace-trust',
+    '--new-window', workspace,
   ], { shell: process.platform === 'win32', stdio: 'ignore' });
 
   const workbenchTarget = await until(async () => {
@@ -367,6 +459,80 @@ try {
     const composer = await evaluate("Boolean(document.querySelector('textarea'))")
       .catch(() => false);
     check(composer === true, 'the composer is present');
+
+    /*
+      ── the folder the panel is actually working in ─────────────────────
+
+      The assertion that would have caught the bug a person found by using the
+      panel: it had quietly registered a second project for the open folder and
+      was running there instead. Nothing on screen said so, and nothing in the
+      test suite asked.
+
+      Read from the header's own tooltip rather than from any internal state,
+      because the tooltip is what a person would check.
+    */
+    const shownFolder = await evaluate(`
+      (() => {
+        const el = [...document.querySelectorAll('[title]')]
+          .find(e => /[\\\\/]/.test(e.getAttribute('title') || ''));
+        return el ? el.getAttribute('title') : '';
+      })()
+    `).catch(() => '');
+
+    /*
+      The window's own idea of where it is, for comparison.
+
+      Without this the check can only say the panel is wrong, not whether the
+      panel misread the window or the window opened somewhere unexpected — and
+      those have completely different fixes.
+    */
+    const windowTitle = await workbench.evaluate('document.title').catch(() => '');
+
+    const norm = (p) => p.toLowerCase().replace(/[\\/]+/g, '/');
+    check(
+      norm(shownFolder) === norm(workspace),
+      `the panel works in the folder the window has open`
+      + ` (panel says ${JSON.stringify(shownFolder)}; window title ${JSON.stringify(windowTitle)})`,
+    );
+
+    // ── editor context reaches the panel ──────────────────────────────
+    /*
+      Opened and selected through VS Code's own commands rather than by faking a
+      message. The whole feature is a chain — an editor event, a debounce, a
+      postMessage, a React render — and every link but the last would pass a test
+      that started halfway along.
+    */
+    await openFile(path.join(workspace, 'sample.ts'), 2);
+
+    const chips = await until(async () => {
+      const text = await evaluate('document.body.innerText').catch(() => '');
+      return /sample\.ts/.test(text) ? text : null;
+    }, 20_000, 750);
+
+    check(
+      Boolean(chips),
+      `the open file appears as a context chip (${JSON.stringify((chips ?? '').replace(/\s+/g, ' ').slice(0, 80))})`,
+    );
+
+    /*
+      The selection keystroke is re-sent until the range shows up.
+
+      Sending it once and waiting was flaky in exactly the way that teaches you
+      nothing: `--goto` returns before the editor has focus, so the first
+      Shift+Down sometimes lands nowhere. Re-pressing is what a person would do,
+      and it turns a coin-flip into a check that means something when it fails.
+    */
+    const ranged = await until(async () => {
+      await selectDown(workbench);
+      await sleep(1200);
+      const text = await evaluate('document.body.innerText').catch(() => '');
+      return /sample\.ts:2(-\d+)?/.test(text) ? text : null;
+    }, 25_000, 0);
+
+    check(
+      Boolean(ranged),
+      'the chip carries the selected line range, not just the filename',
+    );
   }
 } catch (err) {
   failed += 1;
@@ -375,14 +541,7 @@ try {
 } finally {
   panel?.close();
   workbench?.close();
-  if (editor?.pid) {
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(editor.pid), '/T', '/F'], { stdio: 'ignore' })
-        .on('error', () => { /* already gone */ });
-    } else {
-      try { editor.kill('SIGKILL'); } catch { /* gone */ }
-    }
-  }
+  await killEditor();
   await sleep(2000);
   try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* windows holds handles */ }
 }

@@ -32,6 +32,7 @@ import { fileURLToPath } from 'url';
 
 import {
   wire, api, streamSession, supportsSecondarySidebar, sameFolder,
+  buildContextBlock, chipKey, EMPTY, NO_ATTACHMENTS,
 } from '../dist-test/panel-tunnel.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -105,6 +106,102 @@ try {
   );
   check(sameFolder('/home/me/work', '/home/me/work/'), 'POSIX ignores a trailing separator');
   check(!sameFolder(undefined, 'E:\\work'), 'a missing path matches nothing');
+
+  /*
+    ── what the editor context actually sends ────────────────────────────
+
+    This is the part of Phase 2 with teeth. The chips are a claim about what
+    will be attached, and this function is what makes the claim true — a
+    disagreement between the two is not a cosmetic bug, it is the panel lying
+    about what it sent.
+
+    The governing rule under test: inline what nothing else can recover (a
+    selection, a language server's diagnostics) and merely *name* what aico can
+    fetch for itself (files). Getting it backwards is how an editor integration
+    sends fifteen thousand tokens of open tabs with every "hello".
+  */
+  const file = { path: 'src/api.ts', uri: 'file:///w/src/api.ts', language: 'typescript' };
+  const withSelection = {
+    ...EMPTY,
+    active: file,
+    selection: {
+      ...file, fromLine: 12, toLine: 14, text: 'const x = 1;', truncated: false,
+    },
+  };
+
+  const selBlock = buildContextBlock(withSelection, NO_ATTACHMENTS);
+  check(
+    selBlock.includes('lines 12-14') && selBlock.includes('const x = 1;')
+      && selBlock.includes('```typescript'),
+    'a selection is inlined, fenced, with its language and line range',
+  );
+  check(
+    !selBlock.includes('Open in the editor'),
+    'the active file is not named twice when the selection is already in it',
+  );
+
+  check(
+    buildContextBlock({ ...EMPTY, active: file }, NO_ATTACHMENTS)
+      === 'Open in the editor: `src/api.ts`',
+    'an open file with no selection is named, never pasted',
+  );
+
+  const dismissed = {
+    ...NO_ATTACHMENTS,
+    dismissed: new Set([chipKey('sel', file.uri, '12-14'), chipKey('file', file.uri)]),
+  };
+  check(
+    buildContextBlock(withSelection, dismissed) === '',
+    'dismissing every chip sends nothing — a removed chip is a decision, not a hint',
+  );
+
+  const truncated = {
+    ...withSelection,
+    selection: { ...withSelection.selection, truncated: true },
+  };
+  check(
+    /read the file for the rest/i.test(buildContextBlock(truncated, NO_ATTACHMENTS)),
+    'a cut-short selection says so, rather than letting the model reason about an ending it never saw',
+  );
+
+  const withProblems = {
+    ...EMPTY,
+    active: file,
+    problemTotal: 3,
+    problems: [
+      { path: file.path, uri: file.uri, line: 4, severity: 'error', message: 'Cannot find name x', source: 'ts' },
+      { path: file.path, uri: file.uri, line: 9, severity: 'warning', message: 'Unused', source: 'ts' },
+    ],
+  };
+  check(
+    !buildContextBlock(withProblems, NO_ATTACHMENTS).includes('Cannot find name x'),
+    'Problems stay out until asked for — a half-typed file has an opinionated language server',
+  );
+  const attachedProblems = buildContextBlock(
+    withProblems, { ...NO_ATTACHMENTS, problems: true },
+  );
+  check(
+    attachedProblems.includes('error at line 4 [ts]: Cannot find name x'),
+    'attached Problems are inlined with severity, line and source',
+  );
+  check(
+    attachedProblems.includes('and 1 more'),
+    'a truncated Problems list reports how many were left out',
+  );
+
+  check(
+    buildContextBlock(EMPTY, NO_ATTACHMENTS) === '',
+    'no context produces no block, not an empty heading',
+  );
+
+  const pinned = buildContextBlock(EMPTY, {
+    ...NO_ATTACHMENTS,
+    pinned: [{ path: 'src/server/runs.ts', uri: 'file:///w/src/server/runs.ts', line: 88, symbol: 'answer' }],
+  });
+  check(
+    pinned.includes('`src/server/runs.ts`:88 — `answer`'),
+    'a symbol pinned with # is named with its file and line, not pasted',
+  );
 
   // ── start the server the extension would start ──────────────────────
   const server = await new Promise((resolve, reject) => {

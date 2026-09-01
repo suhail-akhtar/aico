@@ -26,6 +26,8 @@ import type { ServerManager } from '../server';
 import { HttpTunnel, type TunnelRequest, type TunnelResponse } from './http-tunnel';
 import { supportsSecondarySidebar as supports } from './vscode-version';
 import { canonicalFolder } from '../paths';
+import { EditorContextSource, type EditorContext } from '../context/editor';
+import { find, type FindResult } from '../context/find';
 
 /** Whether this editor can host the panel beside Chat. See `vscode-version`. */
 export function supportsSecondarySidebar(version = vscode.version): boolean {
@@ -36,7 +38,10 @@ export function supportsSecondarySidebar(version = vscode.version): boolean {
 type HostMessage =
   | { t: 'boot'; folder: string | null; folderName: string | null; version: string }
   | { t: 'ask'; text: string; send: boolean }
-  | { t: 'new-session' };
+  | { t: 'new-session' }
+  | { t: 'focus-composer' }
+  | { t: 'context'; context: EditorContext }
+  | { t: 'find:result'; id: number; results: FindResult[] };
 
 export class AicoViewProvider implements vscode.WebviewViewProvider {
   /** Both registered ids resolve to this one provider; only one ever appears. */
@@ -54,6 +59,15 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
    * precisely the failure this extension has already shipped once.
    */
   private pending: HostMessage[] = [];
+
+  /**
+   * Watches the editor, and only while the panel can see it.
+   *
+   * Created on `resolveWebviewView` and disposed with the view. A source that
+   * outlived the panel would keep four event subscriptions alive to compute
+   * payloads nobody receives, for the whole life of the window.
+   */
+  private editorContext: EditorContextSource | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -91,6 +105,20 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
     this.send({ t: 'new-session' });
   }
 
+  /**
+   * Reveal the panel and put the caret in the composer.
+   *
+   * The editor context is pushed alongside rather than left to the watcher's
+   * next event. Revealing a view does not change the selection, so nothing would
+   * fire — and the chip for the code you just highlighted would be missing at
+   * exactly the moment you pressed a key to ask about it.
+   */
+  async focusComposer(): Promise<void> {
+    await this.reveal();
+    this.editorContext?.push();
+    this.send({ t: 'focus-composer' });
+  }
+
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
 
@@ -107,15 +135,63 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
     );
     this.tunnel = tunnel;
 
-    view.webview.onDidReceiveMessage((message: TunnelRequest | { t: string; id?: number }) => {
+    const editorContext = new EditorContextSource((context) => {
+      this.send({ t: 'context', context });
+    });
+    this.editorContext = editorContext;
+
+    view.webview.onDidReceiveMessage((message: TunnelRequest | {
+      t: string; id?: number; query?: string; uri?: string; line?: number;
+    }) => {
       if (message?.t === 'http') { void tunnel.handle(message as TunnelRequest); return; }
       if (message?.t === 'http:abort' && typeof message.id === 'number') {
         tunnel.abort(message.id); return;
       }
       if (message?.t === 'ready') { this.onReady(); return; }
+
+      if (message?.t === 'find' && typeof message.id === 'number') {
+        const id = message.id;
+        void find(message.query ?? '')
+          .then(results => this.send({ t: 'find:result', id, results }))
+          // A failed search answers with nothing rather than leaving the menu
+          // spinning for ever on a promise that will not settle.
+          .catch(() => this.send({ t: 'find:result', id, results: [] }));
+        return;
+      }
+
+      /*
+        Opening a file from a chip. Worth having because a context chip names
+        something you may want to look at before asking about it, and switching
+        to the Explorer to find it again is the errand this feature exists to
+        remove.
+      */
+      if (message?.t === 'reveal' && typeof message.uri === 'string') {
+        const uri = vscode.Uri.parse(message.uri);
+        const line = typeof message.line === 'number' ? message.line - 1 : undefined;
+        void vscode.window.showTextDocument(uri, {
+          preview: true,
+          ...(line === undefined ? {} : {
+            selection: new vscode.Range(line, 0, line, 0),
+          }),
+        }).then(undefined, () => { /* deleted, or not a text file */ });
+        return;
+      }
+
       if (message?.t === 'open-workspace') {
         void vscode.commands.executeCommand('aico.open'); return;
       }
+      /*
+        There is nothing to work in, so offer the one thing that fixes it.
+
+        aico needs a directory — a session's log is filed under one and its file
+        tools are confined to it. Saying "open a folder" and leaving the reader
+        to go and find the menu is a worse version of the same answer.
+      */
+      if (message?.t === 'open-folder') {
+        void vscode.commands.executeCommand('vscode.openFolder');
+        return;
+      }
+
       if (message?.t === 'open-settings') {
         void vscode.commands.executeCommand(
           'workbench.action.openSettings', '@ext:suhail-akhtar.aico-vscode',
@@ -126,7 +202,9 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
 
     view.onDidDispose(() => {
       tunnel.abortAll();
+      editorContext.dispose();
       this.tunnel = undefined;
+      this.editorContext = undefined;
       this.view = undefined;
     });
   }
@@ -151,6 +229,16 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
     const queued = this.pending;
     this.pending = [];
     for (const message of queued) this.send(message);
+
+    /*
+      The editor's state, once, immediately.
+
+      The source only speaks when something *changes*, and nothing changes while
+      a person looks at a panel they have just opened. Without this the chips are
+      empty until the next keystroke — which reads as the feature not working
+      rather than as it waiting.
+    */
+    this.editorContext?.push();
   }
 
   private send(message: HostMessage): void {
@@ -160,6 +248,7 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     this.tunnel?.abortAll();
+    this.editorContext?.dispose();
   }
 
   /**

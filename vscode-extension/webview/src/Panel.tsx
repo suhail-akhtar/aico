@@ -27,7 +27,7 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '@web/store';
 import { setTokenRejectedHandler } from '@web/api';
-import { onBoot, signalReady, type BootInfo } from './host';
+import { onBoot, signalReady, host, type BootInfo } from './host';
 import { sameFolder } from './paths';
 import { Header } from './components/Header';
 import { SessionList } from './components/SessionList';
@@ -126,7 +126,8 @@ export function Panel(): React.ReactElement {
     return (
       <Empty
         title="No folder open"
-        detail="aico works in a project directory. Open a folder and the panel will connect to it."
+        detail="aico works in a project directory — a session's log is filed under one, and its file tools are confined to it."
+        action={{ label: 'Open a folder…', onClick: host.openFolder }}
       />
     );
   }
@@ -159,13 +160,26 @@ export function Panel(): React.ReactElement {
   );
 }
 
-function Empty({ title, detail, hint }: {
-  title: string; detail: string; hint?: string;
+function Empty({ title, detail, hint, action }: {
+  title: string;
+  detail: string;
+  hint?: string;
+  /** The thing that resolves the state, offered rather than described. */
+  action?: { label: string; onClick: () => void };
 }): React.ReactElement {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
       <p className="text-[13px] font-medium text-aico-primary">{title}</p>
       <p className="text-[12px] leading-relaxed text-aico-secondary">{detail}</p>
+      {action && (
+        <button
+          type="button"
+          onClick={action.onClick}
+          className="mt-1 rounded bg-aico-accent px-2.5 py-1 text-[12px] text-aico-on-accent hover:bg-aico-accent-hover"
+        >
+          {action.label}
+        </button>
+      )}
       {hint && <p className="text-[11px] leading-relaxed text-aico-muted">{hint}</p>}
     </div>
   );

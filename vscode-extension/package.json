@@ -32,6 +32,12 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "aico runs an agent that reads and writes files in this folder and can execute shell commands, so it stays off until you trust the workspace. Declared explicitly so Restricted Mode says the panel is disabled and offers a Trust button — rather than the panel silently not appearing."
+    }
+  },
   "contributes": {
     "viewsContainers": {
       "secondarySidebar": [
