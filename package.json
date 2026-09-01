@@ -1,6 +1,6 @@
 {
   "name": "@suhail-akhtar/aico",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "AI Coder \u2014 multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Z.AI (GLM), Ollama.",
   "keywords": [
     "ai",
@@ -64,6 +64,7 @@
     "test:serve": "npm run build && node scripts/serve-live.mjs",
     "test:vscode": "npm --prefix vscode-extension run package && node scripts/vscode-panel-live.mjs",
     "test:layout": "npm run build && npm --prefix web run build && node scripts/web-layout-live.mjs",
+    "sitemap": "node scripts/build-sitemap.mjs",
     "build:vscode": "cd vscode-extension && npm install && npx tsc -p ./ && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository",
     "test:panel": "npm run build && npx esbuild scripts/panel-tunnel-entry/index.ts --bundle --format=esm --outfile=dist-test/panel-tunnel.mjs --target=node22 --platform=neutral --log-level=warning && node scripts/panel-tunnel-live.mjs",
     "test:shell": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/shell-live.mjs",
