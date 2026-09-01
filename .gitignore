@@ -55,3 +55,8 @@ web-dist/
 # Throwaway probe directories from UI testing
 ui-probe/
 tmp-wire-*/
+
+# An early standalone landing page, superseded by docs/ and referenced by
+# nothing. Left on disk rather than deleted; ignored so it stops showing up as
+# untracked on every status.
+public/
