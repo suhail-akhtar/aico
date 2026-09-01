@@ -10873,6 +10873,14 @@ console.log('\n══ HOW HARD TO THINK ══');
   assert(flashLite.fallback === 'off', 'gemini-2.5-flash-lite does not think unless asked');
   assert(!flash37.levels.includes('minimal') && flashLite.levels.includes('low'),
     'and two models in one family accept different sets — a per-provider setting cannot express this');
+  /*
+    A correction, kept as a test so it cannot quietly revert. This was recorded
+    as the per-model default *level* until the docs were re-read: "Gemini models
+    engage in dynamic thinking by default, automatically adjusting the amount of
+    reasoning effort based on the complexity of the request."
+  */
+  assert(flash37.fallback === 'adaptive',
+    'Gemini thinks dynamically when nothing is sent, which is what auto has to report');
 
   assert(reasoningFor('deepseek-v4-flash').fallback === 'high',
     'DeepSeek pins high when nothing is sent, which is why small tasks think hard');

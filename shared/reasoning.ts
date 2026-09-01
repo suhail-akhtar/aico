@@ -130,10 +130,25 @@ const TABLE: TableEntry[] = [
     checked: 'OpenAI reasoning guide, 2026-09',
   },
 
-  // ── Google ───────────────────────────────────────────────────────
-  // `thinking_level`, which replaced the old `thinkingBudget`. Sets and
-  // defaults genuinely differ between models in the same family, which is the
-  // clearest evidence that this cannot be a per-provider setting.
+  /*
+    ── Google ───────────────────────────────────────────────────────
+
+    `thinking_level`, which replaced the old `thinkingBudget`. Sets *and*
+    defaults genuinely differ between models in one family, which is the
+    clearest single piece of evidence that this cannot be a per-provider
+    setting.
+
+    The fallback is `adaptive`, and that is a correction: it was recorded as
+    the per-model default *level* until the docs were re-read, which say
+    "Gemini models engage in dynamic thinking by default, automatically
+    adjusting the amount of reasoning effort based on the complexity of the
+    request." A level is what the model settles on; the behaviour when nothing
+    is sent is that it decides — and that is what somebody choosing `auto`
+    needs told.
+
+    `gemini-2.5-flash-lite` is the exception the docs call out: off unless
+    asked.
+  */
   {
     match: /^gemini-2\.5-flash-lite/,
     levels: ['off', 'low', 'medium', 'high'],
@@ -143,13 +158,13 @@ const TABLE: TableEntry[] = [
   {
     match: /^gemini-3\.7-flash/,
     levels: ['low', 'medium', 'high'],
-    fallback: 'medium',
+    fallback: 'adaptive',
     checked: 'Gemini thinking docs, 2026-09',
   },
   {
     match: /^gemini-(3|2\.5)/,
     levels: ['minimal', 'low', 'medium', 'high'],
-    fallback: 'medium',
+    fallback: 'adaptive',
     checked: 'Gemini thinking docs, 2026-09',
   },
 

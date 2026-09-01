@@ -11,6 +11,8 @@
 import OpenAI, { APIError } from 'openai';
 import type { ProviderAPI, ProviderChatOptions, ChatEvent, AicoMessage, FinishReason } from './types.js';
 import { normalizeUsage } from './usage.js';
+import { resolvedEffort } from '../run-context.js';
+import { supportsReasoning } from '../../shared/reasoning.js';
 import { DEFAULT_DIALECT } from '../prompt/dialects.js';
 import type { PromptDialect } from '../prompt/types.js';
 
@@ -105,6 +107,20 @@ export interface OpenAICompatibleConfig {
    */
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /**
+   * How this endpoint spells a reasoning level.
+   *
+   * Set explicitly per provider rather than sniffed from the model id, because
+   * a gateway fronts many vendors and the *endpoint* decides the shape, not the
+   * model. Each was read from that vendor's own documentation:
+   *
+   * - `openai`     — `reasoning_effort: '<level>'`
+   * - `openrouter` — `reasoning: { effort: '<level>' }`
+   * - `zai`        — `thinking: { type: 'enabled' | 'disabled' }`, a switch
+   * - `none`       — send nothing. The honest default for an endpoint nobody
+   *                  has checked: a guessed parameter 400s every request.
+   */
+  reasoningShape?: 'openai' | 'openrouter' | 'zai' | 'none';
+  /**
    * Prompt dialect for whichever vendor this instance is pointed at.
    *
    * This class serves five of them, and they do not agree — OpenAI documents
@@ -141,6 +157,7 @@ export class OpenAICompatibleProvider implements ProviderAPI {
   private readonly sessionId?: string;
   private readonly promptCacheKey?: string;
   private readonly reasoningEffort?: OpenAICompatibleConfig['reasoningEffort'];
+  private readonly reasoningShape: NonNullable<OpenAICompatibleConfig['reasoningShape']>;
   private readonly maxOutputTokens: number;
   readonly promptDialect: PromptDialect;
   // Once a 400 from stream_options is seen, disable it for the life of this provider
@@ -165,12 +182,61 @@ export class OpenAICompatibleProvider implements ProviderAPI {
     // 'none' means "do not send the parameter" rather than sending the literal
     // string, so a model with no reasoning support is never handed the field.
     this.reasoningEffort = config.reasoningEffort === 'none' ? undefined : config.reasoningEffort;
+    this.reasoningShape = config.reasoningShape ?? 'none';
     this.promptDialect = config.promptDialect ?? DEFAULT_DIALECT;
     this.client = new OpenAI({
       apiKey: config.apiKey ?? 'no-key',
       baseURL: config.baseURL,
       defaultHeaders: config.defaultHeaders,
     });
+  }
+
+  /**
+   * The reasoning fields for one request, in this endpoint's own shape.
+   *
+   * The run's choice outranks the configured one, and both are withheld from a
+   * model the table does not know reasons — verified the hard way once already:
+   * gpt-4o-mini answers a `reasoning_effort` request with
+   * 400 "Unrecognized request argument supplied: reasoning_effort", so
+   * forwarding a globally configured effort to every model breaks every
+   * non-reasoning one.
+   *
+   * `none` sends nothing at all. That is the default, and it is deliberate: an
+   * endpoint whose documentation nobody has read gets no reasoning parameter
+   * rather than a guessed one, because a guess 400s every request rather than
+   * degrading.
+   */
+  private reasoningFields(model: string): Record<string, unknown> {
+    if (this.reasoningShape === 'none') return {};
+    if (this.reasoningEffortUnsupported) return {};
+
+    const level = resolvedEffort(model) ?? this.reasoningEffort;
+    if (!level || level === 'none') return {};
+    /*
+      Asked of the shared table, not of an OpenAI prefix test.
+
+      `supportsReasoningEffort` answers "is this an OpenAI reasoning model",
+      which is the right question for one vendor and silently false for every
+      other — it gated GLM out entirely, so `thinking` was never sent and the
+      whole Z.AI path did nothing. One source of truth for what reasons.
+    */
+    if (!supportsReasoning(model)) return {};
+
+    switch (this.reasoningShape) {
+      case 'openai':
+        return { reasoning_effort: level };
+      case 'openrouter':
+        // `reasoning: { effort }`, and the accepted ladder is exactly ours —
+        // none, minimal, low, medium, high, xhigh, max — which is why the
+        // shared vocabulary needed no translation here.
+        return { reasoning: { effort: level } };
+      case 'zai':
+        // A switch, not a ladder: `thinking: {type}` takes enabled or disabled
+        // and nothing else, so every level above `off` means enabled.
+        return { thinking: { type: level === 'off' ? 'disabled' : 'enabled' } };
+      default:
+        return {};
+    }
   }
 
   async *chat(opts: ProviderChatOptions): AsyncGenerator<ChatEvent> {
@@ -216,11 +282,7 @@ export class OpenAICompatibleProvider implements ProviderAPI {
       // forwarding a globally configured effort to every model would break
       // every non-reasoning one. Prefix test plus 400 self-heal, same pattern
       // as max_completion_tokens above.
-      ...(this.reasoningEffort
-        && !this.reasoningEffortUnsupported
-        && supportsReasoningEffort(opts.model)
-        ? { reasoning_effort: this.reasoningEffort }
-        : {}),
+      ...this.reasoningFields(opts.model),
     });
 
     // Typed explicitly rather than inferred from create(): the body is cast to
