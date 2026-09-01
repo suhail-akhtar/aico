@@ -29,6 +29,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { Portal } from './Portal';
 import { Icon } from './Icon';
+import { TOOLBAR_CONTROL, toolbarTone } from './toolbar';
 
 export function ModelPicker(): React.ReactElement {
   // Two values, and the difference between them is the whole point. `pinned` is
@@ -117,8 +118,17 @@ export function ModelPicker(): React.ReactElement {
         aria-expanded={open}
         aria-label="Model for this session"
         title={provider ? `${provider.name} · ${model ?? 'provider default'}` : model ?? ''}
-        className="flex max-w-[220px] items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px]
-                   text-aico-muted transition-colors hover:bg-aico-hover hover:text-aico-primary"
+        /*
+          The one control on the toolbar that gives way.
+
+          `[flex-shrink:1]` as an arbitrary property rather than `shrink`,
+          because `shrink` and the base's `shrink-0` set the same property and
+          which one wins depends on Tailwind's output order, not on the order
+          they appear here. The floor keeps a truncated id recognisable —
+          below it the label is an ellipsis and a chevron.
+        */
+        className={`${TOOLBAR_CONTROL} min-w-[92px] max-w-[200px] [flex-shrink:1]`
+          + ` ${toolbarTone(false)}`}
       >
         <span className="min-w-0 truncate">{model ?? 'default model'}</span>
         <Icon name="chevron-down" size={13} />

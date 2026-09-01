@@ -16,21 +16,33 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 export type ApprovalMode = 'auto' | 'edits' | 'ask';
+import { TOOLBAR_CAPTION, TOOLBAR_CONTROL, toolbarTone } from './toolbar';
 
-const MODES: Array<{ mode: ApprovalMode; label: string; blurb: string }> = [
+/**
+ * `label` names the mode in the menu; `short` is what fits on the button.
+ *
+ * They differ because the two are read in different circumstances. Choosing
+ * happens once, with three options side by side and room to explain each.
+ * Afterwards the button is glanced at, next to five other controls, and
+ * "Ask, not for edits" was long enough to push the whole row into wrapping.
+ */
+const MODES: Array<{ mode: ApprovalMode; label: string; short: string; blurb: string }> = [
   {
     mode: 'auto',
     label: 'Auto',
+    short: 'auto',
     blurb: 'Never ask. What this client has always done.',
   },
   {
     mode: 'edits',
     label: 'Ask, not for edits',
+    short: 'not edits',
     blurb: 'File writes go through; commands, fetches and delegation are put to you.',
   },
   {
     mode: 'ask',
     label: 'Ask every time',
+    short: 'always',
     blurb: 'Every tool call waits for a decision. Thorough, and slow by design.',
   },
 ];
@@ -65,15 +77,12 @@ export function ApprovalPicker({ value, onChange, disabled }: {
         onClick={() => setOpen(v => !v)}
         disabled={disabled}
         title={`Approval: ${current.label} — ${current.blurb}`}
-        className={`rounded-lg px-2.5 py-1 text-[13px] transition-colors disabled:opacity-40 ${
-          value === 'auto'
-            // Anything other than auto changes what happens when the agent
-            // reaches for a tool, which is worth seeing without hovering.
-            ? 'text-aico-muted hover:bg-aico-hover hover:text-aico-secondary'
-            : 'bg-aico-accent-soft text-aico-accent'
-        }`}
+        // Anything other than auto changes what happens when the agent reaches
+        // for a tool, which is worth seeing without hovering.
+        className={`${TOOLBAR_CONTROL} ${toolbarTone(value !== 'auto')}`}
       >
-        {value === 'auto' ? 'Approve: auto' : current.label}
+        <span className={value === 'auto' ? TOOLBAR_CAPTION : ''}>Approve</span>
+        {current.short}
       </button>
 
       {open && (

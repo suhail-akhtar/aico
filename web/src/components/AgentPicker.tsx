@@ -22,6 +22,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type AgentSpec } from '../api';
 import { useStore } from '../store';
 import { searchAgents, splitAgents } from '../agents';
+import { TOOLBAR_CONTROL, toolbarTone } from './toolbar';
 
 export function AgentPicker(): React.ReactElement | null {
   const [agents, setAgents] = useState<AgentSpec[]>([]);
@@ -96,13 +97,11 @@ export function AgentPicker(): React.ReactElement | null {
         title={current
           ? `Talking to ${current} — every turn, not just the next one`
           : 'Talk to one specialist instead of the orchestrator'}
-        className={`rounded-lg px-2.5 py-1 text-[13px] transition-colors disabled:opacity-40 ${
-          current
-            ? 'bg-aico-accent-soft text-aico-accent'
-            : 'text-aico-muted hover:bg-aico-hover hover:text-aico-secondary'
-        }`}
+        className={`${TOOLBAR_CONTROL} max-w-[150px] ${toolbarTone(Boolean(current))}`}
       >
-        {current ?? 'Orchestrator'}
+        {/* An agent somebody named themselves can be long. Bound it, or one
+            verbose name pushes the model picker off the row. */}
+        <span className="min-w-0 truncate">{current ?? 'Orchestrator'}</span>
       </button>
 
       {open && (
