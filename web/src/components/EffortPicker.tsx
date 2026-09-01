@@ -19,6 +19,7 @@ import {
   reasoningFor, type EffortChoice, type EffortLevel,
 } from '../../../shared/reasoning';
 import { useStore } from '../store';
+import { TOOLBAR_CAPTION, TOOLBAR_CONTROL, toolbarTone } from './toolbar';
 
 /** What each rung means, in the words someone choosing would use. */
 const BLURB: Record<EffortLevel, string> = {
@@ -69,13 +70,10 @@ export function EffortPicker({ value, onChange, disabled }: {
         onClick={() => setOpen(v => !v)}
         disabled={disabled}
         title={`Reasoning effort — ${value === 'auto' ? autoMeaning(fact.fallback) : BLURB[value]}`}
-        className={`rounded-lg px-2.5 py-1 text-[13px] transition-colors disabled:opacity-40 ${
-          value === 'auto'
-            ? 'text-aico-muted hover:bg-aico-hover hover:text-aico-secondary'
-            : 'bg-aico-accent-soft text-aico-accent'
-        }`}
+        className={`${TOOLBAR_CONTROL} ${toolbarTone(value !== 'auto')}`}
       >
-        {value === 'auto' ? autoLabel(fact.fallback) : `Think: ${value}`}
+        <span className={value === 'auto' ? TOOLBAR_CAPTION : ''}>Think</span>
+        {value === 'auto' ? autoLabel(fact.fallback) : value}
       </button>
 
       {open && (
@@ -127,8 +125,16 @@ function autoMeaning(fallback: ReturnType<typeof reasoningFor>['fallback']): str
  * took a while, which is the complaint that produced this control.
  */
 function autoLabel(fallback: ReturnType<typeof reasoningFor>['fallback']): string {
-  if (fallback === 'adaptive' || fallback === 'unknown') return 'Think: auto';
-  return `Think: auto (${fallback})`;
+  if (fallback === 'adaptive' || fallback === 'unknown') return 'auto';
+  /*
+    `auto·high`, not `auto (high)`.
+
+    The parenthetical read as an aside about something optional, and at
+    eighteen characters it was the label that pushed this row into wrapping.
+    The middot says the two are one value — what you chose, and what that
+    turns into here — in six fewer characters.
+  */
+  return `auto·${fallback}`;
 }
 
 function Row({ active, label, blurb, onPick }: {

@@ -28,6 +28,8 @@ import { EffortPicker } from './EffortPicker';
 import { ApprovalPicker, type ApprovalMode } from './ApprovalPicker';
 import type { EffortChoice } from '../../../shared/reasoning';
 import { SetGoalButton } from './GoalBar';
+import { TOOLBAR_CONTROL, toolbarTone } from './toolbar';
+import { Icon } from './Icon';
 import { MentionMenu } from './MentionMenu';
 import { mentionAt, searchAgents } from '../agents';
 import { api, type AgentSpec } from '../api';
@@ -272,8 +274,11 @@ ${prefill.text}` : prefill.text));
             <span className="shrink-0 text-[11px] text-aico-muted">waiting</span>
           </div>
         )}
-        <div className="rounded-[22px] border border-aico-border bg-aico-bg shadow-sm transition-colors
-                        focus-within:border-aico-accent/40">
+        <div
+          data-composer
+          className="rounded-[22px] border border-aico-border bg-aico-bg shadow-sm transition-colors
+                     focus-within:border-aico-accent/40"
+        >
           <textarea
             ref={textarea}
             value={text}
@@ -339,42 +344,93 @@ ${prefill.text}` : prefill.text));
             className="hidden"
           />
 
-          <div className="flex items-center gap-1.5 px-3 pb-2.5">
+          {/*
+            Two groups, not seven controls in a line.
+
+            The left group says what this turn *does*; the right says who does it
+            and how carefully. Grouping them means that when the row runs out of
+            width it breaks between the groups — which reads as deliberate —
+            rather than orphaning whichever control happened to be fourth.
+
+            `flex-wrap` is what makes running out of width survivable at all. A
+            row that cannot fit does not clip: it either overflows the container
+            or, worse, lets its shrinkable children wrap their own text, so one
+            long label silently becomes two lines tall and every neighbour is
+            centred against it. That is precisely how this row was wrong.
+          */}
+          <div
+            data-composer-toolbar
+            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 pb-2.5"
+          >
+            <div className="flex items-center gap-1">
             <button
               onClick={() => fileInput.current?.click()}
               disabled={uploading}
               title="Attach a document or image — PDF, Word, Excel, CSV, text, Markdown, PNG, JPEG, WebP or GIF. Screenshots can be pasted straight in."
               aria-label="Attach a document"
-              className="rounded-lg px-2 py-1 text-[13px] text-aico-muted transition-colors
-                         hover:bg-aico-hover hover:text-aico-secondary disabled:opacity-40"
+              className={`${TOOLBAR_CONTROL} px-2 ${toolbarTone(false)}`}
             >
-              {uploading ? '…' : '📎'}
+              {uploading ? '…' : <Icon name="paperclip" size={15} />}
             </button>
 
             <button
               onClick={() => setPlanMode(!planMode)}
               disabled={busy}
               title="Plan first, then act"
-              className={`rounded-lg px-2.5 py-1 text-[13px] transition-colors disabled:opacity-40 ${
-                planMode
-                  ? 'bg-aico-accent-soft text-aico-accent'
-                  : 'text-aico-muted hover:bg-aico-hover hover:text-aico-secondary'
-              }`}
+              className={`${TOOLBAR_CONTROL} ${toolbarTone(planMode)}`}
             >
               Plan
             </button>
 
             <SetGoalButton />
 
-            <div className="flex-1" />
+            </div>
 
-            <AgentPicker />
+            {/*
+              The right group is one flex child, and that is the whole trick.
 
-            <ModelPicker />
+              A bare spacer was not enough: the controls stayed siblings of the
+              left-hand ones, so an over-subscribed row broke wherever it ran
+              out — leaving `Orchestrator` and the model on the first line and
+              `Think`, `Approve` and Send stranded on the second. Two lines, and
+              no relationship between them.
 
-            <EffortPicker value={effort} onChange={setEffort} disabled={busy} />
+              As a group it wraps whole. `flex-1` right-aligns it beside the
+              left group on a wide row and gives it the full width on a narrow
+              one; `justify-end` keeps it against the same edge either way, so
+              the second line looks like a decision rather than an accident.
 
-            <ApprovalPicker value={approval} onChange={setApproval} disabled={busy} />
+              It must not wrap *inside*, which the first attempt allowed and
+              which looked worse than the bug: `Approve` and Send dropped to a
+              second line while `Orchestrator` and the model stayed on the
+              first, and the left group — one line tall against a two-line
+              neighbour — floated in the middle of both. A group either fits
+              beside the left one or takes its own line. Nothing in between.
+
+              What absorbs the squeeze instead is the model id, and only it. It
+              is the one label here that can lose characters without losing its
+              meaning — the full id is in the tooltip and the menu — so it is
+              the only control allowed to shrink, down to a floor below which
+              it would stop being a name at all.
+
+              No `min-w-0` here, and that omission is load-bearing. With it the
+              group was allowed to be narrower than its own contents, so rather
+              than wrapping it simply overflowed — and being right-aligned, it
+              overflowed *leftwards*, drawing `Orchestrator` on top of `Plan`
+              and `Goal`. Every measurement passed while that happened: the
+              heights were identical, nothing crossed the right edge, the page
+              did not scroll. It was caught by looking at a screenshot taken
+              for something else, which is why the probe now checks that the
+              two groups do not intersect.
+            */}
+            <div className="flex flex-1 items-center justify-end gap-1">
+              <AgentPicker />
+
+              <ModelPicker />
+
+              <EffortPicker value={effort} onChange={setEffort} disabled={busy} />
+
+              <ApprovalPicker value={approval} onChange={setApproval} disabled={busy} />
 
             {busy ? (
               <>
@@ -382,8 +438,7 @@ ${prefill.text}` : prefill.text));
                   onClick={() => void send('followup')}
                   disabled={!text.trim()}
                   title="Queue as the next turn (⌘/Ctrl+Enter)"
-                  className="rounded-lg px-2.5 py-1 text-[13px] text-aico-muted
-                             hover:bg-aico-hover hover:text-aico-primary disabled:opacity-40"
+                  className={`${TOOLBAR_CONTROL} ${toolbarTone(false)}`}
                 >
                   Queue
                 </button>
@@ -391,8 +446,7 @@ ${prefill.text}` : prefill.text));
                   onClick={() => void send('steer')}
                   disabled={!text.trim()}
                   title="Deliver into the running turn (Enter)"
-                  className="rounded-lg bg-aico-accent-soft px-2.5 py-1 text-[13px] text-aico-accent
-                             hover:bg-aico-accent/20 disabled:opacity-40"
+                  className={`${TOOLBAR_CONTROL} ${toolbarTone(true)}`}
                 >
                   Steer
                 </button>
@@ -400,8 +454,8 @@ ${prefill.text}` : prefill.text));
                   onClick={() => void cancel()}
                   title="Stop the running turn"
                   aria-label="Stop"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-aico-elevated
-                             text-aico-primary transition-colors hover:bg-aico-hover"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full
+                             bg-aico-elevated text-aico-primary transition-colors hover:bg-aico-hover"
                 >
                   <span className="block h-2.5 w-2.5 rounded-[2px] bg-current" />
                 </button>
@@ -411,13 +465,14 @@ ${prefill.text}` : prefill.text));
                 onClick={() => void send('send')}
                 disabled={!text.trim()}
                 aria-label="Send"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-aico-accent
-                           text-aico-on-accent transition-colors hover:bg-aico-accent-hover
-                           disabled:opacity-30"
+                className="flex size-7 shrink-0 items-center justify-center rounded-full
+                           bg-aico-accent text-aico-on-accent transition-colors
+                           hover:bg-aico-accent-hover disabled:opacity-30"
               >
                 ↑
               </button>
             )}
+            </div>
           </div>
         </div>
 

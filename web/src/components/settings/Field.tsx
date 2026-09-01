@@ -35,10 +35,33 @@ export interface FieldProps {
 
 export function Field({ spec, value, onChange, changed, breadcrumb }: FieldProps): React.ReactElement {
   const stacked = spec.kind === 'segmented';
+  /*
+    Only the wide controls drop below their label.
+
+    A text field or a select is 15rem and is what squeezes the prose beside it.
+    A toggle is 38px and a number is not much more — both fit alongside the
+    label at any width this client is usable at, and moving them down would
+    strand a small control on an empty line for no gain.
+  */
+  const wide = spec.kind === 'text' || spec.kind === 'select';
 
   return (
     <div className="group/field border-b border-aico-border-subtle py-4 last:border-b-0">
-      <div className={stacked ? '' : 'flex items-start gap-6'}>
+      {/*
+        Side by side when there is room, stacked when there is not.
+
+        The control is a fixed 15rem. In a modal on a 700px window that leaves
+        about 165px for the label, so "Defaults to the cheapest model in the
+        same family as your provider" came out as four lines beside a control
+        with empty space around it — squeezing the half that is prose to
+        protect the half that is a fixed-width box.
+
+        768px rather than a container query because the modal is sized from the
+        viewport, so the two track each other closely enough and this needs no
+        new machinery.
+      */}
+      <div className={stacked ? ''
+        : `flex items-start gap-6 ${wide ? 'max-md:flex-col max-md:gap-2' : ''}`}>
         <div className="min-w-0 flex-1">
           {breadcrumb && (
             <div className="mb-0.5 text-[11px] uppercase tracking-wider text-aico-muted">{breadcrumb}</div>
@@ -68,7 +91,11 @@ export function Field({ spec, value, onChange, changed, breadcrumb }: FieldProps
           )}
         </div>
 
-        {!stacked && <div className="shrink-0 pt-0.5"><Control spec={spec} value={value} onChange={onChange} /></div>}
+        {!stacked && (
+          <div className={`shrink-0 pt-0.5 ${wide ? 'max-md:w-full max-md:pt-0' : ''}`}>
+            <Control spec={spec} value={value} onChange={onChange} />
+          </div>
+        )}
       </div>
 
       {stacked && <div className="mt-3"><Control spec={spec} value={value} onChange={onChange} /></div>}
@@ -211,9 +238,9 @@ function TextInput(
         onChange(raw.trim() === '' ? undefined : raw);
       }}
       aria-label={spec.label}
-      className="w-[15rem] rounded-full border border-aico-border-subtle bg-aico-surface px-3.5 py-1.5
-                 text-[13px] text-aico-primary placeholder:text-aico-muted
-                 transition-colors focus:border-aico-accent/60 focus:outline-none"
+      className="w-full rounded-full border border-aico-border-subtle bg-aico-surface px-3.5 py-1.5
+                 text-[13px] text-aico-primary placeholder:text-aico-muted transition-colors
+                 focus:border-aico-accent/60 focus:outline-none md:w-[15rem]"
     />
   );
 }

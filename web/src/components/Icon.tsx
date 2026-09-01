@@ -21,7 +21,7 @@ export type Glyph =
   | IconName
   | 'search' | 'close' | 'plus' | 'check' | 'chevron-down' | 'chevron-right'
   | 'trash' | 'edit' | 'bolt' | 'undo' | 'folder' | 'folder-plus' | 'arrow-up'
-  | 'ellipsis' | 'fork' | 'archive' | 'pin' | 'target';
+  | 'ellipsis' | 'fork' | 'archive' | 'pin' | 'target' | 'paperclip';
 
 const PATHS: Record<Glyph, React.ReactNode> = {
   users: <><circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0" /><path d="M16 6a3 3 0 0 1 0 6" /><path d="M17.5 14.5A6 6 0 0 1 21 20" /></>,
@@ -56,6 +56,16 @@ const PATHS: Record<Glyph, React.ReactNode> = {
   target: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.2" /></>,
   pin: <><path d="M9 4h6l-1 6 3.5 3H6.5L10 10 9 4Z" /><path d="M12 13v7" /></>,
   archive: <><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" /><path d="M10 12h4" /></>,
+  /*
+    Drawn, not the 📎 emoji it replaces.
+
+    An emoji is rendered by whichever font the machine has for it, at whatever
+    weight and colour that font decided — beside eight 1.6px line icons it read
+    as a smudge, and on Windows it picked up the monochrome fallback rather than
+    the colour one. A path obeys `currentColor` and the same stroke as its
+    neighbours, on every machine.
+  */
+  paperclip: <path d="M15.5 8 9 14.5a2.1 2.1 0 0 0 3 3l6.5-6.5a4.2 4.2 0 0 0-6-6l-6.5 6.5a6.3 6.3 0 0 0 9 9L20 15" />,
 };
 
 export function Icon(
