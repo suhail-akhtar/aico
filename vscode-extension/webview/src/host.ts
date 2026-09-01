@@ -41,12 +41,26 @@ export interface PermissionDecision {
   allow: boolean;
 }
 
+/** A file write the run handed to this client to apply. */
+export interface EditRequest {
+  id: string;
+  path: string;
+  after: string;
+}
+
+export interface EditOutcome {
+  id: string;
+  applied: boolean;
+  reason?: string;
+}
+
 type HostMessage =
   | ({ t: 'boot' } & BootInfo)
   | ({ t: 'ask' } & AskRequest)
   | { t: 'new-session' }
   | { t: 'focus-composer' }
-  | ({ t: 'permission:decided' } & PermissionDecision);
+  | ({ t: 'permission:decided' } & PermissionDecision)
+  | ({ t: 'edit:done' } & EditOutcome);
 
 type Listener<T> = (value: T) => void;
 
@@ -55,6 +69,7 @@ const askListeners = new Set<Listener<AskRequest>>();
 const newSessionListeners = new Set<Listener<void>>();
 const focusListeners = new Set<Listener<void>>();
 const decisionListeners = new Set<Listener<PermissionDecision>>();
+const editListeners = new Set<Listener<EditOutcome>>();
 
 /**
  * The boot frame, remembered.
@@ -82,6 +97,12 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
   if (message?.t === 'permission:decided') {
     for (const listener of decisionListeners) listener({ id: message.id, allow: message.allow });
+  }
+  if (message?.t === 'edit:done') {
+    const done = message;
+    for (const listener of editListeners) {
+      listener({ id: done.id, applied: done.applied, reason: done.reason });
+    }
   }
 });
 
@@ -134,6 +155,22 @@ export function onPermissionDecided(listener: Listener<PermissionDecision>): () 
  */
 export function requestPermission(request: PermissionRequest): void {
   vscodeApi.postMessage({ t: 'permission', request });
+}
+
+/** What VS Code did with a write it was handed. */
+export function onEditDone(listener: Listener<EditOutcome>): () => void {
+  editListeners.add(listener);
+  return () => editListeners.delete(listener);
+}
+
+/**
+ * Ask VS Code to apply a file write as a WorkspaceEdit.
+ *
+ * Fire and forget, like the permission request: applying can involve opening a
+ * document and saving it, and the answer comes back as `edit:done`.
+ */
+export function requestEdit(request: EditRequest): void {
+  vscodeApi.postMessage({ t: 'edit', request });
 }
 
 export const host = {

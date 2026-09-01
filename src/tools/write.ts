@@ -1,6 +1,5 @@
-import { writeFile as fsWriteFile, mkdir } from 'fs/promises';
-import path from 'path';
 import { resolveInsideWorkspace } from './path.js';
+import { commitFile } from './file-writer.js';
 import { recordBeforeWrite, recordAfterWrite } from '../checkpoint/index.js';
 
 export interface WriteInput {
@@ -13,8 +12,9 @@ export async function writeFile(input: WriteInput): Promise<string> {
   // Before the write, so what is captured is the state the turn started from.
   // A no-op when nothing is recording.
   await recordBeforeWrite(resolved);
-  await mkdir(path.dirname(resolved), { recursive: true });
-  await fsWriteFile(resolved, input.content, 'utf8');
+  // Through the run's writer when it has one, so an edit made from inside an
+  // editor lands in its undo stack rather than arriving as an external change.
+  await commitFile(resolved, input.content);
   // After it, so a later outside edit can be told from an untouched file —
   // which is what lets restore skip work that is not the agent's to undo.
   await recordAfterWrite(resolved);

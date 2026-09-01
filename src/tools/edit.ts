@@ -1,5 +1,6 @@
-import { readFile, writeFile } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { resolveInsideWorkspace } from './path.js';
+import { commitFile } from './file-writer.js';
 import { recordBeforeWrite, recordAfterWrite } from '../checkpoint/index.js';
 
 export interface EditInput {
@@ -29,7 +30,9 @@ export async function editFile(input: EditInput): Promise<string> {
   }
 
   const updated = original.replace(input.old_str, input.new_str);
-  await writeFile(resolved, updated, 'utf8');
+  // `original` is handed over rather than re-read: it is already here, and a
+  // second read would open a window in which the two could disagree.
+  await commitFile(resolved, updated, original);
   await recordAfterWrite(resolved);
 
   const oldLines = input.old_str.split('\n').length;

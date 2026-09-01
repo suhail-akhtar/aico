@@ -140,6 +140,13 @@ export interface SubmitOptions {
   /** How much to ask before acting. Omitted means `auto`, as it always was. */
   approval?: 'auto' | 'edits' | 'ask';
   /**
+   * This client applies the run's file writes itself.
+   *
+   * Only say this if you will answer every `edit` event — the tool call blocks
+   * until you do.
+   */
+  applyEdits?: boolean;
+  /**
    * Settle this session's open tasks as part of accepting the message.
    *
    * Sent as a field rather than left for the server to recognise in the
@@ -218,6 +225,15 @@ export const api = {
    */
   permit: (sessionId: string, id: string, allow: boolean) =>
     post<{ ok: boolean }>('permission', { sessionId, id, allow }),
+
+  /**
+   * Report what happened to a write this client was handed.
+   *
+   * Anything other than `applied: true` becomes a failed tool call, so the
+   * model learns the file was not written rather than assuming it was.
+   */
+  edited: (sessionId: string, id: string, applied: boolean, reason?: string) =>
+    post<{ ok: boolean }>('edit', { sessionId, id, applied, reason }),
 
   /** What differs from the last commit, with this session's own edits marked. */
   // ── skills ─────────────────────────────────────────────────────────
@@ -791,6 +807,15 @@ export interface PermissionRequest {
   detail: string;
   /** Present for the write tools, so a diff can be shown before allowing it. */
   fileDiff?: { path: string; added?: string[]; removed?: string[]; preview?: string };
+}
+
+/** A file write the client was asked to apply itself. */
+export interface EditRequest {
+  id: string;
+  /** Absolute path, already resolved inside the workspace by the engine. */
+  path: string;
+  /** The whole intended contents. `before` is not sent — the client has it. */
+  after: string;
 }
 
 export interface StreamEvent {

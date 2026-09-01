@@ -64,6 +64,7 @@ function getExecutionMode(name: string): ExecutionMode {
 }
 import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
 import { runInContext } from './run-context.js';
+import type { FileWriter } from './tools/file-writer.js';
 import { buildRuntimeAwareness } from './capabilities.js';
 import { renderRunningWork } from './work/projection.js';
 import { noteWindowFromError } from './context-window.js';
@@ -322,6 +323,15 @@ export interface AgentOptions {
   ) => void;
   /** Ink UI permission callback — bypasses readline-based permission check */
   onPermissionRequest?: (toolName: string, detail: string, fileDiff?: { path: string; added?: string[]; removed?: string[]; preview?: string }) => Promise<boolean>;
+  /**
+   * Apply this run's file writes somewhere other than the filesystem.
+   *
+   * The VS Code panel supplies one so an edit enters the editor's undo stack
+   * and its Source Control view instead of arriving as an external change.
+   * Omitted everywhere else, which is what keeps the terminal and the browser
+   * workspace behaving exactly as they did. See `tools/file-writer`.
+   */
+  applyEdit?: FileWriter;
   /** Ink UI AskUser callback — agent pauses to ask human a question */
   onAskUser?: (question: string) => Promise<string>;
   /**
@@ -458,6 +468,15 @@ interface ToolHandlerOpts {
   onToolCall?: (name: string, args: Record<string, unknown>, callId: string) => void;
   onToolDone?: (name: string, result: unknown, callId: string) => void;
   onPermissionRequest?: (toolName: string, detail: string, fileDiff?: { path: string; added?: string[]; removed?: string[]; preview?: string }) => Promise<boolean>;
+  /**
+   * Apply this run's file writes somewhere other than the filesystem.
+   *
+   * The VS Code panel supplies one so an edit enters the editor's undo stack
+   * and its Source Control view instead of arriving as an external change.
+   * Omitted everywhere else, which is what keeps the terminal and the browser
+   * workspace behaving exactly as they did. See `tools/file-writer`.
+   */
+  applyEdit?: FileWriter;
   onAskUser?: (question: string) => Promise<string>;
   silent?: boolean;
   agentType?: SubAgentType;
@@ -1037,6 +1056,9 @@ export async function runAgent(opts: AgentOptions): Promise<string> {
       cwd: opts.cwd ?? process.cwd(),
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
       ...(opts.settings ? { settings: opts.settings } : {}),
+      // Who applies this run's writes. Undefined means the filesystem, which is
+      // every run except one driven from an editor that can do better.
+      ...(opts.applyEdit ? { applyEdit: opts.applyEdit } : {}),
     },
     () => runAgentInContext(opts),
   );

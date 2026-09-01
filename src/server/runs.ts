@@ -119,9 +119,26 @@ export interface ActiveRun {
    * the reader never saw.
    */
   pendingPermission?: PendingPermission;
+  /**
+   * A file write handed to the client to apply, and the promise holding it.
+   *
+   * Only ever set when the client said it could apply edits itself — the VS
+   * Code panel, which turns them into `WorkspaceEdit`s so they enter the
+   * editor's undo stack. Everything else writes straight to disk and never
+   * reaches this.
+   */
+  pendingEdit?: PendingEdit;
   /** How this run's tool calls are approved. Fixed for the turn. */
   approval: ApprovalMode;
   conversationHistory: Array<{ role: string; content: string }>;
+}
+
+export interface PendingEdit {
+  id: string;
+  path: string;
+  after: string;
+  resolve: (outcome: { applied: boolean; reason?: string }) => void;
+  at: number;
 }
 
 export interface PendingPermission {
@@ -242,6 +259,15 @@ export class RunManager {
       planMode?: boolean; autoApprove?: boolean; effort?: string;
       /** How much to ask before acting. Defaults to `auto`, as it always was. */
       approval?: ApprovalMode;
+      /**
+       * The client will apply this run's file writes itself.
+       *
+       * Set by the VS Code panel, which applies them as `WorkspaceEdit`s. Any
+       * client that says this must answer every `edit` event, because the tool
+       * call is blocked until it does — which is why it is opt-in rather than
+       * inferred from anything.
+       */
+      applyEdits?: boolean;
       /** Images the reader attached to this turn, by attachment id. */
       images?: ImageRef[];
     } = {},
@@ -298,6 +324,38 @@ export class RunManager {
       run.pendingQuestion = { question, resolve, at: Date.now() };
       emit('question', { question });
     }));
+
+    /**
+     * Hand a file write to the client instead of writing it here.
+     *
+     * `before` is deliberately not sent. The client has the file — it is an
+     * editor sitting on the same disk — and the copy it has open is a better
+     * "before" than anything this side could ship, because it accounts for
+     * unsaved changes. Sending it would also double the payload of every write
+     * for a value the receiver already holds.
+     *
+     * Refusal is a real answer. Anything that is not an explicit `applied`
+     * becomes a failed tool call, which is what lets the model notice and adapt
+     * rather than carry on believing a file it never wrote.
+     */
+    const applyEditThroughClient = ({ path: file, after }: { path: string; after: string }) =>
+      new Promise<{ applied: boolean; reason?: string }>((resolve) => {
+        /*
+          One at a time, for the same reason permissions are. Two writes in
+          flight would overwrite each other's resolver and hang the turn on the
+          one that lost.
+        */
+        if (run.pendingEdit) {
+          resolve({ applied: false, reason: 'another edit is already being applied' });
+          return;
+        }
+        const pending: PendingEdit = {
+          id: `edit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          path: file, after, resolve, at: Date.now(),
+        };
+        run.pendingEdit = pending;
+        emit('edit', { id: pending.id, path: file, after });
+      });
 
     /**
      * Ask before a tool runs, when the turn was submitted that way.
@@ -500,6 +558,7 @@ export class RunManager {
         */
         autoApprove: run.approval === 'auto' ? (opts.autoApprove ?? true) : false,
         ...(onPermissionRequest ? { onPermissionRequest } : {}),
+        ...(opts.applyEdits ? { applyEdit: applyEditThroughClient } : {}),
         planMode: opts.planMode ?? false,
         ...(opts.effort ? { effort: opts.effort } : {}),
         abortSignal: run.abort.signal,
@@ -615,6 +674,14 @@ export class RunManager {
         run.pendingPermission.resolve(false);
         delete run.pendingPermission;
         emit('permission', { id: '', tool: '', detail: '' });
+      }
+      // A write nobody applied did not happen, and the tool call has to be told
+      // so. Resolving it as applied would leave the transcript claiming a file
+      // that is not on disk.
+      if (run.pendingEdit) {
+        run.pendingEdit.resolve({ applied: false, reason: 'the turn ended before it was applied' });
+        delete run.pendingEdit;
+        emit('edit', { id: '', path: '', after: '' });
       }
       // Queued messages run now, as their own turns.
       //
@@ -947,6 +1014,30 @@ export class RunManager {
     this.hub.publish({ type: 'permission', sessionId, data: { id: '', tool: '', detail: '' } });
     resolve(allowed);
     return true;
+  }
+
+  /**
+   * Report what the client did with a write it was handed.
+   *
+   * The id must match, for the same reason a permission decision's must: a
+   * reconnecting client replays the pending edit, and a stale "applied" could
+   * otherwise release a different write than the one it actually performed.
+   */
+  edited(sessionId: string, id: string, applied: boolean, reason?: string): boolean {
+    const run = this.runs.get(sessionId);
+    if (!run?.pendingEdit || run.pendingEdit.id !== id) return false;
+    const { resolve } = run.pendingEdit;
+    delete run.pendingEdit;
+    this.hub.publish({ type: 'edit', sessionId, data: { id: '', path: '', after: '' } });
+    resolve({ applied, ...(reason ? { reason } : {}) });
+    return true;
+  }
+
+  /** The write this session is waiting on, if any. */
+  editOf(sessionId: string): { id: string; path: string; after: string } | undefined {
+    const pending = this.runs.get(sessionId)?.pendingEdit;
+    if (!pending) return undefined;
+    return { id: pending.id, path: pending.path, after: pending.after };
   }
 
   /**
