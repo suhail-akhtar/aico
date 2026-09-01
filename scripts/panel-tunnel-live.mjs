@@ -547,6 +547,52 @@ try {
   }
   handedStream.close();
 
+  /*
+    ── a flood of output must not reach the client whole ─────────────────
+
+    The bug this guards froze VS Code: a wide `find` produced megabytes of
+    output, `Bash` retains up to 10MB of it, and the progress sink fired every
+    400ms — so the client rebuilt a `<pre>` from the whole buffer several times
+    a second until the editor offered to close the window.
+
+    Two independent bounds now exist and both are checked: the stream carries a
+    tail rather than the buffer (here), and the renderer draws a bounded tail of
+    whatever it is given (unit-tested in the harness). Either alone would leave
+    the other exposed.
+  */
+  const floodSession = `flood-probe-${Date.now().toString(36)}`;
+  const frames = [];
+  const floodStream = streamSession(
+    floodSession,
+    (event) => {
+      if (event.type === 'tool-progress' && typeof event.data?.output === 'string') {
+        frames.push(event.data.output.length);
+      }
+    },
+    undefined,
+    0,
+    workspace,
+  );
+
+  await api.submit({
+    sessionId: floodSession,
+    task: 'Run exactly this command and nothing else: '
+      + 'for i in $(seq 1 60000); do echo "line $i of a very wide and repetitive path/that/goes/on"; done',
+    project: workspace,
+  }).catch(() => { /* reported earlier if the provider is unavailable */ });
+
+  const flooded = await until(() => frames.length > 0, 120_000);
+  check(flooded, `live output arrived as progress frames (${frames.length} seen)`);
+
+  if (flooded) {
+    const biggest = Math.max(...frames);
+    check(
+      biggest <= 20_000,
+      `no progress frame carries more than a readable tail (largest ${biggest.toLocaleString()} chars)`,
+    );
+  }
+  floodStream.close();
+
   // ── closing a stream must not look like a failure ───────────────────
   const before = wiring.frames.length;
   handle.close();

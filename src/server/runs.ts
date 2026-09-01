@@ -175,6 +175,15 @@ const EDIT_TOOLS = new Set([
   'Edit', 'Write', 'MultiEdit', 'NotebookEdit',
 ]);
 
+/**
+ * How much live command output rides on one progress frame.
+ *
+ * Sized for "what is happening now", which is all a progress frame is for. The
+ * finished result is delivered in full with `tool-done` and stored in the log,
+ * so this bounds the stream without bounding the record.
+ */
+const PROGRESS_TAIL_CHARS = 16_000;
+
 export class RunManager {
   private readonly runs = new Map<string, ActiveRun>();
 
@@ -571,8 +580,28 @@ export class RunManager {
           // still working". Scoped to the call that is running, so partial
           // output lands on the right card.
           if (name === 'Bash') {
+            /*
+              The tail, not the whole buffer.
+
+              `Bash` retains up to 10MB and this fires every 400ms, so a command
+              like a wide `find` was pushing megabytes down the stream several
+              times a second — and the client rebuilt a `<pre>` from all of it
+              each time. That froze the VS Code webview hard enough that the
+              editor offered to close the window.
+
+              A tail is also the *right* thing to stream: the point of live
+              output is watching what is happening now. The complete result is
+              in the log and arrives with `tool-done` regardless, so nothing is
+              lost by not re-sending the beginning eight times a second.
+            */
             setBashProgressSink(({ output, elapsedMs }) =>
-              emit('tool-progress', { callId, output, elapsedMs }));
+              emit('tool-progress', {
+                callId,
+                output: output.length > PROGRESS_TAIL_CHARS
+                  ? output.slice(-PROGRESS_TAIL_CHARS)
+                  : output,
+                elapsedMs,
+              }));
           }
         },
         onToolDone: (name, result, callId) => {

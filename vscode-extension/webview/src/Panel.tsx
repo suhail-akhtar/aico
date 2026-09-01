@@ -48,6 +48,15 @@ export function Panel(): React.ReactElement {
    * it — usually that `aico` is not installed, which needs a different answer.
    */
   const [fatal, setFatal] = useState<string | null>(null);
+  /**
+   * Which of the three waits the panel is in.
+   *
+   * Named rather than a boolean, because "loading" is the least useful thing a
+   * loading state can say. A server that never starts and a log that never
+   * replays look identical behind one spinner and have completely different
+   * causes.
+   */
+  const [stage, setStage] = useState<'server' | 'history' | 'ready'>('server');
 
   const connect = useStore(s => s.connect);
   const disconnect = useStore(s => s.disconnect);
@@ -128,6 +137,12 @@ export function Panel(): React.ReactElement {
           back rather than captured before, or this would reconnect to whatever
           session the previous folder left behind.
         */
+        /*
+          The first request through the tunnel is what starts the server, so
+          reaching here means it is up. Anything after this is the log.
+        */
+        if (!cancelled) setStage('history');
+
         connect(useStore.getState().sessionId);
         await refreshSessions();
         if (cancelled) return;
@@ -163,6 +178,7 @@ export function Panel(): React.ReactElement {
           useStore.getState().setModel(boot.lastModel);
         }
 
+        if (!cancelled) setStage('ready');
         void refreshProviders();
         void refreshSettings();
       } catch (err) {
@@ -174,6 +190,31 @@ export function Panel(): React.ReactElement {
     // Runs once the folder is known. `connect` is what changes sessions, not this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boot]);
+
+  /*
+    Say what is happening while it happens.
+
+    Three waits stack up before a panel is usable and none of them used to show
+    anything: the extension activating, `aico serve` starting for the folder,
+    and the session's log replaying. On a cold start that is several seconds of
+    blank column, which is indistinguishable from a panel that is broken — and
+    the honest fix is not to make it faster but to say which of the three it is
+    in, because each has a different remedy if it never finishes.
+  */
+  if (!boot) {
+    return <Loading what="Starting up…" detail="Waiting for the extension to hand over the folder." />;
+  }
+
+  if (boot.folder && stage !== 'ready') {
+    return (
+      <Loading
+        what={stage === 'server' ? 'Starting aico…' : 'Loading this conversation…'}
+        detail={stage === 'server'
+          ? `In ${boot.folderName ?? boot.folder}. The first start compiles nothing but does open a server.`
+          : 'Replaying the session log — the whole conversation, not a summary.'}
+      />
+    );
+  }
 
   if (boot && !boot.folder) {
     return (
@@ -237,6 +278,26 @@ function Empty({ title, detail, hint, action }: {
         </button>
       )}
       {hint && <p className="text-[11px] leading-relaxed text-aico-muted">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * A wait with a name on it.
+ *
+ * Deliberately not a spinner alone. A spinner says "something is happening",
+ * which the reader already assumed; the sentence says *what*, which is the part
+ * that tells them whether waiting is reasonable.
+ */
+function Loading({ what, detail }: { what: string; detail: string }): React.ReactElement {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+      <span
+        aria-hidden
+        className="size-4 animate-spin rounded-full border-2 border-aico-border border-t-aico-accent"
+      />
+      <p className="text-[12px] text-aico-secondary" role="status">{what}</p>
+      <p className="text-[11px] leading-relaxed text-aico-muted">{detail}</p>
     </div>
   );
 }

@@ -16,7 +16,7 @@ import {
 import {
   initialSessionId, rememberSession, forgetSession, isValidSessionId, freshSessionId,
 } from './dist-test/session-memory.mjs';
-import { formatResult, outcomeOf } from './dist-test/tool-result.mjs';
+import { formatResult, outcomeOf, trimForDisplay } from './dist-test/tool-result.mjs';
 import { todosFrom, TASK_REPLY } from './dist-test/todos.mjs';
 import { planFrom, PLAN_REPLY } from './dist-test/plans.mjs';
 import { loadDismissals, saveDismissals } from './dist-test/panel-memory.mjs';
@@ -1830,6 +1830,50 @@ test('a broken board says what is wrong with it', () => {
   assert.match(parseDashboardSpec('{oops').error, /not valid JSON/);
   assert.match(parseDashboardSpec('[]').error, /must be a JSON object/);
 });
+
+// ── output a transcript refuses to draw ──────────────────────────────
+section('Output a transcript refuses to draw');
+{
+  /*
+    The bound that stops a wide `find` freezing the editor. `Bash` retains up to
+    10MB of output and streams it every 400ms; drawing that is tens of thousands
+    of DOM nodes rebuilt several times a second, which took VS Code all the way
+    to "The window is not responding".
+
+    Two bounds exist and this covers the renderer's. The stream's own tail is
+    checked in scripts/panel-tunnel-live.mjs — either alone would leave the
+    other exposed.
+  */
+  const must = (cond, why) => { if (!cond) throw new Error(why); };
+
+  test('short output is left alone', () => {
+    const { text, dropped } = trimForDisplay('one\ntwo\nthree');
+    must(text === 'one\ntwo\nthree', 'untouched');
+    must(dropped === 0, 'nothing dropped');
+  });
+
+  test('a flood keeps the tail and counts what it dropped', () => {
+    const flood = Array.from({ length: 60000 }, (_, i) => `line ${i}`).join('\n');
+    const { text, dropped } = trimForDisplay(flood);
+    must(text.length < 45000, `bounded (${text.length} chars)`);
+    must(dropped > 59000, `reports what was left off (${dropped})`);
+    // The tail, because the end of a command's output is where the exit
+    // message and the error live. Head-truncating a build log hides the failure.
+    must(text.endsWith('line 59999'), 'and keeps the end, where the outcome is');
+  });
+
+  test('one pathological line cannot survive by being a single line', () => {
+    const { text } = trimForDisplay('x'.repeat(500000));
+    must(text.length <= 40000, `character-bounded too (${text.length})`);
+  });
+
+  test('many short lines are line-bounded', () => {
+    const many = Array.from({ length: 5000 }, () => 'a').join('\n');
+    const { text, dropped } = trimForDisplay(many);
+    must(text.split('\n').length <= 400, 'at most 400 lines drawn');
+    must(dropped > 4000, `and the rest reported (${dropped})`);
+  });
+}
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);

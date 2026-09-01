@@ -13,9 +13,9 @@
  * left of a document is louder than the document.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { changeFromArgs, FileDiff } from './FileDiff';
-import { formatResult, outcomeOf } from './tool-result';
+import { formatResult, outcomeOf, trimForDisplay } from './tool-result';
 
 /**
  * The one thing about a call worth reading at a glance.
@@ -85,8 +85,23 @@ export const ToolCallCard = React.memo(function ToolCallCard({
 
   const argPreview = describeArgs(args);
 
-  const { text: resultText, isError: looksLikeError } =
+  const { text: rawResult, isError: looksLikeError } =
     result !== undefined ? formatResult(result) : { text: '', isError: false };
+
+  /*
+    What is actually drawn, which is not the same as what arrived.
+
+    `Bash` keeps up to 10MB of output and streams it as progress every 400ms.
+    Putting that in a `<pre>` is tens of thousands of DOM nodes rebuilt several
+    times a second: it froze the VS Code webview hard enough that the editor
+    offered to close the window. A `find` across a Flutter checkout was enough.
+
+    The cap is on the *tail*, because the end of a command's output is the part
+    that says how it went. What was dropped is stated rather than silently cut —
+    a transcript that quietly shows the last page of a hundred looks like the
+    whole thing.
+  */
+  const { text: resultText, dropped } = useMemo(() => trimForDisplay(rawResult), [rawResult]);
   // The engine said so, or the text betrays it. The first is authoritative and
   // was being thrown away: a structured failure arrives as the JSON string the
   // log stored, and a string cannot be inspected for an `error` field, so every
@@ -199,6 +214,11 @@ export const ToolCallCard = React.memo(function ToolCallCard({
                       text-[12px] leading-[20px] selectable ${
                         isError ? 'text-aico-danger' : 'text-aico-secondary'}`}
         >
+          {dropped > 0 && (
+            <span className="text-aico-muted">
+              […{dropped.toLocaleString()} earlier lines not shown]{'\n'}
+            </span>
+          )}
           {resultText}
         </pre>
       )}
