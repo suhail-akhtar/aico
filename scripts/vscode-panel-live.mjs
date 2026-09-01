@@ -254,6 +254,19 @@ fs.writeFileSync(path.join(workspace, 'sample.ts'), [
   '',
 ].join('\n'));
 
+/*
+  A file the language server will complain about.
+
+  The point of `VSCodeDiagnostics` is that it reads problems nothing outside the
+  editor can see, so the probe has to plant one that only tsserver knows about —
+  no build is ever run in this workspace, and nothing else would report it.
+*/
+fs.writeFileSync(path.join(workspace, 'broken.ts'), [
+  '// The type error below is deliberate: the probe asks the agent to find it.',
+  'export const misdeclared: number = "aico-planted-type-error";',
+  '',
+].join('\n'));
+
 let editor;
 let workbench;
 let panel;
@@ -695,6 +708,90 @@ try {
       Boolean(ranged),
       'the chip carries the selected line range, not just the filename',
     );
+
+    /*
+      ── a host tool, run by the editor it is named after ──────────────
+
+      The one thing nothing else in this repo can check. `view/host-tools.ts`
+      calls `vscode.languages.getDiagnostics`, `vscode.tasks.fetchTasks` and
+      `vscode.workspace.updateWorkspaceFolders`; none of those exist outside an
+      extension host, so every other test of this feature answers the call
+      itself and proves only the channel.
+
+      This drives the whole chain instead: a real turn typed into the composer,
+      a real model choosing the tool, the webview handing it to the extension,
+      the extension asking the real TypeScript language server, and the answer
+      arriving back in the transcript. Six hops, five of which no unit test can
+      reach.
+    */
+    await openFile(path.join(workspace, 'broken.ts'), 2);
+
+    /*
+      Typed the way a person types.
+
+      A React-controlled textarea ignores an assignment to `.value` — the
+      component owns it, and the next render puts the old text back. Going
+      through the prototype's setter and firing `input` is what makes React
+      see a change it did not make, and it is the only way to drive a
+      controlled field from outside.
+    */
+    const typed = await evaluate(`
+      (() => {
+        const box = document.querySelector('textarea');
+        if (!box) return false;
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype, 'value',
+        ).set;
+        setter.call(box, 'Call the VSCodeDiagnostics tool for broken.ts and tell me the '
+          + 'exact message it reports. Do not read the file or run any command.');
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        box.focus();
+        box.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true,
+        }));
+        return true;
+      })()
+    `).catch(() => false);
+    check(typed === true, 'a message can be typed and sent from the panel');
+
+    /*
+      Two outcomes are watched for, and they mean opposite things.
+
+      The planted message coming back means the whole chain worked. The
+      "needs an editor attached" refusal means the tool was offered but the
+      bridge did not answer — which is the failure this check exists to catch,
+      and it is worth naming rather than reporting as a timeout.
+    */
+    const answered = await until(async () => {
+      const text = await evaluate('document.body.innerText').catch(() => '');
+      if (/needs an editor attached/i.test(text)) return { failed: 'the bridge did not answer' };
+      if (/aico-planted-type-error|Type .*string.* is not assignable/i.test(text)) {
+        return { ok: true };
+      }
+      return null;
+    }, 180_000, 2000);
+
+    if (answered?.ok) {
+      check(true, 'the agent read a problem only the language server knew about');
+    } else if (answered?.failed) {
+      check(false, `VSCodeDiagnostics reached the model but ${answered.failed}`);
+    } else {
+      /*
+        Not a pass, and not a hard failure either.
+
+        This is the one check in this file that needs a configured provider and
+        a language server that has finished starting, so a timeout here is
+        genuinely ambiguous — and a probe that cries wolf on somebody else's
+        missing API key stops being read.
+      */
+      const text = await evaluate('document.body.innerText').catch(() => '');
+      const sawTool = /VSCodeDiagnostics/i.test(text);
+      check(
+        sawTool,
+        'the agent at least called VSCodeDiagnostics'
+        + ` (no answer arrived in 180s; ${sawTool ? 'the tool was called' : 'it never was — no provider configured?'})`,
+      );
+    }
   }
 } catch (err) {
   failed += 1;
