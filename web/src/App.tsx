@@ -15,6 +15,7 @@ import { MiniAppsPane } from './components/MiniAppsPane';
 import { MiniAppScope } from './components/MiniAppScope';
 import { ChatPane } from './components/ChatPane';
 import { Composer } from './components/Composer';
+import { PermissionPrompt } from './components/PermissionPrompt';
 
 import { SystemPanel } from './components/SystemPanel';
 import { Trajectory } from './components/Trajectory';
@@ -146,6 +147,13 @@ export function App(): React.ReactElement {
             <SidePanels />
             <GoalBar />
             <ActivityLine />
+            {/*
+              Directly above the composer, because the turn is blocked on it and
+              the composer is where the eye already is. Below the transcript
+              rather than inside it: a prompt that scrolls away with the
+              conversation is a prompt that gets missed while a run waits.
+            */}
+            <PermissionPrompt />
             <Composer />
           </>
         )}

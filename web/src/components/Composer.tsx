@@ -24,6 +24,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { ModelPicker } from './ModelPicker';
 import { AgentPicker } from './AgentPicker';
+import { EffortPicker } from './EffortPicker';
+import { ApprovalPicker, type ApprovalMode } from './ApprovalPicker';
+import type { EffortChoice } from '../../../shared/reasoning';
 import { SetGoalButton } from './GoalBar';
 import { MentionMenu } from './MentionMenu';
 import { mentionAt, searchAgents } from '../agents';
@@ -54,6 +57,13 @@ export function Composer(): React.ReactElement {
   // with the mode it controls is worse than no switch.
   const planMode = useStore(s => s.planMode);
   const setPlanMode = useStore(s => s.setPlanMode);
+  /*
+    Held locally, beside plan mode, because both describe the *next* message
+    rather than the session. They survive sending: somebody who lowered the
+    effort wants it lowered for the message after this one too.
+  */
+  const [effort, setEffort] = useState<EffortChoice>('auto');
+  const [approval, setApproval] = useState<ApprovalMode>('auto');
   const textarea = useRef<HTMLTextAreaElement>(null);
 
   // ── @mentions ──────────────────────────────────────────────────────
@@ -179,7 +189,7 @@ ${prefill.text}` : prefill.text));
     if (question !== null) { await answer(content); return; }
     if (mode === 'steer') await steer(content);
     else if (mode === 'followup') await followup(content);
-    else await submit(content, { planMode });
+    else await submit(content, { planMode, effort, approval });
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -361,6 +371,10 @@ ${prefill.text}` : prefill.text));
             <AgentPicker />
 
             <ModelPicker />
+
+            <EffortPicker value={effort} onChange={setEffort} disabled={busy} />
+
+            <ApprovalPicker value={approval} onChange={setApproval} disabled={busy} />
 
             {busy ? (
               <>
