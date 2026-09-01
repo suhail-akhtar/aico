@@ -29,11 +29,12 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.7.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.8.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
       <a href="workspace.html" aria-current="page">Workspace</a>
+      <a href="vscode.html">VS Code</a>
       <a href="automation.html">Automation</a>
       <a href="compare.html">Compare</a>
       <a href="widgets.html">Visuals</a>
@@ -157,6 +158,50 @@
       invites a retry, a termination invites a re-plan.
     </p>
 
+    <h2>How much it asks, and how hard it thinks</h2>
+    <p>
+      Two controls on the composer, both per message rather than per session — because the
+      message you are about to send is what you know something about.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Approve</th><th>What it asks about</th></tr></thead>
+        <tbody>
+          <tr><td><strong>auto</strong></td><td>Nothing, and this is the default — what every browser session has always done.</td></tr>
+          <tr><td><strong>not edits</strong></td><td>File writes go through; commands, fetches and delegation are put to you.</td></tr>
+          <tr><td><strong>always</strong></td><td>Every tool call waits for a decision.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <code>Terminal</code> is deliberately absent from the middle mode's pass-through list. A
+      shell command can do everything a file write can and more, so "auto-accept edits" would
+      be a lie if it also ran commands. A prompt appears above the composer, quotes the tool
+      and shows a diff for an edit, and clears the moment it is answered.
+    </p>
+    <p>
+      <strong>Think</strong> offers what the <em>model</em> accepts and nothing when the model
+      is unknown — five settings that might each be refused would be worse than none. Each
+      provider is sent its own shape: <code>output_config.effort</code> for Anthropic,
+      <code>reasoning_effort</code> on OpenAI Chat, <code>reasoning.effort</code> on the
+      Responses API and OpenRouter, <code>thinking.type</code> for Z.AI.
+    </p>
+    <p>
+      <code>auto</code> means <em>send nothing</em>, which is not the same as "medium". For
+      several vendors it is adaptive per request; for others it is a fixed level the vendor
+      chose, and the button says which — <code>Think auto·high</code> on a provider whose
+      silent default is high. That single fact is the answer to "why did a one-line change
+      take so long", and it was invisible before.
+    </p>
+
+    <h2>Rewriting what you asked</h2>
+    <p>
+      Edit a message and send it again. The log is append-only, so the new message carries a
+      marker naming the one it replaces and the transcript folds them back into a single row
+      with arrows to move between versions. The earlier attempt — often the one that was
+      right — stays reachable rather than being silently overwritten.
+    </p>
+
     <h2>Forking a conversation</h2>
     <p>
       Branch from any message and carry on down a different path, with the original left
@@ -197,6 +242,7 @@
     </p>
 
     <div class="next">
+      <a class="btn" href="vscode.html">The same session, in VS Code →</a>
       <a class="btn" href="widgets.html">Charts, maths and diagrams →</a>
       <a class="btn" href="miniapps.html">Mini Apps →</a>
     </div>
