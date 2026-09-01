@@ -66,6 +66,10 @@ export async function applyEdit(request: EditRequest): Promise<EditOutcome> {
       // what makes the buffer and the disk agree from this point on.
       const created = await vscode.workspace.openTextDocument(uri);
       if (created.isDirty) await created.save();
+      // A new file is worth showing for the same reason a changed one is, and
+      // more so: nothing else in the editor hints that it now exists.
+      void vscode.window.showTextDocument(created, { preview: true, preserveFocus: true })
+        .then(undefined, () => { /* created regardless */ });
       return { applied: true };
     }
 
@@ -86,6 +90,26 @@ export async function applyEdit(request: EditRequest): Promise<EditOutcome> {
       // is told, and can try a different route.
       return { applied: false, reason: 'VS Code did not apply the edit' };
     }
+
+    /*
+      Show the file it just changed.
+
+      Copilot and Cursor both do this, and it is not decoration: an agent that
+      edits six files while you read prose leaves you no idea which ones moved,
+      and `Ctrl+Z` is only useful if you are looking at the buffer it applies to.
+
+      `preview: true` reuses the italic preview tab rather than accumulating six
+      permanent ones, and `preserveFocus` keeps the caret in the panel — the
+      reader is mid-conversation, and stealing focus to a file they did not ask
+      to edit is worse than not showing it.
+    */
+    void vscode.window.showTextDocument(existing, {
+      preview: true,
+      preserveFocus: true,
+      selection: new vscode.Range(
+        existing.positionAt(span.start), existing.positionAt(span.start),
+      ),
+    }).then(undefined, () => { /* a file the editor will not show is still edited */ });
 
     const saved = await existing.save();
     if (!saved) {

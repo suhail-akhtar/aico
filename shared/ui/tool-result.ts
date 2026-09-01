@@ -184,3 +184,41 @@ function tryParse(text: string): unknown {
   if (!trimmed.startsWith('{')) return undefined;
   try { return JSON.parse(trimmed); } catch { return undefined; }
 }
+
+/**
+ * How much command output a transcript will draw.
+ *
+ * Two limits, because either alone lets the other through: a hundred thousand
+ * short lines is as unrenderable as one enormous line. Both are generous for
+ * reading and far below what freezes a renderer.
+ */
+const MAX_DISPLAY_LINES = 400;
+const MAX_DISPLAY_CHARS = 40_000;
+
+/**
+ * Keep the tail of a result, and say how much was left off.
+ *
+ * The tail, not the head: the end of a command's output is where the exit
+ * message, the error and the summary live. A head-truncated build log shows the
+ * compiler's banner and hides the failure.
+ */
+export function trimForDisplay(text: string): { text: string; dropped: number } {
+  if (text.length <= MAX_DISPLAY_CHARS) {
+    const lines = text.split('\n');
+    if (lines.length <= MAX_DISPLAY_LINES) return { text, dropped: 0 };
+    return {
+      text: lines.slice(-MAX_DISPLAY_LINES).join('\n'),
+      dropped: lines.length - MAX_DISPLAY_LINES,
+    };
+  }
+
+  // Character-bounded first, then line-bounded, so one pathological line cannot
+  // survive by being a single line.
+  const tail = text.slice(-MAX_DISPLAY_CHARS);
+  const lines = tail.split('\n');
+  const kept = lines.slice(-MAX_DISPLAY_LINES);
+  return {
+    text: kept.join('\n'),
+    dropped: text.split('\n').length - kept.length,
+  };
+}
