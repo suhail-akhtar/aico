@@ -349,6 +349,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           // during a prompt leaves the turn blocked with nothing on screen to
           // say why — the run is fine, the reason for the pause is not.
           permission: runs.permissionOf(sessionId) ?? null,
+          // A write handed to the client and not yet reported on. Same reason:
+          // a reload mid-write must not leave the tool call blocked in silence.
+          edit: runs.editOf(sessionId) ?? null,
         },
       })}\n\n`);
       return;
@@ -868,6 +871,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           */
           approval: (['auto', 'edits', 'ask'] as const)
             .find(m => m === (body as { approval?: string }).approval) ?? 'auto',
+          // Opt-in, never inferred: a client that claims this must answer every
+          // `edit` event, because the tool call waits until it does.
+          applyEdits: (body as { applyEdits?: boolean }).applyEdits === true,
           ...(pictures.length ? { images: pictures } : {}),
         }).catch(() => { /* already reported on the stream as turn-end */ });
         return;
@@ -997,6 +1003,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           send(res, 400, { error: 'sessionId and content required' }); return;
         }
         send(res, 200, { ok: runs.answer(sessionId, content) });
+        return;
+      }
+      case 'edit': {
+        // The client applied — or refused — a write it was handed. Named by id
+        // for the same reason a permission decision is.
+        const { sessionId, id, applied, reason } = body as {
+          sessionId?: string; id?: string; applied?: boolean; reason?: string;
+        };
+        if (!sessionId || !id || typeof applied !== 'boolean') {
+          send(res, 400, { error: 'sessionId, id and applied required' }); return;
+        }
+        send(res, 200, { ok: runs.edited(sessionId, id, applied, reason) });
         return;
       }
       case 'permission': {

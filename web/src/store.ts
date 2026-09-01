@@ -44,7 +44,7 @@ import {
   type StreamEvent, type StreamHandle, type SystemSnapshot,
   type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project, type Group,
   type Goal, type Feedback, type Deliverable, type Attachment, type SubAgentView,
-  type PermissionRequest,
+  type PermissionRequest, type EditRequest,
 } from './api';
 import {
   applyLogEvent, withPending, dropPending, emptyDraft,
@@ -209,6 +209,8 @@ interface AppState {
     planMode?: boolean; model?: string; retireTasks?: 'done' | 'cancelled';
     /** How much to ask before acting. Omitted means `auto`, as it always was. */
     approval?: 'auto' | 'edits' | 'ask';
+    /** This client will apply the run's file writes itself. See `edit`. */
+    applyEdits?: boolean;
   }) => Promise<void>;
   /**
    * Files uploaded to this session and not yet sent with a turn.
@@ -295,6 +297,16 @@ interface AppState {
   permission: PermissionRequest | null;
   /** Allow or refuse it. */
   permit: (allow: boolean) => Promise<void>;
+  /**
+   * A file write this client was handed to apply, when it said it could.
+   *
+   * Null for every client that did not opt in, which is all of them except the
+   * VS Code panel. Unlike `permission` this is not a question — nobody is being
+   * asked anything — it is work to do, and the run waits until it is reported.
+   */
+  edit: EditRequest | null;
+  /** Report the outcome and release the tool call. */
+  reportEdit: (id: string, applied: boolean, reason?: string) => Promise<void>;
   /**
    * Sub-agents this session has running, and the ones it just finished.
    *
@@ -389,6 +401,7 @@ export const useStore = create<AppState>((set, get) => ({
   dismissed: {},
   question: null,
   permission: null,
+  edit: null,
   planMode: false,
   busy: false,
   turnStartedAt: null,
@@ -436,7 +449,7 @@ export const useStore = create<AppState>((set, get) => ({
       // the sidebar never inherits the previous one's persona.
       sessionAgent: null,
       pendingAttachments: [],
-      question: null, permission: null,
+      question: null, permission: null, edit: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
@@ -592,6 +605,14 @@ export const useStore = create<AppState>((set, get) => ({
     await api.answer(sessionId, content);
   },
 
+  reportEdit: async (id, applied, reason) => {
+    const { sessionId } = get();
+    // Cleared first: the run resumes as soon as the server has this, and a
+    // second report for the same id would be refused anyway.
+    set({ edit: null });
+    await api.edited(sessionId, id, applied, reason);
+  },
+
   permit: async (allow) => {
     const { sessionId, permission } = get();
     if (!permission) return;
@@ -637,6 +658,8 @@ export const useStore = create<AppState>((set, get) => ({
         // would reject an unknown field or ignore it — sees exactly the request
         // it saw before this existed.
         ...(opts.approval && opts.approval !== 'auto' ? { approval: opts.approval } : {}),
+        // Only when true, so an older server sees the request it always saw.
+        ...(opts.applyEdits ? { applyEdits: true } : {}),
         ...(opts.retireTasks ? { retireTasks: opts.retireTasks } : {}),
         ...(get().pendingAttachments.length
           ? { attachmentIds: get().pendingAttachments.map(a => a.id) }
@@ -1085,6 +1108,9 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
         // A reload during a prompt otherwise leaves the turn blocked with
         // nothing on screen to say why it stopped.
         permission: (data as { permission?: PermissionRequest | null }).permission ?? null,
+        // A write handed over and not yet reported on, restored for the same
+        // reason: a reload must not leave the tool call blocked in silence.
+        edit: (data as { edit?: EditRequest | null }).edit ?? null,
         draft: (data as { busy?: boolean }).busy ? state.draft : emptyDraft(),
         // Drop the optimistic echo now that the real user message has replayed.
         logged: dropPending(state.logged),
@@ -1117,6 +1143,14 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       // finished, or cancelled.
       set(() => ({ question: String((data as { question?: string }).question ?? '') || null }));
       return;
+
+    case 'edit': {
+      // An empty id means nothing is outstanding — applied, refused, or the
+      // turn ended underneath it.
+      const wanted = data as unknown as EditRequest;
+      set(() => ({ edit: wanted?.id ? wanted : null }));
+      return;
+    }
 
     case 'permission': {
       // An empty id means the same thing an empty question does: nothing is

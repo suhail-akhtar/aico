@@ -25,12 +25,24 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import path from 'path';
 import type { AicoSettings } from './settings.js';
+import type { FileWriter } from './tools/file-writer.js';
 
 export interface RunContext {
   /** Absolute path the run treats as the project root. */
   cwd: string;
   sessionId?: string;
   settings?: AicoSettings;
+  /**
+   * Who applies this run's file writes, when it is not the filesystem.
+   *
+   * Rides on the run context for the same reason `cwd` does: a tool three
+   * awaits deep needs it, threading it through every signature would touch
+   * everything, and a module-level variable would be one global that two
+   * concurrent sessions fight over — one in an editor, one in a browser tab.
+   *
+   * Undefined is the normal case and means `fs`. See `tools/file-writer`.
+   */
+  applyEdit?: FileWriter;
 }
 
 const storage = new AsyncLocalStorage<RunContext>();

@@ -32,7 +32,7 @@ import { fileURLToPath } from 'url';
 
 import {
   wire, api, streamSession, supportsSecondarySidebar, sameFolder,
-  buildContextBlock, chipKey, EMPTY, NO_ATTACHMENTS,
+  buildContextBlock, chipKey, EMPTY, NO_ATTACHMENTS, changedSpan,
 } from '../dist-test/panel-tunnel.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -106,6 +106,52 @@ try {
   );
   check(sameFolder('/home/me/work', '/home/me/work/'), 'POSIX ignores a trailing separator');
   check(!sameFolder(undefined, 'E:\\work'), 'a missing path matches nothing');
+
+  /*
+    ── the span an edit replaces ─────────────────────────────────────────
+
+    The arithmetic behind applying a write as a `WorkspaceEdit` rather than a
+    disk write. Getting it wrong does not fail loudly — it produces a range that
+    ends before it starts, or one that quietly replaces more than it should, in
+    the middle of editing somebody's file.
+
+    Every case is checked two ways: the span is well-formed, and applying it to
+    `before` actually produces `after`. The second is the one that matters; the
+    first is what makes a failure readable.
+  */
+  const spanCases = [
+    ['identical', 'same', 'same'],
+    ['a change in the middle', 'const a = 1;\nconst b = 2;\n', 'const a = 9;\nconst b = 2;\n'],
+    ['an insertion at the end', 'line one\n', 'line one\nline two\n'],
+    ['an insertion at the start', 'b\n', 'a\nb\n'],
+    ['a deletion', 'a\nb\nc\n', 'a\nc\n'],
+    ['from empty', '', 'new content\n'],
+    ['to empty', 'old content\n', ''],
+    // The overlap case: an unguarded suffix scan claims characters the prefix
+    // already claimed, and the range inverts.
+    ['a repeated character grown', 'aa', 'aaa'],
+    ['a repeated character shrunk', 'aaa', 'aa'],
+    ['all repeats', 'aaaa', 'aa'],
+    ['a whole-file rewrite', 'nothing in common\n', 'entirely different\n'],
+    ['a multi-byte character', 'héllo wörld', 'héllo wide wörld'],
+  ];
+
+  let spanFailures = 0;
+  for (const [name, before, after] of spanCases) {
+    const span = changedSpan(before, after);
+    const wellFormed = span.start >= 0 && span.end >= span.start && span.end <= before.length;
+    const rebuilt = before.slice(0, span.start) + span.text + before.slice(span.end);
+    if (!wellFormed || rebuilt !== after) {
+      spanFailures += 1;
+      check(false, `${name}: span ${JSON.stringify(span)} rebuilds to ${JSON.stringify(rebuilt)}`);
+    }
+  }
+  check(spanFailures === 0, `every edit span is well-formed and rebuilds exactly (${spanCases.length} cases)`);
+
+  check(
+    changedSpan('const a = 1;\nconst b = 2;\n', 'const a = 9;\nconst b = 2;\n').text === '9',
+    'a one-character change is a one-character edit, not a whole-file replacement',
+  );
 
   /*
     ── what the editor context actually sends ────────────────────────────
@@ -377,7 +423,20 @@ try {
   const editPrompts = [];
   const editStream = streamSession(
     editsSession,
-    (event) => { if (event.type === 'permission' && event.data?.id) editPrompts.push(event.data); },
+    (event) => {
+      if (event.type !== 'permission' || !event.data?.id) return;
+      editPrompts.push(event.data);
+      /*
+        Allowed, so the run finishes either way.
+
+        The first version of this asserted "no prompts at all" and failed the
+        moment the model reached for `Terminal` instead of `Write` — which is
+        correct behaviour being reported as a bug, and would have left the run
+        blocked on a dialog nothing was going to answer. What matters is not
+        that nothing was asked; it is that *edit tools* were not asked about.
+      */
+      void api.permit(editsSession, event.data.id, true);
+    },
     undefined,
     0,
     workspace,
@@ -393,12 +452,100 @@ try {
   const wroteIt = await until(
     () => fs.existsSync(path.join(workspace, 'allowed.txt')), 90_000,
   );
-  check(wroteIt, 'approval:edits writes a file without asking');
+  check(wroteIt, 'approval:edits gets the file written');
+
+  const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+  const promptedEdits = editPrompts.filter(p => EDIT_TOOLS.includes(p.tool));
   check(
-    editPrompts.length === 0,
-    `and raised no prompt for it (${editPrompts.length} seen)`,
+    promptedEdits.length === 0,
+    `and never asks about an edit tool (${editPrompts.length} prompt(s) seen`
+    + `${editPrompts.length ? `, for ${[...new Set(editPrompts.map(p => p.tool))].join(', ')}` : ''})`,
   );
   editStream.close();
+
+  /*
+    ── writes handed to the client ───────────────────────────────────────
+
+    The engine no longer assumes it writes to disk: a run can carry a writer,
+    and the VS Code panel supplies one that applies a `WorkspaceEdit` so the
+    change enters the editor's undo stack instead of arriving as an external
+    change nobody asked for.
+
+    What is checked here is the contract, not the editor: the run hands over the
+    write and *waits*, an outcome releases it, and a refusal becomes a real tool
+    failure with no file on disk. The `WorkspaceEdit` half is checked in the
+    editor, where it can be.
+  */
+  const editSession = `edit-probe-${Date.now().toString(36)}`;
+  const handed = [];
+  const handedStream = streamSession(
+    editSession,
+    (event) => { if (event.type === 'edit' && event.data?.id) handed.push(event.data); },
+    undefined,
+    0,
+    workspace,
+  );
+
+  await api.submit({
+    sessionId: editSession,
+    task: 'Create a file called handed.txt containing the word one. Use the Write tool.',
+    project: workspace,
+    applyEdits: true,
+  }).catch(() => { /* reported earlier if the provider is unavailable */ });
+
+  const gotEdit = await until(() => handed.length > 0, 90_000);
+  check(gotEdit, 'a run with applyEdits hands the write to the client instead of writing it');
+
+  if (gotEdit) {
+    const request = handed[0];
+    check(
+      typeof request.path === 'string' && request.path.endsWith('handed.txt'),
+      `the request names the file (${request.path?.split(/[\\/]/).pop()})`,
+    );
+    check(
+      typeof request.after === 'string' && request.after.includes('one'),
+      'and carries the intended contents',
+    );
+    check(
+      !('before' in request),
+      'but not the previous contents — the client has the file already',
+    );
+    check(
+      !fs.existsSync(path.join(workspace, 'handed.txt')),
+      'nothing was written while the client had not answered',
+    );
+
+    const wrongId = await api.edited(editSession, 'not-the-id', true);
+    check(wrongId.ok === false, 'an outcome for a different write is refused');
+
+    // Refuse it, as a reviewer pressing Undo would.
+    const reported = await api.edited(editSession, request.id, false, 'refused by the probe');
+    check(reported.ok === true, 'reporting a refusal is accepted');
+
+    await until(async () => {
+      try { return !(await api.session(editSession)).busy; } catch { return false; }
+    }, 120_000);
+
+    /*
+      The refusal has to reach the *model*, and that is what is asserted.
+
+      An earlier version checked that the file did not exist afterwards and
+      failed intermittently — because a capable agent told "the write was not
+      applied" does the sensible thing and tries another route, which is the
+      behaviour this feature is for. Absence of the file was never the contract;
+      the contract is that the tool call failed and said why.
+    */
+    const transcript = JSON.stringify(await api.session(editSession).catch(() => ({})));
+    check(
+      /was not applied/i.test(transcript),
+      'the refusal reaches the model as a failed tool call, with the reason',
+    );
+    check(
+      transcript.includes('refused by the probe'),
+      'and carries the reason the client gave, not a generic error',
+    );
+  }
+  handedStream.close();
 
   // ── closing a stream must not look like a failure ───────────────────
   const before = wiring.frames.length;

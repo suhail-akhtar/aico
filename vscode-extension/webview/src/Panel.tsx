@@ -34,6 +34,7 @@ import { SessionList } from './components/SessionList';
 import { Transcript } from './components/Transcript';
 import { Composer } from './components/Composer';
 import { PermissionBridge } from './components/PermissionBridge';
+import { EditBridge } from './components/EditBridge';
 
 export function Panel(): React.ReactElement {
   const [boot, setBoot] = useState<BootInfo | null>(null);
@@ -158,6 +159,7 @@ export function Panel(): React.ReactElement {
       <Transcript />
       <Composer />
       <PermissionBridge />
+      <EditBridge />
     </div>
   );
 }

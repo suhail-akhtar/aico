@@ -101,7 +101,15 @@ export function Composer(): React.ReactElement {
     if (!value.trim()) return;
     if (question) { void answer(value); return; }
     if (busy) { void steer(value); return; }
-    void submit(value, { planMode, approval });
+    /*
+      `applyEdits` is always on from the panel.
+
+      This is the one client that can do better than writing to disk: an edit
+      applied as a WorkspaceEdit joins the editor's undo stack and its Source
+      Control view. There is no reason anybody in VS Code would want the
+      external-change behaviour instead, so it is not a setting.
+    */
+    void submit(value, { planMode, approval, applyEdits: true });
   };
 
   const send = (): void => {
