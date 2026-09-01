@@ -83,6 +83,11 @@ import {
   workspaceWriteToolDefinition,
 } from './workspace.js';
 import {
+  vsCodeDiagnostics, vsCodeDiagnosticsDefinition,
+  vsCodeTasks, vsCodeTasksDefinition,
+  vsCodeWorkspace, vsCodeWorkspaceDefinition,
+} from './vscode.js';
+import {
   agentCreateToolDefinition,
   agentListToolDefinition,
   agentPromptToolDefinition,
@@ -232,6 +237,19 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...workspaceWriteToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 2_000 },
   { ...workspaceReadToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...workspaceListToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
+  /*
+    Serviced by the editor, and offered only while one is attached — `agent.ts`
+    removes them otherwise, so a run in a terminal never sees a tool that can
+    only fail.
+
+    None of the three is concurrency-safe, and that is not caution. Every one
+    round-trips through a single pending slot on the run: two in flight would
+    overwrite each other's resolver and hang the turn on the one that lost, the
+    same way two permission prompts would.
+  */
+  { ...vsCodeDiagnosticsDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
+  { ...vsCodeTasksDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
+  { ...vsCodeWorkspaceDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...agentCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...agentListToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
@@ -628,6 +646,15 @@ export async function executeTool(
       break;
     case 'CronResume':
       result = await executeCronResume(args as { job_id: string });
+      break;
+    case 'VSCodeDiagnostics':
+      result = await vsCodeDiagnostics(args as unknown as Parameters<typeof vsCodeDiagnostics>[0]);
+      break;
+    case 'VSCodeTasks':
+      result = await vsCodeTasks(args as unknown as Parameters<typeof vsCodeTasks>[0]);
+      break;
+    case 'VSCodeWorkspace':
+      result = await vsCodeWorkspace(args as unknown as Parameters<typeof vsCodeWorkspace>[0]);
       break;
     case 'WorkspaceInfo':
       result = await executeWorkspaceInfo();

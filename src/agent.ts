@@ -63,7 +63,8 @@ function getExecutionMode(name: string): ExecutionMode {
   return 'exclusive';
 }
 import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
-import { runInContext } from './run-context.js';
+import { currentRunContext, runInContext, type HostBridge } from './run-context.js';
+import { isHostTool } from '../shared/host-tools.js';
 import type { FileWriter } from './tools/file-writer.js';
 import { isEffortChoice } from '../shared/reasoning.js';
 import { buildRuntimeAwareness } from './capabilities.js';
@@ -333,6 +334,15 @@ export interface AgentOptions {
    * workspace behaving exactly as they did. See `tools/file-writer`.
    */
   applyEdit?: FileWriter;
+  /**
+   * The editor driving this run, when one is.
+   *
+   * Carries both the way to ask and the list of what may be asked. Supplied by
+   * the server when the client submitting the turn declared it can service host
+   * tools; absent everywhere else, which is what keeps a terminal run from
+   * being shown a tool that only an editor can answer.
+   */
+  host?: HostBridge;
   /** Ink UI AskUser callback — agent pauses to ask human a question */
   onAskUser?: (question: string) => Promise<string>;
   /**
@@ -588,7 +598,15 @@ interface ResolvedToolSet {
  * set is — a registry must not be a way to smuggle a writing tool into a
  * read-only run.
  */
-function resolveToolSet(opts: {
+/*
+  Exported for the test harness, which is the only caller outside this module.
+
+  The alternative was to assert on tool availability by running a whole turn
+  against a mock provider, which tests the loop rather than the rule — and the
+  rule ("off means the model cannot see it") is the thing that keeps being got
+  wrong.
+*/
+export function resolveToolSet(opts: {
   toolRegistry?: ToolRegistryCapability;
   agentType?: SubAgentType;
   agentSpecTools?: string[] | 'all' | 'readonly';
@@ -655,6 +673,21 @@ function resolveToolSet(opts: {
     defs = defs.filter(d => d.name !== 'MiniAppManage');
   }
 
+  /*
+    The editor's tools, offered only while an editor is attached.
+
+    Same rule as Mini Apps and `AskUserQuestion` above, and it earns its place
+    for the same reason: a tool in the list is a tool that gets called, and one
+    that can only answer "no editor is attached" costs a turn to discover. The
+    capability is read from the run context rather than from settings because it
+    is a fact about *this* run — the same session opened in a browser tab
+    tomorrow has no editor, and would otherwise be offered `VSCodeDiagnostics`
+    on the strength of yesterday's.
+  */
+  const host = currentRunContext()?.host;
+  const hostTools = new Set<string>(host?.tools ?? []);
+  defs = defs.filter(d => !isHostTool(d.name) || hostTools.has(d.name));
+
   // Last, so it overrides every selection above it. One list, applied in one
   // place, is what makes a capability removable without editing the code that
   // offers it — and applying it here rather than at each call site means a
@@ -676,6 +709,14 @@ const PLAN_MODE_TOOLS = new Set([
   // it out would make planning the one mode that still has to Glob its way
   // around a project it could have asked about once.
   'CodebaseMap',
+  /*
+    Read-only, and a planning turn is exactly when it is worth asking. "What is
+    already broken here?" is the first question of most plans, and answering it
+    from the language server beats guessing from a grep. It is filtered out
+    again when no editor is attached, so this only widens plan mode where the
+    tool exists at all.
+  */
+  'VSCodeDiagnostics',
   // How a planning turn ends. Without it the only way to deliver a plan was
   // prose, which can be read and cannot be answered.
   'ProposePlan',
@@ -1060,6 +1101,8 @@ export async function runAgent(opts: AgentOptions): Promise<string> {
       // Who applies this run's writes. Undefined means the filesystem, which is
       // every run except one driven from an editor that can do better.
       ...(opts.applyEdit ? { applyEdit: opts.applyEdit } : {}),
+      // Which editor, if any, this run can ask to do things it cannot.
+      ...(opts.host ? { host: opts.host } : {}),
       /*
         How hard to think, for the providers that can be asked.
 

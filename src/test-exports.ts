@@ -228,6 +228,11 @@ export {
   learnFromError, resetReasoningForTest,
 } from '../shared/reasoning.js';
 export { resolvedEffort } from './run-context.js';
+export { resolveToolSet } from './agent.js';
+export { HOST_TOOLS, hostToolsFrom, isHostTool } from '../shared/host-tools.js';
+export {
+  vsCodeDiagnostics, vsCodeTasks, vsCodeWorkspace,
+} from './tools/vscode.js';
 export { observe, blockedReason, resetObservations, isObserved } from './tools/observation.js';
 export { runScoped } from './run-scoped.js';
 export { detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck, checkProjectGate, checkResults, newestSourceChange, touchedFiles } from './checks.js';

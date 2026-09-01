@@ -49,6 +49,7 @@ import { handleSystemRoute } from './api-system.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
 import { isEffortChoice } from '../../shared/reasoning.js';
+import { hostToolsFrom } from '../../shared/host-tools.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
 import { requestAgentStop } from '../tools/task.js';
@@ -353,6 +354,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           // A write handed to the client and not yet reported on. Same reason:
           // a reload mid-write must not leave the tool call blocked in silence.
           edit: runs.editOf(sessionId) ?? null,
+          // And a tool call the editor is servicing. Third of the same kind:
+          // every promise the run is holding on a client has to be replayable,
+          // or a reload turns a pause into a hang.
+          hostCall: runs.hostCallOf(sessionId) ?? null,
         },
       })}\n\n`);
       return;
@@ -876,6 +881,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           // `edit` event, because the tool call waits until it does.
           applyEdits: (body as { applyEdits?: boolean }).applyEdits === true,
           /*
+            Which editor-backed tools this client can service.
+
+            Filtered against the known list rather than forwarded, so a client
+            claiming a tool this server has never heard of advertises nothing
+            instead of advertising something that cannot be dispatched.
+          */
+          hostTools: hostToolsFrom((body as { hostTools?: unknown }).hostTools),
+          /*
             How hard to think, when the model can be asked.
 
             Validated rather than forwarded: this arrives as a string from an
@@ -1026,6 +1039,25 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           send(res, 400, { error: 'sessionId, id and applied required' }); return;
         }
         send(res, 200, { ok: runs.edited(sessionId, id, applied, reason) });
+        return;
+      }
+      case 'host-answer': {
+        // What the editor did with a tool call it was handed. `ok: false` is a
+        // real answer and becomes a failed tool call — the model is told, and
+        // can take another route.
+        const { sessionId, id, ok, result, error } = body as {
+          sessionId?: string; id?: string; ok?: boolean; result?: unknown; error?: string;
+        };
+        if (!sessionId || !id || typeof ok !== 'boolean') {
+          send(res, 400, { error: 'sessionId, id and ok required' }); return;
+        }
+        send(res, 200, {
+          ok: runs.hostAnswered(sessionId, id, {
+            ok,
+            ...(result === undefined ? {} : { result }),
+            ...(error ? { error } : {}),
+          }),
+        });
         return;
       }
       case 'permission': {

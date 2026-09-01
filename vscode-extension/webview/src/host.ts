@@ -14,6 +14,7 @@
  */
 
 import { vscodeApi } from './tunnel';
+import type { HostAnswer, HostCall } from '@web/api';
 
 export interface BootInfo {
   /** Absolute path of the first workspace folder, or null if none is open. */
@@ -58,13 +59,20 @@ export interface EditOutcome {
   reason?: string;
 }
 
+/** What the editor did with a host tool call it was handed. */
+export interface HostOutcome {
+  id: string;
+  answer: HostAnswer;
+}
+
 type HostMessage =
   | ({ t: 'boot' } & BootInfo)
   | ({ t: 'ask' } & AskRequest)
   | { t: 'new-session' }
   | { t: 'focus-composer' }
   | ({ t: 'permission:decided' } & PermissionDecision)
-  | ({ t: 'edit:done' } & EditOutcome);
+  | ({ t: 'edit:done' } & EditOutcome)
+  | ({ t: 'host:done' } & HostOutcome);
 
 type Listener<T> = (value: T) => void;
 
@@ -74,6 +82,7 @@ const newSessionListeners = new Set<Listener<void>>();
 const focusListeners = new Set<Listener<void>>();
 const decisionListeners = new Set<Listener<PermissionDecision>>();
 const editListeners = new Set<Listener<EditOutcome>>();
+const hostListeners = new Set<Listener<HostOutcome>>();
 
 /**
  * The boot frame, remembered.
@@ -113,6 +122,10 @@ window.addEventListener('message', (event: MessageEvent) => {
     for (const listener of editListeners) {
       listener({ id: done.id, applied: done.applied, reason: done.reason });
     }
+  }
+  if (message?.t === 'host:done') {
+    const done = message;
+    for (const listener of hostListeners) listener({ id: done.id, answer: done.answer });
   }
 });
 
@@ -181,6 +194,23 @@ export function onEditDone(listener: Listener<EditOutcome>): () => void {
  */
 export function requestEdit(request: EditRequest): void {
   vscodeApi.postMessage({ t: 'edit', request });
+}
+
+/** What VS Code made of a tool call only it could service. */
+export function onHostDone(listener: Listener<HostOutcome>): () => void {
+  hostListeners.add(listener);
+  return () => hostListeners.delete(listener);
+}
+
+/**
+ * Ask VS Code to service a host tool call.
+ *
+ * Fire and forget, like the two above it. Some of these open a modal — adding a
+ * workspace folder, replacing the window — and a promise held across that would
+ * have to survive the panel being hidden and shown again.
+ */
+export function requestHostCall(call: HostCall): void {
+  vscodeApi.postMessage({ t: 'host', call });
 }
 
 /**
