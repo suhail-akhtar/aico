@@ -21,6 +21,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MessageBubble } from '@aico/ui';
 import { composeMessages } from '@web/reduce';
 import { useStore } from '@web/store';
+import { host } from '../host';
 
 /**
  * How close to the bottom still counts as "at the bottom".
@@ -132,6 +133,15 @@ export function Transcript(): React.ReactElement {
   );
 }
 
+/**
+ * What an empty conversation says.
+ *
+ * The workspace link is here rather than only on the toolbar because this is
+ * the moment it is useful: a panel is 300px wide and is the wrong shape for
+ * Mini Apps, the trajectory view, changes review and the full settings screens.
+ * Somebody looking at an empty chat is deciding where to work, and an icon they
+ * have not learned yet does not tell them there is a second surface at all.
+ */
 function Blank(): React.ReactElement {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
@@ -139,6 +149,16 @@ function Blank(): React.ReactElement {
       <p className="text-[11px] leading-relaxed text-aico-muted">
         Select code and press the ask shortcut, or type below. The file and line
         numbers travel with the question.
+      </p>
+      <p className="mt-3 text-[11px] leading-relaxed text-aico-muted">
+        <button
+          type="button"
+          onClick={host.openWorkspace}
+          className="text-aico-accent underline-offset-2 hover:underline"
+        >
+          Open the full workspace
+        </button>
+        {' '}for Mini Apps, the trajectory view and every setting.
       </p>
     </div>
   );

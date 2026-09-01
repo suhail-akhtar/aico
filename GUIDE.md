@@ -69,12 +69,18 @@ carries the outcome:
 | `running · pid 4321` | Started in the background and still going |
 | `failed` | It did not work. No diff is drawn for a write that did not happen |
 
-If you live in VS Code, the extension in `vscode-extension/` puts this same
-client in a panel rather than a tab. Two things change: selecting code and
-pressing <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> sends the file and line
-numbers with your question, so nobody has to go looking for what your editor
-already knew; and anything running in the background shows in the status bar. The
-README has the build steps — it is not on the Marketplace yet.
+If you live in VS Code, the extension in `vscode-extension/` gives aico a tab of
+its own beside Chat, rendering these same tool cards and diffs in your editor's
+colours. Four things change:
+
+- an edit lands as a **workspace edit**, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it
+  back and Source Control shows it;
+- the file you have open, the lines you have selected and that file's Problems
+  ride along with your question, shown as chips before you send;
+- `#` in the composer points at a file or a symbol without leaving the keyboard;
+- tool approvals are real dialogs, with a selector for how much to ask.
+
+The README has the build steps — it is not on the Marketplace yet.
 
 ---
 

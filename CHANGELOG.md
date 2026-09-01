@@ -3,6 +3,73 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.7.0 — 2026-09-01
+
+### Added
+
+- **A native VS Code panel**, in a tab of its own in the Secondary Side Bar
+  beside Chat — the same mechanism Claude Code and Codex use, and no proposed
+  APIs. It replaces an extension that put the whole web workspace in an iframe:
+  a browser page wearing the editor's frame, with no idea what file was open.
+
+  It is not a second implementation. `web/src/{reduce,store,turn-state,plans,
+  todos}.ts` turned out to be free of React and the browser — about 1,900 lines
+  — and `shared/ui` already styles everything through `--aico-*` custom
+  properties. The panel imports the state layer unchanged and redefines
+  twenty-six variables in terms of `--vscode-*`, which restyles every shared
+  component at once and keeps doing so on a theme nobody has seen yet.
+
+- **Editor context, shown before it is sent.** The active file, the current
+  selection with its line range, and that file's Problems arrive as chips above
+  the composer; `#` points at another file or a symbol. Every chip is removable,
+  and a removal sticks per selection rather than per file.
+
+  The rule behind it: inline what nothing else can recover — a selection, a
+  language server's diagnostics — and merely *name* files, because aico has
+  `Read` and can fetch exactly the part that matters. Getting that backwards is
+  how an editor integration sends fifteen thousand tokens of open tabs with
+  every "hello".
+
+- **Tool approval modes.** A turn can be submitted as `auto` (unchanged, and
+  still the default), `edits` — file writes go through, commands and fetches are
+  put to you — or `ask`. In VS Code the prompt is a modal: a card in a panel can
+  be scrolled past while the turn sits blocked on it.
+
+  `Terminal` is deliberately absent from the `edits` pass-through list. A shell
+  command can do everything a file write can and more, so "auto-accept edits"
+  would be a lie if it also ran commands.
+
+- **`applyEdit`**, an optional writer on the run context. When the client
+  supplies one — the panel does — a write is applied as a `WorkspaceEdit`, so
+  `Ctrl`+`Z` takes it back and Source Control shows it. Undefined means `fs`,
+  which is every other run, so the terminal, the browser workspace and headless
+  runs are unchanged.
+
+### Fixed
+
+- **The extension registered a second project for the folder you had open.**
+  VS Code reports Windows paths with a lowercase drive letter (`e:\work`) while
+  everything else on Windows uses an uppercase one, and aico's project registry
+  compares paths as strings. Sessions started from a terminal then did not
+  appear in the panel, because they were filed under the other spelling of the
+  same directory. Paths are canonicalised on the way out of the extension, and
+  matched case-insensitively on Windows.
+
+- **An untrusted folder disabled the extension silently.** VS Code turns
+  extensions off in Restricted Mode; ours simply did not appear, with nothing on
+  screen to say why. The manifest now declares `capabilities.untrustedWorkspaces`
+  with a reason, so Restricted Mode explains it and offers a Trust button.
+
+- **Opening the panel started a fresh conversation every time**, losing the
+  model along with it — the model is pinned per session by design, so forgetting
+  the session forgot the model. The panel now resumes the folder's last
+  conversation, and a genuinely new one inherits the model last chosen there.
+
+- **A turn could block for ever on stdin.** The engine falls back to a readline
+  prompt when permissions are gated with no callback registered; in a server
+  that is a turn waiting on input nobody can see. The approval mode and the
+  callback are now set together and never separately.
+
 ## 0.6.0 — 2026-08-31
 
 ### Added
