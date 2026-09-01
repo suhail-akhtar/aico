@@ -1,0 +1,53 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    // `noUnusedLocals` and `noUnusedParameters` are on in `web` and off here.
+    // This project compiles `web/src` and `shared/ui` as imports, so those flags
+    // would report their code against this project's settings — failing the
+    // panel's typecheck over an unused local in a file it does not own.
+    //
+    // React and its types are NOT dependencies of this package. They resolve
+    // from the repository root, the same place `shared/ui` resolves them, and a
+    // second copy is a conflict rather than a duplicate: @types/react 18 here
+    // against 19 at the root made every shared component stop being a valid JSX
+    // element, reported as `bigint is not assignable to ReactNode`.
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": false,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@aico/ui": [
+        "../../shared/ui/index.ts"
+      ],
+      "@aico/ui/*": [
+        "../../shared/ui/*"
+      ],
+      "@web/*": [
+        "../../web/src/*"
+      ],
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "vite.config.ts",
+    // Ambient only, and needed: mhchem is imported for its side effect and ships
+    // no types. Without this the panel's typecheck fails inside a shared
+    // component it merely renders.
+    "../../shared/ui/katex-mhchem.d.ts"
+  ]
+}

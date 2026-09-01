@@ -1,0 +1,139 @@
+/*
+ * aico's design tokens, expressed in the user's VS Code theme.
+ *
+ * This file is the whole reason the panel can look native without a second
+ * component library. `shared/ui` styles everything through `--aico-*` custom
+ * properties — MessageBubble, ToolCallCard, FileDiff, CodeBlock, the markdown
+ * renderer — so redefining those twenty-six variables in terms of `--vscode-*`
+ * restyles all of it at once, and keeps doing so when someone installs a theme
+ * nobody has ever seen.
+ *
+ * Two rules held throughout:
+ *
+ * **Never hard-code a colour that VS Code already publishes.** A panel that
+ * approximates the editor's greys looks *nearly* right, which is worse than
+ * looking deliberately different — it reads as a rendering bug.
+ *
+ * **Every variable gets a fallback.** `--vscode-*` variables are only defined
+ * for colours the active theme actually sets, and themes routinely omit the
+ * less common ones. Without a fallback the property resolves to nothing and the
+ * component renders with no colour at all, which is how a panel ends up with
+ * invisible text on one theme and looks fine on every other.
+ *
+ * There is no `data-theme` switch here on purpose. VS Code sets `vscode-light`,
+ * `vscode-dark` or `vscode-high-contrast` on the body itself and updates it live
+ * when the theme changes; deriving from its variables means the panel follows
+ * along without listening for anything.
+ */
+
+:root {
+  /* ── surfaces ─────────────────────────────────────────────────── */
+  --aico-bg: var(--vscode-sideBar-background, var(--vscode-editor-background, #1e1e1e));
+  --aico-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background, #252526));
+  --aico-elevated: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #2d2d30));
+  --aico-hover: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+
+  /* ── text ─────────────────────────────────────────────────────── */
+  --aico-text-primary: var(--vscode-foreground, #cccccc);
+  --aico-text-secondary: var(--vscode-descriptionForeground, var(--vscode-foreground, #9d9d9d));
+  --aico-text-muted: var(--vscode-disabledForeground, var(--vscode-descriptionForeground, #7a7a7a));
+
+  /* ── lines ────────────────────────────────────────────────────── */
+  --aico-border: var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.35)));
+  --aico-border-subtle: var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.2));
+
+  /* ── accent ───────────────────────────────────────────────────── */
+  --aico-accent: var(--vscode-textLink-foreground, var(--vscode-button-background, #3794ff));
+  --aico-accent-hover: var(--vscode-textLink-activeForeground, var(--vscode-button-hoverBackground, #4da3ff));
+  --aico-accent-soft: var(--vscode-list-activeSelectionBackground, rgba(55, 148, 255, 0.15));
+  --aico-on-accent: var(--vscode-button-foreground, #ffffff);
+
+  /* ── status ───────────────────────────────────────────────────── */
+  --aico-success: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #4ec94e));
+  --aico-warning: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #cca700));
+  --aico-danger: var(--vscode-editorError-foreground, var(--vscode-errorForeground, #f14c4c));
+  --aico-info: var(--vscode-editorInfo-foreground, var(--vscode-charts-blue, #3794ff));
+
+  /* ── code ─────────────────────────────────────────────────────── */
+  --aico-code-bg: var(--vscode-textCodeBlock-background, var(--vscode-editor-background, #1e1e1e));
+
+  /*
+   * Diffs.
+   *
+   * VS Code publishes its own diff colours and they are already tuned for the
+   * active theme's contrast, so a diff in the panel matches a diff in the editor
+   * beside it. That match is worth more than any palette we could pick: the two
+   * are read together, one right after the other.
+   */
+  --aico-diff-add-bg: var(--vscode-diffEditor-insertedTextBackground, rgba(63, 185, 80, 0.15));
+  --aico-diff-add-gutter: var(--vscode-gitDecoration-addedResourceForeground, #3fb950);
+  --aico-diff-remove-bg: var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.15));
+  --aico-diff-remove-gutter: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+  --aico-diff-context: var(--vscode-descriptionForeground, #8b949e);
+
+  /* ── type ─────────────────────────────────────────────────────── */
+  --aico-font: var(--vscode-font-family);
+  --aico-font-mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+
+  /*
+   * The reading column, narrowed for a side bar.
+   *
+   * The browser client sets this for a full-width page. A panel is often 300px,
+   * and a max-width written for a 900px window simply never applies — but it
+   * does apply the moment somebody drags the panel wide or moves it to the
+   * editor area, and at that point an unbounded column is unreadable.
+   */
+  --aico-column: 68ch;
+}
+
+/* ── the panel itself ───────────────────────────────────────────── */
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: transparent; /* the view container already paints the side bar */
+  color: var(--aico-text-primary);
+  font-family: var(--aico-font);
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.5;
+  /*
+   * A webview scrolls its document by default. The panel manages its own
+   * scrolling regions — the transcript scrolls, the composer stays put — and two
+   * nested scrollbars is the classic way a chat panel loses its input box.
+   */
+  overflow: hidden;
+}
+
+/*
+ * Match the editor's scrollbars rather than the platform's.
+ *
+ * A default webview scrollbar is opaque and light-on-dark wrong; VS Code's own
+ * is a translucent overlay. Getting this wrong is one of the few things that
+ * gives an embedded panel away instantly.
+ */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100, 100, 100, 0.7));
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Focus rings come from the theme, so keyboard navigation looks like VS Code's. */
+:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+
+a { color: var(--aico-accent); }
+a:hover { color: var(--aico-accent-hover); }

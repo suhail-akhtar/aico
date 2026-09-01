@@ -4,3 +4,22 @@ out/**/*.map
 tsconfig.json
 **/*.ts
 !out/**/*.js
+
+# The panel's source and its build tooling. `media/` is the built output and is
+# the only part of this the extension actually loads; shipping the toolchain
+# beside it would multiply the VSIX for nothing.
+webview/src/**
+webview/node_modules/**
+webview/*.json
+webview/*.js
+webview/*.ts
+!media/**
+
+# Source maps are opt-in at build time (AICO_PANEL_SOURCEMAP=1). This is the
+# belt to that braces: 25MB of maps in a published VSIX is not a mistake worth
+# being able to make twice.
+media/**/*.map
+
+# A previously packaged build. Left on disk while iterating; never shipped
+# inside its own successor.
+*.vsix

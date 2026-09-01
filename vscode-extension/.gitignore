@@ -1,3 +1,7 @@
 node_modules/
 out/
 *.vsix
+
+# The panel bundle, produced by `npm run build:panel` from `webview/src`.
+# Build output, and large: ~7MB of code-split chunks and KaTeX fonts.
+media/
