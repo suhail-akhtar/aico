@@ -267,6 +267,27 @@ fs.writeFileSync(path.join(workspace, 'broken.ts'), [
   '',
 ].join('\n'));
 
+/*
+  A task the editor knows about and nothing else does.
+
+  `VSCodeTasks` exists so the agent uses the project's own build and test
+  commands rather than a command line it invented, and the only way to check
+  that is to configure one and have it run. Deliberately `node -e` rather than
+  a shell builtin: this probe runs on Windows, and `echo` is a different
+  program in every shell there.
+*/
+fs.mkdirSync(path.join(workspace, '.vscode'), { recursive: true });
+fs.writeFileSync(path.join(workspace, '.vscode', 'tasks.json'), JSON.stringify({
+  version: '2.0.0',
+  tasks: [{
+    label: 'probe-echo',
+    type: 'shell',
+    command: 'node',
+    args: ['-e', 'console.log("aico-task-ran")'],
+    problemMatcher: [],
+  }],
+}, null, 2));
+
 let editor;
 let workbench;
 let panel;
@@ -735,15 +756,14 @@ try {
       see a change it did not make, and it is the only way to drive a
       controlled field from outside.
     */
-    const typed = await evaluate(`
+    const send = (text) => evaluate(`
       (() => {
         const box = document.querySelector('textarea');
         if (!box) return false;
         const setter = Object.getOwnPropertyDescriptor(
           HTMLTextAreaElement.prototype, 'value',
         ).set;
-        setter.call(box, 'Call the VSCodeDiagnostics tool for broken.ts and tell me the '
-          + 'exact message it reports. Do not read the file or run any command.');
+        setter.call(box, ${JSON.stringify(text)});
         box.dispatchEvent(new Event('input', { bubbles: true }));
         box.focus();
         box.dispatchEvent(new KeyboardEvent('keydown', {
@@ -752,6 +772,11 @@ try {
         return true;
       })()
     `).catch(() => false);
+
+    const typed = await send(
+      'Call the VSCodeDiagnostics tool for broken.ts and tell me the exact message '
+      + 'it reports. Do not read the file or run any command.',
+    );
     check(typed === true, 'a message can be typed and sent from the panel');
 
     /*
@@ -792,6 +817,68 @@ try {
         + ` (no answer arrived in 180s; ${sawTool ? 'the tool was called' : 'it never was — no provider configured?'})`,
       );
     }
+
+    /*
+      ── the other two tools, also in the editor ───────────────────────
+
+      Diagnostics proved the bridge. These prove the two implementations that
+      the bridge carries and that nothing else has ever executed — in
+      particular `VSCodeTasks`, whose completion is a race between
+      `onDidEndTaskProcess` and `onDidEndTask` with a timeout and a dispose,
+      which is exactly the kind of code that is wrong the first time it is
+      written and silent about it.
+
+      `addFolder` and `openFolder` are deliberately not exercised: both open a
+      modal, and a modal blocks the extension host — the probe would hang on a
+      dialog with nobody to press the button.
+    */
+    await send(
+      'Use the VSCodeTasks tool: list the tasks, then run the one called probe-echo, '
+      + 'and tell me its exit code. Then use VSCodeWorkspace to create a folder called '
+      + 'made-by-the-agent. Do not use any other tool.',
+    );
+
+    /*
+      Matched on the tool's own result, not on the prose around it.
+
+      The first version accepted any "0" anywhere in the panel, which a
+      timestamp satisfies. A check that passes for the wrong reason is worse
+      than no check, because it still gets counted.
+
+      Narrowing it to the literal `exitCode` key went too far the other way and
+      failed on one run in two: whether the raw result is on screen depends on
+      whether the tool card happens to be expanded, so that version was testing
+      the card's default state. Both spellings are accepted — the key the tool
+      returns, or the phrase a model uses about it — and either, beside the
+      task's own name, means the task ran and reported.
+    */
+    const ranTask = await until(async () => {
+      const text = await evaluate('document.body.innerText').catch(() => '');
+      if (/probe-echo/.test(text) && /exitCode|exit code/i.test(text)) return text;
+      return null;
+    }, 180_000, 2500);
+
+    check(
+      Boolean(ranTask),
+      'the agent ran the project\'s own configured task and got its exit code'
+      + (ranTask ? '' : ` (panel says: ${JSON.stringify(
+        (await evaluate('document.body.innerText').catch(() => '') ?? '')
+          .replace(/\s+/g, ' ').slice(-400),
+      )})`),
+    );
+
+    /*
+      Checked on disk, not in the transcript.
+
+      A model that says it created a folder and a folder that exists are two
+      different claims, and only one of them is the feature.
+    */
+    const madeFolder = await until(
+      async () => (fs.existsSync(path.join(workspace, 'made-by-the-agent')) ? true : null),
+      60_000,
+      2000,
+    );
+    check(Boolean(madeFolder), 'and created a folder through VSCodeWorkspace, on disk');
   }
 } catch (err) {
   failed += 1;
