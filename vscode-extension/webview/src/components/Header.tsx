@@ -13,9 +13,9 @@
  * @module components/Header
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useStore } from '@web/store';
-import { host } from '../host';
+import { SessionMenu, TitleField } from './SessionMenu';
 
 export function Header({ onToggleSessions, sessionsOpen }: {
   onToggleSessions: () => void;
@@ -26,15 +26,24 @@ export function Header({ onToggleSessions, sessionsOpen }: {
   const busy = useStore(s => s.busy);
   const newSession = useStore(s => s.newSession);
   const folder = useStore(s => s.project);
+  const [renaming, setRenaming] = useState(false);
 
   return (
     <div className="flex h-[35px] shrink-0 items-center gap-1.5 border-b border-aico-border-subtle px-3">
       <Dot status={status} busy={busy} />
 
+      {renaming ? (
+        <TitleField initial={title} onDone={() => setRenaming(false)} />
+      ) : (
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-        <span className="min-w-0 truncate text-[12px] font-medium text-aico-primary">
+        <button
+          type="button"
+          onDoubleClick={() => setRenaming(true)}
+          title="Double-click to rename"
+          className="min-w-0 truncate text-left text-[12px] font-medium text-aico-primary"
+        >
           {title || 'Untitled'}
-        </span>
+        </button>
         {/*
           Which folder this conversation runs in.
 
@@ -53,6 +62,7 @@ export function Header({ onToggleSessions, sessionsOpen }: {
           </span>
         )}
       </span>
+      )}
 
       <IconButton title="History" active={sessionsOpen} onClick={onToggleSessions}>
         {/* A clock, matching VS Code's own history affordance. */}
@@ -64,15 +74,15 @@ export function Header({ onToggleSessions, sessionsOpen }: {
         <path d="M8 3.25v9.5M3.25 8h9.5" />
       </IconButton>
 
-      <IconButton title="Open the full workspace" onClick={host.openWorkspace}>
-        <path d="M6.5 2.75h-3.75v10.5h10.5V9.5" />
-        <path d="M9.5 2.75h3.75V6.5M13.25 2.75 7.75 8.25" />
-      </IconButton>
+      {/*
+        Three buttons, not five.
 
-      <IconButton title="Settings" onClick={host.openSettings}>
-        <circle cx="8" cy="8" r="2.25" />
-        <path d="M8 1.75v1.5M8 12.75v1.5M14.25 8h-1.5M3.25 8h-1.5M12.42 3.58l-1.06 1.06M4.64 11.36l-1.06 1.06M12.42 12.42l-1.06-1.06M4.64 4.64 3.58 3.58" />
-      </IconButton>
+        The workspace and settings actions moved into the overflow menu. At
+        300px a title, a folder and five icons leave the title with nothing —
+        and VS Code's own views keep two or three actions and put the rest
+        behind `⋯` for exactly this reason.
+      */}
+      <SessionMenu title={title} onRenaming={setRenaming} />
     </div>
   );
 }

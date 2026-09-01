@@ -469,6 +469,22 @@ try {
           overflowX: style.overflowX,
           scrollsSideways: scroller.scrollWidth > scroller.clientWidth + 1,
           bodyScrollsSideways: document.documentElement.scrollWidth > innerWidth + 1,
+          /*
+            Which element is doing it, not merely that something is.
+
+            A width overflow is reported by the document and caused by one
+            descendant, and without naming it the failure sends you reading
+            every flex row in the panel. Deepest match wins — an ancestor is
+            only ever wide because a child made it so.
+          */
+          widest: (() => {
+            const over = [...document.querySelectorAll('#root *')]
+              .filter(e => e.getBoundingClientRect().right > innerWidth + 1);
+            const last = over[over.length - 1];
+            return last
+              ? last.className + ' :: ' + (last.textContent || '').slice(0, 40)
+              : '';
+          })(),
           column: getComputedStyle(document.documentElement)
             .getPropertyValue('--aico-column').trim(),
         });
@@ -479,7 +495,11 @@ try {
     check(box.found === true, 'the transcript scroller is there to measure');
     check(box.overflowX === 'hidden', `the transcript never scrolls sideways (overflow-x: ${box.overflowX})`);
     check(box.scrollsSideways === false, 'and nothing inside it is forcing the column wider');
-    check(box.bodyScrollsSideways === false, 'the panel document itself does not scroll sideways');
+    check(
+      box.bodyScrollsSideways === false,
+      'the panel document itself does not scroll sideways'
+      + (box.widest ? ` (widest: ${JSON.stringify(box.widest)})` : ''),
+    );
     check(
       box.column === '100%',
       `the reading column follows the panel width the reader chose (${box.column})`,
@@ -506,6 +526,90 @@ try {
     const composer = await evaluate("Boolean(document.querySelector('textarea'))")
       .catch(() => false);
     check(composer === true, 'the composer is present');
+
+    /*
+      ── the controls, opened rather than counted ────────────────────────
+
+      Every menu below is a popover that closes on an outside click and is
+      rendered only while open, so "the button exists" says nothing about
+      whether the thing behind it does. These click through and read what
+      appears — the same sequence a person performs, and the only version of
+      this check that can fail for a real reason.
+
+      Each one closes itself with Escape afterwards. Two menus open at once is
+      not a state the panel has, and leaving one up would make the next
+      assertion read the wrong popover.
+    */
+    const clickText = async (pattern) => evaluate(`
+      (() => {
+        const re = new RegExp(${JSON.stringify(pattern)}, 'i');
+        const hit = [...document.querySelectorAll('button')].find(b =>
+          re.test(b.textContent || '') || re.test(b.getAttribute('title') || '')
+          || re.test(b.getAttribute('aria-label') || ''));
+        if (!hit) return false;
+        hit.click();
+        return true;
+      })()
+    `).catch(() => false);
+
+    const escape = async () => evaluate(`
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true
+    `).catch(() => false);
+
+    const openedOverflow = await clickText('this conversation');
+    await sleep(400);
+    const overflow = (await evaluate('document.body.innerText').catch(() => '')) ?? '';
+    check(
+      openedOverflow === true && /rename/i.test(overflow) && /fork/i.test(overflow)
+        && /archive/i.test(overflow) && /settings/i.test(overflow),
+      'the ⋯ menu offers rename, fork, archive and settings',
+    );
+    await escape();
+    await sleep(300);
+
+    /*
+      The model menu now has two tabs, and the second one is the answer to
+      "where are the provider settings in VS Code". A tab that opens onto
+      nothing would be worse than not having it, so the check reads the pane
+      rather than the tab strip.
+    */
+    const openedModels = await clickText('choose a model|^model:');
+    await sleep(600);
+    const modelMenu = (await evaluate('document.body.innerText').catch(() => '')) ?? '';
+    check(
+      openedModels === true && /providers/i.test(modelMenu),
+      'the model menu offers a Providers tab',
+    );
+
+    const switchedTab = await clickText('^providers');
+    await sleep(600);
+    const providerPane = (await evaluate('document.body.innerText').catch(() => '')) ?? '';
+    check(
+      switchedTab === true
+        && /(keys, endpoints and models|nothing configured yet)/i.test(providerPane),
+      `the Providers tab shows what is configured, or the way to configure one`
+      + ` (${JSON.stringify(providerPane.replace(/\s+/g, ' ').slice(-70))})`,
+    );
+    await escape();
+    await sleep(300);
+
+    /*
+      The goal control is the one piece of the composer toolbar that vanishes
+      once used, so its absence is ambiguous — this asserts the field it opens,
+      which is unambiguous.
+    */
+    const openedGoal = await clickText('set session goal');
+    await sleep(400);
+    const goalField = await evaluate(`
+      Boolean([...document.querySelectorAll('input')]
+        .find(i => /session goal/i.test(i.getAttribute('aria-label') || '')))
+    `).catch(() => false);
+    check(
+      openedGoal === true && goalField === true,
+      'the composer can set a session goal',
+    );
+    await escape();
+    await sleep(300);
 
     /*
       ── the folder the panel is actually working in ─────────────────────

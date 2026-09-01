@@ -259,10 +259,17 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      /*
+        The real settings, at a width that fits them.
+
+        This opened VS Code's own settings page, which lists this extension's
+        five properties — command, args, port, autoStart, statusBar — and
+        nothing about providers, models, MCP, skills, agents or memory. Those
+        are what anybody means by "settings", and they live in the workspace
+        client, which now takes a deep link.
+      */
       if (message?.t === 'open-settings') {
-        void vscode.commands.executeCommand(
-          'workbench.action.openSettings', '@ext:suhail-akhtar.aico-vscode',
-        );
+        void vscode.commands.executeCommand('aico.openSettings');
         return;
       }
     });

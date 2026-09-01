@@ -7,9 +7,11 @@
  * progress on screen for the same reason: a long turn with no structure gives a
  * reader nothing to check against, and no way to tell "working" from "lost".
  *
- * Derived from the transcript, not from a second source. `todosFrom` and
- * `planFrom` are the browser client's own pure functions, imported unchanged —
- * so the two surfaces cannot disagree about what the agent committed to.
+ * Derived from the transcript, not from a second source. `todosFrom` is the
+ * browser client's own pure function, imported unchanged — so the two surfaces
+ * cannot disagree about what the agent committed to. The plan is the other half
+ * and lives next door in `PlanCard`, because a task list is a report and a plan
+ * is a question, and the two want different chrome.
  *
  * ## Two behaviours worth stating
  *

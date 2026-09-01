@@ -20,8 +20,10 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MessageBubble } from '@aico/ui';
 import { composeMessages } from '@web/reduce';
+import { applyVersions, editMarker, seqOf } from '@web/message-versions';
 import { useStore } from '@web/store';
 import { host } from '../host';
+import { MessageActions, MessageEditor, VersionArrows } from './MessageActions';
 
 /**
  * How close to the bottom still counts as "at the bottom".
@@ -39,16 +41,44 @@ export function Transcript(): React.ReactElement {
   const sessionId = useStore(s => s.sessionId);
   const error = useStore(s => s.error);
   const clearError = useStore(s => s.clearError);
+  const feedback = useStore(s => s.feedback);
+  const rate = useStore(s => s.rate);
+  const submit = useStore(s => s.submit);
+  const forkSession = useStore(s => s.forkSession);
 
   const scroller = useRef<HTMLDivElement>(null);
   /** Whether new output should pull the view down. Cleared by scrolling up. */
   const stick = useRef(true);
   const [showJump, setShowJump] = useState(false);
+  /** Seq of the sent message being reworked, if any. One at a time. */
+  const [editing, setEditing] = useState<number | null>(null);
+  /** Version a reader has navigated to, by the seq of the message it replaces. */
+  const [versionChoice, setVersionChoice] = useState<Map<number, number>>(new Map());
 
-  const messages = React.useMemo(
+  const composed = React.useMemo(
     () => composeMessages(logged, draft, busy),
     [logged, draft, busy],
   );
+
+  /*
+    Edited prompts folded back into the message they replaced.
+
+    Same projection the browser client uses, over the same log. Doing it here
+    rather than in the store is deliberate — which version is on screen is a
+    property of *this view*, and two open surfaces should be able to look at
+    different attempts at the same question.
+  */
+  const versioned = React.useMemo(
+    () => applyVersions(composed, versionChoice), [composed, versionChoice],
+  );
+  const messages = versioned.messages;
+
+  // A conversation being switched away from should not carry its open editor,
+  // its scroll stickiness or its version choices into the next one.
+  useEffect(() => {
+    setEditing(null);
+    setVersionChoice(new Map());
+  }, [sessionId]);
 
   const onScroll = (): void => {
     const el = scroller.current;
@@ -112,9 +142,71 @@ export function Transcript(): React.ReactElement {
         {messages.length === 0 && !busy && <Blank />}
 
         <div className="w-full min-w-0 max-w-column">
-          {messages.map(message => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {messages.map((message) => {
+            /*
+              Only a settled message has a seq, and only a seq can be rated,
+              edited or branched from: a streaming partial has no place in the
+              log to attach any of the three to yet.
+            */
+            const seq = seqOf(message.id);
+            const settled = seq !== null && !message.streaming;
+            const mine = message.type === 'user';
+            const versions = versioned.groups.get(message.id);
+
+            return (
+              <div key={message.id} className="group/message">
+                {editing !== null && seq === editing ? (
+                  <MessageEditor
+                    initial={message.content}
+                    onCancel={() => setEditing(null)}
+                    onSend={(text) => {
+                      setEditing(null);
+                      // Back to the newest version, which is the one about to
+                      // arrive — leaving the reader pinned to an older attempt
+                      // while its replacement streams in below is the most
+                      // confusing possible outcome of pressing Send.
+                      setVersionChoice((current) => {
+                        const next = new Map(current);
+                        next.delete(versions?.originalSeq ?? seq);
+                        return next;
+                      });
+                      void submit(`${text}\n${editMarker(versions?.originalSeq ?? seq)}`);
+                    }}
+                  />
+                ) : (
+                  <>
+                    <MessageBubble message={message} />
+                    {versions && (
+                      <div className="-mt-1 mb-1">
+                        <VersionArrows
+                          total={versions.total}
+                          current={versions.current}
+                          onSelect={index => setVersionChoice((current) => {
+                            const next = new Map(current);
+                            next.set(versions.originalSeq, index);
+                            return next;
+                          })}
+                        />
+                      </div>
+                    )}
+                    {settled && message.content.trim().length > 0 && (
+                      <MessageActions
+                        text={message.content}
+                        {...(mine ? {} : { seq, onRate: (r) => void rate(seq, r) })}
+                        {...(mine && !busy ? { onEdit: () => setEditing(seq) } : {})}
+                        {...(!busy && message.turn !== undefined ? {
+                          onBranch: () => void (mine
+                            ? forkSession(sessionId, message.turn! - 1, message.content)
+                            : forkSession(sessionId, message.turn!)),
+                        } : {})}
+                        {...(!mine && feedback[seq] ? { feedback: feedback[seq] } : {})}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

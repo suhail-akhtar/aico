@@ -25,9 +25,13 @@ import { ModelMenu } from './ModelMenu';
 import { ContextMeter } from './ContextMeter';
 import { ApprovalMenu, type ApprovalMode } from './ApprovalMenu';
 import { EffortMenu } from './EffortMenu';
+import { SetGoalButton } from './GoalBar';
 import type { EffortChoice } from '@aico/reasoning';
+import { mentionAt } from '@web/agents';
+import { api, type AgentSpec } from '@web/api';
 import { ContextChips } from './ContextChips';
 import { FindMenu } from './FindMenu';
+import { AgentMenu } from './AgentMenu';
 
 /** Ceiling for the auto-growing input, in pixels — about eight lines. */
 const MAX_INPUT_PX = 160;
@@ -58,6 +62,14 @@ export function Composer(): React.ReactElement {
   const [find, setFind] = useState<{ query: string; from: number } | null>(null);
   const [findSelected, setFindSelected] = useState(0);
   /*
+    `@` addresses a specialist; `#` points at a file. Two tokens, two menus, and
+    only ever one open — they are anchored to the same spot and a second popover
+    would sit on top of the first.
+  */
+  const [mention, setMention] = useState<{ query: string; from: number } | null>(null);
+  const [mentionSelected, setMentionSelected] = useState(0);
+  const [agents, setAgents] = useState<AgentSpec[]>([]);
+  /*
     Held here rather than in the shared store, because it is a property of the
     *next* message rather than of the session. It survives sending — somebody
     who turned asking on wants it on for the message after this one too.
@@ -72,6 +84,22 @@ export function Composer(): React.ReactElement {
 
   useEffect(() => onEditorContext(setEditor), []);
 
+  /*
+    Fetched the first time somebody types `@`, not at boot.
+
+    Listing agents is a round trip, and most messages never mention one. The
+    panel already pays for a session list and a project list on open; a third
+    for a menu that may never be shown is a cost with no reader.
+  */
+  useEffect(() => {
+    if (!mention || agents.length > 0) return;
+    let cancelled = false;
+    void api.agents()
+      .then(r => { if (!cancelled) setAgents(r.agents.filter(a => a.enabled)); })
+      .catch(() => { /* the menu says "no agent matches", which is true enough */ });
+    return () => { cancelled = true; };
+  }, [mention, agents.length]);
+
   const busy = useStore(s => s.busy);
   const submit = useStore(s => s.submit);
   const cancel = useStore(s => s.cancel);
@@ -81,6 +109,8 @@ export function Composer(): React.ReactElement {
   const question = useStore(s => s.question);
   const answer = useStore(s => s.answer);
   const newSession = useStore(s => s.newSession);
+  const sessionAgent = useStore(s => s.sessionAgent);
+  const setSessionAgent = useStore(s => s.setSessionAgent);
 
   /*
     Grow with the content, up to a ceiling.
@@ -140,6 +170,7 @@ export function Composer(): React.ReactElement {
 
     setText('');
     setFind(null);
+    setMention(null);
     /*
       Attachments reset with the message they went out on. A chip is a statement
       about *this* message; leaving pins and dismissals in place would make the
@@ -149,11 +180,35 @@ export function Composer(): React.ReactElement {
     dispatch(payload);
   };
 
-  /** Track the caret so `#` opens a menu only where a token is being typed. */
-  const syncFind = (value: string, caret: number): void => {
-    const found = findToken(value, caret);
+  /**
+   * Track the caret so a menu opens only where a token is being typed.
+   *
+   * Both are read from one place, and `@` wins when somehow both match: an
+   * agent mention changes who answers, which outranks attaching a file.
+   */
+  const syncMenus = (value: string, caret: number): void => {
+    const at = mentionAt(value, caret);
+    if (at?.query !== mention?.query || at?.from !== mention?.from) setMentionSelected(0);
+    setMention(at);
+
+    const found = at ? null : findToken(value, caret);
     if (found?.query !== find?.query || found?.from !== find?.from) setFindSelected(0);
     setFind(found);
+  };
+
+  /** Engage the agent and take its `@name` back out of the message. */
+  const chooseAgent = (name: string): void => {
+    if (mention) {
+      const node = input.current;
+      const caret = node?.selectionStart ?? text.length;
+      setText(text.slice(0, mention.from) + text.slice(caret));
+      requestAnimationFrame(() => {
+        node?.focus();
+        node?.setSelectionRange(mention.from, mention.from);
+      });
+    }
+    setMention(null);
+    void setSessionAgent(name);
   };
 
   /** Attach what was chosen, and take the `#query` back out of the message. */
@@ -225,6 +280,21 @@ export function Composer(): React.ReactElement {
       sends a message containing a half-typed `#src/ap`, which is the most
       annoying possible outcome of having started to point at a file.
     */
+    if (mention) {
+      if (event.key === 'Escape') { event.preventDefault(); setMention(null); return; }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault(); setMentionSelected(i => i + 1); return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault(); setMentionSelected(i => Math.max(0, i - 1)); return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
+        event.preventDefault();
+        chosenAgent.current?.();
+        return;
+      }
+    }
+
     if (find) {
       if (event.key === 'Escape') { event.preventDefault(); setFind(null); return; }
       if (event.key === 'ArrowDown') {
@@ -259,6 +329,7 @@ export function Composer(): React.ReactElement {
    * here that commits whatever it currently has highlighted.
    */
   const chosen = useRef<(() => void) | null>(null);
+  const chosenAgent = useRef<(() => void) | null>(null);
 
   const placeholder = question
     ? 'Answer to continue…'
@@ -281,11 +352,48 @@ export function Composer(): React.ReactElement {
         either — showing chips for something that will not be sent is a lie the
         UI tells about its own behaviour.
       */}
+      {/*
+        Who is listening, when it is not the orchestrator.
+
+        Shown beside the context chips rather than in the message, because
+        choosing an agent removes the `@name` from the text — without this there
+        would be no evidence at all that the next message is addressed
+        elsewhere.
+      */}
+      {sessionAgent && (
+        <div className="flex items-center gap-1 px-1 pb-1">
+          <span className="inline-flex max-w-full items-center gap-1 rounded border
+                           border-aico-accent bg-aico-accent-soft px-1.5 py-[1px] text-[10px]">
+            <span className="truncate text-aico-accent">@{sessionAgent}</span>
+            <button
+              type="button"
+              aria-label={`Stop addressing ${sessionAgent}`}
+              title="Back to the orchestrator"
+              onClick={() => void setSessionAgent(null)}
+              className="shrink-0 text-aico-muted hover:text-aico-primary"
+            >
+              ✕
+            </button>
+          </span>
+        </div>
+      )}
+
       {!question && !busy && (
         <ContextChips editor={editor} attached={attached} onChange={setAttached} />
       )}
 
       <div className="relative rounded border border-aico-border focus-within:border-aico-accent">
+        {mention && (
+          <AgentMenu
+            agents={agents}
+            query={mention.query}
+            selected={mentionSelected}
+            onSelectedChange={setMentionSelected}
+            onChoose={chooseAgent}
+            commit={chosenAgent}
+          />
+        )}
+
         {find && (
           <FindMenu
             query={find.query}
@@ -304,20 +412,29 @@ export function Composer(): React.ReactElement {
           placeholder={placeholder}
           onChange={(e) => {
             setText(e.target.value);
-            syncFind(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            syncMenus(e.target.value, e.target.selectionStart ?? e.target.value.length);
           }}
           onKeyUp={(e) => {
             // Arrow keys and clicks move the caret without changing the text, and
             // moving out of a `#token` has to close the menu.
             const node = e.currentTarget;
-            syncFind(node.value, node.selectionStart ?? 0);
+            syncMenus(node.value, node.selectionStart ?? 0);
           }}
-          onBlur={() => setFind(null)}
+          onBlur={() => { setFind(null); setMention(null); }}
           onKeyDown={onKeyDown}
           className="block w-full resize-none bg-transparent px-2.5 py-2 text-[13px] text-aico-primary placeholder:text-aico-muted focus:outline-none"
         />
 
-        <div className="flex items-center gap-1.5 px-1.5 pb-1.5">
+        {/*
+          Wraps rather than overflows.
+
+          Six controls, a meter and a send button do not fit a panel docked at
+          its minimum width, and a `flex` row that cannot fit does not clip —
+          it makes the *document* scroll sideways, which drags the whole
+          conversation with it. Wrapping spends a second row on the rare narrow
+          case instead.
+        */}
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-1.5 pb-1.5">
           <ModelMenu />
 
           <button
@@ -338,6 +455,13 @@ export function Composer(): React.ReactElement {
           <ApprovalMenu mode={approval} onChange={setApproval} />
 
           <EffortMenu value={effort} onChange={setEffort} />
+
+          {/*
+            Last of the four, and the only one that disappears once used — a
+            goal is set once a session, where model, mode, approval and effort
+            are changed throughout it.
+          */}
+          <SetGoalButton />
 
           <span className="flex-1" />
 

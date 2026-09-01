@@ -112,6 +112,21 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('aico.focus', () => panel.reveal()),
 
+    /*
+      Providers, models, MCP, skills, memory, agents — the real ones.
+
+      Separate from `aico.open` so it can also be reached from the command
+      palette, which is where somebody who has not found the panel's overflow
+      menu will look for "aico settings".
+    */
+    vscode.commands.registerCommand('aico.openSettings', async () => {
+      const running = await ready();
+      if (running) {
+        WorkspacePanel.show(running, undefined, true);
+        status.refresh();
+      }
+    }),
+
     vscode.commands.registerCommand('aico.open', async () => {
       const running = await ready();
       if (running) {

@@ -33,6 +33,9 @@ import { Header } from './components/Header';
 import { SessionList } from './components/SessionList';
 import { Transcript } from './components/Transcript';
 import { Progress } from './components/Progress';
+import { SubAgents } from './components/SubAgents';
+import { PlanCard } from './components/PlanCard';
+import { GoalBar } from './components/GoalBar';
 import { Composer } from './components/Composer';
 import { PermissionBridge } from './components/PermissionBridge';
 import { EditBridge } from './components/EditBridge';
@@ -249,7 +252,18 @@ export function Panel(): React.ReactElement {
         />
       )}
       <Transcript />
+      <SubAgents />
       <Progress />
+      {/*
+        Above the goal, below the task list. A plan is a decision waiting on the
+        reader, so it sits closest to the thing they are about to type into.
+      */}
+      <PlanCard />
+      {/*
+        Directly above the composer, which is where it is read: the last thing
+        seen before writing the next message.
+      */}
+      <GoalBar />
       <Composer />
       <PermissionBridge />
       <EditBridge />

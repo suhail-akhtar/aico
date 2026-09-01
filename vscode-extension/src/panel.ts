@@ -37,7 +37,7 @@ export class WorkspacePanel {
   private readonly panel: vscode.WebviewPanel;
   private disposed = false;
 
-  static show(server: RunningServer, sessionId?: string): void {
+  static show(server: RunningServer, sessionId?: string, settings?: boolean): void {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
 
     if (WorkspacePanel.current && !WorkspacePanel.current.disposed) {
@@ -45,11 +45,11 @@ export class WorkspacePanel {
       // Reload only when pointed at a different conversation. Reloading on
       // every reveal would throw away scroll position and any half-typed
       // message every time the status bar was clicked.
-      if (sessionId) WorkspacePanel.current.load(server, sessionId);
+      if (sessionId || settings) WorkspacePanel.current.load(server, sessionId, settings);
       return;
     }
 
-    WorkspacePanel.current = new WorkspacePanel(server, column, sessionId);
+    WorkspacePanel.current = new WorkspacePanel(server, column, sessionId, settings);
   }
 
   static dispose(): void {
@@ -57,7 +57,10 @@ export class WorkspacePanel {
     WorkspacePanel.current = undefined;
   }
 
-  private constructor(server: RunningServer, column: vscode.ViewColumn, sessionId?: string) {
+  private constructor(
+    server: RunningServer, column: vscode.ViewColumn,
+    sessionId?: string, settings?: boolean,
+  ) {
     this.panel = vscode.window.createWebviewPanel(
       'aico.workspace',
       'aico',
@@ -85,13 +88,24 @@ export class WorkspacePanel {
       WorkspacePanel.current = undefined;
     });
 
-    this.load(server, sessionId);
+    this.load(server, sessionId, settings);
   }
 
-  load(server: RunningServer, sessionId?: string): void {
+  load(server: RunningServer, sessionId?: string, settings?: boolean): void {
     const target = new URL(`http://localhost:${server.port}/`);
     target.searchParams.set('token', server.token);
     if (sessionId) target.searchParams.set('session', sessionId);
+    /*
+      Straight to the settings screens.
+
+      The panel's gear used to open VS Code's own settings page, which shows
+      this extension's five properties and nothing about providers, models,
+      MCP, skills or memory — the eight panes people actually mean by
+      "settings". Rebuilding those in a 300px column would be the wrong shape
+      for every one of them; opening the real ones in an editor tab is the
+      right width and one click.
+    */
+    if (settings) target.searchParams.set('settings', '1');
     this.panel.webview.html = shell(target.toString(), server.port);
   }
 }
