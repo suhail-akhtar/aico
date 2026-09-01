@@ -17,6 +17,7 @@
 
 import { spawn, execFile, execFileSync } from 'child_process';
 import { currentCwd } from '../run-context.js';
+import { detectShell } from './shell-choice.js';
 import { closeBackgroundProcess, registerBackgroundProcess } from '../work/register.js';
 
 export interface BashInput {
@@ -245,14 +246,23 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
   const serverKind = looksLikeServer(input.command);
   const inBackground = input.background ?? serverKind !== undefined;
 
-  const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
-  const shellFlag = process.platform === 'win32' ? '/d/s/c' : '-c';
+  /*
+    Which shell, decided rather than assumed.
+
+    This was `cmd.exe` on Windows, unconditionally. A tool named `Bash` whose
+    description says "shell command" got `ls: not recognized`, and nothing
+    anywhere told the model why. Git Bash is preferred where it exists — see
+    `shell-choice.ts` for the whole reasoning.
+  */
+  const shell = detectShell();
   const startedAt = Date.now();
 
   return new Promise<BashResult>((resolve) => {
-    const child = spawn(shell, [shellFlag, input.command], {
+    const child = spawn(shell.command, shell.oneShot(input.command), {
       cwd: currentCwd(),
-      windowsVerbatimArguments: process.platform === 'win32',
+      // Verbatim is a `cmd.exe` requirement, not a Windows one: applying it to
+      // bash mangles every command containing a quote.
+      windowsVerbatimArguments: shell.verbatim,
       // Its own process group on POSIX, so a timeout can signal the whole tree
       // rather than just the shell. Without this a killed `sh -c` leaves its
       // children running and holding the pipes open.
