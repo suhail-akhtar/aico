@@ -223,6 +223,11 @@ export { extractRequirements, coverageOf, setBrief, currentRequirements, MIN_INT
 export { withTimeout, timeoutFor, timeoutMessage, ToolTimeoutError } from './tools/timeout-policy.js';
 export { terminal, closeAllTerminals, terminalDefinition } from './tools/terminal.js';
 export { detectShell, resetShellChoiceForTest } from './tools/shell-choice.js';
+export {
+  LADDER, reasoningFor, supportsReasoning, effortToSend,
+  learnFromError, resetReasoningForTest,
+} from '../shared/reasoning.js';
+export { resolvedEffort } from './run-context.js';
 export { observe, blockedReason, resetObservations, isObserved } from './tools/observation.js';
 export { runScoped } from './run-scoped.js';
 export { detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck, checkProjectGate, checkResults, newestSourceChange, touchedFiles } from './checks.js';

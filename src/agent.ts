@@ -65,6 +65,7 @@ function getExecutionMode(name: string): ExecutionMode {
 import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
 import { runInContext } from './run-context.js';
 import type { FileWriter } from './tools/file-writer.js';
+import { isEffortChoice } from '../shared/reasoning.js';
 import { buildRuntimeAwareness } from './capabilities.js';
 import { renderRunningWork } from './work/projection.js';
 import { noteWindowFromError } from './context-window.js';
@@ -1059,6 +1060,15 @@ export async function runAgent(opts: AgentOptions): Promise<string> {
       // Who applies this run's writes. Undefined means the filesystem, which is
       // every run except one driven from an editor that can do better.
       ...(opts.applyEdit ? { applyEdit: opts.applyEdit } : {}),
+      /*
+        How hard to think, for the providers that can be asked.
+
+        `effort` already existed and only ever reached the *prompt* — wording
+        telling the model to be thorough or brief. It never reached the request,
+        so a reasoning model was asked in prose to think less while still being
+        sent `reasoning_effort: high`. On the run context it now reaches both.
+      */
+      ...(isEffortChoice(opts.effort) ? { effort: opts.effort } : {}),
     },
     () => runAgentInContext(opts),
   );

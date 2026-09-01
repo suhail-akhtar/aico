@@ -147,6 +147,14 @@ export interface SubmitOptions {
    */
   applyEdits?: boolean;
   /**
+   * How hard to think, for models that can be asked.
+   *
+   * `auto` and omission both mean "send nothing, let the platform decide" —
+   * which for some models is adaptive per request and for others is a fixed
+   * level the vendor chose. See `src/reasoning.ts`.
+   */
+  effort?: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /**
    * Settle this session's open tasks as part of accepting the message.
    *
    * Sent as a field rather than left for the server to recognise in the

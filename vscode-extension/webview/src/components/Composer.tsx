@@ -24,6 +24,8 @@ import {
 import { ModelMenu } from './ModelMenu';
 import { ContextMeter } from './ContextMeter';
 import { ApprovalMenu, type ApprovalMode } from './ApprovalMenu';
+import { EffortMenu } from './EffortMenu';
+import type { EffortChoice } from '@aico/reasoning';
 import { ContextChips } from './ContextChips';
 import { FindMenu } from './FindMenu';
 
@@ -61,6 +63,12 @@ export function Composer(): React.ReactElement {
     who turned asking on wants it on for the message after this one too.
   */
   const [approval, setApproval] = useState<ApprovalMode>('auto');
+  /*
+    Held beside the approval mode and for the same reason: a property of the
+    next message rather than of the session, and one somebody who lowered it
+    wants to stay lowered for the message after this one too.
+  */
+  const [effort, setEffort] = useState<EffortChoice>('auto');
 
   useEffect(() => onEditorContext(setEditor), []);
 
@@ -109,7 +117,7 @@ export function Composer(): React.ReactElement {
       Control view. There is no reason anybody in VS Code would want the
       external-change behaviour instead, so it is not a setting.
     */
-    void submit(value, { planMode, approval, applyEdits: true });
+    void submit(value, { planMode, approval, applyEdits: true, effort });
   };
 
   const send = (): void => {
@@ -328,6 +336,8 @@ export function Composer(): React.ReactElement {
           </button>
 
           <ApprovalMenu mode={approval} onChange={setApproval} />
+
+          <EffortMenu value={effort} onChange={setEffort} />
 
           <span className="flex-1" />
 

@@ -48,6 +48,7 @@ import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
+import { isEffortChoice } from '../../shared/reasoning.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
 import { requestAgentStop } from '../tools/task.js';
@@ -874,6 +875,16 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           // Opt-in, never inferred: a client that claims this must answer every
           // `edit` event, because the tool call waits until it does.
           applyEdits: (body as { applyEdits?: boolean }).applyEdits === true,
+          /*
+            How hard to think, when the model can be asked.
+
+            Validated rather than forwarded: this arrives as a string from an
+            HTTP body, and an unrecognised value must produce no reasoning
+            parameter rather than a 400 on every request of the turn.
+          */
+          ...(isEffortChoice((body as { effort?: unknown }).effort)
+            ? { effort: (body as { effort: string }).effort }
+            : {}),
           ...(pictures.length ? { images: pictures } : {}),
         }).catch(() => { /* already reported on the stream as turn-end */ });
         return;
