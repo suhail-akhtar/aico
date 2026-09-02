@@ -61,6 +61,30 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   first honest answer is "little to fix here; write harder tasks", which is what
   the user corpus directory is for.
 
+### Fixed
+
+- **Auto-compaction never ran in the browser or the editor.** The terminal
+  client has folded older turns into a summary after every turn since the
+  feature existed. The server never called it — so a web or VS Code session
+  could sit at 100% of a million-token window with the meter saying exactly
+  that and nothing acting on it, the whole conversation resent on every turn
+  until the provider refused. The server now compacts before a turn (so a
+  session reopened after a long absence is folded before its first request)
+  and after it (so the meter drops while you are looking at it), and says so:
+  *Compacted the conversation: 1,280 → 754 tokens, 1 older turn folded*.
+
+  Proven live rather than by reading: a project whose settings set a
+  1,000-token threshold, four large turns, the transcript pinned at three
+  messages from turn two on. The first version of that proof failed for a
+  reason worth recording — three turns totalled ~770 tokens and never crossed
+  the line it was testing, which looked exactly like the bug still being there.
+
+- **Notices were dropped by both clients.** The server has said things like
+  "the agent you addressed was deleted" since personas existed, and neither the
+  browser nor the panel had a case for the event — it was parsed and discarded.
+  Both now show a notice where they show an error, in a quieter tone, until it
+  is dismissed. The compaction line above is the first one most people will see.
+
 ## 0.8.0 — 2026-09-02
 
 ### Added

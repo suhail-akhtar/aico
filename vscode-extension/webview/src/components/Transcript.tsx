@@ -41,6 +41,8 @@ export function Transcript(): React.ReactElement {
   const sessionId = useStore(s => s.sessionId);
   const error = useStore(s => s.error);
   const clearError = useStore(s => s.clearError);
+  const notice = useStore(s => s.notice);
+  const clearNotice = useStore(s => s.clearNotice);
   const feedback = useStore(s => s.feedback);
   const rate = useStore(s => s.rate);
   const submit = useStore(s => s.submit);
@@ -217,6 +219,22 @@ export function Transcript(): React.ReactElement {
           })}
         </div>
       </div>
+
+      {notice && !error && (
+        <div className="absolute inset-x-2 bottom-2 flex items-start gap-2 rounded border border-aico-border bg-aico-elevated px-2.5 py-2">
+          <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-aico-secondary">
+            {notice}
+          </span>
+          <button
+            type="button"
+            onClick={clearNotice}
+            aria-label="Dismiss"
+            className="shrink-0 text-[11px] text-aico-muted hover:text-aico-primary"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="absolute inset-x-2 bottom-2 flex items-start gap-2 rounded border border-aico-danger/40 bg-aico-elevated px-2.5 py-2">
