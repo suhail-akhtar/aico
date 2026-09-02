@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.8.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.9.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -192,6 +192,16 @@
       chose, and the button says which — <code>Think auto·high</code> on a provider whose
       silent default is high. That single fact is the answer to "why did a one-line change
       take so long", and it was invisible before.
+    </p>
+
+    <h2>When the conversation outgrows the model</h2>
+    <p>
+      The meter under the composer shows how much of the window the conversation occupies,
+      and whether that figure is the vendor's or a guess. At 75% of it, older turns are
+      folded into a summary — in the log, so the next request is built from the folded
+      version — and the client says so: <em>Compacted the conversation: 1,309 → 754
+      tokens, 1 older turn folded</em>. The threshold and how many recent turns to keep
+      are settings; a project can set its own.
     </p>
 
     <h2>Keeping a correction</h2>

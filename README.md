@@ -1,13 +1,15 @@
 # aico — open-source AI coding agent
 
-An **AI coding agent** for the terminal and a local web workspace, with a
-durable session log at its core. Self-hosted and MIT licensed: **bring your own
-API key** for OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI (GLM) or
-DeepSeek — or run it entirely offline against a local **Ollama** model.
+An **AI coding agent** for the terminal, a local web workspace and a native
+**VS Code** panel, with a durable session log at its core. Self-hosted and MIT
+licensed: **bring your own API key** for OpenAI, Anthropic, OpenRouter, Google
+Gemini, Z.AI (GLM) or DeepSeek — or run it entirely offline against a local
+**Ollama** model.
 
 It opens what it builds in a real browser before calling a turn done, keeps one
-supervised ledger of everything running in the background, and speaks **MCP**
-so another AI can hand it work.
+supervised ledger of everything running in the background, speaks **MCP** so
+another AI can hand it work, turns your corrections into knowledge it keeps, and
+can measure its own skills against tasks with known answers.
 
 ```
   ✻ aico  (AI Coder)
@@ -22,10 +24,11 @@ so another AI can hand it work.
 ❯ _
 ```
 
-**Status:** `0.6.0`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.9.0`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
-workspace, background supervision, visuals and Mini Apps.
+workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
+background supervision, visuals and Mini Apps.
 
 **How does it compare to Claude Code, OpenCode, Aider or Cline?**
 [There is an honest page for that](https://suhail-akhtar.github.io/aico/compare.html),
@@ -40,7 +43,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.6.0 serve
+npx github:suhail-akhtar/aico#v0.9.0 serve
 ```
 
 ## Why this one
@@ -79,10 +82,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.6.0 serve
+npx github:suhail-akhtar/aico#v0.9.0 serve
 ```
 
-`#v0.6.0` is a tag, so it pins that release. `#release/v0.6` follows the 0.6
+`#v0.9.0` is a tag, so it pins that release. `#release/v0.9` follows the 0.9
 line as it gets fixes, and `#main` is the development trunk.
 
 From source:
@@ -543,6 +546,28 @@ Sessions are named automatically and can be pinned by renaming, transcripts
 export as Markdown or text, and settings — providers, permission mode, context
 and spend ceilings — are searchable across every pane.
 
+Two controls on the composer are per message, because the message you are about
+to send is what you know something about. **Approve** is `auto` (the default, and
+what every session has always done), `not edits` (file writes go through;
+commands, fetches and delegation are put to you) or `always`. `Terminal` is
+deliberately not in the middle mode's pass-through — a shell can do everything a
+file write can. **Think** offers what the *model* accepts, in each provider's own
+shape, and nothing when the model is unknown. `auto` means *send nothing*, and
+the button says what that turns into on a provider whose silent default is high.
+
+When the conversation outgrows the model, older turns fold into a summary at 75%
+of the window and the client says so — *Compacted the conversation: 1,309 → 754
+tokens*. A sent message can be edited and sent again, with arrows between
+versions.
+
+#### Keeping a correction
+
+Rate a reply **▼** and say why, and **Remember this** turns the note into a
+knowledge entry: a trigger built from what you *asked*, your note as the
+guidance, filed with the project. The agent is shown it on any later task whose
+wording matches. You see both fields before they are kept — nothing is adopted
+because the agent decided it should be.
+
 ### In VS Code
 
 The extension in [`vscode-extension/`](vscode-extension/) gives aico a tab of its
@@ -551,19 +576,33 @@ from your theme — not the web workspace in a frame — but it is not a second
 implementation either: the state layer, the reducer and every transcript
 component are the browser client's, imported unchanged.
 
-Four things it does that a browser cannot:
+What it does that a browser cannot:
 
 - **Edits arrive through the front door.** A write is applied as a
   `WorkspaceEdit`, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back and it shows in
   Source Control. A file changed behind the editor's back can do neither.
 - **It knows what you are looking at.** Active file, selection with its line
   range, and that file's Problems — shown as chips, so it is never a guess what a
-  message will carry. `#` points at another file or a symbol.
+  message will carry. `#` points at another file or a symbol; `@` addresses a
+  specialist agent.
 - **Approvals are real dialogs.** Auto, ask-but-not-for-edits, or ask every time.
+- **The editor is a tool.** `VSCodeDiagnostics` reads your Problems panel, so
+  after an edit the agent asks the language server what it thinks instead of
+  grepping for the shape of an error. `VSCodeTasks` runs what is already in your
+  `tasks.json`. `VSCodeWorkspace` creates, adds and opens folders. Offered only
+  while an editor is attached — the same session in a browser tab has none.
+- **The shape of a run, on screen.** Task list, delegated sub-agents, a plan you
+  can accept or amend, the context meter, a session goal.
 - **Background work in the status bar**, without opening anything.
+
+On Windows, commands run on Git Bash when it is installed, then PowerShell, then
+`cmd` — because the tool a model sees is called `Bash`, and `ls` through
+`cmd.exe` used to burn turns rediscovering that it does not exist.
 
 There is no inline completion; that is a different product. The full workspace
 stays one click away for Mini Apps, the trajectory view and the settings screens.
+The extension is not on the Marketplace yet; the `.vsix` is attached to each
+[release](https://github.com/suhail-akhtar/aico/releases), or build it:
 
 ```sh
 cd vscode-extension && npm install
@@ -596,6 +635,13 @@ binary was found and where the server is.
 - **A check can be shallow.** Requirements coverage forces a check *per
   behaviour the brief named*; it cannot judge whether the behaviour is any good.
   It closes "never built it" and "never looked", not "built it badly".
+- **The VS Code extension is a `.vsix`, not a Marketplace listing.** It uses no
+  proposed APIs, so a listing is possible; it needs a publisher account that
+  does not exist yet.
+- **`aico skill optimize` can only fix what its corpus can fail.** The shipped
+  skills already pass the shipped tasks, so the loop's first honest answer is
+  "nothing to fix here" — the value is in the tasks you add under
+  `~/.aico/skill-evals/`.
 - Not a sandbox for untrusted code. Review what it runs.
 
 ---
