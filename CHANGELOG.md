@@ -3,6 +3,23 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.9.1 — 2026-09-03
+
+### Fixed
+
+- **`npm install -g github:suhail-akhtar/aico#<tag>` recursed until it failed.**
+  A global install exports `npm_config_global=true` into every lifecycle
+  script's environment. The prepare step that installs the web client's
+  dependencies runs `npm --prefix web install`, which inherited it — and a
+  global install with no package named installs the current directory, which
+  was the clone being prepared. npm prepared it again, six levels deep, then
+  gave up. `npx github:` sets different config and never hit it, which is why
+  the README's headline path worked while the one a VS Code user needs — a
+  global `aico` on the `PATH` — did not. The prepare script now scrubs the
+  outer install's config from its children and refuses to run nested. The
+  site's VS Code page also told people to `npm install -g @suhail-akhtar/aico`,
+  which is not on the registry; it now names the tag.
+
 ## 0.9.0 — 2026-09-02
 
 ### Added
