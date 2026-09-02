@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.8.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.9.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -215,6 +215,33 @@ ten minutes without doing anything.</code></pre>
       question-asking tool is removed from those runs entirely rather than left
       present with a disclaimer, because a tool that is present gets called
       eventually.
+    </p>
+
+    <h2 id="skills">Measuring a skill, and improving it only when it measures better</h2>
+    <p>
+      A skill is a prompt, and whether it was a <em>good</em> prompt used to be a matter of
+      opinion — it shipped when it read well. <code>aico skill eval &lt;name&gt;</code> makes
+      it a number: the skill runs against tasks with planted, checkable answers — a SQL
+      injection in <code>db.js</code>, an off-by-one in a pager, a staged change that wants
+      a conventional commit — and is graded with regexes, files and tool-call counts.
+      Never a model judging a model: a judge costs a call per task, drifts between runs,
+      and turns the job into "satisfy the judge".
+    </p>
+    <p>
+      <code>aico skill optimize &lt;name&gt;</code> is SkillOpt's loop at personal scale. A
+      separate optimiser model reads only the <em>failing</em> runs — which checks missed,
+      and why in the corpus author's words — and proposes edits bounded by a textual learning
+      rate: at most four a step, none over 600 characters, and the skill may not grow past a
+      third more than it started, because its length is paid for on every future turn. A
+      candidate is kept only if it scores <strong>strictly higher on validation tasks the
+      optimiser never saw</strong>; a rejected one is shown back so it is not tried twice.
+    </p>
+    <p>
+      It never writes the shipped skill. The result is a draft for you to diff and register,
+      because a corpus is a proxy and only a reader can judge the task nobody wrote. Both
+      commands print their cost ceiling before the first call and stop at it. Add your own
+      tasks under <code>~/.aico/skill-evals/&lt;skill&gt;/</code> — the loop can only fix what
+      its tasks can fail, and on the shipped corpus the shipped skills already pass.
     </p>
 
     <div class="next">

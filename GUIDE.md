@@ -311,6 +311,32 @@ because those are different outcomes and one of them means nothing got built.
 
 ---
 
+## In VS Code
+
+aico is a tab of its own in the Secondary Side Bar, beside Chat — a native
+panel, not the web workspace in a frame. Install the `.vsix` attached to a
+release, reload the window, and open a folder: a session's log is filed under
+one and its file tools are confined to it.
+
+What changes inside the editor: your selection and the active file's Problems
+arrive as removable chips; `#` names another file or symbol; edits land as
+`WorkspaceEdit`s so Ctrl+Z takes them back; approvals are real dialogs; and the
+agent can read your Problems panel (`VSCodeDiagnostics`) and run your
+`tasks.json` tasks (`VSCodeTasks`) — tools that only exist while the editor is
+attached. The full write-up is on the
+[VS Code page](https://suhail-akhtar.github.io/aico/vscode.html).
+
+## Teaching it a correction
+
+When a reply misses, rate it **▼** and say why. **Remember this** turns your note
+into a knowledge entry: *when* is built from what you asked, *then* is your note.
+Read both, edit if you like, keep it. From then on any task whose wording matches
+the trigger is shown the guidance before the agent starts.
+
+It is filed with the project by default. Tick *Every project* only when the
+lesson is about you rather than the code — a convention stored globally follows
+you into repositories where it is wrong.
+
 ## Choosing a model
 
 The picker sits in the composer and lists the active provider's models. What you
