@@ -254,6 +254,8 @@ export function ChatPane(): React.ReactElement {
   }, [status]);
   const error = useStore(s => s.error);
   const clearError = useStore(s => s.clearError);
+  const notice = useStore(s => s.notice);
+  const clearNotice = useStore(s => s.clearNotice);
   const turnSummary = useStore(s => s.turnSummary);
   const pendingIntents = useStore(s => s.pendingIntents);
   const feedback = useStore(s => s.feedback);
@@ -326,6 +328,19 @@ export function ChatPane(): React.ReactElement {
               Still connecting to the event stream. Your run is unaffected — it is on the server and
               keeps going — but this page will not show it until the stream opens. It keeps
               retrying; if it stays this way, try reloading or another browser window.
+            </div>
+          )}
+
+          {notice && (
+            <div className="mb-4 flex items-start gap-3 rounded-xl border border-aico-border bg-aico-surface px-4 py-2">
+              <div className="flex-1 text-[13px] text-aico-secondary">{notice}</div>
+              <button
+                onClick={clearNotice}
+                className="text-aico-muted hover:text-aico-primary"
+                aria-label="Dismiss notice"
+              >
+                ✕
+              </button>
             </div>
           )}
 

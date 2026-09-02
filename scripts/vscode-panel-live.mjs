@@ -878,7 +878,79 @@ try {
       60_000,
       2000,
     );
-    check(Boolean(madeFolder), 'and created a folder through VSCodeWorkspace, on disk');
+    check(
+      Boolean(madeFolder),
+      'and created a folder through VSCodeWorkspace, on disk'
+      // Named on failure: whether the model made a differently named folder,
+      // or none, are different bugs and the bare failure could not tell them apart.
+      + (madeFolder ? '' : ` (workspace holds: ${fs.readdirSync(workspace).join(', ')})`),
+    );
+
+    /*
+      ── a correction, kept from the panel ────────────────────────────────
+
+      The panel's version of "Remember this" is one look and one click, and
+      neither the unit tests nor the wire probe can press it: the button only
+      exists after a thumbs-down with a note, on a real reply, in a real
+      webview. So this rates the last reply down, types why, keeps it, and
+      then checks the file the engine will load — because a green button and a
+      file on disk are two different claims.
+
+      The actions row is opacity-0 until hovered; `.click()` does not care.
+    */
+    const ratedDown = await evaluate(`
+      (() => {
+        const buttons = [...document.querySelectorAll('button[aria-label="Not helpful"]')];
+        const last = buttons[buttons.length - 1];
+        if (!last) return false;
+        last.click();
+        return true;
+      })()
+    `).catch(() => false);
+    check(ratedDown === true, 'a reply can be rated down from the panel');
+
+    const noted = await until(async () => evaluate(`
+      (() => {
+        const box = document.querySelector('input[aria-label="Why this reply missed"]');
+        if (!box) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(box, 'It should have cited the line number of the error.');
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        box.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true,
+        }));
+        return true;
+      })()
+    `).catch(() => false), 15_000, 500);
+    check(noted === true, 'a thumbs-down asks why, immediately');
+
+    const remembered = await until(async () => evaluate(`
+      (() => {
+        const btn = [...document.querySelectorAll('button')]
+          .find(b => /remember this/i.test(b.textContent || ''));
+        if (!btn) return false;
+        btn.click();
+        return true;
+      })()
+    `).catch(() => false), 20_000, 500);
+    check(remembered === true, 'and offers to keep the correction once the note is saved');
+
+    /*
+      On disk, in the project, with the note as the guidance. The trigger is
+      whatever the suggestion made of the request; the guidance is the one part
+      a person typed, so it is the part asserted verbatim.
+    */
+    const knowledgeDir = path.join(workspace, '.aico', 'knowledge');
+    const kept = await until(async () => {
+      if (!fs.existsSync(knowledgeDir)) return null;
+      const files = fs.readdirSync(knowledgeDir).filter(f => f.endsWith('.md'));
+      for (const f of files) {
+        const body = fs.readFileSync(path.join(knowledgeDir, f), 'utf8');
+        if (/cited the line number/.test(body) && /^trigger: .+/m.test(body)) return f;
+      }
+      return null;
+    }, 20_000, 500);
+    check(Boolean(kept), `the correction lands as project knowledge the engine loads (${kept ?? 'no file'})`);
   }
 } catch (err) {
   failed += 1;

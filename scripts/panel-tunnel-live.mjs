@@ -45,6 +45,8 @@ function check(cond, label) {
   else { failed++; fails.push(label); console.log(`  ✗ ${label}`); }
 }
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 async function until(fn, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -56,6 +58,16 @@ async function until(fn, timeoutMs = 20_000) {
 
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-panel-live-'));
 fs.writeFileSync(path.join(workspace, 'README.md'), '# probe workspace\n');
+/*
+  Project settings the server will merge, because it runs with this directory
+  as its cwd. A threshold this low is absurd for real work and exactly right
+  for a probe: three short turns must cross it, or the compaction check below
+  is not a check.
+*/
+fs.mkdirSync(path.join(workspace, '.aico'), { recursive: true });
+fs.writeFileSync(path.join(workspace, '.aico', 'settings.json'), JSON.stringify({
+  autoCompact: { enabled: true, thresholdTokens: 1000, keepRecentTurns: 1 },
+}, null, 2));
 
 let child;
 let wiring;
@@ -650,6 +662,75 @@ try {
   const refused = await api.addKnowledge(hostSession, { trigger: 'x', content: '   ' })
     .then(() => ({ ok: true })).catch(err => ({ ok: false, status: err.status }));
   check(refused.ok === false, `an entry with no guidance is refused (${refused.status ?? 'thrown'})`);
+
+  /*
+    ── the server compacts a conversation that has outgrown the model ──────
+
+    Reported as "auto compact isn't working", and it was not: the terminal
+    client had called it after every turn since the feature existed, and the
+    server never had. A browser or editor session could sit at 100% of a
+    million-token window with the meter saying so and nothing acting on it.
+
+    Proven the only way that counts — a real session, over the threshold the
+    project settings above set, checked for the compaction summary in the log
+    rather than only for a notice on the wire, because the summary in the log
+    is what the next request is built from.
+  */
+  const compactSession = `compact-probe-${Date.now().toString(36)}`;
+  const notices = [];
+  const seenTypes = new Map();
+  const listen = (event) => {
+    seenTypes.set(event.type, (seenTypes.get(event.type) ?? 0) + 1);
+    if (event.type === 'notice' && /compacted/i.test(event.data?.text ?? '')) notices.push(event.data.text);
+  };
+
+  /*
+    A fresh stream per turn, deliberately.
+
+    The first version held one stream across four turns and saw exactly one —
+    the probe's transport harness ends a streamed response with the turn, and a
+    notice is ephemeral: it is not in the log, so a reconnect cannot replay it.
+    A raw SSE connection to the same server received every notice, so this is
+    the harness, not the server. Reopening per turn tests what the server emits
+    over the tunnel without depending on how long the harness keeps a socket.
+  */
+  let compactStream = null;
+  for (const n of [1, 2, 3, 4]) {
+    compactStream?.close();
+    compactStream = streamSession(compactSession, listen, undefined, 0, workspace);
+    await sleep(800);
+    await api.submit({
+      sessionId: compactSession,
+      task: `Reply with the line "turn ${n} acknowledged" and then the word lorem repeated 400 times. Do not call any tool.`,
+      project: workspace,
+    }).catch(() => { /* reported earlier if the provider is unavailable */ });
+    await until(async () => {
+      try { return !(await api.session(compactSession)).busy; } catch { return false; }
+    }, 120_000);
+  }
+
+  /*
+    Asserted on what folding *does*, not on a word. The first version looked
+    for "compaction" in the session view and never found it — the view derives
+    messages and the summary is one of them, unlabelled. What is unambiguous is
+    the count: four turns write eight messages, and a log kept to one recent
+    turn cannot still hold them all. The standalone reproduction that found
+    this showed the transcript pinned at three messages from turn two onward.
+  */
+  const compacted = await api.session(compactSession).catch(() => null);
+  const retained = compacted?.messages?.length ?? 0;
+  check(
+    retained > 0 && retained < 8,
+    `a session over the threshold is folded — ${retained} message(s) retained of 8 written`,
+  );
+  check(
+    notices.length > 0 && /→/.test(notices[0]),
+    `and the client is told, with the before and after (${JSON.stringify(notices[0] ?? 'no notice')}`
+    // Which events did arrive, so a missing notice can be told apart from a
+    // stream that never connected.
+    + `; stream saw: ${[...seenTypes].map(([t, n]) => `${t}×${n}`).join(' ') || 'nothing'})`,
+  );
+  compactStream.close();
 
   /*
     A client that declares nothing is offered nothing — and this is the half

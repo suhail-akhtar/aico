@@ -324,6 +324,17 @@ interface AppState {
   /** Answer it and release the tool call. */
   reportHostCall: (id: string, answer: HostAnswer) => Promise<void>;
   /**
+   * Something the server said about the session that is not an error.
+   *
+   * "The agent you addressed was deleted", "compacted the conversation" —
+   * facts about why the next reply will differ from the last. The server has
+   * emitted these since personas existed, and neither client rendered them:
+   * the event was dropped on the floor, so the meter could halve between two
+   * turns with nothing on screen saying why.
+   */
+  notice: string | null;
+  clearNotice: () => void;
+  /**
    * Sub-agents this session has running, and the ones it just finished.
    *
    * Live only — the server sends the whole set on every change, so this is
@@ -419,6 +430,7 @@ export const useStore = create<AppState>((set, get) => ({
   permission: null,
   edit: null,
   hostCall: null,
+  notice: null,
   planMode: false,
   busy: false,
   turnStartedAt: null,
@@ -466,7 +478,7 @@ export const useStore = create<AppState>((set, get) => ({
       // the sidebar never inherits the previous one's persona.
       sessionAgent: null,
       pendingAttachments: [],
-      question: null, permission: null, edit: null, hostCall: null,
+      question: null, permission: null, edit: null, hostCall: null, notice: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
@@ -621,6 +633,8 @@ export const useStore = create<AppState>((set, get) => ({
     set({ question: null });
     await api.answer(sessionId, content);
   },
+
+  clearNotice: () => set({ notice: null }),
 
   reportHostCall: async (id, answer) => {
     const { sessionId } = get();
@@ -1171,6 +1185,14 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       // every change, so merging would only risk keeping a stale child alive.
       set(() => ({ subAgents: (data as { agents?: SubAgentView[] }).agents ?? [] }));
       return;
+
+    case 'notice': {
+      // Replaces rather than accumulates: a second notice before the first was
+      // read is the one that is still true.
+      const text = String((data as { text?: string }).text ?? '').trim();
+      set(() => ({ notice: text || null }));
+      return;
+    }
 
     case 'question':
       // An empty question means the run is no longer waiting — answered,

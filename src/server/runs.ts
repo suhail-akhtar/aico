@@ -37,6 +37,7 @@ import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../too
 import { currentMiniApp } from '../session/projections.js';
 import { miniAppContext } from '../miniapps/context.js';
 import { getMiniApp, miniAppDir } from '../miniapps/store.js';
+import { maybeCompactSession } from '../session/compact.js';
 import {
   hostToolsFrom, type HostAnswer, type HostCall, type HostToolName,
 } from '../../shared/host-tools.js';
@@ -352,6 +353,18 @@ export class RunManager {
     if (agent.notice) emit('notice', { text: agent.notice });
 
     emit('turn-start', { task, model });
+
+    /*
+      Compact before the request goes out, if the log has outgrown the model.
+
+      The terminal did this after every turn; the server never did it at all.
+      A browser or editor session could sit at 100% of a one-million-token
+      window with the meter saying so and nothing acting on it — the
+      conversation was resent whole on every turn until the provider refused
+      it. Checked here as well as after the turn so a session reopened after a
+      long absence is folded before its first new request, not after.
+    */
+    this.compactIfDue(run, settings, model, emit);
 
     // The agent can ask a question, and until now the web had no way to hear
     // it. `askUser` falls back to readline when nothing registers a callback,
@@ -692,6 +705,9 @@ export class RunManager {
 
       run.conversationHistory.push({ role: 'user', content: task });
       run.conversationHistory.push({ role: 'assistant', content: result });
+      // After the turn too, so the meter drops now rather than at the start
+      // of the next message — which is when the reader is looking at it.
+      this.compactIfDue(run, settings, model, emit);
       emit('turn-end', {
         result,
         seq: run.session.length,
@@ -1127,6 +1143,36 @@ export class RunManager {
     this.hub.publish({ type: 'edit', sessionId, data: { id: '', path: '', after: '' } });
     resolve({ applied, ...(reason ? { reason } : {}) });
     return true;
+  }
+
+  /**
+   * Fold older turns into a summary when the log has passed the threshold.
+   *
+   * The compaction event lands in the session log like any other, so both
+   * clients render the summary where the replaced history was — the reducer
+   * has known how to draw it since the terminal client existed. The notice is
+   * the part that was missing: without it the meter simply dropped and nobody
+   * knew why.
+   *
+   * `conversationHistory` is trimmed to match. The agent builds its request
+   * from the session when it has one, so the array is not what gets sent —
+   * but a list that grows for ever is a leak whether or not anyone reads it.
+   */
+  private compactIfDue(
+    run: ActiveRun,
+    settings: AicoSettings,
+    model: string,
+    emit: (type: string, data: unknown) => void,
+  ): void {
+    const result = maybeCompactSession(run.session, settings, model);
+    if (!result.compacted) return;
+    const keep = Math.max(1, settings.autoCompact?.keepRecentTurns ?? 3) * 2;
+    run.conversationHistory = run.conversationHistory.slice(-keep);
+    emit('notice', {
+      text: `Compacted the conversation: ${result.tokensBefore.toLocaleString()} → `
+        + `${result.tokensAfter.toLocaleString()} tokens, ${result.droppedTurns} older turn(s) `
+        + 'folded into a summary.',
+    });
   }
 
   /**
