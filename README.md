@@ -443,6 +443,29 @@ Commands that talk about "the conversation" act on what the **model** actually
 holds — `/clear` clears the model's context, `/compact` shrinks the real
 request, `/status` reports true context size and how much is hidden.
 
+### Measuring a skill
+
+A skill is a prompt, and whether it is a *good* prompt used to be a matter of
+opinion. Two subcommands make it a number:
+
+```
+aico skill eval security-review              # score it against tasks with known answers
+aico skill optimize review --steps 3         # propose bounded edits; keep only what scores higher
+```
+
+`eval` runs the skill on a corpus of planted tasks — a SQL injection in `db.js`,
+an off-by-one in a pager, a staged change that wants a conventional commit —
+and grades with regexes, files and tool-call counts. Never a model judging a
+model. `optimize` is SkillOpt's loop at personal scale: a separate optimiser
+model reads the failing runs and proposes at most four edits a step, a
+candidate is kept only if it scores **strictly higher on validation tasks the
+optimiser never saw**, and rejected proposals are shown back so they are not
+tried twice. Both print their cost ceiling before the first call and stop at it.
+
+`optimize` never touches the shipped skill. It writes a draft for you to diff
+and register — the corpus is a proxy, and only you can judge the task nobody
+wrote. Add your own tasks under `~/.aico/skill-evals/<skill>/*.json`.
+
 ---
 
 ## Configuration

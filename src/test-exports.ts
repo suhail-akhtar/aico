@@ -301,3 +301,8 @@ export { nextAuthoringContract } from './miniapps/contract-nextjs.js';
 export { splitStatements } from './miniapps/data.js';
 export { executeMiniAppManage } from './tools/manage-miniapps.js';
 export { authoringContract } from './miniapps/contract.js';
+export {
+  grade, runCheck, hashFiles, corpusFor, BUILTIN_CORPUS, splitOf, assignSplits,
+  evalSkill, runTask as runEvalTask, materialise, renderTask,
+  applyEdits, buildProposalPrompt, defaultBudget, optimizeSkill, parseProposal,
+} from './skills/eval/index.js';
