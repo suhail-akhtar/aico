@@ -390,6 +390,8 @@ export function ChatPane(): React.ReactElement {
                         ? { onBranch: () => branchFrom(message) } : {})}
                       {...(rateable ? { seq } : {})}
                       {...(rateable && feedback[seq] ? { feedback: feedback[seq] } : {})}
+                      {...(rateable && askedInTurn(visible, message.turn)
+                        ? { askedFor: askedInTurn(visible, message.turn) } : {})}
                     />
                   </div>
                 )}
@@ -454,6 +456,17 @@ export function ChatPane(): React.ReactElement {
 }
 
 /** Recover the log seq a finalized message was keyed by. */
+/**
+ * The user's message from the same turn as a reply.
+ *
+ * A kept correction is matched against future *requests*, so its trigger has to
+ * be built from what was asked, not from the answer being rated.
+ */
+function askedInTurn(messages: readonly ChatMessage[], turn: number | undefined): string | undefined {
+  if (turn === undefined) return undefined;
+  return messages.find(m => m.type === 'user' && m.turn === turn)?.content;
+}
+
 function seqOf(id: string): number | null {
   const match = /^seq-(\d+)$/.exec(id);
   return match ? Number(match[1]) : null;

@@ -346,6 +346,18 @@ export const api = {
   rate: (sessionId: string, targetSeq: number, rating: 'up' | 'down' | 'none', note?: string) =>
     post<{ ok: boolean }>('feedback', { sessionId, targetSeq, rating, note }),
 
+  /**
+   * Keep a correction as knowledge the agent will see again.
+   *
+   * `trigger` is when it applies; `content` is the guidance. Filed with the
+   * session's project unless `scope` is `global`.
+   */
+  addKnowledge: (sessionId: string, entry: {
+    trigger: string; content: string; id?: string; scope?: 'project' | 'global';
+  }) => post<{ ok: boolean; id: string; path: string; scope: 'project' | 'global' }>(
+    'knowledge/add', { sessionId, ...entry },
+  ),
+
   agents: () => request<{ agents: AgentSpec[] }>('agents'),
 
   /** Files attached to a session, held until the turn that uses them. */

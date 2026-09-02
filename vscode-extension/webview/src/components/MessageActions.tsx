@@ -26,9 +26,13 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import type { Feedback } from '@web/api';
+import { api, type Feedback } from '@web/api';
+import { useStore } from '@web/store';
+import { suggestKnowledge } from '@web/knowledge-suggest';
 
-export function MessageActions({ text, seq, feedback, onBranch, onEdit, onRate }: {
+export function MessageActions({
+  text, seq, feedback, onBranch, onEdit, onRate, askedFor,
+}: {
   /** The message's own source, not its rendered form. */
   text: string;
   /** Log seq, present once the message is finalized. Only then can it be rated. */
@@ -38,11 +42,51 @@ export function MessageActions({ text, seq, feedback, onBranch, onEdit, onRate }
   onBranch?: () => void;
   /** Only for messages you sent. */
   onEdit?: () => void;
-  onRate?: (rating: 'up' | 'down' | 'none') => void;
+  /** A rating, and for a thumbs-down, the reason. */
+  onRate?: (rating: 'up' | 'down' | 'none', note?: string) => void;
+  /** What was asked that produced this reply — the trigger of a kept correction. */
+  askedFor?: string;
 }): React.ReactElement {
+  const sessionId = useStore(s => s.sessionId);
+  const [asking, setAsking] = useState(false);
+  const [note, setNote] = useState(feedback?.note ?? '');
+  const [kept, setKept] = useState<'no' | 'keeping' | 'yes' | 'failed'>('no');
+
+  /*
+    A thumbs-down opens the question straight away.
+
+    The browser client waits for a click on "Add note". In a 300px column that
+    second click is the one nobody makes, and a thumbs-down with no words is a
+    signal the log stores and nothing can act on — the note is the lesson.
+  */
+  const rateDown = (): void => {
+    if (feedback?.rating === 'down') { onRate?.('none'); setAsking(false); return; }
+    onRate?.('down');
+    setAsking(true);
+  };
+
+  const saveNote = (): void => {
+    setAsking(false);
+    const trimmed = note.trim();
+    if (trimmed) onRate?.('down', trimmed);
+  };
+
+  const suggestion = suggestKnowledge(askedFor, feedback?.note ?? note);
+
+  const keep = async (): Promise<void> => {
+    setKept('keeping');
+    try {
+      await api.addKnowledge(sessionId, { trigger: suggestion.trigger, content: suggestion.content });
+      setKept('yes');
+    } catch {
+      setKept('failed');
+    }
+  };
+
   return (
+    <div className="mt-0.5">
     <div
-      className="mt-0.5 flex items-center gap-0.5 opacity-0 transition-opacity
+      className="flex items-center gap-0.5 opacity-0 transition-opacity
                  focus-within:opacity-100 group-hover/message:opacity-100"
     >
       <CopyButton text={text} />
@@ -67,10 +111,58 @@ export function MessageActions({ text, seq, feedback, onBranch, onEdit, onRate }
             title="Not helpful"
             glyph="▼"
             on={feedback?.rating === 'down'}
-            onPick={() => onRate(feedback?.rating === 'down' ? 'none' : 'down')}
+            onPick={rateDown}
           />
         </>
       )}
+    </div>
+
+    {asking && (
+      <input
+        autoFocus
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        onBlur={saveNote}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); saveNote(); }
+          if (e.key === 'Escape') { e.preventDefault(); setAsking(false); }
+        }}
+        placeholder="What went wrong?"
+        aria-label="Why this reply missed"
+        className="mt-1 w-full rounded border border-aico-border bg-aico-elevated px-1.5 py-0.5
+                   text-[11px] text-aico-primary placeholder:text-aico-muted focus:border-aico-accent
+                   focus:outline-none"
+      />
+    )}
+
+    {/*
+      Keep it, with the trigger shown before the click.
+
+      One button rather than the browser client's editable form — the column is
+      too narrow for a form, and the full editor is a tab away. But the
+      suggestion is on screen first, because a lesson adopted unread is exactly
+      the confidently wrong rule this is meant to avoid. The user is the gate.
+    */}
+    {feedback?.rating === 'down' && feedback.note && !asking && kept !== 'yes' && (
+      <div className="mt-1 flex items-start gap-1.5 text-[10px] leading-snug">
+        <button
+          type="button"
+          disabled={kept === 'keeping'}
+          onClick={() => void keep()}
+          title="Save this correction as knowledge the agent sees on similar tasks in this project"
+          className="shrink-0 rounded px-1.5 py-0.5 text-aico-accent hover:bg-aico-accent-soft
+                     disabled:opacity-50"
+        >
+          {kept === 'keeping' ? 'Keeping…' : kept === 'failed' ? 'Retry keeping' : 'Remember this'}
+        </button>
+        <span className="min-w-0 truncate text-aico-muted" title={suggestion.trigger}>
+          when: {suggestion.trigger}
+        </span>
+      </div>
+    )}
+    {kept === 'yes' && (
+      <p className="mt-1 text-[10px] text-aico-success">Remembered for this project.</p>
+    )}
     </div>
   );
 }

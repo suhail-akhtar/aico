@@ -192,7 +192,15 @@ export function Transcript(): React.ReactElement {
                     {settled && message.content.trim().length > 0 && (
                       <MessageActions
                         text={message.content}
-                        {...(mine ? {} : { seq, onRate: (r) => void rate(seq, r) })}
+                        {...(mine ? {} : {
+                          seq,
+                          onRate: (r, note) => void rate(seq, r, note),
+                          // The user's message from the same turn: a kept
+                          // correction is matched against future *requests*.
+                          ...(message.turn !== undefined ? {
+                            askedFor: messages.find(m => m.type === 'user' && m.turn === message.turn)?.content,
+                          } : {}),
+                        })}
                         {...(mine && !busy ? { onEdit: () => setEditing(seq) } : {})}
                         {...(!busy && message.turn !== undefined ? {
                           onBranch: () => void (mine

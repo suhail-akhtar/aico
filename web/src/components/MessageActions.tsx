@@ -30,10 +30,12 @@ export interface MessageActionsProps {
    * written, so a branch taken now would be cut mid-sentence.
    */
   onBranch?: () => void;
+  /** What was asked that produced this reply — pre-fills a kept correction. */
+  askedFor?: string;
 }
 
 export function MessageActions({
-  text, seq, feedback, onBranch,
+  text, seq, feedback, onBranch, askedFor,
 }: MessageActionsProps): React.ReactElement {
   return (
     <div
@@ -52,7 +54,12 @@ export function MessageActions({
         </button>
       )}
       {seq !== undefined && (
-        <MessageFeedback seq={seq} {...(feedback ? { current: feedback } : {})} inline />
+        <MessageFeedback
+          seq={seq}
+          {...(feedback ? { current: feedback } : {})}
+          {...(askedFor ? { askedFor } : {})}
+          inline
+        />
       )}
     </div>
   );

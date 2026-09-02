@@ -625,6 +625,33 @@ try {
   hostStream.close();
 
   /*
+    ── a correction, kept ──────────────────────────────────────────────────
+
+    A thumbs-down with a note used to be stored in the log and read by nothing.
+    `knowledge/add` turns it into an entry the engine attaches to later tasks
+    whose wording matches the trigger. Checked on disk, not in the response:
+    the response saying `ok` and a file the engine will actually load are two
+    different claims, and only the second is the feature.
+  */
+  const kept = await api.addKnowledge(hostSession, {
+    trigger: 'probe knowledge round trip',
+    content: 'Planted by the tunnel probe. Safe to delete.',
+  }).catch(err => ({ error: err.message }));
+  check(kept.ok === true && kept.scope === 'project',
+    `a correction can be kept as project knowledge (${JSON.stringify(kept.id ?? kept.error)})`);
+
+  const keptFile = path.join(workspace, '.aico', 'knowledge', `${kept.id}.md`);
+  const keptBody = fs.existsSync(keptFile) ? fs.readFileSync(keptFile, 'utf8') : '';
+  check(
+    /^trigger: probe knowledge round trip$/m.test(keptBody) && /Planted by the tunnel probe/.test(keptBody),
+    'and it lands as a file the engine loads, trigger in the frontmatter',
+  );
+
+  const refused = await api.addKnowledge(hostSession, { trigger: 'x', content: '   ' })
+    .then(() => ({ ok: true })).catch(err => ({ ok: false, status: err.status }));
+  check(refused.ok === false, `an entry with no guidance is refused (${refused.status ?? 'thrown'})`);
+
+  /*
     A client that declares nothing is offered nothing — and this is the half
     that protects every other surface. The browser workspace and the CLI submit
     without `hostTools`, and a model offered `VSCodeDiagnostics` there would
