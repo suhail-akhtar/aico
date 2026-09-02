@@ -32,10 +32,37 @@ if (!existsSync(path.join(root, 'src'))) {
   process.exit(0);
 }
 
+/*
+  Re-entrancy guard, and the reason it is needed.
+
+  `npm install -g github:suhail-akhtar/aico#v0.9.0` recursed six levels deep
+  and failed. The outer global install exports `npm_config_global=true` into
+  every lifecycle script's environment; the web-dependency step below runs
+  `npm --prefix web install`, which inherits it — and a *global* install with no
+  package named installs the current directory. The current directory is this
+  clone, so npm prepared it again, which ran this script again, which ran npm
+  again. `npx github:` sets different config and never hit it, which is why the
+  README's headline path worked while the one a VS Code user needs did not.
+
+  Two defences, because each alone leaves a way back in: the marker stops any
+  nested run dead, and the scrubbed environment stops the nesting from starting.
+*/
+if (process.env.AICO_PREPARING === '1') {
+  process.exit(0);
+}
+const childEnv = { ...process.env, AICO_PREPARING: '1' };
+for (const key of Object.keys(childEnv)) {
+  // Everything npm derived from the *outer* command line: global, prefix,
+  // location, and the `-g` shorthand's other spellings. A child npm must read
+  // its own arguments, not ours.
+  if (/^npm_config_(global|prefix|location|globalconfig|userconfig)$/i.test(key)) delete childEnv[key];
+}
+
 /** Run one step, and stop the install if it fails. */
 function step(label, command, args) {
   const result = spawnSync(command, args, {
     cwd: root,
+    env: childEnv,
     stdio: 'inherit',
     // npm and npx are batch files on Windows and are not executable directly.
     shell: process.platform === 'win32',
@@ -50,6 +77,6 @@ function step(label, command, args) {
   }
 }
 
-step('installing web dependencies', 'npm', ['--prefix', 'web', 'install', '--no-audit', '--no-fund']);
+step('installing web dependencies', 'npm', ['--prefix', 'web', 'install', '--no-global', '--no-audit', '--no-fund']);
 step('building the CLI', 'npm', ['run', 'build']);
 step('building the web client', 'npm', ['run', 'build:web']);
