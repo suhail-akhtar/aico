@@ -733,6 +733,36 @@ try {
   compactStream.close();
 
   /*
+    ── measuring a skill, over the wire ─────────────────────────────────
+
+    The bench in Settings → Skills is these routes and a poll. Checked for
+    shape and refusal rather than for a score: a run with a ceiling of zero
+    starts, does nothing, and reports that it stopped at the ceiling — which
+    proves the job registry end to end without a model call.
+  */
+  const corpus = await api.skillCorpus('security-review');
+  check(corpus.tasks.length === 2 && corpus.train === 1 && corpus.val === 1,
+    `the corpus route describes the split (${corpus.train} train / ${corpus.val} val)`);
+
+  const zero = await api.startSkillEval({ skill: 'security-review', model: 'probe-model', budgetUsd: 0 });
+  check('id' in zero, 'an evaluation job starts and returns an id');
+  if ('id' in zero) {
+    // `until` here answers true/false, not the value — read the job after it.
+    await until(async () => (await api.skillJob(zero.id).catch(() => null))?.done === true, 20_000);
+    const settled = await api.skillJob(zero.id).catch(() => null);
+    check(settled?.report?.overBudget === true && settled.tasks.length === 0,
+      `a zero ceiling runs nothing and says so (${settled?.phase ?? 'never finished'})`);
+    const cancelled = await api.cancelSkillJob(zero.id);
+    check(cancelled.cancelled === false, 'cancelling a finished job is refused, not faked');
+    const adopted = await api.adoptSkillCandidate(zero.id);
+    check(adopted.ok === false, 'an eval job has nothing to adopt, and says so');
+  }
+
+  const refusedSkill = await api.startSkillEval({ skill: 'no-such-skill', model: 'probe-model', budgetUsd: 0 })
+    .then(r => ('error' in r ? r.error : 'started')).catch(err => err.message);
+  check(/no skill/.test(refusedSkill), `an unknown skill is refused by name (${JSON.stringify(refusedSkill)})`);
+
+  /*
     A client that declares nothing is offered nothing — and this is the half
     that protects every other surface. The browser workspace and the CLI submit
     without `hostTools`, and a model offered `VSCodeDiagnostics` there would

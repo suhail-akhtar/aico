@@ -284,6 +284,19 @@ export const api = {
   removeSkill: (name: string) =>
     post<{ ok: boolean; error?: string }>('skills/remove', { name }),
 
+  // ── measuring a skill ─────────────────────────────────────────────
+  skillCorpus: (name: string) =>
+    get<SkillCorpus>(`skill-eval/tasks?name=${encodeURIComponent(name)}`),
+  startSkillEval: (input: { skill: string; model: string; budgetUsd: number; maxIterations?: number }) =>
+    post<SkillJob | { error: string }>('skill-eval/run', input),
+  startSkillOptimize: (input: {
+    skill: string; model: string; budgetUsd: number; steps: number;
+    candidates?: number; maxEdits?: number; optimizerModel?: string; maxIterations?: number;
+  }) => post<SkillJob | { error: string }>('skill-eval/optimize', input),
+  skillJob: (id: string) => get<SkillJob>(`skill-eval/job?id=${encodeURIComponent(id)}`),
+  cancelSkillJob: (id: string) => post<{ cancelled: boolean }>('skill-eval/cancel', { id }),
+  adoptSkillCandidate: (id: string) => post<{ ok: boolean; message: string }>('skill-eval/adopt', { id }),
+
   // ── mcp ────────────────────────────────────────────────────────────
   addMcpServer: (config: Record<string, unknown>) =>
     post<{ ok: boolean; result?: string; error?: string }>('mcp/add', config),
@@ -846,6 +859,60 @@ export interface PermissionRequest {
 /** A file write the client was asked to apply itself. */
 /** Re-exported so a client can name the type without a second import path. */
 export type { HostAnswer, HostCall, HostToolName };
+
+export interface SkillCorpus {
+  skill: string;
+  tasks: Array<{ id: string; split: 'train' | 'val'; checks: number; builtin: boolean }>;
+  train: number;
+  val: number;
+}
+
+export interface SkillJobTask {
+  id: string;
+  score: number;
+  checks: Array<{ check: { kind: string; why: string }; passed: boolean }>;
+  output: string;
+  toolCalls: string[];
+  costUsd: number;
+  error?: string;
+  phase?: 'train' | 'val';
+}
+
+export interface SkillJobStep {
+  step: number;
+  trainMean: number;
+  candidateTrainMean?: number;
+  candidates?: number;
+  proposed: Array<{ find: string; replace: string; reason: string }>;
+  dropped: Array<{ edit: { reason: string }; because: string }>;
+  valMean?: number;
+  accepted: boolean;
+  costUsd: number;
+}
+
+/** One evaluation or optimisation, as the server reports it while it runs. */
+export interface SkillJob {
+  id: string;
+  kind: 'eval' | 'optimize';
+  skill: string;
+  model: string;
+  startedAt: number;
+  phase: string;
+  tasks: SkillJobTask[];
+  steps: SkillJobStep[];
+  costUsd: number;
+  done: boolean;
+  cancelled: boolean;
+  error?: string;
+  report?: { mean: number; tasks: SkillJobTask[]; overBudget: boolean; costUsd: number };
+  outcome?: {
+    baselineValMean: number;
+    bestValMean: number;
+    improved: boolean;
+    best?: string;
+    stoppedBecause?: string;
+  };
+}
 
 export interface EditRequest {
   id: string;

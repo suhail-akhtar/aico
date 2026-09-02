@@ -477,6 +477,13 @@ tried twice. Both print their cost ceiling before the first call and stop at it.
 and register — the corpus is a proxy, and only you can judge the task nobody
 wrote. Add your own tasks under `~/.aico/skill-evals/<skill>/*.json`.
 
+The same bench is in the web workspace under **Settings → Skills → Measure**,
+with live per-task scores, each step's verdict, the candidate as a diff and an
+*Adopt it* button; VS Code reaches it through *Measure skills* in the panel's
+`⋯` menu. Several candidates a step can be scored on training with only the
+best validated, results for an unchanged skill are cached so a rejected step
+costs nothing to retry from, and three rejections in a row end the run.
+
 ---
 
 ## Configuration

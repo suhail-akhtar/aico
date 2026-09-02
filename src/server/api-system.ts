@@ -228,6 +228,67 @@ export async function handleSystemRoute(
       };
     }
 
+    // ── measuring a skill ────────────────────────────────────────────
+    //
+    // Long-running and paid for, so these are jobs: start returns an id, the
+    // client polls, and a run outlives the tab that started it. See
+    // `skills/eval/jobs`.
+    case 'skill-eval/tasks': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const name = String(query.get('name') ?? body.name ?? '');
+      if (!name) return { status: 400, body: { error: 'name required' } };
+      const { describeCorpus } = await import('../skills/eval/jobs.js');
+      return { status: 200, body: await describeCorpus(name) };
+    }
+    case 'skill-eval/run':
+    case 'skill-eval/optimize': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { startEval, startOptimize } = await import('../skills/eval/jobs.js');
+      const { loadSettings } = await import('../settings.js');
+      const settings = await loadSettings();
+      const skill = String(body.skill ?? '');
+      const model = String(body.model ?? settings.model ?? '');
+      if (!skill) return { status: 400, body: { error: 'skill required' } };
+      if (!model) return { status: 400, body: { error: 'model required — none configured' } };
+      /*
+        The ceiling is the client's number, clamped rather than trusted. A
+        typo of 100 where 1.00 was meant is the difference between a coffee
+        and a phone bill, and the field is a text box.
+      */
+      const budgetUsd = Math.min(Math.max(Number(body.budgetUsd ?? 1), 0), 25);
+      const common = {
+        skill, model, settings, budgetUsd,
+        ...(typeof body.maxIterations === 'number' ? { maxIterations: body.maxIterations } : {}),
+      };
+      const started = route === 'skill-eval/run'
+        ? await startEval(common)
+        : await startOptimize({
+          ...common,
+          steps: Math.min(Math.max(Number(body.steps ?? 3), 1), 10),
+          candidates: Math.min(Math.max(Number(body.candidates ?? 1), 1), 4),
+          ...(typeof body.maxEdits === 'number' ? { maxEdits: body.maxEdits } : {}),
+          ...(typeof body.optimizerModel === 'string' && body.optimizerModel ? { optimizerModel: body.optimizerModel } : {}),
+        });
+      if ('error' in started) return { status: 400, body: started };
+      return { status: 200, body: started };
+    }
+    case 'skill-eval/job': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { getJob } = await import('../skills/eval/jobs.js');
+      const job = getJob(String(query.get('id') ?? ''));
+      return job ? { status: 200, body: job } : { status: 404, body: { error: 'no such job' } };
+    }
+    case 'skill-eval/cancel': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { cancelJob } = await import('../skills/eval/jobs.js');
+      return { status: 200, body: { cancelled: cancelJob(String(body.id ?? '')) } };
+    }
+    case 'skill-eval/adopt': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { adoptCandidate } = await import('../skills/eval/jobs.js');
+      return { status: 200, body: await adoptCandidate(String(body.id ?? '')) };
+    }
+
     case 'skills/read': {
       if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
       const name = String(query.get('name') ?? body.name ?? '');

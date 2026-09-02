@@ -36,7 +36,8 @@ import {
   resetContextWindowCache,
   resolveWindow, isStale, learnWindowFromError,
   resolveToolSet, HOST_TOOLS, hostToolsFrom, isHostTool,
-  grade, runCheck, hashFiles, corpusFor, BUILTIN_CORPUS, splitOf, assignSplits,
+  grade, runCheck, hashFiles, corpusFor, BUILTIN_CORPUS, splitOf, assignSplits, cacheKey,
+  describeCorpus, startEval, startOptimize, getJob, cancelJob, adoptCandidate,
   evalSkill, runEvalTask, materialise, applyEdits, buildProposalPrompt, optimizeSkill, parseProposal,
   vsCodeDiagnostics, vsCodeTasks, vsCodeWorkspace,
   skillRegistry,
@@ -11413,6 +11414,125 @@ console.log('  -- The loop keeps an edit only when validation improves, and reme
     `best beats baseline on validation (${result.baseline.mean.toFixed(2)} → ${result.bestValMean.toFixed(2)})`);
   assert(/already passes/.test(result.stoppedBecause ?? '') || result.steps.length === 3,
     `it stops when training is solved or steps run out (${result.stoppedBecause ?? 'ran all steps'})`);
+}
+
+console.log('  -- An unchanged skill is never paid for twice --');
+{
+  /*
+    After a rejected step the skill is unchanged, and the next step re-ran the
+    whole training set to learn nothing. The cache is the fix, and the proof is
+    a provider that counts how often it is asked.
+  */
+  let calls = 0;
+  const agent = {
+    id: 'mock', displayName: 'Mock',
+    async *chat() { calls += 1; yield { type: 'text', content: 'db.js SQL injection; app.py eval command injection shell=True' }; yield { type: 'finish', reason: 'stop' }; },
+  };
+  const tasks = corpusFor('security-review');
+  const settings = { completionGate: { enabled: false }, cron: { enabled: false } };
+  const cache = new Map();
+  await evalSkill('security-review', 'Audit.', tasks, { model: 'mock-model', settings, budgetUsd: 5, provider: agent, cache });
+  const first = calls;
+  const again = await evalSkill('security-review', 'Audit.', tasks, { model: 'mock-model', settings, budgetUsd: 5, provider: agent, cache });
+  assert(calls === first, `the same skill on the same tasks costs no model calls the second time (${first} then ${calls})`);
+  assert(again.tasks.every(t => t.costUsd === 0) && again.costUsd === 0, 'and reports zero cost, so the budget is not charged twice');
+  assert(cacheKey('m', 'a', 't') !== cacheKey('m', 'b', 't'), 'a different skill text is a different key');
+}
+
+console.log('  -- Patience stops a loop that is not moving --');
+{
+  const agent = {
+    id: 'mock', displayName: 'Mock',
+    async *chat() { yield { type: 'text', content: 'nothing useful' }; yield { type: 'finish', reason: 'stop' }; },
+  };
+  let proposals = 0;
+  const optimizer = {
+    id: 'opt', displayName: 'Opt',
+    async *chat() { proposals += 1; yield { type: 'text', content: `[{"find":"","replace":"Try harder ${proposals}.","reason":"r${proposals}"}]` }; yield { type: 'finish', reason: 'stop' }; },
+  };
+  const tasks = corpusFor('security-review').map((t, i) => ({ ...t, split: i === 0 ? 'val' : 'train' }));
+  const result = await optimizeSkill('security-review', 'Audit.', tasks, {
+    model: 'mock-model', settings: { completionGate: { enabled: false }, cron: { enabled: false } },
+    budgetUsd: 5, steps: 8, patience: 2, provider: agent, optimizer,
+  });
+  assert(result.steps.length === 2 && /2 rejections in a row/.test(result.stoppedBecause ?? ''),
+    `two rejections in a row end it, not eight (${result.steps.length} steps: ${result.stoppedBecause})`);
+  assert(result.best === 'Audit.', 'and the skill is unchanged');
+}
+
+console.log('  -- Several candidates: the best on training goes to validation --');
+{
+  // The agent answers well only when the skill says "severity"; candidate 2
+  // adds it, candidate 1 does not. Candidate 2 must be the one validated.
+  const agent = {
+    id: 'mock', displayName: 'Mock',
+    async *chat(opts) {
+      const task = opts.messages.find(m => m.role === 'user')?.content ?? '';
+      const good = task.includes('severity');
+      yield { type: 'text', content: good
+        ? 'db.js SQL injection (critical). config.js hard-coded secret credential. app.py eval, command injection shell=True.'
+        : 'db.js SQL injection. config.js hard-coded secret. app.py command injection shell=True.' };
+      yield { type: 'finish', reason: 'stop' };
+    },
+  };
+  let n = 0;
+  const optimizer = {
+    id: 'opt', displayName: 'Opt',
+    async *chat() {
+      n += 1;
+      yield { type: 'text', content: n % 2 === 1
+        ? '[{"find":"","replace":"Be thorough.","reason":"vague"}]'
+        : '[{"find":"","replace":"Assign a severity to every finding.","reason":"the checks want severity"}]' };
+      yield { type: 'finish', reason: 'stop' };
+    },
+  };
+  const tasks = corpusFor('security-review').map((t, i) => ({ ...t, split: i === 0 ? 'val' : 'train' }));
+  const phases = [];
+  const result = await optimizeSkill('security-review', 'Audit.', tasks, {
+    model: 'mock-model', settings: { completionGate: { enabled: false }, cron: { enabled: false } },
+    budgetUsd: 5, steps: 1, candidates: 2, provider: agent, optimizer, onPhase: p => phases.push(p),
+  });
+  const step = result.steps[0];
+  assert(step && step.candidates === 2, `two candidates were scored (${step?.candidates})`);
+  assert(step.proposed.some(e => /severity/.test(e.reason)), 'the one that scored higher on training was the one validated');
+  assert(step.accepted && result.best.includes('Assign a severity'), 'and it was kept');
+  assert(phases.some(p => /proposing 2 of 2/.test(p)) && phases.some(p => /validating/.test(p)),
+    'the loop says what it is doing as it goes');
+}
+
+console.log('  -- A job can be started, watched, and cancelled --');
+{
+  const agent = {
+    id: 'mock', displayName: 'Mock',
+    async *chat() { await new Promise(r => setTimeout(r, 150)); yield { type: 'text', content: 'db.js SQL injection critical; config.js secret; app.py eval command injection shell=True' }; yield { type: 'finish', reason: 'stop' }; },
+  };
+  const corpus = await describeCorpus('security-review');
+  assert(corpus.train >= 1 && corpus.val >= 1 && corpus.tasks.length === 2,
+    `the corpus is described with its split (${corpus.train} train / ${corpus.val} val)`);
+
+  const job = await startEval({ skill: 'security-review', model: 'mock-model', settings: { completionGate: { enabled: false }, cron: { enabled: false } }, budgetUsd: 5, provider: agent });
+  assert(job.id && job.done === false, 'a job starts and returns before it finishes');
+  const deadline = Date.now() + 15_000;
+  while (!getJob(job.id)?.done && Date.now() < deadline) await new Promise(r => setTimeout(r, 100));
+  const done = getJob(job.id);
+  assert(done?.done === true && done.report?.tasks.length === 2, `it finishes and carries the report (${done?.phase})`);
+  assert(done.tasks.length === 2 && done.tasks.every(t => t.score > 0), 'per-task results were streamed into it as they finished');
+  assert(cancelJob(job.id) === false, 'cancelling a finished job is a no-op, said so');
+  assert((await adoptCandidate(job.id)).ok === false, 'an eval job has nothing to adopt');
+
+  const missing = await startEval({ skill: 'no-such-skill', model: 'm', settings: {}, budgetUsd: 1, provider: agent });
+  assert('error' in missing && /no skill/.test(missing.error), 'an unknown skill is refused with its name');
+
+  // Cancel mid-flight: a slow agent, two tasks, abort after the first starts.
+  const slow = { ...agent, async *chat() { await new Promise(r => setTimeout(r, 400)); yield { type: 'text', content: 'x' }; yield { type: 'finish', reason: 'stop' }; } };
+  const running = await startEval({ skill: 'security-review', model: 'mock-model', settings: { completionGate: { enabled: false }, cron: { enabled: false } }, budgetUsd: 5, provider: slow });
+  await new Promise(r => setTimeout(r, 50));
+  assert(cancelJob(running.id) === true, 'a running job accepts a cancel');
+  const until2 = Date.now() + 15_000;
+  while (!getJob(running.id)?.done && Date.now() < until2) await new Promise(r => setTimeout(r, 100));
+  const stopped = getJob(running.id);
+  assert(stopped?.done === true && stopped.cancelled === true && stopped.tasks.length < 2,
+    `and stops before running everything (${stopped?.tasks.length} of 2 ran)`);
 }
 
 console.log('  -- The budget is a hard stop --');

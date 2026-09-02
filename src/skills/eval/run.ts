@@ -40,6 +40,26 @@ export interface RunOptions {
   provider?: ProviderAPI;
   /** Called after each task, for progress output. */
   onTask?: (result: TaskResult) => void;
+  /** Stops between tasks; a task already running finishes or is aborted with the agent. */
+  signal?: AbortSignal;
+  /**
+   * Results already known for (skill body, task) pairs, keyed by `cacheKey`.
+   *
+   * The optimiser re-runs the training set every step with whatever skill is
+   * current — and after a rejected step that skill is *unchanged*, so the
+   * whole set was being paid for again to learn nothing. With the cache, an
+   * unchanged pair costs nothing. Supplied by the caller so its lifetime is the
+   * caller's: a single optimisation, never across runs, because a model's
+   * answer to the same prompt tomorrow is not today's.
+   */
+  cache?: Map<string, TaskResult>;
+}
+
+/** Identity of one run: what was asked, of which model, with which skill text. */
+export function cacheKey(model: string, skillBody: string, taskId: string): string {
+  let h = 0;
+  for (const ch of skillBody) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return `${model}|${taskId}|${skillBody.length}|${h.toString(36)}`;
 }
 
 /**
@@ -127,6 +147,7 @@ export async function runTask(
         conversationHistory: [],
         onToolCall: (name) => { toolCalls.push(name); },
         ...(opts.provider ? { provider: opts.provider } : {}),
+        ...(opts.signal ? { abortSignal: opts.signal } : {}),
       });
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -161,10 +182,22 @@ export async function evalSkill(
   let overBudget = false;
 
   for (const task of tasks) {
+    if (opts.signal?.aborted) break;
+    const key = cacheKey(opts.model, skillBody, task.id);
+    const known = opts.cache?.get(key);
+    if (known) {
+      // Free, and reported as such: a cached task carries no cost, so the
+      // budget is not charged twice for one answer.
+      const replay = { ...known, costUsd: 0 };
+      results.push(replay);
+      opts.onTask?.(replay);
+      continue;
+    }
     if (costUsd >= opts.budgetUsd) { overBudget = true; break; }
     const result = await runTask(skillBody, task, opts);
     results.push(result);
     costUsd += result.costUsd;
+    if (!result.error) opts.cache?.set(key, result);
     opts.onTask?.(result);
   }
 

@@ -37,7 +37,7 @@ export class WorkspacePanel {
   private readonly panel: vscode.WebviewPanel;
   private disposed = false;
 
-  static show(server: RunningServer, sessionId?: string, settings?: boolean): void {
+  static show(server: RunningServer, sessionId?: string, settings?: boolean | string): void {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
 
     if (WorkspacePanel.current && !WorkspacePanel.current.disposed) {
@@ -59,7 +59,7 @@ export class WorkspacePanel {
 
   private constructor(
     server: RunningServer, column: vscode.ViewColumn,
-    sessionId?: string, settings?: boolean,
+    sessionId?: string, settings?: boolean | string,
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'aico.workspace',
@@ -91,7 +91,7 @@ export class WorkspacePanel {
     this.load(server, sessionId, settings);
   }
 
-  load(server: RunningServer, sessionId?: string, settings?: boolean): void {
+  load(server: RunningServer, sessionId?: string, settings?: boolean | string): void {
     const target = new URL(`http://localhost:${server.port}/`);
     target.searchParams.set('token', server.token);
     if (sessionId) target.searchParams.set('session', sessionId);
@@ -105,7 +105,7 @@ export class WorkspacePanel {
       for every one of them; opening the real ones in an editor tab is the
       right width and one click.
     */
-    if (settings) target.searchParams.set('settings', '1');
+    if (settings) target.searchParams.set('settings', typeof settings === 'string' ? settings : '1');
     this.panel.webview.html = shell(target.toString(), server.port);
   }
 }

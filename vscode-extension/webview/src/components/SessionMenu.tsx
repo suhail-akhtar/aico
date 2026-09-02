@@ -113,6 +113,11 @@ export function SessionMenu({ title, onRenaming }: {
             hint="Providers, models, MCP, skills and memory."
             onPick={() => { setOpen(false); host.openSettings(); }}
           />
+          <Item
+            label="Measure skills"
+            hint="Score a skill against tasks with known answers, or improve it."
+            onPick={() => { setOpen(false); host.openSettings('skills'); }}
+          />
 
           <div className="my-1 border-t border-aico-border-subtle" />
 

@@ -20,6 +20,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type SkillSummary } from '../../api';
+import { SkillLab } from './SkillLab';
 import { useStore } from '../../store';
 
 /** What a SKILL.md looks like, for the paste box. */
@@ -52,6 +53,8 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
   const [open, setOpen] = useState<string | null>(null);
   const [body, setBody] = useState('');
   const [confirming, setConfirming] = useState<string | null>(null);
+  /** Which skill has its measuring bench open. One at a time: each is a job. */
+  const [lab, setLab] = useState<string | null>(null);
   const [pasting, setPasting] = useState(false);
   const [pasted, setPasted] = useState('');
   const folderInput = useRef<HTMLInputElement>(null);
@@ -390,6 +393,17 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
                     there is no way to say "not this one".
                   */}
                   <button
+                    onClick={() => setLab(lab === skill.name ? null : skill.name)}
+                    title="Score this skill against tasks with known answers, or improve it"
+                    className={`rounded-lg px-2 py-1 text-[11px] transition-colors ${
+                      lab === skill.name
+                        ? 'bg-aico-accent-soft text-aico-accent'
+                        : 'text-aico-muted hover:bg-aico-hover hover:text-aico-primary'
+                    }`}
+                  >
+                    Measure
+                  </button>
+                  <button
                     onClick={() => void toggle(skill)}
                     className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
                                hover:bg-aico-hover hover:text-aico-primary"
@@ -437,6 +451,10 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
                                 font-mono text-[11px] leading-[17px] text-aico-secondary selectable">
                   {body || 'Reading…'}
                 </pre>
+              )}
+
+              {lab === skill.name && (
+                <SkillLab skill={skill.name} onAdopted={() => void refresh()} />
               )}
             </li>
           ))}
