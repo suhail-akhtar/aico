@@ -50,6 +50,7 @@ import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
 import { isEffortChoice } from '../../shared/reasoning.js';
 import { hostToolsFrom } from '../../shared/host-tools.js';
+import { saveKnowledge } from '../knowledge/store.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
 import { requestAgentStop } from '../tools/task.js';
@@ -996,6 +997,44 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         }
         await runs.ensure(sessionId, await resolveCwd(sessionId));
         send(res, 200, { ok: runs.rate(sessionId, targetSeq, rating, note) });
+        return;
+      }
+      case 'knowledge/add': {
+        /*
+          A correction, kept.
+
+          Until now a 👎 with a note was stored in the log and read by nothing.
+          That note is exactly the moment worth capturing — the user has just
+          said, in their own words, what went wrong — and it vanished the
+          instant they moved on. This turns it into a knowledge entry, which the
+          engine attaches to any later task whose wording matches the trigger.
+
+          The user is the gate. Nothing here is adopted because the agent
+          thought it should be: the entry is written only when a person has
+          read the pre-filled trigger and guidance and confirmed them. That is
+          the whole difference between a lesson and a confidently wrong rule.
+        */
+        const { sessionId, trigger, content, id, scope } = body as {
+          sessionId?: string; trigger?: string; content?: string; id?: string;
+          scope?: 'project' | 'global';
+        };
+        if (!sessionId || !trigger?.trim() || !content?.trim()) {
+          send(res, 400, { error: 'sessionId, trigger and content required' });
+          return;
+        }
+        // Project by default: a convention is almost always about one codebase,
+        // and stored globally it follows the reader into repositories where it
+        // is wrong — a failure nobody can see from a transcript.
+        const projectRoot = scope === 'global' ? undefined : await resolveCwd(sessionId);
+        const slug = (id?.trim() || trigger)
+          .toLowerCase().split(/\s+/).slice(0, 6).join('-').replace(/[^\w-]/g, '');
+        const file = await saveKnowledge({
+          id: slug || 'entry',
+          trigger,
+          content,
+          ...(projectRoot ? { projectRoot } : {}),
+        });
+        send(res, 200, { ok: true, id: slug || 'entry', path: file, scope: projectRoot ? 'project' : 'global' });
         return;
       }
       case 'cancel': {

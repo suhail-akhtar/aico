@@ -3,6 +3,32 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **A correction can be kept.** A 👎 with a note used to be stored in the log
+  and read by nothing — the one moment where a person has just said, in their
+  own words, what went wrong, and it vanished the instant they moved on.
+  **Remember this** turns that note into a knowledge entry: a trigger built from
+  what was *asked* (knowledge is matched against the next request's wording, and
+  the next request that goes wrong will resemble this one, not its answer) and
+  the note as the guidance. Filed with the project unless you say otherwise,
+  because a convention stored globally follows you into repositories where it is
+  wrong.
+
+  The user is the gate. Nothing is adopted because the agent thought it should
+  be — the entry is written only after a person has read the pre-filled trigger
+  and guidance and confirmed them. That is the whole difference between a lesson
+  and a confidently wrong rule, and it is why this deliberately stops short of
+  SkillOpt-style self-editing: that works because every attempt can be scored
+  against a grader, and your real work has none.
+
+  In the browser the entry is editable before it is kept. In the VS Code panel a
+  👎 asks *What went wrong?* immediately — the second click nobody makes in a
+  300px column — and **Remember this** shows the trigger it will use before you
+  press it.
+
 ## 0.8.0 — 2026-09-02
 
 ### Added

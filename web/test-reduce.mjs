@@ -9,6 +9,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { suggestKnowledge } from './dist-test/knowledge-suggest.mjs';
 import {
   applyLogEvent, readReasoning, parseArgs, orderMessages,
   withPending, dropPending, PENDING_KEY,
@@ -283,6 +284,40 @@ test('a tool-sourced message is attributed to the tool', () => {
     source: { kind: 'tool', tool: 'VerifyApp' },
   }]]));
   assert.equal(messages[0].systemLabel, 'VerifyApp');
+});
+
+// ── a correction becomes a knowledge entry ─────────────────────────────
+//
+// The trigger comes from what was *asked*, because knowledge is matched against
+// the next request's wording — and the next request that goes wrong will
+// resemble this one, not its answer.
+test('the trigger is built from the request, without filler words', () => {
+  const s = suggestKnowledge(
+    'Please can you make the settings page use our shared Field component for the toggles',
+    'You rewrote the toggle from scratch instead of using Field',
+  );
+  assert.equal(s.trigger, 'settings page use shared Field component toggles');
+  assert.equal(s.content, 'You rewrote the toggle from scratch instead of using Field');
+});
+
+test('a long request is cut to eight words, because overlap matching gets looser with length', () => {
+  const s = suggestKnowledge(
+    'refactor auth module session cookie name header parser login logout token refresh middleware',
+    'note',
+  );
+  assert.equal(s.trigger.split(' ').length, 8);
+});
+
+test('code blocks and punctuation do not leak into the trigger', () => {
+  const s = suggestKnowledge('Fix this: ```js\nfoo()\n``` (urgent!!)', 'n');
+  // "this" is filler and the code is dropped; "urgent" is a real word and stays.
+  assert.equal(s.trigger, 'Fix urgent');
+});
+
+test('with nothing asked, the trigger still says something a reader can edit', () => {
+  const s = suggestKnowledge(undefined, '  keep it  ');
+  assert.equal(s.trigger, 'when doing this kind of task');
+  assert.equal(s.content, 'keep it');
 });
 
 console.log(`  WEB REDUCER: ${pass} passed, ${fail} failed`);
