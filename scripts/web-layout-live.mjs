@@ -280,6 +280,17 @@ try {
         await page.goto(`${url}&settings=1`, { waitUntil: 'domcontentloaded' });
       },
     },
+    {
+      name: 'skill-bench',
+      // The Skills pane with a bench open: six controls in a flex row, which
+      // is exactly the shape that went wrong on the composer.
+      open: async () => {
+        await page.goto(`${url}&settings=skills`, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('button:has-text("Measure")', { timeout: 30_000 });
+        await page.click('button:has-text("Measure")');
+        await page.waitForSelector('text=train /', { timeout: 30_000 });
+      },
+    },
   ];
 
   for (const screen of SCREENS) {

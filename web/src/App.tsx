@@ -43,10 +43,22 @@ export function App(): React.ReactElement {
     deep link is an entry point, not a mode, and leaving it in the URL would
     reopen the modal on every later navigation.
   */
+  /*
+    Which pane, when the link named one. Read *before* the initialiser below
+    consumes the parameter: `settings=1` opens the first pane as it always did;
+    `settings=skills` lands on the skill bench, which is what the VS Code
+    panel's "Measure skills" reaches for.
+  */
+  const [settingsPane] = useState<string | undefined>(() => {
+    try {
+      const value = new URL(window.location.href).searchParams.get('settings');
+      return value && value !== '1' ? value : undefined;
+    } catch { return undefined; }
+  });
   const [settingsOpen, setSettingsOpen] = useState(() => {
     try {
       const url = new URL(window.location.href);
-      if (url.searchParams.get('settings') !== '1') return false;
+      if (!url.searchParams.get('settings')) return false;
       url.searchParams.delete('settings');
       window.history.replaceState({}, '', url.pathname + url.search + url.hash);
       return true;
@@ -180,7 +192,12 @@ export function App(): React.ReactElement {
         {view === 'miniapps' && <MiniAppsPane onOpenChat={() => setView('chat')} />}
       </main>
 
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsModal
+          onClose={() => setSettingsOpen(false)}
+          {...(settingsPane ? { initialPane: settingsPane } : {})}
+        />
+      )}
       {pickerOpen && <ProjectPicker onClose={() => setPickerOpen(false)} />}
     </div>
   );

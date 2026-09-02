@@ -3,6 +3,31 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **The skill bench, in Settings → Skills.** Every skill has a *Measure*
+  button: the corpus and its split, a model, a ceiling, then *Evaluate* or
+  *Optimize*. Both run as jobs the page polls — a browser would time out on a
+  five-minute request, and a job outlives the tab that started it — with each
+  task's score, misses and cost as they land, each step's verdict, and at the
+  end the candidate as a line diff with an *Adopt it* button. Adopting
+  registers it as a user skill of the same name; the built-in is untouched.
+  VS Code reaches the same bench through *Measure skills* in the panel's `⋯`
+  menu and the command palette, because a job that spends money for minutes is
+  the wrong shape for a 300px column and the right shape for a wide tab.
+
+- **A truer optimiser.** Four things SkillOpt does that the first loop did
+  not. *Candidates*: several proposals a step, each scored on the training set,
+  only the best sent to validation — a what-if over ideas instead of a bet on
+  one. *A result cache*: every (skill text, task) pair is paid for once, so the
+  training set after a rejected step — an identical skill — costs nothing,
+  which was most of the loop's spend. *Patience*: three rejections in a row end
+  it; the remaining budget is better left unspent. *Preserve hints*: the
+  optimiser is told which tasks pass so it does not fix one by rewriting the
+  sentence another depends on. Runs are cancellable between tasks.
+
 ## 0.9.1 — 2026-09-03
 
 ### Fixed

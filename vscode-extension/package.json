@@ -2,7 +2,7 @@
   "name": "aico-vscode",
   "displayName": "aico \u2014 AI coding agent",
   "description": "A native aico panel in VS Code: its own view beside Chat, with the session list, tool cards and diffs drawn in your editor theme. Ask about a selection, watch background work in the status bar, and open the full workspace when you want the width.",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "publisher": "suhail-akhtar",
   "license": "MIT",
   "repository": {
@@ -89,6 +89,11 @@
       {
         "command": "aico.openSettings",
         "title": "Settings (providers, models, MCP)",
+        "category": "aico"
+      },
+      {
+        "command": "aico.measureSkills",
+        "title": "Measure a Skill",
         "category": "aico"
       },
       {

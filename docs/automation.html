@@ -243,6 +243,15 @@ ten minutes without doing anything.</code></pre>
       tasks under <code>~/.aico/skill-evals/&lt;skill&gt;/</code> — the loop can only fix what
       its tasks can fail, and on the shipped corpus the shipped skills already pass.
     </p>
+    <p>
+      The same bench lives in the web workspace under <strong>Settings → Skills → Measure</strong>:
+      per-task scores and misses as they land, each step's verdict, the candidate as a diff, and
+      <em>Adopt it</em>. It runs as a job the page polls, so closing the tab does not stop it.
+      VS Code reaches it through <em>Measure skills</em> in the panel's <code>⋯</code> menu. Several
+      candidates a step can be scored on training with only the best validated; results for an
+      unchanged skill are cached, so a rejected step costs nothing to try again from; and three
+      rejections in a row end the run.
+    </p>
 
     <div class="next">
       <a class="btn" href="workspace.html">The web workspace →</a>

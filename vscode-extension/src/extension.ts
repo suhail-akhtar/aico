@@ -119,13 +119,22 @@ export function activate(context: vscode.ExtensionContext): void {
       palette, which is where somebody who has not found the panel's overflow
       menu will look for "aico settings".
     */
-    vscode.commands.registerCommand('aico.openSettings', async () => {
+    vscode.commands.registerCommand('aico.openSettings', async (pane?: unknown) => {
       const running = await ready();
       if (running) {
-        WorkspacePanel.show(running, undefined, true);
+        WorkspacePanel.show(running, undefined, typeof pane === 'string' && pane ? pane : true);
         status.refresh();
       }
     }),
+
+    /*
+      Straight to the skill bench. Measuring a skill is a job that spends
+      money and takes minutes, which is exactly the thing a 300px column is
+      wrong for and a wide tab is right for — so the panel hands off rather
+      than reimplementing it.
+    */
+    vscode.commands.registerCommand('aico.measureSkills', () =>
+      vscode.commands.executeCommand('aico.openSettings', 'skills')),
 
     vscode.commands.registerCommand('aico.open', async () => {
       const running = await ready();

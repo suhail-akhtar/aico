@@ -44,16 +44,20 @@ import { MemoryPane } from './MemoryPane';
 
 export interface SettingsModalProps {
   onClose: () => void;
+  /** Which pane to open on. The VS Code panel deep-links straight to Skills. */
+  initialPane?: string;
 }
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
 
-export function SettingsModal({ onClose }: SettingsModalProps): React.ReactElement {
+export function SettingsModal({ onClose, initialPane }: SettingsModalProps): React.ReactElement {
   const settings = useStore(s => s.settings);
   const refreshSettings = useStore(s => s.refreshSettings);
   const refreshProviders = useStore(s => s.refreshProviders);
 
-  const [paneId, setPaneId] = useState(PANES[0]!.id);
+  const [paneId, setPaneId] = useState(
+    PANES.find(p => p.id === initialPane)?.id ?? PANES[0]!.id,
+  );
   const [query, setQuery] = useState('');
   const [save, setSave] = useState<SaveState>('idle');
   const [failure, setFailure] = useState<string | null>(null);

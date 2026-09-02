@@ -233,6 +233,10 @@ export { HOST_TOOLS, hostToolsFrom, isHostTool } from '../shared/host-tools.js';
 export {
   vsCodeDiagnostics, vsCodeTasks, vsCodeWorkspace,
 } from './tools/vscode.js';
+export { cacheKey } from './skills/eval/run.js';
+export {
+  describeCorpus, startEval, startOptimize, getJob, cancelJob, adoptCandidate,
+} from './skills/eval/jobs.js';
 export { observe, blockedReason, resetObservations, isObserved } from './tools/observation.js';
 export { runScoped } from './run-scoped.js';
 export { detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck, checkProjectGate, checkResults, newestSourceChange, touchedFiles } from './checks.js';

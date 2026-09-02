@@ -69,6 +69,10 @@ export interface RejectedProposal {
 export interface OptimizeStep {
   step: number;
   trainMean: number;
+  /** With several candidates: the training score of the one that went to validation. */
+  candidateTrainMean?: number;
+  /** How many proposals were scored on training this step. */
+  candidates?: number;
   proposed: SkillEdit[];
   /** Edits that could not be applied — `find` missing or ambiguous, over budget. */
   dropped: Array<{ edit: SkillEdit; because: string }>;
@@ -77,7 +81,7 @@ export interface OptimizeStep {
   costUsd: number;
 }
 
-export interface OptimizeOptions extends Omit<RunOptions, 'onTask'> {
+export interface OptimizeOptions extends Omit<RunOptions, 'onTask' | 'cache'> {
   /** How many propose–validate rounds. */
   steps: number;
   budget?: Partial<EditBudget>;
@@ -85,8 +89,23 @@ export interface OptimizeOptions extends Omit<RunOptions, 'onTask'> {
   optimizerModel?: string;
   /** Injected for tests. */
   optimizer?: ProviderAPI;
+  /**
+   * Proposals per step. Each is scored on the training set and only the best
+   * goes to validation, so the cost is `candidates × train` runs a step for one
+   * validation run — a what-if over several ideas rather than a bet on one.
+   * Default 1, which is the loop as first written.
+   */
+  candidates?: number;
+  /**
+   * Consecutive rejections before giving up. A loop that has proposed three
+   * things in a row and moved nothing is not about to move something on the
+   * fourth; the remaining budget is better left unspent.
+   */
+  patience?: number;
   onStep?: (step: OptimizeStep) => void;
   onTask?: (phase: 'train' | 'val', result: TaskResult) => void;
+  /** What the loop is doing right now, in words, for a client to show. */
+  onPhase?: (text: string) => void;
 }
 
 export interface OptimizeResult {
@@ -178,6 +197,7 @@ export function buildProposalPrompt(
   failures: Array<{ task: EvalTask; result: TaskResult }>,
   rejected: RejectedProposal[],
   budget: EditBudget,
+  passing: readonly string[] = [],
 ): string {
   const lines: string[] = [];
   lines.push('You improve an AI agent\'s skill file. The file is a natural-language procedure the agent follows.');
@@ -200,6 +220,16 @@ export function buildProposalPrompt(
     lines.push('```');
     lines.push(result.output.slice(-1500));
     lines.push('```');
+    lines.push('');
+  }
+  if (passing.length) {
+    /*
+      What must not break. An optimiser shown only failures will happily fix
+      one task by rewriting the sentence another task depends on; naming the
+      passing tasks is the cheapest way to say "and keep these".
+    */
+    lines.push('## Passing — do not break these');
+    for (const id of passing) lines.push(`- ${id}`);
     lines.push('');
   }
   if (rejected.length) {
@@ -278,16 +308,29 @@ export async function optimizeSkill(
   const val = tasks.filter(t => sides.get(t.id) === 'val');
   const steps: OptimizeStep[] = [];
   const rejected: RejectedProposal[] = [];
+  const candidates = Math.max(1, Math.floor(opts.candidates ?? 1));
+  const patience = Math.max(1, Math.floor(opts.patience ?? 3));
+  /*
+    One cache for the whole optimisation. Every (skill text, task) pair is
+    paid for once: the training set after a rejected step, the validation set
+    for a candidate identical to one already scored, the baseline that a later
+    step happens to reproduce. Without it the loop's cost grew with the number
+    of ideas that did not work, which is most of them.
+  */
+  const cache = new Map<string, TaskResult>();
   let costUsd = 0;
   const remaining = (): number => Math.max(0, opts.budgetUsd - costUsd);
+  const say = (text: string): void => opts.onPhase?.(text);
 
   const run = (body: string, set: readonly EvalTask[], phase: 'train' | 'val'): Promise<EvalReport> =>
     evalSkill(skill, body, set, {
       model: opts.model,
       settings: opts.settings,
       budgetUsd: remaining(),
+      cache,
       ...(opts.maxIterations ? { maxIterations: opts.maxIterations } : {}),
       ...(opts.provider ? { provider: opts.provider } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
       onTask: r => opts.onTask?.(phase, r),
     });
 
@@ -304,45 +347,86 @@ export async function optimizeSkill(
     );
   }
 
+  say('baseline on validation');
   const baseline = await run(skillBody, val, 'val');
   costUsd += baseline.costUsd;
   let best = skillBody;
   let bestValMean = baseline.mean;
   let stoppedBecause: string | undefined;
+  let rejectedInARow = 0;
 
   for (let step = 1; step <= opts.steps; step += 1) {
+    if (opts.signal?.aborted) { stoppedBecause = 'cancelled'; break; }
     if (remaining() <= 0) { stoppedBecause = 'budget exhausted'; break; }
+    if (rejectedInARow >= patience) { stoppedBecause = `${patience} rejections in a row`; break; }
 
+    say(`step ${step}: training set`);
     const trainReport = await run(best, train, 'train');
     costUsd += trainReport.costUsd;
     if (trainReport.overBudget) { stoppedBecause = 'budget exhausted during training'; break; }
+    if (opts.signal?.aborted) { stoppedBecause = 'cancelled'; break; }
 
     const failures = trainReport.tasks
       .filter(r => r.score < 1)
       .map(r => ({ task: train.find(t => t.id === r.id)!, result: r }));
+    const passing = trainReport.tasks.filter(r => r.score === 1).map(r => r.id);
     if (failures.length === 0) { stoppedBecause = 'every training task already passes'; break; }
 
-    const proposalText = await propose(
-      buildProposalPrompt(best, failures, rejected, budget),
-      opts.optimizerModel ?? opts.model,
-      opts.settings,
-      opts.optimizer,
-    );
-    const proposed = parseProposal(proposalText);
-    const { next, applied, dropped } = applyEdits(best, proposed, budget);
+    /*
+      Several ideas, one bet. Each candidate is scored on the training set —
+      cheap when it repeats a prior candidate, thanks to the cache — and only
+      the best goes on to validation. With one candidate this is exactly the
+      original loop.
+    */
+    const scored: Array<{ next: string; applied: SkillEdit[]; dropped: OptimizeStep['dropped']; trainMean: number }> = [];
+    const allProposed: SkillEdit[] = [];
+    for (let c = 1; c <= candidates; c += 1) {
+      if (opts.signal?.aborted) break;
+      say(candidates > 1 ? `step ${step}: proposing ${c} of ${candidates}` : `step ${step}: proposing edits`);
+      const text = await propose(
+        buildProposalPrompt(best, failures, rejected, budget, passing),
+        opts.optimizerModel ?? opts.model,
+        opts.settings,
+        opts.optimizer,
+      );
+      const proposed = parseProposal(text);
+      allProposed.push(...proposed);
+      const { next, applied, dropped } = applyEdits(best, proposed, budget);
+      if (applied.length === 0 || next === best) continue;
+      if (scored.some(sc => sc.next === next)) continue;
 
-    if (applied.length === 0) {
-      const because = proposed.length === 0
+      let trainMean = trainReport.mean;
+      if (candidates > 1) {
+        say(`step ${step}: scoring candidate ${c} on training`);
+        const report = await run(next, train, 'train');
+        costUsd += report.costUsd;
+        trainMean = report.mean;
+        if (report.overBudget) { stoppedBecause = 'budget exhausted while scoring candidates'; break; }
+      }
+      scored.push({ next, applied, dropped, trainMean });
+    }
+    if (stoppedBecause) break;
+
+    if (scored.length === 0) {
+      const because = allProposed.length === 0
         ? 'the optimiser returned no usable edits'
         : 'every proposed edit was outside the budget or did not match the skill';
-      rejected.push({ step, edits: proposed, because });
-      const record: OptimizeStep = { step, trainMean: trainReport.mean, proposed, dropped, accepted: false, costUsd: trainReport.costUsd };
+      rejected.push({ step, edits: allProposed, because });
+      rejectedInARow += 1;
+      const record: OptimizeStep = {
+        step, trainMean: trainReport.mean, candidates: candidates,
+        proposed: allProposed, dropped: [], accepted: false, costUsd: trainReport.costUsd,
+      };
       steps.push(record);
       opts.onStep?.(record);
       continue;
     }
 
-    const valReport = await run(next, val, 'val');
+    scored.sort((a, b) => b.trainMean - a.trainMean);
+    const pick = scored[0]!;
+
+    say(`step ${step}: validating`);
+    const valReport = await run(pick.next, val, 'val');
     costUsd += valReport.costUsd;
 
     /*
@@ -352,12 +436,14 @@ export async function optimizeSkill(
     */
     const accepted = !valReport.overBudget && valReport.mean > bestValMean;
     if (accepted) {
-      best = next;
+      best = pick.next;
       bestValMean = valReport.mean;
+      rejectedInARow = 0;
     } else {
+      rejectedInARow += 1;
       rejected.push({
         step,
-        edits: applied,
+        edits: pick.applied,
         because: valReport.overBudget
           ? 'validation could not finish within budget'
           : `validation ${valReport.mean.toFixed(2)} did not beat ${bestValMean.toFixed(2)}`,
@@ -368,8 +454,9 @@ export async function optimizeSkill(
     const record: OptimizeStep = {
       step,
       trainMean: trainReport.mean,
-      proposed: applied,
-      dropped,
+      ...(candidates > 1 ? { candidateTrainMean: pick.trainMean, candidates: scored.length } : {}),
+      proposed: pick.applied,
+      dropped: pick.dropped,
       valMean: valReport.mean,
       accepted,
       costUsd: trainReport.costUsd + valReport.costUsd,
@@ -378,6 +465,9 @@ export async function optimizeSkill(
     opts.onStep?.(record);
     if (valReport.overBudget) { stoppedBecause = 'budget exhausted during validation'; break; }
   }
+
+  if (!stoppedBecause && rejectedInARow >= patience) stoppedBecause = `${patience} rejections in a row`;
+  say(stoppedBecause ? `stopped: ${stoppedBecause}` : 'finished');
 
   return {
     skill, baseline, best, bestValMean, steps, rejected, costUsd,

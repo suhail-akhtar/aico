@@ -295,7 +295,8 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
         client, which now takes a deep link.
       */
       if (message?.t === 'open-settings') {
-        void vscode.commands.executeCommand('aico.openSettings');
+        const pane = (message as { pane?: unknown }).pane;
+        void vscode.commands.executeCommand('aico.openSettings', typeof pane === 'string' ? pane : undefined);
         return;
       }
     });
