@@ -21,6 +21,7 @@ import { maybeAutoCompactConversation as sharedMaybeAutoCompactConversation } fr
 import { handleSlashCommand } from './commands.js';
 import { freezeHooks, runHooks } from './hooks.js';
 import { skillRegistry } from './skills/index.js';
+import { registerSkillCommands } from './skills/eval/cli.js';
 import { initializeFeatures, shutdownFeatures } from './bootstrap.js';
 import { mcpRegistry } from './mcp/index.js';
 import { cronScheduler } from './cron/scheduler.js';
@@ -343,6 +344,8 @@ program
     });
     process.exit(0);
   });
+
+registerSkillCommands(program, { pickModel: (m) => resolveModel(m || defaultModel()) });
 
 // ── provider subcommand ───────────────────────────────────────────────
 const providerCmd = program

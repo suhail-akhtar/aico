@@ -29,6 +29,38 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   300px column — and **Remember this** shows the trigger it will use before you
   press it.
 
+- **A skill can be measured, and improved only when it measures better.**
+  `aico skill eval <name>` runs a skill against tasks with known answers and
+  scores it; `aico skill optimize <name>` is SkillOpt's loop sized for one
+  person's account. A separate optimiser model reads the *failing* trajectories
+  — which checks missed and, in the corpus author's words, why — and proposes
+  edits bounded by a textual learning rate: at most four operations a step, none
+  over 600 characters, and the skill may not grow past a third more than it
+  started. A candidate is kept only if it scores **strictly higher on
+  validation tasks the optimiser never saw**; a rejected one goes into a buffer
+  the optimiser is shown next time, so it does not propose the same thing twice.
+
+  Graders are regexes, files and counts — never a model judging a model. An LLM
+  judge costs a call per task per step, drifts between runs, and turns the
+  optimiser's job into "satisfy the judge". A planted SQL injection either gets
+  named or it does not. Efficiency is part of the score: every task caps tool
+  calls, because an optimiser scored on correctness alone will happily add "read
+  every file twice", and a skill's length is paid for on every future turn.
+
+  The shipped corpus is six planted tasks across the four built-in skills; add
+  your own under `~/.aico/skill-evals/<skill>/*.json`. Every run prints its
+  ceiling before the first call and stops at it, not near it. `optimize` never
+  writes the skill it was given — it writes a registrable draft for a person to
+  diff and adopt, because a corpus is a proxy and only a reader can judge the
+  seventh task nobody wrote.
+
+  Baseline on the cheap model, six tasks for eleven cents: security-review
+  1.00, commit 1.00, init 1.00, review 0.92 — the one miss was efficiency, not
+  correctness: it found both planted bugs in thirteen tool calls against a cap
+  of twelve. The shipped skills mostly pass the shipped corpus, so the loop's
+  first honest answer is "little to fix here; write harder tasks", which is what
+  the user corpus directory is for.
+
 ## 0.8.0 — 2026-09-02
 
 ### Added

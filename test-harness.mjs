@@ -36,6 +36,8 @@ import {
   resetContextWindowCache,
   resolveWindow, isStale, learnWindowFromError,
   resolveToolSet, HOST_TOOLS, hostToolsFrom, isHostTool,
+  grade, runCheck, hashFiles, corpusFor, BUILTIN_CORPUS, splitOf, assignSplits,
+  evalSkill, runEvalTask, materialise, applyEdits, buildProposalPrompt, optimizeSkill, parseProposal,
   vsCodeDiagnostics, vsCodeTasks, vsCodeWorkspace,
   skillRegistry,
   Session,
@@ -11201,6 +11203,231 @@ console.log('  -- A whitespace-only mismatch says so --');
   });
 
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 46. A SKILL CAN BE MEASURED, AND IMPROVED ONLY WHEN IT MEASURES BETTER
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ 46. A SKILL CAN BE MEASURED, AND IMPROVED ONLY WHEN IT MEASURES BETTER ══');
+
+console.log('  -- Graders are deterministic and weighted --');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-grade-'));
+  fs.writeFileSync(path.join(dir, 'a.js'), 'const a = 1;\n');
+  const fixtureHashes = hashFiles(dir, { 'a.js': 'const a = 1;\n' });
+  const evidence = { output: 'SQL injection in db.js (critical)', toolCalls: ['Read', 'Read', 'Grep'], cwd: dir, fixtureHashes };
+
+  const { score, results } = grade([
+    { kind: 'output-matches', pattern: 'injection', why: 'w' },
+    { kind: 'output-matches', pattern: 'xss', weight: 2, why: 'w' },
+    { kind: 'output-lacks', pattern: 'as an ai', why: 'w' },
+    { kind: 'no-file-changed', why: 'w' },
+    { kind: 'max-tool-calls', limit: 3, why: 'w' },
+  ], evidence);
+  // 1 + 0 + 1 + 1 + 1 earned of 1 + 2 + 1 + 1 + 1 possible.
+  assert(Math.abs(score - 4 / 6) < 1e-9, `weights count: ${score.toFixed(3)} of a possible 1.000`);
+  assert(results.filter(r => r.passed).length === 4, 'four of five checks passed');
+
+  /*
+    The check that no output regex can stand in for: a review that "fixed" the
+    file it was reviewing. Detected by hash, so a one-character change counts.
+  */
+  fs.writeFileSync(path.join(dir, 'a.js'), 'const a = 2;\n');
+  assert(runCheck({ kind: 'no-file-changed', why: 'w' }, evidence) === false,
+    'editing the fixture fails no-file-changed');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- The edit budget is the textual learning rate --');
+{
+  const skill = 'Read the staged diff.\n\nWrite a message.\n\nKeep it short.\n';
+  const budget = { maxEdits: 2, maxEditChars: 40, maxSkillChars: 120 };
+
+  const { next, applied, dropped } = applyEdits(skill, [
+    { find: 'Keep it short.', replace: 'Keep the subject under 72 characters.', reason: 'a' },
+    { find: 'nowhere', replace: 'x', reason: 'b' },
+    { find: 'Write a message.', replace: 'W'.repeat(41), reason: 'c' },
+    { find: '', replace: 'Appended rule.', reason: 'd' },
+    { find: 'Read the staged diff.', replace: 'Read the diff.', reason: 'e' },
+  ], budget);
+
+  assert(applied.length === 2, `at most maxEdits are applied (${applied.length})`);
+  assert(dropped.some(d => /not in the skill/.test(d.because)), 'a find that matches nothing is dropped, not guessed');
+  assert(dropped.some(d => /limit is 40/.test(d.because)), 'a replacement over maxEditChars is dropped');
+  assert(dropped.some(d => /over the 2-edit budget/.test(d.because)), 'the edit past the budget is dropped and named');
+  assert(next.includes('under 72 characters') && next.endsWith('Appended rule.\n'),
+    'the surviving edits landed, and an empty find appends');
+
+  const twice = 'Check X.\nCheck X.\n';
+  const amb = applyEdits(twice, [{ find: 'Check X.', replace: 'Check Y.', reason: 'a' }], budget);
+  assert(amb.applied.length === 0 && /more than once/.test(amb.dropped[0].because),
+    'an ambiguous find is refused — the same rule Edit uses on files');
+
+  const grow = applyEdits('short\n', [{ find: '', replace: 'x'.repeat(200), reason: 'a' }],
+    { maxEdits: 4, maxEditChars: 600, maxSkillChars: 100 });
+  assert(grow.applied.length === 0 && /cap is 100/.test(grow.dropped[0].because),
+    'the growth cap refuses an edit that would make the skill longer than allowed');
+}
+
+console.log('  -- Proposals are parsed from prose and told what was rejected --');
+{
+  const edits = parseProposal('Sure. Here are my edits:\n[{"find":"a","replace":"b","reason":"r"},{"bogus":1}]\nDone.');
+  assert(edits.length === 2 && edits[0].find === 'a' && edits[1].find === '' && edits[1].replace === '',
+    'the first JSON array is extracted and malformed entries are normalised, not thrown on');
+  assert(parseProposal('no json here').length === 0, 'no array means no edits, not a crash');
+
+  const prompt = buildProposalPrompt('SKILL', [{
+    task: { id: 't1', skill: 's', args: 'src/', checks: [] },
+    result: { id: 't1', score: 0.5, output: 'the reply', toolCalls: ['Read'], costUsd: 0,
+      checks: [{ check: { kind: 'output-matches', pattern: 'x', why: 'The injection was not named.' }, passed: false },
+               { check: { kind: 'output-lacks', pattern: 'y', why: 'passed one' }, passed: true }] },
+  }], [{ step: 1, edits: [{ find: 'a', replace: 'b', reason: 'tried adding a checklist' }], because: 'validation 0.40 did not beat 0.50' }],
+    { maxEdits: 3, maxEditChars: 100, maxSkillChars: 1000 });
+  assert(prompt.includes('The injection was not named.') && !prompt.includes('passed one'),
+    'the optimiser is shown the why of each miss, and nothing about checks that passed');
+  assert(prompt.includes('tried adding a checklist') && prompt.includes('did not beat'),
+    'rejected proposals are shown so they are not proposed again');
+  assert(/at most 3 edits/.test(prompt) && /under 1000 characters/.test(prompt), 'the budget is stated in the prompt');
+}
+
+console.log('  -- The built-in corpus is usable as a training set --');
+{
+  const sides = new Set(BUILTIN_CORPUS.map(splitOf));
+  assert(sides.has('train') && sides.has('val'), 'the corpus has tasks on both sides of the split');
+  assert(splitOf({ id: 'security-review/sqli-and-secret', skill: 's', checks: [] })
+      === splitOf({ id: 'security-review/sqli-and-secret', skill: 's', checks: [] }),
+    'the split is a function of the id, so a task never drifts between sides');
+  for (const name of ['security-review', 'review', 'commit', 'init']) {
+    assert(corpusFor(name).length >= 1, `there is at least one task for ${name}`);
+  }
+
+  /*
+    Found live: both security-review tasks hashed to validation and the
+    optimiser refused to start. With two or more tasks, neither side may be
+    empty — and the fix must not touch a task somebody labelled by hand.
+  */
+  for (const name of ['security-review', 'review']) {
+    const sides = [...assignSplits(corpusFor(name)).values()];
+    assert(sides.includes('train') && sides.includes('val'), `${name}'s corpus has a task on each side`);
+  }
+  const twoHashedSame = [
+    { id: 'aaa', skill: 's', checks: [] }, { id: 'aab', skill: 's', checks: [] },
+  ].filter(t => splitOf(t) === splitOf({ id: 'aaa', skill: 's', checks: [] }));
+  if (twoHashedSame.length === 2) {
+    const fixed = [...assignSplits(twoHashedSame).values()];
+    assert(fixed.includes('train') && fixed.includes('val'), 'two tasks that hash to one side are rebalanced');
+  }
+  const labelled = assignSplits([
+    { id: 'x', skill: 's', checks: [], split: 'val' }, { id: 'y', skill: 's', checks: [], split: 'val' },
+  ]);
+  assert([...labelled.values()].every(s => s === 'val'), 'explicit labels are never overridden, even if that leaves a side empty');
+
+  // The commit task needs a real repository with the change staged, or the
+  // skill's `git diff --staged` sees nothing and the score means nothing.
+  const commit = corpusFor('commit')[0];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-mat-'));
+  materialise(commit, dir);
+  const staged = execFileSync('git', ['diff', '--staged', '--name-only'], { cwd: dir, encoding: 'utf8' });
+  assert(/src\/auth\/token\.ts/.test(staged) && !/README/.test(staged),
+    `the commit fixture stages the change and not the baseline (${staged.trim().split('\n').join(', ')})`);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- A run is graded from what the agent actually did --');
+{
+  /*
+    A mock agent that answers from the skill text: if the skill mentions
+    "severity", the reply names one. That is enough to make the score depend on
+    the skill, which is the property the optimiser loop is built on.
+  */
+  const agentFor = (marker) => ({
+    id: 'mock', displayName: 'Mock', calls: 0,
+    async *chat(opts) {
+      this.calls += 1;
+      const task = opts.messages.find(m => m.role === 'user')?.content ?? '';
+      const text = task.includes(marker)
+        ? 'db.js has a SQL injection (critical). config.js holds a hard-coded secret credential.'
+        : 'db.js has a SQL injection. config.js holds a hard-coded secret.';
+      yield { type: 'text', content: text };
+      yield { type: 'finish', reason: 'stop' };
+    },
+  });
+  const task = corpusFor('security-review').find(t => t.id === 'security-review/sqli-and-secret');
+  const settings = { completionGate: { enabled: false }, cron: { enabled: false } };
+
+  const weak = await runEvalTask('Audit the code.', task, { model: 'mock-model', settings, budgetUsd: 1, provider: agentFor('severity') });
+  const strong = await runEvalTask('Audit the code. Assign a severity.', task, { model: 'mock-model', settings, budgetUsd: 1, provider: agentFor('severity') });
+  assert(weak.score < strong.score, `a skill that asks for severity scores higher (${weak.score.toFixed(2)} → ${strong.score.toFixed(2)})`);
+  assert(strong.checks.find(c => c.check.kind === 'no-file-changed')?.passed === true, 'the fixture was left alone');
+  assert(!weak.error && !strong.error, 'neither run crashed');
+}
+
+console.log('  -- The loop keeps an edit only when validation improves, and remembers rejections --');
+{
+  const agent = {
+    id: 'mock', displayName: 'Mock',
+    async *chat(opts) {
+      const task = opts.messages.find(m => m.role === 'user')?.content ?? '';
+      const text = task.includes('severity')
+        ? 'db.js has a SQL injection (critical). config.js holds a hard-coded secret credential. app.py: eval and command injection shell=True.'
+        : 'db.js has a SQL injection. config.js holds a hard-coded secret. app.py: command injection via shell=True.';
+      yield { type: 'text', content: text };
+      yield { type: 'finish', reason: 'stop' };
+    },
+  };
+  /*
+    An optimiser that proposes something useless first, then the fix. The first
+    proposal must be rejected — validation does not improve — and must appear in
+    the second prompt as "already tried", which is the buffer doing its job.
+  */
+  const prompts = [];
+  let round = 0;
+  const optimizer = {
+    id: 'opt', displayName: 'Opt',
+    async *chat(opts) {
+      prompts.push(opts.messages[0].content);
+      round += 1;
+      const reply = round === 1
+        ? '[{"find":"Audit the code.","replace":"Audit the code carefully.","reason":"be more careful"}]'
+        : '[{"find":"","replace":"Assign a severity (critical, high, medium, low) to every finding.","reason":"the checks want a severity"}]';
+      yield { type: 'text', content: reply };
+      yield { type: 'finish', reason: 'stop' };
+    },
+  };
+
+  const tasks = corpusFor('security-review').map((t, i) => ({ ...t, split: i === 0 ? 'val' : 'train' }));
+  const result = await optimizeSkill('security-review', 'Audit the code.', tasks, {
+    model: 'mock-model', settings: { completionGate: { enabled: false }, cron: { enabled: false } },
+    budgetUsd: 5, steps: 3, provider: agent, optimizer,
+  });
+
+  assert(result.steps.length >= 2, `at least two steps ran (${result.steps.length})`);
+  assert(result.steps[0].accepted === false, 'a proposal that did not move validation was rejected');
+  assert(result.rejected.length >= 1 && /did not beat/.test(result.rejected[0].because),
+    'the rejection says why, with the numbers');
+  assert(/already tried and rejected/i.test(prompts[1]) && /be more careful/.test(prompts[1]),
+    'the second proposal prompt lists the first as already tried');
+  assert(result.steps.some(s => s.accepted), 'the edit that raised validation was kept');
+  assert(result.best.includes('Assign a severity'), 'and the best skill carries it');
+  assert(result.bestValMean > result.baseline.mean,
+    `best beats baseline on validation (${result.baseline.mean.toFixed(2)} → ${result.bestValMean.toFixed(2)})`);
+  assert(/already passes/.test(result.stoppedBecause ?? '') || result.steps.length === 3,
+    `it stops when training is solved or steps run out (${result.stoppedBecause ?? 'ran all steps'})`);
+}
+
+console.log('  -- The budget is a hard stop --');
+{
+  const agent = {
+    id: 'mock', displayName: 'Mock',
+    async *chat() { yield { type: 'text', content: 'nothing' }; yield { type: 'finish', reason: 'stop' }; },
+  };
+  const tasks = corpusFor('security-review');
+  const report = await evalSkill('security-review', 'x', tasks, {
+    model: 'mock-model', settings: { completionGate: { enabled: false }, cron: { enabled: false } },
+    budgetUsd: 0, provider: agent,
+  });
+  assert(report.overBudget === true && report.tasks.length === 0,
+    'a zero budget runs nothing and says so, rather than running one task and then stopping');
 }
 
 console.log('\n' + '═'.repeat(50));
