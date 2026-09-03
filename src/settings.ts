@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from './home.js';
 import type { McpServerConfig } from './mcp.js';
 
 import type { ProviderInstance } from './providers/instances.js';
@@ -626,7 +626,7 @@ export function getSettingsAudit(): SettingsAudit | null {
 
 export async function loadSettings(): Promise<AicoSettings> {
   const cwd = process.cwd();
-  const globalPath = path.join(os.homedir(), '.aico', 'settings.json');
+  const globalPath = path.join(aicoHome(), 'settings.json');
   const projectPath = path.join(cwd, '.aico', 'settings.json');
   const localPath = path.join(cwd, '.aico', 'settings.local.json');
 
@@ -676,7 +676,7 @@ export async function loadSettings(): Promise<AicoSettings> {
 }
 
 export async function saveUserSetting(key: string, value: unknown): Promise<void> {
-  const dir = path.join(os.homedir(), '.aico');
+  const dir = aicoHome();
   await mkdir(dir, { recursive: true });
   const filePath = path.join(dir, 'settings.json');
   let existing: Record<string, unknown> = {};

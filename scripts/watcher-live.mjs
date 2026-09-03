@@ -18,6 +18,8 @@
  * live probe.
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import fs from 'fs';
 import http from 'http';
 import os from 'os';

@@ -318,8 +318,10 @@ export class OpenAICompatibleProvider implements ProviderAPI {
       }
     }
 
+    let finalUsage: ReturnType<typeof normalizeUsage> | undefined;
     for await (const chunk of stream) {
-      // Usage (arrives on the final chunk when include_usage: true)
+      // Usage: on the final chunk with include_usage, or on every chunk from
+      // some endpoints. Held, not emitted — see after the loop.
       if (chunk.usage) {
         // OpenAI/OpenRouter/Gemini/Z.AI report automatic prompt-cache hits in
         // prompt_tokens_details. OpenRouter additionally reports cache_write_tokens
@@ -328,20 +330,13 @@ export class OpenAICompatibleProvider implements ProviderAPI {
         const details = (chunk.usage as any).prompt_tokens_details ?? {};
         // `inclusive`: prompt_tokens already contains the cached tokens, so
         // normalizeUsage keeps it as the total instead of double-counting.
-        const usage = normalizeUsage({
+        finalUsage = normalizeUsage({
           reportedInput: chunk.usage.prompt_tokens ?? 0,
           outputTokens: chunk.usage.completion_tokens ?? 0,
           cacheReadTokens: details.cached_tokens,
           cacheWriteTokens: details.cache_write_tokens,
           convention: 'inclusive',
         });
-        yield {
-          type: 'usage',
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          ...(usage.cacheReadTokens ? { cacheReadTokens: usage.cacheReadTokens } : {}),
-          ...(usage.cacheWriteTokens ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
-        };
       }
 
       const choice = chunk.choices?.[0];
@@ -384,6 +379,28 @@ export class OpenAICompatibleProvider implements ProviderAPI {
       if (choice.finish_reason) {
         yield { type: 'finish', reason: normalizeFinishReason(choice.finish_reason) };
       }
+    }
+
+    /*
+      Usage is reported once per request, after the stream, whatever the
+      endpoint did with it.
+
+      OpenAI sends it on one final chunk. vLLM with continuous usage stats,
+      and a number of gateways, put a running total on *every* chunk — and
+      this loop used to emit each one as a separate usage event, which the
+      agent summed. A 130K-token prompt streamed in 400 chunks was then
+      counted as fifty million tokens, and the cost meter climbed with every
+      word. The last figure seen is the request's total; that is the one
+      that counts.
+    */
+    if (finalUsage) {
+      yield {
+        type: 'usage',
+        inputTokens: finalUsage.inputTokens,
+        outputTokens: finalUsage.outputTokens,
+        ...(finalUsage.cacheReadTokens ? { cacheReadTokens: finalUsage.cacheReadTokens } : {}),
+        ...(finalUsage.cacheWriteTokens ? { cacheWriteTokens: finalUsage.cacheWriteTokens } : {}),
+      };
     }
   }
 

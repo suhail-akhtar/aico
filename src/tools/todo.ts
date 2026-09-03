@@ -16,11 +16,12 @@
 
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import { createHash } from 'crypto';
 import { currentRunContext } from '../run-context.js';
 
-const TODO_DIR = path.join(os.homedir(), '.aico', 'todos');
+/** Read at call time so `AICO_HOME` can be decided after this module loads. */
+const todoDir = (): string => path.join(aicoHome(), 'todos');
 /** Where a run with no session id lands — a one-shot CLI invocation. */
 const UNSCOPED = 'unscoped';
 
@@ -43,7 +44,7 @@ function todoFilePath(sessionId?: string): string {
   const id = sessionId ?? currentRunContext()?.sessionId ?? UNSCOPED;
   const readable = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
   const digest = createHash('sha256').update(id).digest('hex').slice(0, 10);
-  return path.join(TODO_DIR, `${readable}-${digest}.json`);
+  return path.join(todoDir(), `${readable}-${digest}.json`);
 }
 
 async function loadTodos(sessionId?: string): Promise<Todo[]> {

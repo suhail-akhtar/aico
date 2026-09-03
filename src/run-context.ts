@@ -46,6 +46,8 @@ export interface RunContext {
   /** Absolute path the run treats as the project root. */
   cwd: string;
   sessionId?: string;
+  /** The model this run is bound to, for the tools that reason about it. */
+  model?: string;
   settings?: AicoSettings;
   /**
    * Who applies this run's file writes, when it is not the filesystem.

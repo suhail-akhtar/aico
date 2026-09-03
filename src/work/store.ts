@@ -18,7 +18,7 @@
 
 import fs from 'fs';
 import { appendFile, mkdir, readFile, rename, writeFile } from 'fs/promises';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import path from 'path';
 import type { WorkEvent, WorkRecord } from './types.js';
 import { isTerminal } from './types.js';
@@ -34,11 +34,11 @@ const LF = '\n';
  * honest way to run two instances against separate state, which is what anyone
  * testing an MCP integration ends up wanting.
  */
-let storePath = process.env.AICO_WORK_LOG?.trim()
-  || path.join(os.homedir(), '.aico', 'work.jsonl');
+let storePath: string | undefined = process.env.AICO_WORK_LOG?.trim() || undefined;
 
+/** Resolved at call time so `AICO_HOME` can be decided after this module loads. */
 export function workStorePath(): string {
-  return storePath;
+  return storePath ?? path.join(aicoHome(), 'work.jsonl');
 }
 
 /** Point the ledger at another file. Tests only — the daemon uses the default. */
@@ -67,7 +67,7 @@ export async function appendWorkEvent(event: WorkEvent): Promise<void> {
   // wrong file. In production the path never moves and this costs nothing —
   // but "usually there is only one" is exactly the assumption that makes a
   // race take a year to show up.
-  const target = storePath;
+  const target = workStorePath();
   try {
     await mkdir(path.dirname(target), { recursive: true });
     await appendFile(target, JSON.stringify(event) + LF, 'utf8');
@@ -88,7 +88,7 @@ export async function appendWorkEvent(event: WorkEvent): Promise<void> {
 export async function readWorkLog(): Promise<{ records: WorkRecord[]; lines: number }> {
   let raw: string;
   try {
-    raw = await readFile(storePath, 'utf8');
+    raw = await readFile(workStorePath(), 'utf8');
   } catch {
     return { records: [], lines: 0 };
   }
@@ -139,7 +139,7 @@ export async function compactWorkLog(records: WorkRecord[]): Promise<void> {
     .map(record => JSON.stringify({ t: 'add', at: Date.now(), record } satisfies WorkEvent))
     .join(LF);
 
-  const target = storePath;
+  const target = workStorePath();
   try {
     await mkdir(path.dirname(target), { recursive: true });
     const temp = `${target}.compact`;
@@ -174,5 +174,5 @@ export function pidAlive(pid: number): boolean {
 
 /** Whether the store file currently exists — used by the boot path's logging. */
 export function workStoreExists(): boolean {
-  return fs.existsSync(storePath);
+  return fs.existsSync(workStorePath());
 }

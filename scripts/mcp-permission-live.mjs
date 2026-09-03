@@ -25,6 +25,8 @@
  * Run: npm run build && node scripts/mcp-permission-live.mjs
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';

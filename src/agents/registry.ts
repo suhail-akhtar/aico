@@ -1,5 +1,5 @@
 import path from 'path';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import { mkdir, readFile, readdir, unlink, writeFile } from 'fs/promises';
 import type { AgentCreateInput, AgentSpec } from './types.js';
 import { AGENT_PROMPTS } from './prompts-registry.js';
@@ -157,7 +157,7 @@ function slugName(name: string): string {
 }
 
 function userAgentsDir(): string {
-  return path.join(os.homedir(), '.aico', 'agents');
+  return path.join(aicoHome(), 'agents');
 }
 
 function projectAgentsDir(cwd = process.cwd()): string {

@@ -17,6 +17,8 @@
  * Run: npm run build && node scripts/mcp-client-live.mjs
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';

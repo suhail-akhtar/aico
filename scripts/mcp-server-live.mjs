@@ -17,6 +17,8 @@
  * Needs: npm run build  (this drives dist/index.js, the real entry point)
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';

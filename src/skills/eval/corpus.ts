@@ -19,7 +19,7 @@
  */
 
 import fs from 'fs';
-import os from 'os';
+import { aicoHome } from '../../home.js';
 import path from 'path';
 import type { EvalTask } from './types.js';
 
@@ -269,7 +269,7 @@ export const BUILTIN_CORPUS: readonly EvalTask[] = [
 
 /** Where a user's own tasks live. */
 export function userCorpusDir(skill: string): string {
-  return path.join(os.homedir(), '.aico', 'skill-evals', skill);
+  return path.join(aicoHome(), 'skill-evals', skill);
 }
 
 /**

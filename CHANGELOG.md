@@ -7,6 +7,34 @@ and each `release/vX.Y` branch is cut from it at the version it names.
 
 ### Added
 
+- **The window learns from use, and the model can read and correct it.** A
+  prompt the model just accepted is proof of the window it has, and until now
+  nothing listened: a model assumed at 128K would take 130K-token prompts
+  turn after turn while compaction fired against the assumption. Now an
+  accepted prompt larger than an assumed or tabulated window raises it to the
+  next size models are sold with, marked *inferred* on the meter, said once in
+  the conversation, and persisted with that provenance. A figure the user set,
+  the provider reported, or a refusal stated is never overruled by it.
+
+  There is also a `ContextWindow` tool. *get* shows the model the figure,
+  where it came from and when compaction will run — the first thing to reach
+  for when summaries seem too frequent. *set* records a figure the user stated
+  or the provider documents; it refuses anything below what has already been
+  seen to work, and anything under 8,000 tokens, because the case that
+  prompted this had a model insisting it held 4,000 while running on a
+  million. *forget* hands the figure back to detection. "Your window is a
+  million tokens, stop compacting" is now something the model can act on.
+
+- **`AICO_HOME`.** Everything aico keeps outside a project — settings,
+  sessions, skills, memories, the work ledger — lives in one directory, and
+  that directory can now be moved with one environment variable. Every test
+  and live probe uses it: each run gets a store of its own under the temp
+  folder, seeded with a copy of your settings for the provider keys, and
+  removed on exit. Before this, over a thousand project folders from test
+  workspaces had accumulated in the real store, each one a "recent session"
+  in the sidebar. `scripts/prune-test-projects.mjs` lists them, and removes
+  them with `--apply`.
+
 - **The skill bench, in Settings → Skills.** Every skill has a *Measure*
   button: the corpus and its split, a model, a ceiling, then *Evaluate* or
   *Optimize*. Both run as jobs the page polls — a browser would time out on a
@@ -29,6 +57,20 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   sentence another depends on. Runs are cancellable between tasks.
 
 ### Fixed
+
+- **Cost on an OpenAI-compatible endpoint climbed with every word.** vLLM
+  with continuous usage stats, and a number of gateways, put a running
+  `usage` total on every streamed chunk. The provider emitted each one as a
+  separate usage event and the agent summed them, so a 1,000-token prompt
+  streamed in six chunks was counted as 6,000 and a long reply was billed
+  hundreds of times over. Usage is now reported once per request, after the
+  stream, whatever the endpoint did with it — the last figure seen is the
+  request's total. DeepSeek's provider had the same shape and the same fix.
+
+- **Two context-window facts written close together lost one.** Each persist
+  was a read-modify-write of `settings.json`; two in flight — a detection
+  landing while an accepted prompt raised the same model's window — each read
+  the same "before" and the last writer erased the other. Writes now queue.
 
 - **A model on an "OpenAI Compatible" provider ran on an assumed 128K window,
   and compaction fired far too often.** Reported with a screenshot: the meter at

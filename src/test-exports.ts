@@ -310,4 +310,6 @@ export {
   evalSkill, runTask as runEvalTask, materialise, renderTask,
   applyEdits, buildProposalPrompt, defaultBudget, optimizeSkill, parseProposal,
 } from './skills/eval/index.js';
-export { windowFromCatalogue, clearContextWindow } from './context-window.js';
+export { windowFromCatalogue, clearContextWindow, noteWindowFromUsage, standardWindowAtLeast } from './context-window.js';
+export { aicoHome } from './home.js';
+export { executeContextWindow, contextWindowToolDefinition } from './tools/context-window.js';

@@ -11,6 +11,8 @@
  * Build first: npm run test:miniapps (or the tsup line inside it)
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';

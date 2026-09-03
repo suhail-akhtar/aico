@@ -20,6 +20,8 @@
  *   node bench.mjs cache           # one bench
  *   node bench.mjs all anthropic   # pick the provider
  */
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './scripts/lib/test-home.mjs';
 import 'dotenv/config';
 import fs from 'fs';
 import os from 'os';
@@ -141,7 +143,7 @@ function newSession(dir) {
  * the thing the cache benchmark is trying to observe.
  */
 function realSettings() {
-  const file = path.join(os.homedir(), '.aico', 'settings.json');
+  const file = path.join(process.env.AICO_HOME, 'settings.json');
   let stored = {};
   try { stored = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* defaults */ }
   return {

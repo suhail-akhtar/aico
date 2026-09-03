@@ -9,6 +9,8 @@
  *   node live-test.mjs                    # both models
  *   node live-test.mjs gpt-5.6-luna       # one model
  */
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './scripts/lib/test-home.mjs';
 import 'dotenv/config';
 import fs from 'fs';
 import os from 'os';

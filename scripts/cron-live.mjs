@@ -13,6 +13,8 @@
  * Run: npm run build && node scripts/cron-live.mjs
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';

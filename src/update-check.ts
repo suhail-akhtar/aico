@@ -28,7 +28,7 @@
 
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from './home.js';
 
 /** How long a cached answer is trusted before another check is worth making. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -44,7 +44,7 @@ interface CacheFile {
 }
 
 function cachePath(): string {
-  return path.join(os.homedir(), '.aico', 'update-check.json');
+  return path.join(aicoHome(), 'update-check.json');
 }
 
 /**

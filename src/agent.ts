@@ -70,7 +70,7 @@ import type { FileWriter } from './tools/file-writer.js';
 import { isEffortChoice } from '../shared/reasoning.js';
 import { buildRuntimeAwareness } from './capabilities.js';
 import { renderRunningWork } from './work/projection.js';
-import { noteWindowFromError } from './context-window.js';
+import { noteWindowFromError, noteWindowFromUsage } from './context-window.js';
 import { listAgentSpecs } from './agents/registry.js';
 import { skillRegistry } from './skills/index.js';
 import { cronScheduler } from './cron/scheduler.js';
@@ -718,6 +718,9 @@ const PLAN_MODE_TOOLS = new Set([
     tool exists at all.
   */
   'VSCodeDiagnostics',
+  // Reading the window is orientation; correcting it at the user's word is
+  // the kind of thing a planning turn is asked to do.
+  'ContextWindow',
   // How a planning turn ends. Without it the only way to deliver a plan was
   // prose, which can be read and cannot be answered.
   'ProposePlan',
@@ -1097,6 +1100,7 @@ export async function runAgent(opts: AgentOptions): Promise<string> {
   return runInContext(
     {
       cwd: opts.cwd ?? process.cwd(),
+      model: opts.model,
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
       ...(opts.settings ? { settings: opts.settings } : {}),
       // Who applies this run's writes. Undefined means the filesystem, which is
@@ -1893,6 +1897,20 @@ const GOAL_REMINDER_EVERY = 6;
               totalOutputTokens += event.outputTokens;
               totalCachedTokens += cacheRead;
               totalCacheWriteTokens += cacheWrite;
+              /*
+                A prompt the model accepted is proof of the window it has.
+
+                Before `onTokens` fires, so the usage event the client draws
+                its meter from already carries the corrected figure rather
+                than one more reading of "100% of 128K".
+              */
+              const grown = noteWindowFromUsage(model, event.inputTokens, settings);
+              if (grown && !silent) {
+                showError(
+                  `Noted: ${model} accepted ${event.inputTokens.toLocaleString()} tokens, `
+                  + `so its window is now taken as ${grown.tokens.toLocaleString()}.`,
+                );
+              }
               // Committed to the tracker HERE, per request, rather than once
               // after the loop. A turn can make up to `maxIterations` model
               // calls, so a tracker that only learns about them afterwards

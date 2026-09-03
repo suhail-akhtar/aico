@@ -31,6 +31,7 @@ const SOURCE_NOTE: Record<string, string> = {
   user: 'you set this limit',
   api: 'reported by the provider',
   learned: 'learned from a provider error',
+  observed: 'inferred — it accepted more than was assumed',
   table: "from aico's built-in table",
   assumed: 'assumed — no source knows this model',
 };

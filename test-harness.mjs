@@ -2,6 +2,8 @@
  * aico End-to-End Test Harness
  * Run: npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node test-harness.mjs
  */
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './scripts/lib/test-home.mjs';
 import fs from 'fs';
 import { pathToFileURL, fileURLToPath } from 'url';
 import path from 'path';
@@ -36,6 +38,7 @@ import {
   resetContextWindowCache,
   resolveWindow, isStale, learnWindowFromError,
   windowFromCatalogue, clearContextWindow, setContextWindow, detectContextWindow,
+  noteWindowFromUsage, standardWindowAtLeast, aicoHome, executeContextWindow, toolDefinitions,
   resolveToolSet, HOST_TOOLS, hostToolsFrom, isHostTool,
   grade, runCheck, hashFiles, corpusFor, BUILTIN_CORPUS, splitOf, assignSplits, cacheKey,
   describeCorpus, startEval, startOptimize, getJob, cancelJob, adoptCandidate,
@@ -5515,7 +5518,7 @@ console.log('  -- The agent may write to its own workspace --');
   // bundled `references/tone.md`, Read refused because skills live under
   // ~/.aico/skills, and the agent only recovered by shelling out to `cat`. A
   // procedure you chose to install is one you already decided to trust reading.
-  const skillFile = nodePath.join(os.homedir(), '.aico', 'skills', 'x', 'references', 'tone.md');
+  const skillFile = nodePath.join(process.env.AICO_HOME, 'skills', 'x', 'references', 'tone.md');
   let skillRead = '';
   try { resolveForReading(skillFile, 'file_path'); }
   catch (err) { skillRead = err.message; }
@@ -5565,7 +5568,7 @@ console.log('  -- The agent may write to its own workspace --');
   // Every tool that only looks shares the boundary. Fixing Read alone was the
   // obvious half-measure and failed within one turn: the orchestrator created a
   // skill, ran LS on the directory it had just been given, and was refused.
-  const skillDir = nodePath.join(os.homedir(), '.aico', 'skills', 'x');
+  const skillDir = nodePath.join(process.env.AICO_HOME, 'skills', 'x');
   for (const [tool, run] of [
     ['LS', () => listDirectory({ path: skillDir })],
     ['Glob', () => globFiles({ pattern: '**/*.md', cwd: skillDir })],
@@ -7372,7 +7375,7 @@ function writeClaudeSkill(root, name, extra = {}) {
 
 console.log('  -- The orchestrator can author a skill, and cannot escape with one --');
 {
-  const home = path.join(os.homedir(), '.aico', 'skills');
+  const home = path.join(process.env.AICO_HOME, 'skills');
 
   // Measured before this was fixed: SkillCreate took its filename straight from
   // a name the *model* chose, so `../escaped-probe` wrote outside the skills
@@ -7829,7 +7832,7 @@ console.log('  -- A pasted MCP config is read and checked before anything is wri
 
 console.log('  -- Creating a skill does not register it --');
 {
-  const home = path.join(os.homedir(), '.aico', 'skills');
+  const home = path.join(process.env.AICO_HOME, 'skills');
   const NAME = 'harness-lifecycle';
   const clean = () => {
     fs.rmSync(path.join(home, NAME), { recursive: true, force: true });
@@ -7964,7 +7967,7 @@ console.log('  -- Verification catches what actually breaks a skill --');
 
 console.log('  -- A skill that matches the request is named as a match --');
 {
-  const home = path.join(os.homedir(), '.aico', 'skills');
+  const home = path.join(process.env.AICO_HOME, 'skills');
   const NAME = 'harness-trigger';
   fs.rmSync(path.join(home, NAME), { recursive: true, force: true });
   fs.rmSync(path.join(draftsDir(), NAME), { recursive: true, force: true });
@@ -8418,7 +8421,7 @@ console.log('\n══ A TASK LIST BELONGS TO ITS SESSION ══');
 
   // Left behind, these make the next run of this suite start dirty — the same
   // way a shared list made every new session start dirty.
-  const dir = path.join(os.homedir(), '.aico', 'todos');
+  const dir = path.join(process.env.AICO_HOME, 'todos');
   for (const name of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
     if (/^(todo-session-[ab]|web.session.one)-/.test(name)) {
       fs.rmSync(path.join(dir, name), { force: true });
@@ -11621,6 +11624,162 @@ console.log('  -- A figure a person typed outranks everything and can be taken b
   assert(isStale(fact) === false, 'and is never re-detected behind their back');
   await clearContextWindow('probe-window-model');
   assert(resolveWindow('probe-window-model', {}).source === 'assumed', 'until it is cleared');
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 48. A STORE OF ONE'S OWN, USAGE COUNTED ONCE, AND A WINDOW THAT LEARNS FROM USE
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ 48. A STORE OF ONE\'S OWN, USAGE COUNTED ONCE, AND A WINDOW THAT LEARNS FROM USE ══');
+
+console.log('  -- AICO_HOME moves the whole store --');
+{
+  /*
+    This harness imports scripts/lib/test-home.mjs before anything else, so
+    every path below must land under the scratch store it set up — and none
+    under the reader's real one. Over a thousand project folders were in there
+    from runs before this existed.
+  */
+  const home = process.env.AICO_HOME;
+  assert(typeof home === 'string' && home.length > 0, 'the harness runs with AICO_HOME set');
+  assert(aicoHome() === path.resolve(home), `aicoHome() follows it (${aicoHome()})`);
+  assert(!aicoHome().startsWith(path.join(os.homedir(), '.aico')),
+    'and it is not the real store');
+  assert(getSessionDir('E:\\anywhere').startsWith(aicoHome()), 'session logs go there');
+  const saved = process.env.AICO_HOME;
+  delete process.env.AICO_HOME;
+  assert(aicoHome() === path.join(os.homedir(), '.aico'), 'without it, ~/.aico as always');
+  process.env.AICO_HOME = saved;
+}
+
+console.log('  -- Usage reported on every chunk is counted once --');
+{
+  /*
+    Reported as "pricing going very fast and up" on an OpenAI-compatible
+    endpoint. vLLM with continuous usage stats, and several gateways, put a
+    running `usage` total on every streamed chunk. The provider emitted one
+    usage event per chunk and the agent summed them — so a prompt streamed in
+    N chunks was billed N times over, and the meter climbed with every word.
+
+    A stub endpoint that does exactly that, driven through the real provider.
+  */
+  const http = await import('http');
+  const chunks = [];
+  const words = ['The ', 'answer ', 'is ', 'forty-', 'two.'];
+  words.forEach((w, i) => chunks.push({
+    choices: [{ index: 0, delta: { content: w } }],
+    usage: { prompt_tokens: 1000, completion_tokens: i + 1 },
+  }));
+  chunks.push({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1000, completion_tokens: 5 } });
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', c => { raw += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      for (const c of chunks) res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'stub', ...c })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  try {
+    const provider = providerFromInstance(
+      { id: 'stub', name: 'stub', type: 'openai-compatible', apiKey: 'k', baseUrl: `http://127.0.0.1:${server.address().port}/v1` },
+      'stub-model',
+      { providerInstances: [] },
+    );
+    const events = [];
+    for await (const ev of provider.chat({ model: 'stub-model', systemPrompt: 's', messages: [{ role: 'user', content: 'q' }], tools: [] })) {
+      events.push(ev);
+    }
+    const usage = events.filter(e => e.type === 'usage');
+    const text = events.filter(e => e.type === 'text').map(e => e.content).join('');
+    assert(text === 'The answer is forty-two.', `the text still arrives whole (${JSON.stringify(text)})`);
+    assert(usage.length === 1, `six chunks carrying usage produce ONE usage event (${usage.length})`);
+    assert(usage[0]?.inputTokens === 1000 && usage[0]?.outputTokens === 5,
+      `and it is the request's total, not a sum of running totals (${usage[0]?.inputTokens} in, ${usage[0]?.outputTokens} out)`);
+    assert(events.some(e => e.type === 'finish'), 'the finish is reported as before');
+    // What the tracker would have seen, either way.
+    const tracker = createTokenTracker();
+    for (const u of usage) tracker.add(u.inputTokens, u.outputTokens);
+    assert(tracker.getUsage().inputTokens === 1000, `the cost is computed from 1,000 prompt tokens, not 6,000 (${tracker.getUsage().inputTokens})`);
+  } finally {
+    server.close();
+  }
+}
+
+console.log('  -- A prompt the model accepted is proof of its window --');
+{
+  /*
+    The reported case: `poolside/laguna-s-2.1` on an OpenAI-compatible
+    provider, assumed at 128K, prompts of 130K going through, compaction
+    firing every turn. Nothing learned from the successes.
+  */
+  resetContextWindowCache();
+  const model = 'probe-floor-model';
+  assert(resolveWindow(model, {}).source === 'assumed', 'an unknown model starts assumed');
+  assert(noteWindowFromUsage(model, 100_000, {}) === undefined, 'a prompt inside the window teaches nothing');
+  const grown = noteWindowFromUsage(model, 131_072, {});
+  assert(grown?.source === 'observed' && grown.tokens === 200_000,
+    `a prompt past it raises the window to the next size models are sold with (${grown?.tokens} · ${grown?.source})`);
+  assert(resolveWindow(model, {}).tokens === 200_000, 'and the meter sees it immediately, before anything is written');
+  assert(noteWindowFromUsage(model, 150_000, {}) === undefined, 'a smaller prompt later does not shrink it');
+  const again = noteWindowFromUsage(model, 900_000, {});
+  assert(again?.tokens === 1_000_000 && again.source === 'observed', 'a larger one raises it again');
+  await new Promise(r => setTimeout(r, 150));
+  resetContextWindowCache();
+  const stored = JSON.parse(fs.readFileSync(path.join(process.env.AICO_HOME, 'settings.json'), 'utf8')).contextWindows?.[model];
+  assert(stored && stored.tokens === 1_000_000 && stored.source === 'observed',
+    `it is persisted with its provenance (${JSON.stringify(stored)})`);
+  await clearContextWindow(model);
+
+  // Stronger evidence is never overruled by a single accepted prompt.
+  await setContextWindow('probe-user-model', 64_000, { source: 'user', silent: true });
+  assert(noteWindowFromUsage('probe-user-model', 100_000, {}) === undefined, 'a user figure stands');
+  await setContextWindow('probe-api-model', 64_000, { source: 'api', silent: true });
+  assert(noteWindowFromUsage('probe-api-model', 100_000, {}) === undefined, 'so does one the provider reported');
+  resetContextWindowCache();
+
+  assert(standardWindowAtLeast(131_072) === 200_000 && standardWindowAtLeast(1_500_000) === 2_000_000
+    && standardWindowAtLeast(11_000_000) === 11_000_000, 'rounding goes to a real window size, or up to the next million past the table');
+}
+
+console.log('  -- The model can read its window, and correct it only at the user\'s word --');
+{
+  resetContextWindowCache();
+  const model = 'probe-tool-model';
+  const run = (fn) => runInContext({ cwd: process.cwd(), model, settings: {} }, fn);
+  const shown = await run(() => executeContextWindow({ action: 'get' }));
+  assert(shown.includes(model) && shown.includes('128,000') && shown.includes('assumed'),
+    'get names the model, the figure and that it is assumed');
+  assert(shown.includes('75%'), 'and says when compaction runs');
+
+  const hallucinated = await run(() => executeContextWindow({ action: 'set', tokens: 4_000, reason: 'I think so' })).catch(e => e.message);
+  assert(/not a credible window/.test(hallucinated), `the 4,000-token belief from the reported chat is refused (${hallucinated.slice(0, 60)})`);
+  const unsourced = await run(() => executeContextWindow({ action: 'set', tokens: 1_000_000 })).catch(e => e.message);
+  assert(/reason/.test(unsourced), 'a figure with no stated source is refused');
+
+  const recorded = await run(() => executeContextWindow({ action: 'set', tokens: 1_000_000, reason: 'the user said so' }));
+  assert(/Recorded .* 1,000,000/.test(recorded), 'a sourced figure is recorded');
+  const fact = resolveWindow(model, {});
+  assert(fact.tokens === 1_000_000 && fact.source === 'user', `held as the user's own (${fact.source})`);
+
+  // Evidence beats assertion: below what has been seen to work is refused.
+  noteWindowFromUsage('probe-seen-model', 300_000, {});
+  const tooSmall = await runInContext({ cwd: process.cwd(), model: 'probe-seen-model', settings: {} },
+    () => executeContextWindow({ action: 'set', tokens: 128_000, reason: 'docs' })).catch(e => e.message);
+  assert(/smaller than what is already known to work/.test(tooSmall), 'a figure below an observed prompt is refused');
+
+  const forgot = await run(() => executeContextWindow({ action: 'forget' }));
+  assert(/assumed/.test(forgot) && resolveWindow(model, {}).source === 'assumed', 'forget returns it to detection');
+
+  const noModel = await runInContext({ cwd: process.cwd() }, () => executeContextWindow({ action: 'get' })).catch(e => e.message);
+  assert(/not bound to a model/.test(noModel), 'without a model there is nothing to read, and it says so');
+
+  assert(toolDefinitions.some(t => t.name === 'ContextWindow'), 'the tool is registered');
+  await clearContextWindow('probe-seen-model');
+  await clearContextWindow(model);
+  resetContextWindowCache();
 }
 
 console.log('\n' + '═'.repeat(50));

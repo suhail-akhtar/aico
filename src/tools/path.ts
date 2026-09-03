@@ -26,7 +26,7 @@
 
 import path from 'path';
 import { currentCwd } from '../run-context.js';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getBuiltinDir } from '../skills/loader.js';
 import { getWorkspaceRuntime } from '../workspace.js';
@@ -57,7 +57,7 @@ export function writableRoots(cwd = currentCwd()): string[] {
   // the tools that show their work are allowed to do what the shell could do
   // regardless. Built-in skills stay out — those ship with AICO and are
   // readable only, which is the asymmetry actually worth keeping.
-  roots.push(path.join(os.homedir(), '.aico', 'skills'));
+  roots.push(path.join(aicoHome(), 'skills'));
 
   try {
     const runtime = getWorkspaceRuntime();

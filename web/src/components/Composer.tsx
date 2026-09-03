@@ -725,7 +725,8 @@ function WindowPopover({ total, source, onClose }: {
           : source === 'user' ? 'set by you'
             : source === 'api' ? 'reported by the provider'
               : source === 'learned' ? 'learned from a refusal'
-                : 'from the built-in table'}
+                : source === 'observed' ? 'inferred — it accepted more than was assumed'
+                  : 'from the built-in table'}
       </p>
       <div className="mt-2 flex items-center gap-1.5">
         <input

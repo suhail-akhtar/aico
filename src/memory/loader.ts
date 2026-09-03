@@ -2,6 +2,7 @@ import { readFile as fsReadFile, appendFile, mkdir, readdir } from 'fs/promises'
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { aicoHome } from '../home.js';
 import type { MemoryType, MemoryEntry, MemoryReadOptions, MemoryReadResult } from './types.js';
 import { getCached, setCached, getCacheStats } from './cache.js';
 import { watchMemoryFile } from './watcher.js';
@@ -121,7 +122,7 @@ export async function loadMemory(opts: MemoryReadOptions = {}): Promise<MemoryRe
 
   // 1. User global instructions
   if (allowedTypes.has('user')) {
-    const homeAicoMd = path.join(os.homedir(), '.aico', 'AICO.md');
+    const homeAicoMd = path.join(aicoHome(), 'AICO.md');
     const homeLegacyMd = path.join(os.homedir(), '.claude', 'CLAUDE.md');
     const userEntry =
       await loadEntry('user', homeAicoMd, opts, watchFiles) ??
@@ -170,7 +171,7 @@ export async function readMemory(opts?: MemoryReadOptions): Promise<string> {
 export async function appendToMemory(content: string, type: 'user' | 'project'): Promise<void> {
   let filePath: string;
   if (type === 'user') {
-    const dir = path.join(os.homedir(), '.aico');
+    const dir = aicoHome();
     await mkdir(dir, { recursive: true });
     filePath = path.join(dir, 'AICO.md');
   } else {

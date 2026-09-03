@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import type { Skill } from './types.js';
 import { loadAllSkills, parseSkillFile } from './loader.js';
 import { safeName } from './import.js';
@@ -52,7 +52,7 @@ export class SkillRegistry {
     // `skills.dirs` as well is the obvious thing to do and used to scan it
     // twice, so the list is deduped by resolved path first — case-insensitively
     // where the filesystem is.
-    const userSkillsDir = path.join(os.homedir(), '.aico', 'skills');
+    const userSkillsDir = path.join(aicoHome(), 'skills');
     const seen = new Set<string>();
     const dirs: string[] = [];
     for (const dir of [userSkillsDir, ...(opts.extraDirs ?? [])]) {
@@ -129,7 +129,7 @@ export class SkillRegistry {
     const skill = parseSkillFile(content, url, false);
     if (!skill) throw new Error('Invalid skill file — missing or invalid frontmatter');
 
-    const dir = path.join(os.homedir(), '.aico', 'skills');
+    const dir = path.join(aicoHome(), 'skills');
     await mkdir(dir, { recursive: true });
     // The name comes out of a file fetched from a URL, so it is exactly as
     // trustworthy as the URL. Sanitised for the same reason addSkill's is.
@@ -175,7 +175,7 @@ export class SkillRegistry {
 
     const safe = safeSkillFile(skill.frontmatter.name);
     const root = scope === 'user'
-      ? path.join(os.homedir(), '.aico', 'skills')
+      ? path.join(aicoHome(), 'skills')
       : path.join(process.cwd(), '.aico', 'skills');
 
     let filePath: string;

@@ -24,7 +24,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from './home.js';
 
 /** The registries that can have entries switched off. */
 export type RegistryKind = 'skills' | 'mcp' | 'agents' | 'memories';
@@ -42,7 +42,7 @@ interface RegistryState {
 }
 
 export function registryStatePath(): string {
-  return path.join(os.homedir(), '.aico', 'registry-state.json');
+  return path.join(aicoHome(), 'registry-state.json');
 }
 
 function read(): RegistryState {

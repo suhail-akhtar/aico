@@ -31,6 +31,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { aicoHome } from '../home.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { parseSkillFile } from './loader.js';
@@ -63,7 +64,7 @@ export interface ImportResult {
 
 /** Where user skills live. */
 export function userSkillsDir(): string {
-  return path.join(os.homedir(), '.aico', 'skills');
+  return path.join(aicoHome(), 'skills');
 }
 
 /**

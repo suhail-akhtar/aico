@@ -1,6 +1,6 @@
 import path from 'path';
 import { mkdir, readFile, readdir, stat, writeFile } from 'fs/promises';
-import os from 'os';
+import { aicoHome } from './home.js';
 import crypto from 'crypto';
 import type { AicoSettings } from './settings.js';
 import { saveProjectWorkspacePath } from './settings.js';
@@ -60,7 +60,7 @@ function defaultProjectWorkspaceRoot(cwd: string): string {
   const resolved = path.resolve(cwd);
   const projectName = cleanSegment(path.basename(resolved) || 'project');
   const hash = crypto.createHash('sha1').update(resolved.toLowerCase()).digest('hex').slice(0, 10);
-  return path.join(os.homedir(), '.aico', 'workspace', 'projects', `${projectName}-${hash}`);
+  return path.join(aicoHome(), 'workspace', 'projects', `${projectName}-${hash}`);
 }
 
 export function resolveWorkspaceRoot(settings?: AicoSettings, cwd = process.cwd()): string {

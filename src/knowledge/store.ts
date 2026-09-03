@@ -18,10 +18,11 @@
 
 import { readFile, readdir, writeFile, mkdir, rm } from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import type { KnowledgeEntry } from './types.js';
 
-const GLOBAL_DIR = path.join(os.homedir(), '.aico', 'knowledge');
+/** Read at call time so `AICO_HOME` can be decided after this module loads. */
+const globalDir = (): string => path.join(aicoHome(), 'knowledge');
 const PROJECT_SUBDIR = path.join('.aico', 'knowledge');
 
 /** Guard against a single runaway file crowding out everything else. */
@@ -96,7 +97,7 @@ async function readDirectory(dir: string): Promise<KnowledgeEntry[]> {
  * — the more specific statement about a place should beat the general one.
  */
 export async function loadKnowledge(projectRoot?: string): Promise<KnowledgeEntry[]> {
-  const global = await readDirectory(GLOBAL_DIR);
+  const global = await readDirectory(globalDir());
   const local = projectRoot ? await readDirectory(projectDir(projectRoot)) : [];
   const byId = new Map<string, KnowledgeEntry>();
   for (const entry of [...global, ...local]) byId.set(entry.id, entry);
@@ -111,7 +112,7 @@ export async function saveKnowledge(input: {
   projectRoot?: string;
 }): Promise<string> {
   const safeId = input.id.replace(/[^\w-]/g, '-').slice(0, 60) || 'entry';
-  const dir = input.projectRoot ? projectDir(input.projectRoot) : GLOBAL_DIR;
+  const dir = input.projectRoot ? projectDir(input.projectRoot) : globalDir();
   await mkdir(dir, { recursive: true });
   const filePath = path.join(dir, `${safeId}.md`);
   const body = [
@@ -129,7 +130,7 @@ export async function saveKnowledge(input: {
 
 /** Remove an entry by id. Returns whether one was there to remove. */
 export async function deleteKnowledge(id: string, projectRoot?: string): Promise<boolean> {
-  for (const dir of [projectRoot ? projectDir(projectRoot) : undefined, GLOBAL_DIR]) {
+  for (const dir of [projectRoot ? projectDir(projectRoot) : undefined, globalDir()]) {
     if (!dir) continue;
     try {
       await rm(path.join(dir, `${id.replace(/[^\w-]/g, '-')}.md`));

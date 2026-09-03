@@ -87,6 +87,7 @@ import {
   vsCodeTasks, vsCodeTasksDefinition,
   vsCodeWorkspace, vsCodeWorkspaceDefinition,
 } from './vscode.js';
+import { contextWindowToolDefinition, executeContextWindow } from './context-window.js';
 import {
   agentCreateToolDefinition,
   agentListToolDefinition,
@@ -251,6 +252,7 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...vsCodeTasksDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   { ...vsCodeWorkspaceDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
+  { ...contextWindowToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 5_000 },
   { ...agentCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...agentListToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
   { ...agentReadToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
@@ -670,6 +672,9 @@ export async function executeTool(
       break;
     case 'WorkspaceList':
       result = await executeWorkspaceList(args as { path?: string; scope?: 'session' | 'common' });
+      break;
+    case 'ContextWindow':
+      result = await executeContextWindow(args as unknown as Parameters<typeof executeContextWindow>[0]);
       break;
     case 'CapabilityReport':
       {

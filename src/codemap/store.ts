@@ -17,7 +17,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { stat } from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import { createHash } from 'crypto';
 import type { CodeMap } from './types.js';
 
@@ -32,7 +32,7 @@ function mapPath(root: string): string {
   // separators, drive letters and spaces, and a readable filename is worth
   // less here than one that cannot collide or escape its directory.
   const digest = createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 16);
-  return path.join(os.homedir(), '.aico', 'codemap', `${digest}.json`);
+  return path.join(aicoHome(), 'codemap', `${digest}.json`);
 }
 
 export async function loadCodeMap(root: string): Promise<CodeMap | undefined> {

@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import type { CronJob, CronStore } from './types.js';
 
 /**
@@ -13,13 +13,14 @@ import type { CronJob, CronStore } from './types.js';
  * running "every minute" leaves it there — firing forever, on their machine,
  * long after the test has finished.
  */
-const STORE_PATH = process.env.AICO_CRON_STORE?.trim()
-  || path.join(os.homedir(), '.aico', 'cron.json');
+function storePath(): string {
+  return process.env.AICO_CRON_STORE?.trim() || path.join(aicoHome(), 'cron.json');
+}
 
 async function readStore(): Promise<CronStore> {
-  if (!existsSync(STORE_PATH)) return { jobs: [], version: 1 };
+  if (!existsSync(storePath())) return { jobs: [], version: 1 };
   try {
-    const text = await readFile(STORE_PATH, 'utf8');
+    const text = await readFile(storePath(), 'utf8');
     return JSON.parse(text) as CronStore;
   } catch {
     return { jobs: [], version: 1 };
@@ -27,17 +28,17 @@ async function readStore(): Promise<CronStore> {
 }
 
 async function writeStore(store: CronStore): Promise<void> {
-  await mkdir(path.dirname(STORE_PATH), { recursive: true });
+  await mkdir(path.dirname(storePath()), { recursive: true });
   // Atomic write: write to temp file then rename
-  const tmpPath = STORE_PATH + '.tmp';
+  const tmpPath = storePath() + '.tmp';
   await writeFile(tmpPath, JSON.stringify(store, null, 2), 'utf8');
   // On Windows, rename over existing file requires unlinking first
   try {
     const { rename } = await import('fs/promises');
-    await rename(tmpPath, STORE_PATH);
+    await rename(tmpPath, storePath());
   } catch {
     // Fallback: direct write
-    await writeFile(STORE_PATH, JSON.stringify(store, null, 2), 'utf8');
+    await writeFile(storePath(), JSON.stringify(store, null, 2), 'utf8');
   }
 }
 

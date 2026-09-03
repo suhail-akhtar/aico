@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir, readdir, rename, stat } from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from './home.js';
 import crypto from 'crypto';
 
 export interface Message {
@@ -24,7 +24,7 @@ export function generateSessionId(): string {
 
 export function getSessionDir(cwd: string): string {
   const hash = Buffer.from(cwd).toString('base64').replace(/[/+=]/g, '_');
-  return path.join(os.homedir(), '.aico', 'projects', hash, 'sessions');
+  return path.join(aicoHome(), 'projects', hash, 'sessions');
 }
 
 function sessionFilePath(sessionId: string, cwd: string): string {

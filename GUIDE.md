@@ -355,6 +355,20 @@ Practical notes from real use:
 Ceilings live in Settings: context, spend per session, and permission mode. A
 spend ceiling is the honest way to try an expensive model.
 
+**The context meter** under the composer is the window the model is being run
+against, and it says where the figure came from — reported by the provider,
+from the built-in table, set by you, inferred from use, or assumed. Assumed is
+the one to look at: it means nothing knew this model, 128K was taken as a
+guess, and compaction is running against that guess. Click the meter and type
+the real figure (`1m`, `200k`); *Forget* hands it back to detection. If a
+prompt larger than an assumed window goes through, the figure is raised on its
+own and a line in the conversation says so.
+
+You can also just tell the model. It has a `ContextWindow` tool: it can read
+the figure and where it came from, and record one you give it. It will not
+record its own guess — models are reliably wrong about their limits — and it
+refuses anything smaller than a prompt it has already been seen to accept.
+
 ---
 
 ## When something goes wrong
@@ -370,6 +384,19 @@ retry the identical call; find out why it hung.
 **A file edit was refused.** You will be told why: either it has not been read
 this session, or it changed since it was read. Both are one `Read` away from
 fixed, and both exist to stop an edit landing in a file nobody looked at.
+
+**It compacts far too often.** Look at the context meter: if it says
+*assumed*, the window is a guess and compaction is firing against it. Set the
+real figure from the meter, or tell the model and it will record it. On an
+OpenAI-compatible endpoint that reports its models, detection now asks that
+endpoint, so this is rarer than it was — but an endpoint that reports nothing
+still needs telling once.
+
+**The cost climbs with every word on a custom endpoint.** That was a bug:
+some gateways report a running usage total on every streamed chunk, and each
+one was being added up. Fixed in 0.10 — if you still see it, the number is an
+estimate (the meter says so) because the endpoint's prices are unknown; set
+`modelPricing` in settings for the real rate.
 
 **The agent says it cannot write anything.** Plan mode is on. Answer the plan, or
 turn the toggle off.
