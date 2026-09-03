@@ -62,6 +62,7 @@
     "test:mcp:model": "npm run build && node scripts/mcp-submit-live.mjs && node scripts/mcp-permission-live.mjs",
     "test:cron": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/cron-live.mjs",
     "test:serve": "npm run build && node scripts/serve-live.mjs",
+    "test:window": "npm run build && node scripts/window-floor-live.mjs",
     "test:vscode": "npm --prefix vscode-extension run package && node scripts/vscode-panel-live.mjs",
     "test:layout": "npm run build && npm --prefix web run build && node scripts/web-layout-live.mjs",
     "sitemap": "node scripts/build-sitemap.mjs",

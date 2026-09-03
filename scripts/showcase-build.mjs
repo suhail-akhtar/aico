@@ -12,6 +12,8 @@
  * Costs money. Uses deepseek-v4-flash through OpenRouter.
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';

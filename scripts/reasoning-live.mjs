@@ -24,6 +24,8 @@
  * Needs: npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import http from 'http';
 
 import { providerFromInstance, runInContext } from '../dist-test/test-exports.js';

@@ -868,7 +868,7 @@ export interface PermissionRequest {
 export type { HostAnswer, HostCall, HostToolName };
 
 /** Where a context-window figure came from. Mirrors the server's `WindowSource`. */
-export type WindowSource = 'user' | 'api' | 'learned' | 'table' | 'assumed';
+export type WindowSource = 'user' | 'api' | 'learned' | 'observed' | 'table' | 'assumed';
 
 export interface SkillCorpus {
   skill: string;

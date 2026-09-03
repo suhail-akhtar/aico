@@ -98,7 +98,7 @@ export interface Usage {
    * identically to a figure the vendor returned is how somebody comes to trust
    * a number nothing stands behind.
    */
-  contextSource: 'user' | 'api' | 'learned' | 'table' | 'assumed' | '';
+  contextSource: 'user' | 'api' | 'learned' | 'observed' | 'table' | 'assumed' | '';
 }
 
 const NO_USAGE: Usage = {

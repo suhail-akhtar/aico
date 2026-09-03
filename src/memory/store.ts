@@ -28,7 +28,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import crypto from 'crypto';
 import { disabledIn, setEnabled as setRegistryEnabled } from '../registry-state.js';
 
@@ -49,7 +49,7 @@ export interface StoredMemory {
 }
 
 export function memoryRoot(): string {
-  return path.join(os.homedir(), '.aico', 'memories');
+  return path.join(aicoHome(), 'memories');
 }
 
 /**

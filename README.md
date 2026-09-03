@@ -508,12 +508,30 @@ costs nothing to retry from, and three rejections in a row end the run.
 
 Full reference: **[`GUIDE.md`](GUIDE.md)**.
 
+### Where things are kept
+
+Everything outside a project — settings, session logs, skills, memories, the
+work ledger — is under `~/.aico`. Set `AICO_HOME` to put it somewhere
+else: a portable install, a second profile, or a throwaway store for a test.
+Every test and live probe in this repository does exactly that, so none of
+them can reach your real one.
+
+### The context window
+
+The meter under the composer shows how full the model's window is and where
+that figure came from: the provider, the built-in table, a figure you typed,
+or an assumption. Click it to set the real number (`1m`, `128k`) or hand it
+back to detection. A prompt the model accepts that is larger than an assumed
+window raises the figure on its own, and the model has a `ContextWindow` tool
+to read it and, when you tell it the real figure, record it — so "your window
+is a million tokens, stop compacting" is an instruction it can carry out.
+
 ---
 
 ## Testing
 
 ```sh
-npm test           # 2,029 offline assertions, no API key needed
+npm test           # 2,435 offline assertions, no API key needed
 npm run test:live  # 93 live assertions per model — costs money
 npm run typecheck
 ```

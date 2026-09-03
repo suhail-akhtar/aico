@@ -21,6 +21,8 @@
  * Run: npm run build && node scripts/serve-live.mjs
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -65,7 +67,7 @@ function killPid(pid) {
  * question without needing the server to expose it.
  */
 function sessionCwd(sessionId) {
-  const base = path.join(os.homedir(), '.aico', 'projects');
+  const base = path.join(process.env.AICO_HOME, 'projects');
   if (!fs.existsSync(base)) return undefined;
   for (const dir of fs.readdirSync(base)) {
     if (fs.existsSync(path.join(base, dir, 'sessions', `${sessionId}.events.jsonl`))) {

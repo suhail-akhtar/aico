@@ -10,7 +10,7 @@
 import * as readline from 'readline';
 import chalk from 'chalk';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from './home.js';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { testProvider } from './providers/connection-test.js';
 
@@ -109,7 +109,7 @@ export function isProviderConfigured(): boolean {
 // ── Persistent settings helpers ──────────────────────────────────────
 
 async function readGlobalSettings(): Promise<Record<string, unknown>> {
-  const p = path.join(os.homedir(), '.aico', 'settings.json');
+  const p = path.join(aicoHome(), 'settings.json');
   try {
     return JSON.parse(await readFile(p, 'utf8')) as Record<string, unknown>;
   } catch {
@@ -118,7 +118,7 @@ async function readGlobalSettings(): Promise<Record<string, unknown>> {
 }
 
 async function writeGlobalSettings(data: Record<string, unknown>): Promise<void> {
-  const dir = path.join(os.homedir(), '.aico');
+  const dir = aicoHome();
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, 'settings.json'), JSON.stringify(data, null, 2));
 }

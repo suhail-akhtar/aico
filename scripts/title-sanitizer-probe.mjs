@@ -8,6 +8,8 @@
  * containing raw control characters.
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import {
   normalizeSessionTitle, fallbackSessionTitle, parseModelTitle, truncateTitleUtf8,
   currentTitle, acceptsAutomaticTitle, buildTitleRequest,

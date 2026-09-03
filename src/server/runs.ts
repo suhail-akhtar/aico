@@ -555,6 +555,9 @@ export class RunManager {
     };
 
     try {
+      // What the meter was drawn against when the turn began, so a window
+      // that grows from use is announced once, not on every token event.
+      let windowAtStart = getContextWindow(model, settings);
       const result = await runAgent({
         task,
         // References go to the log; the bytes are fetched per request by the
@@ -682,25 +685,43 @@ export class RunManager {
           if (name === 'Bash') setBashProgressSink(undefined);
           emit('tool-done', { name, result, callId });
         },
-        onTokens: (input, output, cached, cacheWrite) => emit('tokens', {
-          input, output, cached, cacheWrite,
-          costUsd: run.tokenTracker.estimateCost(model, settings),
-          // Sent so the reader is not shown an invented number as a fact. The
-          // engine has always known this; only the CLI ever said it.
-          costEstimated: run.tokenTracker.isEstimated(model, settings, activeProviderType(settings)),
-          // The other, independent way a figure can be soft: the provider
-          // reported no usage and these counts were derived from text length.
-          usageEstimated: run.tokenTracker.hasEstimatedUsage(),
-          // How much room this model actually has, so the client can show
-          // occupancy rather than a bare token count. A number of tokens means
-          // nothing on its own — 180k is comfortable in a 1M window and nearly
-          // fatal in a 200k one, and the reader cannot tell which without this.
-          contextWindow: getContextWindow(model, settings),
-          // Whether that number is measured or guessed. Sent because a bar
-          // drawn against an assumption should not look identical to one drawn
-          // against the vendor's own figure.
-          contextSource: resolveWindow(model, settings).source,
-        }),
+        onTokens: (input, output, cached, cacheWrite) => {
+          /*
+            The window can grow mid-turn: a prompt larger than the assumed
+            window just went through, and the engine took the hint. Said once,
+            in words, because a meter that silently changes its denominator
+            looks like a bug to the person watching it.
+          */
+          const fact = resolveWindow(model, settings);
+          if (fact.source === 'observed' && fact.tokens > windowAtStart) {
+            emit('notice', {
+              text: `${model} accepted a prompt of ${input.toLocaleString()} tokens, more than the `
+                + `${windowAtStart.toLocaleString()} it was assumed to hold. Its window is now taken as `
+                + `${fact.tokens.toLocaleString()} tokens and compaction follows that. If you know the `
+                + 'real figure, set it from the context meter.',
+            });
+            windowAtStart = fact.tokens;
+          }
+          emit('tokens', {
+            input, output, cached, cacheWrite,
+            costUsd: run.tokenTracker.estimateCost(model, settings),
+            // Sent so the reader is not shown an invented number as a fact. The
+            // engine has always known this; only the CLI ever said it.
+            costEstimated: run.tokenTracker.isEstimated(model, settings, activeProviderType(settings)),
+            // The other, independent way a figure can be soft: the provider
+            // reported no usage and these counts were derived from text length.
+            usageEstimated: run.tokenTracker.hasEstimatedUsage(),
+            // How much room this model actually has, so the client can show
+            // occupancy rather than a bare token count. A number of tokens means
+            // nothing on its own — 180k is comfortable in a 1M window and nearly
+            // fatal in a 200k one, and the reader cannot tell which without this.
+            contextWindow: fact.tokens,
+            // Whether that number is measured or guessed. Sent because a bar
+            // drawn against an assumption should not look identical to one drawn
+            // against the vendor's own figure.
+            contextSource: fact.source,
+          });
+        },
       });
 
       run.conversationHistory.push({ role: 'user', content: task });

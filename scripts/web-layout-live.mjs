@@ -22,6 +22,8 @@
  *        (npm run build), and Chrome or Edge installed.
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './lib/test-home.mjs';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';

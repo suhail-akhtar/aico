@@ -9,6 +9,8 @@
  * Run with `npm run test:web`.
  */
 
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './scripts/lib/test-home.mjs';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -25,7 +27,7 @@ for (const line of fs.readFileSync('.env', 'utf8').split(/\r?\n/)) {
  * user's configuration pointing at a provider it invented and deleted is a
  * worse bug than anything it was checking for. (It did exactly that once.)
  */
-const SETTINGS_PATH = path.join(os.homedir(), '.aico', 'settings.json');
+const SETTINGS_PATH = path.join(process.env.AICO_HOME, 'settings.json');
 const settingsBackup = (() => {
   try { return fs.readFileSync(SETTINGS_PATH, 'utf8'); } catch { return null; }
 })();

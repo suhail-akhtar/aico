@@ -196,7 +196,9 @@ export class DeepSeekProvider implements ProviderAPI {
       }
     }
 
+    let finalUsage: ReturnType<typeof normalizeUsage> | undefined;
     for await (const chunk of stream) {
+      // Held rather than emitted — reported once, after the loop.
       if (chunk.usage) {
         // hit + miss partition prompt_tokens (measured: 5888 + 124 = 6012), so
         // this is `inclusive` and the hit count is the cache-read subset.
@@ -207,19 +209,13 @@ export class DeepSeekProvider implements ProviderAPI {
         // is the documented surface, but the platform mirrors the value into
         // the standard prompt_tokens_details.cached_tokens, and preferring
         // whichever is present survives either being dropped later.
-        const usage = normalizeUsage({
+        finalUsage = normalizeUsage({
           reportedInput: chunk.usage.prompt_tokens ?? 0,
           outputTokens: chunk.usage.completion_tokens ?? 0,
           cacheReadTokens: chunk.usage.prompt_cache_hit_tokens
             ?? chunk.usage.prompt_tokens_details?.cached_tokens,
           convention: 'inclusive',
         });
-        yield {
-          type: 'usage',
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          ...(usage.cacheReadTokens ? { cacheReadTokens: usage.cacheReadTokens } : {}),
-        };
       }
 
       const choice = chunk.choices?.[0];
@@ -260,6 +256,16 @@ export class DeepSeekProvider implements ProviderAPI {
       if (choice.finish_reason) {
         yield { type: 'finish', reason: normalizeFinishReason(choice.finish_reason) };
       }
+    }
+
+    // Once per request, whatever the endpoint did — see providers/openai.ts.
+    if (finalUsage) {
+      yield {
+        type: 'usage',
+        inputTokens: finalUsage.inputTokens,
+        outputTokens: finalUsage.outputTokens,
+        ...(finalUsage.cacheReadTokens ? { cacheReadTokens: finalUsage.cacheReadTokens } : {}),
+      };
     }
   }
 }

@@ -17,7 +17,7 @@
 
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from './home.js';
 import type { AicoSettings } from './settings.js';
 import type { ProviderInstance } from './providers/instances.js';
 import { listInstances, resolveApiKey } from './providers/instances.js';
@@ -133,7 +133,15 @@ const RESERVED_OUTPUT_TOKENS = 8_192;
  * - `assumed` — nothing knew. Flagged so it can be shown as a guess rather
  *               than printed in the same style as a measured number.
  */
-export type WindowSource = 'user' | 'api' | 'learned' | 'table' | 'assumed';
+/**
+ * Where a window figure came from, strongest first.
+ *
+ * `observed` is evidence from use: a prompt larger than the held window went
+ * through, so the window is at least that. It outranks the table and the
+ * assumption it corrects, and is itself replaced by anything the provider or
+ * the user states.
+ */
+export type WindowSource = 'user' | 'api' | 'learned' | 'observed' | 'table' | 'assumed';
 
 export interface WindowFact {
   tokens: number;
@@ -186,7 +194,7 @@ function storedFact(value: unknown): WindowFact | undefined {
     if (Number.isFinite(tokens) && tokens > 0) {
       return {
         tokens,
-        source: (['user', 'api', 'learned', 'table', 'assumed'] as const)
+        source: (['user', 'api', 'learned', 'observed', 'table', 'assumed'] as const)
           .includes(v.source as WindowSource) ? v.source as WindowSource : 'api',
         ...(typeof v.at === 'number' ? { at: v.at } : {}),
       };
@@ -320,6 +328,60 @@ export async function noteWindowFromError(
   return learned;
 }
 
+/**
+ * The windows models are actually sold with, smallest first.
+ *
+ * An accepted prompt of 131,072 tokens does not mean the window is 131,072; it
+ * means the window is one of the sizes vendors ship that is at least that
+ * big. Rounding up to the next one is still a floor — a later, larger prompt
+ * raises it again — but it stops the meter reading "100% of 131.1k" on a
+ * model that plainly holds more.
+ */
+const STANDARD_WINDOWS = [
+  32_000, 64_000, 128_000, 200_000, 256_000, 400_000, 512_000, 1_000_000, 2_000_000, 10_000_000,
+];
+
+/** The smallest standard window that holds `tokens`. */
+export function standardWindowAtLeast(tokens: number): number {
+  return STANDARD_WINDOWS.find(w => w >= tokens) ?? Math.ceil(tokens / 1_000_000) * 1_000_000;
+}
+
+/**
+ * Record what a *successful* request revealed.
+ *
+ * A model that has just accepted a prompt of N tokens holds at least N,
+ * whatever the table or the default said. This is the correction the reported
+ * case needed: the window was assumed at 128K, prompts of 130K were going
+ * through without complaint, and compaction fired on every turn against a
+ * limit the model had already disproved. Nothing was learning from the
+ * successes; only failures were listened to.
+ *
+ * Only an assumption, a table entry, or an earlier observation is corrected.
+ * A figure the user typed, one the provider reported, or one learned from a
+ * refusal is stronger evidence than a single accepted prompt and is left
+ * alone.
+ *
+ * Synchronous on purpose: the runtime cache is updated before this returns,
+ * so the usage event emitted next already carries the corrected window.
+ * Persisting to settings happens in the background and cannot fail the turn.
+ */
+export function noteWindowFromUsage(
+  model: string,
+  promptTokens: number,
+  settings?: AicoSettings,
+): WindowFact | undefined {
+  if (!Number.isFinite(promptTokens) || promptTokens <= 0) return undefined;
+  const current = resolveWindow(model, settings);
+  if (promptTokens <= current.tokens) return undefined;
+  if (current.source !== 'assumed' && current.source !== 'table' && current.source !== 'observed') {
+    return undefined;
+  }
+  const fact: WindowFact = { tokens: standardWindowAtLeast(promptTokens), source: 'observed', at: Date.now() };
+  _runtimeCache.set(model, fact);
+  void persistContextWindow(model, fact).catch(() => { /* the cache still holds it */ });
+  return fact;
+}
+
 /** The table's answer for one spelling of a model name, if it has one. */
 function matchWindow(model: string): number | undefined {
   let best: { tokens: number; len: number } | undefined;
@@ -371,8 +433,27 @@ export async function setContextWindow(
  * Persist a context-window override to ~/.aico/settings.json.
  * Merges into the contextWindows map without clobbering other entries.
  */
-async function persistContextWindow(model: string, fact: WindowFact): Promise<void> {
-  const dir = path.join(os.homedir(), '.aico');
+/**
+ * Writes to settings.json go one at a time.
+ *
+ * Each persist is a read-modify-write of the whole file. Two in flight at
+ * once — a detection landing while an accepted prompt raises the same model's
+ * window, or two sub-agents on one model — each read the same "before",
+ * and whichever wrote last erased the other. The runtime cache was right and
+ * the file was wrong, which is the worse way round: the file is what the next
+ * process starts from.
+ */
+let persistQueue: Promise<void> = Promise.resolve();
+
+function persistContextWindow(model: string, fact: WindowFact): Promise<void> {
+  const next = persistQueue.then(() => writeContextWindow(model, fact));
+  // The queue itself never rejects, so one failed write cannot wedge the rest.
+  persistQueue = next.catch(() => undefined);
+  return next;
+}
+
+async function writeContextWindow(model: string, fact: WindowFact): Promise<void> {
+  const dir = aicoHome();
   await mkdir(dir, { recursive: true });
   const filePath = path.join(dir, 'settings.json');
 

@@ -26,7 +26,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { aicoHome } from '../home.js';
 import { skillRegistry } from './registry.js';
 import { parseSkillFile, loadSkillsFromDir } from './loader.js';
 import { importSkill, exportSkill, removeSkill, userSkillsDir, safeName } from './import.js';
@@ -35,7 +35,7 @@ import type { Skill } from './types.js';
 
 /** Where drafts wait. Deliberately not a directory the loader scans. */
 export function draftsDir(): string {
-  return path.join(os.homedir(), '.aico', 'skill-drafts');
+  return path.join(aicoHome(), 'skill-drafts');
 }
 
 export interface SkillResource { path: string; content: string }

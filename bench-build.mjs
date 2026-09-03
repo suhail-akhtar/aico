@@ -23,6 +23,8 @@
  *   node bench-build.mjs                    # all three
  *   node bench-build.mjs claude-sonnet-5    # one
  */
+// A store of this process's own — nothing below may touch ~/.aico. Must stay first.
+import './scripts/lib/test-home.mjs';
 import 'dotenv/config';
 import fs from 'fs';
 import os from 'os';
@@ -104,7 +106,7 @@ const FEATURES = [
 ];
 
 const only = process.argv[2];
-const stored = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.aico', 'settings.json'), 'utf8'));
+const stored = JSON.parse(fs.readFileSync(path.join(process.env.AICO_HOME, 'settings.json'), 'utf8'));
 const outRoot = 'E:/tmp/aico-bench-build';
 fs.mkdirSync(outRoot, { recursive: true });
 
