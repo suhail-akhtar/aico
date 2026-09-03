@@ -281,6 +281,23 @@ try {
       },
     },
     {
+      name: 'window-popover',
+      // The meter's popover: a positioned box under a control near the bottom
+      // edge, which is where positioned boxes go wrong. The meter only exists
+      // once a session has usage, and this probe spends nothing on purpose —
+      // so with no meter the screen is skipped and says so, rather than
+      // failing a UI that is behaving.
+      open: async () => {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('textarea', { timeout: 30_000 });
+        const meter = await page.$('button[title*="context window"]');
+        if (!meter) return 'skipped: the meter needs usage from a turn, and this probe spends nothing';
+        await meter.click();
+        await page.waitForSelector('text=Compaction runs at 75%', { timeout: 15_000 });
+        return undefined;
+      },
+    },
+    {
       name: 'skill-bench',
       // The Skills pane with a bench open: six controls in a flex row, which
       // is exactly the shape that went wrong on the composer.
@@ -294,7 +311,19 @@ try {
   ];
 
   for (const screen of SCREENS) {
-    await screen.open();
+    /*
+      One screen failing to open must not cancel the ones after it. A thrown
+      selector timeout used to abort the whole sweep, so a broken deep link
+      hid whether the composer or the bench still laid out correctly.
+    */
+    let skipped;
+    try {
+      skipped = await screen.open();
+    } catch (err) {
+      check(false, `${screen.name} — could not open (${String(err?.message ?? err).split(/\r?\n/)[0]})`);
+      continue;
+    }
+    if (skipped) { console.log(`  – ${screen.name}: ${skipped}`); continue; }
     await sleep(3000);
 
     for (const width of WIDTHS) {

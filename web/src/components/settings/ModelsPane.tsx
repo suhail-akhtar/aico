@@ -43,6 +43,8 @@ export function ModelsPane(): React.ReactElement {
   const [editing, setEditing] = useState<string | null>(null);
   const [tests, setTests] = useState<TestMap>({});
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  /** Providers whose model list was collapsed after a pick, with what was picked. */
+  const [picked, setPicked] = useState<Record<string, string>>({});
 
   const test = async (id: string): Promise<void> => {
     setTests(t => ({ ...t, [id]: { ok: false, running: true } }));
@@ -202,16 +204,42 @@ export function ModelsPane(): React.ReactElement {
                     {...(state.latencyMs !== undefined ? { latencyMs: state.latencyMs } : {})}
                   />
                   {state.ok && state.models && state.models.length > 0 && (
-                    <div className="mt-2">
-                      <div className="mb-1 text-[11px] text-aico-muted">
-                        Pick the model this provider runs by default
+                    picked[provider.id] ? (
+                      /*
+                        Closed after a pick, and says what it did. The list
+                        used to stay open with nothing changing on screen —
+                        the pick had written the global default, which this
+                        row does not show — and read as "it did not work".
+                      */
+                      <div className="mt-2 flex items-center gap-2 text-[12px]">
+                        <span className="text-aico-success">✓</span>
+                        <span className="text-aico-secondary">Default model set to</span>
+                        <span className="font-mono text-aico-primary">{picked[provider.id]}</span>
+                        <button
+                          onClick={() => setPicked(p => { const next = { ...p }; delete next[provider.id]; return next; })}
+                          className="ml-1 text-[11px] text-aico-muted underline-offset-2 hover:text-aico-primary hover:underline"
+                        >
+                          Change
+                        </button>
                       </div>
-                      <ModelChooser
-                        models={state.models}
-                        value={(isActive ? model ?? undefined : provider.defaultModel) ?? ''}
-                        onPick={m => void activate(provider, m)}
-                      />
-                    </div>
+                    ) : (
+                      <div className="mt-2">
+                        <div className="mb-1 text-[11px] text-aico-muted">
+                          Pick the model this provider runs by default
+                        </div>
+                        <ModelChooser
+                          models={state.models}
+                          // What this control edits is the provider's default,
+                          // so that is what it highlights — not whatever the
+                          // open conversation happens to be pinned to.
+                          value={provider.defaultModel ?? ''}
+                          onPick={(m) => {
+                            setPicked(p => ({ ...p, [provider.id]: m }));
+                            void activate(provider, m);
+                          }}
+                        />
+                      </div>
+                    )
                   )}
                 </div>
               )}

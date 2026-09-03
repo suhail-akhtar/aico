@@ -310,3 +310,4 @@ export {
   evalSkill, runTask as runEvalTask, materialise, renderTask,
   applyEdits, buildProposalPrompt, defaultBudget, optimizeSkill, parseProposal,
 } from './skills/eval/index.js';
+export { windowFromCatalogue, clearContextWindow } from './context-window.js';

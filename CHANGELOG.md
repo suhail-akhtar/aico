@@ -28,6 +28,32 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   optimiser is told which tasks pass so it does not fix one by rewriting the
   sentence another depends on. Runs are cancellable between tasks.
 
+### Fixed
+
+- **A model on an "OpenAI Compatible" provider ran on an assumed 128K window,
+  and compaction fired far too often.** Reported with a screenshot: the meter at
+  100% of 128K on a model that holds a million, and a summary folding the
+  conversation every couple of turns. Detection for compatible endpoints
+  existed and was never reached — the provider type used to dispatch it knew
+  the legacy single-provider settings and nothing about configured instances,
+  so it asked OpenRouter, or a local Ollama, about a model neither had heard
+  of. Detection now asks the instance that actually routes the request, through
+  the same probe the settings screen uses to test a provider, and matches ids
+  forgivingly (`poolside/laguna-s-2.1` finds `laguna-s-2.1`).
+
+  For endpoints that report nothing — most — the meter is now a button: click
+  it, type `1m` or `128k`, and that is the window from then on, never
+  re-detected behind your back, with *Forget* to hand it back to detection.
+  The same control is in the VS Code panel. And when compaction fires on an
+  assumed window it now says so, and says where to fix it.
+
+- **Picking a model for a provider in Settings looked like it did nothing.** The
+  pick wrote the global default and nothing else, so the row — which shows the
+  provider's own default — never changed, and the list stayed open. The pick
+  now also sets the provider's default, the list closes on a confirmation line
+  with *Change* to reopen it, and it highlights the provider's default rather
+  than whatever the open conversation happened to be pinned to.
+
 ## 0.9.1 — 2026-09-03
 
 ### Fixed
