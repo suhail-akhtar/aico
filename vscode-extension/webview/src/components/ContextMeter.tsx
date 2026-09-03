@@ -18,7 +18,8 @@
  * @module components/ContextMeter
  */
 
-import React from 'react';
+import React, { useState } from 'react';
+import { api } from '@web/api';
 import { useStore } from '@web/store';
 
 /** Where the bar stops being reassuring and starts being a warning. */
@@ -36,9 +37,56 @@ const SOURCE_NOTE: Record<string, string> = {
 
 export function ContextMeter(): React.ReactElement | null {
   const usage = useStore(s => s.usage);
+  const model = useStore(s => s.model ?? s.defaultModel);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
 
   const window = usage.contextWindow;
   if (!window) return null;
+
+  /*
+    Click to set it. A wrong window is the one thing about this meter that
+    was reported, and the only remedy was a JSON file. `1m`, `128k` and plain
+    digits are all accepted, because that is how model cards write it.
+  */
+  const parse = (raw: string): number | null => {
+    const m = /^\s*([\d,._]+)\s*([km]?)\s*$/i.exec(raw);
+    if (!m) return null;
+    const n = Number(m[1]!.replace(/[,_]/g, ''));
+    if (!Number.isFinite(n)) return null;
+    const unit = m[2]!.toLowerCase();
+    return Math.round(unit === 'm' ? n * 1_000_000 : unit === 'k' ? n * 1_000 : n);
+  };
+  const commit = async (): Promise<void> => {
+    const tokens = parse(value);
+    setEditing(false);
+    if (!tokens || !model) return;
+    try {
+      const result = await api.setContextWindow(model, tokens);
+      useStore.setState(s => ({
+        usage: { ...s.usage, contextWindow: result.tokens, contextSource: result.source },
+      }));
+    } catch { /* the meter simply keeps showing what it showed */ }
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); void commit(); }
+          if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
+        }}
+        placeholder="window: 1m, 128k"
+        aria-label="Context window size"
+        className="w-[88px] rounded border border-aico-accent bg-aico-elevated px-1 text-[10px]
+                   text-aico-primary placeholder:text-aico-muted focus:outline-none"
+      />
+    );
+  }
 
   // Input plus cache reads: what the model actually had to read this turn.
   // Output is not occupancy — it left the window as it was written.
@@ -55,10 +103,12 @@ export function ContextMeter(): React.ReactElement | null {
   const label = `${compact(used)} of ${compact(window)} tokens — ${percent}% (${note})`;
 
   return (
-    <span
-      title={label}
+    <button
+      type="button"
+      onClick={() => { setValue(String(window)); setEditing(true); }}
+      title={`${label}. Click to set the real window size.`}
       aria-label={label}
-      className="flex shrink-0 items-center gap-1"
+      className="flex shrink-0 items-center gap-1 rounded px-0.5 hover:bg-aico-hover"
     >
       <span
         className={[
@@ -76,7 +126,7 @@ export function ContextMeter(): React.ReactElement | null {
       <span className="text-[10px] tabular-nums text-aico-muted">
         {percent}%{assumed ? '?' : ''}
       </span>
-    </span>
+    </button>
   );
 }
 

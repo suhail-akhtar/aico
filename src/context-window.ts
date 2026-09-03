@@ -19,6 +19,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import type { AicoSettings } from './settings.js';
+import type { ProviderInstance } from './providers/instances.js';
 import { listInstances, resolveApiKey } from './providers/instances.js';
 
 // ── Built-in context windows (corrected July 2026) ──────────────────
@@ -409,6 +410,15 @@ export async function detectContextWindow(
   model: string,
   provider: string,
   settings?: AicoSettings,
+  /**
+   * The instance that serves this model, when the caller resolved one.
+   *
+   * Without it the detectors fall back to "the first instance of this type",
+   * which is a guess about which server to ask. With two compatible endpoints
+   * configured that guess asks the wrong one, learns nothing, and the model
+   * runs on an assumed 128K for ever.
+   */
+  instance?: ProviderInstance,
 ): Promise<number | undefined> {
   try {
     let detected: number | undefined;
@@ -436,13 +446,19 @@ export async function detectContextWindow(
       // such servers — vLLM, LM Studio, llama.cpp, most gateways — do report a
       // length, just under one of several names.
       case 'openai-compatible': {
-        const instance = listInstances(settings ?? {}).find(i => i.type === 'openai-compatible');
-        if (!instance?.baseUrl) return undefined;
-        detected = await detectViaOpenAICompatible(
-          model,
-          `${instance.baseUrl.replace(/\/+$/, '')}/models`,
-          resolveApiKey(instance),
-        );
+        const target = instance
+          ?? listInstances(settings ?? {}).find(i => i.type === 'openai-compatible');
+        if (!target?.baseUrl) return undefined;
+        /*
+          Through the same probe the settings screen uses to test a provider.
+          It already knows every shape a compatible endpoint takes — `/models`
+          and `/v1/models`, six names for the context length, bounds on what is
+          believable — and a second, thinner copy of that knowledge here was
+          the one that failed the reported case.
+        */
+        const { testProvider } = await import('./providers/connection-test.js');
+        const probe = await testProvider(target.type, resolveApiKey(target), target.baseUrl);
+        detected = windowFromCatalogue(model, probe.contextWindows);
         break;
       }
       /*
@@ -488,13 +504,38 @@ export async function detectContextWindow(
 
 // ── Provider-specific detection ─────────────────────────────────────
 
+/**
+ * The window a catalogue reports for this model, matched forgivingly.
+ *
+ * Ids drift between what a gateway lists and what a person types: a vendor
+ * prefix present on one side (`poolside/laguna-s-2.1` against `laguna-s-2.1`),
+ * or a difference of case. Exact wins; otherwise case-insensitive; otherwise
+ * the bare name after the last slash. A miss on the exact spelling used to be
+ * the end of it.
+ */
+export function windowFromCatalogue(
+  model: string,
+  catalogue: Record<string, number> | undefined,
+): number | undefined {
+  if (!catalogue) return undefined;
+  if (catalogue[model] !== undefined) return catalogue[model];
+  const bare = (id: string): string => id.slice(id.lastIndexOf('/') + 1).toLowerCase();
+  const wanted = bare(model);
+  const hit = Object.keys(catalogue).find(id => id.toLowerCase() === model.toLowerCase())
+    ?? Object.keys(catalogue).find(id => bare(id) === wanted);
+  return hit ? catalogue[hit] : undefined;
+}
+
 /** OpenRouter: GET /api/v1/models returns context_length per model */
 async function detectViaOpenRouter(model: string): Promise<number | undefined> {
   const res = await fetch('https://openrouter.ai/api/v1/models');
   if (!res.ok) return undefined;
   const data = await res.json() as { data?: Array<{ id: string; context_length?: number }> };
-  const found = data.data?.find(m => m.id === model);
-  return found?.context_length;
+  const catalogue: Record<string, number> = {};
+  for (const m of data.data ?? []) {
+    if (typeof m.context_length === 'number') catalogue[m.id] = m.context_length;
+  }
+  return windowFromCatalogue(model, catalogue);
 }
 
 /** Ollama: POST /api/show returns model_info.context_length */
@@ -625,6 +666,7 @@ export async function ensureContextWindow(
   model: string,
   provider: string,
   settings?: AicoSettings,
+  instance?: ProviderInstance,
 ): Promise<number> {
   /*
     Ask again when what we hold is not good enough, rather than never.
@@ -638,7 +680,7 @@ export async function ensureContextWindow(
   const known = resolveWindow(model, settings);
   if (!isStale(known)) return known.tokens;
 
-  const detected = await detectContextWindow(model, provider, settings);
+  const detected = await detectContextWindow(model, provider, settings, instance);
   if (detected && detected > 0) return detected;
 
   /*
@@ -656,6 +698,23 @@ export async function ensureContextWindow(
 /**
  * Clear the runtime cache (useful for testing).
  */
+/**
+ * Forget what is held for one model, so detection gets another chance.
+ *
+ * The complement of `setContextWindow`. A user who typed a figure and later
+ * learns the endpoint reports one needs a way to say "ask again", and the
+ * only alternative was editing settings.json by hand.
+ */
+export async function clearContextWindow(model: string): Promise<void> {
+  _runtimeCache.delete(model);
+  const { loadSettings, saveUserSetting } = await import('./settings.js');
+  const settings = await loadSettings();
+  const map = { ...(settings.contextWindows ?? {}) };
+  if (!(model in map)) return;
+  delete map[model];
+  await saveUserSetting('contextWindows', map);
+}
+
 export function resetContextWindowCache(): void {
   _runtimeCache.clear();
 }

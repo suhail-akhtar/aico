@@ -763,6 +763,23 @@ try {
   check(/no skill/.test(refusedSkill), `an unknown skill is refused by name (${JSON.stringify(refusedSkill)})`);
 
   /*
+    ── the context window, set from the meter ───────────────────────────
+
+    A made-up model name, so nothing the reader configured is touched, and
+    cleared at the end so the settings file is left as it was found.
+  */
+  const windowBefore = await api.contextWindow('probe-window-model').catch(err => ({ error: err.message }));
+  check(windowBefore.source === 'assumed', `an unknown model's window is reported as assumed (${windowBefore.source ?? windowBefore.error})`);
+  const set = await api.setContextWindow('probe-window-model', 1_000_000).catch(err => ({ error: err.message }));
+  check(set.tokens === 1_000_000 && set.source === 'user', `a typed figure is stored as the user's (${set.source ?? set.error})`);
+  const windowAfter = await api.contextWindow('probe-window-model');
+  check(windowAfter.tokens === 1_000_000 && windowAfter.source === 'user', 'and read back the same way');
+  const tooSmall = await api.setContextWindow('probe-window-model', 100).then(() => 'accepted').catch(err => `refused ${err.status}`);
+  check(/refused 400/.test(tooSmall), `a figure no model could have is refused (${tooSmall})`);
+  const cleared = await api.setContextWindow('probe-window-model', null);
+  check(cleared.cleared === true && cleared.source === 'assumed', 'forgetting it returns the model to detection');
+
+  /*
     A client that declares nothing is offered nothing — and this is the half
     that protects every other surface. The browser workspace and the CLI submit
     without `hostTools`, and a model offered `VSCodeDiagnostics` there would

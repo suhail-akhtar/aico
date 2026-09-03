@@ -35,6 +35,7 @@ import {
   getCompactionThreshold,
   resetContextWindowCache,
   resolveWindow, isStale, learnWindowFromError,
+  windowFromCatalogue, clearContextWindow, setContextWindow, detectContextWindow,
   resolveToolSet, HOST_TOOLS, hostToolsFrom, isHostTool,
   grade, runCheck, hashFiles, corpusFor, BUILTIN_CORPUS, splitOf, assignSplits, cacheKey,
   describeCorpus, startEval, startOptimize, getJob, cancelJob, adoptCandidate,
@@ -11548,6 +11549,78 @@ console.log('  -- The budget is a hard stop --');
   });
   assert(report.overBudget === true && report.tasks.length === 0,
     'a zero budget runs nothing and says so, rather than running one task and then stopping');
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 47. THE WINDOW OF A MODEL ON A COMPATIBLE ENDPOINT
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ 47. THE WINDOW OF A MODEL ON A COMPATIBLE ENDPOINT ══');
+
+console.log('  -- A catalogue is matched forgivingly --');
+{
+  const catalogue = { 'laguna-s-2.1': 1_000_000, 'GPT-Something': 128_000 };
+  assert(windowFromCatalogue('laguna-s-2.1', catalogue) === 1_000_000, 'an exact id is found');
+  assert(windowFromCatalogue('poolside/laguna-s-2.1', catalogue) === 1_000_000,
+    'a vendor prefix on the asking side does not hide the match');
+  assert(windowFromCatalogue('gpt-something', catalogue) === 128_000, 'case does not matter');
+  assert(windowFromCatalogue('other', catalogue) === undefined, 'and a miss is a miss');
+  assert(windowFromCatalogue('x', undefined) === undefined, 'no catalogue, no answer, no crash');
+}
+
+console.log('  -- The reported case: an OpenAI-compatible instance that reports its window --');
+{
+  /*
+    Reported with a screenshot: `poolside/laguna-s-2.1` on an "OpenAI
+    Compatible" provider, meter at 100% of an assumed 128K, compaction firing
+    on a model that holds a million. Detection existed and was never reached:
+    the provider type used to dispatch it did not know about instances.
+
+    This drives `detectContextWindow` the way the agent now does — with the
+    instance that serves the model — against a stubbed endpoint that lists
+    the model under its bare name with `max_model_len`, which is the shape
+    vLLM and most self-hosted gateways use.
+  */
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (url, init) => {
+    asked.push(String(url));
+    if (/\/models$/.test(String(url))) {
+      return new Response(JSON.stringify({
+        data: [{ id: 'laguna-s-2.1', object: 'model', max_model_len: 1_000_000 }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('not found', { status: 404 });
+  };
+  try {
+    const instance = { id: 'poolside', type: 'openai-compatible', name: 'Poolside', baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'k' };
+    const settings = { providerInstances: [instance], activeProvider: 'poolside' };
+    const detected = await detectContextWindow('poolside/laguna-s-2.1', 'openai-compatible', settings, instance);
+    assert(detected === 1_000_000,
+      `the endpoint's own figure is found through the instance that serves the model (${detected})`);
+    assert(asked.some(u => u.startsWith('http://127.0.0.1:1/v1')),
+      'and it was the configured base URL that was asked, not a guess');
+    const fact = resolveWindow('poolside/laguna-s-2.1', {});
+    assert(fact.tokens === 1_000_000 && fact.source === 'api',
+      `the figure is held with its provenance (${fact.tokens} · ${fact.source})`);
+  } finally {
+    globalThis.fetch = realFetch;
+    // Leave the settings file as it was found.
+    await clearContextWindow('poolside/laguna-s-2.1');
+    resetContextWindowCache();
+  }
+  assert(resolveWindow('poolside/laguna-s-2.1', {}).source === 'assumed',
+    'and forgetting it returns the model to an assumed window, ready to detect again');
+}
+
+console.log('  -- A figure a person typed outranks everything and can be taken back --');
+{
+  await setContextWindow('probe-window-model', 2_000_000, { source: 'user', silent: true });
+  const fact = resolveWindow('probe-window-model', {});
+  assert(fact.tokens === 2_000_000 && fact.source === 'user', 'a user figure is what the meter shows');
+  assert(isStale(fact) === false, 'and is never re-detected behind their back');
+  await clearContextWindow('probe-window-model');
+  assert(resolveWindow('probe-window-model', {}).source === 'assumed', 'until it is cleared');
 }
 
 console.log('\n' + '═'.repeat(50));

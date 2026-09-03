@@ -698,8 +698,58 @@ ${content || 'Describe the procedure here.'}
       const model = typeof body.model === 'string' ? body.model : undefined;
       if (!id) return { status: 400, body: { error: 'id required' } };
       await saveUserSetting('activeProvider', id);
-      if (model) await saveUserSetting('model', model);
+      if (model) {
+        await saveUserSetting('model', model);
+        /*
+          The instance's own default too. Picking a model for a provider in
+          Settings wrote the global default and nothing else, so the row's
+          summary — which shows `provider.defaultModel` — never changed and the
+          pick looked like it had not taken. It had; it was just written to
+          the one place the row does not read.
+        */
+        const settings = await loadSettings();
+        const target = listInstances(settings).find(i => i.id === id);
+        if (target) {
+          const stored = settings.providerInstances ?? [];
+          const { derived: _derived, ...materialised } = { ...target, defaultModel: model };
+          const next = stored.some(i => i.id === id)
+            ? stored.map(i => (i.id === id ? { ...i, defaultModel: model } : i))
+            : [...stored, materialised];
+          await saveUserSetting('providerInstances', next);
+        }
+      }
       return { status: 200, body: { active: id, model: model ?? null } };
+    }
+
+    // ── the context window, by model ──────────────────────────────────
+    //
+    // Read for the meter's popover; written when a person knows better than
+    // the table or the endpoint. A `user` figure is never re-detected — that
+    // is what makes it worth typing.
+    case 'context-window': {
+      const { resolveWindow, setContextWindow, clearContextWindow } = await import('../context-window.js');
+      if (method === 'GET') {
+        const model = String(query.get('model') ?? '');
+        if (!model) return { status: 400, body: { error: 'model required' } };
+        const fact = resolveWindow(model, await loadSettings());
+        return { status: 200, body: { model, tokens: fact.tokens, source: fact.source } };
+      }
+      if (method !== 'POST') return { status: 405, body: { error: 'GET or POST' } };
+      const model = String(body.model ?? '');
+      if (!model) return { status: 400, body: { error: 'model required' } };
+      if (body.tokens === null) {
+        await clearContextWindow(model);
+        const fact = resolveWindow(model, await loadSettings());
+        return { status: 200, body: { model, tokens: fact.tokens, source: fact.source, cleared: true } };
+      }
+      const tokens = Number(body.tokens);
+      // The same bounds every detector applies. A typo of 1,000,000,000 is
+      // not a window, and neither is 100.
+      if (!Number.isInteger(tokens) || tokens < 1_000 || tokens > 20_000_000) {
+        return { status: 400, body: { error: 'tokens must be a whole number between 1,000 and 20,000,000' } };
+      }
+      await setContextWindow(model, tokens, { source: 'user' });
+      return { status: 200, body: { model, tokens, source: 'user' } };
     }
 
     case 'provider-test':

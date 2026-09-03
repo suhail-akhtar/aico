@@ -1168,10 +1168,22 @@ export class RunManager {
     if (!result.compacted) return;
     const keep = Math.max(1, settings.autoCompact?.keepRecentTurns ?? 3) * 2;
     run.conversationHistory = run.conversationHistory.slice(-keep);
+    /*
+      Say when the threshold came from a guess. Compaction on a model whose
+      window nothing knows fires at 75% of an assumed 128K — on a model that
+      holds a million that is eight times too early, and reads as "it keeps
+      compacting" with no reason on screen. The reason is the guess, and the
+      fix is one number typed into the meter.
+    */
+    const window = resolveWindow(model, settings);
+    const guessed = window.source === 'assumed'
+      ? ` The window for ${model} is assumed (${window.tokens.toLocaleString()} tokens) — `
+        + 'if you know the real figure, set it from the context meter.'
+      : '';
     emit('notice', {
       text: `Compacted the conversation: ${result.tokensBefore.toLocaleString()} → `
         + `${result.tokensAfter.toLocaleString()} tokens, ${result.droppedTurns} older turn(s) `
-        + 'folded into a summary.',
+        + `folded into a summary.${guessed}`,
     });
   }
 

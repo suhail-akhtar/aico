@@ -463,6 +463,13 @@ export const api = {
   settings: () => request<Record<string, unknown>>('settings'),
   saveSettings: (patch: Record<string, unknown>) => post<Record<string, unknown>>('settings', patch),
 
+  /** What the server believes this model's window is, and why. */
+  contextWindow: (model: string) =>
+    get<{ model: string; tokens: number; source: WindowSource }>(`context-window?model=${encodeURIComponent(model)}`),
+  /** Set the window by hand, or `null` to forget an override and let detection try again. */
+  setContextWindow: (model: string, tokens: number | null) =>
+    post<{ model: string; tokens: number; source: WindowSource; cleared?: boolean }>('context-window', { model, tokens }),
+
   system: () => request<SystemSnapshot>('system'),
   cancelBackgroundAgent: (agentId: string) => post<{ cancelled: boolean }>('background/cancel', { agentId }),
   /** Stop anything in the ledger by id — agent, process, watcher or schedule. */
@@ -859,6 +866,9 @@ export interface PermissionRequest {
 /** A file write the client was asked to apply itself. */
 /** Re-exported so a client can name the type without a second import path. */
 export type { HostAnswer, HostCall, HostToolName };
+
+/** Where a context-window figure came from. Mirrors the server's `WindowSource`. */
+export type WindowSource = 'user' | 'api' | 'learned' | 'table' | 'assumed';
 
 export interface SkillCorpus {
   skill: string;

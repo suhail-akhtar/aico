@@ -28,6 +28,7 @@ import type { AicoSettings } from './settings.js';
 import { selectProvider } from './providers/index.js';
 import { detectProviderType } from './providers/index.js';
 import { ensureContextWindow } from './context-window.js';
+import { resolveInstance } from './providers/instances.js';
 import type { ToolDef, ToolCall, FinishReason, ReasoningTrace } from './providers/types.js';
 import type { Inbox, Session, TurnEndReason, Usage } from './session/index.js';
 import { canonicalHeader } from './session/index.js';
@@ -1540,9 +1541,23 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // cached permanently in ~/.aico/settings.json so detection runs only once.
   // Non-blocking — if detection fails, the built-in table is used.
   try {
-    const provId = detectProviderType(model, settings);
+    /*
+      Ask the provider that will actually serve the model.
+
+      `detectProviderType` knows the legacy single-provider settings and
+      nothing about configured instances, so for a model on an "OpenAI
+      Compatible" endpoint it named whichever legacy key existed — and the
+      detector asked OpenRouter, or a local Ollama, about a model neither had
+      heard of. Nothing came back, 128K was assumed, and compaction fired at
+      96K on a model that holds a million. This mirrors `selectProvider`: the
+      instance that routes the request is the one that gets asked.
+    */
+    const instance = settings?.providerInstances?.length
+      ? resolveInstance(settings, { model })
+      : undefined;
+    const provId = instance?.type ?? detectProviderType(model, settings);
     if (provId) {
-      ensureContextWindow(model, provId, settings).catch(() => {});
+      ensureContextWindow(model, provId, settings, instance).catch(() => {});
     }
   } catch {
     // Detection failure is non-fatal

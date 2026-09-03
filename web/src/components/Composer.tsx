@@ -606,15 +606,29 @@ function ContextMeter(
     : fraction >= 0.75 ? 'bg-aico-warning'
       : 'bg-aico-accent';
 
+  const [open, setOpen] = useState(false);
+
   return (
-    <span
-      className="inline-flex items-center gap-1.5"
+    <span className="relative inline-flex items-center">
+    {open && <WindowPopover total={total} source={source} onClose={() => setOpen(false)} />}
+    {/*
+      A button, because the number is the thing to act on. The one recurring
+      complaint about this meter was a window that was wrong — a model nothing
+      knew, drawn against an assumed 128K — and the only fix was a JSON file.
+      Now the fix is one click away from the figure that looks wrong.
+    */}
+    <button
+      type="button"
+      onClick={() => setOpen(v => !v)}
+      className="inline-flex items-center gap-1.5 rounded px-1 hover:bg-aico-hover"
       title={`${used.toLocaleString()} of ${total.toLocaleString()} tokens in the context `
         + `window (${percent}%). The whole conversation is resent each turn, so this is `
         + 'how full it is right now. Older turns are summarised automatically before it fills.'
         + `
 
-${WINDOW_SOURCE[source] ?? ''}`}
+${WINDOW_SOURCE[source] ?? ''}
+
+Click to set the real window size.`}
     >
       <span
         className="relative inline-block h-1.5 w-10 overflow-hidden rounded-full bg-aico-hover"
@@ -635,6 +649,116 @@ ${WINDOW_SOURCE[source] ?? ''}`}
         how somebody comes to trust a number nothing stands behind.
       */}
       <span>{percent}% of {format(total)}{source === 'assumed' ? '?' : ''}</span>
+    </button>
     </span>
+  );
+}
+
+/**
+ * Setting the window by hand, from the meter.
+ *
+ * Accepts what people type — `1m`, `128k`, `200000` — because the figure is
+ * usually copied from a model card that writes it that way. `Forget` removes
+ * an override so detection gets another try, which is the other half of
+ * owning a number: being able to give it back.
+ */
+function WindowPopover({ total, source, onClose }: {
+  total: number; source: string; onClose: () => void;
+}): React.ReactElement {
+  const model = useStore(s => s.model ?? s.defaultModel);
+  const [value, setValue] = useState(String(total));
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent): void => {
+      if (!box.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const parse = (raw: string): number | null => {
+    const m = /^\s*([\d,._]+)\s*([km]?)\s*$/i.exec(raw);
+    if (!m) return null;
+    const n = Number(m[1]!.replace(/[,_]/g, ''));
+    if (!Number.isFinite(n)) return null;
+    const unit = m[2]!.toLowerCase();
+    return Math.round(unit === 'm' ? n * 1_000_000 : unit === 'k' ? n * 1_000 : n);
+  };
+
+  const apply = async (tokens: number | null): Promise<void> => {
+    if (!model) { setNote('No model is selected.'); return; }
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await api.setContextWindow(model, tokens);
+      // Reflect it now rather than at the next usage event, so the bar the
+      // reader is looking at answers the change they just made.
+      useStore.setState(s => ({
+        usage: { ...s.usage, contextWindow: result.tokens, contextSource: result.source },
+      }));
+      onClose();
+    } catch (err) {
+      setNote((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      ref={box}
+      className="absolute bottom-full left-1/2 z-30 mb-2 w-72 -translate-x-1/2 rounded-xl border border-aico-border
+                 bg-aico-bg p-3 text-left shadow-lg"
+    >
+      <p className="text-[12px] font-medium text-aico-primary">Context window</p>
+      <p className="mt-0.5 text-[11px] leading-snug text-aico-muted">
+        <span className="font-mono">{model}</span> · {total.toLocaleString()} tokens ·{' '}
+        {source === 'assumed' ? 'assumed — nothing knows this model'
+          : source === 'user' ? 'set by you'
+            : source === 'api' ? 'reported by the provider'
+              : source === 'learned' ? 'learned from a refusal'
+                : 'from the built-in table'}
+      </p>
+      <div className="mt-2 flex items-center gap-1.5">
+        <input
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { const n = parse(value); if (n) void apply(n); else setNote('Enter a number like 1m, 128k or 200000.'); } }}
+          autoFocus
+          placeholder="1m, 128k, 200000"
+          className="min-w-0 flex-1 rounded-md border border-aico-border bg-aico-surface px-2 py-1 font-mono text-[12px]
+                     text-aico-primary focus:border-aico-accent/50 focus:outline-none"
+        />
+        <button
+          onClick={() => { const n = parse(value); if (n) void apply(n); else setNote('Enter a number like 1m, 128k or 200000.'); }}
+          disabled={busy}
+          className="rounded-md bg-aico-accent px-2.5 py-1 text-[12px] font-medium text-aico-on-accent
+                     hover:bg-aico-accent-hover disabled:opacity-40"
+        >
+          Set
+        </button>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between">
+        <span className="text-[11px] text-aico-muted">Compaction runs at 75% of this.</span>
+        {source === 'user' && (
+          <button
+            onClick={() => void apply(null)}
+            disabled={busy}
+            className="text-[11px] text-aico-muted underline-offset-2 hover:text-aico-primary hover:underline"
+          >
+            Forget, detect again
+          </button>
+        )}
+      </div>
+      {note && <p className="mt-1.5 text-[11px] text-aico-danger">{note}</p>}
+    </div>
   );
 }
