@@ -10,7 +10,16 @@ const _watchers = new Map<string, fs.FSWatcher>();
 export function watchMemoryFile(filePath: string): void {
   if (_watchers.has(filePath)) return;
   try {
-    const watcher = fs.watch(filePath, (eventType) => {
+    /*
+      Not persistent. This watcher exists to invalidate a cache entry when a
+      memory file changes; it must never be the reason a process stays alive.
+      It was: a one-shot `aico -p` in any directory with an AICO.md or
+      CLAUDE.md printed its answer and then sat there until killed, because
+      the default `persistent: true` kept the event loop open after every
+      other handle had drained. The REPL stays alive through readline and the
+      server through its listener, so neither needs this to be pinned.
+    */
+    const watcher = fs.watch(filePath, { persistent: false }, (eventType) => {
       if (eventType === 'change' || eventType === 'rename') {
         invalidate(filePath);
       }

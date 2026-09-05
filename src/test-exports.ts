@@ -318,3 +318,4 @@ export {
   KIMI_BASE_URL, KIMI_MODELS, KIMI_DEFAULT_MAX_OUTPUT_TOKENS,
 } from './providers/kimi.js';
 export { isKimiModel } from './providers/model-vendor.js';
+export { watchMemoryFile, stopMemoryWatcher } from './memory/watcher.js';
