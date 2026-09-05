@@ -357,3 +357,116 @@ export function resetReasoningForTest(): void {
 export function isEffortChoice(value: unknown): value is EffortChoice {
   return value === 'auto' || (LADDER as readonly unknown[]).includes(value);
 }
+
+/**
+ * What a choice becomes on this model — for the button to say.
+ *
+ * A choice outlives the model it was made for: pick `xhigh` on Claude, switch
+ * the session to Kimi K3, and the request goes out with `high` because that
+ * is the nearest rung K3 has. The engine has always done that; the button used
+ * to keep saying `xhigh`. `shown` is what will actually be sent, and
+ * `stepped` says the two differ so the control can explain rather than lie.
+ */
+export interface EffortDisplay {
+  shown: EffortLevel | 'auto';
+  /** True when the choice is not a rung this model has and was stepped. */
+  stepped: boolean;
+  /** The original choice, when stepped. */
+  from?: EffortLevel;
+}
+
+export function effortDisplay(model: string, choice: EffortChoice | undefined): EffortDisplay {
+  if (!choice || choice === 'auto') return { shown: 'auto', stepped: false };
+  const sent = effortToSend(model, choice);
+  if (sent === undefined) return { shown: 'auto', stepped: true, from: choice };
+  return sent === choice ? { shown: sent, stepped: false } : { shown: sent, stepped: true, from: choice };
+}
+
+/*
+  ── What "Auto" sends, per provider family ─────────────────────────────
+
+  The picker's `auto` sends no level and lets the provider decide. What the
+  provider then does is a per-family setting under `settings.providers.<type>`,
+  and each family spells it differently: Anthropic has `thinking: 'off'` and an
+  `effort`, OpenAI a `reasoningEffort` whose off is `'none'`, DeepSeek and
+  Kimi a `thinking` that is a level or `'off'`. This table is the one place
+  that knows the spellings, so the Settings screen can offer one control and the
+  server can validate and write it without a per-family route.
+
+  Families that take no default (Gemini, Z.AI, OpenRouter, Ollama, compatible
+  endpoints) are absent, and the control does not appear for them.
+*/
+export type FamilyDefault = 'auto' | EffortLevel;
+
+export interface FamilyReasoning {
+  /** The choices this family's setting can express, `auto` first. */
+  choices: readonly FamilyDefault[];
+  /** One line for the control: what Auto does here. */
+  hint: string;
+}
+
+export const FAMILY_REASONING: Record<string, FamilyReasoning> = {
+  anthropic: {
+    choices: ['auto', 'off', 'low', 'medium', 'high', 'xhigh', 'max'],
+    hint: 'Auto lets Claude think adaptively per request.',
+  },
+  openai: {
+    choices: ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    hint: 'For reasoning models on the Responses API. Auto takes OpenAI\'s default, medium.',
+  },
+  deepseek: {
+    choices: ['auto', 'off', 'low', 'high', 'max'],
+    hint: 'Auto takes the platform default, high — every step thinks hard.',
+  },
+  kimi: {
+    choices: ['auto', 'off', 'low', 'high', 'max'],
+    hint: 'Auto takes the platform default: max on K3, thinking on for K2.x. Off applies to K2.6 only.',
+  },
+};
+
+/**
+ * The keys to write under `settings.providers.<type>` for a choice.
+ *
+ * `null` means remove the key, so `auto` leaves nothing behind and the
+ * platform default applies again. Undefined for a family with no setting or a
+ * choice it cannot express.
+ */
+export function tuningPatch(type: string, choice: FamilyDefault): Record<string, string | null> | undefined {
+  const family = FAMILY_REASONING[type];
+  if (!family || !family.choices.includes(choice)) return undefined;
+  switch (type) {
+    case 'anthropic':
+      if (choice === 'auto') return { thinking: null, effort: null };
+      if (choice === 'off') return { thinking: 'off', effort: null };
+      return { thinking: null, effort: choice };
+    case 'openai':
+      if (choice === 'auto') return { reasoningEffort: null };
+      return { reasoningEffort: choice === 'off' ? 'none' : choice };
+    case 'deepseek':
+    case 'kimi':
+      return { thinking: choice === 'auto' ? null : choice };
+    default:
+      return undefined;
+  }
+}
+
+/** The choice a family's stored setting currently expresses. */
+export function tuningChoice(type: string, tuning: Record<string, unknown> | undefined): FamilyDefault {
+  const family = FAMILY_REASONING[type];
+  if (!family || !tuning) return 'auto';
+  const as = (value: unknown): FamilyDefault =>
+    (family.choices as readonly string[]).includes(String(value)) ? value as FamilyDefault : 'auto';
+  switch (type) {
+    case 'anthropic':
+      if (tuning.thinking === 'off') return 'off';
+      return as(tuning.effort);
+    case 'openai':
+      if (tuning.reasoningEffort === 'none') return 'off';
+      return as(tuning.reasoningEffort);
+    case 'deepseek':
+    case 'kimi':
+      return as(tuning.thinking);
+    default:
+      return 'auto';
+  }
+}

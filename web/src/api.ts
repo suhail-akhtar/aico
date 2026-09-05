@@ -433,6 +433,10 @@ export const api = {
     post<{ instance: ProviderInstance }>('providers/save', { instance }),
 
   deleteProvider: (id: string) => post<{ deleted: boolean }>('providers/delete', { id }),
+  /** What Auto reasoning sends, per provider family — see shared/reasoning FAMILY_REASONING. */
+  providerTuning: () => get<{ families: Record<string, string> }>('providers/tuning'),
+  setProviderTuning: (type: string, choice: string) =>
+    post<{ type: string; choice: string }>('providers/tuning', { type, choice }),
 
   activateProvider: (id: string, model?: string) =>
     post<{ active: string; model: string | null }>('providers/activate', { id, model }),

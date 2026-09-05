@@ -26,6 +26,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { api, type ProviderInstance } from '@web/api';
+import { FAMILY_REASONING } from '@aico/reasoning';
 import { useStore } from '@web/store';
 import { host } from '../host';
 
@@ -39,6 +40,12 @@ export function ModelMenu(): React.ReactElement {
 
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<'models' | 'providers'>('models');
+  /** What Auto reasoning sends per family; set in Settings → Models. */
+  const [tuning, setTuning] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!open || tab !== 'providers') return;
+    api.providerTuning().then(r => setTuning(r.families)).catch(() => { /* line stays quiet */ });
+  }, [open, tab]);
   const [models, setModels] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
@@ -248,6 +255,11 @@ export function ModelMenu(): React.ReactElement {
                       {instance.defaultModel && (
                         <span className="block truncate pl-3 text-[10px] leading-[14px] text-aico-muted">
                           {instance.defaultModel}
+                        </span>
+                      )}
+                      {FAMILY_REASONING[instance.type] && tuning[instance.type] && tuning[instance.type] !== 'auto' && (
+                        <span className="block truncate pl-3 text-[10px] leading-[14px] text-aico-muted">
+                          Auto reasoning: {tuning[instance.type]}
                         </span>
                       )}
                     </button>

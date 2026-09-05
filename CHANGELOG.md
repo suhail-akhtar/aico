@@ -3,6 +3,27 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.11.0 — 2026-09-03
+
+### Added
+
+- **What "Auto" reasoning sends, per provider, in Settings → Models.** Each
+  provider card that takes a default now has an *Auto reasoning* control:
+  provider default, off, or a level the family can express. It writes the
+  family's own spelling — Anthropic's `effort` and `thinking: 'off'`,
+  OpenAI's `reasoningEffort`, DeepSeek's and Kimi's `thinking` — through a
+  route that changes those keys and nothing else, because the setting lives
+  beside the API key and the generic settings screen cannot be allowed near
+  that root. The VS Code panel's Providers tab shows the value in effect.
+
+### Fixed
+
+- **The effort button kept saying the rung you picked on another model.**
+  Pick `xhigh` on Claude, switch the session to Kimi K3, and the request went
+  out with `high` — the nearest rung K3 has, which the engine always stepped
+  to — while the button still read `xhigh`. Both the web composer and the VS
+  Code panel now show the rung that will be sent, and say why when it differs.
+
 ## 0.10.1 — 2026-09-03
 
 ### Fixed
