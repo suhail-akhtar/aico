@@ -782,6 +782,23 @@ try {
   check(cleared.cleared === true && cleared.source === 'assumed', 'forgetting it returns the model to detection');
 
   /*
+    ── what Auto reasoning sends, per family ────────────────────────────
+
+    Written to this run's own store (see scripts/lib/test-home.mjs), so the
+    reader's settings are untouched, and put back to auto at the end anyway.
+  */
+  const tuning = await api.providerTuning();
+  check(typeof tuning.families?.kimi === 'string', `the tuning route lists every family (${Object.keys(tuning.families ?? {}).join(', ')})`);
+  const setLow = await api.setProviderTuning('kimi', 'low');
+  check(setLow.choice === 'low', 'a family default is set and read back');
+  const refusedRung = await api.setProviderTuning('kimi', 'medium').then(() => 'accepted').catch(err => `refused ${err.status}`);
+  check(/refused 400/.test(refusedRung), `a rung the family cannot express is refused (${refusedRung})`);
+  const noFamily = await api.setProviderTuning('gemini', 'high').then(() => 'accepted').catch(err => `refused ${err.status}`);
+  check(/refused 400/.test(noFamily), 'a family with no setting is refused, not silently written');
+  const back = await api.setProviderTuning('kimi', 'auto');
+  check(back.choice === 'auto', 'and auto removes the key');
+
+  /*
     A client that declares nothing is offered nothing — and this is the half
     that protects every other surface. The browser workspace and the CLI submit
     without `hostTools`, and a model offered `VSCodeDiagnostics` there would

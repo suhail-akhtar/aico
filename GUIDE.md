@@ -356,6 +356,14 @@ Practical notes from real use:
 Ceilings live in Settings: context, spend per session, and permission mode. A
 spend ceiling is the honest way to try an expensive model.
 
+**Reasoning effort** is the *Think* control beside the model picker, in the web
+composer and the VS Code panel alike. It offers only the rungs the current model
+has, and *Auto* says what the provider does when nothing is sent — adaptive on
+Claude and Gemini, `high` on DeepSeek, `max` on Kimi K3. Pick a rung on one
+model and switch to another that lacks it, and the button shows the rung that
+will actually be sent. What Auto means for a provider is yours to set: each
+provider card in Settings → Models has an *Auto reasoning* control.
+
 **The context meter** under the composer is the window the model is being run
 against, and it says where the figure came from — reported by the provider,
 from the built-in table, set by you, inferred from use, or assumed. Assumed is

@@ -708,6 +708,42 @@ export async function saveUserSetting(key: string, value: unknown): Promise<void
   await writeFile(filePath, JSON.stringify(existing, null, 2));
 }
 
+/**
+ * Change one provider family's tuning in the user's settings file.
+ *
+ * Reads the global file itself rather than the merged settings, and writes
+ * only the keys given. The merged view also carries project-level provider
+ * config — keys included — and writing it back into the global file would
+ * copy a project's credentials into the user's, which is the failure the
+ * settings schema forbids any field under `providers` to risk. `null`
+ * removes a key, so "back to the platform default" leaves nothing behind.
+ */
+export async function patchUserProviderTuning(
+  type: string,
+  patch: Record<string, string | number | boolean | null>,
+): Promise<Record<string, unknown>> {
+  const dir = aicoHome();
+  await mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, 'settings.json');
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(await readFile(filePath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    // no file yet
+  }
+  const providers = { ...((existing.providers as Record<string, unknown>) ?? {}) };
+  const family = { ...((providers[type] as Record<string, unknown>) ?? {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) delete family[key];
+    else family[key] = value;
+  }
+  if (Object.keys(family).length === 0) delete providers[type];
+  else providers[type] = family;
+  existing.providers = providers;
+  await writeFile(filePath, JSON.stringify(existing, null, 2));
+  return family;
+}
+
 export function getProjectLocalSettingsPath(cwd = process.cwd()): string {
   return path.join(cwd, '.aico', 'settings.local.json');
 }

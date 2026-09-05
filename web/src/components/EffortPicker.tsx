@@ -16,7 +16,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  reasoningFor, type EffortChoice, type EffortLevel,
+  effortDisplay, reasoningFor, type EffortChoice, type EffortLevel,
 } from '../../../shared/reasoning';
 import { useStore } from '../store';
 import { TOOLBAR_CAPTION, TOOLBAR_CONTROL, toolbarTone } from './toolbar';
@@ -64,16 +64,27 @@ export function EffortPicker({ value, onChange, disabled }: {
   // might each be refused would be worse than none.
   if (fact.levels.length === 0) return null;
 
+  /*
+    The button says what will be sent, not what was once picked. A choice made
+    on one model outlives a switch to another; the engine steps it to the
+    nearest rung the new model has, and until now the button kept the old word.
+  */
+  const display = effortDisplay(model, value);
+  const stepped = display.stepped && display.from
+    ? ` — this model has no "${display.from}", so ${display.shown} is sent`
+    : '';
+
   return (
     <div ref={box} className="relative">
       <button
         onClick={() => setOpen(v => !v)}
         disabled={disabled}
-        title={`Reasoning effort — ${value === 'auto' ? autoMeaning(fact.fallback) : BLURB[value]}`}
-        className={`${TOOLBAR_CONTROL} ${toolbarTone(value !== 'auto')}`}
+        title={`Reasoning effort — ${display.shown === 'auto' ? autoMeaning(fact.fallback) : BLURB[display.shown]}${stepped}`}
+        className={`${TOOLBAR_CONTROL} ${toolbarTone(display.shown !== 'auto')}`}
+        data-effort-sent={display.shown}
       >
-        <span className={value === 'auto' ? TOOLBAR_CAPTION : ''}>Think</span>
-        {value === 'auto' ? autoLabel(fact.fallback) : value}
+        <span className={display.shown === 'auto' ? TOOLBAR_CAPTION : ''}>Think</span>
+        {display.shown === 'auto' ? autoLabel(fact.fallback) : display.shown}
       </button>
 
       {open && (
@@ -88,7 +99,7 @@ export function EffortPicker({ value, onChange, disabled }: {
           {fact.levels.map(level => (
             <Row
               key={level}
-              active={value === level}
+              active={display.shown === level}
               label={level}
               blurb={BLURB[level]}
               onPick={() => { onChange(level); setOpen(false); }}

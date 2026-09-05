@@ -32,6 +32,7 @@ import {
 import { checksFrom } from './dist-test/checks.mjs';
 import { shouldClearBusy } from './dist-test/turn-state.mjs';
 import { searchAgents, splitAgents, mentionAt } from './dist-test/agents.mjs';
+import { effortDisplay, tuningPatch, tuningChoice, FAMILY_REASONING, reasoningFor } from './dist-test/reasoning.mjs';
 
 let pass = 0, fail = 0;
 const test = (name, fn) => {
@@ -1874,6 +1875,41 @@ section('Output a transcript refuses to draw');
     must(dropped > 4000, `and the rest reported (${dropped})`);
   });
 }
+
+// ── The effort control says what will be sent ───────────────────────────────
+console.log('\n── Reasoning effort: what the button says, and what Auto means per family');
+test('a rung the model has is shown as picked', () => {
+  assert.deepEqual(effortDisplay('claude-opus-5', 'xhigh'), { shown: 'xhigh', stepped: false });
+});
+test('a rung the new model lacks is shown stepped to the one that will be sent', () => {
+  assert.deepEqual(effortDisplay('kimi-k3', 'xhigh'), { shown: 'high', stepped: true, from: 'xhigh' });
+  assert.deepEqual(effortDisplay('kimi-k2.7-code', 'off'), { shown: 'high', stepped: true, from: 'off' });
+});
+test('auto is auto, and an unknown model sends nothing', () => {
+  assert.deepEqual(effortDisplay('kimi-k3', 'auto'), { shown: 'auto', stepped: false });
+  assert.equal(effortDisplay('some-unknown-model', 'high').shown, 'auto');
+  assert.equal(reasoningFor('some-unknown-model').levels.length, 0);
+});
+test('each family writes its own spelling and reads it back', () => {
+  for (const type of Object.keys(FAMILY_REASONING)) {
+    for (const choice of FAMILY_REASONING[type].choices) {
+      const patch = tuningPatch(type, choice);
+      assert.ok(patch, `${type}/${choice} has a patch`);
+      const stored = {};
+      for (const [k, v] of Object.entries(patch)) if (v !== null) stored[k] = v;
+      assert.equal(tuningChoice(type, stored), choice, `${type}: ${choice} round-trips`);
+    }
+  }
+});
+test('the spellings are the ones each provider reads', () => {
+  assert.deepEqual(tuningPatch('anthropic', 'off'), { thinking: 'off', effort: null });
+  assert.deepEqual(tuningPatch('anthropic', 'max'), { thinking: null, effort: 'max' });
+  assert.deepEqual(tuningPatch('openai', 'off'), { reasoningEffort: 'none' });
+  assert.deepEqual(tuningPatch('kimi', 'auto'), { thinking: null });
+  assert.deepEqual(tuningPatch('deepseek', 'low'), { thinking: 'low' });
+  assert.equal(tuningPatch('gemini', 'high'), undefined, 'a family with no setting gets no patch');
+  assert.equal(tuningPatch('kimi', 'medium'), undefined, 'a rung the family cannot express gets no patch');
+});
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);

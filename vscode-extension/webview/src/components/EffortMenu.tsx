@@ -27,7 +27,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '@web/store';
-import { reasoningFor, type EffortChoice, type EffortLevel } from '@aico/reasoning';
+import { effortDisplay, reasoningFor, type EffortChoice, type EffortLevel } from '@aico/reasoning';
 
 /** What each rung means, in the words someone choosing would use. */
 const BLURB: Record<EffortLevel, string> = {
@@ -77,18 +77,25 @@ export function EffortMenu({ value, onChange }: {
   */
   if (fact.levels.length === 0) return null;
 
-  const label = choice === 'auto' ? autoLabel(fact.fallback) : choice;
+  // What will be sent on this model, which is not always what was picked —
+  // a choice outlives a model switch and is stepped to the nearest rung.
+  const display = effortDisplay(model, choice);
+  const shown = display.shown;
+  const label = shown === 'auto' ? autoLabel(fact.fallback) : shown;
+  const stepped = display.stepped && display.from
+    ? ` (this model has no "${display.from}"; ${shown} is sent)`
+    : '';
 
   return (
     <div ref={box} className="relative">
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        title={`Reasoning effort: ${choice === 'auto' ? `auto — ${autoMeaning(fact.fallback)}` : choice}`}
-        data-effort={choice}
+        title={`Reasoning effort: ${shown === 'auto' ? `auto — ${autoMeaning(fact.fallback)}` : shown}${stepped}`}
+        data-effort={shown}
         className={[
           'rounded px-1.5 py-0.5 text-[11px]',
-          choice === 'auto'
+          shown === 'auto'
             ? 'text-aico-secondary hover:bg-aico-hover hover:text-aico-primary'
             : 'bg-aico-accent-soft text-aico-accent',
         ].join(' ')}
@@ -107,7 +114,7 @@ export function EffortMenu({ value, onChange }: {
           {fact.levels.map(level => (
             <Row
               key={level}
-              active={choice === level}
+              active={shown === level}
               label={level}
               blurb={BLURB[level]}
               onPick={() => { onChange(level); setOpen(false); }}

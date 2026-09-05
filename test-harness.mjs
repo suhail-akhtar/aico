@@ -40,6 +40,7 @@ import {
   windowFromCatalogue, clearContextWindow, setContextWindow, detectContextWindow,
   noteWindowFromUsage, standardWindowAtLeast, aicoHome, executeContextWindow, toolDefinitions,
   pickNamingModel, watchMemoryFile, stopMemoryWatcher,
+  patchUserProviderTuning, effortDisplay, tuningPatch, tuningChoice, FAMILY_REASONING,
   resolveToolSet, HOST_TOOLS, hostToolsFrom, isHostTool,
   grade, runCheck, hashFiles, corpusFor, BUILTIN_CORPUS, splitOf, assignSplits, cacheKey,
   describeCorpus, startEval, startOptimize, getJob, cancelJob, adoptCandidate,
@@ -12022,6 +12023,47 @@ console.log('  -- A memory watcher never keeps a one-shot process alive --');
   stopMemoryWatcher();
   fs.rmSync(dir, { recursive: true, force: true });
 }
+// ═══════════════════════════════════════════════════════════
+// 50. WHAT AUTO REASONING SENDS, SET WITHOUT TOUCHING A KEY
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ 50. WHAT AUTO REASONING SENDS, SET WITHOUT TOUCHING A KEY ══');
+{
+  /*
+    The setting lives under `providers.<type>`, beside the family's API key.
+    The one thing this write must never do is disturb that key — the settings
+    schema forbids fields under this root for exactly that reason. So the file
+    is seeded with a key and something project-shaped, the tuning is changed
+    three ways, and the key is read back after each.
+  */
+  const file = path.join(process.env.AICO_HOME, 'settings.json');
+  const before = fs.readFileSync(file, 'utf8');
+  try {
+    fs.writeFileSync(file, JSON.stringify({
+      model: 'x', providers: { kimi: { apiKey: 'sk-keep-me', baseUrl: 'https://example/v1' }, openai: { apiKey: 'sk-other' } },
+    }, null, 2));
+    await patchUserProviderTuning('kimi', tuningPatch('kimi', 'low'));
+    let s = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert(s.providers.kimi.thinking === 'low', 'the level is written');
+    assert(s.providers.kimi.apiKey === 'sk-keep-me' && s.providers.kimi.baseUrl === 'https://example/v1', 'and the key and endpoint beside it are untouched');
+    assert(s.providers.openai.apiKey === 'sk-other' && s.model === 'x', 'and nothing else in the file moved');
+    await patchUserProviderTuning('anthropic', tuningPatch('anthropic', 'off'));
+    s = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert(s.providers.anthropic.thinking === 'off' && s.providers.anthropic.effort === undefined, 'a family with no entry yet gets one');
+    await patchUserProviderTuning('anthropic', tuningPatch('anthropic', 'auto'));
+    s = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert(s.providers.anthropic === undefined, 'auto removes the keys, and an empty family is dropped');
+    await patchUserProviderTuning('kimi', tuningPatch('kimi', 'auto'));
+    s = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert(s.providers.kimi.thinking === undefined && s.providers.kimi.apiKey === 'sk-keep-me', 'auto on a family with a key keeps the key');
+    assert(tuningChoice('kimi', s.providers.kimi) === 'auto' && tuningChoice('openai', { reasoningEffort: 'none' }) === 'off', 'and the stored shape reads back as the choice it expresses');
+  } finally {
+    fs.writeFileSync(file, before);
+  }
+
+  assert(effortDisplay('kimi-k3', 'xhigh').shown === 'high' && effortDisplay('kimi-k3', 'xhigh').stepped === true, 'the button says the rung that is sent, not the one picked');
+  assert(Object.keys(FAMILY_REASONING).join(',') === 'anthropic,openai,deepseek,kimi', 'four families take a default; the rest show no control');
+}
+
 clearInterval(keepAliveForAbandonedTools);
 
 

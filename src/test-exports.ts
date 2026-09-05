@@ -319,3 +319,5 @@ export {
 } from './providers/kimi.js';
 export { isKimiModel } from './providers/model-vendor.js';
 export { watchMemoryFile, stopMemoryWatcher } from './memory/watcher.js';
+export { patchUserProviderTuning } from './settings.js';
+export { effortDisplay, tuningPatch, tuningChoice, FAMILY_REASONING } from '../shared/reasoning.js';

@@ -34,7 +34,8 @@ import {
   redactInstance, validateInstance,
 } from '../providers/instances.js';
 import type { ProviderInstance } from '../providers/instances.js';
-import { loadSettings, saveUserSetting } from '../settings.js';
+import { loadSettings, patchUserProviderTuning, saveUserSetting } from '../settings.js';
+import { FAMILY_REASONING, tuningChoice, tuningPatch, type FamilyDefault } from '../../shared/reasoning.js';
 import { getModelCapabilities } from '../model-capabilities.js';
 import type { ModelCapabilities } from '../model-capabilities.js';
 import { getWorkspaceInfo } from '../workspace.js';
@@ -625,6 +626,36 @@ ${content || 'Describe the procedure here.'}
           ...(probe.error ? { error: probe.error } : {}),
         },
       };
+    }
+
+    /*
+      What "Auto" reasoning sends, per provider family.
+
+      Its own route rather than a field on the generic settings screen, because
+      the setting lives under `providers.<type>`, a credential root: the client
+      sees that subtree redacted, and posting it back through the settings
+      route would overwrite the family's key with nothing. This writes one
+      family's tuning keys and no others (see `patchUserProviderTuning`).
+    */
+    case 'providers/tuning': {
+      if (method === 'GET') {
+        const settings = await loadSettings();
+        const tuning = (settings.providers ?? {}) as Record<string, Record<string, unknown> | undefined>;
+        const families: Record<string, FamilyDefault> = {};
+        for (const type of Object.keys(FAMILY_REASONING)) families[type] = tuningChoice(type, tuning[type]);
+        return { status: 200, body: { families } };
+      }
+      if (method !== 'POST') return { status: 405, body: { error: 'GET or POST' } };
+      const type = String(body.type ?? '');
+      const choice = String(body.choice ?? '') as FamilyDefault;
+      const family = FAMILY_REASONING[type];
+      if (!family) return { status: 400, body: { error: `"${type}" takes no default reasoning setting` } };
+      if (!family.choices.includes(choice)) {
+        return { status: 400, body: { error: `"${choice}" is not a level ${type} can be set to (${family.choices.join(', ')})` } };
+      }
+      const patch = tuningPatch(type, choice)!;
+      const stored = await patchUserProviderTuning(type, patch);
+      return { status: 200, body: { type, choice: tuningChoice(type, stored) } };
     }
 
     case 'providers/save': {

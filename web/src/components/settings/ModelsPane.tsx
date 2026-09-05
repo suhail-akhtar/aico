@@ -23,8 +23,9 @@
  * @module components/settings/ModelsPane
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api, type ProviderInstance, type ProviderTestResult } from '../../api';
+import { FAMILY_REASONING, type FamilyDefault } from '../../../../shared/reasoning';
 import { useStore } from '../../store';
 import { Icon } from '../Icon';
 import { ModelChooser, ProviderEditor, TestResult } from './ProviderEditor';
@@ -45,6 +46,15 @@ export function ModelsPane(): React.ReactElement {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   /** Providers whose model list was collapsed after a pick, with what was picked. */
   const [picked, setPicked] = useState<Record<string, string>>({});
+  /** What Auto reasoning sends, by provider family. */
+  const [tuning, setTuning] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api.providerTuning().then(r => setTuning(r.families)).catch(() => { /* control stays at auto */ });
+  }, []);
+  const setDefaultReasoning = async (type: string, choice: string): Promise<void> => {
+    const saved = await api.setProviderTuning(type, choice);
+    setTuning(t => ({ ...t, [saved.type]: saved.choice }));
+  };
 
   const test = async (id: string): Promise<void> => {
     setTests(t => ({ ...t, [id]: { ok: false, running: true } }));
@@ -190,6 +200,32 @@ export function ModelsPane(): React.ReactElement {
                   <>
                     <span aria-hidden>·</span>
                     <span className="font-mono">{provider.defaultModel}</span>
+                  </>
+                )}
+                {FAMILY_REASONING[provider.type] && (
+                  <>
+                    <span aria-hidden>·</span>
+                    {/*
+                      What the composer's "Auto" sends on this family. Here and
+                      not on the generic settings screen because it lives under a
+                      credential root the client only ever sees redacted.
+                    */}
+                    <label
+                      className="inline-flex items-center gap-1"
+                      title={FAMILY_REASONING[provider.type]!.hint}
+                    >
+                      <span>Auto reasoning</span>
+                      <select
+                        value={tuning[provider.type] ?? 'auto'}
+                        onChange={e => void setDefaultReasoning(provider.type, e.target.value)}
+                        className="rounded border border-aico-border-subtle bg-aico-bg px-1 py-0.5 text-[11px] text-aico-primary"
+                        data-testid={`auto-reasoning-${provider.type}`}
+                      >
+                        {FAMILY_REASONING[provider.type]!.choices.map((c: FamilyDefault) => (
+                          <option key={c} value={c}>{c === 'auto' ? 'provider default' : c}</option>
+                        ))}
+                      </select>
+                    </label>
                   </>
                 )}
               </div>
