@@ -44,6 +44,9 @@ export interface ProviderTestResult {
 const PROBES: Record<string, { url: string; auth: 'bearer' | 'x-api-key' | 'query' | 'none' }> = {
   openrouter: { url: 'https://openrouter.ai/api/v1/models', auth: 'bearer' },
   deepseek:   { url: 'https://api.deepseek.com/models', auth: 'bearer' },
+  // Reports `context_length`, `supports_image_in` and `supports_reasoning`
+  // per model — one of the few catalogues that says what it serves.
+  kimi:       { url: 'https://api.moonshot.ai/v1/models', auth: 'bearer' },
   openai:     { url: 'https://api.openai.com/v1/models', auth: 'bearer' },
   anthropic:  { url: 'https://api.anthropic.com/v1/models', auth: 'x-api-key' },
   gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/models', auth: 'query' },

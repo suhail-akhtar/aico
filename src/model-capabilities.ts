@@ -145,6 +145,17 @@ const BUILTIN_CAPABILITIES: CapabilityEntry[] = [
   // ── Google Gemini — the widest input surface of the set ──
   { match: 'gemini-', input: ['text', 'image', 'audio', 'video'] },
 
+  // ── Moonshot Kimi ──
+  // The vision guide (read 2026-09-03) lists K3, K2.7 Code (both variants) and
+  // K2.6 as taking images and video. The bare `kimi-` fallback stays text-only
+  // on purpose: the retired moonshot-v1 line and anything newer than this
+  // table should not be credited with sight until the catalogue says so.
+  { match: 'kimi-k3', input: ['text', 'image', 'video'] },
+  { match: 'kimi-k2.7', input: ['text', 'image', 'video'] },
+  { match: 'kimi-k2.6', input: ['text', 'image', 'video'] },
+  { match: 'kimi-', input: ['text'] },
+  { match: 'moonshot-v1', input: ['text'] },
+
   // ── DeepSeek ──
   // V4 reads images; the V3-era chat and reasoning endpoints do not. Left
   // narrow on purpose: the bare `deepseek-` fallback claiming vision would

@@ -16,11 +16,13 @@ import { OpenAICompatibleProvider } from './openai.js';
 import { OpenAIResponsesProvider } from './openai-responses.js';
 import { AnthropicProvider } from './anthropic.js';
 import { DeepSeekProvider } from './deepseek.js';
+import { KimiProvider } from './kimi.js';
 import {
   ANTHROPIC_DIALECT,
   DEEPSEEK_DIALECT,
   DEFAULT_DIALECT,
   GEMINI_DIALECT,
+  KIMI_DIALECT,
   OPENAI_DIALECT,
 } from '../prompt/dialects.js';
 import type { PromptDialect } from '../prompt/types.js';
@@ -30,7 +32,7 @@ import {
   PROVIDER_TYPES, resolveApiKey, resolveBaseUrl, resolveInstance,
 } from './instances.js';
 import type { ProviderInstance } from './instances.js';
-import { isDirectVendor, isDeepSeekPlatformModel, isOpenAIModel, isZAIModel, vendorForModel } from './model-vendor.js';
+import { isDirectVendor, isDeepSeekPlatformModel, isKimiModel, isOpenAIModel, isZAIModel, vendorForModel } from './model-vendor.js';
 export { isDeepSeekPlatformModel, isDirectVendor, vendorForModel } from './model-vendor.js';
 
 /**
@@ -54,6 +56,7 @@ export function requiresResponsesApi(model: string): boolean {
 export const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   openrouter: 'deepseek/deepseek-v4-flash',  // DeepSeek V4 Flash (default)
   deepseek:   'deepseek-v4-flash',           // DeepSeek Platform, first-party
+  kimi:       'kimi-k2.7-code',              // Moonshot's coding model, first-party
   anthropic:  'claude-sonnet-5',
   openai:     'gpt-4o-mini',
   gemini:     'gemini-2.0-flash',
@@ -65,6 +68,7 @@ export const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
 export const PROVIDER_DISPLAY: Record<string, string> = {
   openrouter: 'OpenRouter',
   deepseek:   'DeepSeek',
+  kimi:       'Moonshot Kimi',
   anthropic:  'Anthropic',
   openai:     'OpenAI',
   gemini:     'Google Gemini',
@@ -88,6 +92,7 @@ export function dialectForRoutedModel(model: string): PromptDialect {
   if (/^(openai|azure)\//i.test(model)) return OPENAI_DIALECT;
   if (/^google\//i.test(model)) return GEMINI_DIALECT;
   if (/^deepseek\//i.test(model)) return DEEPSEEK_DIALECT;
+  if (/^moonshotai\//i.test(model)) return KIMI_DIALECT;
   return DEFAULT_DIALECT;
 }
 
@@ -110,6 +115,8 @@ export function detectProviderType(model: string, settings?: AicoSettings): stri
   // when the key exists. It is the model's home, and only the first-party
   // endpoint reports the cache-hit counts the OpenAI-compatible shim cannot see.
   if (isDeepSeekPlatformModel(model) && apiKey('deepseek'))    return 'deepseek';
+  // `kimi-*` is Moonshot's own id; the routed form is `moonshotai/kimi-*`.
+  if (isKimiModel(model)             && apiKey('kimi'))        return 'kimi';
   if (model.startsWith('deepseek/') || isDeepSeekPlatformModel(model)) {
     if (apiKey('openrouter')) return 'openrouter';
   }
@@ -118,6 +125,7 @@ export function detectProviderType(model: string, settings?: AicoSettings): stri
   // known prefix above)
   if (explicit === 'openrouter' && apiKey('openrouter')) return 'openrouter';
   if (explicit === 'deepseek'   && apiKey('deepseek'))   return 'deepseek';
+  if (explicit === 'kimi'       && apiKey('kimi'))       return 'kimi';
   if (explicit === 'anthropic'  && apiKey('anthropic'))  return 'anthropic';
   if (explicit === 'openai'     && apiKey('openai'))     return 'openai';
   if (explicit === 'gemini'     && apiKey('gemini'))     return 'gemini';
@@ -132,6 +140,7 @@ export function detectProviderType(model: string, settings?: AicoSettings): stri
   if (apiKey('anthropic'))  return 'anthropic';
   if (apiKey('openai'))     return 'openai';
   if (apiKey('zai'))        return 'zai';
+  if (apiKey('kimi'))       return 'kimi';
   if (apiKey('gemini'))     return 'gemini';
 
   // Ollama (local, no key required) — last resort
@@ -311,6 +320,25 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
       });
     }
 
+    case 'kimi': {
+      const key = apiKey('kimi');
+      if (!key) break;
+      // Reasoning is left at the platform default unless the user set one:
+      // K3 defaults to `max`, K2.x to thinking on. See providers/kimi.
+      return new KimiProvider({
+        apiKey: key,
+        ...(settings?.providers?.kimi?.baseUrl
+          ? { baseURL: settings.providers.kimi.baseUrl }
+          : {}),
+        ...(settings?.providers?.kimi?.thinking
+          ? { thinking: settings.providers.kimi.thinking }
+          : {}),
+        ...(settings?.providers?.kimi?.maxOutputTokens
+          ? { maxOutputTokens: settings.providers.kimi.maxOutputTokens }
+          : {}),
+      });
+    }
+
     case 'ollama': {
       const baseURL = settings?.providers?.ollama?.baseUrl ?? 'http://localhost:11434/v1';
       return new OpenAICompatibleProvider({
@@ -330,7 +358,8 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
     '  ANTHROPIC_API_KEY    — Claude models\n' +
     '  OPENAI_API_KEY       — GPT / O-series models\n' +
     '  GEMINI_API_KEY       — Google Gemini models\n' +
-    '  ZAI_API_KEY          — Z.AI GLM models (glm-4.6, glm-5, glm-5.2)\n\n' +
+    '  ZAI_API_KEY          — Z.AI GLM models (glm-4.6, glm-5, glm-5.2)\n' +
+    '  MOONSHOT_API_KEY     — Moonshot Kimi (kimi-k3, kimi-k2.7-code, kimi-k2.6)\n\n' +
     'Or add "provider": "ollama" to ~/.aico/settings.json for local Ollama.\n' +
     'Run /doctor inside aico for a full environment check.',
   );
@@ -477,6 +506,17 @@ export function providerFromInstance(
         sessionId: `aico-${instance.id}`,
       });
 
+    case 'kimi': {
+      const thinking = pick<'low' | 'high' | 'max' | 'off'>('thinking');
+      const maxOutputTokens = pick<number>('maxOutputTokens');
+      return new KimiProvider({
+        apiKey,
+        baseURL,
+        ...(thinking ? { thinking } : {}),
+        ...(maxOutputTokens ? { maxOutputTokens } : {}),
+      });
+    }
+
     case 'ollama':
       return new OpenAICompatibleProvider({
         id: instance.id,
@@ -529,6 +569,9 @@ function apiKey(provider: string): string | undefined {
     case 'openai':     return process.env.OPENAI_API_KEY;
     case 'gemini':     return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
     case 'zai':        return process.env.ZAI_API_KEY;
+    // The platform's own docs name the variable MOONSHOT_API_KEY; the other
+    // spelling is what people who know the product as "Kimi" reach for.
+    case 'kimi':       return process.env.MOONSHOT_API_KEY ?? process.env.KIMI_API_KEY;
   }
 }
 

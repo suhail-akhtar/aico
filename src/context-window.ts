@@ -90,6 +90,21 @@ const BUILTIN_CONTEXT_WINDOWS: Array<{ match: string; tokens: number }> = [
   { match: 'glm-4.5',                 tokens: 128_000 },
   { match: 'glm-',                    tokens: 128_000 },
 
+  // ── Moonshot Kimi ──
+  // From the model parameter reference and pricing pages (platform.kimi.ai,
+  // read 2026-09-03): K3 holds 1,048,576, the K2.x line 262,144. The platform's
+  // /v1/models also reports `context_length`, so these are the fallback for a
+  // run with no key to ask with. The routed `moonshotai/…` ids reach these
+  // through the vendor-prefix strip in resolveWindow.
+  { match: 'kimi-k3',                 tokens: 1_048_576 },
+  { match: 'kimi-k2.7',               tokens: 262_144 },
+  { match: 'kimi-k2.6',               tokens: 262_144 },
+  { match: 'kimi-k2',                 tokens: 262_144 },
+  { match: 'kimi-',                   tokens: 262_144 },
+  { match: 'moonshot-v1-128k',        tokens: 128_000 },
+  { match: 'moonshot-v1-32k',         tokens: 32_000 },
+  { match: 'moonshot-v1-8k',          tokens: 8_000 },
+
   // ── Meta Llama ──
   { match: 'llama-4',                 tokens: 1_000_000 },  // Llama 4 Scout/Maverick: 10M context
   { match: 'llama-3.3',               tokens: 128_000 },
@@ -519,6 +534,20 @@ export async function detectContextWindow(
           'https://api.z.ai/api/paas/v4/models',
           process.env.ZAI_API_KEY,
         );
+        break;
+      }
+      // Moonshot's catalogue states `context_length` per model. Asked through
+      // the same probe the settings screen uses, against the instance's own
+      // endpoint when one is configured (the regional platform, or a proxy).
+      case 'kimi': {
+        const target = instance
+          ?? listInstances(settings ?? {}).find(i => i.type === 'kimi');
+        const key = target ? resolveApiKey(target)
+          : (process.env.MOONSHOT_API_KEY ?? process.env.KIMI_API_KEY ?? '');
+        if (!key) return undefined;
+        const { testProvider } = await import('./providers/connection-test.js');
+        const probe = await testProvider('kimi', key, target?.baseUrl);
+        detected = windowFromCatalogue(model, probe.contextWindows);
         break;
       }
       // A custom endpoint is the case that needs this most and had it least:

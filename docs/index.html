@@ -64,7 +64,7 @@
       "name": "How is it different from Claude Code or Cursor?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It is model-agnostic and local-first: you bring your own API key for Claude, GPT, Gemini, DeepSeek, GLM or a local model, and the whole thing runs on your machine. The design differences that matter are an append-only session log you can resume after a crash, a browser verification step that opens what it builds, and one ledger supervising everything running in the background. A fuller comparison is here, including where the alternatives are ahead."
+        "text": "It is model-agnostic and local-first: you bring your own API key for Claude, GPT, Gemini, Kimi, DeepSeek, GLM or a local model, and the whole thing runs on your machine. The design differences that matter are an append-only session log you can resume after a crash, a browser verification step that opens what it builds, and one ledger supervising everything running in the background. A fuller comparison is here, including where the alternatives are ahead."
       }
     },
     {
@@ -72,7 +72,7 @@
       "name": "Which AI models can it use?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, and local models through Ollama. The model name decides the provider, so switching model never means also remembering to switch provider. See Providers."
+        "text": "OpenAI, Anthropic, OpenRouter, Google Gemini, Moonshot Kimi, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, and local models through Ollama. The model name decides the provider, so switching model never means also remembering to switch provider. See Providers."
       }
     },
     {
@@ -127,7 +127,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.9.1</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.10.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -155,7 +155,7 @@
     </p>
 
     <div class="install">
-      <code>$ npx github:suhail-akhtar/aico#v0.7.0 serve</code>
+      <code>$ npx github:suhail-akhtar/aico#v0.10.0 serve</code>
       <button type="button">Copy</button>
     </div>
 
@@ -166,7 +166,7 @@
 
     <p style="margin-top:1.25rem;font-size:.86rem;color:var(--muted)">
       Requires Node 22.5 or newer. Works with OpenAI, Anthropic, OpenRouter, Gemini,
-      Z.AI and local Ollama.
+      Moonshot Kimi, DeepSeek, Z.AI and local Ollama.
     </p>
   </section>
 
@@ -288,7 +288,7 @@ What rendered:
       </div>
       <div class="card">
         <span class="kicker">Tested</span>
-        <h3>2,375 offline assertions</h3>
+        <h3>2,495 offline assertions</h3>
         <p>No API key needed to run them. Plus 232 web-client checks, 35 Mini Apps checks over real HTTP, and live suites that drive a real server, a real browser at five widths, a real VS Code, and real models.</p>
       </div>
       <div class="card">
@@ -405,7 +405,7 @@ What rendered:
       <div class="a">
         <p>
           It is model-agnostic and local-first: you bring your own API key for
-          Claude, GPT, Gemini, DeepSeek, GLM or a local model, and the whole thing
+          Claude, GPT, Gemini, Kimi, DeepSeek, GLM or a local model, and the whole thing
           runs on your machine. The design differences that matter are an
           append-only session log you can resume after a crash, a browser
           verification step that opens what it builds, and one ledger supervising
@@ -418,8 +418,8 @@ What rendered:
       <h3>Which AI models can it use?</h3>
       <div class="a">
         <p>
-          OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI GLM, DeepSeek, any
-          OpenAI-compatible endpoint, and local models through Ollama. The model
+          OpenAI, Anthropic, OpenRouter, Google Gemini, Moonshot Kimi, Z.AI GLM,
+          DeepSeek, any OpenAI-compatible endpoint, and local models through Ollama. The model
           name decides the provider, so switching model never means also
           remembering to switch provider. See <a href="providers.html">Providers</a>.
         </p>
@@ -501,7 +501,7 @@ What rendered:
     <div class="prose">
       <h2>Try it</h2>
       <div class="install">
-        <code>$ npx github:suhail-akhtar/aico#v0.7.0 serve</code>
+        <code>$ npx github:suhail-akhtar/aico#v0.10.0 serve</code>
         <button type="button">Copy</button>
       </div>
       <p style="margin-top:1rem">

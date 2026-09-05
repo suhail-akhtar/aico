@@ -71,6 +71,15 @@ export const PROVIDERS: ProviderSpec[] = [
     keyHint:      'Get your key at https://aistudio.google.com/app/apikey',
   },
   {
+    id:           'kimi',
+    name:         'Moonshot Kimi',
+    description:  'Kimi K3 (1M context), K2.7 Code, K2.6 — reasoning models with automatic caching',
+    defaultModel: 'kimi-k2.7-code',
+    requiresKey:  true,
+    keyEnv:       'MOONSHOT_API_KEY',
+    keyHint:      'Get your key at https://platform.moonshot.ai',
+  },
+  {
     id:           'zai',
     name:         'Z.AI (GLM)',
     description:  'GLM-4.6, GLM-4.5-Air, GLM-5 — strong coding + agentic models',
@@ -101,6 +110,7 @@ export function isProviderConfigured(): boolean {
     process.env.ANTHROPIC_API_KEY  ||
     process.env.OPENAI_API_KEY     ||
     process.env.ZAI_API_KEY        ||
+    process.env.MOONSHOT_API_KEY   ||
     process.env.GEMINI_API_KEY     ||
     process.env.GOOGLE_API_KEY
   );
@@ -295,6 +305,7 @@ export async function listConfiguredProviders(): Promise<string> {
     anthropic:  process.env.ANTHROPIC_API_KEY,
     openai:     process.env.OPENAI_API_KEY,
     zai:        process.env.ZAI_API_KEY,
+    kimi:       process.env.MOONSHOT_API_KEY ?? process.env.KIMI_API_KEY,
     gemini:     process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY,
   };
 

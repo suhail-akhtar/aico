@@ -204,6 +204,7 @@ import {
   decideHeadlessPermission, setMcpPermissions, mcpPermissions,
   canAskUser, NO_ONE_TO_ASK, cronFiringInFlight, cronFiringSummary, liveCronFirings,
   reportsProgress,
+  KimiProvider, toKimiMessages, toKimiTools, reasoningFieldsFor, reasoningShapeFor, KIMI_BASE_URL, KIMI_DEFAULT_MAX_OUTPUT_TOKENS, isKimiModel,
 } from './dist-test/test-exports.js';
 
 import nodePath from 'path';
@@ -11780,6 +11781,212 @@ console.log('  -- The model can read its window, and correct it only at the user
   await clearContextWindow('probe-seen-model');
   await clearContextWindow(model);
   resetContextWindowCache();
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 49. MOONSHOT KIMI, FROM ITS OWN DOCUMENTATION
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ 49. MOONSHOT KIMI, FROM ITS OWN DOCUMENTATION ══');
+/*
+  Everything asserted here was read from platform.kimi.ai/docs on 2026-09-03:
+  the API overview (base URL, header), the chat reference (parameters, usage
+  shape), the model parameter reference (windows, fixed sampling knobs, which
+  reasoning control each model takes), the thinking and reasoning-effort guides
+  (reasoning_content must be replayed), the pricing pages and the model list.
+*/
+
+console.log('  -- Identity and routing --');
+{
+  assert(KIMI_BASE_URL === 'https://api.moonshot.ai/v1', 'the OpenAI-compatible root is the one the API overview names');
+  assert(isKimiModel('kimi-k3') && isKimiModel('kimi-k2.7-code') && isKimiModel('kimi-k2.6'), 'kimi-* ids are the platform\'s own');
+  assert(isKimiModel('moonshot-v1-8k'), 'so is the retired moonshot-v1 family');
+  assert(!isKimiModel('moonshotai/kimi-k2.6'), 'moonshotai/ is OpenRouter\'s namespacing, not a platform id');
+  assert(vendorForModel('kimi-k3') === 'kimi', 'the vendor is named outright');
+  assert(PROVIDER_TYPES.kimi?.envVar === 'MOONSHOT_API_KEY', 'the key variable is the one the docs use');
+  assert(PROVIDER_TYPES.kimi?.defaultModel === 'kimi-k2.7-code', 'the default is the coding model');
+  assert(PROVIDER_TYPE_IDS.includes('kimi'), 'the settings screens list it');
+
+  const prev = { m: process.env.MOONSHOT_API_KEY, k: process.env.KIMI_API_KEY, o: process.env.OPENROUTER_API_KEY };
+  try {
+    delete process.env.KIMI_API_KEY;
+    process.env.MOONSHOT_API_KEY = 'sk-test';
+    process.env.OPENROUTER_API_KEY = 'sk-or-test';
+    assert(detectProviderType('kimi-k2.7-code', {}) === 'kimi', 'a bare kimi id goes to the platform when its key exists');
+    assert(detectProviderType('moonshotai/kimi-k2.6', {}) === 'openrouter', 'the routed form still goes through OpenRouter');
+    delete process.env.MOONSHOT_API_KEY;
+    process.env.KIMI_API_KEY = 'sk-test-2';
+    assert(detectProviderType('kimi-k2.7-code', {}) === 'kimi', 'KIMI_API_KEY is accepted as the other spelling');
+    delete process.env.KIMI_API_KEY;
+    assert(detectProviderType('kimi-k2.7-code', {}) === 'openrouter', 'without a key it falls back rather than failing');
+  } finally {
+    for (const [env, val] of [['MOONSHOT_API_KEY', prev.m], ['KIMI_API_KEY', prev.k], ['OPENROUTER_API_KEY', prev.o]]) {
+      if (val === undefined) delete process.env[env]; else process.env[env] = val;
+    }
+  }
+}
+
+console.log('  -- Reasoning: three models, three wire shapes --');
+{
+  assert(reasoningShapeFor('kimi-k3') === 'effort', 'K3 takes reasoning_effort');
+  assert(reasoningShapeFor('kimi-k2.6') === 'switch', 'K2.6 takes a thinking switch');
+  assert(reasoningShapeFor('kimi-k2.7-code') === 'fixed' && reasoningShapeFor('kimi-k2.7-code-highspeed') === 'fixed',
+    'K2.7 Code thinks always and takes no control');
+  assert(JSON.stringify(reasoningFieldsFor('kimi-k3', 'max')) === '{"reasoning_effort":"max"}', 'K3 max → reasoning_effort max');
+  assert(JSON.stringify(reasoningFieldsFor('kimi-k3', 'xhigh')) === '{"reasoning_effort":"high"}', 'a rung K3 lacks steps down to one it has');
+  assert(JSON.stringify(reasoningFieldsFor('kimi-k3', 'off')) === '{"reasoning_effort":"low"}', 'K3 has no off; the lowest rung is sent instead');
+  assert(JSON.stringify(reasoningFieldsFor('kimi-k2.6', 'off')) === '{"thinking":{"type":"disabled"}}', 'K2.6 off → thinking disabled');
+  assert(JSON.stringify(reasoningFieldsFor('kimi-k2.6', 'high')) === '{"thinking":{"type":"enabled"}}', 'K2.6 high → thinking enabled');
+  assert(JSON.stringify(reasoningFieldsFor('kimi-k2.7-code', 'off')) === '{}', 'K2.7 Code is never sent a thinking field, even for off');
+  assert(JSON.stringify(reasoningFieldsFor('kimi-k3', undefined)) === '{}', 'no choice sends nothing and takes the platform default');
+
+  const k3 = reasoningFor('kimi-k3');
+  assert(k3.levels.join(',') === 'low,high,max' && k3.fallback === 'max', `the ladder offers K3 exactly its three rungs (${k3.levels}) with max as the default`);
+  const k27 = reasoningFor('kimi-k2.7-code');
+  assert(k27.levels.join(',') === 'high', 'K2.7 Code shows one rung, because that is what is true');
+  const k26 = reasoningFor('kimi-k2.6');
+  assert(k26.levels.join(',') === 'off,high', 'K2.6 is a switch');
+  assert(effortToSend('kimi-k2.7-code', 'off') === 'high', 'asking K2.7 Code to stop thinking lands on the one rung it has');
+}
+
+console.log('  -- Messages: reasoning replayed on every assistant turn, only from this provider --');
+{
+  const trace = { provider: 'kimi', content: 'thinking…' };
+  const msgs = toKimiMessages([
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: 'plain reply', reasoning: trace },
+    { role: 'user', content: 'now use a tool' },
+    { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'Read', input: { file_path: 'a.txt' } }], reasoning: trace },
+    { role: 'tool', toolCallId: 'call_1', content: 'contents' },
+    { role: 'assistant', content: 'foreign', reasoning: { provider: 'deepseek', content: 'not ours' } },
+  ], 'SYSTEM', 'volatile tail');
+  assert(msgs[0].role === 'system' && msgs[0].content === 'SYSTEM', 'the system prompt leads');
+  assert(msgs[2].role === 'assistant' && msgs[2].reasoning_content === 'thinking…',
+    'a plain assistant turn carries its reasoning back — the docs ask for every historical message, not only tool turns');
+  assert(msgs[4].role === 'assistant' && msgs[4].reasoning_content === 'thinking…' && msgs[4].tool_calls?.[0]?.id === 'call_1',
+    'a tool-calling turn carries both its calls and its reasoning');
+  assert(msgs[4].content === null, 'an empty assistant content is null on the wire, as the reference shows');
+  assert(msgs[5].role === 'tool' && msgs[5].tool_call_id === 'call_1', 'tool results are matched by id');
+  assert(msgs[6].role === 'assistant' && msgs[6].reasoning_content === undefined,
+    'a trace another vendor produced is never forwarded into Kimi\'s field');
+  assert(msgs[msgs.length - 1].role === 'user' && msgs[msgs.length - 1].content === 'volatile tail',
+    'turn-volatile text goes last, behind the cacheable prefix');
+  const withImage = toKimiMessages([{ role: 'user', content: 'see', images: [{ mediaType: 'image/png', data: 'AAAA' }] }], 's');
+  assert(Array.isArray(withImage[1].content) && withImage[1].content[1].image_url.url.startsWith('data:image/png;base64,'),
+    'images go as data-URL parts, the shape the vision guide shows');
+  const tools = toKimiTools([{ name: 'Read', description: 'read', inputSchema: { type: 'object', properties: {} } }]);
+  assert(tools[0].type === 'function' && tools[0].function.name === 'Read', 'tools are function definitions');
+}
+
+console.log('  -- On the wire: what one request contains, and how usage comes back --');
+{
+  /*
+    A stub of the platform that records the body and answers with the documented
+    stream shape: reasoning_content ahead of content, and usage with the
+    top-level cached_tokens the chat reference shows.
+  */
+  const http = await import('http');
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', c => { raw += c; });
+    req.on('end', () => {
+      seen.push(JSON.parse(raw));
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const chunk = (o) => res.write(`data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', model: 'kimi-k3', ...o })}\n\n`);
+      chunk({ choices: [{ index: 0, delta: { reasoning_content: 'let me ' } }] });
+      chunk({ choices: [{ index: 0, delta: { reasoning_content: 'think' } }] });
+      chunk({ choices: [{ index: 0, delta: { content: 'forty-two' } }] });
+      chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+      chunk({ choices: [], usage: { prompt_tokens: 1000, completion_tokens: 12, total_tokens: 1012, cached_tokens: 600 } });
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}/v1`;
+    const drive = async (model, thinking) => {
+      const provider = new KimiProvider({ apiKey: 'k', baseURL: base, ...(thinking ? { thinking } : {}) });
+      const events = [];
+      for await (const ev of provider.chat({ model, systemPrompt: 's', messages: [{ role: 'user', content: 'q' }], tools: [] })) events.push(ev);
+      return events;
+    };
+
+    const events = await drive('kimi-k3', 'high');
+    const body = seen[0];
+    assert(body.model === 'kimi-k3' && body.stream === true, 'the request streams');
+    assert(body.reasoning_effort === 'high' && body.thinking === undefined, 'K3 gets reasoning_effort and no thinking object');
+    assert(body.max_completion_tokens === KIMI_DEFAULT_MAX_OUTPUT_TOKENS, `the ceiling is max_completion_tokens at the 32K default (${body.max_completion_tokens})`);
+    assert(body.temperature === undefined && body.top_p === undefined && body.n === undefined,
+      'temperature, top_p and n are never sent — the reference says they are fixed');
+    assert(body.stream_options?.include_usage === true, 'usage is asked for on the final chunk');
+    assert(events.filter(e => e.type === 'reasoning').map(e => e.delta).join('') === 'let me think', 'reasoning_content is surfaced as reasoning');
+    assert(events.filter(e => e.type === 'text').map(e => e.content).join('') === 'forty-two', 'content is surfaced as text');
+    const usage = events.filter(e => e.type === 'usage');
+    assert(usage.length === 1 && usage[0].inputTokens === 1000 && usage[0].outputTokens === 12, 'usage is reported once with the request totals');
+    assert(usage[0].cacheReadTokens === 600, `the top-level cached_tokens is read as the cache hit (${usage[0].cacheReadTokens})`);
+
+    await drive('kimi-k2.6', 'off');
+    assert(JSON.stringify(seen[1].thinking) === '{"type":"disabled"}' && seen[1].reasoning_effort === undefined, 'K2.6 off → thinking disabled, no reasoning_effort');
+    await drive('kimi-k2.7-code', 'off');
+    assert(seen[2].thinking === undefined && seen[2].reasoning_effort === undefined, 'K2.7 Code gets neither, whatever was configured');
+    await drive('kimi-k3', undefined);
+    assert(seen[3].reasoning_effort === undefined, 'with nothing configured K3 is left at the platform default');
+  } finally {
+    server.close();
+  }
+}
+
+console.log('  -- Windows, prices and sight, from the pricing and model pages --');
+{
+  resetContextWindowCache();
+  assert(getContextWindow('kimi-k3', {}) === 1_048_576, 'K3 holds 1,048,576');
+  assert(getContextWindow('kimi-k2.7-code', {}) === 262_144 && getContextWindow('kimi-k2.6', {}) === 262_144, 'the K2.x line holds 262,144');
+  assert(getContextWindow('moonshotai/kimi-k3', {}) === 1_048_576, 'the routed id finds the same figure');
+  assert(resolveWindow('kimi-k3', {}).source === 'table', 'and says it came from the table');
+
+  const t = createTokenTracker();
+  t.add(1_000_000, 1_000_000, 0, 0);
+  assert(Math.abs(t.estimateCost('kimi-k3') - 18.0) < 1e-6, `K3: $3 in + $15 out per million (${t.estimateCost('kimi-k3')})`);
+  assert(Math.abs(t.estimateCost('kimi-k2.7-code') - 4.95) < 1e-6, `K2.7 Code: $0.95 + $4.00 (${t.estimateCost('kimi-k2.7-code')})`);
+  assert(Math.abs(t.estimateCost('kimi-k2.7-code-highspeed') - 9.90) < 1e-6, 'the high-speed variant is exactly double');
+  assert(Math.abs(t.estimateCost('kimi-k2.6') - 4.95) < 1e-6, 'K2.6: $0.95 + $4.00');
+  const hit = createTokenTracker(); hit.add(1_000_000, 0, 1_000_000, 0);
+  const miss = createTokenTracker(); miss.add(1_000_000, 0, 0, 0);
+  assert(Math.abs(hit.estimateCost('kimi-k3') / miss.estimateCost('kimi-k3') - 0.10) < 1e-9, 'a K3 cache hit bills at a tenth of a miss ($0.30 vs $3.00)');
+  assert(!t.isEstimated('kimi-k3', {}, 'kimi'), 'Kimi pricing is real, not a fallback');
+
+  assert(modelAccepts('kimi-k3', 'image') && modelAccepts('kimi-k2.6', 'image') && modelAccepts('kimi-k2.7-code', 'image'), 'the current models read images');
+  assert(modelAccepts('kimi-k3', 'video'), 'and video, per the vision guide');
+  assert(!modelAccepts('moonshot-v1-8k', 'image'), 'the retired line is text-only');
+}
+
+console.log('  -- Routing past a gateway that has said what it serves --');
+{
+  /*
+    Found live: `aico -m kimi-k3` with a Poolside endpoint active went to
+    Poolside, which lists two models and had told us so, and answered 404.
+    A Kimi instance derived from the environment key was there the whole time.
+  */
+  const prev = process.env.MOONSHOT_API_KEY;
+  try {
+    process.env.MOONSHOT_API_KEY = 'sk-test';
+    const poolside = { id: 'poolside', type: 'openai-compatible', name: 'Poolside', apiKey: 'k', baseUrl: 'https://inference.example/v1', models: ['poolside/laguna-s-2.1', 'poolside/laguna-xs-2.1'] };
+    const settings = { providerInstances: [poolside], activeProvider: 'poolside' };
+    assert(resolveInstance(settings, { model: 'kimi-k3' })?.type === 'kimi',
+      'a vendor id goes to its vendor when the active gateway has listed its models and this is not one');
+    assert(resolveInstance(settings, { model: 'poolside/laguna-s-2.1' })?.id === 'poolside',
+      'a model the gateway lists still goes to the gateway');
+    const silent = { providerInstances: [{ ...poolside, models: undefined }], activeProvider: 'poolside' };
+    assert(resolveInstance(silent, { model: 'kimi-k3' })?.id === 'poolside',
+      'a gateway that has said nothing about what it serves keeps its exemption — unchanged behaviour');
+    const listed = { providerInstances: [{ ...poolside, models: ['kimi-k3'] }], activeProvider: 'poolside' };
+    assert(resolveInstance(listed, { model: 'kimi-k3' })?.id === 'poolside',
+      'and a gateway that does list the model owns it outright, as before');
+  } finally {
+    if (prev === undefined) delete process.env.MOONSHOT_API_KEY; else process.env.MOONSHOT_API_KEY = prev;
+  }
 }
 
 console.log('\n' + '═'.repeat(50));

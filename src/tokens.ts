@@ -94,6 +94,15 @@ const COST_RATES: Array<{ match: string; rate: CostRate }> = [
   { match: 'glm-4.5-air',      rate: { input: 0.14, output: 0.56 } },
   { match: 'glm-4.5',          rate: { input: 0.60, output: 2.20, cacheRead: 0.183, cacheWrite: 1 } },
   { match: 'glm-',             rate: { input: 0.60, output: 2.20, cacheRead: 0.183, cacheWrite: 1 } },
+  // ── Moonshot Kimi (platform.kimi.ai/docs/pricing, read 2026-09-03; USD) ──
+  // `input` is the cache-MISS rate. Caching is automatic with no write
+  // premium, and the hit rate is published per model: K3 $0.30 against $3.00
+  // (0.10), K2.7 Code $0.19 against $0.95 (0.20), K2.6 $0.16 against $0.95
+  // (0.168). The high-speed K2.7 variant is exactly double across the board.
+  { match: 'kimi-k3',                    rate: { input: 3.00, output: 15.00, cacheRead: 0.10,  cacheWrite: 1 } },
+  { match: 'kimi-k2.7-code-highspeed',   rate: { input: 1.90, output: 8.00,  cacheRead: 0.20,  cacheWrite: 1 } },
+  { match: 'kimi-k2.7-code',             rate: { input: 0.95, output: 4.00,  cacheRead: 0.20,  cacheWrite: 1 } },
+  { match: 'kimi-k2.6',                  rate: { input: 0.95, output: 4.00,  cacheRead: 0.168, cacheWrite: 1 } },
   // ── Meta Llama (via OpenRouter) ──
   { match: 'llama',            rate: { input: 0.20, output: 0.60 } },
   // ── Local ──
