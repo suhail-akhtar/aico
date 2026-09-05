@@ -28,6 +28,16 @@ export function isDeepSeekPlatformModel(model: string): boolean {
   return /^deepseek-/i.test(model);
 }
 
+/**
+ * A Moonshot Kimi platform model id: `kimi-*`, or the retired `moonshot-v1-*`.
+ *
+ * Excludes the `moonshotai/…` form, which is OpenRouter's namespacing and
+ * would 404 on api.moonshot.ai.
+ */
+export function isKimiModel(model: string): boolean {
+  return /^(kimi-|moonshot-v)/i.test(model);
+}
+
 export function isOpenAIModel(model: string): boolean {
   return (
     model.startsWith('gpt-') ||
@@ -61,6 +71,7 @@ export function vendorForModel(model: string): ProviderType | null {
   if (model.startsWith('gemini-')) return 'gemini';
   if (/^glm-/i.test(model)) return 'zai';
   if (isDeepSeekPlatformModel(model)) return 'deepseek';
+  if (isKimiModel(model)) return 'kimi';
   return null;
 }
 

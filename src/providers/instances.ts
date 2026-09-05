@@ -32,6 +32,7 @@ import { isDirectVendor, vendorForModel } from './model-vendor.js';
 export type ProviderType =
   | 'openrouter'
   | 'deepseek'
+  | 'kimi'
   | 'anthropic'
   | 'openai'
   | 'gemini'
@@ -130,6 +131,15 @@ export const PROVIDER_TYPES: Record<ProviderType, ProviderTypeInfo> = {
     envVar: 'GEMINI_API_KEY',
     requiresKey: true,
     hint: 'Google AI Studio endpoint.',
+  },
+  kimi: {
+    type: 'kimi',
+    label: 'Moonshot Kimi',
+    defaultBaseUrl: 'https://api.moonshot.ai/v1',
+    defaultModel: 'kimi-k2.7-code',
+    envVar: 'MOONSHOT_API_KEY',
+    requiresKey: true,
+    hint: 'Kimi K3, K2.7 Code and K2.6, first-party. Reasoning comes back as its own channel and is replayed; caching is automatic.',
   },
   zai: {
     type: 'zai',
@@ -319,6 +329,25 @@ export function resolveInstance(
     // there is a guaranteed 404 on an id that vendor has never heard of. A
     // gateway is exempt: fronting other vendors is what it is for.
     if (configured && isDirectVendor(configured.type) && configured.type !== vendor) return owning;
+
+    /*
+      A gateway is exempt from that rule because fronting other vendors is what
+      it is for — but a gateway that has *told us what it serves* and did not
+      name this model is not fronting this one. `models` is filled by asking
+      the endpoint, so its absence from that list is the endpoint's own word.
+
+      Found with `aico -m kimi-k3` while a Poolside endpoint was the active
+      provider: Poolside lists exactly two models, neither of them Kimi's, and
+      the request went there anyway — "404 please check the model you
+      provided", from a server that had already said it did not have it, while
+      a Kimi instance derived from MOONSHOT_API_KEY sat unused. A gateway with
+      no list keeps the exemption: nothing is known about what it serves.
+    */
+    if (configured && !isDirectVendor(configured.type)
+        && (configured.models?.length ?? 0) > 0
+        && !configured.models!.includes(opts.model!)) {
+      return owning;
+    }
 
     // With no active choice, the vendor match beats positional order — but it
     // must not demote an instance somebody explicitly configured in favour of

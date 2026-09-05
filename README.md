@@ -3,7 +3,7 @@
 An **AI coding agent** for the terminal, a local web workspace and a native
 **VS Code** panel, with a durable session log at its core. Self-hosted and MIT
 licensed: **bring your own API key** for OpenAI, Anthropic, OpenRouter, Google
-Gemini, Z.AI (GLM) or DeepSeek — or run it entirely offline against a local
+Gemini, Moonshot Kimi, Z.AI (GLM) or DeepSeek — or run it entirely offline against a local
 **Ollama** model.
 
 It opens what it builds in a real browser before calling a turn done, keeps one
@@ -24,7 +24,7 @@ can measure its own skills against tasks with known answers.
 ❯ _
 ```
 
-**Status:** `0.9.1`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.10.0`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
@@ -43,7 +43,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.9.1 serve
+npx github:suhail-akhtar/aico#v0.10.0 serve
 ```
 
 ## Why this one
@@ -82,10 +82,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.9.1 serve
+npx github:suhail-akhtar/aico#v0.10.0 serve
 ```
 
-`#v0.9.1` is a tag, so it pins that release. `#release/v0.9` follows the 0.9
+`#v0.10.0` is a tag, so it pins that release. `#release/v0.10` follows the 0.10
 line as it gets fixes, and `#main` is the development trunk.
 
 To have `aico` on your `PATH` — which the VS Code extension needs — install it
@@ -93,7 +93,7 @@ globally from the same tag. aico is not on the npm registry; this builds from
 source and takes a minute the first time:
 
 ```sh
-npm install -g github:suhail-akhtar/aico#v0.9.1
+npm install -g github:suhail-akhtar/aico#v0.10.0
 ```
 
 From source:
@@ -128,6 +128,8 @@ aico --agent review -p "review my diff"
 | **Anthropic** | `ANTHROPIC_API_KEY` | Explicit `cache_control` for ~90% input savings |
 | **OpenRouter** | `OPENROUTER_API_KEY` | Routes any model; sticky session routing for cache warmth |
 | **Google Gemini** | `GEMINI_API_KEY` | Via the OpenAI-compatible endpoint |
+| **Moonshot Kimi** | `MOONSHOT_API_KEY` | Kimi K3, K2.7 Code, K2.6; reasoning replayed; automatic caching |
+| **DeepSeek** | `DEEPSEEK_API_KEY` | First-party V4; cache hits at ~1/50th of a miss |
 | **Z.AI (GLM)** | `ZAI_API_KEY` | Implicit caching; Coding Plan endpoint supported |
 | **Ollama** | *(none)* | Local, free, private |
 
@@ -531,7 +533,7 @@ is a million tokens, stop compacting" is an instruction it can carry out.
 ## Testing
 
 ```sh
-npm test           # 2,435 offline assertions, no API key needed
+npm test           # 2,495 offline assertions, no API key needed
 npm run test:live  # 93 live assertions per model — costs money
 npm run typecheck
 ```

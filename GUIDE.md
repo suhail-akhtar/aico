@@ -30,7 +30,8 @@ per-project workspace it keeps its own scratch files in — reports, logs, spill
 tool output. Your repository stays yours.
 
 **The model name decides the provider.** `aico -m glm-4.6` goes to Z.AI even if
-your default is OpenRouter. You do not have to switch anything first.
+your default is OpenRouter, and `aico -m kimi-k3` goes to Moonshot. You do not
+have to switch anything first.
 
 ```sh
 aico -p "why does the build fail on windows?"   # one question, no session

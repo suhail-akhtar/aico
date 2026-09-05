@@ -71,6 +71,13 @@ function resolveModel(model: string, settings?: { providers?: { openrouter?: { d
     'glm-52':     'glm-5.2',
     'glm-flash':  'glm-4.5-air',
     zai:          'glm-4.6',
+    // Moonshot Kimi aliases
+    kimi:         'kimi-k2.7-code',
+    'kimi-code':  'kimi-k2.7-code',
+    'kimi-fast':  'kimi-k2.7-code-highspeed',
+    k3:           'kimi-k3',
+    'kimi-k3':    'kimi-k3',
+    moonshot:     'kimi-k2.7-code',
   };
   // Strip z.ai/ prefix if present (Z.AI API expects bare model IDs)
   const resolved = aliases[model.toLowerCase()] ?? model;
@@ -107,6 +114,7 @@ function defaultModel(): string {
   if (process.env.ANTHROPIC_API_KEY)  return PROVIDER_DEFAULT_MODELS.anthropic;
   if (process.env.OPENAI_API_KEY)     return PROVIDER_DEFAULT_MODELS.openai;
   if (process.env.ZAI_API_KEY)        return PROVIDER_DEFAULT_MODELS.zai;
+  if (process.env.MOONSHOT_API_KEY)   return PROVIDER_DEFAULT_MODELS.kimi;
   if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) return PROVIDER_DEFAULT_MODELS.gemini;
   return PROVIDER_DEFAULT_MODELS.openrouter; // will error gracefully if no key
 }

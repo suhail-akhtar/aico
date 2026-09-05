@@ -123,6 +123,23 @@ export const DEEPSEEK_DIALECT: PromptDialect = {
 };
 
 /**
+ * Moonshot Kimi.
+ *
+ * The platform's prompt guide (platform.kimi.ai/docs/guide/prompt-best-practice,
+ * read 2026-09-03) asks for structural clarity through "delimiters (XML tags,
+ * triple quotes, section headings)" and step-by-step task sequences, and
+ * recommends nothing about repeating instructions. Markdown headings satisfy
+ * the first and match what the rest of the prompt already is; the reprise
+ * stays off because no source asks for it and it costs tokens on every turn.
+ */
+export const KIMI_DIALECT: PromptDialect = {
+  style: 'markdown',
+  repeatKeyInstructions: false,
+  rationale: 'Kimi\'s prompt guide asks for delimiters and section headings and says '
+    + 'nothing about repetition; Markdown headings meet the first without paying for the second.',
+};
+
+/**
  * Default for vendors with no published prompt-structure guidance.
  *
  * Z.AI and Ollama models publish nothing specific, so this picks the

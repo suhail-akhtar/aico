@@ -492,7 +492,7 @@ export interface ProviderTestResult {
 /** One configured provider, as the server reports it — never with a key. */
 export interface ProviderInstance {
   id: string;
-  type: 'openrouter' | 'deepseek' | 'anthropic' | 'openai' | 'gemini' | 'zai' | 'ollama' | 'openai-compatible';
+  type: 'openrouter' | 'deepseek' | 'kimi' | 'anthropic' | 'openai' | 'gemini' | 'zai' | 'ollama' | 'openai-compatible';
   name: string;
   apiKey?: string;
   baseUrl?: string;

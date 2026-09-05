@@ -313,3 +313,8 @@ export {
 export { windowFromCatalogue, clearContextWindow, noteWindowFromUsage, standardWindowAtLeast } from './context-window.js';
 export { aicoHome } from './home.js';
 export { executeContextWindow, contextWindowToolDefinition } from './tools/context-window.js';
+export {
+  KimiProvider, toKimiMessages, toKimiTools, reasoningFieldsFor, reasoningShapeFor,
+  KIMI_BASE_URL, KIMI_MODELS, KIMI_DEFAULT_MAX_OUTPUT_TOKENS,
+} from './providers/kimi.js';
+export { isKimiModel } from './providers/model-vendor.js';

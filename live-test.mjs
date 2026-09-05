@@ -31,6 +31,7 @@ import {
   describeSessionContext,
   selectProvider,
   requiresResponsesApi,
+  vendorForModel,
   Inbox,
 } from './dist-test/test-exports.js';
 
@@ -112,11 +113,25 @@ for (const model of MODELS) {
 
   // ── 1. Routing ─────────────────────────────────────────────────────
   section('1. Provider routing');
-  assert(requiresResponsesApi(model), `${model} is routed to the Responses API`);
+  /*
+    The suite was written for gpt-5.6 and asserted OpenAI's transport for
+    every model handed to it. Now it asserts what the id actually implies:
+    a Responses-API model must land on that transport; any other model must
+    land on the vendor its id names, which is the routing rule the product
+    documents ("the model name decides the provider").
+  */
   const provider = selectProvider(model, SETTINGS);
-  assert(provider.id === 'openai', 'Resolves to the OpenAI provider');
-  assert(provider.constructor.name === 'OpenAIResponsesProvider',
-    `Uses OpenAIResponsesProvider (got ${provider.constructor.name})`);
+  const expectedVendor = vendorForModel(model);
+  if (requiresResponsesApi(model)) {
+    assert(provider.id === 'openai', 'Resolves to the OpenAI provider');
+    assert(provider.constructor.name === 'OpenAIResponsesProvider',
+      `Uses OpenAIResponsesProvider (got ${provider.constructor.name})`);
+  } else if (expectedVendor) {
+    assert(provider.id === expectedVendor, `Resolves to the vendor the id names (${expectedVendor}; got ${provider.id})`);
+    assert(provider.constructor.name !== 'OpenAIResponsesProvider', 'and not to the Responses API, which is OpenAI\'s');
+  } else {
+    console.log(`    · ${model} names no vendor outright; routed to ${provider.id}`);
+  }
   const ctx = getContextWindow(model, SETTINGS);
   assert(ctx >= 128_000, `Context window resolves to a sane value (${ctx.toLocaleString()})`);
 
@@ -233,7 +248,15 @@ for (const model of MODELS) {
     const s = freshSession();
     const tiny = selectProvider(model, {
       ...SETTINGS,
-      providers: { openai: { reasoningEffort: 'none', maxOutputTokens: 16 } },
+      // The ceiling in every family's own setting, so the check is about the
+      // engine's handling of a truncated step and not about which vendor is on.
+      providers: {
+        openai: { reasoningEffort: 'none', maxOutputTokens: 16 },
+        deepseek: { thinking: 'off', maxOutputTokens: 16 },
+        kimi: { thinking: 'off', maxOutputTokens: 16 },
+        anthropic: { thinking: 'off', maxTokens: 16 },
+        zai: { maxTokens: 16 },
+      },
     });
     const out = await run(model, 'Write a 500 word essay about the sea.', s, { provider: tiny });
     const sh = shape(s);

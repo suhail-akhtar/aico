@@ -145,11 +145,33 @@ body {
   color: var(--muted); background: var(--hover);
   padding: .1rem .35rem; border-radius: 4px;
 }
-.site-nav { display: flex; align-items: center; gap: .25rem; margin-left: auto; }
+/*
+  Nine links and a toggle. From about 820px down the multi-word ones ("VS Code",
+  "Mini Apps") used to break inside themselves onto two lines, and below 700px
+  the row ran past the viewport and the whole page scrolled sideways. So: a link
+  never wraps internally; the row wraps onto a tidy second line while there is
+  room for that; and on a phone it becomes one scrollable strip, which is what
+  every documentation site does with a nav this wide.
+*/
+.site-header .inner { flex-wrap: wrap; row-gap: .35rem; }
+.site-nav {
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end;
+  gap: .25rem; row-gap: .1rem; margin-left: auto; min-width: 0;
+}
 .site-nav a {
   padding: .35rem .6rem; border-radius: var(--radius-sm);
   font-size: .875rem; color: var(--text-2); text-decoration: none;
+  white-space: nowrap;
   transition: background .12s, color .12s;
+}
+@media (max-width: 700px) {
+  .site-nav {
+    flex: 1 0 100%; flex-wrap: nowrap; justify-content: flex-start; margin-left: 0;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; padding-bottom: .1rem;
+  }
+  .site-nav::-webkit-scrollbar { display: none; }
+  .site-nav .theme-toggle { flex: 0 0 auto; }
 }
 .site-nav a:hover { background: var(--hover); color: var(--text); }
 .site-nav a[aria-current='page'] { color: var(--text); font-weight: 550; }

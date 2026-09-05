@@ -179,6 +179,30 @@ const TABLE: TableEntry[] = [
     checked: 'DeepSeek thinking-mode guide, 2026-09',
   },
 
+  // ── Moonshot Kimi ────────────────────────────────────
+  // Three models, three shapes. K3 takes a top-level `reasoning_effort` of
+  // low/high/max, default max, and has no off. K2.7 Code thinks always and
+  // accepts no control at all — one rung, so the picker shows what is true.
+  // K2.6 is a switch: `thinking: {type: 'enabled' | 'disabled'}`.
+  {
+    match: /^kimi-k3/i,
+    levels: ['low', 'high', 'max'],
+    fallback: 'max',
+    checked: 'Kimi model parameter reference and reasoning-effort guide, 2026-09',
+  },
+  {
+    match: /^kimi-k2\.7/i,
+    levels: ['high'],
+    fallback: 'high',
+    checked: 'Kimi model parameter reference, 2026-09',
+  },
+  {
+    match: /^kimi-k2/i,
+    levels: ['off', 'high'],
+    fallback: 'high',
+    checked: 'Kimi thinking-models guide, 2026-09',
+  },
+
   // ── Z.AI ─────────────────────────────────────────────────────────
   // `thinking: {type: 'enabled' | 'disabled'}` — a switch, not a ladder. Listed
   // as two levels rather than pretending to five, so a picker offers what is

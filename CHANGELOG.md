@@ -3,9 +3,24 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.10.0 — 2026-09-03
 
 ### Added
+
+- **Moonshot Kimi, as a provider of its own.** Kimi K3 (1M context), K2.7 Code
+  (256K, the default) and K2.6, on `api.moonshot.ai`, in the CLI, the web
+  client and the VS Code panel. Built from the platform's documentation rather
+  than the OpenAI-compatible shim, for the same three reasons DeepSeek was:
+  the chain of thought arrives as `reasoning_content` and the docs require it
+  replayed on every historical assistant message; reasoning is controlled
+  differently per model (`reasoning_effort` on K3, a `thinking` switch on
+  K2.6, nothing on K2.7 Code which always thinks) and the effort picker offers
+  each model only the rungs it has; and cache hits arrive as a top-level
+  `cached_tokens` at a published fraction of the miss price. Temperature and
+  `top_p` are never sent — the platform fixes them. Context windows are read
+  from the platform's model list, which reports `context_length`. Set
+  `MOONSHOT_API_KEY` (or `KIMI_API_KEY`), or add it under Settings →
+  Providers; `aico -m kimi-k3` routes there on the model name alone.
 
 - **The window learns from use, and the model can read and correct it.** A
   prompt the model just accepted is proof of the window it has, and until now

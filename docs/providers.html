@@ -4,21 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bring your own API key — Claude, GPT, Gemini, Ollama | aico</title>
-<meta name="description" content="Run the aico coding agent on OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, or a local Ollama model. BYOK, prompt caching, and spending limits you set.">
+<meta name="description" content="Run the aico coding agent on OpenAI, Anthropic, OpenRouter, Google Gemini, Moonshot Kimi, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, or a local Ollama model. BYOK, prompt caching, and spending limits you set.">
 <!-- seo:start -->
 <link rel="canonical" href="https://suhail-akhtar.github.io/aico/providers.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="aico">
 <meta property="og:url" content="https://suhail-akhtar.github.io/aico/providers.html">
 <meta property="og:title" content="Bring your own API key — Claude, GPT, Gemini, Ollama | aico">
-<meta property="og:description" content="Run the aico coding agent on OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, or a local Ollama model. BYOK, prompt caching, and spending limits you set.">
+<meta property="og:description" content="Run the aico coding agent on OpenAI, Anthropic, OpenRouter, Google Gemini, Moonshot Kimi, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, or a local Ollama model. BYOK, prompt caching, and spending limits you set.">
 <meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Bring your own API key — Claude, GPT, Gemini, Ollama | aico">
-<meta name="twitter:description" content="Run the aico coding agent on OpenAI, Anthropic, OpenRouter, Google Gemini, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, or a local Ollama model. BYOK, prompt caching, and spending limits you set.">
+<meta name="twitter:description" content="Run the aico coding agent on OpenAI, Anthropic, OpenRouter, Google Gemini, Moonshot Kimi, Z.AI GLM, DeepSeek, any OpenAI-compatible endpoint, or a local Ollama model. BYOK, prompt caching, and spending limits you set.">
 <meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <!-- seo:end -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.9.1</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.10.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html" aria-current="page">Providers</a>
@@ -51,7 +51,7 @@
   <div class="prose">
     <h1>Providers &amp; models</h1>
     <p class="lede">
-      Six providers behind one streaming interface. You keep your keys, you pick the
+      Eight providers behind one streaming interface. You keep your keys, you pick the
       model, and nothing is proxied through anyone else.
     </p>
 
@@ -63,6 +63,8 @@
           <tr><td><strong>Anthropic</strong></td><td><code>ANTHROPIC_API_KEY</code></td><td>Explicit <code>cache_control</code> for ~90% input savings</td></tr>
           <tr><td><strong>OpenRouter</strong></td><td><code>OPENROUTER_API_KEY</code></td><td>Routes any model; sticky session routing keeps the cache warm</td></tr>
           <tr><td><strong>Google Gemini</strong></td><td><code>GEMINI_API_KEY</code></td><td>Via the OpenAI-compatible endpoint</td></tr>
+          <tr><td><strong>Moonshot Kimi</strong></td><td><code>MOONSHOT_API_KEY</code></td><td>Kimi K3, K2.7 Code, K2.6; reasoning replayed as <code>reasoning_content</code>; automatic caching</td></tr>
+          <tr><td><strong>DeepSeek</strong></td><td><code>DEEPSEEK_API_KEY</code></td><td>First-party V4; cache hits at ~1/50th of a miss</td></tr>
           <tr><td><strong>Z.AI (GLM)</strong></td><td><code>ZAI_API_KEY</code></td><td>Implicit caching; Coding Plan endpoint supported</td></tr>
           <tr><td><strong>Ollama</strong></td><td><em>none</em></td><td>Local, free, private</td></tr>
         </tbody>
@@ -73,6 +75,20 @@
       The <strong>model name decides the provider</strong>, overriding any configured
       default. <code>aico -m glm-4.6</code> goes to Z.AI even if your default is
       OpenRouter — so switching model never means also remembering to switch provider.
+    </p>
+
+    <h2 id="kimi">Moonshot Kimi</h2>
+    <p>
+      Three models, read from Moonshot's own documentation: <code>kimi-k3</code>
+      (1M context, the flagship), <code>kimi-k2.7-code</code> (256K, the coding model
+      and aico's default for this provider) and <code>kimi-k2.6</code> (256K, general).
+      Every one of them reasons, and the chain of thought comes back as its own
+      channel — aico shows it, and sends it back on later turns as the platform asks.
+      Reasoning is controlled the way each model wants: an effort level on K3, an
+      on/off switch on K2.6, and nothing at all on K2.7 Code, which thinks always.
+      Caching is automatic and the cache-hit price is a tenth to a sixth of a miss,
+      so the cost meter uses the published rates rather than a guess. Temperature is
+      never sent; the platform fixes it.
     </p>
 
     <h2 id="keys">Where to put your key</h2>

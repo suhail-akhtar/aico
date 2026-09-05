@@ -114,6 +114,23 @@ export interface AicoSettings {
        */
       maxTokens?: number;
     };
+    kimi?: {
+      apiKey?: string;
+      baseUrl?: string;
+      defaultModel?: string;
+      /**
+       * Reasoning depth when a run does not choose one. Unset takes the
+       * platform default (K3: `max`; K2.x: thinking on). `off` disables
+       * thinking on K2.6; K3 has no off and K2.7 Code cannot be switched off,
+       * so on those it steps to the nearest rung the model has.
+       */
+      thinking?: 'low' | 'high' | 'max' | 'off';
+      /**
+       * Output ceiling per step. Reasoning and answer share it — the platform
+       * recommends at least 16,000 for complex reasoning. Default: 32000.
+       */
+      maxOutputTokens?: number;
+    };
     ollama?:     { baseUrl?: string; defaultModel?: string };
   };
 
@@ -671,6 +688,7 @@ export async function loadSettings(): Promise<AicoSettings> {
   if (p?.openai?.apiKey     && !process.env.OPENAI_API_KEY)     process.env.OPENAI_API_KEY     = p.openai.apiKey;
   if (p?.gemini?.apiKey     && !process.env.GEMINI_API_KEY)     process.env.GEMINI_API_KEY     = p.gemini.apiKey;
   if (p?.zai?.apiKey        && !process.env.ZAI_API_KEY)        process.env.ZAI_API_KEY        = p.zai.apiKey;
+  if (p?.kimi?.apiKey       && !process.env.MOONSHOT_API_KEY)   process.env.MOONSHOT_API_KEY   = p.kimi.apiKey;
 
   return merged;
 }
