@@ -39,6 +39,7 @@ import {
   resolveWindow, isStale, learnWindowFromError,
   windowFromCatalogue, clearContextWindow, setContextWindow, detectContextWindow,
   noteWindowFromUsage, standardWindowAtLeast, aicoHome, executeContextWindow, toolDefinitions,
+  pickNamingModel, watchMemoryFile, stopMemoryWatcher,
   resolveToolSet, HOST_TOOLS, hostToolsFrom, isHostTool,
   grade, runCheck, hashFiles, corpusFor, BUILTIN_CORPUS, splitOf, assignSplits, cacheKey,
   describeCorpus, startEval, startOptimize, getJob, cancelJob, adoptCandidate,
@@ -8590,6 +8591,12 @@ console.log('\n══ A SHELL THAT REMEMBERS ══');
 }
 
 console.log('\n══ NO TOOL RUNS FOREVER ══');
+// `withTimeout` unrefs its deadline on purpose - a hung tool must never pin a
+// process - so with nothing else alive these awaits would end the harness
+// mid-section ("unsettled top-level await"). They used to be held up by a
+// memory-file watcher that is no longer persistent; hold the loop open here
+// instead, honestly, for the length of the section.
+const keepAliveForAbandonedTools = setInterval(() => {}, 1_000);
 
 {
   // The hang was fixed in Bash, but the fault was never really about Bash. Any
@@ -11988,6 +11995,35 @@ console.log('  -- Routing past a gateway that has said what it serves --');
     if (prev === undefined) delete process.env.MOONSHOT_API_KEY; else process.env.MOONSHOT_API_KEY = prev;
   }
 }
+
+console.log('  -- Naming a Kimi conversation does not think at maximum effort --');
+{
+  assert(pickNamingModel({}, 'kimi-k3') === 'kimi-k2.6', 'a K3 conversation is named by K2.6, the cheapest Kimi');
+  assert(pickNamingModel({}, 'kimi-k2.7-code') === 'kimi-k2.6', 'so is a K2.7 Code one');
+  assert(pickNamingModel({}, 'moonshotai/kimi-k3') === 'deepseek/deepseek-v4-flash',
+    'a routed Kimi id is named through the router, as every routed id is');
+}
+
+console.log('  -- A memory watcher never keeps a one-shot process alive --');
+{
+  /*
+    Found with `aico -p` in any directory holding an AICO.md: the answer was
+    printed and the process sat there until killed. The cache-invalidation
+    watcher on that file was persistent, and it was the last handle standing.
+    `_getActiveHandles` lists only handles that hold the loop open, so a
+    non-persistent watcher must be absent from it.
+  */
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-watch-'));
+  const file = path.join(dir, 'AICO.md');
+  fs.writeFileSync(file, '# memory\n');
+  watchMemoryFile(file);
+  const pinned = (process._getActiveHandles?.() ?? []).filter(h => h?.constructor?.name === 'FSWatcher');
+  assert(pinned.length === 0, `the watcher holds no reference on the event loop (${pinned.length} pinned)`);
+  stopMemoryWatcher();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+clearInterval(keepAliveForAbandonedTools);
+
 
 console.log('\n' + '═'.repeat(50));
 console.log(`  RESULTS: ${passed} passed, ${failed} failed`);

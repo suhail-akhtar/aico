@@ -3,6 +3,23 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Fixed
+
+- **`aico -p` never exited in a directory holding an AICO.md or CLAUDE.md.**
+  The answer was printed and the process sat there until killed. The watcher
+  that invalidates the memory cache when such a file changes was persistent,
+  so it was the last thing holding the event loop open once every other
+  handle had drained. It no longer pins the process; the REPL and the server
+  stay alive through their own listeners, as they always did. Found while
+  timing one-shot runs against Kimi, and older than Kimi by a month.
+
+- **A Kimi conversation was named by its own work model.** Session naming
+  picks the cheapest model in the same family with reasoning off; Kimi had no
+  entry, so a K3 conversation was named by K3 at maximum effort for a
+  six-word label. K2.6 with thinking off does it now.
+
 ## 0.10.0 — 2026-09-03
 
 ### Added

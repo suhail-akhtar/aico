@@ -36,6 +36,11 @@ const NAMING_MODELS: Record<string, string> = {
   openrouter: 'deepseek/deepseek-v4-flash',
   gemini: 'gemini-2.0-flash',
   zai: 'glm-4.6',
+  // K2.6 is the cheapest Kimi and the only one whose thinking can be switched
+  // off, which `withoutReasoning` does below. Without this row a Kimi
+  // conversation was named by its own work model — kimi-k3 at maximum effort,
+  // for a six-word label.
+  kimi: 'kimi-k2.6',
 };
 
 /**
@@ -52,6 +57,7 @@ const MODEL_BRANDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^(deepseek\/)?deepseek/i, 'deepseek'],
   [/^(google\/)?gemini/i, 'gemini'],
   [/^(z-ai\/|zai\/)?glm/i, 'zai'],
+  [/^(moonshotai\/)?kimi/i, 'kimi'],
 ];
 
 /** How long the naming call may take before it is abandoned. */
@@ -193,6 +199,7 @@ function withoutReasoning(settings: AicoSettings): AicoSettings {
       ...providers,
       anthropic: { ...providers.anthropic, thinking: 'off' },
       deepseek: { ...providers.deepseek, thinking: 'off' },
+      kimi: { ...providers.kimi, thinking: 'off' },
       openai: { ...providers.openai, reasoningEffort: 'none' },
     } as AicoSettings['providers'],
   };
