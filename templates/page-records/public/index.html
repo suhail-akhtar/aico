@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>__APP_TITLE__</title>
+  <link rel="stylesheet" href="/_aico/aico.css">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/_aico/aico.js"></script>
+  <script defer src="/_aico/alpine.js"></script>
+</head>
+<body>
+  <div x-data="resource('records', {
+        orderBy: 'created_at', direction: 'desc',
+        blank: { title: '', amount: 0, status: 'open', notes: '' },
+        validate(row) {
+          const e = {};
+          if (!row.title || !row.title.trim()) e.title = 'Give it a name.';
+          if (!(Number(row.amount) >= 0)) e.amount = 'Zero or more.';
+          return e;
+        },
+      })" x-cloak>
+
+    <header class="app-header">
+      <h1 class="app-title">__APP_TITLE__</h1>
+      <div class="spacer"></div>
+      <button class="btn btn-primary" @click="startCreate()">New record</button>
+    </header>
+
+    <main class="app-main stack">
+
+      <!-- Lead with the answer -->
+      <section class="summary">
+        <div class="stat">
+          <div class="label">Open</div>
+          <div class="value num" x-text="rows.filter(r => r.status === 'open').length"></div>
+        </div>
+        <div class="stat">
+          <div class="label">Open amount</div>
+          <div class="value num" x-text="aico.money(rows.filter(r => r.status === 'open').reduce((s, r) => s + Number(r.amount || 0), 0))"></div>
+        </div>
+        <div class="stat">
+          <div class="label">Done</div>
+          <div class="value num" x-text="rows.filter(r => r.status === 'done').length"></div>
+        </div>
+      </section>
+
+      <template x-if="loadError">
+        <div class="alert bad" x-text="loadError"></div>
+      </template>
+
+      <section class="card">
+        <div class="card-head">
+          <strong>Records</strong>
+          <span class="muted" x-text="rows.length === 1 ? '1 record' : rows.length + ' records'"></span>
+        </div>
+        <div class="card-body flush">
+          <template x-if="loading && rows.length === 0">
+            <div class="skeleton" style="height: 120px"></div>
+          </template>
+          <template x-if="!loading && rows.length === 0">
+            <div class="empty">No records yet. <button class="btn btn-sm" @click="startCreate()">Create the first one</button></div>
+          </template>
+          <div class="table-wrap" x-show="rows.length > 0">
+            <table class="table">
+              <thead>
+                <tr><th>Title</th><th class="num">Amount</th><th>Status</th><th>Created</th><th></th></tr>
+              </thead>
+              <tbody>
+                <template x-for="row in rows" :key="row.id">
+                  <tr>
+                    <td>
+                      <div x-text="row.title"></div>
+                      <div class="faint" x-show="row.notes" x-text="row.notes"></div>
+                    </td>
+                    <td class="num" x-text="aico.money(row.amount)"></td>
+                    <td>
+                      <span class="pill" :class="{ good: row.status === 'done', warn: row.status === 'open', bad: row.status === 'cancelled' }" x-text="row.status"></span>
+                    </td>
+                    <td class="muted" x-text="aico.date(row.created_at)"></td>
+                    <td class="actions">
+                      <button class="btn btn-sm btn-ghost" x-show="row.status === 'open'" @click="form = { ...row, status: 'done' }; save()">Done</button>
+                      <button class="btn btn-sm" @click="startEdit(row)">Edit</button>
+                      <button class="btn btn-sm btn-danger" @click="askRemove(row)">Delete</button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Create / edit -->
+    <div class="backdrop" x-show="isEditing" @keydown.escape.window="cancel()" x-cloak>
+      <form class="dialog" @submit.prevent="save()">
+        <div class="dialog-head" x-text="form.id ? 'Edit record' : 'New record'"></div>
+        <div class="dialog-body stack">
+          <div class="field" :class="{ invalid: errors.title }">
+            <label for="f-title">Title</label>
+            <input id="f-title" class="input" x-model="form.title" autofocus>
+            <div class="error" x-text="errors.title"></div>
+          </div>
+          <div class="row">
+            <div class="field" :class="{ invalid: errors.amount }">
+              <label for="f-amount">Amount</label>
+              <input id="f-amount" class="input num" type="number" min="0" step="0.01" x-model.number="form.amount">
+              <div class="error" x-text="errors.amount"></div>
+            </div>
+            <div class="field">
+              <label for="f-status">Status</label>
+              <select id="f-status" class="select" x-model="form.status">
+                <option value="open">open</option>
+                <option value="done">done</option>
+                <option value="cancelled">cancelled</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="f-notes">Notes</label>
+            <textarea id="f-notes" class="textarea" rows="3" x-model="form.notes"></textarea>
+          </div>
+        </div>
+        <div class="dialog-foot">
+          <button type="button" class="btn btn-ghost" @click="cancel()">Cancel</button>
+          <button type="submit" class="btn btn-primary" :disabled="saving" x-text="saving ? 'Saving…' : 'Save'"></button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Two-step delete -->
+    <div class="backdrop" x-show="pendingDelete" @keydown.escape.window="cancelRemove()" x-cloak>
+      <div class="dialog">
+        <div class="dialog-head">Delete this record?</div>
+        <div class="dialog-body">
+          <p><strong x-text="pendingDelete && pendingDelete.title"></strong> will be removed. This cannot be undone.</p>
+        </div>
+        <div class="dialog-foot">
+          <button class="btn btn-ghost" @click="cancelRemove()">Keep it</button>
+          <button class="btn btn-danger" @click="confirmRemove()">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

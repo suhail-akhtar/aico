@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* Design tokens. Components use these through Tailwind's theme, never raw hex. */
+@theme {
+  --color-brand: #2f5df6;
+  --color-brand-ink: #ffffff;
+  --color-ink: #16181d;
+  --color-ink-muted: #5b6270;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f5f7fb;
+  --color-line: #e2e6ee;
+  --color-danger: #b42318;
+  --radius-card: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-ink: #eef1f6;
+    --color-ink-muted: #a3abba;
+    --color-surface: #0f1116;
+    --color-surface-alt: #171a21;
+    --color-line: #2a2f3a;
+  }
+}
+
+body {
+  @apply bg-surface text-ink antialiased;
+}
+
+/* Small component layer: the handful of shapes every page reuses. */
+.btn { @apply inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold bg-brand text-brand-ink hover:brightness-110 disabled:opacity-60; }
+.btn-ghost { @apply bg-transparent text-brand border border-line hover:bg-surface-alt; }
+.btn-danger { @apply bg-transparent text-danger border border-line hover:bg-surface-alt; }
+.btn-sm { @apply px-3 py-1 text-xs; }
+.input { @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand; }
+.label { @apply block text-sm font-semibold mb-1; }
+.field-error { @apply text-danger text-sm mt-1; }
+.card { @apply rounded-card border border-line bg-surface p-6; }

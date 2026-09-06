@@ -340,14 +340,14 @@ export const PANES: Pane[] = [
         ],
       },
       {
-        title: 'Mini Apps',
+        title: 'Apps',
         hint: 'Single-page apps the agent builds, each with its own SQLite database, served from a '
           + 'second local port. The separate port is the security boundary — it is what keeps a '
           + 'generated page from reaching the API that runs shell commands. Takes effect on restart.',
         fields: [
           {
             path: 'miniApps.enabled',
-            label: 'Enable Mini Apps',
+            label: 'Enable Apps',
             hint: 'Off by default: this is the one feature that opens a listening socket of its own.',
             kind: 'toggle',
             fallback: false,

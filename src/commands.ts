@@ -7,7 +7,6 @@ import path from 'path';
 import fs from 'fs';
 import { runHooks } from './hooks.js';
 import { getProjectLocalSettingsPath, getSettingsAudit, saveProjectSettingsPatch, type AicoSettings } from './settings.js';
-import { handleStudio } from './studio/index.js';
 import { skillRegistry } from './skills/index.js';
 import { subscribeToBackgroundAgents, cancelBackgroundAgent, getBackgroundAgents } from './background/index.js';
 import { worktreeManager } from './worktree/index.js';
@@ -34,7 +33,9 @@ import {
 } from './session/index.js';
 import { toolDefinitions } from './tools/index.js';
 import { mcpRegistry } from './mcp/registry.js';
-import { buildAgentChatPrompt, buildTeamPrompt } from './agents/prompts.js';
+import { buildAgentChatPrompt } from './agents/prompts.js';
+import { executeAppManage } from './tools/manage-miniapps.js';
+import { renderCatalogue } from './apps/templates.js';
 import { createAgentSpec, deleteProjectAgentSpec, formatAgentList, getAgentSpec, listAgentSpecs, updateProjectAgentSpec } from './agents/registry.js';
 import { getAgentRegistry } from './tools/task.js';
 import {
@@ -77,15 +78,6 @@ export interface CommandResult {
   newTokenCount?: number;
   /** If set, the caller should send this as a user message to the agent */
   sendAsPrompt?: string;
-  /**
-   * If set, the caller should run the deterministic studio pipeline directly
-   * (instead of sending sendAsPrompt to runAgent). The caller supplies the
-   * runtime adapter (runTask/askUser/abortSignal) and appends the resulting
-   * summary to conversation history.
-   */
-  runStudioPipeline?: {
-    projectDir: string;
-  };
 }
 
 const HELP_TEXT = `
@@ -102,8 +94,9 @@ Available slash commands:
   /config                  Show/edit provider, model, workspace, MCP, hooks, cron
   /review [scope]          Professional evidence-based code review (diff, file, or branch)
   /verify [scope]          Adversarial verification — a critic that tries to break the code
-  /studio <req>            Autonomous end-to-end SDLC (PRD → code → tests → docs)
-  /scaffold <req>          Generate a full-stack project from requirements
+  /app templates [brief]   Templates an app can start from (★ = suggested by the brief)
+  /app new <tpl> "<name>"  Create an app from a template; --brief "<what it does>" starts the build
+  /app list|start|stop     Your apps; run or stop a process app
   /security-audit          Run defensive security analysis on the codebase
   /memory                  Show all loaded memory file contents
   /memory add <text>       Append text to project AICO.md
@@ -120,7 +113,6 @@ Available slash commands:
   /agents skills <n> <csv> Set skills on a project custom agent
   /agent-create <n> <role> Create a reusable custom agent
   /agent <name> <task>     Chat with a specialist agent
-  /team <requirements>     Run Product Owner-led agent team orchestration
   /mcp                     List loaded MCP servers
   /mcp-add playwright      Add Playwright browser automation MCP preset
   /mcp-add <name> -- <cmd> Add a stdio MCP server command
@@ -276,404 +268,104 @@ function mcpSecurityReport(settings: AicoSettings | undefined): string {
   return lines.join('\n');
 }
 
-// ── /scaffold — Full-stack project generator ────────────────────────
+// ── /app — Apps: templates, create, run ─────────────────────────────
 
-const SCAFFOLD_STACKS = new Set(['nextjs', 'vite-react', 'vite-vue', 'vite-angular', 'mern', 'mean']);
-const SCAFFOLD_DBS = new Set(['mariadb', 'mysql', 'postgresql', 'postgres', 'mongodb', 'mongo', 'sqlite']);
-const SCAFFOLD_UIS = new Set(['shadcn', 'tailwind', 'bootstrap']);
-const MAX_SCAFFOLD_REQUIREMENTS_FILE = 200_000;
-
-function tokenizeScaffoldArgs(args: string): string[] {
-  const tokens: string[] = [];
-  let current = '';
+/** Split a command line into words, honouring double and single quotes. */
+function splitArgs(args: string): string[] {
+  const out: string[] = [];
+  let cur = '';
   let quote: '"' | "'" | null = null;
-  let escaped = false;
-
-  for (let i = 0; i < args.length; i++) {
-    const ch = args[i];
-    if (escaped) {
-      current += ch;
-      escaped = false;
+  let has = false;
+  for (const ch of args) {
+    if (quote) {
+      if (ch === quote) quote = null; else cur += ch;
       continue;
     }
-    if (ch === '\\' && quote === '"' && (args[i + 1] === '"' || args[i + 1] === '\\')) {
-      escaped = true;
-      continue;
-    }
-    if ((ch === '"' || ch === "'") && !quote) {
-      quote = ch;
-      continue;
-    }
-    if (quote === ch) {
-      quote = null;
-      continue;
-    }
-    if (!quote && /\s/.test(ch)) {
-      if (current) {
-        tokens.push(current);
-        current = '';
-      }
-      continue;
-    }
-    current += ch;
+    if (ch === '"' || ch === "'") { quote = ch; has = true; continue; }
+    if (/\s/.test(ch)) { if (cur || has) { out.push(cur); cur = ''; has = false; } continue; }
+    cur += ch;
   }
-
-  if (quote) throw new Error(`Unclosed quote in /scaffold arguments`);
-  if (current) tokens.push(current);
-  return tokens;
+  if (cur || has) out.push(cur);
+  return out;
 }
 
-function takeFlagValue(tokens: string[], index: number, flag: string): { value: string; nextIndex: number } {
-  const eq = tokens[index].indexOf('=');
-  if (eq !== -1) {
-    const value = tokens[index].slice(eq + 1);
-    if (!value) throw new Error(`Flag ${flag} requires a value`);
-    return { value, nextIndex: index + 1 };
-  }
-  const value = tokens[index + 1];
-  if (!value || value.startsWith('--')) throw new Error(`Flag ${flag} requires a value`);
-  return { value, nextIndex: index + 2 };
-}
+const APP_USAGE = [
+  'Usage:',
+  '  /app templates [brief]              what an app can start from (★ = suggested by the brief)',
+  '  /app new <template> "<name>" [--description "<one line>"] [--brief "<what it should do>"]',
+  '  /app list                           your apps, their kind and state',
+  '  /app start|stop|status <name>       run, stop or inspect a process app',
+  '  /app describe|tables|delete <name>',
+  '',
+  'Examples:',
+  '  /app templates a SaaS with accounts and billing',
+  '  /app new web-saas-next "Invoice Desk" --brief "Invoices with customers, line items and PDF export"',
+  '  /app new page-records "Reading Log"',
+].join('\n');
 
-function normalizeScaffoldDb(db: string | undefined): string | undefined {
-  if (!db) return undefined;
-  if (db === 'postgres') return 'postgresql';
-  if (db === 'mongo') return 'mongodb';
-  return db;
-}
-
-function parseScaffoldArgs(args: string): {
-  requirements: string;
-  filePath?: string;
-  outputDir?: string;
-  stack?: string;
-  db?: string;
-  ui?: string;
-  docker?: boolean;
-} {
-  let requirements = args;
-  let filePath: string | undefined;
-  let outputDir: string | undefined;
-  let stack: string | undefined;
-  let db: string | undefined;
-  let ui: string | undefined;
-  let docker = false;
-
-  const requirementTokens: string[] = [];
-  const tokens = tokenizeScaffoldArgs(args);
-
-  for (let i = 0; i < tokens.length;) {
-    const token = tokens[i];
-    const [flagName] = token.split('=', 1);
-    switch (flagName) {
-      case '--file': {
-        const r = takeFlagValue(tokens, i, '--file');
-        filePath = r.value;
-        i = r.nextIndex;
-        break;
-      }
-      case '--dir': {
-        const r = takeFlagValue(tokens, i, '--dir');
-        outputDir = r.value;
-        i = r.nextIndex;
-        break;
-      }
-      case '--stack': {
-        const r = takeFlagValue(tokens, i, '--stack');
-        stack = r.value.toLowerCase();
-        i = r.nextIndex;
-        break;
-      }
-      case '--db': {
-        const r = takeFlagValue(tokens, i, '--db');
-        db = normalizeScaffoldDb(r.value.toLowerCase());
-        i = r.nextIndex;
-        break;
-      }
-      case '--ui': {
-        const r = takeFlagValue(tokens, i, '--ui');
-        ui = r.value.toLowerCase();
-        i = r.nextIndex;
-        break;
-      }
-      case '--docker':
-        docker = true;
-        i++;
-        break;
-      case '--no-docker':
-        docker = false;
-        i++;
-        break;
-      default:
-        if (token.startsWith('--')) {
-          throw new Error(`Unknown /scaffold flag: ${flagName}`);
-        }
-        requirementTokens.push(token);
-        i++;
-    }
-  }
-
-  requirements = requirementTokens.join(' ').trim();
-
-  if (stack && !SCAFFOLD_STACKS.has(stack)) {
-    throw new Error(`Unsupported stack "${stack}". Use: ${Array.from(SCAFFOLD_STACKS).join(', ')}`);
-  }
-  if (db && !SCAFFOLD_DBS.has(db)) {
-    throw new Error(`Unsupported database "${db}". Use: mariadb, mysql, postgresql, mongodb, sqlite`);
-  }
-  if (ui && !SCAFFOLD_UIS.has(ui)) {
-    throw new Error(`Unsupported UI "${ui}". Use: ${Array.from(SCAFFOLD_UIS).join(', ')}`);
-  }
-
-  return { requirements, filePath, outputDir, stack, db, ui, docker };
-}
-
-async function readScaffoldRequirementsFile(filePath: string): Promise<string> {
-  const abs = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
-  const info = await statAsync(abs);
-  if (!info.isFile()) throw new Error('path is not a file');
-  if (info.size > MAX_SCAFFOLD_REQUIREMENTS_FILE) {
-    throw new Error(`file is too large (${Math.round(info.size / 1024)}KB, max ${Math.round(MAX_SCAFFOLD_REQUIREMENTS_FILE / 1024)}KB)`);
-  }
-
-  const buf = await readFileAsync(abs);
-  if (buf.includes(0)) throw new Error('file appears to be binary');
-  return buf.toString('utf8');
-}
-
-function buildScaffoldPrompt(opts: {
-  requirements: string;
-  fileContent?: string;
-  outputDir: string;
-  stack?: string;
-  db?: string;
-  ui?: string;
-  docker: boolean;
-}): string {
-  const { requirements, fileContent, outputDir, stack, db, ui, docker } = opts;
-
-  const reqSource = fileContent
-    ? `## Requirements (from file)\n\`\`\`\n${fileContent}\n\`\`\``
-    : `## Requirements\n${requirements}`;
-
-  const stackHint = stack ? `\nPreferred tech stack: ${stack}` : '';
-  const dbHint = db ? `\nPreferred database: ${db}` : '';
-  const uiHint = ui ? `\nPreferred UI library: ${ui}` : '';
-  const dockerHint = docker ? '\nGenerate Docker and docker-compose configuration.' : '';
-
-  return `You are the Scaffold Orchestrator. Build a complete, production-ready full-stack project. Follow the phases IN ORDER. Do not dump phase instructions to the user — just execute them.
-
-${reqSource}
-${stackHint}${dbHint}${uiHint}${dockerHint}
-
-Base directory: ${outputDir}
-
-Path handling rules:
-- Treat PROJECT_ROOT as an absolute path.
-- Quote PROJECT_ROOT in every shell command because paths may contain spaces.
-- The Bash tool runs through the platform shell. On Windows, use cmd.exe-compatible commands with quoted paths, for example: \`cd /d "<PROJECT_ROOT>" && npm install\`.
-- For long install/build commands, pass Bash timeout=0.
-
-═══════════════════════════════════════════════════════════
-PHASE 1: CLARIFICATION (use AskUserQuestion tool)
-═══════════════════════════════════════════════════════════
-
-Ask the user using AskUserQuestion (combine into ONE question if possible):
-
-1. **Project directory**: "Create project in current directory (${outputDir}) or in a new subdirectory? If new, what name?" — If user says a name like "gym-app", the project root becomes ${outputDir}/<name>. If user says "current", use ${outputDir}.
-
-2. ONLY ask the following if NOT already specified above:
-   - Tech stack: nextjs | vite-react | vite-vue | vite-angular | mern | mean
-   - Database: mariadb | mysql | postgresql | mongodb | sqlite
-   - UI library: shadcn (React/Next only) | tailwind | bootstrap
-   - Auth needed? (yes/no)
-   - Docker? (yes/no)
-
-If a tech stack IS already specified, skip asking about it. Be brief.
-
-After user answers, set PROJECT_ROOT to the chosen directory path.
-
-═══════════════════════════════════════════════════════════
-PHASE 2: BOOTSTRAP PROJECT (do this FIRST, before docs)
-═══════════════════════════════════════════════════════════
-
-Use Bash to scaffold the project with the appropriate CLI tool.
-If the project directory doesn't exist, create it first.
-
-| Stack | Commands |
-|-------|----------|
-| nextjs | \`npx create-next-app@latest "<PROJECT_ROOT>" --typescript --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --yes\` |
-| vite-react | \`npm create vite@latest "<PROJECT_ROOT>" -- --template react-ts\` then \`cd /d "<PROJECT_ROOT>" && npm install\` |
-| vite-vue | \`npm create vite@latest "<PROJECT_ROOT>" -- --template vue-ts\` then \`cd /d "<PROJECT_ROOT>" && npm install\` |
-| vite-angular | \`npx @angular/cli new "<project-name>" --directory "<PROJECT_ROOT>" --style=css --routing --skip-git\` |
-| mern | \`npm create vite@latest "<PROJECT_ROOT>/client" -- --template react-ts\` then create \`<PROJECT_ROOT>/server/\` manually |
-| mean | \`npx @angular/cli new client --directory "<PROJECT_ROOT>/client" --style=css --routing --skip-git\` then create \`<PROJECT_ROOT>/server/\` manually |
-
-After bootstrapping:
-- cd into PROJECT_ROOT
-- Install additional dependencies: database driver, ORM (prisma/mongoose/knex), auth (bcrypt, jsonwebtoken), validation (zod), UI library
-- Create \`docs/\` subdirectory inside PROJECT_ROOT for documentation
-
-═══════════════════════════════════════════════════════════
-PHASE 3: GENERATE docs/PRD.md
-═══════════════════════════════════════════════════════════
-
-Write \`<PROJECT_ROOT>/docs/PRD.md\` with:
-- **Product Overview**: One paragraph describing the product
-- **User Personas**: Who uses this and why
-- **Core Features**: Numbered list of all features with acceptance criteria
-- **Non-Functional Requirements**: Performance, security, scalability
-- **Out of Scope**: What this version does NOT include
-- **Tech Stack**: Chosen stack, database, UI library, key packages
-
-═══════════════════════════════════════════════════════════
-PHASE 4: GENERATE docs/REQUIREMENTS.md
-═══════════════════════════════════════════════════════════
-
-Write \`<PROJECT_ROOT>/docs/REQUIREMENTS.md\` derived from PRD.md:
-- **Database Schema**: All tables/collections with fields, types, relationships, indexes
-- **API Endpoints**: Method, path, request/response bodies, auth required, status codes
-- **Frontend Routes**: Path, page component, auth guard needed
-- **Auth Flow**: Registration, login, token refresh, logout sequence
-- **State Management**: What state is global vs local
-- **Environment Variables**: All required env vars with descriptions
-
-═══════════════════════════════════════════════════════════
-PHASE 5: GENERATE docs/TASKS.md
-═══════════════════════════════════════════════════════════
-
-Write \`<PROJECT_ROOT>/docs/TASKS.md\` as a phased checklist driven by PRD.md and REQUIREMENTS.md. Each phase should have concrete tasks with checkboxes. Include phases for: Database & Models, Backend API, Frontend Layout, Frontend Features, Auth, Testing, Quality/Build, Docker (if requested). Add sub-tasks where needed. Mark tasks complete as you finish them.
-
-═══════════════════════════════════════════════════════════
-PHASE 6: BUILD — FOLLOW docs/TASKS.md
-═══════════════════════════════════════════════════════════
-
-Execute the task phases from docs/TASKS.md one by one. For each task:
-1. Read docs/TASKS.md to see what's next
-2. Read docs/REQUIREMENTS.md for the specification
-3. Write the code in PROJECT_ROOT
-4. Edit docs/TASKS.md to mark the task \`[x]\` completed
-5. Move to next task
-
-CODING STANDARDS (enforce strictly):
-- TypeScript strict mode — no \`any\` types
-- Reusable UI components in \`components/ui/\` — Button, Input, Card, Modal, Table, Badge, Alert, Spinner, etc.
-- Reusable hooks in \`hooks/\` — useAuth, useFetch, useForm, useDebounce, etc.
-- Typed API client with error handling, auth headers, base URL from env
-- Environment variables via .env + .env.example — NEVER hardcode URLs, secrets, ports
-- Error handling: try/catch on all API routes, proper HTTP status codes (200, 201, 400, 401, 403, 404, 500)
-- Input validation: zod schemas (shared frontend + backend where possible)
-- Database: connection pooling, parameterized queries, indexes on foreign keys
-- Auth: bcrypt (saltRounds=12), JWT with expiration, httpOnly cookies or Authorization header
-- Security: helmet, CORS with specific origins, rate limiting on auth endpoints
-- .gitignore (node_modules, .env, dist, .next), README.md with setup instructions
-- File naming: kebab-case for files, PascalCase for components, camelCase for functions
-
-═══════════════════════════════════════════════════════════
-PHASE 7: VERIFY & FIX
-═══════════════════════════════════════════════════════════
-
-Run inside PROJECT_ROOT and fix ALL errors (loop until clean):
-1. \`npm run lint\` — fix lint errors (set up ESLint if missing)
-2. \`npm run build\` — fix TypeScript/build errors
-3. \`npm test\` — fix test failures
-4. If any fails: read error, fix code, re-run. Repeat until all 3 pass.
-
-═══════════════════════════════════════════════════════════
-PHASE 8: DOCKER (if requested)
-═══════════════════════════════════════════════════════════
-
-Generate in PROJECT_ROOT:
-- \`Dockerfile\`: multi-stage build, non-root user, proper EXPOSE
-- \`docker-compose.yml\`: app + database services with volumes, env, health checks, depends_on
-- \`.dockerignore\`: node_modules, .git, .env, dist, .next
-
-═══════════════════════════════════════════════════════════
-PHASE 9: FINAL SUMMARY
-═══════════════════════════════════════════════════════════
-
-Provide:
-1. What was built (features list)
-2. How to run (\`cd <PROJECT_ROOT> && npm run dev\` or \`docker-compose up\`)
-3. Project structure tree
-4. Manual steps needed (create database, set env vars, etc.)
-5. Known limitations or next steps
-
-RULES:
-- All project files go in PROJECT_ROOT. All docs go in PROJECT_ROOT/docs/.
-- Read files before editing. Write complete files, not snippets.
-- If a phase fails, debug and fix before moving on.
-- Use TodoWrite to track progress.
-- This must be a REAL working project, not a skeleton.`;
-}
-
-async function handleScaffold(args: string): Promise<CommandResult> {
-  if (!args.trim()) {
-    return {
-      handled: true,
-      output: [
-        'Usage: /scaffold <requirements>',
-        '',
-        'Options:',
-        '  --file <path>      Read requirements from a file',
-        '  --dir <path>       Output directory (default: current dir)',
-        '  --stack <name>     Tech stack: nextjs | vite-react | vite-vue | vite-angular | mern | mean',
-        '  --db <name>        Database: mariadb | mysql | postgresql | mongodb | sqlite',
-        '  --ui <name>        UI library: shadcn | tailwind | bootstrap',
-        '  --docker           Generate Dockerfile + docker-compose.yml',
-        '',
-        'Examples:',
-        '  /scaffold "Task management app with user auth and teams"',
-        '  /scaffold --stack nextjs --db postgresql --ui shadcn "E-commerce platform"',
-        '  /scaffold --file requirements.txt --dir ./my-project --docker',
-        '  /scaffold --stack mern --db mongodb "Blog with comments and tags"',
-      ].join('\n'),
-    };
-  }
-
-  let parsed: ReturnType<typeof parseScaffoldArgs>;
-  try {
-    parsed = parseScaffoldArgs(args);
-  } catch (err) {
-    return { handled: true, output: err instanceof Error ? err.message : String(err) };
-  }
-  let fileContent: string | undefined;
-
-  // Read requirements from file if --file specified
-  if (parsed.filePath) {
-    try {
-      fileContent = await readScaffoldRequirementsFile(parsed.filePath);
-    } catch (err) {
+/**
+ * Apps from the CLI: the same tool the agent uses, so the two never disagree
+ * about what an app is or how it is made.
+ *
+ * `/app new … --brief` creates the app and then sends the brief to the agent
+ * as the first message, with the pointer the tool returned, so the build starts
+ * from the template's notes rather than from nothing.
+ */
+async function handleApp(args: string): Promise<CommandResult> {
+  const words = splitArgs(args);
+  const [sub = '', ...rest] = words;
+  switch (sub) {
+    case '':
+    case 'help':
+      return { handled: true, output: APP_USAGE };
+    case 'templates':
       return {
         handled: true,
-        output: `Error reading file: ${parsed.filePath} — ${err instanceof Error ? err.message : String(err)}`,
+        output: `Templates (★ = suggested):\n${renderCatalogue(rest.join(' '))}\n\nCreate one with /app new <template> "<name>"`,
+      };
+    case 'new': {
+      const positional: string[] = [];
+      let brief: string | undefined;
+      let description: string | undefined;
+      for (let i = 0; i < rest.length; i++) {
+        const w = rest[i]!;
+        if (w === '--brief') { brief = rest[++i]; continue; }
+        if (w.startsWith('--brief=')) { brief = w.slice('--brief='.length); continue; }
+        if (w === '--description') { description = rest[++i]; continue; }
+        if (w.startsWith('--description=')) { description = w.slice('--description='.length); continue; }
+        if (w.startsWith('--')) return { handled: true, output: `Unknown /app new flag: ${w}\n\n${APP_USAGE}` };
+        positional.push(w);
+      }
+      const [template, ...nameWords] = positional;
+      const name = nameWords.join(' ').trim();
+      if (!template || !name) return { handled: true, output: APP_USAGE };
+      const created = await executeAppManage({
+        action: 'create', template, name,
+        ...(description ? { description } : {}),
+        ...(brief ? { brief } : {}),
+      });
+      if (!brief || !/^Created /.test(created)) return { handled: true, output: created };
+      return {
+        handled: true,
+        output: created,
+        sendAsPrompt: `${created}\n\nThe reader's brief for this app:\n${brief}\n\nStart with the files above, then use the app-plan skill to turn the brief into the backlog and build it.`,
       };
     }
+    case 'list':
+      return { handled: true, output: await executeAppManage({ action: 'list' }) };
+    case 'start':
+    case 'stop':
+    case 'status':
+    case 'describe':
+    case 'tables':
+    case 'delete': {
+      const name = rest.join(' ').trim();
+      if (!name) return { handled: true, output: `Which app? /app ${sub} <name>` };
+      return { handled: true, output: await executeAppManage({ action: sub, name }) };
+    }
+    default:
+      return { handled: true, output: `Unknown /app command "${sub}".\n\n${APP_USAGE}` };
   }
-
-  if (!parsed.requirements && !fileContent) {
-    return { handled: true, output: 'Usage: /scaffold <requirements> or /scaffold --file <path>' };
-  }
-
-  const outputDir = parsed.outputDir
-    ? (path.isAbsolute(parsed.outputDir) ? parsed.outputDir : path.resolve(process.cwd(), parsed.outputDir))
-    : process.cwd();
-
-  const prompt = buildScaffoldPrompt({
-    requirements: parsed.requirements || '(requirements from file)',
-    fileContent,
-    outputDir,
-    stack: parsed.stack,
-    db: parsed.db,
-    ui: parsed.ui,
-    docker: parsed.docker ?? false,
-  });
-
-  return {
-    handled: true,
-    output: `🏗️  Scaffold starting...\n   Output: ${outputDir}${parsed.stack ? `\n   Stack: ${parsed.stack}` : ''}${parsed.db ? `\n   DB: ${parsed.db}` : ''}${parsed.ui ? `\n   UI: ${parsed.ui}` : ''}${parsed.docker ? '\n   Docker: yes' : ''}`,
-    sendAsPrompt: prompt,
-  };
 }
 
 export async function handleSlashCommand(
@@ -1161,21 +853,6 @@ export async function handleSlashCommand(
       };
     }
 
-    case 'team': {
-      if (!args) return { handled: true, output: 'Usage: /team <requirements or mission>' };
-      const names = ['product-owner', 'architect', 'backend', 'frontend', 'qa', 'security'];
-      const specs = (await Promise.all(names.map((name) => getAgentSpec(name)))).filter(Boolean);
-      return {
-        handled: true,
-        output: 'Starting Product Owner-led agent team orchestration...',
-        sendAsPrompt: buildTeamPrompt({
-          requirements: args,
-          agents: specs as NonNullable<typeof specs[number]>[],
-          availableSkills: skillRegistry.list(),
-        }),
-      };
-    }
-
     case 'mcp': {
       return { handled: true, output: `MCP servers:\n${formatMcpServers()}` };
     }
@@ -1511,22 +1188,19 @@ export async function handleSlashCommand(
       };
     }
 
-    case 'studio': {
-      const workspace = await ensureWorkspace({
-        settings: ctx.settings,
-        sessionId: ctx.sessionId,
-        cwd: process.cwd(),
-      });
-      const result = await handleStudio(args, workspace.commonDir);
-      return {
-        handled: result.handled,
-        output: result.output,
-        sendAsPrompt: result.sendAsPrompt,
-      };
+
+    case 'app': {
+      return handleApp(args);
     }
 
+    // One release of redirect: /scaffold used to generate a project from prose.
     case 'scaffold': {
-      return handleScaffold(args);
+      return {
+        handled: true,
+        output: '/scaffold has been folded into /app. Start from a template instead:\n'
+          + '  /app templates <what you are building>\n'
+          + '  /app new <template> "<name>" --brief "<what it should do>"',
+      };
     }
 
     // ── Skills commands ───────────────────────────────────────────────

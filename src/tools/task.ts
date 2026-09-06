@@ -246,7 +246,6 @@ export const taskToolDefinition = {
     '   "tech-writer" — documentation. Full access.',
     '   "product-owner" — PRD, user stories, quality gate. Read/write + Web.',
     '   "healer" — error recovery and bug fixing. Full access.',
-    '   "studio-orchestrator" — pipeline coordination. Full access.',
     '',
     'agent_spec.tools accepts: "all", "readonly", or an explicit array like ["Read","Write","Edit","Bash"].',
     'Different agents can use different models — pass model per Task call or pin it in the agent spec.',
@@ -272,7 +271,7 @@ export const taskToolDefinition = {
           'general', 'explore', 'plan', 'verification', 'security-audit',
           'project', 'devops', 'devsecops', 'review',
           'frontend', 'backend', 'qa', 'architect',
-          'tech-writer', 'product-owner', 'healer', 'studio-orchestrator',
+          'tech-writer', 'product-owner', 'healer',
         ],
         description: 'Predefined agent type controlling tool access (default: general). Ignored if agent_spec or agent_name is provided.',
       },
@@ -561,7 +560,7 @@ export async function runTask(
     // Instead of a fixed wall-clock timeout, we track the last tool activity.
     // The agent is considered "alive" as long as it's making tool calls.
     // It only times out after IDLE_TIMEOUT_MS of no activity.
-    const STUDIO_AGENT_TYPES = new Set(['frontend', 'backend', 'qa', 'architect', 'tech-writer', 'product-owner', 'healer', 'studio-orchestrator']);
+    const STUDIO_AGENT_TYPES = new Set(['frontend', 'backend', 'qa', 'architect', 'tech-writer', 'product-owner', 'healer']);
     const isStudioAgent = STUDIO_AGENT_TYPES.has(agentType);
 
     // Idle timeout: how long with NO tool activity before we kill the agent

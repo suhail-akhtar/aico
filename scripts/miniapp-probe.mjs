@@ -42,6 +42,16 @@ writeFileSync(path.join(dir, 'public', 'index.html'),
 // A file that must never be reachable from the public root.
 writeFileSync(path.join(root, 'miniapps', 'secret.txt'), 'do not serve me');
 
+// A static app: files under public/, no schema, no database. Served the same way.
+const site = path.join(root, 'miniapps', 'launch-site');
+mkdirSync(path.join(site, 'public'), { recursive: true });
+writeFileSync(path.join(site, 'app.json'), JSON.stringify({
+  slug: 'launch-site', title: 'Launch Site', kind: 'static', category: 'landing', createdAt: 1, updatedAt: 1,
+}));
+writeFileSync(path.join(site, 'public', 'index.html'),
+  '<!doctype html><title>Launch</title><h1>Launch Site</h1><link rel="stylesheet" href="/launch-site/styles.css">');
+writeFileSync(path.join(site, 'public', 'styles.css'), 'h1{color:red}');
+
 let passed = 0;
 const failures = [];
 
@@ -241,6 +251,15 @@ check('an unknown app is a 404', missing.status === 404);
 
 const index = await get('/');
 check('the index lists the app', index.text.includes('Invoices'));
+
+// ── the static kind ─────────────────────────────────────────────────
+
+const sitePage = await get('/launch-site/');
+check('a static app is served from its public/', sitePage.status === 200 && sitePage.text.includes('Launch Site'),
+  `${sitePage.status} ${sitePage.text.slice(0, 40)}`);
+const siteCss = await get('/launch-site/styles.css');
+check('and its assets with it', siteCss.status === 200 && siteCss.text.includes('color:red'));
+check('the index lists the static app too', index.text.includes('Launch Site'));
 
 // ── the claim a single process cannot make ──────────────────────────
 

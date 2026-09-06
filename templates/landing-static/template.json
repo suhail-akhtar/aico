@@ -1,0 +1,15 @@
+{
+  "id": "landing-static",
+  "version": "1.0.0",
+  "name": "Landing page",
+  "category": "landing",
+  "kind": "static",
+  "summary": "A marketing or product page: hero, features, pricing, FAQ, contact. Plain HTML, CSS and a little JavaScript, no build step, served the moment it is saved.",
+  "tags": ["static", "landing", "marketing", "html", "css"],
+  "match": ["landing", "marketing", "homepage", "website", "site", "brochure", "portfolio", "launch", "waitlist", "pricing"],
+  "substitute": ["README.md", "AICO.md", ".aico/backlog.md", "public/index.html", "public/main.js", "deploy/README.md"],
+  "deploy": [
+    { "id": "docker", "label": "Docker image (nginx)", "script": "node deploy/docker.mjs", "requires": ["docker"] }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

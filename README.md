@@ -28,7 +28,7 @@ can measure its own skills against tasks with known answers.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
-background supervision, visuals and Mini Apps.
+background supervision, visuals and Apps.
 
 **How does it compare to Claude Code, OpenCode, Aider or Cline?**
 [There is an honest page for that](https://suhail-akhtar.github.io/aico/compare.html),
@@ -431,9 +431,13 @@ with exactly the tools it needs. Multiple `Task` calls in one step run in
 parallel. **Sub-agents inherit every constraint their parent is under** —
 settings, hooks, plan mode, sandbox policy, spend caps, and composed tool sets.
 
-`/studio <requirements>` runs an autonomous SDLC pipeline: tier detection,
-stack selection from 15 presets, a Ralph-style implementation loop with disk as
-the only state, a validation stack, and a self-healer. Resumable.
+**Apps** are real applications kept in the workspace and started from
+templates: a records page over SQLite, a static landing page, a Hono JSON API,
+a Next.js web app with accounts. Each template copies in as files (zero model
+tokens) with a worked feature, tests, notes for the agent (`AICO.md`), a backlog
+and a Dockerfile. One agent builds from there; `Investigate` is the only fan-out.
+`/app templates`, `/app new <template> "<name>" --brief "…"`, or the **Apps**
+screen in the web portal. The agent's side is the `AppManage` tool.
 
 ---
 
@@ -444,8 +448,9 @@ the only state, a validation stack, and a self-healer. Resumable.
 ```
 /help  /status  /cost  /compact  /clear  /plan
 /model [name]           switch model mid-session
-/agents  /agent <n> <task>  /team <requirements>
-/studio <req>  /scaffold <req>  /review  /security-audit
+/agents  /agent <n> <task>
+/app templates  /app new <template> "<name>" --brief "…"  /app list|start|stop
+/review  /security-audit
 /mcp  /mcp-add playwright   MCP servers
 /skills  /bg-agents  /cron  /worktrees
 /transcript [--all]     export the session (log-backed, includes tool calls)
@@ -635,7 +640,7 @@ On Windows, commands run on Git Bash when it is installed, then PowerShell, then
 `cmd.exe` used to burn turns rediscovering that it does not exist.
 
 There is no inline completion; that is a different product. The full workspace
-stays one click away for Mini Apps, the trajectory view and the settings screens.
+stays one click away for Apps, the trajectory view and the settings screens.
 The extension is not on the Marketplace yet; the `.vsix` is attached to each
 [release](https://github.com/suhail-akhtar/aico/releases), or build it:
 

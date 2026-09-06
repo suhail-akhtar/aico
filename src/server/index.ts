@@ -54,8 +54,12 @@ import { saveKnowledge } from '../knowledge/store.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
 import { requestAgentStop } from '../tools/task.js';
-import { deleteMiniApp, getMiniApp, listMiniApps, miniAppDir } from '../miniapps/store.js';
-import { runningApps, startApp, stopAllApps, stopApp } from '../miniapps/process.js';
+import {
+  backlogProgress, deleteMiniApp, effectiveKind, getMiniApp, hasProcess, listMiniApps, miniAppDir, runProfileFor,
+} from '../miniapps/store.js';
+import { installApp, runningApps, startApp, stopAllApps, stopApp } from '../miniapps/process.js';
+import { getTemplate, instantiateTemplate, listTemplates, nodeSatisfies } from '../apps/templates.js';
+import { closeDatabase } from '../miniapps/data.js';
 import { setWakeDelivery } from '../work/watchers.js';
 
 export interface ServeOptions {
@@ -389,11 +393,12 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
-    if (route === 'miniapps' && req.method === 'GET') {
+    if ((route === 'miniapps' || route === 'apps') && req.method === 'GET') {
       // `host` is null when the plugin is off, and the panel says so rather
       // than listing apps behind links that would not resolve. Read live so
       // turning the switch on and restarting is enough — no rebuild.
       const live = await loadSettings();
+      const apps = await listMiniApps(live, cwd);
       send(res, 200, {
         enabled: live.miniApps?.enabled === true,
         host: miniApps?.url ?? null,
@@ -401,7 +406,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // host did not start" sends the reader to the terminal to find out
         // which port was taken.
         ...(miniAppsError ? { error: miniAppsError } : {}),
-        apps: await listMiniApps(live, cwd),
+        // Each app with its effective kind and backlog progress, so the Apps
+        // screen can group by category and show how far along a build is
+        // without a request per card.
+        apps: await Promise.all(apps.map(async app => ({
+          ...app,
+          kind: effectiveKind(app),
+          backlog: await backlogProgress(miniAppDir(app.slug, live, cwd)),
+        }))),
         // Process state for the Next.js apps, which have one. A single-page app
         // is served by the shared host and has nothing to report here.
         processes: runningApps(),
@@ -409,7 +421,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
-    if (route === 'miniapps/run' && req.method === 'POST') {
+    if ((route === 'miniapps/run' || route === 'apps/run') && req.method === 'POST') {
       // Start or stop one Next.js app. Deliberately explicit rather than
       // automatic: these install dependencies and hold a port, and starting
       // every app a workspace has ever contained because the portal opened
@@ -423,18 +435,69 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       }
       const app = await getMiniApp(body.slug, live, cwd);
       if (!app) { send(res, 404, { error: `no app "${body.slug}"` }); return; }
-      if (app.kind !== 'nextjs') {
+      if (!hasProcess(app)) {
         send(res, 400, {
-          error: 'only a Next.js Mini App has a process to run — a single-page '
-            + 'app is served by the shared host and is already up.',
+          error: `a ${effectiveKind(app)} app has no process to run — `
+            + (effectiveKind(app) === 'cli'
+              ? 'a CLI runs through its checks.'
+              : 'it is served by the shared host and is already up.'),
         });
         return;
       }
-      send(res, 200, await startApp(body.slug, miniAppDir(body.slug, live, cwd)));
+      send(res, 200, await startApp(body.slug, miniAppDir(body.slug, live, cwd), app));
       return;
     }
 
-    if (route === 'miniapps/session' && req.method === 'POST') {
+    if (route === 'apps/templates' && req.method === 'GET') {
+      // The catalogue the Apps screen builds its "Start from a template" cards
+      // from. Read from disk each time: a template dropped into
+      // ~/.aico/templates appears without a restart.
+      send(res, 200, { templates: listTemplates(cwd).map(t => ({ ...t, dir: undefined })) });
+      return;
+    }
+
+    if (route === 'apps/create' && req.method === 'POST') {
+      /*
+        Make an app from a template and bind a conversation to it, in one
+        request, so the portal's wizard is one click from "name it" to
+        "talking about it". The install, for process apps, starts here too
+        and runs in the background: the minutes it takes are spent while the
+        reader is still typing their brief rather than after.
+      */
+      const body = await readJson(req) as {
+        template?: string; title?: string; description?: string; install?: boolean; brief?: string;
+      };
+      if (!body.template) { send(res, 400, { error: 'template required' }); return; }
+      if (!body.title?.trim()) { send(res, 400, { error: 'title required' }); return; }
+      const template = getTemplate(body.template, cwd);
+      if (!template) { send(res, 404, { error: `no template "${body.template}"` }); return; }
+      if (!nodeSatisfies(template.requires?.node)) {
+        send(res, 400, { error: `template "${template.id}" needs Node ${template.requires?.node}; this machine runs ${process.versions.node}` });
+        return;
+      }
+      const live = await loadSettings();
+      const app = await instantiateTemplate({
+        template,
+        title: body.title.trim(),
+        ...(body.description?.trim() ? { description: body.description.trim() } : {}),
+      }, live, cwd);
+      const dir = miniAppDir(app.slug, live, cwd);
+      const profile = runProfileFor(app);
+      if (body.install !== false && profile?.install && hasProcess(app)) {
+        void installApp(app.slug, dir, profile);
+      }
+      const sessionId = `miniapp-${app.slug}`;
+      const root = resolveWorkspaceRoot(live, cwd);
+      const bound = await runs.setMiniApp(sessionId, app.slug, root);
+      if (!bound.ok) { send(res, 500, { error: bound.error ?? 'could not bind the session' }); return; }
+      sessionCwd.set(sessionId, root);
+      // The same shape the listing gives: an absent kind means page on disk,
+      // but a client should not have to know that.
+      send(res, 200, { slug: app.slug, sessionId, app: { ...app, kind: effectiveKind(app), backlog: await backlogProgress(dir) } });
+      return;
+    }
+
+    if ((route === 'miniapps/session' || route === 'apps/session') && req.method === 'POST') {
       // Bind a conversation to one app. The session id is derived from the
       // slug rather than generated, so returning to an app returns to the
       // conversation you were already having about it — which is the whole
@@ -451,10 +514,13 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
-    if (route === 'miniapps/delete' && req.method === 'POST') {
+    if ((route === 'miniapps/delete' || route === 'apps/delete') && req.method === 'POST') {
       const body = await readJson(req) as { slug?: string };
       if (!body.slug) { send(res, 400, { error: 'slug required' }); return; }
       const live = await loadSettings();
+      // A running process or an open database would keep the directory busy on Windows.
+      await stopApp(body.slug).catch(() => undefined);
+      closeDatabase(miniAppDir(body.slug, live, cwd));
       send(res, 200, { deleted: await deleteMiniApp(body.slug, live, cwd) });
       return;
     }

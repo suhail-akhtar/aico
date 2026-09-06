@@ -19,5 +19,14 @@ export default defineConfig({
     if (fs.existsSync('src/skills/builtin')) {
       fs.cpSync('src/skills/builtin', 'dist/skills/builtin', { recursive: true });
     }
+    // App templates ship as files: copied for zero model tokens, never generated.
+    // `node_modules` in a template is a local convenience for running its tests
+    // and must not travel; the lockfile is what makes an install deterministic.
+    if (fs.existsSync('templates')) {
+      fs.cpSync('templates', 'dist/templates', {
+        recursive: true,
+        filter: (src) => !/[\\/](node_modules|\.next|dist|coverage)([\\/]|$)/.test(src),
+      });
+    }
   },
 });

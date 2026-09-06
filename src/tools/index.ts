@@ -97,8 +97,6 @@ import {
   executeAgentList,
   executeAgentPrompt,
   executeAgentRead,
-  executeTeamPrompt,
-  teamPromptToolDefinition,
 } from './agents.js';
 import { skillCreateToolDefinition, executeSkillCreate } from '../skills/create.js';
 import { skillManageToolDefinition, executeSkillManage } from '../skills/manage.js';
@@ -107,10 +105,10 @@ import type { McpManageInput } from '../mcp/manage-tool.js';
 import { agentManageToolDefinition, executeAgentManage } from './manage-agents.js';
 import { memoryManageToolDefinition, executeMemoryManage } from './manage-memory.js';
 import type { MemoryManageInput } from './manage-memory.js';
-import { miniAppManageToolDefinition, executeMiniAppManage } from './manage-miniapps.js';
+import { appManageToolDefinition, executeAppManage } from './manage-miniapps.js';
 import { superviseToolDefinition, executeSupervise } from './supervise.js';
 import type { SuperviseInput } from './supervise.js';
-import type { MiniAppManageInput } from './manage-miniapps.js';
+import type { AppManageInput } from './manage-miniapps.js';
 import type { AgentManageInput } from './manage-agents.js';
 import type { SkillManageInput } from '../skills/manage.js';
 import { buildCapabilityReport } from '../capabilities.js';
@@ -140,7 +138,7 @@ export type SubAgentType =
   | 'project' | 'devops' | 'devsecops' | 'review'
   // Studio pipeline types
   | 'frontend' | 'backend' | 'qa' | 'architect'
-  | 'tech-writer' | 'product-owner' | 'healer' | 'studio-orchestrator';
+  | 'tech-writer' | 'product-owner' | 'healer';
 
 /**
  * Tool sets by sub-agent type.
@@ -171,7 +169,6 @@ const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
   frontend: 'all',
   backend: 'all',
   healer: 'all',
-  'studio-orchestrator': 'all',
   'tech-writer': 'all',
   // Studio — constrained agents
   qa: new Set(['CodebaseMap', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers', 'ListMcpResources', 'ReadMcpResource', 'WorkspaceInfo', 'WorkspaceWrite', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead']),
@@ -257,15 +254,14 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...agentListToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
   { ...agentReadToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
   { ...agentPromptToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
-  { ...teamPromptToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 120_000 },
   { ...skillCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...skillManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...mcpManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...agentManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...memoryManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
-  // The authoring guide `create` returns is long on purpose, and truncating it
-  // would cut the part about the CSP — which is the part that saves an hour.
-  { ...miniAppManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
+  // The authoring guide a bare page app's `create` returns is long on purpose,
+  // and truncating it would cut the part about the CSP — the part that saves an hour.
+  { ...appManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   // Concurrency-safe on purpose: the whole point is to run alongside the Task
   // calls it is watching. An exclusive supervisor would be a barrier, and a
   // barrier could only ever inspect agents that had already finished.
@@ -314,7 +310,7 @@ export function setBashDefaultTimeout(secs: number): void {
 const CACHE_TTL = 30_000;  // 30 seconds
 const CACHE_MAX = 50;
 const _resultCache = new Map<string, { result: unknown; timestamp: number }>();
-const CACHEABLE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Pwd', 'WorkspaceInfo', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead', 'AgentPrompt', 'TeamPrompt']);
+const CACHEABLE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Pwd', 'WorkspaceInfo', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead', 'AgentPrompt']);
 
 function getCachedResult(toolName: string, args: Record<string, unknown>): unknown | undefined {
   if (!CACHEABLE_TOOLS.has(toolName)) return undefined;
@@ -706,17 +702,15 @@ export async function executeTool(
     case 'AgentPrompt':
       result = await executeAgentPrompt(args as { name: string; task: string });
       break;
-    case 'TeamPrompt':
-      result = await executeTeamPrompt(args as { requirements: string; agents?: string[] });
-      break;
     case 'MemoryManage':
       result = await executeMemoryManage(args as unknown as MemoryManageInput);
       break;
     case 'McpManage':
       result = await executeMcpManage(args as unknown as McpManageInput);
       break;
-    case 'MiniAppManage':
-      result = await executeMiniAppManage(args as unknown as MiniAppManageInput);
+    case 'AppManage':
+    case 'MiniAppManage': // the old name, honoured one release so a transcript that says it still works
+      result = await executeAppManage(args as unknown as AppManageInput);
       break;
     case 'Supervise':
       result = await executeSupervise(args as unknown as SuperviseInput);

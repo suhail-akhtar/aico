@@ -137,7 +137,11 @@ import {
   owningSession, registerOwnerForTest, requestAgentStop, executeSupervise,
   guideAgent, detachedRun, taskToolDefinition, runTask,
   openSession, scrubbedEnv, startApp, appState, splitStatements, executeMiniAppManage,
-  createMiniApp, miniAppDir,
+  createMiniApp, miniAppDir, getMiniApp, effectiveKind, hasProcess, runProfileFor, backlogProgress,
+  executeAppManage, appManageToolDefinition,
+  listTemplates, getTemplate, validateManifest, suggestTemplates, renderCatalogue, substituteTokens,
+  matchesSubstitute, instantiateTemplate, nodeSatisfies, bundledTemplatesDir, REQUIRED_TEMPLATE_FILES,
+  miniAppContext, fileList, appStateLine, closeAllAppDatabases,
   superviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
@@ -468,7 +472,13 @@ assert(reviewResult.sendAsPrompt.includes('CRITICAL'), '/review uses unified CRI
 const verifyResult = await handleSlashCommand('/verify src', ctx);
 assert(verifyResult.sendAsPrompt !== undefined, '/verify returns a prompt');
 assert(verifyResult.sendAsPrompt.includes('verification'), '/verify spawns verification agent');
-assert((await handleSlashCommand('/studio', ctx)).output.includes('default: AICO workspace'), '/studio usage shows workspace default');
+assert((await handleSlashCommand('/app', ctx)).output.includes('Usage:'), '/app shows usage');
+assert((await handleSlashCommand('/app templates', ctx)).output.includes('web-saas-next'), '/app templates lists the shipped catalogue');
+assert((await handleSlashCommand('/app templates a landing page for a launch', ctx)).output.includes('★ landing-static'), '/app templates ranks a suggested template first');
+assert((await handleSlashCommand('/app new', ctx)).output.includes('Usage:'), '/app new without arguments shows usage');
+assert((await handleSlashCommand('/app new web-saas-next "Shop" --wat', ctx)).output.includes('Unknown /app new flag'), '/app new rejects unknown flags');
+assert((await handleSlashCommand('/studio', ctx)).output.includes('Unknown'), '/studio is gone');
+assert((await handleSlashCommand('/scaffold "Blog"', ctx)).output.includes('folded into /app'), '/scaffold redirects to /app for one release');
 assert((await handleSlashCommand('/mcp-security', ctx)).output.includes('MCP Security'), '/mcp-security reports posture');
 const transcriptResult = await handleSlashCommand('/transcript', ctx);
 assert(transcriptResult.output.includes('Transcript exported'), '/transcript exports to workspace');
@@ -477,9 +487,10 @@ assert((await handleSlashCommand('/agents show product-owner', ctx)).output.incl
 const agentRun = await handleSlashCommand('/agent product-owner review the current requirements', ctx);
 assert(agentRun.sendAsPrompt.includes('<aico_agent_session>'), '/agent builds XML prompt');
 assert(agentRun.sendAsPrompt.includes('<role>'), '/agent includes role');
-const teamRun = await handleSlashCommand('/team Build a CRM with auth and reports', ctx);
-assert(teamRun.sendAsPrompt.includes('<aico_agent_team>'), '/team builds XML prompt');
-assert(teamRun.sendAsPrompt.includes('Product Owner'), '/team includes Product Owner lead');
+// The role-based build team is retired: one writing agent, read-only fan-out.
+assert((await handleSlashCommand('/team Build a CRM', ctx)).output.includes('Unknown'), '/team is gone');
+assert(!toolDefinitions.some(d => d.name === 'TeamPrompt'), 'TeamPrompt is no longer a tool');
+assert(toolDefinitions.some(d => d.name === 'AppManage'), 'AppManage is a tool');
 const createdAgent = await executeTool('AgentCreate', {
   name: 'test-reviewer',
   description: 'Focused reviewer for generated test artifacts',
@@ -491,20 +502,6 @@ const agentList = await executeTool('AgentList', {});
 assert(typeof agentList === 'string' && agentList.includes('test-reviewer'), 'AgentList includes custom agent');
 const agentPrompt = await executeTool('AgentPrompt', { name: 'test-reviewer', task: 'review tests' });
 assert(typeof agentPrompt === 'string' && agentPrompt.includes('<aico_agent_session>'), 'AgentPrompt returns XML');
-const scaffoldDocker = await handleSlashCommand('/scaffold --docker "Blog with comments"', ctx);
-assert(scaffoldDocker.sendAsPrompt.includes('Blog with comments'), '/scaffold keeps requirements after --docker');
-assert(scaffoldDocker.sendAsPrompt.includes('Generate Docker'), '/scaffold --docker enables Docker');
-const scaffoldEq = await handleSlashCommand('/scaffold --stack=nextjs --db=postgres --ui=shadcn "Shop app"', ctx);
-assert(scaffoldEq.sendAsPrompt.includes('Preferred tech stack: nextjs'), '/scaffold parses --flag=value');
-assert(scaffoldEq.sendAsPrompt.includes('Preferred database: postgresql'), '/scaffold normalizes postgres');
-assert((await handleSlashCommand('/scaffold --stack rails "App"', ctx)).output.includes('Unsupported stack'), '/scaffold validates stack');
-assert((await handleSlashCommand('/scaffold --wat "App"', ctx)).output.includes('Unknown /scaffold flag'), '/scaffold rejects unknown flags');
-const reqFile = path.resolve('./test-scaffold-req.txt');
-fs.writeFileSync(reqFile, 'Inventory app requirements');
-const scaffoldFile = await handleSlashCommand(`/scaffold --file "${reqFile}" --dir "./tmp scaffold output"`, ctx);
-assert(scaffoldFile.sendAsPrompt.includes('Inventory app requirements'), '/scaffold reads requirements file');
-assert(scaffoldFile.sendAsPrompt.includes('tmp scaffold output'), '/scaffold parses quoted --dir');
-fs.unlinkSync(reqFile);
 assert((await handleSlashCommand('/xyz', ctx)).output.includes('Unknown'), 'Unknown handled');
 
 // ═══════════════════════════════════════════════════════════
@@ -12062,6 +12059,176 @@ console.log('\n══ 50. WHAT AUTO REASONING SENDS, SET WITHOUT TOUCHING A KEY 
 
   assert(effortDisplay('kimi-k3', 'xhigh').shown === 'high' && effortDisplay('kimi-k3', 'xhigh').stepped === true, 'the button says the rung that is sent, not the one picked');
   assert(Object.keys(FAMILY_REASONING).join(',') === 'anthropic,openai,deepseek,kimi', 'four families take a default; the rest show no control');
+}
+
+// ═══════════════════════════════════════════════════════════
+// Apps foundation: templates, kinds, the bound block, the tool
+// ═══════════════════════════════════════════════════════════
+
+console.log('  -- Every shipped template is complete and describes itself correctly --');
+{
+  const shipped = listTemplates();
+  const ids = shipped.map(t => t.id).sort();
+  assert(bundledTemplatesDir() !== undefined, 'the bundled templates directory is found from the test bundle');
+  assert(['api-service-hono', 'landing-static', 'page-records', 'web-saas-next'].every(id => ids.includes(id)),
+    `tranche 1 ships (got ${ids.join(', ')})`);
+  for (const t of shipped) {
+    assert(validateManifest(JSON.parse(fs.readFileSync(path.join(t.dir, 'template.json'), 'utf8'))).length === 0,
+      `${t.id}: manifest validates`);
+    for (const rel of REQUIRED_TEMPLATE_FILES) {
+      assert(fs.existsSync(path.join(t.dir, rel)), `${t.id}: ships ${rel}`);
+    }
+    const aicoMd = fs.readFileSync(path.join(t.dir, 'AICO.md'), 'utf8');
+    assert(aicoMd.length <= 2_000, `${t.id}: AICO.md fits the inlined cap (${aicoMd.length} chars)`);
+    assert(/- \[x\]/.test(fs.readFileSync(path.join(t.dir, '.aico', 'backlog.md'), 'utf8')),
+      `${t.id}: the backlog records the worked feature as done`);
+    if (t.kind === 'process') {
+      const pkg = JSON.parse(fs.readFileSync(path.join(t.dir, 'package.json'), 'utf8'));
+      for (const s of ['typecheck', 'build', 'test']) assert(pkg.scripts?.[s], `${t.id}: npm script "${s}" exists so detectChecks finds it`);
+      assert(fs.existsSync(path.join(t.dir, 'package-lock.json')), `${t.id}: ships a lockfile`);
+      assert(fs.existsSync(path.join(t.dir, 'Dockerfile')) && fs.existsSync(path.join(t.dir, 'compose.yaml')) && fs.existsSync(path.join(t.dir, '.env.example')),
+        `${t.id}: ships Dockerfile, compose.yaml and .env.example`);
+      assert(t.run?.dev && t.run?.ready && t.run?.install, `${t.id}: declares install, dev and ready`);
+    }
+  }
+  // Manifest validation says what is wrong, not just "invalid".
+  const bad = validateManifest({ id: 'x', version: '1', name: 'X', category: 'c', kind: 'spaceship', summary: 's' });
+  assert(bad.some(m => /kind/.test(m)), `an unknown kind is named in the validation errors (${bad.join('; ')})`);
+  assert(validateManifest(null).length > 0, 'a non-object is rejected');
+
+  // Suggestion is word overlap, cheap and deterministic.
+  const landing = suggestTemplates('a marketing landing page for the launch');
+  assert(landing[0]?.id === 'landing-static', `a landing brief suggests landing-static first (got ${landing[0]?.id})`);
+  const api = suggestTemplates('a REST API service with endpoints for orders');
+  assert(api[0]?.id === 'api-service-hono', `an API brief suggests api-service-hono first (got ${api[0]?.id})`);
+  assert(suggestTemplates('').length === 0, 'an empty brief suggests nothing');
+  const catalogue = renderCatalogue('saas with user accounts');
+  assert(catalogue.split('\n')[0].startsWith('★ web-saas-next'), 'the catalogue puts the suggestion first with a star');
+  assert(catalogue.split('\n').length <= 20, 'and stays within twenty lines');
+
+  // Substitution: the tokens, and only the files the manifest names.
+  assert(substituteTokens('# __APP_TITLE__ (__APP_SLUG__): __APP_DESCRIPTION__', { title: 'Shop', slug: 'shop', description: 'd' }) === '# Shop (shop): d', 'all three tokens substitute');
+  assert(matchesSubstitute('src/app/layout.tsx', ['src/app/layout.tsx']) && !matchesSubstitute('src/app/page.tsx', ['src/app/layout.tsx']), 'exact paths match exactly');
+  assert(matchesSubstitute('docs/deep/er/file.md', ['docs/**/*.md']) && matchesSubstitute('a.md', ['*.md']) && !matchesSubstitute('a/b.md', ['*.md']), 'globs: ** crosses directories, * does not');
+  assert(matchesSubstitute('x.yaml', ['x.{yml,yaml}']), 'brace alternatives');
+  assert(nodeSatisfies('>=22.5.0', '22.5.0') && nodeSatisfies('>=22.5', '23.0.0') && !nodeSatisfies('>=22.5.0', '22.4.9') && nodeSatisfies(undefined, '18.0.0'), 'node requirement comparison');
+}
+
+console.log('  -- A template becomes an app: copied, substituted, described in app.json v2 --');
+{
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-template-'));
+  const settings = { workspace: { path: ws } };
+  const t = getTemplate('api-service-hono');
+  const app = await instantiateTemplate({ template: t, title: 'Order Service', description: 'Orders for the shop' }, settings, ws);
+  const dir = miniAppDir(app.slug, settings, ws);
+  assert(app.slug === 'order-service' && app.kind === 'process' && app.category === 'api', 'the app carries the template’s kind and category');
+  assert(app.template?.id === 'api-service-hono' && app.template?.version === t.version, 'and remembers which template, at which version');
+  assert(app.run?.dev === t.run.dev && app.deploy?.[0]?.id === 'docker', 'run and deploy blocks are copied into app.json');
+  assert(fs.existsSync(path.join(dir, 'src', 'items.ts')) && fs.existsSync(path.join(dir, 'AICO.md')), 'the files are copied');
+  assert(!fs.existsSync(path.join(dir, 'template.json')), 'but not the manifest');
+  assert(!fs.existsSync(path.join(dir, 'node_modules')), 'and not node_modules');
+  const readme = fs.readFileSync(path.join(dir, 'README.md'), 'utf8');
+  assert(readme.startsWith('# Order Service') && readme.includes('Orders for the shop') && !readme.includes('__APP_'), 'tokens are substituted in the files the manifest names');
+  const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  assert(pkg.name === 'order-service', 'including package.json’s name');
+  const items = fs.readFileSync(path.join(dir, 'src', 'items.ts'), 'utf8');
+  assert(items === fs.readFileSync(path.join(t.dir, 'src', 'items.ts'), 'utf8'), 'files not named for substitution are byte-identical');
+  const written = JSON.parse(fs.readFileSync(path.join(dir, 'app.json'), 'utf8'));
+  assert(written.template?.id === 'api-service-hono' && written.run?.install, 'app.json on disk is v2');
+  const progress = await backlogProgress(dir);
+  assert(progress.total >= 4 && progress.done >= 1 && progress.done < progress.total, `backlog progress is counted (${progress.done}/${progress.total})`);
+  const again = await getMiniApp(app.slug, settings, ws);
+  assert(again?.built === true && effectiveKind(again) === 'process' && hasProcess(again), 'reading it back: built, process kind');
+
+  // Old manifests still read, and the legacy kind maps onto a run profile.
+  const legacyDir = miniAppDir('old-next', settings, ws);
+  fs.mkdirSync(legacyDir, { recursive: true });
+  fs.writeFileSync(path.join(legacyDir, 'app.json'), JSON.stringify({ slug: 'old-next', title: 'Old Next', kind: 'nextjs', createdAt: 1, updatedAt: 1 }));
+  fs.writeFileSync(path.join(legacyDir, 'package.json'), '{}');
+  const legacy = await getMiniApp('old-next', settings, ws);
+  assert(legacy && effectiveKind(legacy) === 'process' && hasProcess(legacy), 'a v1 nextjs manifest reads as a process app');
+  const profile = runProfileFor(legacy);
+  assert(/next dev/.test(profile.dev) && /\{port\}/.test(profile.dev) && profile.install && profile.ready, 'and gets the Next.js run profile');
+  const pageOnly = await createMiniApp({ title: 'Plain Page' }, settings, ws);
+  assert(effectiveKind(pageOnly) === 'page' && !hasProcess(pageOnly), 'an app with no kind is a page');
+  assert(runProfileFor(pageOnly).dev === undefined, 'and has no process to run');
+
+  // The static kind: files under public/, no database, served by the host.
+  const site = await instantiateTemplate({ template: getTemplate('landing-static'), title: 'Launch Site' }, settings, ws);
+  assert(site.kind === 'static' && fs.existsSync(path.join(miniAppDir(site.slug, settings, ws), 'public', 'index.html')), 'a static template lands its page under public/');
+  assert(!fs.existsSync(path.join(miniAppDir(site.slug, settings, ws), 'schema.sql')), 'and has no schema');
+
+  fs.rmSync(ws, { recursive: true, force: true });
+}
+
+console.log('  -- The bound block is small, stable, and never lists node_modules --');
+{
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-boundblock-'));
+  const settings = { workspace: { path: ws } };
+  const app = await instantiateTemplate({ template: getTemplate('api-service-hono'), title: 'Block Test' }, settings, ws);
+  const dir = miniAppDir(app.slug, settings, ws);
+  // A pretend install, the way a real one would leave the tree.
+  fs.mkdirSync(path.join(dir, 'node_modules', 'hono', 'dist'), { recursive: true });
+  for (let i = 0; i < 50; i++) fs.writeFileSync(path.join(dir, 'node_modules', 'hono', 'dist', `f${i}.js`), '');
+  fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'dist', 'index.js'), '');
+  const files = await fileList(dir);
+  assert(!/node_modules/.test(files) && !/\bdist\b/.test(files), 'node_modules and dist are not listed');
+  assert(/src\/items\.ts/.test(files) && /\.aico\//.test(files), 'source and the app’s own .aico/ are');
+  assert(files.split('\n').length <= 42, `the list is bounded (${files.split('\n').length} lines)`);
+
+  const a = await miniAppContext(app, dir, 'http://127.0.0.1:1/x/', true);
+  const b = await miniAppContext(app, dir, 'http://127.0.0.1:1/x/', true);
+  assert(a === b, 'two turns with no file change render a byte-identical block');
+  assert(a.includes('## AICO.md') && a.includes('Hono'), 'the template’s AICO.md is inlined');
+  assert(a.length < 6_000, `the block stays small (${a.length} chars)`);
+  assert(!/## Its tables/.test(a), 'a process app has no shared-host schema section');
+  assert(/AppManage start/.test(a) && !/Mini App/.test(a), 'the working notes name the tool and the new word');
+
+  const page = await createMiniApp({ title: 'Page Block' }, settings, ws);
+  const pageBlock = await miniAppContext(page, miniAppDir(page.slug, settings, ws), 'http://127.0.0.1:1/p/', false);
+  assert(/host is NOT running/i.test(pageBlock), 'a page app whose host is off is told so plainly');
+  assert(/Mini App "/.test(pageBlock) || /schema\.sql/.test(pageBlock), 'and keeps the page authoring contract');
+
+  assert(appStateLine({ app: { slug: 's', kind: 'process' }, process: { state: 'running', url: 'http://x' }, backlog: { done: 2, total: 5 } }) === 'App s: process running at http://x · backlog 2/5 done', 'the volatile state line');
+  assert(appStateLine({ app: { slug: 's', kind: 'page' }, hostUp: true }) === 'App s: host serving', 'host state for a page app');
+  assert(appStateLine({ app: { slug: 's', kind: 'page' } }) === '', 'nothing to say is an empty line, not a header');
+  // The page block opened its database to summarise the schema; Windows will
+  // not unlink an open file.
+  closeAllAppDatabases();
+  fs.rmSync(ws, { recursive: true, force: true });
+}
+
+console.log('  -- AppManage leads to a template, then points at the files --');
+{
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-appmanage-'));
+  const settings = { workspace: { path: ws }, miniApps: { enabled: true, port: 4321 } };
+  const inWs = (fn) => runInContext({ cwd: ws, sessionId: 'sess-1', settings }, fn);
+  assert(appManageToolDefinition.name === 'AppManage' && appManageToolDefinition.inputSchema.properties.action.enum.includes('templates'), 'the tool is AppManage with a templates action');
+  const bare = await inWs(() => executeAppManage({ action: 'create', name: 'Invoice Desk', brief: 'invoices for a SaaS with accounts' }));
+  assert(/Nothing created/.test(bare) && /★ web-saas-next/.test(bare), 'create without a template makes nothing and shows the ranked catalogue');
+  assert((await fs.promises.readdir(path.join(ws, 'miniapps')).catch(() => [])).length === 0, 'and no directory was claimed');
+  const listed = await inWs(() => executeAppManage({ action: 'templates', brief: 'landing page' }));
+  assert(/★ landing-static/.test(listed), 'templates ranks by brief');
+  const made = await inWs(() => executeAppManage({ action: 'create', name: 'Invoice Desk', template: 'web-saas-next', description: 'Invoices' }));
+  assert(/^Created "invoice-desk"/.test(made) && /AICO\.md/.test(made) && /EXTENDING\.md/.test(made) && /backlog\.md/.test(made), 'create with a template returns the pointer');
+  assert(made.length < 1_400, `the pointer is short (${made.length} chars)`);
+  assert(/AppManage start/.test(made), 'and says how to run a process app');
+  const list = await inWs(() => executeAppManage({ action: 'list' }));
+  assert(/invoice-desk/.test(list) && /process/.test(list) && /backlog \d+\/\d+/.test(list), 'list shows kind and backlog progress');
+  const described = await inWs(() => executeAppManage({ action: 'describe', name: 'Invoice Desk' }));
+  assert(/^App "invoice-desk"/.test(described), 'describe returns the pointer for a templated app');
+  const tables = await inWs(() => executeAppManage({ action: 'tables', name: 'invoice-desk' }));
+  assert(/its database is its own/.test(tables), 'tables refuses a process app and says why');
+  const status = await inWs(() => executeAppManage({ action: 'status', name: 'invoice-desk' }));
+  assert(/not running/.test(status) && /Backlog/.test(status), 'status of a process app that has not started');
+  const missing = await inWs(() => executeAppManage({ action: 'create', name: 'X', template: 'no-such' }));
+  assert(/No template called "no-such"/.test(missing) && /page-records/.test(missing), 'an unknown template gets the catalogue');
+  const page = await inWs(() => executeAppManage({ action: 'create', name: 'Quick List', kind: 'page' }));
+  assert(/Mini App "quick-list"/.test(page) && /schema\.sql/.test(page), 'kind: page still returns the authoring contract');
+  const startPage = await inWs(() => executeAppManage({ action: 'start', name: 'quick-list' }));
+  assert(/needs no start/.test(startPage) && /4321/.test(startPage), 'start on a page app names the host URL instead');
+  fs.rmSync(ws, { recursive: true, force: true });
 }
 
 clearInterval(keepAliveForAbandonedTools);

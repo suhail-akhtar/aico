@@ -1,13 +1,12 @@
 /**
- * Running a Mini App that is a real Node application.
+ * Running an App that is a real program.
  *
  * ## What changes, and what does not
  *
- * A single-page Mini App runs no code the model wrote on the server — that is
- * why the page can be trusted with a database it cannot send SQL to. A Next.js
- * app is server code by definition. There is no version of it that keeps that
- * guarantee, so the guarantee here is a different one, stated plainly rather
- * than implied:
+ * A page App runs no code the model wrote on the server — that is why the page
+ * can be trusted with a database it cannot send SQL to. A process App is server
+ * code by definition. There is no version of it that keeps that guarantee, so
+ * the guarantee here is a different one, stated plainly rather than implied:
  *
  * **It runs in its own process, on its own port, with nothing of aico's.**
  *
@@ -15,7 +14,7 @@
  *     takes down the app and not the workspace.
  *   - Its own port, so it is its own origin. One app's JavaScript cannot read
  *     another app's data, and neither can reach the aico API — the same
- *     browser-enforced boundary the single-page host relies on, one level up.
+ *     browser-enforced boundary the page host relies on, one level up.
  *   - A scrubbed environment. Every `*_API_KEY`, every `AICO_*`, every token in
  *     the parent's environment is removed before the child sees it. A generated
  *     `page.tsx` that logs `process.env` gets nothing worth having.
@@ -28,6 +27,15 @@
  * is the same trust you extend to any repository you clone and run — it is not
  * a sandbox, and calling it one would be the dishonest part.
  *
+ * ## One runner, any framework
+ *
+ * The runner used to know one command: `npx next dev`. It now runs whatever the
+ * app's manifest declares (`app.json.run`, copied from its template): an install
+ * command when `node_modules` is absent, a dev command with `{port}` filled in,
+ * and a readiness pattern to watch the output for. Next.js, Hono, Astro and an
+ * Expo web preview are the same to it. Apps from before templates keep the
+ * profile they always had — see `runProfileFor` in the store.
+ *
  * @module miniapps/process
  */
 
@@ -35,6 +43,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { existsSync } from 'fs';
 import net from 'net';
 import path from 'path';
+import { runProfileFor, type MiniApp, type RunProfile } from './store.js';
 
 export type AppState =
   | 'stopped'
@@ -43,7 +52,11 @@ export type AppState =
   /** The dev server is starting but has not reported a URL yet. */
   | 'starting'
   | 'running'
-  | 'failed';
+  | 'failed'
+  /** A deploy or install-only command is running; nothing is served. */
+  | 'working'
+  /** A deploy or install-only command finished cleanly. */
+  | 'done';
 
 export interface RunningApp {
   slug: string;
@@ -55,7 +68,7 @@ export interface RunningApp {
   /**
    * The tail of what the process printed.
    *
-   * Kept because a Next.js app that will not start says why — a syntax error, a
+   * Kept because an app that will not start says why — a syntax error, a
    * missing dependency, a port clash — and that message is the entire content
    * of "it did not work". Without it the panel can only report the failure, and
    * the reader has to go and find the terminal.
@@ -121,9 +134,9 @@ export function runningApps(): RunningApp[] {
  * A port nothing is listening on.
  *
  * Asked of the OS and then released, which leaves a gap between choosing and
- * binding. Next needs a port on its command line, so there is no way to hand it
- * an already-bound socket; the gap is small and the failure is visible in the
- * child's own output rather than silent.
+ * binding. Dev servers take a port on their command line, so there is no way
+ * to hand one an already-bound socket; the gap is small and the failure is
+ * visible in the child's own output rather than silent.
  */
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -138,7 +151,7 @@ async function freePort(): Promise<number> {
 }
 
 /**
- * The environment a Mini App process gets.
+ * The environment an App process gets.
  *
  * An allow-by-exception copy: everything the parent has, minus anything that
  * looks like a credential. Removing by pattern rather than listing what to keep
@@ -152,16 +165,43 @@ export function scrubbedEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proce
     if (/_API_KEY$|^AICO_|TOKEN|SECRET|_KEY$|PASSWORD|CREDENTIAL/i.test(key)) continue;
     out[key] = value;
   }
-  // Next reads this and behaves differently; being explicit beats inheriting
-  // whatever the parent shell happened to have.
+  // Frameworks read this and behave differently; being explicit beats
+  // inheriting whatever the parent shell happened to have.
   out.NODE_ENV = 'development';
   return out;
 }
 
-function spawnIn(
-  dir: string, command: string, args: string[], port?: number,
-): ChildProcess {
-  return spawn(command, args, {
+/**
+ * Split a declared command into an executable and its arguments.
+ *
+ * Commands come from a manifest a person can edit, so quoting is honoured:
+ * `node "deploy/build image.mjs"` is one argument. Nothing else — no pipes, no
+ * redirection — because the runner hands the pieces to `spawn`, not to a shell
+ * that would interpret them.
+ */
+export function splitCommand(command: string): { file: string; args: string[] } {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  for (const ch of command.trim()) {
+    if (quote) {
+      if (ch === quote) quote = null; else current += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (/\s/.test(ch)) {
+      if (current) { parts.push(current); current = ''; }
+    } else {
+      current += ch;
+    }
+  }
+  if (current) parts.push(current);
+  const [file = '', ...args] = parts;
+  return { file, args };
+}
+
+function spawnIn(dir: string, command: string, port?: number): ChildProcess {
+  const { file, args } = splitCommand(command);
+  return spawn(file, args, {
     cwd: dir,
     env: { ...scrubbedEnv(), ...(port ? { PORT: String(port) } : {}) },
     // Windows resolves `npm`/`npx` through a shim, which needs a shell.
@@ -203,20 +243,28 @@ export async function stopAllApps(): Promise<void> {
 }
 
 /**
- * Start a Next.js Mini App, installing its dependencies first if needed.
+ * Start an App's dev server, installing its dependencies first if needed.
  *
  * Returns as soon as the work is under way rather than when the server is
  * ready: a first install can take minutes, and a call that blocked for them
  * would make the UI look hung during the one operation that most needs a
  * progress report. Progress arrives through {@link subscribeToApps}.
+ *
+ * `app` supplies the run profile; without it the legacy Next.js profile is
+ * assumed, which is what every caller before templates meant.
  */
-export async function startApp(slug: string, dir: string): Promise<RunningApp> {
+export async function startApp(
+  slug: string,
+  dir: string,
+  app: Pick<MiniApp, 'kind' | 'run'> = { kind: 'nextjs' },
+): Promise<RunningApp> {
   const existing = running.get(slug);
-  if (existing && existing.record.state !== 'failed' && existing.record.state !== 'stopped') {
+  if (existing && !['failed', 'stopped', 'done'].includes(existing.record.state)) {
     return { ...existing.record, output: [...existing.record.output] };
   }
   if (existing) await stopApp(slug);
 
+  const profile = runProfileFor(app);
   const record: RunningApp = { slug, state: 'starting', output: [], startedAt: Date.now() };
   running.set(slug, { record });
   emit();
@@ -225,38 +273,43 @@ export async function startApp(slug: string, dir: string): Promise<RunningApp> {
     patch(slug, { state: 'failed', error: 'no package.json — this app has not been scaffolded yet' });
     return appState(slug)!;
   }
+  if (!profile.dev) {
+    patch(slug, { state: 'failed', error: 'this app declares no dev command (app.json run.dev)' });
+    return appState(slug)!;
+  }
 
   void (async () => {
     try {
-      if (!existsSync(path.join(dir, 'node_modules'))) {
+      if (profile.install && !existsSync(path.join(dir, 'node_modules'))) {
         patch(slug, { state: 'installing' });
-        note(slug, 'npm install — first run, this takes a while');
-        const code = await run(slug, dir, 'npm', ['install', '--no-audit', '--no-fund']);
+        note(slug, `${profile.install} — first run, this takes a while`);
+        const code = await run(slug, dir, profile.install);
         if (code !== 0) {
-          patch(slug, { state: 'failed', error: `npm install failed (exit ${code})` });
+          patch(slug, { state: 'failed', error: `install failed (exit ${code})` });
           return;
         }
       }
 
       const port = await freePort();
       patch(slug, { state: 'starting', port });
-      note(slug, `starting on port ${port}`);
+      const command = profile.dev!.replace(/\{port\}/g, String(port));
+      note(slug, `starting on port ${port}: ${command}`);
+      const ready = new RegExp(profile.ready ?? 'ready in|listening on|Local:\\s+http|http://', 'i');
 
-      const child = spawnIn(dir, 'npx', ['next', 'dev', '--port', String(port)], port);
+      const child = spawnIn(dir, command, port);
       const entry = running.get(slug);
       if (!entry) { child.kill(); return; }
       entry.child = child;
 
-      child.stdout?.on('data', (chunk: Buffer) => {
+      const watch = (chunk: Buffer): void => {
         const text = chunk.toString();
         note(slug, text);
-        // Next announces readiness; until then the page would 404 and a panel
-        // saying "running" would be lying by a few seconds.
-        if (/ready in|started server|Local:\s+http/i.test(text)) {
-          patch(slug, { state: 'running', url: `http://127.0.0.1:${port}` });
-        }
-      });
-      child.stderr?.on('data', (chunk: Buffer) => note(slug, chunk.toString()));
+        // The server announces readiness; until then the page would 404 and a
+        // panel saying "running" would be lying by a few seconds.
+        if (ready.test(text)) patch(slug, { state: 'running', url: `http://127.0.0.1:${port}` });
+      };
+      child.stdout?.on('data', watch);
+      child.stderr?.on('data', watch);
 
       child.on('error', (err) => {
         patch(slug, { state: 'failed', error: err.message });
@@ -277,10 +330,56 @@ export async function startApp(slug: string, dir: string): Promise<RunningApp> {
   return appState(slug)!;
 }
 
+/**
+ * Install an app's dependencies without starting it.
+ *
+ * What the create path does the moment a template is copied, so the minutes
+ * an install takes are spent while the reader is still typing their brief
+ * rather than after they press Start.
+ */
+export async function installApp(slug: string, dir: string, profile: RunProfile): Promise<RunningApp> {
+  const existing = running.get(slug);
+  if (existing && !['failed', 'stopped', 'done'].includes(existing.record.state)) {
+    return { ...existing.record, output: [...existing.record.output] };
+  }
+  const record: RunningApp = { slug, state: 'installing', output: [], startedAt: Date.now() };
+  running.set(slug, { record });
+  emit();
+  if (!profile.install) { patch(slug, { state: 'done' }); return appState(slug)!; }
+  note(slug, profile.install);
+  void run(slug, dir, profile.install).then(code => {
+    if (!running.has(slug)) return;
+    if (code === 0) patch(slug, { state: 'done' });
+    else patch(slug, { state: 'failed', error: `install failed (exit ${code})` });
+  });
+  return appState(slug)!;
+}
+
+/**
+ * Run one declared command to completion under an app's record — a deploy
+ * script, a one-off build — with its output kept like a dev server's.
+ */
+export async function runAppCommand(slug: string, dir: string, command: string): Promise<RunningApp> {
+  const existing = running.get(slug);
+  if (existing && !['failed', 'stopped', 'done'].includes(existing.record.state)) {
+    return { ...existing.record, output: [...existing.record.output] };
+  }
+  const record: RunningApp = { slug, state: 'working', output: [], startedAt: Date.now() };
+  running.set(slug, { record });
+  emit();
+  note(slug, command);
+  void run(slug, dir, command).then(code => {
+    if (!running.has(slug)) return;
+    if (code === 0) patch(slug, { state: 'done' });
+    else patch(slug, { state: 'failed', error: `${command} exited with ${code}` });
+  });
+  return appState(slug)!;
+}
+
 /** Run a command to completion, streaming its output into the record. */
-function run(slug: string, dir: string, command: string, args: string[]): Promise<number> {
+function run(slug: string, dir: string, command: string): Promise<number> {
   return new Promise((resolve) => {
-    const child = spawnIn(dir, command, args);
+    const child = spawnIn(dir, command);
     const entry = running.get(slug);
     if (entry) entry.child = child;
     child.stdout?.on('data', (c: Buffer) => note(slug, c.toString()));

@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+data
+coverage
+.git
+.aico
+.env
+.env.local
+*.md
+test
+deploy
