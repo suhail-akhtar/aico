@@ -1,6 +1,6 @@
 import { createAgentSpec, formatAgentList, getAgentSpec, listAgentSpecs } from '../agents/registry.js';
 import type { AgentCreateInput } from '../agents/types.js';
-import { buildAgentChatPrompt, buildTeamPrompt } from '../agents/prompts.js';
+import { buildAgentChatPrompt } from '../agents/prompts.js';
 import { skillRegistry } from '../skills/index.js';
 
 export const agentCreateToolDefinition = {
@@ -55,19 +55,6 @@ export const agentPromptToolDefinition = {
   },
 };
 
-export const teamPromptToolDefinition = {
-  name: 'TeamPrompt',
-  description: 'Build a powerful XML team-orchestration prompt led by Product Owner with specialist agents, QA, security, and repair loops.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      requirements: { type: 'string', description: 'User requirements or mission for the agent team.' },
-      agents: { type: 'array', items: { type: 'string' }, description: 'Optional agent names. Defaults to product-owner, architect, backend, frontend, qa, security.' },
-    },
-    required: ['requirements'],
-  },
-};
-
 export async function executeAgentCreate(args: AgentCreateInput): Promise<string> {
   const spec = await createAgentSpec(args);
   return `Agent "${spec.name}" saved (${spec.source}).\nRole: ${spec.role}\nSkills: ${spec.skills.join(', ') || '(none)'}`;
@@ -89,18 +76,6 @@ export async function executeAgentPrompt(args: { name: string; task: string }): 
   return buildAgentChatPrompt({
     agent: spec,
     task: args.task,
-    availableSkills: skillRegistry.list(),
-  });
-}
-
-export async function executeTeamPrompt(args: { requirements: string; agents?: string[] }): Promise<string> {
-  const names = args.agents?.length
-    ? args.agents
-    : ['product-owner', 'architect', 'backend', 'frontend', 'qa', 'security'];
-  const specs = (await Promise.all(names.map((name) => getAgentSpec(name)))).filter(Boolean);
-  return buildTeamPrompt({
-    requirements: args.requirements,
-    agents: specs.length ? specs as NonNullable<typeof specs[number]>[] : await listAgentSpecs(),
     availableSkills: skillRegistry.list(),
   });
 }

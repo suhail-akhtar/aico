@@ -13,7 +13,7 @@
  *   without opening anything.
  *
  * The full web workspace is still reachable in a tab. It is better than a 300px
- * column at the things that want width — Mini Apps, the trajectory view, the
+ * column at the things that want width — Apps, the trajectory view, the
  * whole settings surface — and worse at being an editor panel, which is why both
  * exist.
  *

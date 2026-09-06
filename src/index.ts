@@ -31,9 +31,6 @@ import { setNotificationHookSettings } from './background/notifications.js';
 import { selectProvider, PROVIDER_DEFAULT_MODELS, detectProviderType } from './providers/index.js';
 import { runProviderSetup, isProviderConfigured, listConfiguredProviders } from './setup.js';
 import { ensureWorkspace, setWorkspaceRuntime } from './workspace.js';
-import { runPipeline } from './studio/pipeline.js';
-import { readState } from './studio/state.js';
-import { createStudioRuntime } from './studio/runtime.js';
 import { Inbox, maybeCompactSession, openSession, seedFromLegacyHistory } from './session/index.js';
 
 /** Resolve model aliases and short names to full model IDs */
@@ -716,48 +713,6 @@ async function startReadlineREPL(
               showError(err instanceof Error ? err.message : String(err));
             }
             rl.resume();
-          }
-          // Deterministic studio pipeline execution (instead of sendAsPrompt).
-          // Runs the Ralph Loop + self-healer + validation stack directly.
-          if (result.runStudioPipeline) {
-            rl.pause();
-            // Give the pipeline its own abort controller so Ctrl+C cancels the
-            // long-running build cleanly instead of orphaning sub-agents.
-            const studioAbort = new AbortController();
-            const onSigInt = () => studioAbort.abort();
-            process.once('SIGINT', onSigInt);
-            try {
-              const state = await readState(result.runStudioPipeline.projectDir);
-              if (!state) {
-                showError('Studio state not found. Run /studio <requirements> to start a new build.');
-              } else {
-                const runtime = createStudioRuntime({
-                  model: currentModel,
-                  autoApprove: opts.yes || (settings.autoApprove ?? false),
-                  verbose: opts.verbose,
-                  settings,
-                  abortSignal: studioAbort.signal,
-                });
-                const pipelineResult = await runPipeline(state, {
-                  runTask: runtime.runTask,
-                  askUser: runtime.askUser,
-                  abortSignal: studioAbort.signal,
-                });
-                const summary = pipelineResult.summary || 'Studio pipeline finished.';
-                const statusLine = pipelineResult.success
-                  ? `\n✅ Studio completed: ${pipelineResult.completedPhases}/${pipelineResult.totalPhases} phases in ${Math.round(pipelineResult.durationMs / 1000)}s.`
-                  : `\n⚠️ Studio finished with incomplete phases: ${pipelineResult.completedPhases}/${pipelineResult.totalPhases}.`;
-                console.log('\n' + chalk.white(summary) + chalk.gray(statusLine) + '\n');
-                conversationHistory.push({ role: 'user', content: `/studio ${state.requirements}` });
-                conversationHistory.push({ role: 'assistant', content: summary });
-                maybeAutoCompactConversation(conversationHistory, settings, currentModel, session);
-              }
-            } catch (err) {
-              showError(err instanceof Error ? err.message : String(err));
-            } finally {
-              process.removeListener('SIGINT', onSigInt);
-              rl.resume();
-            }
           }
           prompt();
           return;

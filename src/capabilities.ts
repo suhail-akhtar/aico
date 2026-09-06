@@ -14,8 +14,8 @@ export interface CapabilityToolSummary {
 
 export const SLASH_COMMAND_NAMES = [
   '/help', '/exit', '/clear', '/compact', '/model', '/plan', '/status', '/cost',
-  '/permissions', '/config', '/review', '/studio', '/scaffold', '/security-audit', '/memory', '/history', '/resume',
-  '/init', '/provider', '/agents', '/agent-create', '/agent', '/team',
+  '/permissions', '/config', '/review', '/app', '/security-audit', '/memory', '/history', '/resume',
+  '/init', '/provider', '/agents', '/agent-create', '/agent',
   '/mcp', '/mcp-add', '/mcp-create', '/mcp-remove',
   '/mcp-reload', '/mcp-security', '/workspace', '/workspace-set', '/capabilities', '/transcript', '/debug',
   '/github-action', '/ide-bridge', '/doctor',
@@ -166,8 +166,7 @@ export function buildRuntimeAwareness(input: {
     '    <process name="sub-agents">Use Task for isolated specialist work. Spawn by subagent_type (devops, devsecops, review, backend, frontend, qa, etc.), agent_name (a registered custom agent), or agent_spec (a fully custom inline agent with custom instructions, tools, and model). Pass complete context.</process>',
     '    <process name="agent-creation">Use AgentManage to list, create, update, delete, enable or disable specialist agents. Created agents are immediately spawnable via Task agent_name. Assign skills to an agent to give it specialized procedures — the skill prompt is injected at spawn time, and skill names are checked when you set them.</process>',
     '    <process name="skill-creation">Use SkillManage to list, create, verify, register, update, delete, enable, disable, import or export skills. Creating writes a DRAFT that is deliberately NOT registered: write it, actually run it on a real example, then register it. A skill may ship scripts and references alongside its markdown.</process>',
-    '    <process name="pipeline-creation">Write .aico/pipeline.json to define custom SDLC pipelines with phases, per-phase agent types and models, conditions, and attached docs/policies. Run with /studio.</process>',
-    '    <process name="teams">Use TeamPrompt or /team for Product Owner-led multi-agent work with QA/security gates and repair loops.</process>',
+    '    <process name="apps">Build applications with AppManage: templates first (zero-token skeleton with a worked feature, tests and a Dockerfile), one writing agent, read-only Investigate for research, RunChecks then start and VerifyApp. /app in the CLI.</process>',
     '    <process name="skills">Prefer a skill over working the procedure out again. If a listed skill matches what is being asked, open it with Skill and follow it — the person who wrote it knew something about this task that is not in the codebase. Skills flagged as matching the request are the first thing to consider, not the last.</process>',
     '    <process name="memory">Use MemoryManage to remember durable facts, list what is remembered, update or forget one. Scope matters: global applies everywhere, project only in this directory, session only in this conversation. Remember when told to, and when a fact will still be true next week.</process>',
     '    <process name="workspace">Use WorkspaceWrite for durable reports, QA evidence, handoffs, and long-running operation notes.</process>',

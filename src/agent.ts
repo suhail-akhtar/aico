@@ -666,12 +666,12 @@ export function resolveToolSet(opts: {
     defs = defs.filter(d => d.name !== 'AskUserQuestion');
   }
 
-  // Mini Apps are a plugin, and "off" has to mean the model cannot see the
-  // tool — not that it is told not to use it. A tool present in the list is a
-  // tool that gets called eventually, and calling it while the host is not
+  // Apps are a plugin, and "off" has to mean the model cannot see the tool —
+  // not that it is told not to use it. A tool present in the list is a tool
+  // that gets called eventually, and calling it while the host is not
   // listening builds an app nobody can open.
   if (!opts.settings?.miniApps?.enabled) {
-    defs = defs.filter(d => d.name !== 'MiniAppManage');
+    defs = defs.filter(d => d.name !== 'AppManage');
   }
 
   /*

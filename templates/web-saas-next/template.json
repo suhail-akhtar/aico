@@ -1,0 +1,26 @@
+{
+  "id": "web-saas-next",
+  "version": "1.0.0",
+  "name": "Web app (Next.js)",
+  "category": "saas",
+  "kind": "process",
+  "summary": "A full-stack web application: Next.js App Router, Tailwind, node:sqlite, sign-up and sign-in with a signed cookie, one worked feature (items) end to end — page, server actions, data layer, tests — and a multi-stage Dockerfile.",
+  "tags": ["nextjs", "react", "typescript", "tailwind", "sqlite", "auth", "saas", "fullstack", "web app"],
+  "match": ["saas", "web app", "webapp", "dashboard", "portal", "platform", "full stack", "fullstack", "users", "login", "signup", "accounts", "subscription", "next", "react", "crm", "admin", "booking", "marketplace"],
+  "requires": { "node": ">=22.5.0" },
+  "run": {
+    "install": "npm install --no-audit --no-fund",
+    "dev": "npx next dev --port {port}",
+    "ready": "ready in|started server|Local:\\s+http",
+    "build": "npm run build",
+    "test": "npm test",
+    "typecheck": "npm run typecheck",
+    "lint": "npm run lint",
+    "start": "npm start"
+  },
+  "substitute": ["README.md", "AICO.md", ".aico/backlog.md", "package.json", "src/app/layout.tsx", "src/app/page.tsx", "deploy/README.md", "compose.yaml"],
+  "deploy": [
+    { "id": "docker", "label": "Docker image", "script": "node deploy/docker.mjs", "requires": ["docker"] }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

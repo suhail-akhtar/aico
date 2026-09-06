@@ -171,7 +171,7 @@ purpose.
 ## Knowing what is still running
 
 Everything long-lived goes into one place: sub-agents, background agents,
-backgrounded shell commands, Mini App servers, scheduled runs and watchers. When
+backgrounded shell commands, app servers, scheduled runs and watchers. When
 there is something in flight, or something finished while you were away, the
 agent is told about it at the start of the turn — and when there is nothing, it
 is told nothing at all.

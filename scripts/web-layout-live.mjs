@@ -308,9 +308,29 @@ try {
       // the nav both reach it — with the session tabs gone from the header.
       open: async () => {
         await page.goto(`${url}&view=apps`, { waitUntil: 'domcontentloaded' });
-        await page.waitForSelector('h2:has-text("Mini Apps"), h2:has-text("Apps")', { timeout: 30_000 });
+        await page.waitForSelector('[data-apps-pane] h2:has-text("Apps")', { timeout: 30_000 });
         const tabs = await page.$$('header nav button');
         check(tabs.length === 0, `apps — the session tabs are not drawn on a destination (${tabs.length} found)`);
+        // The template cards come from the catalogue route, not a hard-coded list.
+        await page.waitForSelector('[data-template="page-records"]', { timeout: 30_000 });
+        const cards = await page.$$('[data-apps-templates] [data-template]');
+        check(cards.length >= 4, `apps — the shipped templates are offered (${cards.length} cards)`);
+        // The wizard: opens from the primary action, fits the viewport, closes on Escape.
+        await page.click('[data-create-app]');
+        await page.waitForSelector('[data-app-wizard] [role="dialog"]', { timeout: 10_000 });
+        const fit = await page.evaluate(() => {
+          const d = document.querySelector('[data-app-wizard] [role="dialog"]');
+          const r = d.getBoundingClientRect();
+          return { top: r.top, bottom: r.bottom, right: r.right, vh: window.innerHeight, vw: window.innerWidth };
+        });
+        check(fit.top >= 0 && fit.bottom <= fit.vh + 1 && fit.right <= fit.vw + 1,
+          `apps — the create wizard fits the viewport (${Math.round(fit.top)}–${Math.round(fit.bottom)} of ${fit.vh})`);
+        await page.click('[data-wizard-template="landing-static"]');
+        await page.waitForSelector('[data-wizard-title]', { timeout: 10_000 });
+        const disabled = await page.$eval('[data-wizard-create]', b => b.disabled);
+        check(disabled === true, 'apps — Create is disabled until the app has a name');
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('[data-app-wizard]', { state: 'detached', timeout: 10_000 });
         return undefined;
       },
     },

@@ -1,0 +1,6 @@
+/* Token overrides only. The design system is /_aico/aico.css. */
+:root {
+  --accent: #2f5df6;
+  --radius: 10px;
+}
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }

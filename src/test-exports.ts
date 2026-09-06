@@ -295,14 +295,21 @@ export {
 } from './tools/task.js';
 export { executeSupervise, superviseToolDefinition } from './tools/supervise.js';
 export { loadSettings } from './settings.js';
-export { createMiniApp, miniAppDir, getMiniApp, listMiniApps } from './miniapps/store.js';
-export { miniAppContext } from './miniapps/context.js';
+export {
+  createMiniApp, miniAppDir, getMiniApp, listMiniApps, effectiveKind, hasProcess, runProfileFor, backlogProgress,
+} from './miniapps/store.js';
+export { miniAppContext, fileList, appStateLine } from './miniapps/context.js';
+export {
+  listTemplates, getTemplate, validateManifest, suggestTemplates, renderCatalogue, substituteTokens,
+  matchesSubstitute, instantiateTemplate, nodeSatisfies, bundledTemplatesDir, REQUIRED_TEMPLATE_FILES,
+} from './apps/templates.js';
+export { executeAppManage, appManageToolDefinition } from './tools/manage-miniapps.js';
 export { runAgent } from './agent.js';
 export {
   scrubbedEnv, startApp, stopApp, appState, runningApps, subscribeToApps,
 } from './miniapps/process.js';
 export { nextAuthoringContract } from './miniapps/contract-nextjs.js';
-export { splitStatements } from './miniapps/data.js';
+export { splitStatements, closeAll as closeAllAppDatabases, closeDatabase as closeAppDatabase } from './miniapps/data.js';
 export { executeMiniAppManage } from './tools/manage-miniapps.js';
 export { authoringContract } from './miniapps/contract.js';
 export {

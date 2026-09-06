@@ -1,0 +1,20 @@
+services:
+  web:
+    build: .
+    image: __APP_SLUG__
+    ports:
+      - "3000:3000"
+    environment:
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      DATABASE_PATH: /app/data/app.sqlite
+    volumes:
+      - data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  data:

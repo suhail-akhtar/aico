@@ -110,6 +110,22 @@ export function closeAll(): void {
 }
 
 /**
+ * Close one app's database, if it is open.
+ *
+ * Called before the app's directory is removed: on Windows an open SQLite
+ * file cannot be unlinked, so a delete that forgot this would fail with EBUSY
+ * on exactly the apps somebody had looked at.
+ */
+export function closeDatabase(dir: string): void {
+  const key = path.resolve(dir);
+  for (const [k, entry] of open) {
+    if (path.resolve(k) !== key) continue;
+    try { entry.db.close(); } catch { /* already gone */ }
+    open.delete(k);
+  }
+}
+
+/**
  * The app's database, opening and initialising it if this is the first call.
  *
  * `schema.sql` is applied every time rather than once-and-recorded, so it must

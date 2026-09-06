@@ -3,7 +3,7 @@
  *
  * This embeds the web client rather than reimplementing it. aico already ships
  * a complete workspace — sessions, tool cards with diffs, plan and task panels,
- * trajectory, Mini Apps — and rebuilding that natively would duplicate several
+ * trajectory, Apps — and rebuilding that natively would duplicate several
  * thousand lines to arrive somewhere worse.
  *
  * ## Why an iframe inside the webview

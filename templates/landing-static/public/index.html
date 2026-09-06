@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; form-action 'self'">
+  <title>__APP_TITLE__</title>
+  <meta name="description" content="__APP_DESCRIPTION__">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top">__APP_TITLE__</a>
+    <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" data-menu>
+      <span class="sr-only">Menu</span>
+      <span class="menu-bars" aria-hidden="true"></span>
+    </button>
+    <nav id="site-nav" class="site-nav" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a href="#contact" class="button button-small">Contact</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section id="hero" class="hero">
+      <p class="eyebrow">Placeholder eyebrow</p>
+      <h1>__APP_TITLE__</h1>
+      <p class="lede">__APP_DESCRIPTION__</p>
+      <div class="actions">
+        <a class="button" href="#contact">Get started</a>
+        <a class="button button-ghost" href="#features">See how it works</a>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <h2>Features</h2>
+      <p class="section-lede">Three placeholder claims. Replace each with something the product actually does, in the customer's words.</p>
+      <ul class="cards">
+        <li class="card">
+          <h3>Fast to start</h3>
+          <p>Placeholder: one sentence on the first thing a new customer gets, and how quickly.</p>
+        </li>
+        <li class="card">
+          <h3>Built to last</h3>
+          <p>Placeholder: one sentence on reliability, ownership of data, or the guarantee you make.</p>
+        </li>
+        <li class="card">
+          <h3>Grows with you</h3>
+          <p>Placeholder: one sentence on what happens when the customer's needs get bigger.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section id="pricing" class="section section-alt">
+      <h2>Pricing</h2>
+      <p class="section-lede">Placeholder tiers. Keep it to three; say what changes between them, not what stays the same.</p>
+      <ul class="cards pricing">
+        <li class="card">
+          <h3>Starter</h3>
+          <p class="price"><span class="amount">$0</span> <span class="period">/ month</span></p>
+          <ul class="ticks">
+            <li>Placeholder limit</li>
+            <li>Community support</li>
+          </ul>
+          <a class="button button-ghost" href="#contact">Start free</a>
+        </li>
+        <li class="card card-featured">
+          <h3>Team</h3>
+          <p class="price"><span class="amount">$29</span> <span class="period">/ month</span></p>
+          <ul class="ticks">
+            <li>Everything in Starter</li>
+            <li>Placeholder team feature</li>
+            <li>Email support</li>
+          </ul>
+          <a class="button" href="#contact">Choose Team</a>
+        </li>
+        <li class="card">
+          <h3>Business</h3>
+          <p class="price"><span class="amount">Custom</span></p>
+          <ul class="ticks">
+            <li>Everything in Team</li>
+            <li>Single sign-on</li>
+            <li>A named contact</li>
+          </ul>
+          <a class="button button-ghost" href="#contact">Talk to us</a>
+        </li>
+      </ul>
+    </section>
+
+    <section id="faq" class="section">
+      <h2>Questions</h2>
+      <div class="faq" data-faq>
+        <details>
+          <summary>Placeholder: the question people ask before they sign up?</summary>
+          <p>Answer it plainly in two or three sentences. Link to the detail if there is more.</p>
+        </details>
+        <details>
+          <summary>Placeholder: can I cancel?</summary>
+          <p>Yes. Say how, and what happens to their data when they do.</p>
+        </details>
+        <details>
+          <summary>Placeholder: where is my data stored?</summary>
+          <p>Name the region and the provider. People ask this one more than any other.</p>
+        </details>
+      </div>
+    </section>
+
+    <section id="contact" class="section section-alt">
+      <h2>Contact</h2>
+      <p class="section-lede">Placeholder: this form posts nowhere until it is wired to an endpoint — see the README.</p>
+      <form class="contact" action="#" method="post" novalidate data-contact>
+        <div class="field">
+          <label for="name">Name</label>
+          <input id="name" name="name" type="text" autocomplete="name" required>
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="email" required aria-describedby="email-error">
+          <p id="email-error" class="error" hidden>Enter an email address like name@example.com.</p>
+        </div>
+        <div class="field">
+          <label for="message">Message</label>
+          <textarea id="message" name="message" rows="4" required></textarea>
+        </div>
+        <button class="button" type="submit">Send</button>
+        <p class="form-status" role="status" data-status></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>&copy; <span data-year>2026</span> __APP_TITLE__. Placeholder footer — add the legal pages here.</p>
+  </footer>
+
+  <script src="/main.js" defer></script>
+</body>
+</html>

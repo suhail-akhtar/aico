@@ -1,0 +1,6 @@
+.git
+.aico
+docs
+deploy
+node_modules
+*.md

@@ -11,8 +11,8 @@ dist-test/
 .env.*
 !.env.example
 
-# aico runtime state, written while the tool runs
-.aico/
+# aico runtime state, written while the tool runs (root only: templates ship a .aico/ of their own)
+/.aico/
 .studio/
 .zcode/
 
@@ -59,7 +59,7 @@ tmp-wire-*/
 # An early standalone landing page, superseded by docs/ and referenced by
 # nothing. Left on disk rather than deleted; ignored so it stops showing up as
 # untracked on every status.
-public/
+/public/
 
 # Emitted beside the source, not written there.
 #

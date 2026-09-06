@@ -24,6 +24,7 @@ export function MiniAppScope(): React.ReactElement | null {
   const busy = useStore(s => s.busy);
   const [app, setApp] = useState<MiniAppSummary | null>(null);
   const [host, setHost] = useState<string | null>(null);
+  const [processUrl, setProcessUrl] = useState<string | null>(null);
 
   // Re-read when a turn ends: the agent may have just built the page, and a
   // bar still saying "not built yet" beside a working app is worse than none.
@@ -34,13 +35,28 @@ export function MiniAppScope(): React.ReactElement | null {
       if (!live) return;
       setApp(view.apps.find(a => a.slug === slug) ?? null);
       setHost(view.host);
+      const proc = (view.processes ?? []).find(p => p.slug === slug);
+      setProcessUrl(proc?.state === 'running' ? proc.url ?? null : null);
     }).catch(() => { /* the bar is not worth an error banner */ });
     return () => { live = false; };
   }, [slug, busy]);
 
   if (!slug) return null;
 
-  const url = host && app?.built ? `${host}/${slug}/` : null;
+  const kind = app?.kind ?? 'page';
+  const ownProcess = kind === 'process' || kind === 'nextjs' || kind === 'mobile';
+  // A page or static app lives at a fixed address on the shared host; a
+  // process app has an address only while it is running.
+  const url = ownProcess
+    ? processUrl
+    : (host && app?.built ? `${host}/${slug}/` : null);
+  const kindLabel = kind === 'nextjs' ? 'Next.js app' : `${kind} app`;
+  const state = app?.built
+    ? `${kindLabel} — ask for changes, fixes or new features`
+    : `${kindLabel} — not built yet`;
+  const progress = app?.backlog && app.backlog.total > 0
+    ? ` · backlog ${app.backlog.done}/${app.backlog.total}`
+    : '';
 
   return (
     <div className="mx-auto flex w-full max-w-column items-center gap-2 px-5 pb-2 pt-3">
@@ -49,9 +65,7 @@ export function MiniAppScope(): React.ReactElement | null {
         {app?.title ?? slug}
       </span>
       <span className="min-w-0 truncate text-[12px] text-aico-muted">
-        {app?.built
-          ? 'Mini App — ask for changes, fixes or new features'
-          : 'Mini App — not built yet'}
+        {state}{progress}
       </span>
       <div className="flex-1" />
       {/*

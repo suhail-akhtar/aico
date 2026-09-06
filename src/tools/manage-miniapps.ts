@@ -1,20 +1,32 @@
 /**
- * Mini Apps, from the agent's side.
+ * Apps, from the agent's side.
  *
- * The fifth registry, same shape as the other four: one tool, an `action`, and
- * a text answer. What differs is that creating the entry is not the work — the
- * work is a page and a schema, written afterwards with the ordinary file tools.
+ * One tool, an `action`, a text answer — the same shape as the other
+ * registries. What differs is that creating the entry is not the work: the work
+ * is the files written afterwards with the ordinary tools, or copied from a
+ * template in zero model tokens.
  *
- * So `create` does two things: it claims a directory, and it hands back the
- * authoring contract. The second is the important one. Everything a Mini App
- * gets for free — the data client, the CRUD component, the design system, the
- * CSP that will silently kill a CDN link — is invisible unless something says
- * so at the moment it matters, and a capability nobody mentions is one the
- * model routes around badly.
+ * ## Templates first
  *
- * Returning it here rather than putting it in the system prompt keeps it off
- * every unrelated turn. It is roughly two thousand tokens; a user who never
- * builds a Mini App should never pay for it.
+ * `create` without a template does not make anything. It returns the catalogue
+ * — one line per template, the ones a brief suggests first — and stops. An app
+ * started from a template arrives with a working feature, tests, a Dockerfile
+ * and its own notes to the agent, and the whole skeleton costs no generation;
+ * an app started from nothing costs a few thousand tokens of contract on every
+ * create and arrives empty. The catalogue is the cheaper path and the better
+ * one, so it is the path the tool leads to.
+ *
+ * The exception is the `page` kind by explicit request (`kind: 'page'`), which
+ * keeps the authoring contract that has worked since Mini Apps began: for a
+ * one-screen tool over SQLite the runtime is the template.
+ *
+ * ## What comes back after create
+ *
+ * A pointer, not a brief: the directory, the kind, and the three files to read
+ * (`AICO.md`, `docs/EXTENDING.md`, `.aico/backlog.md`). Roughly 150 tokens.
+ * The template's own `AICO.md` is inlined into the bound session's system
+ * prompt, so an agent working on the app reads the notes once and has them
+ * on every turn from cache.
  *
  * @module tools/manage-miniapps
  */
@@ -25,19 +37,32 @@ import { loadSettings } from '../settings.js';
 import { authoringContract } from '../miniapps/contract.js';
 import { nextAuthoringContract } from '../miniapps/contract-nextjs.js';
 import {
-  createMiniApp, deleteMiniApp, getMiniApp, listMiniApps, miniAppDir, slugify, touchMiniApp,
-  type MiniAppKind,
+  backlogProgress, createMiniApp, deleteMiniApp, effectiveKind, getMiniApp, hasProcess, listMiniApps,
+  miniAppDir, runProfileFor, slugify, touchMiniApp,
+  type MiniApp, type MiniAppKind,
 } from '../miniapps/store.js';
-import { describe as describeTables } from '../miniapps/data.js';
+import { closeDatabase, describe as describeTables } from '../miniapps/data.js';
+import { appState, startApp, stopApp, type RunningApp } from '../miniapps/process.js';
+import { getTemplate, instantiateTemplate, nodeSatisfies, renderCatalogue } from '../apps/templates.js';
 
-export interface MiniAppManageInput {
-  action: 'list' | 'create' | 'describe' | 'tables' | 'delete';
+export interface AppManageInput {
+  action: 'list' | 'create' | 'describe' | 'tables' | 'delete' | 'templates' | 'start' | 'stop' | 'status';
   /** For create: what to call it. For everything else: which one. */
   name?: string;
   description?: string;
-  /** What to build. Defaults to the single-page app. */
+  /** For create: the template id (see action "templates"). */
+  template?: string;
+  /** For templates and create-without-template: what the app is for, to rank suggestions. */
+  brief?: string;
+  /** For create without a template: only "page" is honoured; everything else goes through a template. */
   kind?: MiniAppKind;
 }
+
+/** The old name, kept one release so a transcript that says it still works. */
+export type MiniAppManageInput = AppManageInput;
+
+/** How long `start` waits for a process to report ready before handing back the log. */
+const START_TIMEOUT_MS = 120_000;
 
 /**
  * Where an app is reachable.
@@ -58,12 +83,52 @@ async function appUrl(slug: string): Promise<string> {
 async function disabledNotice(): Promise<string | null> {
   const settings = currentRunContext()?.settings ?? await loadSettings();
   if (settings.miniApps?.enabled) return null;
-  return 'Note: Mini Apps are switched off, so nothing is being served right now. '
-    + 'Turn on Settings → Mini Apps (or set miniApps.enabled to true) and restart aico. '
-    + 'Building one now is fine — it will be there when the plugin is on.';
+  return 'Note: Apps are switched off, so the shared host is not serving page and static apps right now. '
+    + 'Turn on Settings → Apps (or set miniApps.enabled to true) and restart aico. '
+    + 'Building one now is fine — it will be there when the host is on.';
 }
 
-export async function executeMiniAppManage(input: MiniAppManageInput): Promise<string> {
+/** The ~150-token pointer handed back for a templated app. */
+function pointer(app: MiniApp, dir: string, created: boolean): string {
+  const kind = effectiveKind(app);
+  const process = hasProcess(app);
+  return [
+    `${created ? 'Created' : 'App'} "${app.slug}" — ${app.title} (${kind}${app.template ? `, from template ${app.template.id}` : ''})`,
+    `  Directory  ${dir}`,
+    '',
+    'Read these first, in order:',
+    `  ${path.join(dir, 'AICO.md')}            what this app is and how to work on it`,
+    `  ${path.join(dir, 'docs', 'EXTENDING.md')}   how to add the next feature — copy the worked one`,
+    `  ${path.join(dir, '.aico', 'backlog.md')}   the stories; tick them as they land`,
+    '',
+    process
+      ? 'Then: use Skill app-plan for the brief, build by copying the worked feature, RunChecks, '
+        + `and AppManage start (name "${app.slug}") to run it — the first start installs dependencies, `
+        + 'which takes a while. VerifyApp the URL it reports.'
+      : `Then: build by copying the worked pattern and VerifyApp ${kind === 'cli' ? 'is not needed — a passing RunChecks is the check' : 'the served URL after every change'}.`,
+    'Do not create another app in this conversation.',
+  ].join('\n');
+}
+
+function describeProcess(rec: RunningApp | undefined, slug: string): string {
+  if (!rec) return `"${slug}" is not running. AppManage start to run it.`;
+  const tail = rec.output.slice(-20);
+  const head = `"${slug}": ${rec.state}${rec.url ? ` at ${rec.url}` : ''}${rec.error ? ` — ${rec.error}` : ''}`;
+  return tail.length ? `${head}\n\nLast output:\n${tail.join('\n')}` : head;
+}
+
+/** Wait for a started process to settle: running, failed, or the timeout. */
+async function awaitReady(slug: string): Promise<RunningApp | undefined> {
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const rec = appState(slug);
+    if (!rec || rec.state === 'running' || rec.state === 'failed' || rec.state === 'stopped' || rec.state === 'done') return rec;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return appState(slug);
+}
+
+export async function executeAppManage(input: AppManageInput): Promise<string> {
   const cwd = currentCwd();
   const sessionId = currentRunContext()?.sessionId;
   // Which app this conversation is about, when it is about one. Derived from
@@ -81,22 +146,39 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
   const settings = currentRunContext()?.settings ?? await loadSettings();
   const notice = await disabledNotice();
   const withNotice = (body: string) => (notice ? `${body}\n\n${notice}` : body);
+  const find = async (name: string | undefined): Promise<{ slug: string; app: MiniApp } | string> => {
+    if (!name) return 'Which app? Use action "list" to see them.';
+    const slug = slugify(name);
+    const app = await getMiniApp(slug, settings, cwd);
+    return app ? { slug, app } : `No app called "${slug}".`;
+  };
 
   switch (input.action) {
+    case 'templates': {
+      return `Templates (★ = suggested by the brief):\n${renderCatalogue(input.brief ?? input.description ?? '', cwd)}\n\n`
+        + 'Create from one with action "create", name, and template. Templates copy in zero model tokens '
+        + 'and arrive with a worked feature, tests, notes to you (AICO.md) and a Dockerfile.';
+    }
+
     case 'list': {
       const apps = await listMiniApps(settings, cwd);
       if (apps.length === 0) {
-        return withNotice('No Mini Apps yet. Create one with action "create".');
+        return withNotice('No apps yet. See action "templates", then "create".');
       }
       const lines = await Promise.all(apps.map(async (app) => {
-        // A Next.js app has no fixed address — it is given a free port when it
-        // is started — so quoting the shared host's URL for one would be wrong.
-        const state = app.kind === 'nextjs'
-          ? (app.built ? 'Next.js app — started on demand' : 'Next.js app, not scaffolded yet')
-          : (app.built ? await appUrl(app.slug) : 'not built yet');
-        return `- ${app.slug} — ${app.title}${app.description ? `: ${app.description}` : ''} (${state})`;
+        const kind = effectiveKind(app);
+        let state: string;
+        if (hasProcess(app)) {
+          const rec = appState(app.slug);
+          state = rec ? `${rec.state}${rec.url ? ` at ${rec.url}` : ''}` : (app.built ? 'not running' : 'not built yet');
+        } else {
+          state = app.built ? await appUrl(app.slug) : 'not built yet';
+        }
+        const progress = await backlogProgress(miniAppDir(app.slug, settings, cwd));
+        const backlog = progress.total ? `, backlog ${progress.done}/${progress.total}` : '';
+        return `- ${app.slug} — ${app.title}${app.description ? `: ${app.description}` : ''} (${kind}, ${state}${backlog})`;
       }));
-      return withNotice([`${apps.length} Mini App${apps.length === 1 ? '' : 's'}:`, ...lines].join('\n'));
+      return withNotice([`${apps.length} app${apps.length === 1 ? '' : 's'}:`, ...lines].join('\n'));
     }
 
     case 'create': {
@@ -126,48 +208,74 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
             + 'reader decide.';
         }
       }
-      const kind: MiniAppKind = input.kind === 'nextjs' ? 'nextjs' : 'page';
-      const app = await createMiniApp({
-        title: input.name,
-        kind,
-        ...(input.description ? { description: input.description } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      }, settings, cwd);
-      const dir = miniAppDir(app.slug, settings, cwd);
-      // Two kinds, two contracts. A Next.js author is responsible for the parts
-      // a single-page author gets for free, so handing them the wrong brief
-      // would be worse than handing them none.
-      return withNotice(kind === 'nextjs'
-        ? nextAuthoringContract(app.slug, dir)
-        : authoringContract(app.slug, dir, await appUrl(app.slug)));
+
+      if (input.template) {
+        const template = getTemplate(input.template, cwd);
+        if (!template) {
+          return `No template called "${input.template}".\n\n${renderCatalogue(input.brief ?? input.description ?? '', cwd)}`;
+        }
+        if (!nodeSatisfies(template.requires?.node)) {
+          return `Template "${template.id}" needs Node ${template.requires?.node}; this machine runs ${process.versions.node}. `
+            + 'Pick another template or upgrade Node.';
+        }
+        const app = await instantiateTemplate({
+          template,
+          title: input.name,
+          ...(input.description ? { description: input.description } : {}),
+          ...(sessionId ? { sessionId } : {}),
+        }, settings, cwd);
+        return withNotice(pointer(app, miniAppDir(app.slug, settings, cwd), true));
+      }
+
+      // The page kind by explicit request keeps its authoring contract: for a
+      // one-screen tool over SQLite, the runtime is the template.
+      if (input.kind === 'page') {
+        const app = await createMiniApp({
+          title: input.name,
+          kind: 'page',
+          ...(input.description ? { description: input.description } : {}),
+          ...(sessionId ? { sessionId } : {}),
+        }, settings, cwd);
+        const dir = miniAppDir(app.slug, settings, cwd);
+        return withNotice(authoringContract(app.slug, dir, await appUrl(app.slug)));
+      }
+
+      // No template named: nothing is made. The catalogue is the answer, and
+      // the next call names one.
+      return `Nothing created yet — pick a template first.\n\n`
+        + `Templates (★ = suggested for "${input.name}"):\n`
+        + `${renderCatalogue([input.name, input.description, input.brief].filter(Boolean).join(' '), cwd)}\n\n`
+        + `Call create again with template set (for example template: "page-records"). `
+        + 'For a bare single-page app without a template, pass kind: "page".';
     }
 
     case 'describe': {
-      if (!input.name) return 'Which app? Use action "list" to see them.';
-      const slug = slugify(input.name);
-      const app = await getMiniApp(slug, settings, cwd);
-      if (!app) return `No Mini App called "${slug}".`;
+      const found = await find(input.name);
+      if (typeof found === 'string') return found;
+      const { slug, app } = found;
       // Touched, so working on an app moves it up the list even when the change
       // was to a file this tool never saw.
       await touchMiniApp(slug, {}, settings, cwd);
       const dir = miniAppDir(slug, settings, cwd);
-      const isNext = app.kind === 'nextjs';
-      const state = app.built
-        ? 'Built.'
-        : `Not built yet — there is no ${isNext ? 'package.json' : path.join('public', 'index.html')}.`;
-      // Two kinds, two contracts. A Next.js author is responsible for the parts
-      // a single-page author gets for free, so handing them the wrong brief
-      // would be worse than handing them none.
-      return withNotice(`${state}\n\n${isNext
-        ? nextAuthoringContract(slug, dir)
-        : authoringContract(slug, dir, await appUrl(slug))}`);
+      if (app.template) return withNotice(pointer(app, dir, false));
+      if (app.kind === 'nextjs') {
+        return withNotice(`${app.built ? 'Built.' : 'Not built yet — there is no package.json.'}\n\n${nextAuthoringContract(slug, dir)}`);
+      }
+      if (effectiveKind(app) === 'page') {
+        const state = app.built ? 'Built.' : `Not built yet — there is no ${path.join('public', 'index.html')}.`;
+        return withNotice(`${state}\n\n${authoringContract(slug, dir, await appUrl(slug))}`);
+      }
+      return withNotice(pointer(app, dir, false));
     }
 
     case 'tables': {
-      if (!input.name) return 'Which app? Use action "list" to see them.';
-      const slug = slugify(input.name);
-      const app = await getMiniApp(slug, settings, cwd);
-      if (!app) return `No Mini App called "${slug}".`;
+      const found = await find(input.name);
+      if (typeof found === 'string') return found;
+      const { slug, app } = found;
+      if (effectiveKind(app) !== 'page') {
+        return `"${slug}" is a ${effectiveKind(app)} app; its database is its own. Read its data layer `
+          + '(see AICO.md) rather than asking the shared host.';
+      }
       const dir = miniAppDir(slug, settings, cwd);
       let tables;
       try {
@@ -187,11 +295,56 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
       ].join('\n')).join('\n\n');
     }
 
+    case 'start': {
+      const found = await find(input.name);
+      if (typeof found === 'string') return found;
+      const { slug, app } = found;
+      if (!hasProcess(app)) {
+        return effectiveKind(app) === 'cli'
+          ? `"${slug}" is a CLI: nothing to start. Run its checks with RunChecks, or run it with Bash in ${miniAppDir(slug, settings, cwd)}.`
+          : withNotice(`"${slug}" is served by the shared host and needs no start: ${await appUrl(slug)}`);
+      }
+      const dir = miniAppDir(slug, settings, cwd);
+      const profile = runProfileFor(app);
+      if (!profile?.dev) return `"${slug}" declares no dev command in app.json; add run.dev and try again.`;
+      const current = appState(slug);
+      if (current?.state === 'running') return describeProcess(current, slug);
+      await startApp(slug, dir, app);
+      const rec = await awaitReady(slug);
+      if (rec?.state === 'running') return `"${slug}" is running at ${rec.url}. VerifyApp it.`;
+      if (rec && rec.state !== 'failed' && rec.state !== 'stopped') {
+        return `"${slug}" is still ${rec.state} after ${START_TIMEOUT_MS / 1000}s (a first install can take longer). `
+          + `Check again with AppManage status.\n\n${describeProcess(rec, slug)}`;
+      }
+      return describeProcess(rec, slug);
+    }
+
+    case 'stop': {
+      const found = await find(input.name);
+      if (typeof found === 'string') return found;
+      const stopped = await stopApp(found.slug);
+      return stopped ? `Stopped "${found.slug}".` : `"${found.slug}" was not running.`;
+    }
+
+    case 'status': {
+      const found = await find(input.name);
+      if (typeof found === 'string') return found;
+      const { slug, app } = found;
+      const dir = miniAppDir(slug, settings, cwd);
+      const progress = await backlogProgress(dir);
+      const backlog = progress.total ? `Backlog ${progress.done}/${progress.total} done.` : 'No backlog file.';
+      if (!hasProcess(app)) {
+        const where = effectiveKind(app) === 'cli' ? 'a CLI; nothing is served' : `served at ${await appUrl(slug)}`;
+        return withNotice(`"${slug}" is ${where}. ${backlog}`);
+      }
+      return `${describeProcess(appState(slug), slug)}\n${backlog}`;
+    }
+
     case 'delete': {
       if (!input.name) return 'Which app?';
       const slug = slugify(input.name);
       const app = await getMiniApp(slug, settings, cwd);
-      if (!app) return `No Mini App called "${slug}".`;
+      if (!app) return `No app called "${slug}".`;
 
       /*
         Refuse to delete the app this conversation is about.
@@ -212,8 +365,10 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
           + 'If something looks broken, fix it in place — read the files, correct them, '
           + 'and check with action "tables". Starting over is almost never the repair, '
           + 'and it is never the repair for a schema that did not seem to apply.\n\n'
-          + 'If the reader genuinely wants it gone, they can delete it from the Mini Apps panel.';
+          + 'If the reader genuinely wants it gone, they can delete it from the Apps screen.';
       }
+      await stopApp(slug).catch(() => undefined);
+      closeDatabase(miniAppDir(slug, settings, cwd));
       const gone = await deleteMiniApp(slug, settings, cwd);
       return gone
         ? `Deleted "${slug}", including its database. That data is not recoverable.`
@@ -225,54 +380,60 @@ export async function executeMiniAppManage(input: MiniAppManageInput): Promise<s
   }
 }
 
-export const miniAppManageToolDefinition = {
-  name: 'MiniAppManage',
+/** The old name, kept one release. */
+export const executeMiniAppManage = executeAppManage;
+
+export const appManageToolDefinition = {
+  name: 'AppManage',
   description: [
-    'Build and manage Mini Apps: self-contained single-page applications with their own SQLite',
-    'database, served on their own local URL. Use this when someone asks for a small app, tool or',
-    'tracker — invoices, inventory, a CRM, a habit log, anything with forms and stored records.',
-    'Two kinds. "page" is the default and the right answer for most requests: one HTML file with',
-    'Alpine over a shared server that runs no code you write, so there is nothing to install and it',
-    'is serving the moment you save. "nextjs" is a real Node application with its own server,',
-    'routing and dependencies — choose it only when the app genuinely needs server-side logic,',
-    'several routes, or a database other than SQLite, because it costs minutes of install on first',
-    'run and you become responsible for the query safety the page kind provides for free.',
-    'Start with action "create": it makes the app and returns the authoring guide for whichever kind',
-    'you chose. Read that guide before writing any files; it is the difference between an app that',
-    'works and one that silently does not. Then write the files with the normal Write tool.',
+    'Create and run Apps: real applications kept in the workspace, started from templates.',
+    'Use this when someone asks for an app, a tool, a site, a service or an API — a tracker, a',
+    'landing page, a SaaS with accounts, a JSON API. Start with action "templates" (or "create" with',
+    'a name and no template) to see the catalogue: each template copies in without generating a line,',
+    'and arrives with a worked feature, tests, a Dockerfile, and notes to you in AICO.md.',
+    'Then "create" with the template id. Kinds: page (one HTML file over the shared SQLite host, no',
+    'install), static (files), process (its own server — Next.js, Hono — installed and started by',
+    '"start"), cli. After creating, read the app\'s AICO.md and docs/EXTENDING.md before writing',
+    'anything; build by copying the worked feature; RunChecks; then "start" and VerifyApp.',
   ].join(' '),
   inputSchema: {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'create', 'describe', 'tables', 'delete'],
+        enum: ['templates', 'list', 'create', 'describe', 'tables', 'start', 'stop', 'status', 'delete'],
         description:
-          'create: make a new app and get the authoring guide. list: every app and its URL. '
-          + 'describe: the guide again, for an app that already exists. '
-          + 'tables: the schema as it actually applied, for checking your schema.sql worked. '
-          + 'delete: remove an app and its database for good.',
+          'templates: the catalogue, best matches for `brief` first. create: make an app from `template` '
+          + '(without one, returns the catalogue and makes nothing). list: every app, its kind and state. '
+          + 'describe: the pointer or authoring guide for an existing app. tables: a page app\'s schema as it '
+          + 'applied. start/stop/status: the process of a process app (start installs on first run and waits '
+          + 'for the URL). delete: remove an app and its data for good.',
       },
       name: {
         type: 'string',
         description: 'What to call it when creating ("Invoices"), or which app for every other action.',
       },
+      template: {
+        type: 'string',
+        description: 'For create: the template id from action "templates", e.g. "web-saas-next", "api-service-hono", "page-records", "landing-static".',
+      },
+      brief: {
+        type: 'string',
+        description: 'What the app is for, in the user\'s words. Ranks the catalogue.',
+      },
       kind: {
         type: 'string',
-        enum: ['page', 'nextjs'],
-        description:
-          'What to build, for "create". "page" (the default) is one HTML file with Alpine and a '
-          + 'shared server that runs no code you write — fastest to build, and enough for records, '
-          + 'forms and dashboards. "nextjs" is a real Node application with its own server, routing '
-          + 'and dependencies, started as its own process; choose it when the app genuinely needs '
-          + 'server-side logic, multiple routes, or a database other than SQLite. It takes minutes '
-          + 'longer on first run because dependencies install.',
+        enum: ['page'],
+        description: 'For create without a template: "page" makes a bare single-page app and returns its authoring guide. Prefer a template.',
       },
       description: {
         type: 'string',
-        description: 'One line saying what the app is for. Shown in the Mini Apps list.',
+        description: 'One line saying what the app is for. Shown on its card and substituted into the template.',
       },
     },
     required: ['action'],
   },
 };
+
+/** The old name, kept one release. */
+export const miniAppManageToolDefinition = appManageToolDefinition;

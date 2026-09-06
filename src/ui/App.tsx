@@ -30,9 +30,6 @@ function compactActiveContext(
   }
   maybeAutoCompactConversation(history, settings, model);
 }
-import { runPipeline } from '../studio/pipeline.js';
-import { readState } from '../studio/state.js';
-import { createStudioRuntime } from '../studio/runtime.js';
 import type { Todo } from '../tools/todo.js';
 import {
   readClipboardImage,
@@ -527,14 +524,7 @@ function AgentsPanel({
 
   if (!agents.length) return null;
 
-  // Group: studio pipeline agents (Phase N / studio-*) vs. regular sub-agents
-  const studioAgents = agents.filter(a =>
-    a.description.startsWith('Phase ') || a.agentType?.startsWith('studio'),
-  );
-  const otherAgents = agents.filter(a =>
-    !a.description.startsWith('Phase ') && !a.agentType?.startsWith('studio'),
-  );
-  const allAgents = [...studioAgents, ...otherAgents];
+  const allAgents = agents;
 
   const formatElapsed = (a: SubAgentRec) => {
     const ms = (a.completedAt ?? Date.now()) - a.startedAt;
@@ -747,10 +737,7 @@ function AgentsPanel({
   return (
     <Panel title={headerParts.join(' · ')} borderColor={isFocused ? CORAL : 'gray'}>
       {columnHeader}
-      {studioAgents.map((agent, i) => renderAgent(agent, i))}
-      {otherAgents.map((agent, i) =>
-        renderAgent(agent, studioAgents.length + i, studioAgents.length > 0 ? 1 : 0),
-      )}
+      {allAgents.map((agent, i) => renderAgent(agent, i))}
       {isFocused && (
         <Box marginTop={0}>
           <Text dimColor>{'  ↑↓ scroll · → or ↵ select · ← or Esc back to input'}</Text>
@@ -775,7 +762,9 @@ const SLASH_COMMANDS = [
   { name: '/permissions',      desc: 'Manage session tool trust' },
   { name: '/config',           desc: 'Show or edit AICO settings' },
   { name: '/review',           desc: 'Run code review agents' },
-  { name: '/studio',           desc: 'Autonomous SDLC build in workspace' },
+  { name: '/app',              desc: 'Apps: templates, create, start, stop' },
+  { name: '/app templates',    desc: 'What an app can start from' },
+  { name: '/app new',          desc: 'Create an app from a template' },
   { name: '/memory',           desc: 'Show loaded memory files' },
   { name: '/memory add',       desc: 'Append text to project AICO.md' },
   { name: '/memory types',     desc: 'Show memory cache stats' },
@@ -789,7 +778,6 @@ const SLASH_COMMANDS = [
   { name: '/agents skills',    desc: 'Set agent skills' },
   { name: '/agent-create',     desc: 'Create reusable custom agent' },
   { name: '/agent',            desc: 'Chat with one specialist agent' },
-  { name: '/team',             desc: 'Run Product Owner-led agent team' },
   { name: '/mcp',              desc: 'List loaded MCP servers' },
   { name: '/mcp-add',          desc: 'Add an MCP server' },
   { name: '/mcp-add-playwright', desc: 'Add Playwright browser automation MCP' },
@@ -804,7 +792,6 @@ const SLASH_COMMANDS = [
   { name: '/debug',            desc: 'Show/export runtime debug details' },
   { name: '/github-action',    desc: 'Create GitHub workflow template' },
   { name: '/ide-bridge',       desc: 'Create VS Code task bridge' },
-  { name: '/scaffold',         desc: 'Generate full-stack project from requirements' },
   { name: '/security-audit',   desc: 'Run defensive security analysis' },
   { name: '/skills',           desc: 'List available skills' },
   { name: '/skill-install',    desc: 'Install a skill from a URL' },
@@ -1523,7 +1510,7 @@ export function AicoApp(props: InkAppProps) {
     // This lets the user scroll through running operations, select one to see
     // details, and return to the terminal input.
     if (opsFocus && subAgents.length > 0) {
-      // Count visible agents (studio + other, same grouping as AgentsPanel)
+      // Count visible agents (same order as AgentsPanel)
       const visibleCount = subAgents.length;
       if (opsDetail) {
         // In detail view: ← or Esc returns to list
@@ -1794,53 +1781,10 @@ export function AicoApp(props: InkAppProps) {
         if (res.output) pushStatic({ type: 'system', content: res.output });
         if (res.newTokenCount !== undefined) setTotalTokens(res.newTokenCount);
         if (res.exit) { exit(); }
-        // Some commands (e.g. /scaffold, /security-audit) send a prompt to the agent
+        // Some commands (e.g. /app new --brief, /security-audit) send a prompt to the agent
         if (res.sendAsPrompt) {
           setInput('');
           handleSubmit(res.sendAsPrompt, true); // silent=true — don't show orchestration prompt in UI
-        }
-        // Deterministic studio pipeline execution (instead of sendAsPrompt).
-        if (res.runStudioPipeline) {
-          setInput('');
-          setIsThinking(true);
-          setSpinnerLabel('Studio pipeline…');
-          // Abort controller so Ctrl+C cancels the pipeline cleanly.
-          const studioAbort = new AbortController();
-          const onSigInt = () => studioAbort.abort();
-          process.once('SIGINT', onSigInt);
-          try {
-            const state = await readState(res.runStudioPipeline.projectDir);
-            if (!state) {
-              pushStatic({ type: 'error', content: 'Studio state not found. Run /studio <requirements> to start a new build.' });
-            } else {
-              const runtime = createStudioRuntime({
-                model: currentModel,
-                autoApprove: props.autoApprove,
-                verbose: props.verbose,
-                settings: props.settings,
-                abortSignal: studioAbort.signal,
-              });
-              const pipelineResult = await runPipeline(state, {
-                runTask: runtime.runTask,
-                askUser: runtime.askUser,
-                abortSignal: studioAbort.signal,
-              });
-              const summary = pipelineResult.summary || 'Studio pipeline finished.';
-              const statusLine = pipelineResult.success
-                ? `✅ ${pipelineResult.completedPhases}/${pipelineResult.totalPhases} phases in ${Math.round(pipelineResult.durationMs / 1000)}s.`
-                : `⚠️ Incomplete: ${pipelineResult.completedPhases}/${pipelineResult.totalPhases} phases.`;
-              pushStatic({ type: 'assistant', content: `${summary}\n${statusLine}` });
-              histRef.current.push({ role: 'user', content: `/studio ${state.requirements}` });
-              histRef.current.push({ role: 'assistant', content: summary });
-              compactActiveContext(histRef.current, props.settings, currentModel, props.session);
-            }
-          } catch (err) {
-            pushStatic({ type: 'error', content: err instanceof Error ? err.message : String(err) });
-          } finally {
-            process.removeListener('SIGINT', onSigInt);
-            setIsThinking(false);
-            setSpinnerLabel('Thinking…');
-          }
         }
       }
       return;
@@ -1859,7 +1803,6 @@ export function AicoApp(props: InkAppProps) {
     liveOpsRef.current = [];
 
     // Create an AbortController so the user can cancel with Escape during processing.
-    // This mirrors the studio pipeline's SIGINT→abort pattern.
     const runAbort = new AbortController();
     abortRef.current = runAbort;
 

@@ -1,7 +1,7 @@
 /**
  * Unified specialist agent prompts — the SINGLE source of truth.
  *
- * Every entry point (Task tool, /agents chat, /team, /studio pipeline) imports
+ * Every entry point (Task tool, /agents chat) imports
  * from here. This eliminates the previous three-path fragmentation where:
  *   - studio/prompts/system.ts had strong ~300-word prompts (studio-only)
  *   - tools/task.ts had weak ~100-word prompts (everyday Task path)
@@ -230,13 +230,6 @@ You do NOT write application code. You produce specs, designs, and task graphs.`
 - For missing packages: install them. For test failures: fix the implementation (or the test if the test is wrong), never delete a failing test.
 - Run the typechecker AND the test suite to verify the fix.
 - Make the minimal change that resolves the error without side effects.`,
-
-  'studio-orchestrator': `You are the Studio Orchestrator. Drive the complete autonomous SDLC pipeline deterministically.
-- Read .studio/STUDIO.json for current state. Execute phases sequentially using the Task tool.
-- After each implementation phase: check .studio/FEEDBACK.md — if non-empty, spawn a healer Task.
-- After gate phases: check the review verdict — if REJECTED, re-run the failed phase.
-- Do NOT skip phases. Do NOT mark a phase done if FEEDBACK.md has unresolved errors.
-- Show progress after each phase and produce a delivery summary when all phases complete.`,
 
   'security-audit': `You are a Security Audit agent — a defensive security specialist.
 Your job is to find vulnerabilities, misconfigurations, and security weaknesses in the codebase.

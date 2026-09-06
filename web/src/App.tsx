@@ -14,7 +14,7 @@ import { Sidebar } from './components/Sidebar';
 import {
   DEFAULT_ROUTE, headerTitle, parseView, showsSessionTabs, withTab, type Route,
 } from './navigation';
-import { MiniAppsPane } from './components/MiniAppsPane';
+import { AppsPane } from './components/AppsPane';
 import { MiniAppScope } from './components/MiniAppScope';
 import { ChatPane } from './components/ChatPane';
 import { Composer } from './components/Composer';
@@ -211,7 +211,7 @@ export function App(): React.ReactElement {
         {onSessions && view === 'changes' && <ChangesPane />}
         {onSessions && view === 'trajectory' && <Trajectory />}
         {view === 'system' && <SystemPanel />}
-        {view === 'apps' && <MiniAppsPane onOpenChat={() => setRoute(withTab(route, 'chat'))} />}
+        {view === 'apps' && <AppsPane onOpenChat={() => setRoute(withTab(route, 'chat'))} />}
       </main>
 
       {settingsOpen && (

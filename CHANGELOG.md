@@ -5,6 +5,64 @@ and each `release/vX.Y` branch is cut from it at the version it names.
 
 ## Unreleased
 
+### Added
+
+- **Apps, from templates.** Mini Apps have become *Apps*: real applications
+  kept in the workspace, of four kinds — `page` (one screen over the shared
+  SQLite host, as before), `static` (files), `process` (its own server) and
+  `cli`. Four templates ship in `templates/`: **page-records** (a records tool
+  with a summary strip, form, two-step delete), **landing-static** (hero,
+  features, pricing, FAQ, contact; CSP `'self'`; nginx image),
+  **api-service-hono** (Hono + node:sqlite, typed routes with field-level 400s,
+  OpenAPI at `/openapi.json`, health and readiness, vitest in memory, multi-stage
+  Dockerfile) and **web-saas-next** (Next.js App Router, Tailwind, node:sqlite,
+  sign-up and sign-in with a signed HTTP-only cookie, an items feature end to
+  end, vitest, standalone Dockerfile). A template copies in as files — nothing
+  is generated — and every one carries `AICO.md` (inlined into the bound
+  session's system prompt), `docs/EXTENDING.md` (the worked feature to copy),
+  `.aico/backlog.md` and `.aico/decisions.md`, a lockfile, `.env.example`,
+  `compose.yaml` and `deploy/`. Templates are also read from `~/.aico/templates`
+  and `<project>/.aico/templates`, later winning by id. `app.json` gains
+  `category`, `template`, `run` (install, dev with `{port}`, ready pattern,
+  build, test, typecheck, lint, start) and `deploy`; old manifests still read.
+- **`AppManage`** replaces `MiniAppManage` (the old name is honoured one
+  release). `templates` ranks the catalogue by a brief; `create` without a
+  template makes nothing and returns the catalogue; with one it copies the
+  template and returns a ~150-token pointer to `AICO.md`, `docs/EXTENDING.md`
+  and the backlog instead of a two-thousand-token contract. `start` installs on
+  first run and waits for the URL; `stop` and `status` follow. `kind: "page"`
+  keeps the authoring contract for a bare single-page tool.
+- **`/app`** in the CLI: `templates [brief]`, `new <template> "<name>"
+  [--brief "…"]` (the brief becomes the first message), `list`, `start`,
+  `stop`, `status`, `describe`, `tables`, `delete`.
+- **The Apps screen** in the web portal: a *Running* band, cards grouped by
+  category with kind badge and backlog progress, *Start from a template* cards
+  fed by `GET /api/apps/templates`, and a **Create app** wizard (template → name,
+  description, optional brief, install now) over `POST /api/apps/create`, which
+  makes the app, binds its conversation and starts the install in the
+  background. `apps/*` routes with `miniapps/*` kept as aliases.
+
+### Removed
+
+- **`/studio`, `/team`, `/scaffold`, the `TeamPrompt` tool and `src/studio`.**
+  The studio pipeline was wired but unreachable; the role-based build team is
+  the documented anti-pattern (three to ten times the tokens for worse
+  coordination — one writing agent and read-only `Investigate` is the shape
+  that works); `/scaffold` was a prompt with its own stack list. `/scaffold`
+  answers with a redirect to `/app` for one release. `/agent`, `Task`,
+  `Investigate`, `Supervise` and the role prompts stay.
+
+### Fixed
+
+- **The bound-app system prompt walked `node_modules`.** The file list in a
+  session bound to a Next.js app listed the whole tree, skipping only dotfiles,
+  which put the install into the cached prefix. It now lists two levels, at most
+  forty entries, and never `node_modules`, build output or the database; the
+  block is byte-identical across turns with no file change, and the parts that
+  move mid-build (process state, URL, backlog counts) are a separate line.
+- **Deleting an app whose database had been opened failed on Windows** with
+  EBUSY. The handle is closed first.
+
 ### Changed
 
 - **The portal's left column, rebuilt.** The list is headed *Projects* — it is a

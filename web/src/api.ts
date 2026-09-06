@@ -317,9 +317,19 @@ export const api = {
   memories: (scope?: string) =>
     get<{ memories: MemorySummary[] }>(`memory${scope && scope !== 'all' ? `?scope=${encodeURIComponent(scope)}` : ''}`),
 
-  /** Start or stop a Next.js Mini App's own process. */
+  /** Start or stop a process app's own process. */
   runMiniApp: (slug: string, action: 'start' | 'stop') =>
-    post<MiniAppProcess | { stopped: boolean }>('miniapps/run', { slug, action }),
+    post<MiniAppProcess | { stopped: boolean }>('apps/run', { slug, action }),
+
+  /** What an app can start from: the shipped templates plus the user's and the project's. */
+  templates: () => get<{ templates: AppTemplate[] }>('apps/templates'),
+  /**
+   * Make an app from a template. The server also binds its conversation and,
+   * for a process app, starts the install in the background — so the answer
+   * carries the session to open, not just the slug.
+   */
+  createApp: (input: { template: string; title: string; description?: string; install?: boolean }) =>
+    post<{ slug: string; sessionId: string; app: MiniAppSummary }>('apps/create', input),
 
   /** Stop one sub-agent without cancelling the turn its siblings are in. */
   stopSubAgent: (agentId: string, reason: string) =>
@@ -694,10 +704,28 @@ export interface SubAgentView {
   depth: number;
 }
 
-/** How a Mini App's process is doing. Only Next.js apps have one. */
+/** A template an app can start from, as the catalogue route describes it. */
+export interface AppTemplate {
+  id: string;
+  version: string;
+  name: string;
+  category: string;
+  kind: AppKind;
+  summary: string;
+  tags?: string[];
+  requires?: { node?: string };
+  run?: { install?: string; dev?: string };
+  deploy?: Array<{ id: string; label: string; requires?: string[] }>;
+  source: 'bundled' | 'user' | 'project';
+}
+
+/** What runs an app: the shared host (page, static), its own process, or nothing served (cli). */
+export type AppKind = 'page' | 'static' | 'process' | 'cli' | 'mobile' | 'nextjs';
+
+/** How a process app's process is doing. Page and static apps have none. */
 export interface MiniAppProcess {
   slug: string;
-  state: 'stopped' | 'installing' | 'starting' | 'running' | 'failed';
+  state: 'stopped' | 'installing' | 'starting' | 'running' | 'failed' | 'working' | 'done';
   port?: number;
   url?: string;
   error?: string;
@@ -708,8 +736,12 @@ export interface MiniAppProcess {
 
 export interface MiniAppSummary {
   slug: string;
-  /** Absent means the single-page kind. */
-  kind?: 'page' | 'nextjs';
+  /** The effective kind; absent in old manifests means page. */
+  kind?: AppKind;
+  /** The shelf it sits on in the Apps screen. */
+  category?: string;
+  /** Where it came from, when it came from a template. */
+  template?: { id: string; version: string };
   title: string;
   description?: string;
   createdAt: number;
@@ -717,6 +749,8 @@ export interface MiniAppSummary {
   sessionId?: string;
   /** False until the app has a page; a claimed directory is not yet an app. */
   built: boolean;
+  /** Stories ticked in .aico/backlog.md, when it has one. */
+  backlog?: { done: number; total: number };
 }
 
 export interface MiniAppsView {

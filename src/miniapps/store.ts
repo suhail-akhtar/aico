@@ -1,25 +1,34 @@
 /**
- * Where Mini Apps live, and what one is.
+ * Where Apps live, and what one is.
  *
- * A Mini App is a directory holding a single-page application, its schema, and
- * its data. It is not part of the user's repository — it is something the agent
- * produced, so it belongs in the workspace alongside every other artifact.
+ * An App is a directory holding an application, its data, and a manifest. It is
+ * not part of the user's repository — it is something the agent produced, so it
+ * belongs in the workspace alongside every other artifact.
  *
  *   <workspace>/miniapps/<slug>/
- *     app.json          identity, schema version, when it was made
- *     schema.sql        the tables, applied on first serve
- *     data.sqlite       the database, created from the schema
- *     public/
- *       index.html      the app — one page, Alpine, no build step
- *       app.js          its behaviour, as Alpine.data components
- *       app.css         its own styles, on top of the shipped foundation
+ *     app.json          identity, kind, template, how to run and deploy it
+ *     schema.sql        the tables (page apps), applied on first serve
+ *     data.sqlite       the database (page apps), created from the schema
+ *     public/           the page (page and static apps)
+ *     package.json …    the project (process, cli and mobile apps)
+ *     AICO.md           what the agent needs to know about this app, inlined
+ *                       into the bound session's prompt
+ *     .aico/backlog.md  stories; .aico/decisions.md  what was decided and why
  *
- * ## Why a directory rather than a row somewhere
+ * The directory name `miniapps` is a fossil kept on purpose: renaming it would
+ * migrate every existing app for no benefit to anyone.
  *
- * Because the agent writes files, and a Mini App you cannot open in an editor,
- * copy somewhere else, or read without the tool that made it is a worse
- * artifact than one you can. The directory *is* the app; this module only
- * agrees on its shape.
+ * ## Kinds are runtimes, not frameworks
+ *
+ * What the host has to *do* with an app is the thing worth recording. A `page`
+ * is served by the shared host with a database it cannot send SQL to. A
+ * `static` app is files and nothing else. A `process` is a child process on its
+ * own port started from a command the app declares — Next.js, Hono, Astro, a
+ * dozen others, all the same to the runner. A `cli` has no server at all. The
+ * framework is the template's business; `app.json.run` says how to run it.
+ *
+ * `nextjs` is the legacy spelling of `process` from before there were
+ * templates. It still reads, and maps to the run profile those apps always had.
  *
  * ## The slug is not the title
  *
@@ -39,15 +48,41 @@ import type { AicoSettings } from '../settings.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 
 /**
- * What kind of application a Mini App is.
+ * What the host does with an app.
  *
- * `page` is the original: one HTML file, Alpine, and a shared server that runs
- * no code the model wrote. `nextjs` is a real Node application with its own
- * server, its own dependencies and its own process — which is a different
- * bargain, not a bigger version of the same one, and is why the type is
- * recorded rather than inferred from what happens to be in the directory.
+ *   page     one HTML file, Alpine, the shared host, a SQLite table API
+ *   static   files under public/, served by the shared host, no database
+ *   process  its own child process on its own port, from `run.dev`
+ *   cli      no server; checks and a `run.start` that prints
+ *   mobile   an Expo project; `process` semantics with a web preview
+ *   nextjs   legacy spelling of `process` with the Next.js run profile
  */
-export type MiniAppKind = 'page' | 'nextjs';
+export type MiniAppKind = 'page' | 'static' | 'process' | 'cli' | 'mobile' | 'nextjs';
+
+/** How to install, run, build and check an app. Copied from its template at create. */
+export interface RunProfile {
+  /** Installs dependencies. Run before the first `dev` when `node_modules` is absent. */
+  install?: string;
+  /** Starts the dev server. `{port}` is substituted; `PORT` is also set in the environment. */
+  dev?: string;
+  /** Regex source matched against the dev server's output to know it is up. */
+  ready?: string;
+  build?: string;
+  test?: string;
+  typecheck?: string;
+  lint?: string;
+  /** For `cli` apps: the command "Run" executes. */
+  start?: string;
+}
+
+export interface DeployTarget {
+  id: string;
+  label: string;
+  /** A command run in the app directory. Node scripts, so it works on Windows. */
+  script: string;
+  /** Executables that must be on PATH first, e.g. `docker`. */
+  requires?: string[];
+}
 
 export interface MiniApp {
   /** URL and directory name. Derived from the title, never supplied directly. */
@@ -61,15 +96,21 @@ export interface MiniApp {
   title: string;
   /** One line for the list. */
   description?: string;
+  /** Which shelf it sits on in the Apps screen: web-saas, api, landing, records, … */
+  category?: string;
+  /** Where it came from, so a newer template can be pointed at without being applied. */
+  template?: { id: string; version: string };
+  run?: RunProfile;
+  deploy?: DeployTarget[];
   createdAt: number;
   updatedAt: number;
   /** The session that is building it, so the two can find each other. */
   sessionId?: string;
-  /** False until `index.html` exists — a directory is not yet an app. */
+  /** False until the files that make it runnable exist — a directory is not yet an app. */
   built: boolean;
 }
 
-/** Everything Mini Apps own, under one directory. */
+/** Everything Apps own, under one directory. */
 export function miniAppsRoot(settings?: AicoSettings, cwd = process.cwd()): string {
   return path.join(resolveWorkspaceRoot(settings, cwd), 'miniapps');
 }
@@ -109,6 +150,62 @@ export function isSafeSlug(slug: string): boolean {
   return /^[a-z0-9][a-z0-9-]{0,47}$/.test(slug) && slugify(slug) === slug;
 }
 
+/** The kind an app behaves as, with the legacy spelling folded in. */
+export function effectiveKind(app: Pick<MiniApp, 'kind'>): Exclude<MiniAppKind, 'nextjs'> {
+  if (!app.kind) return 'page';
+  return app.kind === 'nextjs' ? 'process' : app.kind;
+}
+
+/** Whether the app is a child process with a port of its own. */
+export function hasProcess(app: Pick<MiniApp, 'kind'>): boolean {
+  const kind = effectiveKind(app);
+  return kind === 'process' || kind === 'mobile';
+}
+
+/** Whether the shared host serves this app's `public/`. */
+export function servedByHost(app: Pick<MiniApp, 'kind'>): boolean {
+  const kind = effectiveKind(app);
+  return kind === 'page' || kind === 'static';
+}
+
+/**
+ * How to run an app, filling in what its manifest does not say.
+ *
+ * A `nextjs` app made before templates has no `run` block; it gets the profile
+ * those apps always ran with. A templated app carries its own. The defaults for
+ * a `process` app with a missing field are the npm conventions, because that is
+ * what every template here uses and what a hand-made project most likely has.
+ */
+export function runProfileFor(app: Pick<MiniApp, 'kind' | 'run'>): RunProfile {
+  const declared = app.run ?? {};
+  if (app.kind === 'nextjs') {
+    return {
+      install: 'npm install --no-audit --no-fund',
+      dev: 'npx next dev --port {port}',
+      ready: 'ready in|started server|Local:\\s+http',
+      build: 'npm run build',
+      ...declared,
+    };
+  }
+  if (!hasProcess(app) && effectiveKind(app) !== 'cli') return declared;
+  return {
+    install: 'npm install --no-audit --no-fund',
+    ready: 'ready in|started server|Local:\\s+http|listening on|http://',
+    ...declared,
+  };
+}
+
+/** What has to exist for an app of this kind to count as built. */
+function builtMarker(app: Pick<MiniApp, 'kind'>): string {
+  switch (effectiveKind(app)) {
+    case 'page':
+    case 'static':
+      return path.join('public', 'index.html');
+    default:
+      return 'package.json';
+  }
+}
+
 async function readApp(dir: string): Promise<MiniApp | null> {
   try {
     const raw = await readFile(path.join(dir, 'app.json'), 'utf8');
@@ -116,15 +213,10 @@ async function readApp(dir: string): Promise<MiniApp | null> {
     /*
       Recomputed rather than trusted: the flag records whether there is an app
       to open, and the only honest source for that is whether the files exist.
-
-      What counts differs by kind. A single-page app is its `index.html`; a
-      Next.js app is a `package.json` — the thing that makes it installable and
-      runnable at all. Reading the stored flag instead would let a half-written
-      app claim to be finished for as long as nobody corrected the file.
+      Reading the stored flag instead would let a half-written app claim to be
+      finished for as long as nobody corrected the file.
     */
-    const built = app.kind === 'nextjs'
-      ? existsSync(path.join(dir, 'package.json'))
-      : existsSync(path.join(dir, 'public', 'index.html'));
+    const built = existsSync(path.join(dir, builtMarker(app)));
     return { ...app, built };
   } catch {
     return null;
@@ -157,6 +249,17 @@ export async function getMiniApp(
   return readApp(miniAppDir(slug, settings, cwd));
 }
 
+export interface CreateMiniAppInput {
+  title: string;
+  description?: string;
+  sessionId?: string;
+  kind?: MiniAppKind;
+  category?: string;
+  template?: { id: string; version: string };
+  run?: RunProfile;
+  deploy?: DeployTarget[];
+}
+
 /**
  * Claim a directory for a new app.
  *
@@ -165,7 +268,7 @@ export async function getMiniApp(
  * to invent names for the tool's benefit.
  */
 export async function createMiniApp(
-  input: { title: string; description?: string; sessionId?: string; kind?: MiniAppKind },
+  input: CreateMiniAppInput,
   settings?: AicoSettings,
   cwd = process.cwd(),
 ): Promise<MiniApp> {
@@ -182,6 +285,10 @@ export async function createMiniApp(
     ...(input.kind && input.kind !== 'page' ? { kind: input.kind } : {}),
     title: input.title.trim() || slug,
     ...(input.description ? { description: input.description } : {}),
+    ...(input.category ? { category: input.category } : {}),
+    ...(input.template ? { template: input.template } : {}),
+    ...(input.run && Object.keys(input.run).length ? { run: input.run } : {}),
+    ...(input.deploy?.length ? { deploy: input.deploy } : {}),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     createdAt: now,
     updatedAt: now,
@@ -189,7 +296,7 @@ export async function createMiniApp(
   };
 
   const dir = path.join(root, slug);
-  await mkdir(path.join(dir, 'public'), { recursive: true });
+  await mkdir(servedByHost(app) ? path.join(dir, 'public') : dir, { recursive: true });
   await writeFile(path.join(dir, 'app.json'), `${JSON.stringify(app, null, 2)}\n`, 'utf8');
   return app;
 }
@@ -213,7 +320,8 @@ export async function deleteMiniApp(
 
 /** Record that something changed, so the list orders by what was touched last. */
 export async function touchMiniApp(
-  slug: string, patch: Partial<Pick<MiniApp, 'title' | 'description' | 'sessionId'>> = {},
+  slug: string,
+  patch: Partial<Pick<MiniApp, 'title' | 'description' | 'sessionId' | 'run' | 'deploy' | 'category'>> = {},
   settings?: AicoSettings, cwd = process.cwd(),
 ): Promise<MiniApp | null> {
   const dir = miniAppDir(slug, settings, cwd);
@@ -222,4 +330,21 @@ export async function touchMiniApp(
   const next: MiniApp = { ...app, ...patch, updatedAt: Date.now() };
   await writeFile(path.join(dir, 'app.json'), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
   return next;
+}
+
+/**
+ * Backlog progress, from the checkboxes in `.aico/backlog.md`.
+ *
+ * Read by the Apps screen so a card can say `3/7` without a model call. A file
+ * that is not there is zero of zero, which the card shows as nothing.
+ */
+export async function backlogProgress(dir: string): Promise<{ done: number; total: number }> {
+  try {
+    const text = await readFile(path.join(dir, '.aico', 'backlog.md'), 'utf8');
+    const done = (text.match(/^\s*- \[x\]/gim) ?? []).length;
+    const open = (text.match(/^\s*- \[ \]/gm) ?? []).length;
+    return { done, total: done + open };
+  } catch {
+    return { done: 0, total: 0 };
+  }
 }
