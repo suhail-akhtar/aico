@@ -370,7 +370,8 @@ interface AppState {
   /** Start a session in a specific folder, whatever is currently selected. */
   newSessionIn: (path: string) => void;
   refreshGroups: () => Promise<void>;
-  createGroup: (name: string) => Promise<void>;
+  /** Make a group and return its id. Does not start a session in it — that is a separate act. */
+  createGroup: (name: string) => Promise<string | undefined>;
   updateGroup: (id: string, patch: {
     name?: string; color?: string; pinned?: boolean;
     description?: string; instructions?: string; cwd?: string;
@@ -895,11 +896,13 @@ export const useStore = create<AppState>((set, get) => ({
   createGroup: async (name) => {
     try {
       // Seeded with the folder you are looking at, so a group made while
-      // working somewhere starts its sessions in that somewhere.
+      // working somewhere starts its sessions in that somewhere. Making the
+      // group used to also start a session in it, so there was no way to make
+      // an empty group; the header's own + starts one when that is wanted.
       const { group } = await api.createGroup(name, get().project ?? undefined);
       await get().refreshGroups();
-      get().newSessionInGroup(group.id);
-    } catch (err) { set({ error: (err as Error).message }); }
+      return group.id;
+    } catch (err) { set({ error: (err as Error).message }); return undefined; }
   },
 
   updateGroup: async (id, patch) => {

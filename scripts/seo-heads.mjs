@@ -75,7 +75,7 @@ const META = {
       + 'caching, and spending limits you set.',
   },
   'workspace.html': {
-    title: 'A local web workspace for your AI coding agent — aico',
+    title: 'A local web portal for your AI coding agent — aico',
     description:
       'aico serve runs a loopback server and a browser client, and the server owns the run — '
       + 'close the tab and the work carries on. Plan mode, mid-run steering, forking a '
@@ -162,7 +162,7 @@ function structuredData() {
     license: 'https://opensource.org/licenses/MIT',
     description:
       'An open-source multi-provider AI coding agent for the terminal and a local '
-      + 'web workspace. Keeps an append-only session log, verifies web work in a real '
+      + 'web portal. Keeps an append-only session log, verifies web work in a real '
       + 'browser, supervises background work, and runs as an MCP server.',
     author: { '@type': 'Person', name: 'Suhail Akhtar' },
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },

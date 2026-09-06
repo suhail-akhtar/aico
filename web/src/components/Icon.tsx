@@ -21,7 +21,8 @@ export type Glyph =
   | IconName
   | 'search' | 'close' | 'plus' | 'check' | 'chevron-down' | 'chevron-right'
   | 'trash' | 'edit' | 'bolt' | 'undo' | 'folder' | 'folder-plus' | 'arrow-up'
-  | 'ellipsis' | 'fork' | 'archive' | 'pin' | 'target' | 'paperclip';
+  | 'ellipsis' | 'fork' | 'archive' | 'pin' | 'target' | 'paperclip'
+  | 'grid' | 'activity' | 'menu' | 'clock';
 
 const PATHS: Record<Glyph, React.ReactNode> = {
   users: <><circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0" /><path d="M16 6a3 3 0 0 1 0 6" /><path d="M17.5 14.5A6 6 0 0 1 21 20" /></>,
@@ -66,6 +67,16 @@ const PATHS: Record<Glyph, React.ReactNode> = {
     neighbours, on every machine.
   */
   paperclip: <path d="M15.5 8 9 14.5a2.1 2.1 0 0 0 3 3l6.5-6.5a4.2 4.2 0 0 0-6-6l-6.5 6.5a6.3 6.3 0 0 0 9 9L20 15" />,
+
+  /*
+    Four for the navigation, so each destination has its own shape. `stack` had
+    been doing duty as "System", "new group" and "a group" in one column, which
+    made the three indistinguishable at a glance.
+  */
+  grid: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></>,
+  activity: <path d="M3 12h4l3-7 4 14 3-7h4" />,
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+  clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
 };
 
 export function Icon(

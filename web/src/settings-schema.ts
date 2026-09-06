@@ -131,12 +131,12 @@ export const PANES: Pane[] = [
         ],
       },
       {
-        title: 'Workspace',
+        title: 'Scratch workspace',
         hint: 'Where AICO writes artifacts, reports and scratch files that are not part of your project.',
         fields: [
           {
             path: 'workspace.path',
-            label: 'Workspace path',
+            label: 'Scratch workspace path',
             hint: 'Absolute, or relative to the project. Blank uses ~/.aico/workspace.',
             kind: 'text',
             placeholder: '~/.aico/workspace',

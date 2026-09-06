@@ -1,90 +1,282 @@
 /**
- * Session list and navigation.
+ * The left column: the session list and the navigation.
  *
- * Grouped by when work last happened in each session — Today, Yesterday, then
- * widening windows. A flat list of forty rows is a lookup problem; the same
- * forty under date headings is a memory one, and people remember *when* they
- * were doing something far better than what they called it.
- *
+ * Grouped by project, with the groups you made and a section for the
+ * conversations bound to Apps, and the handful you were just in above them all.
  * Sessions running on the server are marked distinctly from sessions that
- * merely exist on disk. That distinction is the point of a server-owned run:
- * closing the tab does not stop the work, so the list has to be able to say
- * "this one is still going" about a session you are not looking at.
+ * merely exist on disk: closing the tab does not stop the work, so the list has
+ * to be able to say "this one is still going" about a session you are not
+ * looking at.
+ *
+ * The list is one flat sequence of rows (see {@link module:sidebar-rows}), which
+ * is what lets it be walked with the keyboard and, past a couple of hundred
+ * rows, windowed so a machine with five hundred sessions does not mount five
+ * hundred rows to show thirty.
+ *
+ * What the reader folds is remembered ({@link module:sidebar-memory}); what
+ * they type into the search box is not — a search is about now.
  *
  * @module components/Sidebar
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import type { SessionSummary } from '../api';
-import { groupByProject, recentSessions, relativeAge, type Section } from '../grouping';
+import {
+  groupByProject, recentSessions, relativeAge, sectionLabelFor, showRecent, splitPinned,
+  searchTerms, APPS_SECTION, type MatchContext, type Section,
+} from '../grouping';
+import { flattenRows, rowKey, isFocusable, type Row } from '../sidebar-rows';
+import { moveFocus, HANDLED_KEYS } from '../sidebar-keys';
+import { dropAction, SESSION_DRAG_TYPE } from '../sidebar-drop';
+import { loadSidebarMemory, saveSidebarMemory, defaultCollapsed, type SidebarMemory } from '../sidebar-memory';
+import { toggleDestination, type Route } from '../navigation';
 import { Icon, type Glyph } from './Icon';
+import { Portal } from './Portal';
 import { SessionRowMenu } from './SessionRowMenu';
 import { ProjectGroupHeader } from './ProjectGroupHeader';
 import { ResizeHandle, useSidebarWidth } from './ResizeHandle';
-
-export type View = 'chat' | 'changes' | 'trajectory' | 'system' | 'miniapps';
+import { WindowedList } from './WindowedList';
+import { TOOLBAR_CONTROL, toolbarTone } from './toolbar';
 
 interface Props {
-  view: View;
-  onView: (view: View) => void;
+  route: Route;
+  onRoute: (route: Route) => void;
   open: boolean;
   onClose: () => void;
   onSettings: () => void;
+  settingsOpen: boolean;
   onAddProject: () => void;
 }
 
+/** Past this many rows the list is windowed; below it, every row is mounted. */
+const WINDOW_ABOVE = 200;
+/** Uniform row height in windowed mode. */
+const ROW_HEIGHT = 32;
+
 export function Sidebar(
-  { view, onView, open, onClose, onSettings, onAddProject }: Props,
+  { route, onRoute, open, onClose, onSettings, settingsOpen, onAddProject }: Props,
 ): React.ReactElement {
   const sessions = useStore(s => s.sessions);
   const activeSessions = useStore(s => s.activeSessions);
   const sessionId = useStore(s => s.sessionId);
   const openSession = useStore(s => s.openSession);
   const newSession = useStore(s => s.newSession);
-  const [filter, setFilter] = useState('');
-  const [searching, setSearching] = useState(false);
-  /** Folded groups, by path. A view preference about right now, not stored. */
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [width, setWidth] = useSidebarWidth();
+  const moveToGroup = useStore(s => s.moveToGroup);
   const showArchived = useStore(s => s.showArchived);
   const toggleArchived = useStore(s => s.toggleArchived);
-
   const projects = useStore(s => s.projects);
   const groups = useStore(s => s.groups);
   const createGroup = useStore(s => s.createGroup);
-  const [naming, setNaming] = useState(false);
 
-  // Always grouped by folder now. The date axis was better when a folder was
-  // not a thing you could choose, but a header that says Workspaces above a
-  // list that shows none of them is a screen disagreeing with itself.
-  const byProject = true;
+  const [filter, setFilter] = useState('');
+  const [width, setWidth] = useSidebarWidth();
+  const [naming, setNaming] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // What the reader folded, remembered. Read once; every toggle writes back.
+  const [memory, setMemory] = useState<SidebarMemory>(() => loadSidebarMemory());
+  const remember = useCallback((patch: Partial<SidebarMemory>) => {
+    setMemory(current => {
+      const next = { ...current, ...patch, touched: true };
+      saveSidebarMemory(next);
+      return next;
+    });
+  }, []);
+  // The archived toggle lives in the store (the VS Code panel reads it too);
+  // the memory only seeds it on the first paint and mirrors later flips.
+  useEffect(() => {
+    if (memory.showArchived !== showArchived) toggleArchived();
+    // Once, at mount: afterwards the store is the source and the memory follows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const flipArchived = (): void => {
+    toggleArchived();
+    remember({ showArchived: !showArchived });
+  };
+
   const visible = useMemo(
     () => (showArchived ? sessions : sessions.filter(s => !s.archived)),
     [sessions, showArchived],
   );
-  // One shape for both axes, so the renderer below does not have to know which
-  // it got. `path` is simply absent on the date buckets.
+  const ctx: MatchContext = useMemo(() => ({
+    projects: new Map(projects.map(p => [p.path, { name: p.name }])),
+    groups: new Map(groups.map(g => [g.id, { name: g.name }])),
+  }), [projects, groups]);
+  const filtering = searchTerms(filter).length > 0;
+
   const sections: Section[] = useMemo(
     () => groupByProject(visible, projects, filter, groups),
     [visible, projects, filter, groups],
   );
+  const ordered = useMemo(() => {
+    const { pinned, rest } = splitPinned(sections);
+    return [...pinned, ...rest];
+  }, [sections]);
+  const recent = useMemo(() => recentSessions(visible, filter, undefined, ctx), [visible, filter, ctx]);
+  const recentShown = showRecent(filter, visible.length);
 
-  // How many recent rows to show before the folders start. Ten is enough to
-  // cover a working session's worth of switching; more turns it into a second
-  // copy of the sidebar.
-  const [recentLimit, setRecentLimit] = useState(10);
-  const recent = useMemo(
-    () => recentSessions(visible, filter, recentLimit),
-    [visible, filter, recentLimit],
+  const collapsed = useMemo(
+    () => defaultCollapsed(ordered, memory),
+    [ordered, memory],
   );
-  const [recentFolded, setRecentFolded] = useState(false);
-
-  const select = (id: string): void => {
-    void openSession(id);
-    onView('chat');
-    onClose();
+  const toggleSection = (path: string): void => {
+    const next = new Set(collapsed);
+    if (next.has(path)) next.delete(path); else next.add(path);
+    remember({ collapsed: [...next] });
   };
+
+  const rows: Row[] = useMemo(() => flattenRows({
+    recent, showRecent: recentShown, recentFolded: memory.recentFolded,
+    sections: ordered, collapsed, filtering,
+  }), [recent, recentShown, memory.recentFolded, ordered, collapsed, filtering]);
+  const matchCount = useMemo(() => ordered.reduce((n, s) => n + s.items.length, 0), [ordered]);
+
+  const select = useCallback((id: string): void => {
+    void openSession(id);
+    onRoute({ destination: 'sessions', tab: 'chat' });
+    onClose();
+  }, [openSession, onRoute, onClose]);
+
+  const startNew = (): void => { newSession(); onRoute({ destination: 'sessions', tab: 'chat' }); onClose(); };
+
+  // ── keyboard ────────────────────────────────────────────────────────
+  const [focusIndex, setFocusIndex] = useState(0);
+  // The focus ring is drawn only while the tree itself has focus; a ring on a
+  // row while the reader is typing in the composer is a ring about nothing.
+  const [treeFocused, setTreeFocused] = useState(false);
+  const treeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Keep the focus on a real row when the rows change under it.
+    if (rows.length === 0) { setFocusIndex(0); return; }
+    if (focusIndex >= rows.length || !isFocusable(rows[focusIndex]!)) {
+      const first = rows.findIndex(isFocusable);
+      setFocusIndex(first < 0 ? 0 : first);
+    }
+  }, [rows, focusIndex]);
+
+  const onTreeKey = (e: React.KeyboardEvent): void => {
+    if (e.key === '/') { e.preventDefault(); searchRef.current?.focus(); return; }
+    if (!HANDLED_KEYS.has(e.key)) return;
+    // A rename input inside a row owns its own keys.
+    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    e.preventDefault();
+    const move = moveFocus(rows, focusIndex, e.key);
+    setFocusIndex(move.index);
+    if (move.action.type === 'open') select(move.action.sessionId);
+    if (move.action.type === 'toggle') {
+      if (move.action.path === 'recent') remember({ recentFolded: !memory.recentFolded });
+      else toggleSection(move.action.path);
+    }
+  };
+
+  // ── drag to a group ─────────────────────────────────────────────────
+  const dragged = draggingId ? sessions.find(s => s.id === draggingId) : undefined;
+  const acceptsDrop = (section: Section): boolean => Boolean(dragged && dropAction(section, dragged));
+  const onDrop = (section: Section, id: string): void => {
+    const session = sessions.find(s => s.id === id);
+    if (!session) return;
+    const action = dropAction(section, session);
+    if (!action) return;
+    void moveToGroup(id, action.type === 'move' ? action.group : null);
+    setDraggingId(null);
+  };
+
+  // ── rendering one row ───────────────────────────────────────────────
+  const dense = rows.length > WINDOW_ABOVE;
+  const rowId = (index: number): string => `sidebar-row-${index}`;
+  const renderRow = (row: Row, index: number): React.ReactNode => {
+    const focused = treeFocused && index === focusIndex;
+    switch (row.kind) {
+      case 'recent-header':
+        return (
+          <div
+            id={rowId(index)}
+            role="treeitem"
+            aria-expanded={!row.folded}
+            aria-level={1}
+            className={`flex items-center gap-1.5 px-3 ${dense ? 'h-8' : 'py-1'}
+                        ${focused ? 'rounded-lg outline outline-1 outline-aico-accent/60' : ''}`}
+          >
+            <button
+              onClick={() => remember({ recentFolded: !row.folded })}
+              tabIndex={-1}
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              aria-expanded={!row.folded}
+            >
+              <Icon name={row.folded ? 'chevron-right' : 'chevron-down'} size={12} className="text-aico-muted" />
+              <Icon name="clock" size={14} className="text-aico-muted" />
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-aico-muted">Recent</span>
+            </button>
+          </div>
+        );
+      case 'section-header': {
+        const { section } = row;
+        const known = section.kind === 'group'
+          ? groups.some(g => g.id === section.path)
+          : section.kind === 'project' && projects.some(p => p.path === section.path);
+        return (
+          <ProjectGroupHeader
+            label={section.label}
+            path={section.path}
+            kind={section.kind}
+            known={known}
+            isLaunch={projects.some(p => p.path === section.path && p.isLaunch)}
+            collapsed={row.collapsed}
+            count={row.matches}
+            filtering={filtering}
+            onToggle={() => toggleSection(section.path)}
+            acceptsDrop={acceptsDrop(section)}
+            onDropSession={id => onDrop(section, id)}
+            onOpenApps={() => { onRoute({ ...route, destination: 'apps' }); onClose(); }}
+            dense={dense}
+            focused={focused}
+            rowId={rowId(index)}
+          />
+        );
+      }
+      case 'empty':
+        return (
+          <p className={`px-3 text-[12px] text-aico-muted ${dense ? 'flex h-8 items-center' : 'pb-1'}`}>
+            {filtering ? 'No match here.'
+              : row.section.kind === 'group' ? 'No sessions here yet. Drop one on the name, or use ⋯ → Move to group.'
+              : row.section.kind === 'apps' ? 'No app conversations yet.'
+              : 'No sessions here yet.'}
+          </p>
+        );
+      case 'session':
+        return (
+          <SessionRow
+            session={row.session}
+            running={row.session.running === true || activeSessions.includes(row.session.id)}
+            current={row.session.id === sessionId}
+            suffix={row.within === 'recent' ? sectionLabelFor(row.session, projects, groups) : ''}
+            groupColor={row.within === 'recent' ? groups.find(g => g.id === row.session.group)?.color : undefined}
+            onSelect={() => select(row.session.id)}
+            onDragStart={() => setDraggingId(row.session.id)}
+            onDragEnd={() => setDraggingId(null)}
+            dense={dense}
+            focused={focused}
+            rowId={rowId(index)}
+          />
+        );
+    }
+  };
+
+  const treeProps: React.HTMLAttributes<HTMLDivElement> = {
+    role: 'tree',
+    'aria-label': 'Sessions',
+    tabIndex: 0,
+    'aria-activedescendant': rows.length ? rowId(focusIndex) : undefined,
+    onKeyDown: onTreeKey,
+    onFocus: (e: React.FocusEvent) => { if (e.target === e.currentTarget) setTreeFocused(true); },
+    onBlur: (e: React.FocusEvent) => { if (e.target === e.currentTarget) setTreeFocused(false); },
+  };
+
+  const empty = sessions.length === 0;
+  const nothingMatches = !empty && filtering && matchCount === 0 && ordered.length === 0;
 
   return (
     <>
@@ -93,23 +285,20 @@ export function Sidebar(
       )}
 
       <aside
+        data-sidebar
         // The width is inline because it is a dragged value, and `transition-transform`
         // is scoped to the mobile drawer: leaving it on during a resize animates
-        // every pixel of the drag a beat behind the pointer.
-        style={{ width }}
+        // every pixel of the drag a beat behind the pointer. The max keeps a
+        // remembered desktop width from exceeding a phone.
+        style={{ width, maxWidth: 'calc(100vw - 48px)' }}
         className={`fixed inset-y-0 left-0 z-30 flex flex-col border-r border-aico-border-subtle
                     bg-aico-surface md:static md:translate-x-0
                     ${open ? 'translate-x-0' : '-translate-x-full transition-transform'}`}
+        onKeyDown={e => { if (e.key === 'Escape' && open) onClose(); }}
       >
         <ResizeHandle onResize={setWidth} />
         <div className="flex items-center gap-2 px-4 pb-2 pt-4">
           <span className="text-[15px] font-semibold tracking-tight text-aico-primary">AICO</span>
-          {/*
-            Version beside the name, attribution under it. Both are the kind of
-            thing you look for once and then never again, so they take the
-            quietest weight on the page — a reader scanning for a session should
-            not have to read past them.
-          */}
           <span
             className="rounded bg-aico-hover px-1.5 py-0.5 text-[10px] tabular-nums text-aico-muted"
             title={`aico ${__AICO_VERSION__} — by Suhail Akhtar`}
@@ -126,11 +315,9 @@ export function Sidebar(
           </button>
         </div>
 
-        <p className="-mt-1 px-4 pb-2 text-[10px] text-aico-muted">Suhail Akhtar</p>
-
         <div className="px-3 pb-2">
           <button
-            onClick={() => { newSession(); onView('chat'); onClose(); }}
+            onClick={startNew}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-aico-border
                        bg-aico-bg px-3 py-2 text-[14px] font-medium text-aico-primary
                        transition-colors hover:bg-aico-hover"
@@ -139,52 +326,71 @@ export function Sidebar(
           </button>
         </div>
 
-        {searching && (
-          <div className="px-3 pb-1">
-            <div className="flex items-center gap-2 rounded-lg border border-aico-border-subtle bg-aico-bg
-                            px-2.5 py-1.5 transition-colors focus-within:border-aico-accent/40">
-              <Icon name="search" size={15} className="text-aico-muted" />
-              <input
-                value={filter}
-                onChange={e => setFilter(e.target.value)}
-                placeholder="Search sessions"
-                autoFocus
-                onKeyDown={e => { if (e.key === 'Escape') { setFilter(''); setSearching(false); } }}
-                className="w-full min-w-0 bg-transparent text-[13px] text-aico-primary
-                           placeholder:text-aico-muted focus:outline-none"
-              />
-            </div>
+        {/*
+          Always on. Search used to hide behind an icon, which meant the box was
+          missing exactly when someone opened the sidebar to find something. The
+          placeholder says what it searches, because it searches more than
+          titles: project and group names too.
+        */}
+        <div className="px-3 pb-1">
+          <div className="flex items-center gap-2 rounded-lg border border-aico-border-subtle bg-aico-bg
+                          px-2.5 py-1.5 transition-colors focus-within:border-aico-accent/40">
+            <Icon name="search" size={15} className="text-aico-muted" />
+            <input
+              ref={searchRef}
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              placeholder="Search sessions, projects, groups"
+              aria-label="Search sessions, projects and groups"
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  if (filter) setFilter(''); else (e.target as HTMLInputElement).blur();
+                }
+                if (e.key === 'ArrowDown') { e.preventDefault(); treeRef.current?.focus(); }
+              }}
+              className="w-full min-w-0 bg-transparent text-[13px] text-aico-primary
+                         placeholder:text-aico-muted focus:outline-none"
+            />
+            {filter && (
+              <button onClick={() => setFilter('')} aria-label="Clear search" className="text-aico-muted hover:text-aico-primary">
+                <Icon name="close" size={14} />
+              </button>
+            )}
           </div>
-        )}
+          {filtering && (
+            <p className="px-1 pt-1 text-[11px] text-aico-muted">
+              {matchCount === 1 ? '1 match' : `${matchCount} matches`}
+            </p>
+          )}
+        </div>
 
         {/*
-          Always present. It was gated on having more than one folder open,
-          which meant the controls on it — search, archived, add — were missing
-          exactly when someone was looking for how to open their first one.
+          Two labelled controls, not four glyphs. The header used to carry four
+          17px icons with nothing but a tooltip to tell them apart — and two of
+          them (new group, add folder) looked the same. A `+` menu holds the
+          three ways to make something; the archive toggle says its own name.
         */}
-        <div className="flex items-center gap-0.5 px-4 pb-1 pt-2">
+        <div data-sidebar-header className="flex items-center gap-1 px-3 pb-1 pt-2">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-aico-muted">
-            Workspaces
+            Projects
           </span>
           <div className="flex-1" />
-          <HeaderButton
-            icon="search"
-            label="Search sessions"
-            active={searching}
-            onClick={() => { setSearching(v => !v); if (searching) setFilter(''); }}
+          <button
+            onClick={flipArchived}
+            aria-pressed={showArchived}
+            title={showArchived ? 'Hide archived sessions' : 'Show archived sessions'}
+            className={`${TOOLBAR_CONTROL} ${toolbarTone(showArchived)} text-[12px]`}
+          >
+            <Icon name="archive" size={14} /> Archived
+          </button>
+          <AddMenu
+            open={menuOpen}
+            onToggle={() => setMenuOpen(v => !v)}
+            onClose={() => setMenuOpen(false)}
+            onNewSession={startNew}
+            onOpenProject={onAddProject}
+            onNewGroup={() => setNaming(true)}
           />
-          <HeaderButton
-            icon="archive"
-            label={showArchived ? 'Hide archived sessions' : 'Show archived sessions'}
-            active={showArchived}
-            onClick={toggleArchived}
-          />
-          <HeaderButton
-            icon="stack"
-            label="New group"
-            onClick={() => setNaming(true)}
-          />
-          <HeaderButton icon="folder-plus" label="Add workspace" onClick={onAddProject} />
         </div>
 
         {naming && (
@@ -199,7 +405,12 @@ export function Sidebar(
                 if (e.key === 'Enter') {
                   const value = (e.target as HTMLInputElement).value.trim();
                   setNaming(false);
-                  if (value) void createGroup(value);
+                  if (value) {
+                    void createGroup(value).then(id => {
+                      // A new group opens: the whole point of making it was to look at it.
+                      if (id) remember({ collapsed: [...collapsed].filter(p => p !== id) });
+                    });
+                  }
                 }
               }}
               className="w-full rounded-lg border border-aico-accent/50 bg-aico-bg px-2.5 py-1.5
@@ -208,134 +419,60 @@ export function Sidebar(
           </div>
         )}
 
-        <nav className="mt-1 flex-1 overflow-y-auto px-2 pb-2">
-          {sessions.length === 0 && (
-            <p className="px-3 py-3 text-[13px] text-aico-muted">No sessions yet.</p>
-          )}
-          {sessions.length > 0 && sections.every(g => g.items.length === 0) && (
-            <p className="px-3 py-3 text-[13px] text-aico-muted">Nothing matches that.</p>
-          )}
-
-          {/*
-            Above the folders, because "the thing I was just doing" is what the
-            sidebar is opened for most of the time, and it was previously one
-            row inside one of several collapsed folders.
-          */}
-          {recent.items.length > 0 && (
-            <section className="mb-2">
-              <div className="flex items-center gap-1.5 px-3 py-1">
-                <button
-                  onClick={() => setRecentFolded(f => !f)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-                  aria-expanded={!recentFolded}
-                >
-                  <span className="text-[10px] text-aico-muted">{recentFolded ? '▸' : '▾'}</span>
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-aico-muted">
-                    Recent
-                  </span>
-                  <span className="text-[11px] text-aico-muted">{recent.total}</span>
-                </button>
-              </div>
-
-              {!recentFolded && recent.items.map(session => (
-                <SessionRow
-                  key={`recent-${session.id}`}
-                  session={session}
-                  running={session.running === true || activeSessions.includes(session.id)}
-                  current={session.id === sessionId}
-                  onSelect={() => select(session.id)}
-                />
-              ))}
-
-              {/*
-                Grows in place rather than opening a separate screen. Somebody
-                looking for a chat from last week is still looking in the list
-                they are already reading.
-              */}
-              {!recentFolded && recent.total > recent.items.length && (
-                <button
-                  onClick={() => setRecentLimit(n => n + 20)}
-                  className="w-full px-3 py-1 text-left text-[12px] text-aico-accent
-                             hover:underline"
-                >
-                  View more ({recent.total - recent.items.length} older)
-                </button>
-              )}
-              {!recentFolded && recentLimit > 10 && recent.total <= recent.items.length && (
-                <button
-                  onClick={() => setRecentLimit(10)}
-                  className="w-full px-3 py-1 text-left text-[12px] text-aico-muted hover:underline"
-                >
-                  Show fewer
-                </button>
-              )}
-            </section>
-          )}
-
-          {sections.map(section => {
-            const path = section.path;
-            const known = section.kind === 'group'
-              ? groups.some(g => g.id === path)
-              : projects.some(p => p.path === path);
-            const isFolded = collapsed.has(path);
-            return (
-              <section key={section.kind + path} className="mb-1">
-                <ProjectGroupHeader
-                  label={section.label}
-                  path={path}
-                  kind={section.kind}
-                  known={known}
-                  isLaunch={projects.some(p => p.path === path && p.isLaunch)}
-                  collapsed={isFolded}
-                  count={section.items.length}
-                  onToggle={() => setCollapsed(current => {
-                    const next = new Set(current);
-                    if (next.has(path)) next.delete(path); else next.add(path);
-                    return next;
-                  })}
-                />
-                {!isFolded && section.items.length === 0 && (
-                  <p className="px-3 pb-1 text-[12px] text-aico-muted">No sessions here yet.</p>
-                )}
-                {!isFolded && section.items.map(session => (
-                  <SessionRow
-                    key={session.id}
-                    session={session}
-                    running={session.running === true || activeSessions.includes(session.id)}
-                    current={session.id === sessionId}
-                    onSelect={() => select(session.id)}
-                  />
-                ))}
-              </section>
-            );
-          })}
-        </nav>
+        {/*
+          The first-run card sits above the list, not instead of it: a reader
+          who has opened two projects and started nothing still needs to see
+          the projects they opened.
+        */}
+        {empty && <FirstRun onNewSession={startNew} onOpenProject={onAddProject} />}
+        {nothingMatches ? (
+          <p className="px-5 py-3 text-[13px] text-aico-muted">Nothing matches that.</p>
+        ) : dense ? (
+          <WindowedList
+            rows={rows}
+            rowHeight={ROW_HEIGHT}
+            renderRow={renderRow}
+            rowKey={rowKey}
+            scrollToIndex={focusIndex}
+            className="mt-1 flex-1 px-2 pb-2 focus:outline-none"
+            containerProps={{ ...treeProps, ref: treeRef } as React.HTMLAttributes<HTMLDivElement>}
+          />
+        ) : (
+          <div
+            {...treeProps}
+            ref={treeRef}
+            data-sidebar-list
+            className="mt-1 flex-1 overflow-y-auto px-2 pb-2 focus:outline-none"
+          >
+            {rows.map((row, index) => (
+              <React.Fragment key={rowKey(row)}>{renderRow(row, index)}</React.Fragment>
+            ))}
+          </div>
+        )}
 
         {/*
-          Destinations, not views. Chat and Trajectory are two readings of the
-          same session and are tabs on it in the header, so listing Trajectory
-          here as well offered the same destination twice and made the sidebar
-          disagree with the header about what it selected. Settings is a sheet
-          over whatever you are doing, not somewhere to go. Mini Apps earns a
-          place because it outlives the session that built it — the apps are
-          still there tomorrow, in a chat that has nothing to do with them.
+          Destinations, not views. Chat, Changes and Trajectory are three
+          readings of one session and are tabs on it in the header. Settings is
+          a sheet over whatever you are doing, and its button lights while the
+          sheet is open. Apps earns a place because an app outlives the session
+          that built it.
         */}
         <div className="border-t border-aico-border-subtle px-2 py-2">
           <NavButton
-            icon="stack"
-            active={view === 'system'}
-            onClick={() => { onView(view === 'system' ? 'chat' : 'system'); onClose(); }}
+            icon="grid"
+            active={route.destination === 'apps'}
+            onClick={() => { onRoute(toggleDestination(route, 'apps')); onClose(); }}
+          >
+            Apps
+          </NavButton>
+          <NavButton
+            icon="activity"
+            active={route.destination === 'system'}
+            onClick={() => { onRoute(toggleDestination(route, 'system')); onClose(); }}
           >
             System
           </NavButton>
-          <NavButton
-            icon="bolt"
-            active={view === 'miniapps'}
-            onClick={() => { onView(view === 'miniapps' ? 'chat' : 'miniapps'); onClose(); }}
-          >
-            Mini Apps
-          </NavButton>
-          <NavButton icon="sliders" active={false} onClick={() => { onSettings(); onClose(); }}>
+          <NavButton icon="sliders" active={settingsOpen} onClick={() => { onSettings(); onClose(); }}>
             Settings
           </NavButton>
         </div>
@@ -350,11 +487,20 @@ export function Sidebar(
  * Shows its title when it has one and its id when it does not. A model-written
  * title that is still provisional is marked, because a name you did not choose
  * that silently changes under you is disorienting. Double-clicking renames,
- * which pins it.
+ * which pins it. The row can be dragged onto a group header.
  */
-function SessionRow(
-  { session, running, current, onSelect }: {
-    session: SessionSummary; running: boolean; current: boolean; onSelect: () => void;
+const SessionRow = React.memo(function SessionRow(
+  { session, running, current, suffix, groupColor, onSelect, onDragStart, onDragEnd, dense, focused, rowId }: {
+    session: SessionSummary; running: boolean; current: boolean;
+    /** Where it lives, for a Recent row: the project or group name. */
+    suffix: string;
+    groupColor?: string | undefined;
+    onSelect: () => void;
+    onDragStart: () => void;
+    onDragEnd: () => void;
+    dense: boolean;
+    focused: boolean;
+    rowId: string;
   },
 ): React.ReactElement {
   const renameSession = useStore(s => s.renameSession);
@@ -369,10 +515,6 @@ function SessionRow(
     setEditing(false);
     const next = draft.trim();
     if (!next || next === session.title) return;
-    // No longer has to open the session first. Renaming used to be defined only
-    // for the session you were in, so renaming any other row silently switched
-    // you into it — a destination change nobody asked for from a menu item that
-    // says "Rename".
     await renameSession(session.id, next);
   };
 
@@ -387,8 +529,9 @@ function SessionRow(
           if (e.key === 'Escape') { setDraft(session.title ?? ''); setEditing(false); }
         }}
         autoFocus
-        className="mb-0.5 w-full rounded-lg border border-aico-accent/50 bg-aico-bg px-3 py-1.5
-                   text-[13px] text-aico-primary focus:outline-none"
+        aria-label="Session name"
+        className={`w-full rounded-lg border border-aico-accent/50 bg-aico-bg px-3 text-[13px]
+                    text-aico-primary focus:outline-none ${dense ? 'h-8' : 'mb-0.5 py-1.5'}`}
       />
     );
   }
@@ -396,39 +539,49 @@ function SessionRow(
   const label = session.title ?? session.id;
   return (
     // A row, not a button: the ellipsis is interactive and a button inside a
-    // button is invalid markup that browsers resolve by dropping one of them.
-    // The selected row is the one you are *looking at*; the green dot means
-    // *running*. Those are different facts and were both rendered as one faint
-    // grey tint, so a list with two running sessions gave no way to tell which
-    // one the transcript on the right belonged to. Selection now gets an accent
-    // bar down its left edge, a tinted background and a heavier label — three
-    // signals, because the single subtle one is what failed.
+    // button is invalid markup. The selected row is the one you are *looking
+    // at*; the green dot means *running* — three signals for selection (bar,
+    // tint, weight) because the single subtle one failed.
     <div
+      id={rowId}
+      role="treeitem"
+      aria-level={2}
+      aria-selected={current}
       aria-current={current ? 'true' : undefined}
-      className={`group/row relative mb-0.5 flex w-full items-center gap-2 rounded-lg pr-1.5 text-left
-                  text-[13px] transition-colors ${current
+      draggable
+      onDragStart={e => {
+        e.dataTransfer.setData(SESSION_DRAG_TYPE, session.id);
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className={`group/row relative flex w-full items-center gap-2 rounded-lg pr-1.5 text-left
+                  text-[13px] transition-colors ${dense ? 'h-8' : 'mb-0.5'} ${current
                     ? 'bg-aico-accent-soft font-medium text-aico-primary'
-                    : 'text-aico-secondary hover:bg-aico-hover'} ${session.archived ? 'opacity-55' : ''}`}
+                    : 'text-aico-secondary hover:bg-aico-hover'} ${session.archived ? 'opacity-55' : ''}
+                  ${focused ? 'outline outline-1 outline-aico-accent/60' : ''}`}
     >
       {current && (
-        <span
-          aria-hidden
-          className="absolute inset-y-1 left-0 w-[3px] rounded-full bg-aico-accent"
-        />
+        <span aria-hidden className="absolute inset-y-1 left-0 w-[3px] rounded-full bg-aico-accent" />
       )}
       <button
         onClick={onSelect}
         onDoubleClick={() => { setDraft(session.title ?? ''); setEditing(true); }}
+        tabIndex={-1}
         title={`${label}\n${session.id}\nDouble-click to rename`}
-        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3 text-left"
+        className={`flex min-w-0 flex-1 items-center gap-2 pl-3 text-left ${dense ? 'h-8' : 'py-1.5'}`}
       >
         {running && (
-          <span className="aico-thinking shrink-0 text-aico-success" title="Running on the server">
-            ●
-          </span>
+          <span className="aico-thinking shrink-0 text-aico-success" title="Running on the server">●</span>
+        )}
+        {groupColor && (
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: groupColor }} />
         )}
         <span className={`min-w-0 flex-1 truncate ${session.title ? '' : 'font-mono opacity-70'}`}>
           {label}
+          {suffix && (
+            <span className="ml-1.5 text-[11px] font-normal text-aico-muted">{suffix}</span>
+          )}
         </span>
       </button>
 
@@ -450,32 +603,107 @@ function SessionRow(
       />
     </div>
   );
-}
+});
 
-/**
- * One icon in the projects header.
- *
- * The label is a `title` *and* an `aria-label`: the tooltip is the only thing
- * that says what an unlabelled glyph does, and a screen reader gets nothing
- * from a tooltip.
- */
-function HeaderButton(
-  { icon, label, onClick, active = false }: {
-    icon: Glyph; label: string; onClick: () => void; active?: boolean;
+/** The `+` menu on the Projects header: the three ways to make something. */
+function AddMenu(
+  { open, onToggle, onClose, onNewSession, onOpenProject, onNewGroup }: {
+    open: boolean; onToggle: () => void; onClose: () => void;
+    onNewSession: () => void; onOpenProject: () => void; onNewGroup: () => void;
   },
 ): React.ReactElement {
-  return (
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState({ top: 0, left: 0 });
+
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: MouseEvent): void => {
+      if (buttonRef.current?.contains(event.target as Node)) return;
+      if ((event.target as HTMLElement).closest('[data-add-menu]')) return;
+      onClose();
+    };
+    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('mousedown', dismiss, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', dismiss, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open, onClose]);
+
+  const item = (glyph: Glyph, label: string, onPick: () => void): React.ReactElement => (
     <button
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
-      className={`rounded-md p-1.5 transition-colors hover:bg-aico-hover ${
-        active ? 'bg-aico-hover text-aico-accent' : 'text-aico-muted hover:text-aico-primary'
-      }`}
+      role="menuitem"
+      onClick={() => { onClose(); onPick(); }}
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-primary
+                 transition-colors hover:bg-aico-hover"
     >
-      <Icon name={icon} size={17} />
+      <Icon name={glyph} size={15} className="text-aico-muted" /> {label}
     </button>
+  );
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        onClick={() => {
+          const box = buttonRef.current?.getBoundingClientRect();
+          if (box) setAt({ top: box.bottom + 4, left: Math.min(box.left, window.innerWidth - 220) });
+          onToggle();
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="New session, open a project, or make a group"
+        className={`${TOOLBAR_CONTROL} ${toolbarTone(open)} w-7 justify-center px-0`}
+      >
+        <Icon name="plus" size={16} />
+      </button>
+      {open && (
+        <Portal>
+          <div
+            data-add-menu
+            role="menu"
+            style={{ top: at.top, left: at.left }}
+            className="fixed z-50 w-[212px] overflow-hidden rounded-xl border border-aico-border
+                       bg-aico-bg py-1 shadow-2xl"
+          >
+            {item('plus', 'New session', onNewSession)}
+            {item('folder-plus', 'Open project…', onOpenProject)}
+            {item('stack', 'New group…', onNewGroup)}
+          </div>
+        </Portal>
+      )}
+    </>
+  );
+}
+
+/** What a brand-new install sees instead of "No sessions yet." */
+function FirstRun(
+  { onNewSession, onOpenProject }: { onNewSession: () => void; onOpenProject: () => void },
+): React.ReactElement {
+  return (
+    <div className="mx-3 mt-2 rounded-xl border border-dashed border-aico-border p-4">
+      <p className="text-[13px] font-medium text-aico-primary">Nothing here yet</p>
+      <p className="mt-1 text-[12px] leading-relaxed text-aico-secondary">
+        Ask anything below — it runs in the scratch workspace. Open a project folder to work on code.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <button
+          onClick={onOpenProject}
+          className="rounded-full bg-aico-accent px-3 py-1 text-[12px] font-medium text-aico-on-accent
+                     transition-colors hover:bg-aico-accent-hover"
+        >
+          Open project…
+        </button>
+        <button
+          onClick={onNewSession}
+          className="rounded-full border border-aico-border px-3 py-1 text-[12px] text-aico-secondary
+                     transition-colors hover:bg-aico-hover hover:text-aico-primary"
+        >
+          New session
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -487,6 +715,7 @@ function NavButton(
   return (
     <button
       onClick={onClick}
+      aria-current={active ? 'page' : undefined}
       className={`mb-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-[13px]
                   transition-colors ${
                     active ? 'bg-aico-hover text-aico-primary' : 'text-aico-secondary hover:bg-aico-hover'
@@ -497,3 +726,5 @@ function NavButton(
     </button>
   );
 }
+
+export { APPS_SECTION };

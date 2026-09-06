@@ -1,5 +1,5 @@
 /**
- * The heading over one project's sessions, and its controls.
+ * The heading over one section's sessions, and its controls.
  *
  * Three affordances, and each earns its place by removing a step that would
  * otherwise take two:
@@ -7,21 +7,27 @@
  * **`+` starts a session here.** Without it, working in a second folder means
  * selecting it and *then* starting a session — and the only way to select it
  * was to click one of its existing sessions, which a folder you have just
- * opened does not have. The plus is the whole path in one click.
+ * opened does not have. The plus is the whole path in one click. On the apps
+ * section it opens the Apps screen instead, because an app conversation is
+ * started from an app, not from a folder.
  *
- * **The caret folds the group.** A project with sixty sessions otherwise pushes
- * every other project off the bottom of the sidebar, which defeats the point of
- * grouping. Collapsed state is per-project and lives in the component tree, not
- * on the server: it is a view preference about right now, not a fact about the
- * project.
+ * **The caret folds the section.** A project with sixty sessions otherwise
+ * pushes every other project off the bottom of the sidebar, which defeats the
+ * point of grouping. Folds are remembered between reloads (see
+ * {@link module:sidebar-memory}); the header only reports the toggle.
  *
  * **The menu renames or forgets.** Rename changes the label only — the path is
- * the identity, since sessions are filed under it. Delete is styled as the
+ * the identity, since sessions are filed under it. Removing is styled as the
  * destructive thing it is and asks first, because a folder full of history is
  * one click from disappearing out of the list.
  *
- * The launch directory has no delete: the server is running in it, and a list
+ * The launch directory has no remove: the server is running in it, and a list
  * that could not show you where you are would be lying by omission.
+ *
+ * A header is also a drop target. Dropping a session on a group files it there;
+ * dropping it on its own project header takes it back out. The decision lives
+ * in {@link module:sidebar-drop}; the header only says whether it will accept
+ * what is being dragged, and shows a ring while it can.
  *
  * @module components/ProjectGroupHeader
  */
@@ -31,22 +37,37 @@ import { useStore } from '../store';
 import { Portal } from './Portal';
 import { Icon } from './Icon';
 import { ProjectSettings } from './ProjectSettings';
+import { SESSION_DRAG_TYPE } from '../sidebar-drop';
 
 export interface ProjectGroupHeaderProps {
   label: string;
   path: string;
-  /** A folder, or a container someone made. */
-  kind: 'project' | 'group';
-  /** False for the group holding sessions whose folder is no longer listed. */
+  /** A folder, a container someone made, or the synthetic app-conversations section. */
+  kind: 'project' | 'group' | 'apps';
+  /** False for the section holding sessions whose folder is no longer listed, and for apps. */
   known: boolean;
   isLaunch: boolean;
   collapsed: boolean;
   onToggle: () => void;
+  /** Sessions shown under this header right now. */
   count: number;
+  /** Set while a filter is active: what is shown is a subset, and the header says so. */
+  filtering?: boolean;
+  /** Whether a drop of the session currently being dragged would do something here. */
+  acceptsDrop?: boolean;
+  onDropSession?: (sessionId: string) => void;
+  /** For the apps section: where its `+` goes. */
+  onOpenApps?: () => void;
+  /** Uniform-height rows, for the windowed list. */
+  dense?: boolean;
+  /** Keyboard focus marker and the id `aria-activedescendant` points at. */
+  focused?: boolean;
+  rowId?: string;
 }
 
 export function ProjectGroupHeader({
   label, path, kind, known, isLaunch, collapsed, onToggle, count,
+  filtering = false, acceptsDrop = false, onDropSession, onOpenApps, dense = false, focused = false, rowId,
 }: ProjectGroupHeaderProps): React.ReactElement {
   const newSessionIn = useStore(s => s.newSessionIn);
   const updateProject = useStore(s => s.updateProject);
@@ -60,6 +81,7 @@ export function ProjectGroupHeader({
   // One shape for both, so everything below asks about "the section" rather
   // than branching on kind at every use.
   const isGroup = kind === 'group';
+  const isApps = kind === 'apps';
   const entry = isGroup ? group : project;
   const update = (patch: {
     name?: string; color?: string; pinned?: boolean; description?: string; instructions?: string;
@@ -74,6 +96,7 @@ export function ProjectGroupHeader({
   const [draft, setDraft] = useState(label);
   const [confirming, setConfirming] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [over, setOver] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -119,25 +142,57 @@ export function ProjectGroupHeader({
           if (e.key === 'Escape') { setDraft(label); setEditing(false); }
         }}
         autoFocus
-        aria-label="Project name"
-        className="mx-3 mb-1 mt-3 w-[calc(100%-1.5rem)] rounded-lg border border-aico-accent/50
-                   bg-aico-bg px-2 py-1 text-[12px] text-aico-primary focus:outline-none"
+        aria-label={isGroup ? 'Group name' : 'Project name'}
+        className={`mx-3 w-[calc(100%-1.5rem)] rounded-lg border border-aico-accent/50 bg-aico-bg px-2 py-1
+                    text-[12px] text-aico-primary focus:outline-none ${dense ? 'my-0.5' : 'mb-1 mt-3'}`}
       />
     );
   }
 
+  const glyph = isApps ? 'bolt' : isGroup ? 'stack' : 'folder';
+  const startHere = (): void => {
+    if (isApps) { onOpenApps?.(); return; }
+    if (isGroup) newSessionInGroup(path); else newSessionIn(path);
+  };
+
   return (
-    <div className="group/proj flex items-center gap-0.5 rounded-lg px-1 pb-1 pt-3 hover:bg-aico-hover/60">
+    <div
+      id={rowId}
+      role="treeitem"
+      aria-expanded={!collapsed}
+      aria-level={1}
+      data-focused={focused ? 'true' : undefined}
+      onDragOver={e => {
+        if (!acceptsDrop || !e.dataTransfer.types.includes(SESSION_DRAG_TYPE)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (!over) setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={e => {
+        setOver(false);
+        if (!acceptsDrop) return;
+        const id = e.dataTransfer.getData(SESSION_DRAG_TYPE);
+        if (!id) return;
+        e.preventDefault();
+        onDropSession?.(id);
+      }}
+      className={`group/proj flex items-center gap-0.5 rounded-lg px-1 hover:bg-aico-hover/60
+                  ${dense ? 'h-8' : 'pb-1 pt-3'}
+                  ${over && acceptsDrop ? 'ring-1 ring-aico-accent bg-aico-accent-soft/60' : ''}
+                  ${focused ? 'outline outline-1 outline-aico-accent/60' : ''}`}
+    >
       <button
         onClick={onToggle}
         title={collapsed ? `Show ${count} session${count === 1 ? '' : 's'}` : 'Collapse'}
         aria-expanded={!collapsed}
+        tabIndex={-1}
         className="flex min-w-0 flex-1 items-center gap-1.5 px-2 text-left text-[11px] font-medium
                    tracking-wider text-aico-muted"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
         <Icon
-          name={isGroup ? 'stack' : 'folder'}
+          name={glyph}
           size={18}
           strokeWidth={1.7}
           filled={Boolean(entry?.color)}
@@ -148,32 +203,43 @@ export function ProjectGroupHeader({
         {entry?.pinned && (
           <Icon name="pin" size={11} className="shrink-0 text-aico-accent" />
         )}
-        <span className="min-w-0 truncate" title={entry?.description || path}>{label}</span>
-        {collapsed && count > 0 && (
-          <span className="shrink-0 tabular-nums opacity-70">{count}</span>
-        )}
+        <span className="min-w-0 truncate" title={entry?.description || (isApps ? 'Conversations bound to an app' : path)}>
+          {label}
+        </span>
+        {/*
+          The count, always. It used to appear only when folded, so an open
+          folder with sixty rows gave no number — and while filtering, the
+          number is the search result.
+        */}
+        <span className="shrink-0 tabular-nums opacity-70" title={filtering ? 'matches' : 'sessions'}>
+          {count}
+        </span>
       </button>
 
-      {known && (
+      {(known || isApps) && (
         <>
+          {known && (
+            <button
+              ref={buttonRef}
+              onClick={openMenu}
+              tabIndex={-1}
+              aria-label={`Actions for ${label}`}
+              aria-haspopup="menu"
+              className={`shrink-0 rounded p-0.5 text-aico-muted transition-opacity hover:text-aico-primary
+                          ${menuOpen ? 'opacity-100' : 'opacity-0 focus:opacity-100 group-hover/proj:opacity-100'}`}
+            >
+              <Icon name="ellipsis" size={14} />
+            </button>
+          )}
           <button
-            ref={buttonRef}
-            onClick={openMenu}
-            aria-label={`Actions for ${label}`}
-            aria-haspopup="menu"
-            className={`shrink-0 rounded p-0.5 text-aico-muted transition-opacity hover:text-aico-primary
-                        ${menuOpen ? 'opacity-100' : 'opacity-0 focus:opacity-100 group-hover/proj:opacity-100'}`}
-          >
-            <Icon name="ellipsis" size={14} />
-          </button>
-          <button
-            onClick={() => (isGroup ? newSessionInGroup(path) : newSessionIn(path))}
-            aria-label={`New session in ${label}`}
-            title={`New session in ${label}`}
+            onClick={startHere}
+            tabIndex={-1}
+            aria-label={isApps ? 'Open Apps' : `New session in ${label}`}
+            title={isApps ? 'Open Apps' : `New session in ${label}`}
             className="shrink-0 rounded p-0.5 text-aico-muted opacity-0 transition-opacity
                        hover:text-aico-primary focus:opacity-100 group-hover/proj:opacity-100"
           >
-            <Icon name="plus" size={14} />
+            <Icon name={isApps ? 'grid' : 'plus'} size={14} />
           </button>
         </>
       )}
@@ -222,13 +288,13 @@ export function ProjectGroupHeader({
 
           {isLaunch ? (
             <p className="px-3 py-2 text-[11px] leading-snug text-aico-muted">
-              The server is running here, so this folder is always listed.
+              The server is running here, so this project is always listed.
             </p>
           ) : confirming ? (
             <div className="px-3 py-2">
               <p className="text-[11px] leading-snug text-aico-secondary">
                 {isGroup
-                  ? 'Delete this group? Its sessions go back to their own folders.'
+                  ? 'Delete this group? Its sessions go back to their own projects.'
                   : 'Remove from the list? The sessions stay on disk.'}
               </p>
               <div className="mt-1.5 flex gap-1.5">
@@ -257,7 +323,7 @@ export function ProjectGroupHeader({
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-danger
                          transition-colors hover:bg-aico-danger/10"
             >
-              <Icon name="trash" size={16} /> {isGroup ? 'Delete group' : 'Remove workspace'}
+              <Icon name="trash" size={16} /> {isGroup ? 'Delete group' : 'Remove project'}
             </button>
           )}
         </div>
@@ -267,7 +333,7 @@ export function ProjectGroupHeader({
       {settingsOpen && entry && (
         <ProjectSettings
           entry={entry}
-          kind={kind}
+          kind={isGroup ? 'group' : 'project'}
           onSave={patch => update(patch)}
           onClose={() => setSettingsOpen(false)}
         />

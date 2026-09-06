@@ -110,7 +110,7 @@ export function AgentsCard(): React.ReactElement | null {
                 <button
                   onClick={() => {
                     setStopping(prev => new Set(prev).add(agent.agentId));
-                    void api.stopSubAgent(agent.agentId, 'stopped from the workspace')
+                    void api.stopSubAgent(agent.agentId, 'stopped from the portal')
                       .catch(() => {
                         // It finished first, or the server said no. Either way it
                         // is still running or already gone, and the next frame
