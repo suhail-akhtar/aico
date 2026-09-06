@@ -1,10 +1,7 @@
 /**
  * Ordering and bucketing the session list.
  *
- * Pure, and in its own module so it can be tested without a DOM: the date
- * boundaries are the kind of thing that is quietly wrong for a week before
- * anyone notices, and "is 11pm last night Yesterday at 9am" is a real question
- * with a right answer.
+ * Pure, and in its own module so it can be tested without a DOM.
  *
  * The ordering rule is one sentence: **the session something last happened in
  * is the first row, always.** That has to hold live, not only at the moment the
@@ -13,6 +10,10 @@
  * kept the position it had when the page loaded and sank down the list as
  * nothing about it was ever re-read. `promote` and `merge` below are what make
  * the rule hold between fetches.
+ *
+ * The old calendar buckets (Today, Yesterday, …) are gone: nothing had rendered
+ * them since the list became grouped by folder, and a filter implemented three
+ * times over is a filter that disagrees with itself sooner or later.
  *
  * @module grouping
  */
@@ -81,30 +82,86 @@ export function merge(local: SessionSummary[], incoming: SessionSummary[]): Sess
   return byRecency([...byId.values()]);
 }
 
+// ── Searching ────────────────────────────────────────────────────────
+
+/** What a search can see besides the session itself. */
+export interface MatchContext {
+  /** Project name by path. */
+  projects: Map<string, { name: string }>;
+  /** Group name by id. */
+  groups: Map<string, { name: string }>;
+}
+
+export const EMPTY_CONTEXT: MatchContext = { projects: new Map(), groups: new Map() };
+
 /**
- * Bucket sessions by the directory they belong to.
+ * A query, as the words that all have to be present.
  *
- * Used instead of the date buckets once more than one project is open, because
- * at that point *where* a conversation happened is the stronger memory than
- * *when* — you remember you were working on the API, not that it was Tuesday.
- * With a single project the question never arises and dates are the better
- * axis, so {@link groupByAge} stays the default.
+ * Space-separated terms with AND semantics — "auth api" finds the sessions
+ * about both — matching the behaviour of the settings search, so the two boxes
+ * in the product agree about what a space means.
+ */
+export function searchTerms(filter: string): string[] {
+  return filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Whether a session matches every term.
  *
- * Projects are ordered by their most recent activity and sessions within them
- * by recency, so the same rule holds at both levels: the thing you touched last
- * is at the top.
+ * Looks at the title, the id, the project's name and path, and the group's
+ * name — because "the one in the payments repo" and "the one in my Q3 group"
+ * are how people actually remember a conversation, not by its title alone.
+ */
+export function matchesSession(s: SessionSummary, terms: string[], ctx: MatchContext = EMPTY_CONTEXT): boolean {
+  if (terms.length === 0) return true;
+  const project = s.project ? ctx.projects.get(s.project) : undefined;
+  const group = s.group ? ctx.groups.get(s.group) : undefined;
+  const haystack = [
+    s.title ?? '',
+    s.id,
+    project?.name ?? '',
+    s.project ?? '',
+    s.project ? basename(s.project) : '',
+    group?.name ?? '',
+  ].join('\n').toLowerCase();
+  return terms.every(term => haystack.includes(term));
+}
+
+/** Whether a section's own name matches, so an empty project can still be found. */
+export function matchesSectionLabel(label: string, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const lower = label.toLowerCase();
+  return terms.every(term => lower.includes(term));
+}
+
+// ── Sections ─────────────────────────────────────────────────────────
+
+/**
+ * One heading in the list.
+ *
+ * A *project* is a folder; a *group* is a bucket someone made; *apps* is the
+ * one synthetic section, holding the conversations bound to an App — they are
+ * filed under the scratch directory on disk, and showing them there made the
+ * scratch folder look like where the work was.
  */
 export interface Section {
   label: string;
-  /** Folder path, or group id. Unique across both — a path is never an id. */
+  /** Folder path, group id, or {@link APPS_SECTION} for the synthetic one. Unique across all three. */
   path: string;
-  kind: 'project' | 'group';
+  kind: 'project' | 'group' | 'apps';
   pinned?: boolean;
   items: SessionSummary[];
 }
 
+export const APPS_SECTION = '__apps__';
+
+/** Sessions bound to an App carry a fixed id prefix; the server derives it. */
+export function isAppSession(s: SessionSummary): boolean {
+  return /^miniapp-/.test(s.id);
+}
+
 /**
- * Sections, which are folders and the groups you made.
+ * Sections, which are folders, the groups you made, and the app conversations.
  *
  * A session in a group appears under the group *instead of* its folder. It is
  * still running in that folder — a group is a label, not a location — but a
@@ -118,17 +175,17 @@ export function groupByProject(
   filter = '',
   groups: Array<{ id: string; name: string; pinned?: boolean }> = [],
 ): Section[] {
-  const needle = filter.trim().toLowerCase();
-  const matching = byRecency(needle
-    ? sessions.filter(s =>
-      (s.title ?? '').toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle))
-    : sessions);
+  const terms = searchTerms(filter);
+  const ctx: MatchContext = {
+    projects: new Map(projects.map(p => [p.path, { name: p.name }])),
+    groups: new Map(groups.map(g => [g.id, { name: g.name }])),
+  };
+  const matching = byRecency(terms.length ? sessions.filter(s => matchesSession(s, terms, ctx)) : sessions);
 
   const sections = new Map<string, Section>();
   // Seeded from the project list so a project with no sessions still appears —
   // a folder you just opened and cannot see is indistinguishable from one that
-  // failed to open.
-  // Groups first: they are the ones someone made on purpose.
+  // failed to open. Groups first: they are the ones someone made on purpose.
   for (const group of groups) {
     sections.set(group.id, {
       label: group.name,
@@ -149,21 +206,35 @@ export function groupByProject(
   }
 
   for (const session of matching) {
-    // The group wins when the session is in one that still exists. A group that
-    // has been deleted leaves the membership event behind in the log, and the
-    // session correctly falls back to the folder it has been running in.
-    const key = (session.group && sections.has(session.group))
-      ? session.group
-      : (session.project ?? '');
+    // An app conversation goes to the apps section, whatever folder it is filed
+    // under — unless someone deliberately put it in a group, which wins as it
+    // does for every other session. A group that has been deleted leaves the
+    // membership event behind in the log, and the session correctly falls back.
+    const inGroup = Boolean(session.group && sections.has(session.group));
+    const key = inGroup
+      ? session.group!
+      : isAppSession(session)
+        ? APPS_SECTION
+        : (session.project ?? '');
     let section = sections.get(key);
     if (!section) {
-      // A session whose directory is no longer a known project still has to go
-      // somewhere; dropping it would hide history rather than tidy it.
-      section = { label: key ? basename(key) : 'Other', path: key, kind: 'project', items: [] };
+      section = key === APPS_SECTION
+        ? { label: 'App conversations', path: APPS_SECTION, kind: 'apps', items: [] }
+        // A session whose directory is no longer a known project still has to go
+        // somewhere; dropping it would hide history rather than tidy it.
+        : { label: key ? basename(key) : 'Other', path: key, kind: 'project', items: [] };
       sections.set(key, section);
     }
     section.items.push(session);
   }
+
+  // While filtering, a section whose own name matches stays even when none of
+  // its sessions do — that is how an empty project is found by name. Every
+  // other empty section is dropped, because "no match here" seventy times is
+  // not a search result.
+  const kept = terms.length
+    ? [...sections.values()].filter(s => s.items.length > 0 || matchesSectionLabel(s.label, terms))
+    : [...sections.values()];
 
   // Pinned first, then by activity. A folder you just added has no activity at
   // all, so plain recency buries it at the bottom — which is the opposite of
@@ -173,13 +244,53 @@ export function groupByProject(
     ...groups.map((g, index) => [g.id, index] as const),
     ...projects.map((p, index) => [p.path, groups.length + index] as const),
   ]);
-  return [...sections.values()].sort((a, b) => {
+  return kept.sort((a, b) => {
     if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
     const activity = (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0);
     if (activity !== 0) return activity;
     return (addedRank.get(a.path) ?? 1e9) - (addedRank.get(b.path) ?? 1e9);
   });
 }
+
+/** Pinned sections apart from the rest, so the list can draw a band above them. */
+export function splitPinned(sections: Section[]): { pinned: Section[]; rest: Section[] } {
+  return {
+    pinned: sections.filter(s => s.pinned),
+    rest: sections.filter(s => !s.pinned),
+  };
+}
+
+/** The section a session is shown under, named — for the Recent rows' suffix. */
+export function sectionLabelFor(
+  session: SessionSummary,
+  projects: Array<{ path: string; name: string }>,
+  groups: Array<{ id: string; name: string }>,
+): string {
+  if (session.group) {
+    const group = groups.find(g => g.id === session.group);
+    if (group) return group.name;
+  }
+  if (isAppSession(session)) return 'App';
+  if (session.project) {
+    const project = projects.find(p => p.path === session.project);
+    return project?.name ?? basename(session.project);
+  }
+  return '';
+}
+
+// ── Recent ───────────────────────────────────────────────────────────
+
+/**
+ * How many rows Recent shows. Five, fixed.
+ *
+ * It used to start at ten and grow by twenty on request, and a Recent list that
+ * grows is the sidebar twice — the folders below already hold everything. Five
+ * covers the handful a person actually moves between in a working session.
+ */
+export const RECENT_LIMIT = 5;
+
+/** Below this many sessions the folders fit on screen and Recent would only duplicate them. */
+export const RECENT_MIN_SESSIONS = 8;
 
 /**
  * The most recent conversations, whatever folder they live in.
@@ -189,79 +300,27 @@ export function groupByProject(
  * doing. That chat is one row in one of eight collapsed folders, and finding
  * it means remembering which — a question nobody should have to answer about
  * their own last five minutes.
- *
- * Deliberately flat and deliberately short. A second full list of everything
- * would just be the sidebar twice; the point is the handful you are actually
- * moving between, with the folders still below for everything else.
  */
 export function recentSessions(
   sessions: SessionSummary[],
   filter = '',
-  limit = 10,
+  limit = RECENT_LIMIT,
+  ctx: MatchContext = EMPTY_CONTEXT,
 ): { items: SessionSummary[]; total: number } {
-  const needle = filter.trim().toLowerCase();
-  const matching = byRecency(needle
-    ? sessions.filter(s =>
-      (s.title ?? '').toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle))
-    : sessions);
+  const terms = searchTerms(filter);
+  const matching = byRecency(terms.length ? sessions.filter(s => matchesSession(s, terms, ctx)) : sessions);
   return { items: matching.slice(0, limit), total: matching.length };
 }
 
-/** Last path segment, for either separator. */
-function basename(dir: string): string {
-  const parts = dir.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? dir;
+/** Whether Recent is worth drawing: not while searching, not for a short list. */
+export function showRecent(filter: string, sessionCount: number): boolean {
+  return searchTerms(filter).length === 0 && sessionCount >= RECENT_MIN_SESSIONS;
 }
 
-/**
- * Bucket sessions by age.
- *
- * Boundaries are calendar days, not elapsed hours: something from 11pm last
- * night is "Yesterday" at 9am, not "ten hours ago". People navigate by the day
- * a thing happened on.
- *
- * Sorts rather than trusting the caller. Every path that reaches here is
- * supposed to hand over a recency-ordered list, and relying on that held right
- * up until one of them did not.
- */
-export function groupByAge(
-  sessions: SessionSummary[],
-  filter = '',
-  now = Date.now(),
-): Array<{ label: string; items: SessionSummary[] }> {
-  const needle = filter.trim().toLowerCase();
-  const matching = byRecency(needle
-    ? sessions.filter(s =>
-      (s.title ?? '').toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle))
-    : sessions);
-
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-  const today = startOfToday.getTime();
-  const yesterday = today - 86_400_000;
-  const week = today - 6 * 86_400_000;
-  const month = today - 29 * 86_400_000;
-
-  const groups: Array<{ label: string; items: SessionSummary[] }> = [
-    { label: 'Today', items: [] },
-    { label: 'Yesterday', items: [] },
-    { label: 'Previous 7 days', items: [] },
-    { label: 'Previous 30 days', items: [] },
-    { label: 'Older', items: [] },
-  ];
-
-  for (const session of matching) {
-    const at = session.updatedAt;
-    const bucket =
-      at >= today ? 0
-      : at >= yesterday ? 1
-      : at >= week ? 2
-      : at >= month ? 3
-      : 4;
-    groups[bucket]!.items.push(session);
-  }
-
-  return groups;
+/** Last path segment, for either separator. */
+export function basename(dir: string): string {
+  const parts = dir.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? dir;
 }
 
 /** Compact relative age, as the row's right-hand marker. */
@@ -278,4 +337,3 @@ export function relativeAge(at: number, now = Date.now()): string {
   if (weeks < 5) return `${weeks}w`;
   return `${Math.round(days / 30)}mo`;
 }
-

@@ -102,8 +102,14 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
   // list is one nobody can select, rename, or even find — and `isKnownProject`
   // reads this list, so an unlisted default would be refused when passed back
   // explicitly.
+  // Named "Scratch" in the list, not "Workspace": the list is headed Projects,
+  // and a row called Workspace inside it made one word mean two things.
   const workspace = normalizeProjectPath(resolveWorkspaceRoot(settings, launch));
-  if (!seen.has(workspace)) seen.set(workspace, { path: workspace, name: 'Workspace' });
+  if (!seen.has(workspace)) {
+    seen.set(workspace, {
+      path: workspace, name: 'Scratch', description: 'Where sessions run when no project is chosen.',
+    });
+  }
 
   for (const entry of configured) if (!seen.has(entry.path)) seen.set(entry.path, entry);
 

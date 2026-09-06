@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>A local web workspace for your AI coding agent — aico</title>
+<title>A local web portal for your AI coding agent — aico</title>
 <meta name="description" content="aico serve runs a loopback server and a browser client, and the server owns the run — close the tab and the work carries on. Plan mode, mid-run steering, forking a conversation, and a session log you can resume.">
 <!-- seo:start -->
 <link rel="canonical" href="https://suhail-akhtar.github.io/aico/workspace.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="aico">
 <meta property="og:url" content="https://suhail-akhtar.github.io/aico/workspace.html">
-<meta property="og:title" content="A local web workspace for your AI coding agent — aico">
+<meta property="og:title" content="A local web portal for your AI coding agent — aico">
 <meta property="og:description" content="aico serve runs a loopback server and a browser client, and the server owns the run — close the tab and the work carries on. Plan mode, mid-run steering, forking a conversation, and a session log you can resume.">
 <meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="A local web workspace for your AI coding agent — aico">
+<meta name="twitter:title" content="A local web portal for your AI coding agent — aico">
 <meta name="twitter:description" content="aico serve runs a loopback server and a browser client, and the server owns the run — close the tab and the work carries on. Plan mode, mid-run steering, forking a conversation, and a session log you can resume.">
 <meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <!-- seo:end -->
@@ -49,7 +49,7 @@
   <p class="crumb"><a href="./">Home</a> → Workspace</p>
 
   <div class="prose">
-    <h1>The web workspace</h1>
+    <h1>The web portal</h1>
     <p class="lede">
       <code>aico serve</code> starts a loopback HTTP server and opens a browser client
       against it. The important part is which of the two owns the run.
@@ -247,7 +247,12 @@
     <p>
       Sessions are named automatically and pinned by renaming — a name you did not choose
       that silently changes under you is disorienting, so a provisional one is marked as
-      such. Projects group by directory; groups are yours to arrange.
+      such. Projects group by directory; groups are yours to arrange, and a session is filed
+      in one by dragging it onto the group's name. The search box matches project and group
+      names as well as titles, the five most recent conversations sit above the folders, and
+      what you fold stays folded across reloads. Apps, System and Settings are the three
+      destinations at the foot of the column; the session's own tabs — Chat, Changes,
+      Trajectory — appear only while a session is what you are looking at.
     </p>
     <p>
       Transcripts export as Markdown or text, backed by the log, so they include tool calls

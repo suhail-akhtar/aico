@@ -34,7 +34,7 @@
   "codeRepository": "https://github.com/suhail-akhtar/aico",
   "programmingLanguage": "TypeScript",
   "license": "https://opensource.org/licenses/MIT",
-  "description": "An open-source multi-provider AI coding agent for the terminal and a local web workspace. Keeps an append-only session log, verifies web work in a real browser, supervises background work, and runs as an MCP server.",
+  "description": "An open-source multi-provider AI coding agent for the terminal and a local web portal. Keeps an append-only session log, verifies web work in a real browser, supervises background work, and runs as an MCP server.",
   "author": {
     "@type": "Person",
     "name": "Suhail Akhtar"
@@ -80,7 +80,7 @@
       "name": "Does it work in the terminal, or does it need an editor?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Either. aico is a terminal agent; aico serve starts a local web workspace on 127.0.0.1; and the VS Code extension gives it a panel of its own beside Chat, where edits apply as workspace edits you can undo and your selection travels with the question. One engine drives all three, and the panel shares the browser client's state layer and transcript rather than reimplementing them. There is no inline completion — that is a different product."
+        "text": "Either. aico is a terminal agent; aico serve starts a local web portal on 127.0.0.1; and the VS Code extension gives it a panel of its own beside Chat, where edits apply as workspace edits you can undo and your selection travels with the question. One engine drives all three, and the panel shares the browser client's state layer and transcript rather than reimplementing them. There is no inline completion — that is a different product."
       }
     },
     {
@@ -149,7 +149,7 @@
     <span class="eyebrow">MIT · self-hosted · bring your own model</span>
     <h1>The AI coding agent that opens what it builds.</h1>
     <p class="lede">
-      aico works in your terminal or a local web workspace. It keeps an append-only
+      aico works in your terminal or a local web portal. It keeps an append-only
       log of every turn instead of a chat buffer, and it will not call a job done on a
       page that throws when you load it.
     </p>
@@ -348,8 +348,8 @@ What rendered:
     </div>
 
     <figure>
-      <img class="crop" src="assets/portal-miniapps.jpg" alt="The aico web workspace showing the Mini Apps panel, with a session list on the left and one app listed with its local URL." loading="lazy">
-      <figcaption>The web workspace. Sessions and projects on the left, Mini Apps beside them.</figcaption>
+      <img class="crop" src="assets/portal-miniapps.jpg" alt="The aico web portal showing the Mini Apps panel, with a session list on the left and one app listed with its local URL." loading="lazy">
+      <figcaption>The web portal. Sessions and projects on the left, Mini Apps beside them.</figcaption>
     </figure>
 
     <div class="grid grid-4">
@@ -429,7 +429,7 @@ What rendered:
       <div class="a">
         <p>
           Either. <code>aico</code> is a terminal agent; <code>aico serve</code>
-          starts a local web workspace on <code>127.0.0.1</code>; and the
+          starts a local web portal on <code>127.0.0.1</code>; and the
           <a href="compare.html#vscode">VS Code extension</a> gives it a panel of
           its own beside Chat, where edits apply as workspace edits you can undo
           and your selection travels with the question. One engine drives all

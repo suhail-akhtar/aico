@@ -275,6 +275,46 @@ try {
   const SCREENS = [
     { name: 'chat', open: async () => { await page.goto(url, { waitUntil: 'domcontentloaded' }); } },
     {
+      name: 'sidebar',
+      // The left column on its own terms: the Projects header carries two
+      // controls that must be one height (the composer's fault, in another
+      // row), and the list must not push anything past the aside's own edge.
+      open: async () => {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('[data-sidebar-header]', { timeout: 30_000 });
+        const report = await page.evaluate(() => {
+          const header = document.querySelector('[data-sidebar-header]');
+          const aside = document.querySelector('[data-sidebar]');
+          const controls = [...(header?.querySelectorAll('button') ?? [])];
+          const heights = controls.map(b => Math.round(b.getBoundingClientRect().height));
+          const asideBox = aside?.getBoundingClientRect();
+          const spill = aside
+            ? [...aside.querySelectorAll('*')].filter(el => {
+              const box = el.getBoundingClientRect();
+              return box.width > 0 && box.right > (asideBox?.right ?? 0) + 1;
+            }).length
+            : -1;
+          return { heights, spill };
+        });
+        const ragged = Math.max(...report.heights) - Math.min(...report.heights);
+        check(ragged <= 1, `sidebar — the two header controls are the same height (${report.heights.join('/')}px)`);
+        check(report.spill === 0, `sidebar — nothing inside the column reaches past its right edge (${report.spill} offenders)`);
+        return undefined;
+      },
+    },
+    {
+      name: 'apps',
+      // The Apps destination by its deep link — the way the VS Code panel and
+      // the nav both reach it — with the session tabs gone from the header.
+      open: async () => {
+        await page.goto(`${url}&view=apps`, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('h2:has-text("Mini Apps"), h2:has-text("Apps")', { timeout: 30_000 });
+        const tabs = await page.$$('header nav button');
+        check(tabs.length === 0, `apps — the session tabs are not drawn on a destination (${tabs.length} found)`);
+        return undefined;
+      },
+    },
+    {
       name: 'settings',
       // The deep link the VS Code panel's gear uses, so this exercises the
       // route somebody actually arrives on rather than a synthetic click.
@@ -311,6 +351,31 @@ try {
       },
     },
   ];
+
+  /*
+    The drawer, at the phone width only. A remembered desktop sidebar width
+    must not let the drawer exceed the viewport when it is opened on a phone.
+  */
+  {
+    await page.setViewportSize({ width: 700, height: 900 });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[aria-label="Open sidebar"]', { timeout: 30_000 });
+    await page.click('[aria-label="Open sidebar"]');
+    await sleep(600);
+    const drawer = await page.evaluate(() => {
+      const aside = document.querySelector('[data-sidebar]');
+      const box = aside?.getBoundingClientRect();
+      return {
+        right: Math.round(box?.right ?? 0),
+        inner: window.innerWidth,
+        scrolls: document.documentElement.scrollWidth > window.innerWidth + 1,
+      };
+    });
+    check(drawer.right <= drawer.inner, `drawer at 700px — the open drawer fits the viewport (right edge ${drawer.right} of ${drawer.inner})`);
+    check(drawer.scrolls === false, 'drawer at 700px — the page does not scroll sideways with the drawer open');
+    await page.screenshot({ path: path.join(shots, 'drawer-700.png') });
+    await page.keyboard.press('Escape');
+  }
 
   for (const screen of SCREENS) {
     /*

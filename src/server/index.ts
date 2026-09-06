@@ -383,7 +383,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       if (!body.agentId) { send(res, 400, { error: 'agentId required' }); return; }
       const stopped = requestAgentStop(
         body.agentId,
-        body.reason?.trim() || 'stopped from the workspace',
+        body.reason?.trim() || 'stopped from the portal',
       );
       send(res, 200, { stopped });
       return;

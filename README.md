@@ -1,6 +1,6 @@
 # aico — open-source AI coding agent
 
-An **AI coding agent** for the terminal, a local web workspace and a native
+An **AI coding agent** for the terminal, a local web portal and a native
 **VS Code** panel, with a durable session log at its core. Self-hosted and MIT
 licensed: **bring your own API key** for OpenAI, Anthropic, OpenRouter, Google
 Gemini, Moonshot Kimi, Z.AI (GLM) or DeepSeek — or run it entirely offline against a local
@@ -479,7 +479,7 @@ tried twice. Both print their cost ceiling before the first call and stop at it.
 and register — the corpus is a proxy, and only you can judge the task nobody
 wrote. Add your own tasks under `~/.aico/skill-evals/<skill>/*.json`.
 
-The same bench is in the web workspace under **Settings → Skills → Measure**,
+The same bench is in the web portal under **Settings → Skills → Measure**,
 with live per-task scores, each step's verdict, the candidate as a diff and an
 *Adopt it* button; VS Code reaches it through *Measure skills* in the panel's
 `⋯` menu. Several candidates a step can be scored on training with only the
@@ -607,7 +607,7 @@ because the agent decided it should be.
 
 The extension in [`vscode-extension/`](vscode-extension/) gives aico a tab of its
 own in the Secondary Side Bar, beside Chat. It is drawn for the editor and styled
-from your theme — not the web workspace in a frame — but it is not a second
+from your theme — not the web portal in a frame — but it is not a second
 implementation either: the state layer, the reducer and every transcript
 component are the browser client's, imported unchanged.
 

@@ -8,7 +8,17 @@
 
 import assert from 'node:assert/strict';
 import { composeMessages, emptyDraft, applyLogEvent } from './dist-test/reduce.mjs';
-import { groupByAge, groupByProject, recentSessions, relativeAge, promote, merge } from './dist-test/grouping.mjs';
+import {
+  groupByProject, recentSessions, relativeAge, promote, merge, searchTerms, matchesSession,
+  showRecent, splitPinned, sectionLabelFor, APPS_SECTION, RECENT_LIMIT,
+} from './dist-test/grouping.mjs';
+import {
+  DEFAULT_ROUTE, headerTitle, showsSessionTabs, parseView, toggleDestination, withTab,
+} from './dist-test/navigation.mjs';
+import { loadSidebarMemory, saveSidebarMemory, defaultCollapsed, EMPTY_MEMORY } from './dist-test/sidebar-memory.mjs';
+import { flattenRows, rowKey } from './dist-test/sidebar-rows.mjs';
+import { moveFocus } from './dist-test/sidebar-keys.mjs';
+import { dropAction } from './dist-test/sidebar-drop.mjs';
 import {
   PANES, SECRET_ROOTS, allFields, assertNoSecrets, changedPaths,
   patchFor, readPath, searchFields,
@@ -140,81 +150,228 @@ test('nothing live is shown once the turn ends', () => {
 });
 
 // ── session grouping ─────────────────────────────────────────────────
-section('Sessions bucket by calendar day');
+section('Sessions are searched by more than their title');
 
 const AT_9AM = new Date(2026, 7, 17, 9, 0, 0).getTime();
 const at = (ms) => ({ id: `s${ms}`, updatedAt: ms, turns: 1 });
-const labelOf = (ms) =>
-  groupByAge([at(ms)], '', AT_9AM).find(g => g.items.length > 0)?.label;
 
-test('this morning is Today', () => {
-  assert.equal(labelOf(new Date(2026, 7, 17, 8, 0).getTime()), 'Today');
+const PROJECTS = [
+  { path: 'C:\\work\\payments', name: 'Payments API' },
+  { path: 'C:\\work\\site', name: 'Marketing site' },
+];
+const GROUPS = [{ id: 'q3-launch', name: 'Q3 launch' }];
+const CTX = {
+  projects: new Map(PROJECTS.map(p => [p.path, { name: p.name }])),
+  groups: new Map(GROUPS.map(g => [g.id, { name: g.name }])),
+};
+const SESSIONS = [
+  { id: 'abc', title: 'Fix the auth bug', project: 'C:\\work\\payments', updatedAt: AT_9AM - 1000, turns: 1 },
+  { id: 'xyz', title: 'Write the docs', project: 'C:\\work\\site', group: 'q3-launch', updatedAt: AT_9AM - 2000, turns: 1 },
+  { id: 'miniapp-ledger', title: 'Ledger app', project: 'C:\\scratch', updatedAt: AT_9AM - 3000, turns: 1 },
+];
+
+test('a query is words that all have to be present', () => {
+  assert.deepEqual(searchTerms('  Auth   API '), ['auth', 'api']);
+  assert.deepEqual(searchTerms(''), []);
 });
 
-test('11pm last night is Yesterday, not "ten hours ago"', () => {
-  // The boundary is the calendar day, which is how people actually navigate.
-  assert.equal(labelOf(new Date(2026, 7, 16, 23, 0).getTime()), 'Yesterday');
+test('matching sees title, id, project name and path, and group name', () => {
+  const [auth, docs] = SESSIONS;
+  assert.equal(matchesSession(auth, ['auth'], CTX), true, 'title');
+  assert.equal(matchesSession(auth, ['abc'], CTX), true, 'id');
+  assert.equal(matchesSession(auth, ['payments'], CTX), true, 'project name and path');
+  assert.equal(matchesSession(docs, ['q3'], CTX), true, 'group name');
+  assert.equal(matchesSession(docs, ['q3', 'docs'], CTX), true, 'two terms narrow, both present');
+  assert.equal(matchesSession(docs, ['q3', 'auth'], CTX), false, 'two terms narrow, one missing');
+  assert.equal(matchesSession(auth, [], CTX), true, 'no terms matches everything');
 });
 
-test('one minute after midnight is Today', () => {
-  assert.equal(labelOf(new Date(2026, 7, 17, 0, 1).getTime()), 'Today');
+test('filtering through groupByProject keeps a project found by its own name, and drops the rest', () => {
+  const sections = groupByProject(SESSIONS, PROJECTS, 'marketing', GROUPS);
+  // The docs session lives in the marketing project but is filed in a group, so
+  // it shows under the group; the project itself is kept, empty, by its name.
+  assert.deepEqual(sections.map(s => s.label).sort(), ['Marketing site', 'Q3 launch']);
+  assert.equal(sections.find(s => s.label === 'Marketing site').items.length, 0, 'the empty project whose name matches survives');
+  assert.deepEqual(sections.find(s => s.label === 'Q3 launch').items.map(s => s.id), ['xyz']);
+  const none = groupByProject(SESSIONS, PROJECTS, 'zzz', GROUPS);
+  assert.equal(none.length, 0, 'nothing matching means no sections, not seventy empty ones');
 });
 
-test('one minute before midnight is Yesterday', () => {
-  assert.equal(labelOf(new Date(2026, 7, 16, 23, 59).getTime()), 'Yesterday');
+test('app conversations get their own section rather than the scratch folder', () => {
+  const sections = groupByProject(SESSIONS, PROJECTS, '', GROUPS);
+  const apps = sections.find(s => s.kind === 'apps');
+  assert.ok(apps, 'an apps section exists');
+  assert.equal(apps.path, APPS_SECTION);
+  assert.deepEqual(apps.items.map(s => s.id), ['miniapp-ledger']);
+  assert.ok(!sections.some(s => s.label === 'scratch'), 'and no ad-hoc "scratch" folder appears for it');
+  // A deliberate group placement still wins over the apps section.
+  const grouped = groupByProject([{ ...SESSIONS[2], group: 'q3-launch' }], PROJECTS, '', GROUPS);
+  assert.equal(grouped.find(s => s.kind === 'group').items.length, 1);
+  assert.equal(grouped.some(s => s.kind === 'apps'), false);
 });
 
-test('four days ago is in the week bucket', () => {
-  assert.equal(labelOf(new Date(2026, 7, 13, 12, 0).getTime()), 'Previous 7 days');
+test('a group wins over a folder, and a session is never shown twice', () => {
+  const sections = groupByProject(SESSIONS, PROJECTS, '', GROUPS);
+  const all = sections.flatMap(s => s.items.map(i => i.id));
+  assert.equal(new Set(all).size, all.length);
+  assert.equal(sections.find(s => s.kind === 'group').items[0].id, 'xyz');
+  assert.equal(sections.find(s => s.label === 'Marketing site').items.length, 0);
 });
 
-test('a fortnight ago is in the month bucket', () => {
-  assert.equal(labelOf(new Date(2026, 7, 3, 12, 0).getTime()), 'Previous 30 days');
+test('Recent is short, fixed, and steps aside while searching or for short lists', () => {
+  assert.equal(RECENT_LIMIT, 5);
+  const many = Array.from({ length: 12 }, (_, i) => at(AT_9AM - i * 1000));
+  assert.equal(recentSessions(many).items.length, 5);
+  assert.equal(recentSessions(many).total, 12);
+  assert.equal(showRecent('', 12), true);
+  assert.equal(showRecent('auth', 12), false, 'hidden while filtering');
+  assert.equal(showRecent('', 6), false, 'hidden when the folders already fit');
 });
 
-test('last year is Older', () => {
-  assert.equal(labelOf(new Date(2025, 7, 17, 12, 0).getTime()), 'Older');
+test('pinned sections split out, and a Recent row can say where it lives', () => {
+  const sections = groupByProject(SESSIONS, [{ ...PROJECTS[0], pinned: true }, PROJECTS[1]], '', GROUPS);
+  const { pinned, rest } = splitPinned(sections);
+  assert.deepEqual(pinned.map(s => s.label), ['Payments API']);
+  assert.equal(rest.some(s => s.pinned), false);
+  assert.equal(sectionLabelFor(SESSIONS[0], PROJECTS, GROUPS), 'Payments API');
+  assert.equal(sectionLabelFor(SESSIONS[1], PROJECTS, GROUPS), 'Q3 launch', 'the group, when in one');
+  assert.equal(sectionLabelFor(SESSIONS[2], PROJECTS, GROUPS), 'App');
 });
 
-test('every session lands in exactly one bucket', () => {
-  const sessions = [
-    at(AT_9AM - 1000), at(AT_9AM - 86_400_000), at(AT_9AM - 3 * 86_400_000),
-    at(AT_9AM - 20 * 86_400_000), at(AT_9AM - 400 * 86_400_000),
+section('Where the portal is: destinations and tabs');
+
+test('the header names the place, or the conversation', () => {
+  assert.equal(headerTitle(DEFAULT_ROUTE, undefined), 'New session');
+  assert.equal(headerTitle(DEFAULT_ROUTE, 'Fix auth'), 'Fix auth');
+  assert.equal(headerTitle({ destination: 'apps', tab: 'chat' }, 'Fix auth'), 'Apps');
+  assert.equal(headerTitle({ destination: 'system', tab: 'trajectory' }, 'x'), 'System');
+});
+
+test('session tabs only exist on the sessions destination', () => {
+  assert.equal(showsSessionTabs(DEFAULT_ROUTE), true);
+  assert.equal(showsSessionTabs({ destination: 'apps', tab: 'chat' }), false);
+});
+
+test('?view= opens a destination and ignores anything else', () => {
+  assert.equal(parseView('?view=apps'), 'apps');
+  assert.equal(parseView('?token=abc&view=system'), 'system');
+  assert.equal(parseView('?view=miniapps'), null, 'the old value was never linked and is not guessed at');
+  assert.equal(parseView('?view=sessions'), null, 'the default is not a link');
+  assert.equal(parseView(''), null);
+});
+
+test('leaving for Apps keeps the tab for the way back', () => {
+  const onChanges = withTab(DEFAULT_ROUTE, 'changes');
+  const away = toggleDestination(onChanges, 'apps');
+  assert.deepEqual(away, { destination: 'apps', tab: 'changes' });
+  assert.deepEqual(toggleDestination(away, 'apps'), onChanges, 'clicking the nav again returns');
+  assert.deepEqual(withTab(away, 'chat'), { destination: 'sessions', tab: 'chat' }, 'a tab always means the sessions');
+});
+
+section('What the sidebar remembers');
+
+const fakeStore = () => { const m = new Map(); return {
+  getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: k => m.delete(k),
+}; };
+
+test('folds round-trip and a malformed record is discarded whole', () => {
+  const store = fakeStore();
+  saveSidebarMemory({ collapsed: ['a', 'b'], recentFolded: true, showArchived: false, touched: true }, store);
+  assert.deepEqual(loadSidebarMemory(store), { collapsed: ['a', 'b'], recentFolded: true, showArchived: false, touched: true });
+  store.setItem('aico.sidebar', JSON.stringify({ collapsed: 'nope', recentFolded: true }));
+  assert.deepEqual(loadSidebarMemory(store), EMPTY_MEMORY);
+  store.setItem('aico.sidebar', '{not json');
+  assert.deepEqual(loadSidebarMemory(store), EMPTY_MEMORY);
+  assert.deepEqual(loadSidebarMemory(null), EMPTY_MEMORY, 'no storage at all is fine');
+});
+
+test('a first paint opens the three most active sections; a touched memory wins', () => {
+  const sections = [
+    { path: 'p1', items: [{ updatedAt: 10 }] }, { path: 'p2', items: [{ updatedAt: 40 }] },
+    { path: 'p3', items: [{ updatedAt: 30 }] }, { path: 'p4', items: [{ updatedAt: 20 }] },
+    { path: 'empty', items: [] },
   ];
-  const groups = groupByAge(sessions, '', AT_9AM);
-  assert.equal(groups.reduce((n, g) => n + g.items.length, 0), sessions.length);
-  assert.equal(new Set(groups.flatMap(g => g.items.map(i => i.id))).size, sessions.length);
+  const folded = defaultCollapsed(sections, EMPTY_MEMORY);
+  assert.deepEqual([...folded].sort(), ['empty', 'p1'], 'the three most active stay open; the rest fold, empty ones included');
+  const remembered = defaultCollapsed(sections, { ...EMPTY_MEMORY, touched: true, collapsed: ['p2'] });
+  assert.deepEqual([...remembered], ['p2']);
+  assert.deepEqual([...defaultCollapsed(sections.slice(0, 2), EMPTY_MEMORY)], [], 'a short list is left entirely open');
 });
 
-test('groups are ordered newest first whatever order they arrive in', () => {
-  // Sorted here rather than trusted from the caller. Every path was *supposed*
-  // to hand over a recency-ordered list, right up until one of them did not.
-  const groups = groupByAge(
-    [{ id: 'oldest', updatedAt: AT_9AM - 3000, turns: 1 },
-     { id: 'newest', updatedAt: AT_9AM - 1000, turns: 1 },
-     { id: 'middle', updatedAt: AT_9AM - 2000, turns: 1 }],
-    '', AT_9AM);
-  assert.deepEqual(groups[0].items.map(i => i.id), ['newest', 'middle', 'oldest']);
+section('The list as rows');
+
+const SECTIONS = [
+  { label: 'A', path: 'a', kind: 'project', items: [SESSIONS[0]] },
+  { label: 'B', path: 'b', kind: 'project', items: [] },
+  { label: 'G', path: 'g', kind: 'group', items: [SESSIONS[1]] },
+];
+
+test('a folded section is only its header; an empty one says so; Recent rows carry their own keys', () => {
+  const rows = flattenRows({
+    recent: { items: [SESSIONS[0]], total: 3 }, showRecent: true, recentFolded: false,
+    sections: SECTIONS, collapsed: new Set(['g']), filtering: false,
+  });
+  assert.deepEqual(rows.map(r => r.kind), ['recent-header', 'session', 'section-header', 'session', 'section-header', 'empty', 'section-header']);
+  const keys = rows.map(rowKey);
+  assert.equal(new Set(keys).size, keys.length, 'keys are unique even with one session shown twice');
+  assert.ok(keys.includes('recent:abc') && keys.includes('a:abc'));
 });
 
-test('filtering does not disturb the ordering', () => {
-  const groups = groupByAge(
-    [{ id: 'b', title: 'keep me', updatedAt: AT_9AM - 3000, turns: 1 },
-     { id: 'a', title: 'keep me too', updatedAt: AT_9AM - 1000, turns: 1 }],
-    'keep', AT_9AM);
-  assert.deepEqual(groups[0].items.map(i => i.id), ['a', 'b']);
+test('filtering ignores folds and hides Recent', () => {
+  const rows = flattenRows({
+    recent: { items: [SESSIONS[0]], total: 1 }, showRecent: false, recentFolded: false,
+    sections: SECTIONS, collapsed: new Set(['a', 'g']), filtering: true,
+  });
+  assert.equal(rows[0].kind, 'section-header');
+  assert.equal(rows.filter(r => r.kind === 'session').length, 2, 'both folded sections are open while searching');
 });
 
-test('filtering matches title and id, case-insensitively', () => {
-  const sessions = [
-    { id: 'abc', title: 'Fix the auth bug', updatedAt: AT_9AM, turns: 1 },
-    { id: 'xyz', title: 'Write the docs', updatedAt: AT_9AM, turns: 1 },
-  ];
-  const byTitle = groupByAge(sessions, 'AUTH', AT_9AM).flatMap(g => g.items);
-  assert.deepEqual(byTitle.map(s => s.id), ['abc']);
-  const byId = groupByAge(sessions, 'xy', AT_9AM).flatMap(g => g.items);
-  assert.deepEqual(byId.map(s => s.id), ['xyz']);
-  assert.equal(groupByAge(sessions, 'nothing', AT_9AM).flatMap(g => g.items).length, 0);
+test('a thousand sessions flatten in well under a frame', () => {
+  const big = Array.from({ length: 1000 }, (_, i) => ({ id: 'x' + i, updatedAt: i, turns: 1, project: 'p' + (i % 40) }));
+  const sections = groupByProject(big, Array.from({ length: 40 }, (_, i) => ({ path: 'p' + i, name: 'P' + i })), '', []);
+  const started = performance.now();
+  const rows = flattenRows({ recent: { items: [], total: 0 }, showRecent: false, recentFolded: false, sections, collapsed: new Set(), filtering: false });
+  const ms = performance.now() - started;
+  assert.equal(rows.filter(r => r.kind === 'session').length, 1000);
+  assert.ok(ms < 20, `flattened in ${ms.toFixed(1)}ms`);
+});
+
+section('Keyboard moves through the tree');
+
+const ROWS = flattenRows({
+  recent: { items: [], total: 0 }, showRecent: false, recentFolded: false,
+  sections: SECTIONS, collapsed: new Set(['g']), filtering: false,
+});
+// ROWS: head a, session abc, head b, empty b, head g(folded)
+
+test('Down and Up skip the empty-state line; Home and End go to the ends', () => {
+  assert.equal(moveFocus(ROWS, 0, 'ArrowDown').index, 1);
+  assert.equal(moveFocus(ROWS, 2, 'ArrowDown').index, 4, 'the empty line is not a stop');
+  assert.equal(moveFocus(ROWS, 4, 'ArrowUp').index, 2);
+  assert.equal(moveFocus(ROWS, 3, 'Home').index, 0);
+  assert.equal(moveFocus(ROWS, 0, 'End').index, 4);
+  assert.equal(moveFocus(ROWS, 4, 'ArrowDown').index, 4, 'the last row stays put');
+});
+
+test('Right opens a folded header, Left folds an open one or climbs to it, Enter acts', () => {
+  assert.deepEqual(moveFocus(ROWS, 4, 'ArrowRight').action, { type: 'toggle', path: 'g' });
+  assert.deepEqual(moveFocus(ROWS, 0, 'ArrowLeft').action, { type: 'toggle', path: 'a' });
+  assert.equal(moveFocus(ROWS, 1, 'ArrowLeft').index, 0, 'a session climbs to its header');
+  assert.deepEqual(moveFocus(ROWS, 1, 'Enter').action, { type: 'open', sessionId: 'abc' });
+  assert.deepEqual(moveFocus(ROWS, 0, ' ').action, { type: 'toggle', path: 'a' });
+  assert.deepEqual(moveFocus([], 0, 'ArrowDown'), { index: 0, action: { type: 'none' } });
+});
+
+section('Dropping a session on a header');
+
+test('onto a group files it; onto its own folder while grouped unfiles it; anything else is nothing', () => {
+  const group = SECTIONS[2];
+  assert.deepEqual(dropAction(group, SESSIONS[0]), { type: 'move', group: 'g' });
+  assert.equal(dropAction(group, { ...SESSIONS[0], group: 'g' }), null, 'already there');
+  const ownFolder = { label: 'Site', path: 'C:\\work\\site', kind: 'project', items: [] };
+  assert.deepEqual(dropAction(ownFolder, SESSIONS[1]), { type: 'unfile' });
+  assert.equal(dropAction(ownFolder, SESSIONS[0]), null, 'a different folder cannot take a session');
+  assert.equal(dropAction({ label: 'Apps', path: '__apps__', kind: 'apps', items: [] }, SESSIONS[0]), null);
 });
 
 section('Relative ages read like a person wrote them');

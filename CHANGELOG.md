@@ -3,6 +3,35 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Changed
+
+- **The portal's left column, rebuilt.** The list is headed *Projects* — it is a
+  list of project directories, and calling them workspaces while the engine,
+  the System view and the docs each used that word for something else made
+  one word mean three things. The scratch directory sessions run in when no
+  project is chosen is listed as *Scratch*; the engine's scratch workspace keeps
+  its name in code and in Settings as "Scratch workspace". Four unlabelled
+  header icons became a **+** menu (New session, Open project…, New group…)
+  and a labelled *Archived* toggle. Search is always visible and matches
+  titles, ids, project names and paths, and group names, with AND across words.
+  *Recent* is five rows, fixed, hidden while searching and for short lists,
+  each row saying which project or group it lives in. Folds are remembered
+  across reloads; a first visit opens the three most active sections. The list
+  is a keyboard tree (arrows, Left/Right fold, Enter opens, `/` to search),
+  windowed past two hundred rows so five hundred sessions do not mount five
+  hundred rows, and a session can be dragged onto a group to file it. Making a
+  group no longer starts a session in it. Conversations bound to an App have
+  their own section instead of appearing under the scratch folder.
+- **Destinations and tabs are two axes.** Apps, System and Settings are the
+  destinations at the foot of the column, each with its own glyph (Settings
+  lights while the sheet is open); Chat, Changes and Trajectory are tabs on the
+  open session and no longer appear on the Apps or System screens, where
+  clicking one used to leave the screen silently. `?view=apps` and
+  `?view=system` open a destination by link, the way `?settings=` opens the
+  sheet. The mobile drawer is clamped to the phone's width and closes on Escape.
+
 ## 0.11.0 — 2026-09-03
 
 ### Added

@@ -10,7 +10,10 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Sidebar, type View } from './components/Sidebar';
+import { Sidebar } from './components/Sidebar';
+import {
+  DEFAULT_ROUTE, headerTitle, parseView, showsSessionTabs, withTab, type Route,
+} from './navigation';
 import { MiniAppsPane } from './components/MiniAppsPane';
 import { MiniAppScope } from './components/MiniAppScope';
 import { ChatPane } from './components/ChatPane';
@@ -32,7 +35,23 @@ import { getToken, setToken, setTokenRejectedHandler } from './api';
 import { useStore } from './store';
 
 export function App(): React.ReactElement {
-  const [view, setView] = useState<View>('chat');
+  /*
+    Where the portal is, in two axes: a destination (sessions, Apps, System) and
+    the tab on the open session. `?view=apps` opens a destination the way
+    `?settings=` opens the sheet, read once and stripped.
+  */
+  const [route, setRoute] = useState<Route>(() => {
+    try {
+      const url = new URL(window.location.href);
+      const destination = parseView(url.search);
+      if (!destination) return DEFAULT_ROUTE;
+      url.searchParams.delete('view');
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      return { ...DEFAULT_ROUTE, destination };
+    } catch { return DEFAULT_ROUTE; }
+  });
+  const onSessions = route.destination === 'sessions';
+  const view = onSessions ? route.tab : route.destination;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /*
     Openable by link, so another surface can send someone straight here.
@@ -115,11 +134,12 @@ export function App(): React.ReactElement {
   return (
     <div className="flex h-full bg-aico-bg">
       <Sidebar
-        view={view}
-        onView={setView}
+        route={route}
+        onRoute={setRoute}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onSettings={() => setSettingsOpen(true)}
+        settingsOpen={settingsOpen}
         onAddProject={() => setPickerOpen(true)}
       />
 
@@ -130,27 +150,29 @@ export function App(): React.ReactElement {
             className="text-aico-secondary hover:text-aico-primary md:hidden"
             aria-label="Open sidebar"
           >
-            <Icon name="sliders" size={19} />
+            <Icon name="menu" size={19} />
           </button>
 
           <span className="min-w-0 max-w-[40%] truncate text-[14px] font-medium text-aico-primary">
-            {view === 'system' ? 'System'
-              : view === 'miniapps' ? 'Mini Apps'
-              : (title || 'New session')}
+            {headerTitle(route, title)}
           </span>
 
           {/* Three readings of one session — what was said, what it did to the
               tree, and what happened in what order — so they are tabs on it
-              rather than separate destinations in the sidebar. */}
-          <nav className="flex items-center gap-1">
-            <Tab active={view === 'chat'} onClick={() => setView('chat')}>Chat</Tab>
-            <Tab active={view === 'changes'} onClick={() => setView('changes')}>Changes</Tab>
-            <Tab active={view === 'trajectory'} onClick={() => setView('trajectory')}>Trajectory</Tab>
-          </nav>
+              rather than separate destinations in the sidebar. Shown only when a
+              session is what is on screen: on Apps or System they used to sit
+              there and, when clicked, silently leave the destination. */}
+          {showsSessionTabs(route) && (
+            <nav className="flex items-center gap-1">
+              <Tab active={route.tab === 'chat'} onClick={() => setRoute(withTab(route, 'chat'))}>Chat</Tab>
+              <Tab active={route.tab === 'changes'} onClick={() => setRoute(withTab(route, 'changes'))}>Changes</Tab>
+              <Tab active={route.tab === 'trajectory'} onClick={() => setRoute(withTab(route, 'trajectory'))}>Trajectory</Tab>
+            </nav>
+          )}
 
           <div className="flex-1" />
 
-          <SessionMenu />
+          {showsSessionTabs(route) && <SessionMenu />}
 
           <span
             className="flex items-center gap-1.5 text-[12px] text-aico-muted"
@@ -167,7 +189,7 @@ export function App(): React.ReactElement {
           </span>
         </header>
 
-        {view === 'chat' && (
+        {onSessions && view === 'chat' && (
           <>
             {/* Above the transcript: the scope has to be readable before the
                 first message is, not discovered at the bottom of the page. */}
@@ -186,10 +208,10 @@ export function App(): React.ReactElement {
             <Composer />
           </>
         )}
-        {view === 'changes' && <ChangesPane />}
-        {view === 'trajectory' && <Trajectory />}
+        {onSessions && view === 'changes' && <ChangesPane />}
+        {onSessions && view === 'trajectory' && <Trajectory />}
         {view === 'system' && <SystemPanel />}
-        {view === 'miniapps' && <MiniAppsPane onOpenChat={() => setView('chat')} />}
+        {view === 'apps' && <MiniAppsPane onOpenChat={() => setRoute(withTab(route, 'chat'))} />}
       </main>
 
       {settingsOpen && (

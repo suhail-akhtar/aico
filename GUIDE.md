@@ -26,7 +26,7 @@ Two things worth knowing before you start.
 
 **It works in the directory you launch it from.** Not the directory it was
 installed in. Everything it reads and writes is scoped there, and so is the
-per-project workspace it keeps its own scratch files in — reports, logs, spilled
+per-project scratch workspace it keeps its own files in — reports, logs, spilled
 tool output. Your repository stays yours.
 
 **The model name decides the provider.** `aico -m glm-4.6` goes to Z.AI even if
@@ -295,11 +295,27 @@ in about a second and a half.
 ## Projects, sessions and groups
 
 A **project** is a directory. Sessions filed under it are the work you did there.
-Add one with the folder icon in the sidebar, give it a colour and a description,
-and attach **custom instructions** that apply to every session in it.
+Open one with the **+** menu at the top of the sidebar (*Open project…*), give it
+a colour and a description, and attach **custom instructions** that apply to
+every session in it. The list is headed *Projects*; the row called *Scratch* is
+where sessions run when no project is chosen.
 
 A **group** is a label you make up — for work that spans directories, or for
-anything you want kept together.
+anything you want kept together. Make one from the same **+** menu; it starts
+empty. Drag a session onto a group's name to file it there, or use the row's
+**⋯ → Move to group**; drop it back on its own project to unfile it. Filing never
+moves the session's directory.
+
+**Finding things.** The search box is always there and matches titles, ids,
+project names and paths, and group names — "payments auth" finds the sessions
+about both. **Recent** shows the last five conversations across every project
+and steps aside while you search. Which sections you fold is remembered across
+reloads; a first visit opens the three most active. The list is a tree for the
+keyboard: arrows move, Left and Right fold and unfold, Enter opens, and `/`
+jumps to search.
+
+**App conversations** — sessions bound to an App — sit in their own section
+rather than under the scratch folder, with a shortcut to the Apps screen.
 
 A **session goal** is a standing objective for one conversation. It goes into the
 prompt, so the agent keeps working toward it across turns instead of losing the
@@ -315,7 +331,7 @@ because those are different outcomes and one of them means nothing got built.
 ## In VS Code
 
 aico is a tab of its own in the Secondary Side Bar, beside Chat — a native
-panel, not the web workspace in a frame. Install the `.vsix` attached to a
+panel, not the web portal in a frame. Install the `.vsix` attached to a
 release, reload the window, and open a folder: a session's log is filed under
 one and its file tools are confined to it.
 

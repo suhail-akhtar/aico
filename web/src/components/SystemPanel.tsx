@@ -53,7 +53,7 @@ export function SystemPanel(): React.ReactElement {
 
         {workspace && (
           <section>
-            <h2 className="mb-2 text-sm font-medium text-aico-secondary">Workspace</h2>
+            <h2 className="mb-2 text-sm font-medium text-aico-secondary">Scratch workspace</h2>
             <Row>
               <div className="text-xs text-aico-secondary">
                 Where AICO writes artifacts, reports and scratch files that are not part of
