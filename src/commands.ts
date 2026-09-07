@@ -36,6 +36,7 @@ import { mcpRegistry } from './mcp/registry.js';
 import { buildAgentChatPrompt } from './agents/prompts.js';
 import { executeAppManage } from './tools/manage-miniapps.js';
 import { renderCatalogue } from './apps/templates.js';
+import { recommendedAgentModels, unsetCheapRoles } from './agents/economy.js';
 import { createAgentSpec, deleteProjectAgentSpec, formatAgentList, getAgentSpec, listAgentSpecs, updateProjectAgentSpec } from './agents/registry.js';
 import { getAgentRegistry } from './tools/task.js';
 import {
@@ -1146,6 +1147,19 @@ export async function handleSlashCommand(
         ? `✓ .aico/settings.json found`
         : `  .aico/settings.json not found (optional)`,
       );
+
+      // 4b. Sub-agent models: a read-only fan-out on the frontier model is the
+      // largest avoidable spend in a session that delegates. A recommendation,
+      // never a silent default.
+      {
+        const unset = unsetCheapRoles(ctx.settings);
+        const rec = recommendedAgentModels(ctx.currentModel, ctx.settings);
+        if (unset.length === 0) checks.push('✓ Sub-agent models set (agentModels)');
+        else if (rec.cheap) {
+          checks.push(`  Sub-agents ${unset.join(', ')} run on ${ctx.currentModel}; ${rec.cheap} would do — `
+            + `Settings → Models → Apply, or set agentModels in settings.json`);
+        }
+      }
 
       // 5. AICO.md / CLAUDE.md
       const aicoMd  = path.join(process.cwd(), 'AICO.md');

@@ -175,6 +175,67 @@ export async function handleSystemRoute(
     // (`{ cwd, name, command }`) at `user` rank — a person's word — or forgets
     // one (`{ cwd, name, forget: true }`). The model never reaches this route:
     // it corrects a command by running the right one, which the observer records.
+    // ── learning ─────────────────────────────────────────────────────
+    //
+    // Proposals the log produced, waiting for a person. `list` reads a
+    // project's (and the global) open ones; `adopt` writes what a proposal
+    // says — with the person's edits — and marks it; `dismiss` marks it so the
+    // same lesson is not proposed again. The model never reaches these.
+    case 'learning/list': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { listProposals } = await import('../learning/proposals.js');
+      const { default: path } = await import('path');
+      const cwd = path.resolve(query.get('cwd') || process.cwd());
+      const status = (query.get('status') ?? 'open') as 'open' | 'adopted' | 'dismissed' | 'all';
+      const wanted = status === 'all' ? undefined : status;
+      return {
+        status: 200,
+        body: {
+          cwd,
+          project: listProposals(cwd, wanted),
+          global: listProposals('global', wanted),
+        },
+      };
+    }
+    case 'learning/adopt': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { adoptProposal } = await import('../learning/proposals.js');
+      const { default: path } = await import('path');
+      const cwd = path.resolve(typeof body.cwd === 'string' && body.cwd ? body.cwd : process.cwd());
+      const id = String(body.id ?? '');
+      if (!id) return { status: 400, body: { error: 'id required' } };
+      const edits = {
+        ...(typeof body.trigger === 'string' ? { trigger: body.trigger } : {}),
+        ...(typeof body.content === 'string' ? { content: body.content } : {}),
+        ...(body.scope === 'global' || body.scope === 'project' ? { scope: body.scope as 'global' | 'project' } : {}),
+      };
+      const result = await adoptProposal(cwd, id, edits);
+      return result.ok ? { status: 200, body: result } : { status: 400, body: { error: result.error } };
+    }
+    case 'learning/dismiss': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { setProposalStatus, proposalsFile } = await import('../learning/proposals.js');
+      const { default: path } = await import('path');
+      const { default: fs } = await import('fs');
+      const cwd = path.resolve(typeof body.cwd === 'string' && body.cwd ? body.cwd : process.cwd());
+      const id = String(body.id ?? '');
+      if (!id) return { status: 400, body: { error: 'id required' } };
+      // A global proposal lives in the global file; try the project first.
+      const inProject = fs.existsSync(proposalsFile(cwd)) && setProposalStatus(cwd, id, 'dismissed');
+      const found = inProject || setProposalStatus('global', id, 'dismissed');
+      return found ? { status: 200, body: { ok: true, id } } : { status: 404, body: { error: `no proposal "${id}"` } };
+    }
+
+    // ── sub-agent economy ────────────────────────────────────────────
+    case 'agents/recommendation': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { recommendedAgentModels, CHEAP_ROLES } = await import('../agents/economy.js');
+      const { loadSettings } = await import('../settings.js');
+      const settings = await loadSettings();
+      const model = query.get('model') || settings.model || '';
+      return { status: 200, body: { ...recommendedAgentModels(model, settings), roles: CHEAP_ROLES } };
+    }
+
     case 'project/profile': {
       const { loadProfile, forgetCommand, saveProfile, COMMAND_NAMES, checksFor } = await import('../project/profile.js');
       const { default: path } = await import('path');

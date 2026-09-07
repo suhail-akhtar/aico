@@ -249,6 +249,14 @@ export function AppsPane({ onOpenChat }: Props): React.ReactElement {
                     }
                   }}
                   onOpenSession={() => openSession(app.slug)}
+                  onDuplicate={async () => {
+                    try {
+                      await api.duplicateApp(app.slug);
+                      void refresh();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err));
+                    }
+                  }}
                   onDelete={() => setConfirming(app)}
                 />
               ))}
@@ -351,7 +359,7 @@ export function KindBadge({ kind }: { kind: MiniAppSummary['kind'] }): React.Rea
 }
 
 function AppCard(
-  { app, host, process, deploy, onRun, onDeploy, onOpenSession, onDelete }: {
+  { app, host, process, deploy, onRun, onDeploy, onOpenSession, onDuplicate, onDelete }: {
     app: MiniAppSummary;
     host: string | null;
     process?: MiniAppProcess;
@@ -360,6 +368,7 @@ function AppCard(
     onRun: (action: 'start' | 'stop') => void;
     onDeploy: (target?: string) => void;
     onOpenSession: () => void;
+    onDuplicate: () => void;
     onDelete: () => void;
   },
 ): React.ReactElement {
@@ -489,6 +498,15 @@ function AppCard(
                      transition-colors hover:bg-aico-hover hover:text-aico-primary"
         >
           Work on it
+        </button>
+        <button
+          onClick={onDuplicate}
+          title="A copy under a new name: the files and profiles, not the data or the install"
+          className="rounded-lg px-2.5 py-1.5 text-[12px] text-aico-secondary
+                     transition-colors hover:bg-aico-hover hover:text-aico-primary"
+          data-duplicate
+        >
+          Duplicate
         </button>
         {targets.length > 0 && app.built && (
           /*

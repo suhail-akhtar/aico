@@ -24,6 +24,7 @@ import type { MemoryEntry } from './memory/types.js';
 import { PromptDocument } from './prompt/index.js';
 import { currentCwd } from './run-context.js';
 import { catalogLines } from '../shared/widgets/catalog.js';
+import { DECISIONS_BULLET } from './project/decisions.js';
 
 const execAsync = promisify(exec);
 
@@ -106,6 +107,8 @@ function memoryLabel(entry: MemoryEntry, cwd: string): { id: string; title: stri
   switch (entry.type) {
     case 'user':
       return { id: 'user_memory', title: 'User memory (~/.aico/AICO.md)' };
+    case 'user-model':
+      return { id: 'user_model', title: 'About the user (~/.aico/USER.md)' };
     case 'parent':
       return {
         id: 'parent_memory',
@@ -534,8 +537,20 @@ Four rules the renderer cannot enforce for you:
     // a two-thousand-line AICO.md restated forty times a turn is the reprise
     // costing more than the instructions it protects.
     const reprise = entry.content.length <= MEMORY_REPRISE_MAX_CHARS;
+    // Lines about the user sit just before the memory files and are never
+    // reprised: they are context, not rules that change what happens next.
+    if (entry.type === 'user-model') {
+      doc.append(id, entry.content, { title, order: 849, reprise: false });
+      return;
+    }
     doc.append(id, entry.content, { title, order: 850 + index, reprise });
   });
+
+  // The one bullet that makes `.aico/decisions.md` get written (~40 tokens).
+  // Its own small section, not reprised: `behaviour` is kept to a scannable
+  // dozen, and this is a habit to keep rather than a rule that changes the
+  // next action.
+  doc.add({ id: 'decisions', order: 26, body: DECISIONS_BULLET });
 
   return doc;
 }

@@ -95,6 +95,7 @@ function formatSections(sections: MemoryEntry[], cwd: string): string {
     let label: string;
     switch (s.type) {
       case 'user':    label = `## User Memory (~/.aico/AICO.md)`; break;
+      case 'user-model': label = `## About the user (~/.aico/USER.md)`; break;
       case 'parent': {
         const rel = path.relative(os.homedir(), s.path);
         label = `## Parent Directory Memory (${rel})`;
@@ -116,7 +117,7 @@ function formatSections(sections: MemoryEntry[], cwd: string): string {
 export async function loadMemory(opts: MemoryReadOptions = {}): Promise<MemoryReadResult> {
   const cwd = currentCwd();
   const watchFiles = true; // always watch when loading
-  const allowedTypes = new Set<MemoryType>(opts.types ?? ['user', 'parent', 'rules', 'project', 'local']);
+  const allowedTypes = new Set<MemoryType>(opts.types ?? ['user', 'user-model', 'parent', 'rules', 'project', 'local']);
 
   const sections: MemoryEntry[] = [];
 
@@ -128,6 +129,12 @@ export async function loadMemory(opts: MemoryReadOptions = {}): Promise<MemoryRe
       await loadEntry('user', homeAicoMd, opts, watchFiles) ??
       await loadEntry('user', homeLegacyMd, opts, watchFiles);
     if (userEntry) sections.push(userEntry);
+  }
+  // Lines about the user, kept by adoption. Capped at write; capped again at
+  // read so a hand edit cannot grow the prefix past its budget.
+  if (allowedTypes.has('user-model')) {
+    const entry = await loadEntry('user-model', path.join(aicoHome(), 'USER.md'), { ...opts, maxSizePerType: 1_600 }, watchFiles);
+    if (entry) sections.push(entry);
   }
 
   // 2. Parent directories

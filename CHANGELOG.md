@@ -3,6 +3,50 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.14.0 — 2026-09-07
+
+### Added
+
+- **The system proposes lessons from evidence; you keep them in a click.** After
+  every turn, pure extractors read the session log — no model call — for the
+  signals a reflection step would look for: a 👎 with a note becomes a
+  knowledge entry in your words; a message you sent mid-turn to steer becomes
+  one marked "needs an edit"; a checks gate that fired and a RunChecks that
+  later passed becomes a lesson keyed on the check and the error; a browser
+  check that failed and then passed becomes one keyed on the problem; a tool
+  error that repeated becomes one that says what to do instead, or — for
+  "pnpm is not recognized" — a project fact to use npm. Proposals are
+  deduplicated by word overlap against each other and against existing
+  knowledge, kept per project under `~/.aico/learning/`, capped at 25 open,
+  and dropped after thirty days unadopted. Settings → Memory gains a
+  **Suggested** section: kind badge, editable trigger and content, the
+  evidence, Keep and Dismiss. Keep writes knowledge, a `user`-rank profile
+  fact, or a line about you; "Remember this" on a rated message also marks the
+  matching proposal adopted. The turn-end event carries the count.
+- **A model of the user, bounded.** `~/.aico/USER.md` holds at most twelve
+  bullets and 1,200 characters — stable preferences with evidence, never
+  inferences about the person — written only by adoption and capped again at
+  render, as a memory section of its own in the cached prefix (never
+  reprised). Once per server start, what repeats across projects becomes a
+  global proposal: a stack recorded in two profiles, a correction kept in two
+  projects.
+- **Decisions survive compaction.** A forty-token prefix bullet asks the agent
+  to append one line to `.aico/decisions.md` when it settles a design choice;
+  every template seeds the file and a bare page app gets one on create. When a
+  session compacts, the dropped turns are written in full to the session's
+  `reports/compaction-<seq>.md`, and the summary begins by naming the decisions
+  file and that report, so a later turn knows where the exact error message
+  and the reasons went.
+- **Sub-agent economy.** The cheap model per provider family lives in one
+  shared table, used by session naming and by a new recommendation: Settings →
+  Models shows "Recommended for sub-agents on *model*" with an Apply button
+  that sets `agentModels` for the read-only roles (explore, plan, review,
+  verification, security audit, devsecops) without touching roles you set
+  yourself; `/doctor` says the same when nothing is set. A recommendation,
+  never a silent default.
+- **Duplicate** on an app's card: a copy under a new name with the same kind,
+  template and profiles, without the install, the build output or the data.
+
 ## 0.13.0 — 2026-09-07
 
 ### Added

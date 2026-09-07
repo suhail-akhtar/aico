@@ -24,7 +24,7 @@ can measure its own skills against tasks with known answers.
 ❯ _
 ```
 
-**Status:** `0.13.0`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.14.0`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
@@ -43,7 +43,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.13.0 serve
+npx github:suhail-akhtar/aico#v0.14.0 serve
 ```
 
 ## Why this one
@@ -82,10 +82,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.13.0 serve
+npx github:suhail-akhtar/aico#v0.14.0 serve
 ```
 
-`#v0.13.0` is a tag, so it pins that release. `#release/v0.13` follows the 0.13
+`#v0.14.0` is a tag, so it pins that release. `#release/v0.14` follows the 0.14
 line as it gets fixes, and `#main` is the development trunk.
 
 To have `aico` on your `PATH` — which the VS Code extension needs — install it
@@ -93,7 +93,7 @@ globally from the same tag. aico is not on the npm registry; this builds from
 source and takes a minute the first time:
 
 ```sh
-npm install -g github:suhail-akhtar/aico#v0.13.0
+npm install -g github:suhail-akhtar/aico#v0.14.0
 ```
 
 From source:
@@ -443,6 +443,14 @@ turn cannot end until the app was opened in a real browser and its own checks
 are green; **Deploy** on the card runs the script the app ships with. `/app
 templates`, `/app new <template> "<name>" --brief "…"`, or the **Apps** screen
 in the web portal. The agent's side is the `AppManage` tool.
+
+**It learns, with you as the gate.** After each turn the log is read — no model
+call — for a rating with a note, a mid-turn steer, a fix after a failing check
+or browser verdict, a repeated error, and each becomes a *proposal* in
+Settings → Memory → Suggested. Keep writes it as knowledge, a project fact or a
+line about you in `~/.aico/USER.md` (twelve bullets at most); Dismiss records
+the decision. Design choices go to `.aico/decisions.md`, which compaction keeps
+and names; the dropped turns are spilled in full to the session's reports.
 
 ---
 

@@ -27,21 +27,14 @@ import {
   fallbackSessionTitle, normalizeSessionTitle, parseModelTitle,
 } from './title.js';
 import type { SessionTitle } from './title.js';
+import { CHEAP_MODELS } from '../../shared/models.js';
 
-/** Cheapest model each family offers, used for naming rather than the work model. */
-const NAMING_MODELS: Record<string, string> = {
-  anthropic: 'claude-haiku-4-5',
-  openai: 'gpt-4o-mini',
-  deepseek: 'deepseek-v4-flash',
-  openrouter: 'deepseek/deepseek-v4-flash',
-  gemini: 'gemini-2.0-flash',
-  zai: 'glm-4.6',
-  // K2.6 is the cheapest Kimi and the only one whose thinking can be switched
-  // off, which `withoutReasoning` does below. Without this row a Kimi
-  // conversation was named by its own work model — kimi-k3 at maximum effort,
-  // for a six-word label.
-  kimi: 'kimi-k2.6',
-};
+/**
+ * Cheapest model each family offers, used for naming rather than the work
+ * model. One table in `shared/models`, shared with the sub-agent
+ * recommendation, so the two never disagree about a vendor's small model.
+ */
+const NAMING_MODELS: Record<string, string> = CHEAP_MODELS;
 
 /**
  * Brand prefixes that identify a model's family.

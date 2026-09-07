@@ -36,8 +36,52 @@
 
 import { buildConversationSummary, getCompactionThreshold } from '../compact.js';
 import { estimateTokens } from '../tokens.js';
+import fs from 'fs';
+import path from 'path';
 import type { AicoSettings } from '../settings.js';
+import { getWorkspaceInfo } from '../workspace.js';
+import { decisionsNote } from '../project/decisions.js';
 import { deriveMessages } from './derive.js';
+
+/**
+ * Keep the full text of what a compaction drops, on disk, and say where.
+ *
+ * The summary is lossy by design. What it must not lose is the *way back*: a
+ * later turn that needs the exact error message from turn four can read the
+ * report, and a design decision the summary flattened is in `.aico/decisions.md`
+ * if the model kept the bullet. The line prepended to the summary names both.
+ * Best effort — a spill that cannot be written must never stop a compaction.
+ */
+function spillDropped(
+  session: Session,
+  settings: AicoSettings | undefined,
+  dropped: Array<{ role: string; content: string }>,
+  cutEnd: Seq,
+): { line: string } {
+  const parts: string[] = [];
+  try {
+    const cwd = session.header.cwd;
+    const note = decisionsNote(cwd);
+    if (note) parts.push(note);
+  } catch { /* no project root to look in */ }
+  try {
+    const info = getWorkspaceInfo({ settings, sessionId: session.header.id, cwd: session.header.cwd });
+    if (info.reportsDir) {
+      fs.mkdirSync(info.reportsDir, { recursive: true });
+      const file = path.join(info.reportsDir, `compaction-${cutEnd}.md`);
+      const body = [
+        `# Compacted turns — through seq ${cutEnd}`,
+        '',
+        `Session ${session.header.id}. Everything below was folded into a summary; this is the full text.`,
+        '',
+        ...dropped.map(m => `## ${m.role}\n\n${m.content}\n`),
+      ].join('\n');
+      fs.writeFileSync(file, body, 'utf8');
+      parts.push(`Full detail of the compacted turns: ${file}`);
+    }
+  } catch { /* the summary still stands without the spill */ }
+  return { line: parts.join(' ') };
+}
 import type { Seq, SessionEvent } from './events.js';
 import type { Session } from './session.js';
 
@@ -139,9 +183,9 @@ export function maybeCompactSession(
   const dropped = deriveMessages(session.events.filter(e => e.seq <= cutEnd));
   if (dropped.length === 0) return idle('replaced range projects to nothing');
 
-  const summary = buildConversationSummary(
-    dropped.map(m => ({ role: m.role, content: m.content })),
-  );
+  const plain = dropped.map(m => ({ role: m.role, content: m.content }));
+  const spilled = spillDropped(session, settings, plain, cutEnd);
+  const summary = (spilled.line ? `${spilled.line}\n\n` : '') + buildConversationSummary(plain);
 
   // `dropped` is the projection of the prefix and `before` the full projection,
   // so the tail past `dropped.length` is exactly what survives. That makes the

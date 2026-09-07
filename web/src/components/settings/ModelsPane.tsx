@@ -23,6 +23,7 @@
  * @module components/settings/ModelsPane
  */
 
+import type { AgentRecommendation } from '../../api';
 import React, { useEffect, useState } from 'react';
 import { api, type ProviderInstance, type ProviderTestResult } from '../../api';
 import { FAMILY_REASONING, type FamilyDefault } from '../../../../shared/reasoning';
@@ -93,6 +94,28 @@ export function ModelsPane(): React.ReactElement {
 
   const activeInstance = providers.find(p => p.id === activeProvider);
 
+  /*
+    Sub-agent economy: which cheap model the read-only roles could run on for
+    the model in use. A recommendation with an Apply button — never a silent
+    default — and the user's own `agentModels` are left alone by Apply.
+  */
+  const workModel = model ?? activeInstance?.defaultModel;
+  const [rec, setRec] = useState<AgentRecommendation | null>(null);
+  const [applied, setApplied] = useState<string | null>(null);
+  useEffect(() => {
+    if (!workModel) { setRec(null); return; }
+    api.agentRecommendation(workModel).then(setRec).catch(() => setRec(null));
+  }, [workModel]);
+  const applyRecommendation = async (): Promise<void> => {
+    if (!rec) return;
+    const current = (await api.settings()) as { agentModels?: Record<string, string> };
+    const agentModels = { ...rec.agentModels, ...(current.agentModels ?? {}) };
+    await api.saveSettings({ agentModels });
+    setApplied(`Set ${Object.keys(rec.agentModels).filter(r => !rec.alreadySet.includes(r)).length} role(s) to ${rec.cheap}.`);
+    setRec(await api.agentRecommendation(workModel));
+  };
+  const toApply = rec ? Object.keys(rec.agentModels).filter(r => !rec.alreadySet.includes(r)) : [];
+
   return (
     <div>
       {/* What is actually in effect, stated once at the top. Everything below
@@ -110,6 +133,25 @@ export function ModelsPane(): React.ReactElement {
           </span>
         )}
       </div>
+
+      {rec?.cheap && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-aico-border-subtle px-4 py-2.5" data-agent-recommendation>
+          <span className="text-[12px] text-aico-secondary">
+            {toApply.length > 0
+              ? <>Recommended for sub-agents on <span className="font-mono">{rec.workModel}</span>: run {toApply.join(', ')} on <span className="font-mono">{rec.cheap}</span> — they read and report; the work model is spent on nothing.</>
+              : <>Read-only sub-agents run on <span className="font-mono">{rec.cheap}</span>{applied ? ` — ${applied}` : ''}.</>}
+          </span>
+          {toApply.length > 0 && (
+            <button
+              onClick={() => void applyRecommendation()}
+              className="ml-auto rounded-full bg-aico-accent px-3 py-1 text-[12px] font-medium text-aico-on-accent hover:bg-aico-accent-hover"
+              data-apply-recommendation
+            >
+              Apply
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 space-y-2">
         {providers.length === 0 && editing !== 'new' && (
