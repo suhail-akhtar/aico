@@ -101,6 +101,12 @@ export interface RequestHeader {
   systemHash: string;
   /** Tool names in registration order. */
   tools: string[];
+  /**
+   * A short hash per rendered prompt section, keyed by section id, so a
+   * changed prefix can be attributed to the section that moved. Optional:
+   * older logs have none, and equality is decided by `systemHash`.
+   */
+  sectionHashes?: Record<string, string>;
 }
 
 /** Token accounting reported by the provider for one assistant message. */

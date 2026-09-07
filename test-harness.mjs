@@ -142,6 +142,8 @@ import {
   listTemplates, getTemplate, validateManifest, suggestTemplates, renderCatalogue, substituteTokens,
   matchesSubstitute, instantiateTemplate, nodeSatisfies, bundledTemplatesDir, REQUIRED_TEMPLATE_FILES,
   miniAppContext, fileList, appStateLine, closeAllAppDatabases,
+  buildRuntimeBlocks, capGitStatus, GIT_STATUS_MAX_LINES, GIT_STATUS_MAX_CHARS, MEMORY_REPRISE_MAX_CHARS,
+  sectionHashes, cacheResets, cacheShare, describeReset,
   superviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
@@ -12229,6 +12231,142 @@ console.log('  -- AppManage leads to a template, then points at the files --');
   const startPage = await inWs(() => executeAppManage({ action: 'start', name: 'quick-list' }));
   assert(/needs no start/.test(startPage) && /4321/.test(startPage), 'start on a page app names the host URL instead');
   fs.rmSync(ws, { recursive: true, force: true });
+}
+
+// ═══════════════════════════════════════════════════════════
+// Prompt economy: a small tail, a stable prefix, and a log that says what moved
+// ═══════════════════════════════════════════════════════════
+
+console.log('  -- The runtime facts are split by how often they change --');
+{
+  const blocks = buildRuntimeBlocks({
+    model: 'm', cwd: '/c', sessionId: 's', tools: [{ name: 'Read', description: '' }, { name: 'Bash', description: '' }],
+    mcpServers: [{ name: 'pw', health: 'ok', toolCount: 3 }], workspace: { root: '/w' }, agents: [], skills: [],
+    cronJobs: [], backgroundAgents: [], subAgents: [], memories: [{ id: 'm1', scope: 'project', text: 'Deploys on Fridays' }],
+  });
+  assert(!/<commands>|<tools>/.test(blocks.runtime + blocks.operatingProcesses + blocks.remembered + blocks.mcpHealth),
+    'neither the slash commands nor the tool roster is sent any more');
+  assert(/<model>m<\/model>/.test(blocks.runtime) && /<cwd>\/c<\/cwd>/.test(blocks.runtime), 'the identity block names the model and directory');
+  assert(/Deploys on Fridays/.test(blocks.remembered), 'memories are their own block');
+  assert(/pw:ok\/3 tools/.test(blocks.mcpHealth), 'MCP health is its own line');
+  const processes = (blocks.operatingProcesses.match(/<process /g) ?? []).length;
+  assert(processes === 6, `six process decisions, not ten (${processes})`);
+  assert(blocks.operatingProcesses.length < 1_400, `and they fit in ~350 tokens (${blocks.operatingProcesses.length} chars)`);
+  const none = buildRuntimeBlocks({ tools: [], mcpServers: [], workspace: { root: '/w' }, agents: [], skills: [], cronJobs: [], backgroundAgents: [], subAgents: [] });
+  assert(none.remembered === '' && none.mcpHealth === '', 'nothing remembered and no MCP adds nothing');
+
+  // The composite still answers the old question for the old tests.
+  const composite = buildRuntimeAwareness({ tools: [], mcpServers: [], workspace: { root: '/w' }, agents: [], skills: [], cronJobs: [], backgroundAgents: [], subAgents: [], memories: [{ id: 'x', scope: 'global', text: 'tabs' }] });
+  assert(/<remembered>/.test(composite) && !/<commands>/.test(composite), 'the composite view keeps memories and drops the roster');
+}
+
+console.log('  -- Git status is capped for the tail --');
+{
+  const many = Array.from({ length: 120 }, (_, i) => ` M src/file-${i}.ts`).join('\n');
+  const capped = capGitStatus(many);
+  const lines = capped.split('\n');
+  assert(lines.length === GIT_STATUS_MAX_LINES + 1, `forty lines and a count (${lines.length})`);
+  assert(/\(\+80 more/.test(capped), 'the count says how many were left out');
+  assert(capGitStatus(' M a.ts\n M b.ts') === ' M a.ts\n M b.ts', 'a short status is untouched');
+  const long = Array.from({ length: 30 }, (_, i) => ` M ${'x'.repeat(120)}-${i}.ts`).join('\n');
+  assert(capGitStatus(long).length <= GIT_STATUS_MAX_CHARS + 60, `the character cap holds too (${capGitStatus(long).length})`);
+  assert(MEMORY_REPRISE_MAX_CHARS === 1_500, 'a memory file longer than 1,500 chars is not reprised');
+}
+
+console.log('  -- Section hashes change only for the section that changed --');
+{
+  const a = new PromptDocument().add({ id: 'role', body: 'You are A.' }).add({ id: 'scope', body: 'Only this.' });
+  const b = new PromptDocument().add({ id: 'role', body: 'You are A.' }).add({ id: 'scope', body: 'Only that.' });
+  const ha = sectionHashes(a, DEFAULT_DIALECT, 'anthropic');
+  const hb = sectionHashes(b, DEFAULT_DIALECT, 'anthropic');
+  assert(Object.keys(ha).join(',') === 'role,scope', 'one hash per rendered section');
+  assert(ha.role === hb.role && ha.scope !== hb.scope, 'editing scope moves only scope');
+  assert(/^[0-9a-f]{8}$/.test(ha.role), 'eight hex characters each');
+  const again = sectionHashes(a, DEFAULT_DIALECT, 'anthropic');
+  assert(JSON.stringify(again) === JSON.stringify(ha), 'and the same document hashes the same twice');
+}
+
+console.log('  -- A prefix change is named, not just seen --');
+{
+  const s = mkSession('cache-1');
+  const header = (sections, tools, model = 'm') => canonicalHeader({
+    provider: 'p', model, systemPrompt: Object.values(sections).join('|'), tools, sectionHashes: sections,
+  });
+  s.append('turn/start', { turn: 1 });
+  s.recordRequestHeader(header({ role: 'aaaa1111', remembered: 'bbbb2222' }, ['Read', 'Bash']));
+  s.append('assistant/message', { content: 'x', usage: { inputTokens: 1000, outputTokens: 10, cachedTokens: 900 } });
+  s.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  assert(cacheResets(s).length === 0, 'the first header is not a reset');
+  s.append('turn/start', { turn: 2 });
+  s.recordRequestHeader(header({ role: 'aaaa1111', remembered: 'cccc3333' }, ['Read', 'Bash', 'VerifyApp']));
+  const resets = cacheResets(s);
+  assert(resets.length === 1 && resets[0].sections.join() === 'remembered', `the changed section is named (${JSON.stringify(resets[0]?.sections)})`);
+  assert(resets[0].toolsAdded.join() === 'VerifyApp' && resets[0].toolsRemoved.length === 0 && resets[0].route === false, 'tool additions are listed');
+  assert(describeReset(resets[0]) === 'prefix changed: remembered; tools: +VerifyApp', `and described in words (${describeReset(resets[0])})`);
+  s.append('assistant/message', { content: 'y', usage: { inputTokens: 1000, outputTokens: 10, cachedTokens: 100 } });
+  s.append('step/start', { turn: 2, step: 1 }); s.append('step/start', { turn: 2, step: 2 });
+  s.append('turn/end', { turn: 2, reason: { kind: 'completed' } });
+  const summary = summarizeLastTurn(s);
+  assert(Math.abs(summary.cache.turnShare - 0.1) < 1e-9, `the turn's cache share is cached over input (${summary.cache.turnShare})`);
+  assert(Math.abs(summary.cache.sessionShare - 0.5) < 1e-9, `the session share spans both turns (${summary.cache.sessionShare})`);
+  assert(summary.cache.resets.length === 1 && /remembered/.test(summary.cache.resets[0]), 'and the summary carries the reset in words');
+  assert(Math.abs(cacheShare(s) - 0.5) < 1e-9, 'cacheShare over the whole session');
+  // A route change is a different cache altogether.
+  s.recordRequestHeader(header({ role: 'aaaa1111', remembered: 'cccc3333' }, ['Read', 'Bash', 'VerifyApp'], 'other-model'));
+  const last = cacheResets(s).at(-1);
+  assert(last.route === true && last.sections.length === 0 && describeReset(last) === 'model changed', 'a model change says so');
+  // Old logs without section hashes still get an answer.
+  const t = mkSession('cache-2');
+  t.recordRequestHeader(canonicalHeader({ provider: 'p', model: 'm', systemPrompt: 'A', tools: [] }));
+  t.recordRequestHeader(canonicalHeader({ provider: 'p', model: 'm', systemPrompt: 'B', tools: [] }));
+  assert(cacheResets(t)[0].sections.join() === 'system_prompt', 'without per-section hashes the whole prompt is named');
+}
+
+console.log('  -- Browser QA keeps the conversation’s tool set; only a sub-agent is narrowed --');
+{
+  const top = resolveToolSet({ toolProfile: 'browser-qa', depth: 0, settings: {} }).defs.map(d => d.name);
+  const plain = resolveToolSet({ toolProfile: 'default', depth: 0, settings: {} }).defs.map(d => d.name);
+  assert(top.join() === plain.join(), `a QA-shaped message at depth 0 changes nothing about the tool set (${top.length} vs ${plain.length})`);
+  const child = resolveToolSet({ toolProfile: 'browser-qa', depth: 1, settings: {} }).defs.map(d => d.name);
+  assert(child.length < plain.length && child.includes('TodoWrite') && !child.includes('Bash'), 'a browser-QA sub-agent is narrowed to the QA built-ins');
+}
+
+console.log('  -- The tail is small and the prefix carries the stable facts --');
+{
+  // The same scripted loop the economy probe drives, here for the two claims
+  // that matter most: what is in the tail, and that two turns render the same prefix.
+  const seen = [];
+  const provider = {
+    id: 'mock', displayName: 'Mock',
+    async *chat(opts) {
+      seen.push({ prefix: opts.systemPrompt, tail: opts.volatileContext ?? '', tools: (opts.tools ?? []).map(t => t.name).sort().join() });
+      yield { type: 'text', content: 'ok' };
+      yield { type: 'usage', inputTokens: 10, outputTokens: 1 };
+      yield { type: 'finish', reason: 'stop' };
+    },
+  };
+  const session = mkSession('economy-1');
+  const settings = { completionGate: { enabled: false }, cron: { enabled: false } };
+  const run = (task) => runAgent({
+    task, model: 'mock-model', showPlan: false, autoApprove: true, verbose: false, silent: true,
+    conversationHistory: [], sessionId: session.header.id, settings, provider, session,
+    volatileSections: [{ id: 'app_state', body: 'App x: process running at http://h · backlog 2/5 done' }],
+  });
+  await run('first');
+  await run('Open http://localhost:1 and test the form.');
+  const [first, second] = seen;
+  assert(!/<commands>|<tools>|<operating_processes>|<remembered>|<agents>/.test(first.tail), 'the tail carries no roster, no processes, no memories');
+  // The mock provider has no dialect of its own, so sections may render as
+  // XML tags or Markdown headings; both spellings are accepted.
+  assert(/<working_tree>|## Working tree/.test(first.tail) && /Today's date/.test(first.tail), 'it carries the date and the working tree');
+  assert(/<app_state>|## App state/.test(first.tail) && /backlog 2\/5/.test(first.tail), 'and the caller’s app_state line');
+  assert(first.tail.length < 2_400, `a quiet tail is under ~600 tokens (${first.tail.length} chars)`);
+  assert(/<runtime>|## Runtime/.test(first.prefix) && /<operating_processes>|## Operating processes/.test(first.prefix), 'the runtime identity and the process decisions are in the prefix');
+  assert(first.prefix === second.prefix, 'two turns render a byte-identical prefix');
+  assert(first.tools === second.tools, 'and offer the same tools, QA-shaped message or not');
+  const headers = session.events.filter(e => e.type === 'request/header');
+  assert(headers.length === 1, `one request header for two turns — the tail no longer counts as a change (${headers.length})`);
+  assert(headers[0].data.header.sectionHashes?.runtime, 'and it carries per-section hashes');
 }
 
 clearInterval(keepAliveForAbandonedTools);

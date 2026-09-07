@@ -55,8 +55,36 @@ export async function buildVolatileContext(): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
   return [
     `Today's date: ${today}`,
-    gitStatus ? `Git status:\n${gitStatus}` : 'Git status: (clean or not a git repo)',
+    gitStatus ? `Git status:\n${capGitStatus(gitStatus)}` : 'Git status: (clean or not a git repo)',
   ].join('\n\n');
+}
+
+/** A memory file longer than this is in the prefix but not the tail reprise. */
+export const MEMORY_REPRISE_MAX_CHARS = 1_500;
+
+/** The most of `git status --short` the tail carries per step. */
+export const GIT_STATUS_MAX_LINES = 40;
+export const GIT_STATUS_MAX_CHARS = 1_500;
+
+/**
+ * Bound the working-tree listing.
+ *
+ * Uncapped, a repository with a generated directory or a fresh install put
+ * hundreds of lines into the tail — and the tail is paid on every step. Forty
+ * lines is enough to see what a turn touched; past that the count says the
+ * rest, and Git is one tool call away.
+ */
+export function capGitStatus(status: string): string {
+  const lines = status.split('\n').filter(l => l.trim().length > 0);
+  const kept: string[] = [];
+  let chars = 0;
+  for (const line of lines) {
+    if (kept.length >= GIT_STATUS_MAX_LINES || chars + line.length + 1 > GIT_STATUS_MAX_CHARS) break;
+    kept.push(line);
+    chars += line.length + 1;
+  }
+  const more = lines.length - kept.length;
+  return more > 0 ? `${kept.join('\n')}\n(+${more} more — run git status for the rest)` : kept.join('\n');
 }
 
 /**
@@ -501,7 +529,12 @@ Four rules the renderer cannot enforce for you:
     const { id, title } = memoryLabel(entry, cwd);
     // `append` rather than `add`: several files can share a label (multiple
     // project rules), and the later one must not silently replace the earlier.
-    doc.append(id, entry.content, { title, order: 850 + index, reprise: true });
+    // A short rules file is reprised, on the dialects that ask for one. A long
+    // one is not: the reprise rides in the tail and is paid on every step, and
+    // a two-thousand-line AICO.md restated forty times a turn is the reprise
+    // costing more than the instructions it protects.
+    const reprise = entry.content.length <= MEMORY_REPRISE_MAX_CHARS;
+    doc.append(id, entry.content, { title, order: 850 + index, reprise });
   });
 
   return doc;

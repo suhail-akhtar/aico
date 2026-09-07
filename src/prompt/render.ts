@@ -9,6 +9,7 @@
  * @module prompt/render
  */
 
+import { createHash } from 'crypto';
 import { PromptDocument } from './document.js';
 import type { PromptDialect, PromptSection, RenderedPrompt, PromptStyle } from './types.js';
 
@@ -98,4 +99,26 @@ export function renderSection(section: PromptSection, style: PromptStyle): strin
 export function titleFromId(id: string): string {
   const words = id.replace(/[_-]+/g, ' ').trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * A short hash of each rendered section, keyed by id.
+ *
+ * Recorded with the request header so that when the cached prefix changes,
+ * the log can say *which part* changed — "the project instructions" or "the
+ * remembered facts" — rather than only that the hash moved. Rendered exactly
+ * as {@link renderPrompt} would, so two identical documents hash identically
+ * and a change in one section leaves every other hash alone.
+ */
+export function sectionHashes(
+  doc: PromptDocument,
+  dialect: PromptDialect,
+  providerId: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const section of doc.forProvider(providerId, dialect.style)) {
+    const body = renderSection(section, dialect.style);
+    if (body) out[section.id] = createHash('sha256').update(body).digest('hex').slice(0, 8);
+  }
+  return out;
 }

@@ -32,6 +32,8 @@ import { resolveInstance } from './providers/instances.js';
 import type { ToolDef, ToolCall, FinishReason, ReasoningTrace } from './providers/types.js';
 import type { Inbox, Session, TurnEndReason, Usage } from './session/index.js';
 import { canonicalHeader } from './session/index.js';
+import { sectionHashes } from './prompt/render.js';
+import type { PromptSection } from './prompt/types.js';
 import { LegacyTranscript, SessionTranscript, type Transcript } from './session/transcript.js';
 import { ToolPipeline, type AdditionalContext, type ToolCallContext } from './tools/pipeline.js';
 import { RepeatToolGuard } from './tools/repeat-guard.js';
@@ -68,7 +70,7 @@ import { currentRunContext, runInContext, type HostBridge } from './run-context.
 import { isHostTool } from '../shared/host-tools.js';
 import type { FileWriter } from './tools/file-writer.js';
 import { isEffortChoice } from '../shared/reasoning.js';
-import { buildRuntimeAwareness } from './capabilities.js';
+import { buildRuntimeBlocks } from './capabilities.js';
 import { renderRunningWork } from './work/projection.js';
 import { noteWindowFromError, noteWindowFromUsage } from './context-window.js';
 import { listAgentSpecs } from './agents/registry.js';
@@ -399,6 +401,12 @@ export interface AgentOptions {
    * the prompt cache it should be sitting in front of.
    */
   agentPersona?: { name: string; instructions: string };
+  /**
+   * Sections for the volatile tail that only the caller can know — the state
+   * of the app a bound session is building, for one. Paid on every step, so
+   * each should be a line or two.
+   */
+  volatileSections?: PromptSection[];
   /** Plan mode — only read-only tools allowed */
   planMode?: boolean;
   /** Effort level for system prompt (low/medium/high/max) */
@@ -633,7 +641,19 @@ export function resolveToolSet(opts: {
     dispatch = (name, args, callId, signal) => executeTool(name, args, callId, signal);
   }
 
-  if (opts.toolProfile === 'browser-qa') {
+  /*
+    Browser QA narrows the tool set for sub-agents only.
+
+    At depth 0 it used to as well, and that was the single largest cache
+    breaker in the log: one message with a URL and the word "test" dropped
+    most built-ins and every MCP tool but Playwright, which invalidates the
+    tools breakpoint — and everything cached behind it — on both sides of that
+    turn. The hint about working quickly in the browser still rides in the
+    tail; the toolbox stays the same one the conversation has had all along.
+    A sub-agent spawned for QA is a short, separate conversation, where the
+    narrowing costs nothing and keeps it on task.
+  */
+  if (opts.toolProfile === 'browser-qa' && (opts.depth ?? 0) > 0) {
     defs = defs.filter(d => BROWSER_QA_BUILTINS.has(d.name));
   }
   if (opts.toolProfile === 'repair') {
@@ -1186,7 +1206,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       ].join('\n'),
     });
   }
-  const runtimeAwareness = await buildRuntimeAwareness({
+  const runtime = buildRuntimeBlocks({
     model,
     cwd: process.cwd(),
     sessionId: opts.sessionId,
@@ -1209,17 +1229,36 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       id: m.id, scope: m.scope, text: m.text,
     })),
   });
+  /*
+    The stable half of the runtime facts goes into the cached prefix.
+
+    These used to ride in the tail with the git status, on the theory that the
+    roster changes. It does not, within a session — and the tail is paid on
+    every step of every turn, which for a forty-step build meant forty copies
+    of the same twelve hundred tokens. A memory saved mid-session or a cron job
+    added does move the prefix once; that one miss is cheaper than the certain
+    cost of resending it every step.
+  */
+  promptDoc.add({ id: 'runtime', order: 34, body: runtime.runtime });
+  promptDoc.add({ id: 'operating_processes', order: 36, body: runtime.operatingProcesses });
+  if (runtime.remembered) promptDoc.add({ id: 'remembered', order: 848, body: runtime.remembered });
+
   // ── Volatile context ───────────────────────────────────────────────
-  // Everything here changes between turns: the working tree moves whenever the
-  // agent writes a file, the runtime roster moves as background agents and cron
-  // jobs come and go, and the QA note depends on the task. None of it can sit
-  // in `systemPrompt` — system renders before messages, so a byte of churn
-  // there invalidates the cached transcript behind it, which for a coding agent
-  // is most turns. It is delivered at the tail of the request instead, where it
-  // invalidates nothing. See ProviderChatOptions.volatileContext.
+  // Everything here changes between turns or steps: the working tree moves
+  // whenever the agent writes a file, MCP health can change, the QA note
+  // depends on the task, and an app's process starts and stops mid-build. None
+  // of it can sit in `systemPrompt` — system renders before messages, so a byte
+  // of churn there invalidates the cached transcript behind it, which for a
+  // coding agent is most turns. It is delivered at the tail of the request
+  // instead, where it invalidates nothing. See ProviderChatOptions.volatileContext.
+  //
+  // Kept small on purpose: the tail is paid in full on every step.
   const volatileDoc = new PromptDocument()
-    .add({ id: 'working_tree', body: await buildVolatileContext() })
-    .add({ id: 'runtime_awareness', body: runtimeAwareness });
+    .add({ id: 'working_tree', body: await buildVolatileContext() });
+  if (runtime.mcpHealth) volatileDoc.add({ id: 'mcp_health', body: runtime.mcpHealth });
+  // What the caller knows moves mid-turn and the loop cannot see — the state
+  // of the app a bound session is building, for one.
+  for (const section of opts.volatileSections ?? []) volatileDoc.add(section);
 
   // What is still running, and what settled without anyone being told.
   //
@@ -1343,8 +1382,10 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     });
   }
 
-  // Add Task tool (sub-agent dispatch) if within depth limit
-  if (depth < 4 && toolProfile !== 'browser-qa') {
+  // Add Task tool (sub-agent dispatch) if within depth limit. Browser QA
+  // removes it for sub-agents only — see resolveToolSet on why depth 0 keeps
+  // its tool set whole.
+  if (depth < 4 && (toolProfile !== 'browser-qa' || depth === 0)) {
     handlers.set(taskToolDefinition.name, async (args: Record<string, unknown>, callId: string) => {
       const { description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout } = args as {
         description: string; prompt: string; model?: string;
@@ -1412,10 +1453,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     }
   }
 
-  // Add MCP tools. In browser QA mode, keep only Playwright tools in the active
-  // surface; sending every coding/MCP tool schema slows each model turn.
+  // Add MCP tools. A browser-QA sub-agent keeps only the Playwright tools; the
+  // conversation itself keeps every MCP tool it had, so the tool set — and the
+  // cache behind it — does not change because one message mentioned a URL.
   const mcpTools = mcpRegistry.getToolsForAgent().filter((t) =>
-    toolProfile === 'browser-qa' ? t.name.startsWith('mcp__playwright__') : true,
+    toolProfile === 'browser-qa' && depth > 0 ? t.name.startsWith('mcp__playwright__') : true,
   );
   for (const t of mcpTools) {
     handlers.set(t.name, async (args: Record<string, unknown>, callId: string) => {
@@ -1580,10 +1622,15 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   transcript.recordRequestHeader(canonicalHeader({
     provider: detectProviderType(model, settings) ?? 'unknown',
     model,
-    // Hashed together so the header still identifies everything non-conversational
-    // the model was shown. Moving the volatile half out of `systemPrompt` changed
-    // where it is sent, not whether the log can account for it.
-    systemPrompt: `${systemPrompt}\n${volatileContext}`,
+    /*
+      The cached prefix only. The tail used to be hashed in as well, which
+      made every turn a "change" — the git status moves whenever a file is
+      written — and left the header unable to say the one thing it is for:
+      whether the part of the request a provider can cache stayed the same.
+      Per-section hashes go with it so a change can be named, not just seen.
+    */
+    systemPrompt,
+    sectionHashes: sectionHashes(promptDoc, dialect, provider.id),
     tools: toolDefs.map(d => d.name),
   }));
 

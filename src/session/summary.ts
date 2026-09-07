@@ -19,6 +19,7 @@
 import type { Session } from './session.js';
 import type { Seq, TurnEndReason } from './events.js';
 import { deliverables, type Deliverable } from './projections.js';
+import { cacheResets, cacheShare, describeReset } from './cache.js';
 
 /** How a turn ended, in the terms a reader cares about. */
 export type TurnOutcome =
@@ -46,6 +47,12 @@ export interface TurnSummary {
   outputTokens: number;
   cachedTokens: number;
   files: Deliverable[];
+  /**
+   * How the provider's cache did. `turnShare` is cached input over all input
+   * for this turn; `sessionShare` the same over the whole session; `resets`
+   * names what changed in the cacheable prefix during the turn, in words.
+   */
+  cache: { turnShare: number; sessionShare: number; resets: string[] };
 }
 
 /**
@@ -130,6 +137,13 @@ export function summarizeLastTurn(session: Session, throughSeq?: Seq): TurnSumma
     outputTokens,
     cachedTokens,
     files: deliverables(session, startEvent.seq),
+    cache: {
+      turnShare: inputTokens > 0 ? cachedTokens / inputTokens : 0,
+      sessionShare: cacheShare(session, 0, endEvent.seq),
+      resets: cacheResets(session, startEvent.seq)
+        .filter(r => r.seq <= endEvent.seq)
+        .map(describeReset),
+    },
   };
 }
 

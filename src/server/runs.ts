@@ -35,7 +35,42 @@ import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
 import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
 import { currentMiniApp } from '../session/projections.js';
-import { miniAppContext } from '../miniapps/context.js';
+import { appStateLine, miniAppContext } from '../miniapps/context.js';
+import { backlogProgress, hasProcess } from '../miniapps/store.js';
+import { appState } from '../miniapps/process.js';
+import type { PromptSection } from '../prompt/types.js';
+
+/**
+ * The moving state of the app a bound session is building, for the volatile
+ * tail: process state and URL, backlog progress, whether the host is up.
+ *
+ * Kept out of the cached bound block on purpose. A build that starts its own
+ * server mid-turn would otherwise move the prefix on exactly the turns that
+ * have most steps; one line in the tail costs a few tokens a step instead.
+ */
+async function appStateSection(
+  session: Session,
+  settings: AicoSettings,
+  cwd: string,
+): Promise<PromptSection | undefined> {
+  const slug = currentMiniApp(session);
+  if (!slug) return undefined;
+  try {
+    const app = await getMiniApp(slug, settings, cwd);
+    if (!app) return undefined;
+    const dir = miniAppDir(slug, settings, cwd);
+    const proc = hasProcess(app) ? appState(slug) : undefined;
+    const line = appStateLine({
+      app,
+      ...(proc ? { process: { state: proc.state, ...(proc.url ? { url: proc.url } : {}), ...(proc.error ? { error: proc.error } : {}) } } : {}),
+      backlog: await backlogProgress(dir),
+      ...(hasProcess(app) ? {} : { hostUp: settings.miniApps?.enabled === true }),
+    });
+    return line ? { id: 'app_state', body: line, order: 890 } : undefined;
+  } catch {
+    return undefined;
+  }
+}
 import { getMiniApp, miniAppDir } from '../miniapps/store.js';
 import { maybeCompactSession } from '../session/compact.js';
 import {
@@ -558,6 +593,7 @@ export class RunManager {
       // What the meter was drawn against when the turn began, so a window
       // that grows from use is announced once, not on every token event.
       let windowAtStart = getContextWindow(model, settings);
+      const appStateTail = await appStateSection(run.session, settings, run.cwd);
       const result = await runAgent({
         task,
         // References go to the log; the bytes are fetched per request by the
@@ -592,6 +628,8 @@ export class RunManager {
         // took a cwd, every session silently worked in whatever directory the
         // server process happened to be started in.
         cwd: run.cwd,
+        // The app's moving state, for the tail, when this session is about one.
+        ...(appStateTail ? { volatileSections: [appStateTail] } : {}),
         // Whatever the user attached to this folder, re-read per turn so an
         // edit takes effect on the next message rather than the next restart.
         /*

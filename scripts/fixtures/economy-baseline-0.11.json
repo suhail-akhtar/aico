@@ -1,0 +1,68 @@
+{
+  "at": "2026-09-07T07:10:57.014Z",
+  "requests": [
+    {
+      "prefixChars": 13143,
+      "tailChars": 4666,
+      "tailSections": {
+        "aico_runtime_awareness": 4540
+      },
+      "toolCount": 57,
+      "messages": 1,
+      "prefixHash": "244759c6",
+      "turn": 1,
+      "label": "two-step",
+      "step": 1
+    },
+    {
+      "prefixChars": 13143,
+      "tailChars": 4666,
+      "tailSections": {
+        "aico_runtime_awareness": 4540
+      },
+      "toolCount": 57,
+      "messages": 3,
+      "prefixHash": "244759c6",
+      "turn": 1,
+      "label": "two-step",
+      "step": 2
+    },
+    {
+      "prefixChars": 13143,
+      "tailChars": 4666,
+      "tailSections": {
+        "aico_runtime_awareness": 4540
+      },
+      "toolCount": 57,
+      "messages": 5,
+      "prefixHash": "244759c6",
+      "turn": 2,
+      "label": "qa-shaped",
+      "step": 1
+    },
+    {
+      "prefixChars": 13143,
+      "tailChars": 4666,
+      "tailSections": {
+        "aico_runtime_awareness": 4540
+      },
+      "toolCount": 57,
+      "messages": 7,
+      "prefixHash": "244759c6",
+      "turn": 3,
+      "label": "quiet",
+      "step": 1
+    }
+  ],
+  "summary": {
+    "prefixChars": 13143,
+    "prefixStable": true,
+    "toolSetStable": true,
+    "toolCount": 57,
+    "quietTailChars": 4666,
+    "quietTailTokensApprox": 1167,
+    "quietTailSections": {
+      "aico_runtime_awareness": 4540
+    }
+  }
+}

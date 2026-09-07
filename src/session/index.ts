@@ -42,6 +42,8 @@ export {
 
 export type { AppendOptions, SessionHeader, SessionListener } from './session.js';
 export { Session, canonicalHeader, headerEquals } from './session.js';
+export type { CacheReset } from './cache.js';
+export { cacheResets, cacheShare, describeReset } from './cache.js';
 
 export {
   EVENT_LOG_VERSION,

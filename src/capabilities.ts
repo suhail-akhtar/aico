@@ -101,7 +101,7 @@ export function buildCapabilityReport(input: {
   ].join('\n');
 }
 
-export function buildRuntimeAwareness(input: {
+export interface RuntimeBlocksInput {
   model?: string;
   cwd?: string;
   sessionId?: string;
@@ -116,63 +116,94 @@ export function buildRuntimeAwareness(input: {
   subAgents: SubAgentRecord[];
   /** Discrete memories that apply to this project and session. */
   memories?: Array<{ id: string; scope: string; text: string }>;
-}): string {
-  const enabledTools = input.tools.map((t) => t.name).join(', ');
+}
+
+/**
+ * The runtime facts, split by how often they change — which decides where
+ * they are sent.
+ *
+ * `runtime`, `operatingProcesses` and `remembered` are stable for the life of a
+ * session (a memory saved mid-session moves the prefix once, deliberately) and
+ * belong in the cached system prompt. `mcpHealth` is the one line that can
+ * change between steps and rides in the volatile tail. Slash commands and the
+ * tool roster are not here at all any more: the model cannot run a slash
+ * command, and the tool names duplicate the schemas the request already
+ * carries — together they were half the tail, paid on every step.
+ */
+export interface RuntimeBlocks {
+  /** Model, directory, session, workspace, agents, skills, cron — the identity of this run. */
+  runtime: string;
+  /** The handful of process decisions the model actually has to make. */
+  operatingProcesses: string;
+  /** What the user asked to be remembered, or empty. */
+  remembered: string;
+  /** MCP server health, or empty when none is configured. */
+  mcpHealth: string;
+}
+
+/** The six decisions worth stating. Everything else is in the tool descriptions. */
+const OPERATING_PROCESSES = [
+  '<process name="single-agent">Do small or tightly-coupled work yourself with direct tools.</process>',
+  '<process name="sub-agents">Task spawns one isolated specialist (subagent_type, agent_name or agent_spec) with complete context; Investigate is the read-only fan-out for research. No role-based build teams.</process>',
+  '<process name="apps">Build applications with AppManage: a template first (zero-token skeleton with a worked feature, tests and a Dockerfile), one writing agent, RunChecks, then start and VerifyApp.</process>',
+  '<process name="skills">Prefer a skill over working the procedure out again; a skill flagged as matching the request is the first thing to consider. SkillManage creates and registers them.</process>',
+  '<process name="memory">MemoryManage remembers durable facts by scope (global, project, session). Remember when told to, and when a fact will still be true next week.</process>',
+  '<process name="mcp">Use MCP tools when loaded; McpManage changes what is connected. WorkspaceWrite keeps durable reports and handoffs.</process>',
+].join('\n');
+
+export function buildRuntimeBlocks(input: RuntimeBlocksInput): RuntimeBlocks {
   const agents = input.agents.map((a) => `${a.name}(${a.role})`).join('; ') || 'none';
   const skills = input.skills.map((s) => s.frontmatter.name).join(', ') || 'none';
-  const mcp = input.mcpServers.map((s) => `${s.name}:${s.health}/${s.toolCount} tools`).join(', ') || 'none';
   const cron = input.cronJobs.map((j) => `${j.name}:${j.status}:${j.schedule}`).join('; ') || 'none';
-  const bg = input.backgroundAgents.map((a) => `${a.agentId.slice(0, 8)}:${a.status}:${a.description}`).join('; ') || 'none';
-  const subs = input.subAgents.map((a) => `${a.agentId}:${a.status}:${a.agentType}:${a.description}`).join('; ') || 'none';
+  const mcp = input.mcpServers.map((s) => `${s.name}:${s.health}/${s.toolCount} tools`).join(', ');
 
   // Memories are rendered as their own block rather than squeezed into an
-  // attribute list. They are the only part of this section that is an
-  // *instruction* — "deploys happen on Fridays" changes what the agent should
-  // do — and a fact that reads as metadata gets skimmed like metadata. Ordered
-  // narrowest-last by the store, so when two disagree the more specific one is
-  // read last and wins.
-  const memories = (input.memories ?? []).length
+  // attribute list. They are the only part of this that is an *instruction* —
+  // "deploys happen on Fridays" changes what the agent should do — and a fact
+  // that reads as metadata gets skimmed like metadata. Ordered narrowest-last
+  // by the store, so when two disagree the more specific one is read last.
+  const remembered = (input.memories ?? []).length
     ? [
-      '  <remembered>',
-      '    <!-- Things this user asked to be remembered. Treat them as true unless',
-      '         the conversation contradicts them; the later ones are more specific. -->',
+      '<!-- Things this user asked to be remembered. Treat them as true unless',
+      '     the conversation contradicts them; the later ones are more specific. -->',
       ...input.memories!.map(m =>
-        `    <memory id="${m.id}" scope="${m.scope}">${m.text.replace(/\s*\n+\s*/g, ' ').trim()}</memory>`),
-      '  </remembered>',
+        `<memory id="${m.id}" scope="${m.scope}">${m.text.replace(/\s*\n+\s*/g, ' ').trim()}</memory>`),
     ].join('\n')
     : '';
 
+  return {
+    runtime: [
+      `<model>${input.model ?? 'unknown'}</model>`,
+      `<cwd>${input.cwd ?? process.cwd()}</cwd>`,
+      `<session_id>${input.sessionId ?? 'none'}</session_id>`,
+      `<workspace>${input.workspace.root}</workspace>`,
+      `<agents>${agents}</agents>`,
+      `<skills>${skills}</skills>`,
+      `<cron_jobs>${cron}</cron_jobs>`,
+      // Background and sub-agent rosters used to be listed here as well. They
+      // are not any more: the `<running_work>` block built from the work
+      // ledger is the one view, and it knows things these lines could not.
+    ].join('\n'),
+    operatingProcesses: OPERATING_PROCESSES,
+    remembered,
+    mcpHealth: mcp ? `<mcp_servers>${mcp}</mcp_servers>` : '',
+  };
+}
+
+/**
+ * The blocks as one document — for tests and diagnostics.
+ *
+ * Production sends the parts separately (see {@link buildRuntimeBlocks}); this
+ * exists so "does a memory reach the prompt" can be asked of one string.
+ */
+export function buildRuntimeAwareness(input: RuntimeBlocksInput): string {
+  const b = buildRuntimeBlocks(input);
   return [
     '<aico_runtime_awareness>',
-    `  <model>${input.model ?? 'unknown'}</model>`,
-    `  <cwd>${input.cwd ?? process.cwd()}</cwd>`,
-    `  <session_id>${input.sessionId ?? 'none'}</session_id>`,
-    `  <workspace>${input.workspace.root}</workspace>`,
-    `  <commands>${SLASH_COMMAND_NAMES.join(', ')}</commands>`,
-    `  <tools>${enabledTools}</tools>`,
-    `  <agents>${agents}</agents>`,
-    `  <skills>${skills}</skills>`,
-    `  <mcp_servers>${mcp}</mcp_servers>`,
-    `  <cron_jobs>${cron}</cron_jobs>`,
-    // Background and sub-agent rosters used to be listed here as well. They are
-    // not any more: the `<running_work>` block built from the work ledger is
-    // the one view, and it knows things these lines could not — processes,
-    // watchers, cost, idle time, and which outcomes nobody has read yet. Two
-    // sources for the same fact is exactly the failure the ledger exists to
-    // remove, and the stale one would have been this.
-    memories,
-    '  <operating_processes>',
-    '    <process name="single-agent">Use direct tools for small or tightly-coupled work.</process>',
-    '    <process name="sub-agents">Use Task for isolated specialist work. Spawn by subagent_type (devops, devsecops, review, backend, frontend, qa, etc.), agent_name (a registered custom agent), or agent_spec (a fully custom inline agent with custom instructions, tools, and model). Pass complete context.</process>',
-    '    <process name="agent-creation">Use AgentManage to list, create, update, delete, enable or disable specialist agents. Created agents are immediately spawnable via Task agent_name. Assign skills to an agent to give it specialized procedures — the skill prompt is injected at spawn time, and skill names are checked when you set them.</process>',
-    '    <process name="skill-creation">Use SkillManage to list, create, verify, register, update, delete, enable, disable, import or export skills. Creating writes a DRAFT that is deliberately NOT registered: write it, actually run it on a real example, then register it. A skill may ship scripts and references alongside its markdown.</process>',
-    '    <process name="apps">Build applications with AppManage: templates first (zero-token skeleton with a worked feature, tests and a Dockerfile), one writing agent, read-only Investigate for research, RunChecks then start and VerifyApp. /app in the CLI.</process>',
-    '    <process name="skills">Prefer a skill over working the procedure out again. If a listed skill matches what is being asked, open it with Skill and follow it — the person who wrote it knew something about this task that is not in the codebase. Skills flagged as matching the request are the first thing to consider, not the last.</process>',
-    '    <process name="memory">Use MemoryManage to remember durable facts, list what is remembered, update or forget one. Scope matters: global applies everywhere, project only in this directory, session only in this conversation. Remember when told to, and when a fact will still be true next week.</process>',
-    '    <process name="workspace">Use WorkspaceWrite for durable reports, QA evidence, handoffs, and long-running operation notes.</process>',
-    '    <process name="mcp">Use MCP tools when loaded. Use McpManage to list, add, remove, enable, disable, test, import or export servers when the user asks about or wants to change what is connected.</process>',
-    '    <process name="cron-background">Cron jobs spawn background agents; use /cron and /bg-agents or tools to inspect and manage them.</process>',
-    '  </operating_processes>',
+    b.runtime,
+    b.mcpHealth,
+    b.remembered ? `<remembered>\n${b.remembered}\n</remembered>` : '',
+    `<operating_processes>\n${b.operatingProcesses}\n</operating_processes>`,
     '</aico_runtime_awareness>',
   ].filter(Boolean).join('\n');
 }
