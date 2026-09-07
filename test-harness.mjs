@@ -139,7 +139,7 @@ import {
   openSession, scrubbedEnv, startApp, appState, splitStatements, executeMiniAppManage,
   createMiniApp, miniAppDir, getMiniApp, effectiveKind, hasProcess, runProfileFor, backlogProgress,
   executeAppManage, appManageToolDefinition,
-  listTemplates, getTemplate, validateManifest, suggestTemplates, renderCatalogue, substituteTokens,
+  listTemplates, getTemplate, validateManifest, suggestTemplates, matchScore, stem, renderCatalogue, substituteTokens,
   matchesSubstitute, instantiateTemplate, nodeSatisfies, bundledTemplatesDir, REQUIRED_TEMPLATE_FILES,
   miniAppContext, fileList, appStateLine, closeAllAppDatabases,
   buildRuntimeBlocks, capGitStatus, GIT_STATUS_MAX_LINES, GIT_STATUS_MAX_CHARS, MEMORY_REPRISE_MAX_CHARS,
@@ -5480,6 +5480,12 @@ console.log('  -- The portal defaults to the workspace, the CLI to where you are
   assert(nodePath.resolve(derived) !== repo, 'and is never the project directory itself');
   assert(derived.includes(nodePath.basename(repo)),
     'named after the project, so several are tellable apart');
+  // A session bound to an app runs *in* the workspace root. Resolving from
+  // there must land on the same root, not on a root nested under it.
+  assert(nodePath.resolve(resolveWorkspaceRoot(undefined, derived)) === nodePath.resolve(derived),
+    `a workspace root resolves to itself (${resolveWorkspaceRoot(undefined, derived)})`);
+  assert(nodePath.resolve(resolveWorkspaceRoot(undefined, nodePath.join(derived, 'miniapps', 'x'))) !== nodePath.resolve(derived),
+    'but a directory inside a workspace is an ordinary project');
 
   // A configured path wins, which is what "as user setup custom or default" means.
   const custom = nodePath.join(os.tmpdir(), 'aico-custom-workspace');
@@ -12115,6 +12121,14 @@ console.log('  -- Every shipped template is complete and describes itself correc
   const api = suggestTemplates('a REST API service with endpoints for orders');
   assert(api[0]?.id === 'api-service-hono', `an API brief suggests api-service-hono first (got ${api[0]?.id})`);
   assert(suggestTemplates('').length === 0, 'an empty brief suggests nothing');
+  // Ranking is plural-insensitive, phrase-aware, and weights what a template is
+  // *for* (match) over what it is made of (tags) — "a page showing who has not
+  // paid" must not hand an invoicing SaaS to the page kind.
+  assert(stem('invoices') === 'invoice' && stem('categories') === 'category' && stem('class') === 'class', 'stem folds plurals and leaves -ss alone');
+  const invoice = suggestTemplates('An invoice desk for a small studio: customers, line items with tax, statuses draft, sent and paid, and a page showing who has not paid. Users sign in.');
+  assert(invoice[0]?.id === 'web-saas-next', 'an invoicing brief with sign-in ranks the SaaS template first, got ' + invoice[0]?.id);
+  const scored = matchScore({ id: 't', version: '1', name: 'T', category: 'c', kind: 'page', summary: '', tags: ['page'], match: ['sign in', 'customers'] }, new Set(['page', 'sign', 'in', 'customer']));
+  assert(scored.score === 5 && scored.matched.join(',') === 'sign in,customers,page', 'match words count double and a phrase needs all its words: ' + scored.score + ' ' + scored.matched.join(','));
   const catalogue = renderCatalogue('saas with user accounts');
   assert(catalogue.split('\n')[0].startsWith('★ web-saas-next'), 'the catalogue puts the suggestion first with a star');
   assert(catalogue.split('\n').length <= 20, 'and stays within twenty lines');

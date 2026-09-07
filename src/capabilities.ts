@@ -145,7 +145,7 @@ export interface RuntimeBlocks {
 const OPERATING_PROCESSES = [
   '<process name="single-agent">Do small or tightly-coupled work yourself with direct tools.</process>',
   '<process name="sub-agents">Task spawns one isolated specialist (subagent_type, agent_name or agent_spec) with complete context; Investigate is the read-only fan-out for research. No role-based build teams.</process>',
-  '<process name="apps">Build applications with AppManage: a template first (zero-token skeleton with a worked feature, tests and a Dockerfile), one writing agent, RunChecks, then start and VerifyApp.</process>',
+  '<process name="apps">Build applications with AppManage: a template first (zero-token skeleton with a worked feature, tests and a Dockerfile), one writing agent, RunChecks, then start and VerifyApp. The whole platform — kinds, templates, files, the workspace panel the person sees, the gates — is Skill app-platform; read it once before working on an app.</process>',
   '<process name="skills">Prefer a skill over working the procedure out again; a skill flagged as matching the request is the first thing to consider. SkillManage creates and registers them.</process>',
   '<process name="memory">MemoryManage remembers durable facts by scope (global, project, session). Remember when told to, and when a fact will still be true next week.</process>',
   '<process name="mcp">Use MCP tools when loaded; McpManage changes what is connected. WorkspaceWrite keeps durable reports and handoffs.</process>',

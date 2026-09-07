@@ -62,5 +62,10 @@
       ]
     }
   ],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "Typed routes with field-level 400s and an OpenAPI document",
+    "Health and readiness routes, SIGTERM shutdown",
+    "Vitest against the app in memory; multi-stage Dockerfile"
+  ]
 }

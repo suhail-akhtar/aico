@@ -55,5 +55,10 @@
       ]
     }
   ],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "Argument parsing with node:util, help and version",
+    "Exit codes 0/1/2 and a worked subcommand to copy",
+    "Builds to a single bin; npm pack for distribution"
+  ]
 }

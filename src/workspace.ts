@@ -65,8 +65,24 @@ function defaultProjectWorkspaceRoot(cwd: string): string {
 
 export function resolveWorkspaceRoot(settings?: AicoSettings, cwd = process.cwd()): string {
   const configured = settings?.workspace?.path;
-  if (!configured) return defaultProjectWorkspaceRoot(cwd);
+  if (!configured) {
+    /*
+      A cwd that already is a workspace root names itself.
+
+      Sessions bound to an app run with the workspace root as their cwd. Without
+      this, resolving from there derived a second root nested under the first —
+      the app the session was bound to was then "not found", and its logs and
+      sessions went to a directory nobody ever opens.
+    */
+    return isDefaultWorkspaceRoot(cwd) ? path.resolve(cwd) : defaultProjectWorkspaceRoot(cwd);
+  }
   return path.isAbsolute(configured) ? configured : path.resolve(cwd, configured);
+}
+
+function isDefaultWorkspaceRoot(dir: string): boolean {
+  const projects = path.join(aicoHome(), 'workspace', 'projects');
+  const rel = path.relative(projects, path.resolve(dir));
+  return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel) && !rel.includes(path.sep);
 }
 
 export function getWorkspaceInfo(ctx: WorkspaceContext = {}): WorkspaceInfo {

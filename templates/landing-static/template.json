@@ -43,5 +43,10 @@
       ]
     }
   ],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "Hero, features, pricing, FAQ and contact sections",
+    "Mobile menu, FAQ accordion and form validation without a framework",
+    "A strict content-security policy and an nginx image"
+  ]
 }

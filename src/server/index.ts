@@ -58,7 +58,56 @@ import {
   backlogProgress, deleteMiniApp, effectiveKind, getMiniApp, hasProcess, listMiniApps, miniAppDir, runProfileFor,
 } from '../miniapps/store.js';
 import { installApp, runningApps, startApp, stopAllApps, stopApp, subscribeToApps } from '../miniapps/process.js';
-import { getTemplate, instantiateTemplate, listTemplates, nodeSatisfies } from '../apps/templates.js';
+import { getTemplate, instantiateTemplate, listTemplates, matchScore, nodeSatisfies, stem, suggestTemplates } from '../apps/templates.js';
+import { meaningfulWords } from '../knowledge/match.js';
+import { promises as fsp } from 'fs';
+
+/**
+ * A name from a brief: the first few meaningful words, title-cased, so the
+ * wizard can offer "Invoice Desk" for "an invoice desk for a small studio".
+ */
+function suggestName(brief: string): string {
+  // The first clause names the thing; what follows a colon, a comma or "for"
+  // describes it. "An invoice desk for a small studio: customers, …" → Invoice Desk.
+  const clause = brief.split(/[:.;,\n]| \bfor\b | \bthat\b | \bwhich\b | \bwhere\b | \bwith\b /)[0] ?? brief;
+  const source = clause.trim().length >= 3 ? clause : brief;
+  const words = source.replace(/[^\p{L}\p{N}\s-]/gu, ' ').split(/\s+/).filter(Boolean);
+  const skip = new Set(['a', 'an', 'the', 'for', 'to', 'of', 'that', 'with', 'my', 'our', 'i', 'we', 'want', 'need', 'build', 'make', 'create', 'app', 'application', 'simple', 'small', 'basic', 'please', 'me', 'us', 'and', 'or', 'in', 'on', 'which', 'where', 'lets', 'let', 'can']);
+  const picked: string[] = [];
+  for (const w of words) {
+    if (skip.has(w.toLowerCase())) continue;
+    picked.push(w.charAt(0).toUpperCase() + w.slice(1));
+    if (picked.length === 3) break;
+  }
+  return picked.join(' ');
+}
+
+const APP_TREE_SKIP = new Set(['node_modules', '.next', '.astro', '.expo', 'dist', 'build', 'coverage', '.git', '.turbo', 'out', 'data.sqlite', 'data.sqlite-wal', 'data.sqlite-shm']);
+
+/** Two levels of an app's files for the workspace panel; directories deeper than that are named, not walked. */
+async function listAppFiles(dir: string): Promise<Array<{ path: string; dir: boolean; size?: number }>> {
+  const out: Array<{ path: string; dir: boolean; size?: number }> = [];
+  const walk = async (rel: string, depth: number): Promise<void> => {
+    let entries;
+    try { entries = await fsp.readdir(path.join(dir, rel), { withFileTypes: true }); } catch { return; }
+    for (const e of entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))) {
+      if (APP_TREE_SKIP.has(e.name)) continue;
+      if (e.name.startsWith('.') && e.name !== '.aico' && e.name !== '.env.example') continue;
+      const next = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        out.push({ path: next, dir: true });
+        if (depth < 2) await walk(next, depth + 1);
+      } else {
+        let size: number | undefined;
+        try { size = (await fsp.stat(path.join(dir, next))).size; } catch { /* listed without a size */ }
+        out.push({ path: next, dir: false, ...(size !== undefined ? { size } : {}) });
+      }
+      if (out.length >= 400) return;
+    }
+  };
+  await walk('', 0);
+  return out;
+}
 import { deployApp, deployState } from '../apps/deploy.js';
 import { markAdoptedByContent } from '../learning/proposals.js';
 import { proposeUserSignals } from '../learning/index.js';
@@ -546,6 +595,58 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       const slug = url.searchParams.get('slug');
       if (!slug) { send(res, 400, { error: 'slug required' }); return; }
       send(res, 200, { deploy: deployState(slug) ?? null });
+      return;
+    }
+
+    if (route === 'apps/suggest' && req.method === 'GET') {
+      // Prompt first: rank the catalogue against what the person wants to
+      // build, and say which words matched so the ranking can be read.
+      const brief = url.searchParams.get('brief') ?? '';
+      const all = listTemplates(cwd);
+      const suggested = suggestTemplates(brief, all);
+      const words = new Set([...meaningfulWords(brief)].map(stem));
+      send(res, 200, {
+        suggested: suggested.map(t => ({ id: t.id, matched: matchScore(t, words).matched })),
+        name: suggestName(brief),
+      });
+      return;
+    }
+
+    if (route === 'apps/files' && req.method === 'GET') {
+      // Two levels of the app's tree for the workspace panel — the same view
+      // the bound prompt carries, as data. Never the install or the database.
+      const slug = url.searchParams.get('slug');
+      if (!slug) { send(res, 400, { error: 'slug required' }); return; }
+      const live = await loadSettings();
+      const app = await getMiniApp(slug, live, cwd);
+      if (!app) { send(res, 404, { error: `no app "${slug}"` }); return; }
+      send(res, 200, { files: await listAppFiles(miniAppDir(slug, live, cwd)) });
+      return;
+    }
+
+    if (route === 'apps/file' && req.method === 'GET') {
+      // One text file from inside the app, read-only, bounded, and never a
+      // path that escapes the app's directory.
+      const slug = url.searchParams.get('slug');
+      const rel = url.searchParams.get('path') ?? '';
+      if (!slug || !rel) { send(res, 400, { error: 'slug and path required' }); return; }
+      const live = await loadSettings();
+      const app = await getMiniApp(slug, live, cwd);
+      if (!app) { send(res, 404, { error: `no app "${slug}"` }); return; }
+      const dir = miniAppDir(slug, live, cwd);
+      const abs = path.resolve(dir, rel);
+      const inside = path.relative(dir, abs);
+      if (!inside || inside.startsWith('..') || path.isAbsolute(inside) || /(^|[\\/])(node_modules|data\.sqlite)/.test(inside)) {
+        send(res, 400, { error: 'path must be inside the app' }); return;
+      }
+      try {
+        const stat = await fsp.stat(abs);
+        if (stat.size > 200_000) { send(res, 200, { path: inside.replace(/\\/g, '/'), truncated: true, content: `(${Math.round(stat.size / 1024)} KB — too large to show here)` }); return; }
+        const content = await fsp.readFile(abs, 'utf8');
+        send(res, 200, { path: inside.replace(/\\/g, '/'), content, truncated: false });
+      } catch {
+        send(res, 404, { error: `no file "${rel}"` });
+      }
       return;
     }
 

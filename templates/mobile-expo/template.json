@@ -58,5 +58,10 @@
       ]
     }
   ],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "Expo Router with one worked list screen",
+    "Pure, tested logic separate from the screens",
+    "Web preview in the browser; EAS notes for the stores"
+  ]
 }

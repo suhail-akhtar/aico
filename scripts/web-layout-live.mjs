@@ -329,12 +329,67 @@ try {
         });
         check(fit.top >= 0 && fit.bottom <= fit.vh + 1 && fit.right <= fit.vw + 1,
           `apps — the create wizard fits the viewport (${Math.round(fit.top)}–${Math.round(fit.bottom)} of ${fit.vh})`);
-        await page.click('[data-wizard-template="landing-static"]');
+        // Prompt first: the brief ranks the templates, the best match is named,
+        // the gallery marks it, and the name is suggested from the brief.
+        await page.fill('[data-wizard-brief]', 'A marketing landing page for the launch of our product');
+        await page.waitForSelector('[data-wizard-best]', { timeout: 10_000 });
+        const best = await page.$eval('[data-wizard-best]', el => el.getAttribute('data-wizard-best'));
+        check(best === 'landing-static', `apps — the brief ranks landing-static as the best match (${best})`);
+        await page.click('[data-wizard-see-all]');
+        await page.waitForSelector('[data-app-wizard] [data-template-gallery]', { timeout: 10_000 });
+        const badge = await page.$('[data-app-wizard] [data-template="landing-static"] [data-best-match]');
+        check(Boolean(badge), 'apps — the gallery marks the best match on its card');
+        await page.click('[data-app-wizard] [data-template="landing-static"]');
         await page.waitForSelector('[data-wizard-title]', { timeout: 10_000 });
+        const suggestedName = await page.$eval('[data-wizard-title]', el => el.value);
+        check(suggestedName.length > 0, `apps — the name is suggested from the brief (“${suggestedName}”)`);
+        await page.fill('[data-wizard-title]', '');
         const disabled = await page.$eval('[data-wizard-create]', b => b.disabled);
         check(disabled === true, 'apps — Create is disabled until the app has a name');
         await page.keyboard.press('Escape');
         await page.waitForSelector('[data-app-wizard]', { state: 'detached', timeout: 10_000 });
+        return undefined;
+      },
+    },
+    {
+      name: 'workspace',
+      // A bound conversation shows the app beside the chat: a live preview the
+      // host lets the portal frame, the backlog with its next story, the files.
+      open: async () => {
+        const token = url.split('token=')[1];
+        const base = url.split('/?')[0];
+        const headers = { 'x-aico-token': token, 'content-type': 'application/json' };
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const made = await fetch(`${base}/api/apps/create`, { method: 'POST', headers, body: JSON.stringify({ template: 'page-records', title: 'Layout Probe Log', install: false }) }).then(r => r.json());
+        check(Boolean(made.slug), `workspace — a records app was created for the probe (${made.slug ?? made.error})`);
+        await page.goto(`${url}&view=apps`, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector(`[data-app-card="${made.slug}"]`, { timeout: 30_000 });
+        await page.click(`[data-app-card="${made.slug}"] button:has-text("Work on it")`);
+        await page.waitForSelector('[data-app-panel]', { timeout: 15_000 });
+        await sleep(1500);
+        const src = await page.$eval('[data-app-panel] iframe', el => el.getAttribute('src')).catch(() => '');
+        check(/^http:\/\/127\.0\.0\.1:\d+\/[a-z0-9-]+\/(\?.*)?$/.test(src ?? ''), `workspace — the preview frames the served app (${src})`);
+        // The app host is another origin, so the frame's document is sealed off;
+        // the header it sends says whether the browser will draw it at all.
+        const csp = src ? await fetch(src).then(r => r.headers.get('content-security-policy') ?? '').catch(() => '') : '';
+        const portalOrigin = new URL(base).origin;
+        check(csp.includes(`frame-ancestors`) && csp.includes(portalOrigin), `workspace — the app host lets this portal frame it (${csp.match(/frame-ancestors[^;]*/)?.[0] ?? 'no frame-ancestors'})`);
+        const frameBox = await page.$eval('[data-app-panel] iframe', el => el.getBoundingClientRect().width);
+        check(frameBox > 300, `workspace — the preview has room (${Math.round(frameBox)}px wide)`);
+        await page.click('[data-panel-tab="backlog"]');
+        await page.waitForSelector('[data-build-next]', { timeout: 10_000 }).catch(() => undefined);
+        const next = await page.$('[data-build-next]');
+        check(Boolean(next), 'workspace — the backlog names the next story with a Build it action');
+        await page.click('[data-panel-tab="files"]');
+        await page.waitForSelector('[data-files] button', { timeout: 10_000 }).catch(() => undefined);
+        const files = await page.$$('[data-files] button');
+        check(files.length >= 6, `workspace — the files tab lists the app (${files.length} entries)`);
+        await page.click('[data-panel-tab="preview"]');
+        await page.click('[data-device="phone"]');
+        await sleep(400);
+        const phone = await page.$eval('[data-app-panel] iframe', el => el.getBoundingClientRect().width);
+        check(phone >= 360 && phone <= 400, `workspace — the phone device narrows the preview (${Math.round(phone)}px)`);
+        await page.click('[data-device="desktop"]');
         return undefined;
       },
     },

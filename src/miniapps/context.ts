@@ -157,6 +157,9 @@ export async function miniAppContext(
 
   const howToWork = hasProcess(app) || kind === 'cli'
     ? `Read before you change: the file list says what exists, not what is in it.
+If this is your first turn on an app, Skill app-platform is the whole platform in one page.
+The person sees this app beside the chat — a live preview, the backlog, decisions, files, logs —
+so keep .aico/backlog.md and .aico/decisions.md current; they are read there.
 Start with AICO.md (below) and docs/EXTENDING.md — the worked feature there is
 the pattern to copy. New feature work: use the app-plan skill first, then keep
 .aico/backlog.md ticked as you go. After changing source, RunChecks runs this

@@ -25,6 +25,7 @@ import { api, type AppTemplate, type MiniAppProcess, type MiniAppSummary, type M
 import { useStore } from '../store';
 import { Icon } from './Icon';
 import { AppCreateWizard } from './AppCreateWizard';
+import { TemplateGallery } from './apps/TemplateGallery';
 
 interface Props {
   /** Switch to the conversation view once an app's session is open. */
@@ -267,33 +268,16 @@ export function AppsPane({ onOpenChat }: Props): React.ReactElement {
 
       {templates.length > 0 && (
         <section className="px-5 pb-6 pt-6" data-apps-templates>
-          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-aico-muted">Start from a template</h3>
-          <p className="mt-1 text-[12px] text-aico-muted">
-            Each arrives with a worked feature, tests, notes for the agent and a Dockerfile. Nothing is generated;
-            the files are copied.
-          </p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {templates.map(t => (
-              <button
-                key={t.id}
-                onClick={() => setWizard({ template: t })}
-                data-template={t.id}
-                className="group flex flex-col rounded-xl border border-aico-border-subtle bg-aico-surface p-4 text-left
-                           transition-colors hover:border-aico-accent/50 hover:bg-aico-hover/40"
-              >
-                <div className="flex items-start gap-2">
-                  <p className="min-w-0 flex-1 text-[14px] font-medium text-aico-primary">{t.name}</p>
-                  <KindBadge kind={t.kind} />
-                </div>
-                <p className="mt-1 line-clamp-3 text-[12px] text-aico-muted">{t.summary}</p>
-                <p className="mt-2 text-[11px] text-aico-muted">
-                  {categoryLabel(t.category)}
-                  {t.requires?.node ? ` · Node ${t.requires.node}` : ''}
-                  {t.source !== 'bundled' ? ` · ${t.source}` : ''}
-                </p>
-              </button>
-            ))}
+          <div className="mb-3 flex flex-wrap items-end gap-3">
+            <div>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-aico-muted">Start from a template</h3>
+              <p className="mt-1 text-[12px] text-aico-muted">
+                Each arrives with a worked feature, tests, notes for the agent and a deploy path. Nothing is generated;
+                the files are copied. Or describe what you want and let the ranking pick.
+              </p>
+            </div>
           </div>
+          <TemplateGallery templates={templates} onPick={t => setWizard({ template: t })} />
         </section>
       )}
 

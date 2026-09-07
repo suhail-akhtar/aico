@@ -3,6 +3,42 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **The app beside the chat.** A conversation bound to an app now shows the
+  app in a panel on the right: a live preview at desktop, tablet and phone
+  widths that reloads when a turn ends, the backlog with a progress bar and
+  the next story one click from being built, the decisions file, the app's
+  files, and the process and deploy logs. Start, Stop, Deploy and Open sit in
+  its header; it resizes, hides to a strip, and remembers both. The app host
+  lets the portal frame it — and only the portal: `frame-ancestors` names the
+  portal's origin, nothing else.
+- **Describe it first.** Create app opens on one question — what do you want to
+  build? — and ranks the templates against the answer as you type, naming the
+  best match with the words that matched, suggesting a name from the brief, and
+  keeping the whole brief as the agent's first message. "See all templates"
+  opens a gallery with search, category chips, what each template ships, and
+  the ranking's badge; "Let the agent choose and start" hands the brief to the
+  agent with the catalogue. The Apps screen's template section is the same
+  gallery. Ranking folds plurals, matches phrases such as "sign in", and
+  weights what a template is *for* over what it is made of, so "a page showing
+  who has not paid" no longer sends an invoicing SaaS to the page kind.
+- **The agent knows the platform.** A built-in `app-platform` skill describes
+  kinds, templates, `AppManage`, the bound conversation, the panel the person
+  is looking at and the gates, in one page; the capability report and the
+  bound-app block point at it on the first turn of an app.
+- Routes `apps/suggest`, `apps/files` and `apps/file`; every template
+  manifest lists its `features`.
+
+### Fixed
+
+- With no workspace path configured, a session bound to an app ran with the
+  workspace root as its cwd, and resolving the workspace from there derived a
+  second root nested under the first — the app was "not found" on "Work on
+  it" and after create. A workspace root now resolves to itself.
+
 ## 0.14.0 — 2026-09-07
 
 ### Added

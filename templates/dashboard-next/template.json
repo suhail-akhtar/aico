@@ -66,5 +66,10 @@
       ]
     }
   ],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "KPI tiles with change versus the previous day",
+    "An ECharts line chart over a metrics table",
+    "An ingest route any script can POST to; sample data seeded"
+  ]
 }

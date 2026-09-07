@@ -328,7 +328,7 @@ export {
 } from './miniapps/store.js';
 export { miniAppContext, fileList, appStateLine } from './miniapps/context.js';
 export {
-  listTemplates, getTemplate, validateManifest, suggestTemplates, renderCatalogue, substituteTokens,
+  listTemplates, getTemplate, validateManifest, suggestTemplates, matchScore, stem, renderCatalogue, substituteTokens,
   matchesSubstitute, instantiateTemplate, nodeSatisfies, bundledTemplatesDir, REQUIRED_TEMPLATE_FILES,
 } from './apps/templates.js';
 export { executeAppManage, appManageToolDefinition } from './tools/manage-miniapps.js';

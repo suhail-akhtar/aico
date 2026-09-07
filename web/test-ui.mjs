@@ -19,6 +19,7 @@ import { loadSidebarMemory, saveSidebarMemory, defaultCollapsed, EMPTY_MEMORY } 
 import { flattenRows, rowKey } from './dist-test/sidebar-rows.mjs';
 import { moveFocus } from './dist-test/sidebar-keys.mjs';
 import { dropAction } from './dist-test/sidebar-drop.mjs';
+import { parseBacklog, nextStory } from './dist-test/backlog.mjs';
 import {
   PANES, SECRET_ROOTS, allFields, assertNoSecrets, changedPaths,
   patchFor, readPath, searchFields,
@@ -2067,6 +2068,38 @@ test('the spellings are the ones each provider reads', () => {
   assert.equal(tuningPatch('gemini', 'high'), undefined, 'a family with no setting gets no patch');
   assert.equal(tuningPatch('kimi', 'medium'), undefined, 'a rung the family cannot express gets no patch');
 });
+
+// ── The backlog the agent keeps, read for the workspace panel ─────────────
+{
+  const md = [
+    '# Backlog — Invoice Desk', '',
+    'Stories are vertical slices. Tick a box only when its "Done when" was observed.', '',
+    '## Iteration 0 — from the template', '',
+    '- [x] Records table with title, amount, status.',
+    '      Done when: `AppManage tables` lists every column.',
+    '- [x] Summary strip leads the page.',
+    '      Done when: creating a record changes two figures.', '',
+    '## Iteration 1 — the real domain', '',
+    '- [ ] Rename records to invoices with customer and due date.',
+    '      Done when: the table name and every label use the user\'s words',
+    '      and the migration applied.',
+    '- [ ] Mark an invoice paid from the row.',
+    '      Done when: VerifyApp check "mark paid" flips the pill.',
+  ].join('\n');
+  const b = parseBacklog(md);
+  test('the backlog title drops the "Backlog —" prefix', () => assert.equal(b.title, 'Invoice Desk'));
+  test('iterations come from ## headings', () => assert.deepEqual(b.iterations.map(i => i.title), ['Iteration 0 — from the template', 'Iteration 1 — the real domain']));
+  test('stories carry done and their Done-when line', () => {
+    assert.equal(b.iterations[0].stories[0].done, true);
+    assert.equal(b.iterations[0].stories[0].doneWhen, '`AppManage tables` lists every column.');
+  });
+  test('a continued Done-when line is joined', () => assert.match(b.iterations[1].stories[0].doneWhen, /words and the migration applied/));
+  test('progress counts across iterations', () => { assert.equal(b.done, 2); assert.equal(b.total, 4); });
+  test('the next story is the first open one in reading order', () => assert.match(nextStory(b).story.text, /^Rename records/));
+  test('an empty file is an empty backlog', () => assert.deepEqual(parseBacklog(''), { iterations: [], done: 0, total: 0 }));
+  test('stories before any heading get a default iteration', () => assert.equal(parseBacklog('- [ ] lone story').iterations[0].title, 'Stories'));
+  test('CRLF files parse the same', () => assert.equal(parseBacklog(md.replace(/\n/g, '\r\n')).total, 4));
+}
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);

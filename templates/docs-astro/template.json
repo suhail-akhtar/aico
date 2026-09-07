@@ -62,5 +62,10 @@
       ]
     }
   ],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "Markdown pages with validated frontmatter",
+    "A generated sidebar, prev/next and an on-this-page list",
+    "Dark mode, mobile menu, nginx image"
+  ]
 }
