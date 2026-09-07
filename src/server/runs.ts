@@ -36,6 +36,7 @@ import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../sessi
 import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
 import { currentMiniApp } from '../session/projections.js';
 import { appStateLine, miniAppContext } from '../miniapps/context.js';
+import { learnFromTurn } from '../learning/index.js';
 import { backlogProgress, effectiveKind, hasProcess } from '../miniapps/store.js';
 import { appState } from '../miniapps/process.js';
 import type { PromptSection } from '../prompt/types.js';
@@ -800,9 +801,13 @@ export class RunManager {
       // After the turn too, so the meter drops now rather than at the start
       // of the next message — which is when the reader is looking at it.
       this.compactIfDue(run, settings, model, emit);
+      // What this turn taught, filed as proposals for the person to keep or
+      // dismiss. A projection over the log — no model call — and best effort.
+      const proposals = await learnFromTurn(run.session, run.cwd);
       emit('turn-end', {
         result,
         seq: run.session.length,
+        proposals,
         // Derived server-side and delivered with the turn, so the client
         // renders what the turn produced without a second round trip and
         // without a second copy of the derivation logic.

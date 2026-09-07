@@ -12,7 +12,7 @@ export {
 } from './history.js';
 export { handleSlashCommand } from './commands.js';
 export { createTokenTracker, estimateTokens } from './tokens.js';
-export { readMemory } from './memory/index.js';
+export { readMemory, loadMemory } from './memory/index.js';
 export { runHooks, freezeHooks, resetHooks } from './hooks.js';
 // Exports for the new-logic test suites
 export { getOpenTodoCount, todoWrite, todoRead, retireTodos } from './tools/todo.js';
@@ -269,6 +269,21 @@ export { projectRoot, currentApp } from './run-context.js';
 export { servedArtifacts } from './verification.js';
 export { gateChecks } from './tools/run-checks.js';
 export { deployKey, toolAvailable, missingRequirements, deployApp, deployState } from './apps/deploy.js';
+export {
+  extractFromTurn, fromFeedback, fromSteering, fromChecksFix, fromVerifyFix, fromRepeatedErrors,
+  dedupe as dedupeProposals, normaliseError, overlap as wordOverlap, PROPOSAL_TTL_MS, DEDUPE_OVERLAP,
+} from './learning/extract.js';
+export {
+  listProposals, addProposals, setProposalStatus, adoptProposal, markAdoptedByContent, proposalsFile, projectKey, MAX_OPEN,
+} from './learning/proposals.js';
+export {
+  readUserModel, writeUserModel, addUserModelLine, renderUserModel, capUserModel, fromUserSignals, userModelPath,
+  USER_MODEL_MAX_LINES, USER_MODEL_MAX_CHARS,
+} from './learning/user-model.js';
+export { readDecisions, countDecisions, seedDecisions, appendDecision, decisionsNote, decisionsPath, DECISIONS_BULLET } from './project/decisions.js';
+export { recommendedAgentModels, unsetCheapRoles, CHEAP_ROLES } from './agents/economy.js';
+export { CHEAP_MODELS, familyOfModel } from '../shared/models.js';
+export { suggestKnowledge } from '../shared/knowledge-suggest.js';
 export { exportSkill } from './skills/import.js';
 export { listDirectory } from './tools/ls.js';
 export { globFiles } from './tools/glob.js';

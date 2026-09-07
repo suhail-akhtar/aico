@@ -45,6 +45,7 @@ import { closeDatabase, describe as describeTables } from '../miniapps/data.js';
 import { appState, startApp, stopApp, type RunningApp } from '../miniapps/process.js';
 import { getTemplate, instantiateTemplate, nodeSatisfies, renderCatalogue } from '../apps/templates.js';
 import { deployApp, deployState } from '../apps/deploy.js';
+import { seedDecisions } from '../project/decisions.js';
 
 export interface AppManageInput {
   action: 'list' | 'create' | 'describe' | 'tables' | 'delete' | 'templates' | 'start' | 'stop' | 'status' | 'deploy';
@@ -240,6 +241,9 @@ export async function executeAppManage(input: AppManageInput): Promise<string> {
           ...(sessionId ? { sessionId } : {}),
         }, settings, cwd);
         const dir = miniAppDir(app.slug, settings, cwd);
+        // A bare page app has no template to seed its notes; the decisions
+        // file is the one that must exist, because compaction points at it.
+        seedDecisions(dir, app.title);
         return withNotice(authoringContract(app.slug, dir, await appUrl(app.slug)));
       }
 

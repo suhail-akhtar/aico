@@ -324,6 +324,24 @@ export const api = {
   /** What an app can start from: the shipped templates plus the user's and the project's. */
   templates: () => get<{ templates: AppTemplate[] }>('apps/templates'),
 
+  /** A copy of an app under a new name: files and profiles, not its data or install. */
+  duplicateApp: (slug: string, title?: string) =>
+    post<{ slug: string; app: MiniAppSummary; from: string }>('apps/duplicate', { slug, ...(title ? { title } : {}) }),
+
+  /** What the last turns proposed, for the Suggested section. Nothing here is in effect. */
+  learning: (cwd?: string, status: 'open' | 'adopted' | 'dismissed' | 'all' = 'open') =>
+    get<{ cwd: string; project: Proposal[]; global: Proposal[] }>(
+      `learning/list?status=${status}${cwd ? `&cwd=${encodeURIComponent(cwd)}` : ''}`),
+  /** Keep a proposal, with edits: writes knowledge, a profile fact, or a line about the user. */
+  adoptProposal: (cwd: string | undefined, id: string, edits: { trigger?: string; content?: string; scope?: 'project' | 'global' }) =>
+    post<{ ok: true; wrote: string }>('learning/adopt', { cwd, id, ...edits }),
+  dismissProposal: (cwd: string | undefined, id: string) =>
+    post<{ ok: true; id: string }>('learning/dismiss', { cwd, id }),
+
+  /** Which cheap model the read-only sub-agent roles could run on, for the model in use. */
+  agentRecommendation: (model?: string) =>
+    get<AgentRecommendation>(`agents/recommendation${model ? `?model=${encodeURIComponent(model)}` : ''}`),
+
   /** Run the app's own deploy script. A missing requirement answers 400 with `missing`. */
   deployApp: (slug: string, target?: string) =>
     post<{ deploy: MiniAppProcess }>('apps/deploy', { slug, ...(target ? { target } : {}) }),
@@ -732,6 +750,31 @@ export interface AppTemplate {
   run?: { install?: string; dev?: string };
   deploy?: Array<{ id: string; label: string; requires?: string[] }>;
   source: 'bundled' | 'user' | 'project';
+}
+
+/** A lesson the log proposed, waiting for a person. Mirrors `learning/extract` on the server. */
+export interface Proposal {
+  id: string;
+  kind: 'knowledge' | 'profile' | 'user';
+  trigger?: string;
+  content: string;
+  why: string;
+  needsEdit: boolean;
+  evidence: { sessionId: string; seqs: number[]; turn?: number };
+  scope: 'project' | 'global';
+  status: 'open' | 'adopted' | 'dismissed';
+  createdAt: number;
+  expiresAt: number;
+}
+
+/** Which cheap model the read-only sub-agent roles could run on. */
+export interface AgentRecommendation {
+  workModel: string;
+  family?: string;
+  cheap?: string;
+  agentModels: Record<string, string>;
+  alreadySet: string[];
+  roles: Array<{ role: string; why: string }>;
 }
 
 /** Where a profile fact came from; a person's word outranks everything else. */

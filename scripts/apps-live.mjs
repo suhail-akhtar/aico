@@ -161,6 +161,21 @@ try {
     check(fs.existsSync(path.join(dir, '.aico', 'profile.json')), 'the profile lives in the app’s .aico/profile.json');
   }
 
+  console.log('\n-- learning and economy routes answer on a real server --');
+  {
+    const dir = path.join(workspace, 'miniapps', slug);
+    const list = await api(`learning/list?cwd=${encodeURIComponent(dir)}`);
+    check(list.status === 200 && Array.isArray(list.json?.project) && Array.isArray(list.json?.global), 'GET learning/list answers with project and global lists');
+    const gone = await post('learning/dismiss', { cwd: dir, id: 'no-such-proposal' });
+    check(gone.status === 404, 'dismissing an unknown proposal is a 404');
+    const rec = await api('agents/recommendation?model=claude-sonnet-5');
+    check(rec.status === 200 && rec.json?.cheap === 'claude-haiku-4-5' && rec.json?.agentModels?.explore === 'claude-haiku-4-5', `the sub-agent recommendation comes from the shared table (${rec.json?.cheap})`);
+    const dup = await post('apps/duplicate', { slug, title: 'Reading Log Two' });
+    check(dup.status === 200 && dup.json?.slug === 'reading-log-two' && dup.json?.app?.kind === 'page', `duplicate makes a copy under the new name (${dup.text.slice(0, 60)})`);
+    check(fs.existsSync(path.join(workspace, 'miniapps', 'reading-log-two', 'public', 'index.html')) && !fs.existsSync(path.join(workspace, 'miniapps', 'reading-log-two', 'data.sqlite')), 'with the files and without the database');
+    await post('apps/delete', { slug: 'reading-log-two' });
+  }
+
   console.log('\n-- a page app has no process; the session route rejoins; delete removes --');
   {
     const run = await post('apps/run', { slug, action: 'start' });

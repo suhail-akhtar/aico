@@ -60,6 +60,10 @@ import {
 import { installApp, runningApps, startApp, stopAllApps, stopApp, subscribeToApps } from '../miniapps/process.js';
 import { getTemplate, instantiateTemplate, listTemplates, nodeSatisfies } from '../apps/templates.js';
 import { deployApp, deployState } from '../apps/deploy.js';
+import { markAdoptedByContent } from '../learning/proposals.js';
+import { proposeUserSignals } from '../learning/index.js';
+import { createMiniApp, slugify } from '../miniapps/store.js';
+import { cp } from 'fs/promises';
 import { closeDatabase } from '../miniapps/data.js';
 import { setWakeDelivery } from '../work/watchers.js';
 
@@ -495,6 +499,46 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         return;
       }
       send(res, 200, { deploy: started.record });
+      return;
+    }
+
+    if (route === 'apps/duplicate' && req.method === 'POST') {
+      /*
+        A copy of an app under a new name: same kind, template, run and deploy
+        profiles, every file but the install, the build output and the
+        database. The commonest reason is "make me one like that but for X",
+        and a copy that carried the first app's records would answer the wrong
+        question.
+      */
+      const body = await readJson(req) as { slug?: string; title?: string };
+      if (!body.slug) { send(res, 400, { error: 'slug required' }); return; }
+      const live = await loadSettings();
+      const source = await getMiniApp(body.slug, live, cwd);
+      if (!source) { send(res, 404, { error: `no app "${body.slug}"` }); return; }
+      const title = body.title?.trim() || `${source.title} copy`;
+      const made = await createMiniApp({
+        title,
+        ...(source.description ? { description: source.description } : {}),
+        ...(source.kind ? { kind: source.kind } : {}),
+        ...(source.category ? { category: source.category } : {}),
+        ...(source.template ? { template: source.template } : {}),
+        ...(source.run ? { run: source.run } : {}),
+        ...(source.deploy ? { deploy: source.deploy } : {}),
+      }, live, cwd);
+      const from = miniAppDir(source.slug, live, cwd);
+      const to = miniAppDir(made.slug, live, cwd);
+      await cp(from, to, {
+        recursive: true,
+        force: false,
+        errorOnExist: false,
+        filter: (src) => {
+          const base = path.basename(src);
+          return !['app.json', 'node_modules', '.next', '.astro', '.expo', 'dist', 'coverage', 'data', 'data.sqlite', 'data.sqlite-wal', 'data.sqlite-shm', '.env', '.env.local'].includes(base);
+        },
+      });
+      const app = await getMiniApp(made.slug, live, cwd);
+      send(res, 200, { slug: made.slug, app: app ? { ...app, kind: effectiveKind(app), backlog: await backlogProgress(to) } : made, from: slugify(source.slug) });
+      announceApps();
       return;
     }
 
@@ -1159,6 +1203,8 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           content,
           ...(projectRoot ? { projectRoot } : {}),
         });
+        // A proposal that said the same thing is now adopted, not still waiting.
+        markAdoptedByContent(projectRoot ?? await resolveCwd(sessionId), trigger, content);
         send(res, 200, { ok: true, id: slug || 'entry', path: file, scope: projectRoot ? 'project' : 'global' });
         return;
       }
@@ -1377,6 +1423,8 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   const url = `http://127.0.0.1:${boundPort}/?token=${token}`;
 
   await reconcileMiniApps(boundPort);
+  // Once per start: what repeats across projects becomes a global proposal.
+  proposeUserSignals(await loadSettings(), cwd);
 
   if (opts.open) openBrowser(url);
 

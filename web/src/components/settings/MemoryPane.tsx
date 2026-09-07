@@ -17,6 +17,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, type MemorySummary } from '../../api';
+import { SuggestedProposals } from './SuggestedProposals';
 
 type Scope = 'all' | 'global' | 'project' | 'session';
 
@@ -60,6 +61,8 @@ export function MemoryPane(): React.ReactElement {
 
   return (
     <div className="space-y-4">
+      <SuggestedProposals />
+
       <section>
         <h3 className="text-[13px] font-medium text-aico-primary">Remember something</h3>
         <p className="mt-0.5 text-[12px] text-aico-muted">

@@ -148,6 +148,13 @@ import {
   detectStack, forgetCommand, emptyProfile, profilePath, COMMAND_NAMES, PROFILE_RENDER_MAX,
   observeCommand, installProfileObserver, detectChecksFor, projectRoot, currentApp, servedArtifacts, gateChecks,
   deployKey, toolAvailable, missingRequirements, deployApp, deployState, EventHub,
+  extractFromTurn, fromFeedback, fromSteering, fromChecksFix, fromVerifyFix, fromRepeatedErrors,
+  dedupeProposals, normaliseError, wordOverlap, PROPOSAL_TTL_MS,
+  listProposals, addProposals, setProposalStatus, adoptProposal, markAdoptedByContent, proposalsFile, MAX_OPEN,
+  readUserModel, writeUserModel, addUserModelLine, renderUserModel, capUserModel, fromUserSignals, userModelPath,
+  USER_MODEL_MAX_LINES, USER_MODEL_MAX_CHARS,
+  readDecisions, countDecisions, seedDecisions, appendDecision, decisionsNote, DECISIONS_BULLET,
+  recommendedAgentModels, unsetCheapRoles, CHEAP_ROLES, CHEAP_MODELS, familyOfModel, suggestKnowledge, loadMemory,
   superviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
@@ -12638,6 +12645,213 @@ console.log('  -- A topic stream sends a full frame first, then only what moved 
   hub.subscribeTopic('apps', dead);
   hub.publishTopic('apps', 'changed', {});
   assert(hub.topicSize('apps') === 0, 'a dead socket is dropped on the first failed write');
+}
+
+// ═══════════════════════════════════════════════════════════
+// Learning: proposals from evidence, the user as the gate
+// ═══════════════════════════════════════════════════════════
+
+console.log('  -- Each extractor reads one kind of evidence from the log --');
+{
+  const s = mkSession('learn-1');
+  // Turn 1: a task, a reply, a 👎 with a note.
+  s.append('turn/start', { turn: 1 });
+  const ask = s.append('user/message', { turn: 1, content: 'Add a CSV export button to the invoices page', source: { kind: 'human' } });
+  s.append('step/start', { turn: 1, step: 1 });
+  const reply = s.append('assistant/message', { turn: 1, step: 1, content: 'Done.' });
+  s.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  s.append('message/feedback', { targetSeq: reply.seq, rating: 'down', note: 'Never use alert() for confirmations; use the in-page dialog.' });
+  const fb = fromFeedback(s, 1, 1000);
+  assert(fb.length === 1 && fb[0].kind === 'knowledge' && !fb[0].needsEdit, 'a 👎 with a note is a knowledge proposal in the user’s words');
+  assert(/CSV export button invoices page/.test(fb[0].trigger), `the trigger comes from what was asked (${fb[0].trigger})`);
+  assert(fb[0].content === 'Never use alert() for confirmations; use the in-page dialog.', 'the content is the note, verbatim');
+  assert(fb[0].evidence.seqs.includes(reply.seq) && fb[0].evidence.turn === 1 && fb[0].expiresAt === 1000 + PROPOSAL_TTL_MS, 'with evidence and a thirty-day expiry');
+  s.append('message/feedback', { targetSeq: reply.seq, rating: 'up' });
+  assert(fromFeedback(s, 1).length === 0, 'a later rating withdraws it');
+  void ask;
+
+  // Turn 2: a steer mid-turn, a checks gate then a pass, a repeated error.
+  s.append('turn/start', { turn: 2 });
+  s.append('user/message', { turn: 2, content: 'Refactor the invoice totals into a helper', source: { kind: 'human' } });
+  s.append('step/start', { turn: 2, step: 1 });
+  s.append('tool/call', { turn: 2, step: 1, callId: 'c1', name: 'Bash', arguments: '{"command":"pnpm test"}' });
+  s.append('tool/result', { turn: 2, step: 1, callId: 'c1', name: 'Bash', content: "'pnpm' is not recognized as an internal or external command", isError: true });
+  s.append('tool/call', { turn: 2, step: 1, callId: 'c2', name: 'Bash', arguments: '{"command":"pnpm test"}' });
+  s.append('tool/result', { turn: 2, step: 1, callId: 'c2', name: 'Bash', content: "'pnpm' is not recognized as an internal or external command", isError: true });
+  s.append('user/message', { turn: 2, content: 'Keep the money in integer cents, never floats.', source: { kind: 'human' } });
+  s.append('step/start', { turn: 2, step: 2 });
+  s.append('user/message', { turn: 2, content: 'The project\'s checks are failing:\n\n  typecheck — npm run typecheck\nsrc/invoices.ts(12,5): error TS2322: Type \'string\' is not assignable to type \'number\'.\n\nFix these and run RunChecks again.', source: { kind: 'plugin', plugin: 'checks-gate' } });
+  s.append('tool/call', { turn: 2, step: 2, callId: 'c3', name: 'Edit', arguments: '{"file_path":"src/invoices.ts"}' });
+  s.append('tool/result', { turn: 2, step: 2, callId: 'c3', name: 'Edit', content: 'ok' });
+  s.append('tool/call', { turn: 2, step: 2, callId: 'c4', name: 'RunChecks', arguments: '{}' });
+  s.append('tool/result', { turn: 2, step: 2, callId: 'c4', name: 'RunChecks', content: 'PASSED — 2 checks, all green.' });
+  s.append('tool/call', { turn: 2, step: 2, callId: 'c5', name: 'VerifyApp', arguments: '{"url":"http://localhost:3000/invoices"}' });
+  s.append('tool/result', { turn: 2, step: 2, callId: 'c5', name: 'VerifyApp', content: 'FAIL http://localhost:3000/invoices\nproblems:\n- TypeError: Cannot read properties of undefined (reading \'total\')' });
+  s.append('tool/call', { turn: 2, step: 2, callId: 'c6', name: 'VerifyApp', arguments: '{"url":"http://localhost:3000/invoices"}' });
+  s.append('tool/result', { turn: 2, step: 2, callId: 'c6', name: 'VerifyApp', content: 'PASS http://localhost:3000/invoices — 3 checks' });
+  s.append('turn/end', { turn: 2, reason: { kind: 'completed' } });
+
+  const steer = fromSteering(s, 2);
+  assert(steer.length === 1 && steer[0].needsEdit && steer[0].content === 'Keep the money in integer cents, never floats.', 'a human message after work began is a steer, marked as needing an edit');
+  assert(/Refactor invoice totals/.test(steer[0].trigger), `its trigger is the original request (${steer[0].trigger})`);
+  const fix = fromChecksFix(s, 2);
+  assert(fix.length === 1 && /typecheck fails/.test(fix[0].trigger) && /invoices\.ts/.test(fix[0].content), `a checks gate followed by a pass names the check and the file (${fix[0]?.trigger})`);
+  const vfix = fromVerifyFix(s, 2);
+  assert(vfix.length === 1 && /TypeError/.test(vfix[0].content) && /browser check fails/.test(vfix[0].trigger), 'a browser failure that then passed is a lesson by problem class');
+  const rep = fromRepeatedErrors(s, 2);
+  assert(rep.length === 1 && rep[0].kind === 'profile' && rep[0].patch.packageManager === 'npm' && /pnpm/.test(rep[0].content), 'a repeated "pnpm is not recognized" is a profile proposal to use npm');
+  assert(normaliseError('Error at C:\\x\\y.ts:12 (hash a1b2c3d4e5)') === normaliseError('Error at /a/b.ts:99 (hash ffffffffff)'), 'errors normalise across paths, numbers and hashes');
+
+  const all = extractFromTurn(s, 2, [{ id: 'k', trigger: 'Refactor invoice totals helper', content: 'Keep the money in integer cents, never floats.', path: '' }]);
+  assert(!all.some(p => p.content === 'Keep the money in integer cents, never floats.'), 'a proposal already in knowledge is dropped');
+  assert(all.some(p => p.kind === 'profile') && all.some(p => /typecheck/.test(p.trigger ?? '')), 'the others survive dedupe');
+  const twice = dedupeProposals([...fix, ...fix]);
+  assert(twice.length === 1, 'the same proposal twice is one');
+  assert(wordOverlap('invoices export button page', 'invoices export button page') === 1 && wordOverlap('alpha beta', 'gamma delta') === 0, 'overlap is by meaningful words');
+  assert(fromSteering(mkSession('x'), 1).length === 0 && fromChecksFix(s, 1).length === 0 && fromVerifyFix(s, 1).length === 0 && fromRepeatedErrors(s, 1).length === 0, 'extractors are quiet without their evidence');
+}
+
+console.log('  -- The proposal store caps, expires, dedupes and adopts --');
+{
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-learn-'));
+  const file = proposalsFile(cwd);
+  assert(file.startsWith(aicoHome()) && /learning[\\/]projects[\\/]/.test(file), 'proposals live under ~/.aico/learning/projects/<key>/');
+  // Distinct words per proposal: dedupe is word overlap, and a hundred entries
+  // that differ only by a number are, to it, one entry.
+  const VOCAB = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar', 'papa', 'quebec', 'romeo', 'sierra', 'tango', 'uniform', 'victor', 'whiskey', 'xray', 'yankee', 'zulu', 'amber', 'basalt', 'cobalt', 'dune', 'ember', 'fjord', 'glacier', 'harbor', 'island', 'jungle', 'lagoon', 'meadow', 'nebula', 'orchard', 'prairie', 'quarry', 'ridge', 'summit', 'tundra', 'valley', 'willow', 'zenith'];
+  // A per-entry letter tag makes every word unique to its entry, so overlap
+  // between two different entries is exactly zero.
+  const tag = (i) => 'q' + i.toString(26).split('').map(c => String.fromCharCode(97 + parseInt(c, 26))).join('');
+  const word = (i, k) => `${tag(i)}${VOCAB[k % VOCAB.length]}`;
+  const mk = (i, over = {}) => ({
+    id: `knowledge-${String(i).padStart(10, '0')}`, kind: 'knowledge',
+    trigger: `${word(i, 1)} ${word(i, 2)} ${word(i, 3)}`, content: `${word(i, 4)} ${word(i, 5)} ${word(i, 6)} ${word(i, 7)}`,
+    why: 'test', needsEdit: false, evidence: { sessionId: 's', seqs: [i] }, scope: 'project', status: 'open', createdAt: 1000 + i, expiresAt: 1000 + i + PROPOSAL_TTL_MS, ...over,
+  });
+  assert(addProposals(cwd, [mk(1), mk(2)], 2000) === 2, 'two new proposals are added');
+  assert(addProposals(cwd, [mk(1)], 2000) === 0, 'the same id again is not');
+  assert(addProposals(cwd, [{ ...mk(1), id: 'knowledge-other' }], 2000) === 0, 'nor the same words under another id');
+  assert(listProposals(cwd, 'open', 2000).length === 2, 'both are open');
+  const expired = mk(9, { createdAt: 10, expiresAt: 100 });
+  addProposals(cwd, [expired], 2000);
+  assert(!listProposals(cwd, 'open', 2000).some(p => p.id === expired.id), 'an already-expired proposal is dropped on read');
+  const many = Array.from({ length: 30 }, (_, i) => mk(100 + i));
+  addProposals(cwd, many, 3000);
+  assert(listProposals(cwd, 'open', 3000).length === MAX_OPEN, `open proposals are capped at ${MAX_OPEN}`);
+  assert(!listProposals(cwd, 'open', 3000).some(p => p.id === 'knowledge-0000000001'), 'the oldest are the ones dropped');
+  const target = listProposals(cwd, 'open', 3000)[0];
+  const adopted = await adoptProposal(cwd, target.id, { trigger: 'edited trigger words', content: 'edited content' });
+  assert(adopted.ok && /knowledge/.test(adopted.wrote) && fs.readFileSync(adopted.wrote, 'utf8').includes('edited content'), 'adopting a knowledge proposal writes the entry with the person’s edits');
+  assert(listProposals(cwd, 'adopted', 3000).some(p => p.id === target.id), 'and marks it adopted');
+  fs.rmSync(adopted.wrote);
+  const second = listProposals(cwd, 'open', 3000)[0];
+  assert(setProposalStatus(cwd, second.id, 'dismissed')?.status === 'dismissed' && !listProposals(cwd, 'open', 3000).some(p => p.id === second.id), 'dismissing removes it from the open list and keeps the decision');
+  const third = listProposals(cwd, 'open', 3000)[0];
+  assert(markAdoptedByContent(cwd, third.trigger, third.content) === 1 && listProposals(cwd, 'adopted', 3000).some(p => p.id === third.id), 'saving matching knowledge by hand adopts the proposal');
+  assert((await adoptProposal(cwd, 'nope')).ok === false, 'adopting an unknown id is refused');
+  // A profile proposal writes a user-rank fact.
+  addProposals(cwd, [{ ...mk(500), kind: 'profile', trigger: undefined, content: 'pnpm is not installed; use npm', patch: { packageManager: 'npm' } }], 4000);
+  const prof = listProposals(cwd, 'open', 4000).find(p => p.kind === 'profile');
+  const adoptedProfile = await adoptProposal(cwd, prof.id);
+  assert(adoptedProfile.ok && loadProfile(cwd).packageManager?.value === 'npm' && loadProfile(cwd).packageManager?.source === 'user', 'adopting a profile proposal writes the fact at user rank');
+  fs.rmSync(cwd, { recursive: true, force: true });
+  fs.rmSync(path.dirname(file), { recursive: true, force: true });
+}
+
+console.log('  -- USER.md is capped at write and at render, and grows only by adoption --');
+{
+  const before = fs.existsSync(userModelPath()) ? fs.readFileSync(userModelPath(), 'utf8') : null;
+  try {
+    writeUserModel([]);
+    assert(readUserModel().length === 0 && renderUserModel() === '', 'empty is empty');
+    addUserModelLine('Prefers TypeScript for new projects.');
+    addUserModelLine('Prefers TypeScript for new projects.');
+    assert(readUserModel().length === 1, 'the same line twice is one');
+    // Each line its own words: the store treats near-identical lines as one.
+    const NOUNS = ['harbor', 'glacier', 'orchard', 'quarry', 'meadow', 'summit', 'lagoon', 'prairie', 'tundra', 'willow', 'nebula', 'ember', 'fjord', 'ridge', 'valley', 'island', 'jungle', 'dune', 'basalt', 'cobalt'];
+    for (let i = 0; i < 20; i++) addUserModelLine(`Prefers ${NOUNS[i]} over ${NOUNS[(i + 5) % 20]} when choosing ${NOUNS[(i + 9) % 20]}`);
+    assert(readUserModel().length === USER_MODEL_MAX_LINES, `never more than ${USER_MODEL_MAX_LINES} lines (${readUserModel().length})`);
+    const longs = Array.from({ length: 12 }, (_, i) => `Line ${i} ${'x'.repeat(150)} ${i * 97}`);
+    const capped = capUserModel(longs);
+    assert(capped.reduce((n, l) => n + l.length + 3, 0) <= USER_MODEL_MAX_CHARS && capped.length < 12, 'the character budget drops the oldest lines');
+    fs.writeFileSync(userModelPath(), `# About the user\n\n${longs.map(l => `- ${l}`).join('\n')}\n`);
+    assert(renderUserModel().length <= USER_MODEL_MAX_CHARS + 40, 'a hand-edited file is capped again at render');
+    const memory = await loadMemory({ types: ['user-model'], forceRefresh: true });
+    assert(memory.sections.length === 1 && memory.sections[0].type === 'user-model' && /About the user/.test(memory.formatted), 'USER.md loads as its own memory type');
+    const doc = await buildSystemPrompt('mock-model');
+    const sec = doc.get('user_model');
+    assert(sec && sec.order === 849 && sec.reprise === false, 'and renders in the prefix at order 849, never reprised');
+  } finally {
+    if (before === null) fs.rmSync(userModelPath(), { force: true }); else fs.writeFileSync(userModelPath(), before);
+  }
+  // Cross-project signals, over fake projects.
+  const a = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-sig-a-'));
+  const b = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-sig-b-'));
+  await updateProfile(a, { stack: { value: 'Next.js + TypeScript', source: 'detected' } });
+  await updateProfile(b, { stack: { value: 'Next.js + TypeScript (web-saas-next)', source: 'template' } });
+  const signals = fromUserSignals([a, b], [
+    { projectRoot: a, trigger: 'writing tests', content: 'Use vitest, never jest.' },
+    { projectRoot: b, trigger: 'writing tests', content: 'Use vitest, never jest.' },
+    { projectRoot: a, trigger: 'deploy', content: 'Only in project a.' },
+  ], 5000, []);
+  assert(signals.some(p => /Prefers Next\.js \+ TypeScript/.test(p.content) && /2 projects/.test(p.content)), 'a stack seen in two profiles becomes a global proposal');
+  assert(signals.some(p => /vitest, never jest/.test(p.content)), 'a correction kept in two projects becomes a line about the user');
+  assert(!signals.some(p => /Only in project a/.test(p.content)), 'one project is not a habit');
+  assert(signals.every(p => p.kind === 'user' && p.scope === 'global' && p.status === 'open'), 'all of them are global user proposals');
+  assert(fromUserSignals([a, b], [], 5000, ['Prefers Next.js + TypeScript for new projects (seen in 2 projects).']).length === 0, 'a line already on file is not proposed again');
+  fs.rmSync(a, { recursive: true, force: true }); fs.rmSync(b, { recursive: true, force: true });
+}
+
+console.log('  -- Decisions survive compaction, and the summary says where they are --');
+{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-decisions-'));
+  assert(countDecisions(root) === 0 && decisionsNote(root) === '', 'no file, no note');
+  assert(seedDecisions(root, 'Shop') === true && seedDecisions(root) === false, 'seeding is idempotent');
+  appendDecision(root, 'SQLite over Postgres — one writer is enough.');
+  appendDecision(root, '- Hono over Express — Web-standard requests.');
+  assert(readDecisions(root).length === 2 && /Hono over Express/.test(readDecisions(root)[1]), 'lines append as bullets');
+  assert(/Decisions on file: \.aico\/decisions\.md \(2 lines\)/.test(decisionsNote(root)), `the note counts them (${decisionsNote(root)})`);
+  assert(/append one line to `\.aico\/decisions\.md`/.test(DECISIONS_BULLET) && DECISIONS_BULLET.length < 320, 'the prefix bullet is one sentence');
+  const doc = await buildSystemPrompt('mock-model');
+  assert(doc.get('decisions')?.body.includes('.aico/decisions.md') && doc.get('decisions')?.reprise !== true, 'and it is its own small prefix section, not reprised');
+
+  // Compaction: the dropped turns are spilled to a report and the summary names the file.
+  const s = new Session({ id: 'compact-spill', cwd: root, startedAt: Date.now() });
+  for (let t = 1; t <= 6; t++) {
+    s.append('turn/start', { turn: t });
+    s.append('user/message', { turn: t, content: `Question ${t}: ${'detail '.repeat(300)}`, source: { kind: 'human' } });
+    s.append('step/start', { turn: t, step: 1 });
+    s.append('assistant/message', { turn: t, step: 1, content: `Answer ${t} with the exact error TS${1000 + t} ${'words '.repeat(300)}` });
+    s.append('turn/end', { turn: t, reason: { kind: 'completed' } });
+  }
+  const settings = { workspace: { path: path.join(root, 'ws') }, autoCompact: { enabled: true, keepRecentTurns: 2 } };
+  const result = maybeCompactSession(s, settings, undefined, { force: true });
+  assert(result.compacted, `the session compacts (${result.reason ?? 'ok'})`);
+  // The summary rides as a compaction-sourced user message; the
+  // compaction/summary event carries only the range it replaced.
+  const summary = s.events.find(e => e.type === 'user/message' && e.data.source?.kind === 'compaction');
+  const text = JSON.stringify(summary?.data?.content ?? '');
+  assert(/Decisions on file: \.aico\/decisions\.md \(2 lines\)/.test(text), 'the summary names the decisions file');
+  const content = String(summary?.data?.content ?? '');
+  const reportPath = /Full detail of the compacted turns: (.+?\.md)/.exec(content)?.[1];
+  assert(reportPath && fs.existsSync(reportPath), `and the dropped turns are on disk (${reportPath})`);
+  assert(reportPath && /TS1001/.test(fs.readFileSync(reportPath, 'utf8')), 'with the exact text the summary dropped');
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+console.log('  -- The sub-agent recommendation comes from the naming table --');
+{
+  const rec = recommendedAgentModels('claude-sonnet-5', {});
+  assert(rec.family === 'anthropic' && rec.cheap === CHEAP_MODELS.anthropic, 'Claude work → Haiku for read-only roles');
+  assert(Object.keys(rec.agentModels).length === CHEAP_ROLES.length && rec.agentModels.explore === 'claude-haiku-4-5' && rec.alreadySet.length === 0, 'every read-only role gets the cheap model');
+  const partial = recommendedAgentModels('gpt-5.6-terra', { agentModels: { review: 'gpt-4o' } });
+  assert(partial.cheap === 'gpt-4o-mini' && partial.alreadySet.join() === 'review', 'a role the user set is reported, not overwritten');
+  assert(recommendedAgentModels('gpt-4o-mini', {}).agentModels.explore === undefined, 'no recommendation when the work model is already the cheap one');
+  assert(recommendedAgentModels('mystery-model', {}).cheap === undefined, 'an unknown family recommends nothing');
+  assert(recommendedAgentModels('some/routed-model', {}).cheap === CHEAP_MODELS.openrouter, 'a slash means OpenRouter');
+  assert(unsetCheapRoles({}).length === CHEAP_ROLES.length && unsetCheapRoles({ agentModels: { default: 'x' } }).length === 0, 'a default covers every role');
+  assert(familyOfModel('kimi-k3') === 'kimi' && familyOfModel('glm-4.6') === 'zai' && familyOfModel('deepseek-v4') === 'deepseek', 'families from names');
+  assert(suggestKnowledge('please add a button to the page', 'note').trigger === 'add button page', 'the shared suggestion helper drops filler');
 }
 
 clearInterval(keepAliveForAbandonedTools);

@@ -1,4 +1,5 @@
-export type MemoryType = 'user' | 'parent' | 'rules' | 'project' | 'local';
+/** `user-model` is `~/.aico/USER.md`: lines about the user, written by adoption, capped small. */
+export type MemoryType = 'user' | 'user-model' | 'parent' | 'rules' | 'project' | 'local';
 
 export interface MemoryEntry {
   type: MemoryType;
