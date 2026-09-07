@@ -63,5 +63,10 @@
       ]
     }
   ],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "A tool-calling agent loop over any OpenAI-compatible model",
+    "Conversations in SQLite; answers streamed over SSE",
+    "Tested with a scripted model — no key needed"
+  ]
 }

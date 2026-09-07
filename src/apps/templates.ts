@@ -47,6 +47,8 @@ export interface TemplateManifest {
   kind: Exclude<MiniAppKind, 'nextjs'>;
   /** One or two sentences for the card. */
   summary: string;
+  /** Three short lines of what the app arrives with, for the gallery card. */
+  features?: string[];
   tags?: string[];
   /** Words in a brief that suggest this template. */
   match?: string[];
@@ -188,14 +190,35 @@ export function getTemplate(id: string, cwd = process.cwd()): Template | undefin
  * model call would be spent before the app exists. Ties keep catalogue order.
  */
 export function suggestTemplates(brief: string, templates = listTemplates()): Template[] {
-  const words = new Set(meaningfulWords(brief));
+  const words = new Set([...meaningfulWords(brief)].map(stem));
   if (words.size === 0) return [];
-  const scored = templates.map(t => {
-    const vocabulary = [...(t.match ?? []), ...(t.tags ?? [])].map(w => w.toLowerCase());
-    const hits = vocabulary.filter(w => words.has(w)).length;
-    return { t, hits };
-  });
-  return scored.filter(s => s.hits > 0).sort((a, b) => b.hits - a.hits).map(s => s.t);
+  const scored = templates.map(t => ({ t, score: matchScore(t, words).score }));
+  return scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score).map(s => s.t);
+}
+
+/** A crude singular: "invoices" and "invoice" are one word to the ranking. */
+export function stem(word: string): string {
+  const w = word.toLowerCase();
+  if (w.length > 4 && w.endsWith('ies')) return `${w.slice(0, -3)}y`;
+  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
+  return w;
+}
+
+/**
+ * How well a template fits a set of brief words, and which entries matched.
+ *
+ * `match` words are what the template author said the template is *for*;
+ * they count double. Tags are what it is made of ("node", "page") and count
+ * once — a brief that says "page" is not asking for the page kind. A
+ * multi-word entry ("sign in", "web app") matches when all its words do.
+ */
+export function matchScore(t: TemplateManifest, words: Set<string>): { score: number; matched: string[] } {
+  const matched: string[] = [];
+  let score = 0;
+  const hit = (entry: string): boolean => entry.toLowerCase().split(/[\s-]+/).filter(Boolean).every(w => words.has(stem(w)));
+  for (const entry of t.match ?? []) if (hit(entry)) { score += 2; matched.push(entry); }
+  for (const entry of t.tags ?? []) if (hit(entry) && !matched.includes(entry)) { score += 1; matched.push(entry); }
+  return { score, matched };
 }
 
 /** The catalogue as the agent sees it: one line each, ≤20, suggestions first. */

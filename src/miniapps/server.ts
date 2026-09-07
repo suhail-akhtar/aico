@@ -90,6 +90,10 @@ export async function startMiniAppServer(
   const host = settings?.miniApps?.host ?? '127.0.0.1';
   const requestedPort = settings?.miniApps?.port
     ?? (opts.sisterPort ? opts.sisterPort + 1 : 0);
+  // The portal on its sister port may frame apps for the workspace preview.
+  if (opts.sisterPort) {
+    allowFramingFrom([`http://127.0.0.1:${opts.sisterPort}`, `http://localhost:${opts.sisterPort}`]);
+  }
 
   let port = requestedPort;
 
@@ -315,6 +319,19 @@ function isOwnOrigin(origin: string, port: number): boolean {
  * restricted expression subset, which is a poor trade when the origin is
  * already the boundary.
  */
+/**
+ * Who may frame an app: nobody, except the aico portal on its own port.
+ *
+ * The portal's workspace panel shows the app live beside the conversation.
+ * Framing is safe in that direction — a framed page cannot read its parent —
+ * and naming the portal's origin, rather than `*`, keeps every other site out.
+ * Set once when the host starts, from the port it was told is its sister.
+ */
+let frameAncestors = "'none'";
+export function allowFramingFrom(origins: string[]): void {
+  frameAncestors = origins.length ? origins.join(' ') : "'none'";
+}
+
 function contentSecurityPolicy(): Record<string, string> {
   return {
     'Content-Security-Policy': [
@@ -324,7 +341,7 @@ function contentSecurityPolicy(): Record<string, string> {
       "img-src 'self' data: blob:",
       "font-src 'self' data:",
       "connect-src 'self'",
-      "frame-ancestors 'none'",
+      `frame-ancestors ${frameAncestors}`,
       "base-uri 'none'",
       "form-action 'self'",
     ].join('; '),

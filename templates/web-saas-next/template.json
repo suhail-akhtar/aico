@@ -35,7 +35,25 @@
     "crm",
     "admin",
     "booking",
-    "marketplace"
+    "marketplace",
+    "sign in",
+    "sign up",
+    "customers",
+    "invoices",
+    "orders",
+    "billing",
+    "payments",
+    "team",
+    "multi-user",
+    "workspace",
+    "tenant",
+    "auth",
+    "members",
+    "projects",
+    "tasks",
+    "tickets",
+    "inventory",
+    "clients"
   ],
   "requires": {
     "node": ">=22.5.0"
@@ -71,5 +89,10 @@
       ]
     }
   ],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "Sign-up and sign-in with a signed HTTP-only cookie",
+    "An items feature end to end: page, server actions, data layer, tests",
+    "Tailwind tokens, standalone Docker image"
+  ]
 }

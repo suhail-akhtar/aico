@@ -15,6 +15,7 @@ import {
   DEFAULT_ROUTE, headerTitle, parseView, showsSessionTabs, withTab, type Route,
 } from './navigation';
 import { AppsPane } from './components/AppsPane';
+import { AppWorkspace } from './components/apps/AppWorkspace';
 import { MiniAppScope } from './components/MiniAppScope';
 import { ChatPane } from './components/ChatPane';
 import { Composer } from './components/Composer';
@@ -190,23 +191,32 @@ export function App(): React.ReactElement {
         </header>
 
         {onSessions && view === 'chat' && (
-          <>
-            {/* Above the transcript: the scope has to be readable before the
-                first message is, not discovered at the bottom of the page. */}
-            <MiniAppScope />
-            <ChatPane />
-            <SidePanels />
-            <GoalBar />
-            <ActivityLine />
-            {/*
-              Directly above the composer, because the turn is blocked on it and
-              the composer is where the eye already is. Below the transcript
-              rather than inside it: a prompt that scrolls away with the
-              conversation is a prompt that gets missed while a run waits.
-            */}
-            <PermissionPrompt />
-            <Composer />
-          </>
+          /*
+            A conversation about an app is a split: the chat on the left, the
+            app itself on the right — preview, backlog, decisions, files, logs.
+            The thing being built stays on screen while it is built. An
+            ordinary conversation has no right half; the panel renders nothing.
+          */
+          <div className="flex min-h-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col">
+              {/* Above the transcript: the scope has to be readable before the
+                  first message is, not discovered at the bottom of the page. */}
+              <MiniAppScope />
+              <ChatPane />
+              <SidePanels />
+              <GoalBar />
+              <ActivityLine />
+              {/*
+                Directly above the composer, because the turn is blocked on it and
+                the composer is where the eye already is. Below the transcript
+                rather than inside it: a prompt that scrolls away with the
+                conversation is a prompt that gets missed while a run waits.
+              */}
+              <PermissionPrompt />
+              <Composer />
+            </div>
+            <AppWorkspace />
+          </div>
         )}
         {onSessions && view === 'changes' && <ChangesPane />}
         {onSessions && view === 'trajectory' && <Trajectory />}

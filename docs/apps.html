@@ -86,19 +86,48 @@
       of instructions. A template copies in as files — nothing is generated — and every
       one carries a worked feature end to end, tests, a Dockerfile, and a short
       <code>AICO.md</code> written for the agent: what the app is, how it is laid out,
-      and what to copy for the next feature. Four ship today:
+      and what to copy for the next feature. Nine ship today:
     </p>
     <ul>
       <li><strong>page-records</strong> — a one-screen tool over the shared SQLite host: summary strip, table, form, two-step delete. Nothing to install; serving the moment it is saved.</li>
       <li><strong>landing-static</strong> — hero, features, pricing, FAQ, contact. Plain HTML and CSS, a strict content-security policy, and an nginx image.</li>
       <li><strong>api-service-hono</strong> — a JSON API on Hono and Node's built-in SQLite: typed routes with field-level errors, an OpenAPI document, health and readiness, tests that run the app in memory, a multi-stage image.</li>
       <li><strong>web-saas-next</strong> — Next.js App Router, Tailwind, node:sqlite, sign-up and sign-in with a signed cookie, an items feature from page to database to test, a standalone image.</li>
+      <li><strong>dashboard-next</strong>, <strong>docs-astro</strong>, <strong>cli-node</strong>, <strong>agent-service-node</strong>, <strong>mobile-expo</strong> — a metrics dashboard, a documentation site, a command-line tool, an LLM agent service, and an Expo app with a web preview.</li>
     </ul>
     <p>
       Your own templates go in <code>~/.aico/templates/&lt;id&gt;/</code> or a project's
       <code>.aico/templates/</code>; the later shelf wins by id. A template is a directory
-      with a <code>template.json</code> naming its kind, category, run commands and deploy
-      targets.
+      with a <code>template.json</code> naming its kind, category, run commands, deploy
+      targets, the words a brief would use for it, and what it ships.
+    </p>
+
+    <h2>Describe it first</h2>
+    <p>
+      <strong>Create app</strong> opens on one question: what do you want to build? As you
+      type, the templates are ranked against the answer — plurals folded, phrases such as
+      "sign in" matched whole, what a template is <em>for</em> weighted over what it is
+      made of — and the best match is named with the words that matched, along with a
+      name for the app taken from the brief. <em>See all templates</em> opens a gallery
+      with search, category chips and what each one ships; <em>Let the agent choose and
+      start</em> hands the brief to the agent with the catalogue. Whichever way, the brief
+      becomes the first message of the conversation, so the agent plans from your words
+      and not from a template's.
+    </p>
+
+    <h2>The app beside the chat</h2>
+    <p>
+      A conversation bound to an app shows the app on the right. The <strong>Preview</strong>
+      is the app itself, framed at desktop, tablet or phone width, reloaded when a turn
+      ends; the app host allows exactly one framer, the portal's own origin.
+      <strong>Backlog</strong> reads <code>.aico/backlog.md</code> — a progress bar, the
+      stories with their <em>Done when</em> lines, and the next one a click from being
+      built. <strong>Decisions</strong> is the file compaction keeps, <strong>Files</strong>
+      the app's tree with any file readable in place, <strong>Logs</strong> the process and
+      deploy output. Start, Stop, Deploy and Open sit in its header; the panel resizes,
+      hides to a strip, and remembers both. The agent knows all of this: the built-in
+      <code>app-platform</code> skill describes the kinds, templates, tools, gates and the
+      panel the person is looking at, and the first turn on an app points at it.
     </p>
 
     <h2>Four kinds, one screen</h2>
@@ -197,7 +226,9 @@
       lockfiles and put through typecheck, lint, test and build before a release; the host
       is exercised over real HTTP with a restart in the middle; the create, run, deploy and
       profile routes are driven against a real server on a scratch store; and the Apps
-      screen and its wizard are measured in a real browser.
+      screen, the describe-first wizard and the panel beside a bound conversation — the
+      framed preview, the backlog's next story, the files, the phone width — are measured
+      in a real browser.
     </p>
 
     <div class="next">

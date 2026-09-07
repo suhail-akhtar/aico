@@ -442,7 +442,13 @@ builds from there following the `app-plan`, `app-architecture`, `app-ship` and
 turn cannot end until the app was opened in a real browser and its own checks
 are green; **Deploy** on the card runs the script the app ships with. `/app
 templates`, `/app new <template> "<name>" --brief "…"`, or the **Apps** screen
-in the web portal. The agent's side is the `AppManage` tool.
+in the web portal, where **Create app** starts from a description — the
+templates are ranked against it as you type, the best match named with the
+words that matched — and a conversation bound to an app shows the app beside
+the chat: a live preview at desktop, tablet and phone widths, the backlog with
+the next story one click from being built, decisions, files and logs. The
+agent's side is the `AppManage` tool and the `app-platform` skill, which
+describes the whole platform in one page.
 
 **It learns, with you as the gate.** After each turn the log is read — no model
 call — for a rating with a note, a mid-turn steer, a fix after a failing check

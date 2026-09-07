@@ -40,5 +40,10 @@
     "deploy/*.mjs"
   ],
   "deploy": [],
-  "brief": "docs/EXTENDING.md"
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "A summary strip that leads with the numbers",
+    "A table, a form and a two-step delete over SQLite",
+    "No install, no build: saved is served"
+  ]
 }

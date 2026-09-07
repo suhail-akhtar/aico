@@ -324,6 +324,15 @@ export const api = {
   /** What an app can start from: the shipped templates plus the user's and the project's. */
   templates: () => get<{ templates: AppTemplate[] }>('apps/templates'),
 
+  /** Templates ranked against a brief, with the words that matched, and a suggested name. */
+  suggestApps: (brief: string) =>
+    get<{ suggested: Array<{ id: string; matched: string[] }>; name: string }>(`apps/suggest?brief=${encodeURIComponent(brief)}`),
+  /** Two levels of an app's files, for the workspace panel. */
+  appFiles: (slug: string) => get<{ files: Array<{ path: string; dir: boolean; size?: number }> }>(`apps/files?slug=${encodeURIComponent(slug)}`),
+  /** One text file inside an app, read-only. */
+  appFile: (slug: string, filePath: string) =>
+    get<{ path: string; content: string; truncated: boolean }>(`apps/file?slug=${encodeURIComponent(slug)}&path=${encodeURIComponent(filePath)}`),
+
   /** A copy of an app under a new name: files and profiles, not its data or install. */
   duplicateApp: (slug: string, title?: string) =>
     post<{ slug: string; app: MiniAppSummary; from: string }>('apps/duplicate', { slug, ...(title ? { title } : {}) }),
@@ -745,7 +754,10 @@ export interface AppTemplate {
   category: string;
   kind: AppKind;
   summary: string;
+  /** Three short lines of what the app arrives with. */
+  features?: string[];
   tags?: string[];
+  match?: string[];
   requires?: { node?: string };
   run?: { install?: string; dev?: string };
   deploy?: Array<{ id: string; label: string; requires?: string[] }>;
