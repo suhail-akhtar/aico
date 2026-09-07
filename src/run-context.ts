@@ -81,9 +81,41 @@ export interface RunContext {
    * nothing and let the platform decide". See `reasoning.ts`.
    */
   effort?: EffortChoice;
+  /**
+   * The app this run is building, when the session is bound to one.
+   *
+   * `dir` is what {@link projectRoot} answers with: the checks gate, RunChecks
+   * and the served-artifact gate all judge the app, not the workspace that
+   * happens to contain it. `url` is where it is (or will be) served — known up
+   * front for page and static apps, only once running for a process app.
+   */
+  app?: {
+    slug: string;
+    dir: string;
+    kind: string;
+    url?: string;
+  };
 }
 
 const storage = new AsyncLocalStorage<RunContext>();
+
+/**
+ * The directory whose checks and artifacts this run is judged by.
+ *
+ * The bound app's directory when there is one, the run's cwd otherwise. This is
+ * the seam that makes every stack verifiable: a Next.js app under
+ * `workspace/miniapps/<slug>/` has its own manifest, its own tests and its own
+ * server, and a gate that looked at the workspace root would find none of them.
+ */
+export function projectRoot(): string {
+  const ctx = storage.getStore();
+  return ctx?.app?.dir ?? ctx?.cwd ?? path.resolve(process.cwd());
+}
+
+/** The bound app, or undefined outside one. */
+export function currentApp(): RunContext['app'] {
+  return storage.getStore()?.app;
+}
 
 /**
  * Run `fn` with `context` visible to everything it awaits.

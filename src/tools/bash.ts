@@ -32,6 +32,12 @@ export interface BashInput {
   background?: boolean;
   /** Passed from settings — default bash timeout in seconds (0 = no timeout) */
   _defaultTimeout?: number;
+  /**
+   * Where to run it. Defaults to the run's directory; RunChecks passes a
+   * sub-project's root so a generated app's checks run where its manifest is.
+   * Internal — not part of the model-facing schema.
+   */
+  cwd?: string;
 }
 
 export interface BashResult {
@@ -259,7 +265,7 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
 
   return new Promise<BashResult>((resolve) => {
     const child = spawn(shell.command, shell.oneShot(input.command), {
-      cwd: currentCwd(),
+      cwd: input.cwd ?? currentCwd(),
       // Verbatim is a `cmd.exe` requirement, not a Windows one: applying it to
       // bash mangles every command containing a quote.
       windowsVerbatimArguments: shell.verbatim,

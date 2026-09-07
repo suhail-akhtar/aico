@@ -168,6 +168,43 @@ export async function handleSystemRoute(
   query: URLSearchParams = new URLSearchParams(),
 ): Promise<{ status: number; body: unknown } | undefined> {
   switch (route) {
+    // ── project profile ──────────────────────────────────────────────
+    //
+    // The commands a project is held to, with provenance, for the System
+    // screen's Commands table. A GET reads `?cwd=`; a POST sets one command
+    // (`{ cwd, name, command }`) at `user` rank — a person's word — or forgets
+    // one (`{ cwd, name, forget: true }`). The model never reaches this route:
+    // it corrects a command by running the right one, which the observer records.
+    case 'project/profile': {
+      const { loadProfile, forgetCommand, saveProfile, COMMAND_NAMES, checksFor } = await import('../project/profile.js');
+      const { default: path } = await import('path');
+      const cwdRaw = method === 'GET' ? query.get('cwd') : typeof body.cwd === 'string' ? body.cwd : undefined;
+      const cwd = path.resolve(cwdRaw || process.cwd());
+      if (method === 'GET') {
+        // Reading bootstraps the file from the manifest, so the table is never
+        // empty for a project that plainly has a package.json.
+        checksFor(cwd);
+        return { status: 200, body: { cwd, profile: loadProfile(cwd), names: COMMAND_NAMES } };
+      }
+      if (method !== 'POST') return { status: 405, body: { error: 'GET or POST' } };
+      const name = String(body.name ?? '');
+      if (!(COMMAND_NAMES as readonly string[]).includes(name)) return { status: 400, body: { error: `name must be one of ${COMMAND_NAMES.join(', ')}` } };
+      if (body.forget === true) {
+        const next = forgetCommand(loadProfile(cwd), name as typeof COMMAND_NAMES[number]);
+        await saveProfile(cwd, next);
+        return { status: 200, body: { cwd, profile: next } };
+      }
+      const command = String(body.command ?? '').trim();
+      if (!command) return { status: 400, body: { error: 'command required' } };
+      // A person's edit is `user` rank: nothing observed or detected can undo it.
+      // Written directly rather than merged so a user can also *replace* their
+      // own earlier entry.
+      const current = loadProfile(cwd);
+      const next = { ...current, commands: { ...current.commands, [name]: { command, source: 'user' as const, at: new Date().toISOString() } } };
+      await saveProfile(cwd, next);
+      return { status: 200, body: { cwd, profile: next } };
+    }
+
     case 'agents': {
       if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
       const { listAgentSpecs } = await import('../agents/registry.js');

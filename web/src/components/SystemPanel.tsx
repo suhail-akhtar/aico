@@ -15,6 +15,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { ProjectCommands } from './ProjectCommands';
 import { api, type AgentSpec } from '../api';
 import { useStore } from '../store';
 
@@ -23,6 +24,9 @@ const POLL_MS = 3000;
 export function SystemPanel(): React.ReactElement {
   const system = useStore(s => s.system);
   const refreshSystem = useStore(s => s.refreshSystem);
+  // The open project, whose commands the table below shows. Null means the
+  // server's own directory, which is what the route defaults to.
+  const project = useStore(s => s.project);
 
   useEffect(() => {
     void refreshSystem();
@@ -50,6 +54,11 @@ export function SystemPanel(): React.ReactElement {
             Work the engine is doing outside this conversation.
           </p>
         </header>
+
+        <section>
+          <h2 className="mb-2 text-sm font-medium text-aico-secondary">Project commands</h2>
+          <ProjectCommands cwd={project ?? undefined} />
+        </section>
 
         {workspace && (
           <section>

@@ -323,6 +323,15 @@ export const api = {
 
   /** What an app can start from: the shipped templates plus the user's and the project's. */
   templates: () => get<{ templates: AppTemplate[] }>('apps/templates'),
+
+  /** The commands a project is held to, with provenance. Reading bootstraps the file from the manifest. */
+  projectProfile: (cwd?: string) =>
+    get<ProjectProfileView>(`project/profile${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''}`),
+  /** Set one command by hand — `user` rank, which nothing observed or detected can undo. */
+  setProjectCommand: (cwd: string | undefined, name: string, command: string) =>
+    post<ProjectProfileView>('project/profile', { cwd, name, command }),
+  forgetProjectCommand: (cwd: string | undefined, name: string) =>
+    post<ProjectProfileView>('project/profile', { cwd, name, forget: true }),
   /**
    * Make an app from a template. The server also binds its conversation and,
    * for a process app, starts the install in the background — so the answer
@@ -717,6 +726,20 @@ export interface AppTemplate {
   run?: { install?: string; dev?: string };
   deploy?: Array<{ id: string; label: string; requires?: string[] }>;
   source: 'bundled' | 'user' | 'project';
+}
+
+/** Where a profile fact came from; a person's word outranks everything else. */
+export type ProfileSource = 'user' | 'template' | 'observed' | 'detected';
+
+export interface ProjectProfileView {
+  cwd: string;
+  names: string[];
+  profile: {
+    version: 1;
+    stack?: { value: string; source: ProfileSource; at: string };
+    packageManager?: { value: string; source: ProfileSource; at: string };
+    commands: Record<string, { command: string; source: ProfileSource; at: string; port?: number } | undefined>;
+  };
 }
 
 /** What runs an app: the shared host (page, static), its own process, or nothing served (cli). */

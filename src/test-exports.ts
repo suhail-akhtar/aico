@@ -259,6 +259,15 @@ export { buildRuntimeAwareness, buildRuntimeBlocks } from './capabilities.js';
 export { capGitStatus, GIT_STATUS_MAX_LINES, GIT_STATUS_MAX_CHARS, MEMORY_REPRISE_MAX_CHARS } from './prompts.js';
 export { sectionHashes } from './prompt/render.js';
 export { cacheResets, cacheShare, describeReset } from './session/cache.js';
+export {
+  loadProfile, mergeProfile, saveProfile, updateProfile, checksFor, renderProfile, profileFromTemplate,
+  detectStack, forgetCommand, emptyProfile, profilePath, COMMAND_NAMES, PROFILE_RENDER_MAX,
+} from './project/profile.js';
+export { observeCommand, installProfileObserver } from './project/observe.js';
+export { detectChecksFor } from './checks.js';
+export { projectRoot, currentApp } from './run-context.js';
+export { servedArtifacts } from './verification.js';
+export { gateChecks } from './tools/run-checks.js';
 export { exportSkill } from './skills/import.js';
 export { listDirectory } from './tools/ls.js';
 export { globFiles } from './tools/glob.js';

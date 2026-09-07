@@ -27,9 +27,30 @@
 
 import fs from 'fs';
 import path from 'path';
-import { currentCwd } from './run-context.js';
+import { currentApp, currentCwd } from './run-context.js';
 import { coverageOf, currentRequirements, MIN_INTERACTIONS_FOR_COVERAGE } from './requirements.js';
 import { runScoped } from './run-scoped.js';
+import { isSourceFile } from './checks.js';
+import { appState } from './miniapps/process.js';
+
+/**
+ * An app served over HTTP that this turn changed — the second kind of artifact.
+ *
+ * A page app is a file a browser can open, and the `.html` rule below covers
+ * it. A Next.js or Hono app is a *process*: the artifact is whatever answers at
+ * its URL, and no single file is it. So any source write under the bound app's
+ * directory registers (or refreshes) one served artifact for the app, and an
+ * http verdict against the app's origin is what verifies it. A CLI is never
+ * one: there is nothing to open.
+ */
+export interface ServedArtifact {
+  slug: string;
+  dir: string;
+  /** Where it answers, when known. A process app has no URL until it is started. */
+  url?: string;
+  /** Newest source write under the app this turn. */
+  mtimeMs: number;
+}
 
 /** The subset of a browser verdict the gate needs. */
 export interface VerificationRecord {
@@ -45,6 +66,10 @@ export interface VerificationRecord {
   file?: string;
   /** Modification time of that file at check time — how staleness is detected. */
   fileMtimeMs?: number;
+  /** The served app this verdict is about, when the URL matched one. */
+  servedSlug?: string;
+  /** The app's newest source write at check time — staleness for served artifacts. */
+  servedMtimeMs?: number;
   at: number;
 }
 
@@ -64,7 +89,35 @@ export interface WebArtifact {
 const state = runScoped(() => ({
   records: [] as VerificationRecord[],
   artifacts: new Map<string, number>(),
+  /** One per bound app: the app itself is the artifact, not any one file. */
+  served: new Map<string, ServedArtifact>(),
 }));
+
+/** Whether `file` lives under `dir`. */
+function within(file: string, dir: string): boolean {
+  const rel = path.relative(path.resolve(dir), path.resolve(file));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/** The origin (scheme, host, port) of a URL, or undefined when it is not http(s). */
+function originOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Where a served app answers right now: the URL the run context knew at the
+ * start of the turn, or — for a process app started mid-turn — the URL its
+ * process reports.
+ */
+function servedUrl(artifact: ServedArtifact): string | undefined {
+  return appState(artifact.slug)?.url ?? artifact.url;
+}
 
 /** Start of turn: last turn's evidence says nothing about this one. */
 export function resetVerification(): void {
@@ -88,8 +141,30 @@ const WEB_EXTENSIONS = new Set(['.html', '.htm']);
  * produced from what was already there.
  */
 export function noteFileWritten(file: string): void {
-  if (!WEB_EXTENSIONS.has(path.extname(file).toLowerCase())) return;
   const abs = path.isAbsolute(file) ? file : path.join(currentCwd(), file);
+
+  // A source write under the bound app is a change to the served artifact —
+  // whatever the file. The `.html` rule below still applies to page apps, whose
+  // one page is also a file a browser can open directly.
+  //
+  // A page app is left to the file rule: its one page is a file a browser can
+  // open, and gating it as served too would ask for the same page twice over.
+  const app = currentApp();
+  if (app && app.kind !== 'cli' && app.kind !== 'page' && within(abs, app.dir)
+      && (isSourceFile(abs) || WEB_EXTENSIONS.has(path.extname(abs).toLowerCase()))) {
+    let mtimeMs = Date.now();
+    try { mtimeMs = fs.statSync(abs).mtimeMs; } catch { /* keep now */ }
+    const existing = state.get().served.get(app.slug);
+    state.get().served.set(app.slug, {
+      slug: app.slug,
+      dir: app.dir,
+      ...(app.url ? { url: app.url } : {}),
+      mtimeMs: Math.max(mtimeMs, existing?.mtimeMs ?? 0),
+    });
+    return;
+  }
+
+  if (!WEB_EXTENSIONS.has(path.extname(file).toLowerCase())) return;
   try {
     state.get().artifacts.set(abs, fs.statSync(abs).mtimeMs);
   } catch {
@@ -121,9 +196,78 @@ export function recordVerification(verdict: {
       // No mtime means it cannot be shown to be fresh, and unprovable freshness
       // is treated as stale below. That is the safe direction to fail.
     }
+  } else {
+    // An http verdict verifies the served app whose origin it hit. Matched on
+    // origin rather than the exact URL: checking `/items` verifies the app that
+    // serves `/`. The mtime taken is the app's newest write *now*, so a write
+    // after this verdict makes it stale by the same rule as a file.
+    const origin = originOf(verdict.url);
+    if (origin) {
+      for (const artifact of state.get().served.values()) {
+        if (originOf(servedUrl(artifact)) === origin) {
+          record.servedSlug = artifact.slug;
+          record.servedMtimeMs = artifact.mtimeMs;
+          break;
+        }
+      }
+    }
   }
 
   state.get().records.push(record);
+}
+
+/** Served apps changed this turn. Exposed for tests and the turn summary. */
+export function servedArtifacts(): ServedArtifact[] {
+  return [...state.get().served.values()];
+}
+
+/**
+ * The served half of the gate: for each app this turn changed, is there a
+ * fresh, passing http verdict against it?
+ *
+ * Three objections, each with the next action in it: never opened (start it
+ * and verify), verified before the last change (verify again), failing (fix).
+ * "Start it" is said explicitly because an agent whose VerifyApp answered
+ * nothing at the URL goes looking for the server rather than starting one.
+ */
+function checkServedGate(): GateResult {
+  const { records, served } = state.get();
+  for (const artifact of served.values()) {
+    const forApp = records.filter(r => r.servedSlug === artifact.slug);
+    const latest = forApp[forApp.length - 1];
+    const url = servedUrl(artifact);
+    if (!latest) {
+      return {
+        ok: false,
+        message:
+          `You changed the app "${artifact.slug}" but never opened it. `
+          + (url
+            ? `It is served at ${url}. Call VerifyApp on that URL`
+            : `It is not running: call AppManage start (name "${artifact.slug}") and wait for the URL it reports, then call VerifyApp on it`)
+          + ', with checks covering the interactions the user asked for, and fix whatever it reports before finishing. '
+          + 'Reading the source you just wrote is not verification.',
+      };
+    }
+    if (latest.servedMtimeMs === undefined || latest.servedMtimeMs < artifact.mtimeMs) {
+      return {
+        ok: false,
+        message:
+          `The app "${artifact.slug}" changed after it was last verified, so the last result no longer `
+          + `describes what is running. Run VerifyApp again${url ? ` on ${url}` : ''} — a fix is not finished until `
+          + 'the check that found the problem passes. If the dev server does not reload on its own, restart it with AppManage stop and start.',
+      };
+    }
+    if (!latest.passed) {
+      const problems = latest.problems.slice(0, 5).map(p => `  - ${p}`).join('\n');
+      return {
+        ok: false,
+        message:
+          `The app "${artifact.slug}" does not work. The browser reported:\n${problems}\n`
+          + 'Fix these and verify again. Do not summarise this as done — an app that fails in the browser is not finished, whatever its source looks like.',
+      };
+    }
+  }
+  return { ok: true };
 }
 
 /** Everything recorded this turn, oldest first. */
@@ -147,6 +291,9 @@ export interface GateResult {
  */
 export function checkVerificationGate(): GateResult {
   const { records, artifacts } = state.get();
+  // The app with its own process, or a static site: verified over http.
+  const served = checkServedGate();
+  if (!served.ok) return served;
   if (artifacts.size === 0) return { ok: true };
 
   // Freshest mtime wins — a turn that touched several pages is judged on the

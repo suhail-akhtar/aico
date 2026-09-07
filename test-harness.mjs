@@ -144,6 +144,9 @@ import {
   miniAppContext, fileList, appStateLine, closeAllAppDatabases,
   buildRuntimeBlocks, capGitStatus, GIT_STATUS_MAX_LINES, GIT_STATUS_MAX_CHARS, MEMORY_REPRISE_MAX_CHARS,
   sectionHashes, cacheResets, cacheShare, describeReset,
+  loadProfile, mergeProfile, saveProfile, updateProfile, checksFor, renderProfile, profileFromTemplate,
+  detectStack, forgetCommand, emptyProfile, profilePath, COMMAND_NAMES, PROFILE_RENDER_MAX,
+  observeCommand, installProfileObserver, detectChecksFor, projectRoot, currentApp, servedArtifacts, gateChecks,
   superviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
@@ -12367,6 +12370,217 @@ console.log('  -- The tail is small and the prefix carries the stable facts --')
   const headers = session.events.filter(e => e.type === 'request/header');
   assert(headers.length === 1, `one request header for two turns — the tail no longer counts as a change (${headers.length})`);
   assert(headers[0].data.header.sectionHashes?.runtime, 'and it carries per-section hashes');
+}
+
+// ═══════════════════════════════════════════════════════════
+// Gates for every stack, and a profile that remembers the commands
+// ═══════════════════════════════════════════════════════════
+
+console.log('  -- The profile merges by provenance and never downgrades --');
+{
+  const base = emptyProfile();
+  const { profile: p1, changed: c1 } = mergeProfile(base, { commands: { test: { command: 'npm test', source: 'detected' } } });
+  assert(c1 && p1.commands.test.command === 'npm test' && p1.commands.test.source === 'detected', 'a detected command lands');
+  const { profile: p2 } = mergeProfile(p1, { commands: { test: { command: 'vitest run', source: 'observed' } } });
+  assert(p2.commands.test.command === 'vitest run' && p2.commands.test.source === 'observed', 'observed outranks detected');
+  const { profile: p3 } = mergeProfile(p2, { commands: { test: { command: 'npm run test:unit', source: 'user' } } });
+  assert(p3.commands.test.source === 'user', 'a person outranks an observation');
+  const { profile: p4, changed: c4 } = mergeProfile(p3, { commands: { test: { command: 'npm test', source: 'observed' } } });
+  assert(!c4 && p4.commands.test.command === 'npm run test:unit', 'and nothing observed later can undo it');
+  const { profile: p5 } = mergeProfile(p4, { commands: { test: { command: 'npm test', source: 'template' } } });
+  assert(p5.commands.test.source === 'user', 'nor a template');
+  const { profile: p6 } = mergeProfile(p5, { commands: { dev: { command: 'npm run dev', source: 'observed', port: 5173 } } });
+  assert(p6.commands.dev.port === 5173, 'a dev command keeps its port');
+  const { profile: p7 } = mergeProfile(p6, { commands: { dev: { command: 'npm run dev', source: 'observed', port: 5174 } } });
+  assert(p7.commands.dev.port === 5174, 'an equal-rank observation updates the port');
+  assert(forgetCommand(p7, 'dev').commands.dev === undefined && p7.commands.dev, 'forgetting removes one command and leaves the input alone');
+  const { profile: p8 } = mergeProfile(p7, { stack: { value: 'Hono', source: 'detected' } });
+  const { profile: p9, changed: c9 } = mergeProfile(p8, { stack: { value: 'Next.js', source: 'detected' } });
+  assert(c9 && p9.stack.value === 'Next.js', 'equal rank replaces a scalar');
+  assert(COMMAND_NAMES.includes('migrate') && COMMAND_NAMES.includes('deploy'), 'migrate and deploy are command names');
+}
+
+console.log('  -- The profile renders small, without ports, and loads what it saved --');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-profile-'));
+  const p = await updateProfile(dir, {
+    stack: { value: 'Next.js + TypeScript', source: 'template' },
+    packageManager: { value: 'npm', source: 'detected' },
+    commands: { dev: { command: 'npm run dev', source: 'observed', port: 3000 }, test: { command: 'vitest run', source: 'template' }, build: { command: 'npm run build', source: 'user' } },
+  });
+  assert(fs.existsSync(profilePath(dir)), 'the profile is written to .aico/profile.json');
+  const again = loadProfile(dir);
+  assert(again.commands.dev.port === 3000 && again.commands.build.source === 'user' && again.stack.value === 'Next.js + TypeScript', 'and reads back intact');
+  const text = renderProfile(p);
+  assert(/Stack: Next\.js \+ TypeScript \(npm\)/.test(text), 'the render leads with the stack');
+  assert(/dev\s+npm run dev\s+\[observed\]/.test(text) && /build\s+npm run build\s+\[user\]/.test(text), 'each command carries its source');
+  assert(!/3000/.test(text), 'ports are not rendered — they would move the prefix for nothing');
+  assert(text.length <= PROFILE_RENDER_MAX, `and it fits the cap (${text.length})`);
+  assert(renderProfile(emptyProfile()) === '', 'an empty profile renders to nothing');
+  fs.writeFileSync(profilePath(dir), '{ not json');
+  assert(loadProfile(dir).commands.test === undefined, 'a malformed file reads as empty, not as an error');
+  // Serialised writes: two facts 1ms apart both land.
+  fs.rmSync(profilePath(dir));
+  await Promise.all([
+    updateProfile(dir, { commands: { setup: { command: 'npm install', source: 'observed' } } }),
+    updateProfile(dir, { commands: { migrate: { command: 'npx prisma migrate dev', source: 'observed' } } }),
+  ]);
+  const both = loadProfile(dir);
+  assert(both.commands.setup && both.commands.migrate, 'two concurrent updates both land');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- checksFor prefers the profile and bootstraps it from the manifest --');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-checksfor-'));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'x', scripts: { typecheck: 'tsc --noEmit', test: 'vitest run' }, dependencies: { hono: '1', typescript: '5' } }));
+  const first = checksFor(dir);
+  assert(first.map(c => c.name).join() === 'typecheck,test', 'without a profile, the manifest decides');
+  await new Promise(r => setTimeout(r, 150));
+  const written = loadProfile(dir);
+  assert(written.commands.typecheck?.source === 'detected' && written.commands.test?.command === 'npm run test', 'and what it found is written back as detected');
+  assert(/Hono/.test(written.stack?.value ?? '') && written.packageManager?.value === 'npm', `with a stack label (${written.stack?.value})`);
+  await updateProfile(dir, { commands: { test: { command: 'npm run test:fast', source: 'user' } } });
+  const second = checksFor(dir);
+  assert(second.find(c => c.name === 'test').command === 'npm run test:fast', 'once the profile names commands, it wins over the manifest');
+  assert(second.map(c => c.name).join() === 'typecheck,test', 'in gate order');
+  assert(detectStack(dir).stack.value.includes('Hono'), 'detectStack labels a Hono project');
+  const tpl = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-tplprofile-'));
+  fs.writeFileSync(path.join(tpl, 'package.json'), '{"name":"t","dependencies":{"next":"15"}}');
+  const seeded = await profileFromTemplate(tpl, { install: 'npm install', dev: 'npx next dev --port {port}', test: 'npm test', build: 'npm run build' }, 'Web app (web-saas-next)');
+  assert(seeded.commands.dev.source === 'template' && seeded.commands.setup.command === 'npm install' && seeded.stack.value === 'Web app (web-saas-next)', 'a template seeds commands at template rank');
+  fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(tpl, { recursive: true, force: true });
+}
+
+console.log('  -- The observer learns from commands that worked --');
+{
+  const install = observeCommand('npm install', 'added 57 packages', 0);
+  assert(install.packageManager.value === 'npm' && install.commands.setup.command === 'npm install', 'a bare install is the setup command');
+  assert(observeCommand('npm install', 'ERR', 1) === undefined, 'a failed install teaches nothing');
+  assert(observeCommand('pnpm add zod', 'ok', 0).commands === undefined && observeCommand('pnpm add zod', 'ok', 0).packageManager.value === 'pnpm', 'adding a package says which manager, not what setup is');
+  const dev = observeCommand('npm run dev', '  ▲ Next.js 15\n  - Local:        http://localhost:3000\n', 0);
+  assert(dev.commands.dev.command === 'npm run dev' && dev.commands.dev.port === 3000, 'a dev server that printed its port is recorded with it');
+  assert(observeCommand('npm run dev', 'compiled', 0) === undefined, 'a dev command with no port line is not recorded');
+  assert(observeCommand('npx prisma migrate dev', 'applied', 0).commands.migrate.command === 'npx prisma migrate dev', 'a migration is recorded');
+  assert(observeCommand('alembic upgrade head', 'ok', 0).commands.migrate, 'in any of the usual dialects');
+  assert(observeCommand('cd api && npm install', 'ok', 0) === undefined, 'a compound command is left alone — it would run from the wrong directory next time');
+  assert(observeCommand('npm install -g typescript', 'ok', 0) === undefined, 'a global install is not the project’s setup');
+  const pipeline = new ToolPipeline();
+  installProfileObserver(pipeline, () => '/tmp');
+  installProfileObserver(pipeline, () => '/tmp');
+  assert(pipeline.describe().post.filter(n => n === 'project-profile-observer').length === 1, 'the observer registers once per pipeline');
+}
+
+console.log('  -- Checks belong to the project a file is in --');
+{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-subroot-'));
+  fs.writeFileSync(path.join(root, 'package.json'), '{"scripts":{"test":"vitest run"}}');
+  fs.mkdirSync(path.join(root, 'apps', 'api', 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'apps', 'api', 'package.json'), '{"scripts":{"typecheck":"tsc --noEmit"}}');
+  fs.writeFileSync(path.join(root, 'apps', 'api', 'src', 'a.ts'), '');
+  fs.writeFileSync(path.join(root, 'b.ts'), '');
+  const groups = detectChecksFor([path.join(root, 'apps', 'api', 'src', 'a.ts'), path.join(root, 'b.ts')], root);
+  assert(groups.length === 2, `two roots (${groups.length})`);
+  const sub = groups.find(g => g.root !== path.resolve(root));
+  assert(sub && sub.checks[0].name === 'typecheck' && sub.checks[0].cwd === path.join(root, 'apps', 'api'), 'the sub-project’s check runs in its own directory');
+  const top = groups.find(g => g.root === path.resolve(root));
+  assert(top.checks[0].name === 'test' && top.checks[0].cwd === undefined, 'the root’s check runs at the root');
+  assert(detectChecksFor([], root)[0].root === path.resolve(root), 'no touched files means the root alone');
+  await runInContext({ cwd: root, settings: {} }, async () => {
+    resetChecks();
+    noteSourceChanged(path.join(root, 'apps', 'api', 'src', 'a.ts'));
+    const all = gateChecks();
+    assert(all.some(c => c.name === 'test') && all.some(c => c.name === 'apps/api:typecheck'), `gateChecks adds the sub-project’s checks by relative name (${all.map(c => c.name).join(', ')})`);
+  });
+  // checksFor bootstraps .aico/profile.json in the background; let it land before the directory goes.
+  await new Promise(r => setTimeout(r, 200));
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+console.log('  -- A bound app is the project root, and a served app is gated over http --');
+{
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-served-'));
+  const appDir = path.join(ws, 'miniapps', 'shop');
+  fs.mkdirSync(path.join(appDir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(appDir, 'package.json'), '{"scripts":{"test":"vitest run"}}');
+  const app = { slug: 'shop', dir: appDir, kind: 'process', url: 'http://localhost:4567' };
+  await runInContext({ cwd: ws, settings: {}, app }, async () => {
+    assert(projectRoot() === appDir && currentApp().slug === 'shop', 'projectRoot is the app directory inside a bound run');
+    assert(gateChecks().some(c => c.name === 'test'), 'and the checks gate reads the app’s own manifest');
+    resetVerification();
+    assert(checkVerificationGate().ok, 'nothing written, nothing gated');
+    const file = path.join(appDir, 'src', 'page.tsx');
+    fs.writeFileSync(file, 'export default () => null');
+    noteFileWritten(file);
+    assert(servedArtifacts().length === 1 && servedArtifacts()[0].slug === 'shop', 'a .tsx write under the app registers a served artifact');
+    const never = checkVerificationGate();
+    assert(!never.ok && /never opened/.test(never.message) && /localhost:4567/.test(never.message), `unverified: the gate names the URL (${never.message.slice(0, 60)})`);
+    recordVerification({ url: 'http://localhost:9999/', passed: true, problems: [] }, []);
+    assert(!checkVerificationGate().ok, 'a verdict against a different origin does not count');
+    recordVerification({ url: 'http://localhost:4567/items', passed: false, problems: ['TypeError at /items'] }, ['items']);
+    const failing = checkVerificationGate();
+    assert(!failing.ok && /does not work/.test(failing.message) && /TypeError/.test(failing.message), 'a failing verdict on the right origin blocks with the browser’s words');
+    recordVerification({ url: 'http://localhost:4567/items', passed: true, problems: [] }, ['items']);
+    assert(checkVerificationGate().ok, 'a passing verdict on the app’s origin satisfies it — any path, same origin');
+    await new Promise(r => setTimeout(r, 5));
+    fs.writeFileSync(file, 'export default () => "changed"');
+    fs.utimesSync(file, new Date(), new Date(Date.now() + 50));
+    noteFileWritten(file);
+    const stale = checkVerificationGate();
+    assert(!stale.ok && /changed after it was last verified/.test(stale.message), 'a later write makes the verdict stale');
+    recordVerification({ url: 'http://localhost:4567/', passed: true, problems: [] }, []);
+    assert(checkVerificationGate().ok, 'and a fresh verdict clears it');
+  });
+  // A process app that has not started has no URL: the gate says to start it.
+  await runInContext({ cwd: ws, settings: {}, app: { slug: 'shop', dir: appDir, kind: 'process' } }, async () => {
+    resetVerification();
+    noteFileWritten(path.join(appDir, 'src', 'page.tsx'));
+    const msg = checkVerificationGate().message;
+    assert(/AppManage start/.test(msg) && /"shop"/.test(msg), `without a URL the gate says to start the app (${msg.slice(0, 70)})`);
+  });
+  // A CLI is never gated; a page app keeps the file rule.
+  await runInContext({ cwd: ws, settings: {}, app: { slug: 'tool', dir: appDir, kind: 'cli' } }, async () => {
+    resetVerification();
+    noteFileWritten(path.join(appDir, 'src', 'page.tsx'));
+    assert(servedArtifacts().length === 0 && checkVerificationGate().ok, 'a cli app registers nothing');
+  });
+  await runInContext({ cwd: ws, settings: {}, app: { slug: 'page', dir: appDir, kind: 'page', url: 'http://h/page/' } }, async () => {
+    resetVerification();
+    fs.mkdirSync(path.join(appDir, 'public'), { recursive: true });
+    const html = path.join(appDir, 'public', 'index.html');
+    fs.writeFileSync(html, '<html></html>');
+    noteFileWritten(html);
+    assert(servedArtifacts().length === 0 && !checkVerificationGate().ok, 'a page app is gated as a file, not as served');
+  });
+  // Outside any app, a source write registers nothing.
+  await runInContext({ cwd: ws, settings: {} }, async () => {
+    resetVerification();
+    noteFileWritten(path.join(appDir, 'src', 'page.tsx'));
+    assert(servedArtifacts().length === 0 && checkVerificationGate().ok, 'no bound app, no served artifact');
+  });
+  await new Promise(r => setTimeout(r, 200));
+  fs.rmSync(ws, { recursive: true, force: true });
+}
+
+console.log('  -- The app skills ship, fit, and have tasks --');
+{
+  const { BUILTIN_CORPUS } = await import('./dist-test/test-exports.js');
+  const ids = BUILTIN_CORPUS.map(t => t.id);
+  assert(ids.includes('app-plan/backlog-from-brief') && ids.includes('app-architecture/place-a-feature'), 'the corpus carries app-plan and app-architecture tasks');
+  for (const t of BUILTIN_CORPUS.filter(t => t.skill.startsWith('app-'))) {
+    for (const c of t.checks) {
+      if ('pattern' in c) { try { new RegExp(c.pattern, c.flags ?? ''); } catch (e) { assert(false, `${t.id}: pattern compiles (${c.pattern})`); } }
+    }
+  }
+  for (const name of ['app-plan', 'app-architecture']) {
+    const file = path.join('src', 'skills', 'builtin', name, 'SKILL.md');
+    const text = fs.readFileSync(file, 'utf8');
+    assert(text.length <= 3_600, `${name} is under 3,600 chars (${text.length})`);
+    const trigger = /^trigger: (.+)$/m.exec(text)?.[1];
+    assert(trigger && (() => { try { new RegExp(trigger, 'i'); return true; } catch { return false; } })(), `${name} has a trigger that compiles`);
+    assert(skillRegistry.list().some(s => s.frontmatter.name === name), `${name} is registered as a built-in`);
+  }
+  assert(new RegExp(/^trigger: (.+)$/m.exec(fs.readFileSync(path.join('src', 'skills', 'builtin', 'app-plan', 'SKILL.md'), 'utf8'))[1], 'i').test('build me a saas app for invoices'), 'app-plan triggers on "build me a saas app"');
 }
 
 clearInterval(keepAliveForAbandonedTools);
