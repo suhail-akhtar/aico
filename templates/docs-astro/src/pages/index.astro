@@ -1,0 +1,22 @@
+---
+import { getCollection } from 'astro:content';
+import Docs from '@/layouts/Docs.astro';
+import { buildNav } from '@/lib/nav';
+
+const nav = buildNav((await getCollection('docs')).map(e => ({
+  id: e.id, title: e.data.title, section: e.data.section, order: e.data.order, draft: e.data.draft,
+})));
+const first = nav[0]?.pages[0];
+---
+<Docs title="Home" description="__APP_DESCRIPTION__">
+  <h1>__APP_TITLE__</h1>
+  <p class="lede">__APP_DESCRIPTION__</p>
+  {first && <p><a class="button" href={first.href}>Start with {first.title} →</a></p>}
+  <h2>Contents</h2>
+  {nav.map(section => (
+    <>
+      <h3>{section.section}</h3>
+      <ul>{section.pages.map(p => <li><a href={p.href}>{p.title}</a></li>)}</ul>
+    </>
+  ))}
+</Docs>

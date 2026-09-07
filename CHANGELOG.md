@@ -3,10 +3,41 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.13.0 — 2026-09-07
 
 ### Added
 
+- **The Apps screen is live, not polled.** A topic stream (`GET /api/apps/events`)
+  sends one full frame on connect, process state the moment the runner emits
+  it, and a `changed` frame after a create or delete; the store keeps one
+  stream however many panes ask, and the two-second poll is gone. A dot beside
+  the heading says whether the stream is connected.
+- **Deploy from the files an app ships.** `AppManage deploy` and **Deploy** on
+  the card run the app's own deploy script (`app.json` targets; Docker by
+  default) under a record of its own, so the log shows on the card beside the
+  app's process; a target whose tool is missing on this machine is refused with
+  a sentence naming it and nothing started. aico holds no cloud credentials
+  and ships no cloud SDK. `scripts/apps-deploy-live.mjs` proves the refusal
+  without Docker and the build with it.
+- **Five more templates**, nine in all: **dashboard-next** (KPI tiles and an
+  ECharts chart over a node:sqlite metrics table with an ingest route and seeded
+  sample data), **cli-node** (a TypeScript command-line tool with `node:util`
+  parsing, exit codes, a build to one bin and `npm pack`), **docs-astro** (a
+  documentation site from Markdown content collections with a generated
+  sidebar, dark mode and an nginx image), **agent-service-node** (a Hono API
+  around a tool-calling agent loop over any OpenAI-compatible model, SSE
+  streaming, conversations in SQLite, tested with a scripted model) and
+  **mobile-expo** (React Native with Expo Router, a worked list screen with
+  pure tested logic, a web preview and EAS notes). `scripts/templates-live.mjs`
+  now checks every template with a `package.json` — process, CLI and mobile.
+- **Two more app skills**, `app-ship` (runs from clean, env example, health
+  route, README Run section, one deploy target with its command) and
+  `app-quality` (checks green, a VerifyApp check per requirement in the user's
+  words, console noise and dead code gone, a report of exactly what was
+  verified), with eval tasks.
+- **The docs site has an Apps page.** `docs/apps.html` replaces
+  `miniapps.html`, which redirects and is excluded from the sitemap and the
+  social cards; every page's navigation points at the new one.
 - **Every stack is verified in a real browser.** A session bound to an app with
   its own process (Next.js, Hono) or a static site now has a *served* artifact:
   any source write under the app registers it, an http verdict from `VerifyApp`

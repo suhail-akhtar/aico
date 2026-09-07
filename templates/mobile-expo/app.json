@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "__APP_TITLE__",
+    "slug": "__APP_SLUG__",
+    "version": "0.1.0",
+    "scheme": "__APP_SLUG__",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.example.__APP_SLUG__"
+    },
+    "android": {
+      "package": "com.example.__APP_SLUG__"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

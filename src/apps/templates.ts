@@ -316,6 +316,7 @@ export async function instantiateTemplate(
       // install, build output, a scratch database, a committed secret.
       return base !== 'template.json' && base !== 'node_modules' && base !== '.next' && base !== 'data.sqlite'
         && base !== 'coverage' && base !== 'data' && base !== '.env' && base !== '.env.local'
+        && base !== '.astro' && base !== '.expo' && base !== 'dist' && base !== 'web-build'
         && !base.endsWith('.tsbuildinfo') && base !== 'package-lock.json.bak';
     },
   });

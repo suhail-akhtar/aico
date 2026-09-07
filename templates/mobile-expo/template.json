@@ -1,0 +1,62 @@
+{
+  "id": "mobile-expo",
+  "version": "1.0.0",
+  "name": "Mobile app (Expo)",
+  "category": "mobile",
+  "kind": "mobile",
+  "summary": "A React Native app with Expo Router: one worked screen (a list you can add to), typed, previewed in the browser with Expo's web target, tested with vitest, ready for EAS builds to iOS and Android.",
+  "tags": [
+    "mobile",
+    "expo",
+    "react-native",
+    "ios",
+    "android",
+    "app",
+    "typescript"
+  ],
+  "match": [
+    "mobile",
+    "phone",
+    "ios",
+    "android",
+    "react native",
+    "expo",
+    "app store",
+    "play store",
+    "native app",
+    "tablet"
+  ],
+  "requires": {
+    "node": ">=22.5.0"
+  },
+  "run": {
+    "install": "npm install --no-audit --no-fund",
+    "dev": "npx expo start --web --port {port}",
+    "ready": "Waiting on http|Web is waiting on|Metro waiting on",
+    "build": "npm run build",
+    "test": "npm test",
+    "typecheck": "npm run typecheck",
+    "start": "npm run build"
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    "package.json",
+    "app.json",
+    "app/index.tsx",
+    "deploy/README.md",
+    "deploy/*.mjs"
+  ],
+  "deploy": [
+    {
+      "id": "web",
+      "label": "Web export (static)",
+      "script": "node deploy/web.mjs",
+      "requires": [
+        "npx"
+      ]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

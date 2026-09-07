@@ -147,6 +147,7 @@ import {
   loadProfile, mergeProfile, saveProfile, updateProfile, checksFor, renderProfile, profileFromTemplate,
   detectStack, forgetCommand, emptyProfile, profilePath, COMMAND_NAMES, PROFILE_RENDER_MAX,
   observeCommand, installProfileObserver, detectChecksFor, projectRoot, currentApp, servedArtifacts, gateChecks,
+  deployKey, toolAvailable, missingRequirements, deployApp, deployState, EventHub,
   superviseToolDefinition,
   currentModel,
   DIAGRAM_TYPES, diagramType, diagramIndex,
@@ -12581,6 +12582,62 @@ console.log('  -- The app skills ship, fit, and have tasks --');
     assert(skillRegistry.list().some(s => s.frontmatter.name === name), `${name} is registered as a built-in`);
   }
   assert(new RegExp(/^trigger: (.+)$/m.exec(fs.readFileSync(path.join('src', 'skills', 'builtin', 'app-plan', 'SKILL.md'), 'utf8'))[1], 'i').test('build me a saas app for invoices'), 'app-plan triggers on "build me a saas app"');
+}
+
+// ═══════════════════════════════════════════════════════════
+// Deploy from shipped files, and a topic stream for the Apps screen
+// ═══════════════════════════════════════════════════════════
+
+console.log('  -- Deploy refuses plainly, runs under its own key, and reports --');
+{
+  assert(deployKey('shop') === 'shop#deploy', 'a deploy runs beside the app’s process, not instead of it');
+  assert(toolAvailable('node') === true, 'node is available to the probe');
+  assert(toolAvailable('definitely-not-a-tool-9f8e') === false, 'a missing tool is reported as missing');
+  assert(missingRequirements({ id: 'x', label: 'x', script: 'true', requires: ['node', 'definitely-not-a-tool-9f8e'] }).join() === 'definitely-not-a-tool-9f8e', 'only the missing requirements are named');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-deploy-'));
+  // A script file rather than `node -e "…"`: nested quotes do not survive a
+  // Windows spawn, and a real deploy script is a file too.
+  fs.writeFileSync(path.join(dir, 'deploy.mjs'), "console.log('deployed ok');\n");
+  const none = await deployApp({ slug: 'a', title: 'A', createdAt: 1, updatedAt: 1, built: true }, dir);
+  assert(!none.ok && none.reason === 'no-targets', 'an app with no targets says so');
+  const app = { slug: 'a', title: 'A', kind: 'static', createdAt: 1, updatedAt: 1, built: true, deploy: [
+    { id: 'echo', label: 'Echo', script: 'node deploy.mjs', requires: ['node'] },
+    { id: 'needs', label: 'Needs', script: 'true', requires: ['definitely-not-a-tool-9f8e'] },
+  ] };
+  const unknown = await deployApp(app, dir, 'nope');
+  assert(!unknown.ok && unknown.reason === 'unknown-target' && /echo, needs/.test(unknown.message), 'an unknown target lists the real ones');
+  const missing = await deployApp(app, dir, 'needs');
+  assert(!missing.ok && missing.reason === 'missing' && missing.missing.join() === 'definitely-not-a-tool-9f8e' && /nothing was started/.test(missing.message), 'a missing requirement is a plain answer, nothing started');
+  assert(deployState('a') === undefined, 'and no record was made');
+  const started = await deployApp(app, dir);
+  assert(started.ok && started.record.state === 'working', 'the first target runs by default');
+  const deadline = Date.now() + 15_000;
+  while (deployState('a')?.state === 'working' && Date.now() < deadline) await new Promise(r => setTimeout(r, 100));
+  const rec = deployState('a');
+  assert(rec?.state === 'done' && rec.output.some(l => /deployed ok/.test(l)), `the record settles to done with the script’s output (${rec?.state})`);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('  -- A topic stream sends a full frame first, then only what moved --');
+{
+  const hub = new EventHub();
+  const frames = [];
+  const fakeRes = { writeHead() {}, write(s) { frames.push(s); }, end() {} };
+  const detach = hub.subscribeTopic('apps', fakeRes);
+  assert(hub.topicSize('apps') === 1 && hub.size === 0, 'a topic subscriber is not a session subscriber');
+  hub.publishTopic('apps', 'processes', { processes: [{ slug: 'x', state: 'running' }] });
+  hub.publishTopic('other', 'changed', {});
+  const data = frames.filter(f => f.startsWith('event:')).map(f => JSON.parse(f.split('\n')[1].slice(6)));
+  assert(data.length === 1 && data[0].type === 'processes' && data[0].topic === 'apps' && data[0].data.processes[0].slug === 'x', 'only the subscribed topic’s frames arrive, with type and topic');
+  hub.heartbeat();
+  assert(frames.some(f => f === ': ping\n\n'), 'the heartbeat reaches topic streams');
+  detach();
+  hub.publishTopic('apps', 'changed', {});
+  assert(hub.topicSize('apps') === 0 && frames.filter(f => /changed/.test(f)).length === 0, 'a detached stream gets nothing more');
+  const dead = { writeHead() {}, write() { throw new Error('EPIPE'); }, end() {} };
+  hub.subscribeTopic('apps', dead);
+  hub.publishTopic('apps', 'changed', {});
+  assert(hub.topicSize('apps') === 0, 'a dead socket is dropped on the first failed write');
 }
 
 clearInterval(keepAliveForAbandonedTools);

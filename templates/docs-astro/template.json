@@ -1,0 +1,66 @@
+{
+  "id": "docs-astro",
+  "version": "1.0.0",
+  "name": "Documentation site (Astro)",
+  "category": "docs",
+  "kind": "process",
+  "summary": "A documentation site: Astro with Markdown content collections, a generated sidebar, a search-free fast static build, dark mode, and an nginx image. Write a Markdown file, get a page.",
+  "tags": [
+    "docs",
+    "documentation",
+    "astro",
+    "markdown",
+    "static",
+    "site",
+    "handbook",
+    "wiki"
+  ],
+  "match": [
+    "docs",
+    "documentation",
+    "handbook",
+    "wiki",
+    "manual",
+    "guide",
+    "knowledge base",
+    "blog",
+    "changelog",
+    "markdown",
+    "content site"
+  ],
+  "requires": {
+    "node": ">=22.5.0"
+  },
+  "run": {
+    "install": "npm install --no-audit --no-fund",
+    "dev": "npx astro dev --port {port}",
+    "ready": "Local\\s+http|ready in",
+    "build": "npm run build",
+    "test": "npm test",
+    "typecheck": "npm run typecheck",
+    "start": "npm run preview"
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    "package.json",
+    "src/layouts/Docs.astro",
+    "src/pages/index.astro",
+    "src/content/docs/getting-started.md",
+    "deploy/README.md",
+    "compose.yaml",
+    "deploy/*.mjs"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image (nginx)",
+      "script": "node deploy/docker.mjs",
+      "requires": [
+        "docker"
+      ]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

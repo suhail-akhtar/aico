@@ -350,8 +350,69 @@ const ARCH_2: EvalTask = {
   ],
 };
 
+// ── app-ship ──────────────────────────────────────────────────────────
+
+const SHIP_1: EvalTask = {
+  id: 'app-ship/env-and-health',
+  skill: 'app-ship',
+  split: 'val',
+  args: 'Get this service ready to deploy with Docker.',
+  files: {
+    'package.json': '{ "name": "notes-api", "scripts": { "start": "node src/index.js", "test": "node --test" }, "dependencies": { "hono": "^4.7.0", "@hono/node-server": "^1.14.0" } }\n',
+    'package-lock.json': '{ "name": "notes-api", "lockfileVersion": 3, "packages": {} }\n',
+    'src/index.js': [
+      "import { serve } from '@hono/node-server';",
+      "import { Hono } from 'hono';",
+      'const app = new Hono();',
+      "const token = process.env.API_TOKEN;",
+      "const dbPath = process.env.DATABASE_PATH || './notes.sqlite';",
+      "app.get('/notes', c => c.json([]));",
+      'serve({ fetch: app.fetch, port: 3000 });',
+      '',
+    ].join('\n'),
+    '.gitignore': 'node_modules\n',
+    'README.md': '# notes-api\n\nA notes service.\n',
+  },
+  checks: [
+    { kind: 'file-exists', path: 'Dockerfile', weight: 2, why: 'No Dockerfile was written.' },
+    { kind: 'file-matches', path: 'Dockerfile', pattern: String.raw`FROM [^\n]+ AS \w+[\s\S]*FROM `, why: 'The Dockerfile is not multi-stage.' },
+    { kind: 'file-matches', path: 'Dockerfile', pattern: String.raw`USER `, why: 'The image runs as root.' },
+    { kind: 'file-matches', path: 'Dockerfile', pattern: String.raw`HEALTHCHECK`, why: 'No HEALTHCHECK in the image.' },
+    { kind: 'file-exists', path: '.env.example', weight: 2, why: 'No .env.example; the variables the code reads are undocumented.' },
+    { kind: 'file-matches', path: '.env.example', pattern: String.raw`API_TOKEN`, why: 'API_TOKEN is read by the code but not in .env.example.' },
+    { kind: 'file-matches', path: '.env.example', pattern: String.raw`DATABASE_PATH`, why: 'DATABASE_PATH is read by the code but not in .env.example.' },
+    { kind: 'file-matches', path: 'src/index.js', pattern: String.raw`healthz`, weight: 2, why: 'No health route was added.' },
+    { kind: 'file-matches', path: 'src/index.js', pattern: String.raw`process\.env\.PORT`, why: 'The port is still hard-coded; it must come from PORT.' },
+    { kind: 'file-matches', path: 'README.md', pattern: String.raw`(?:docker build|docker compose|docker run)`, why: 'The README does not say the deploy command.' },
+    { kind: 'output-lacks', pattern: String.raw`(?:aws-sdk|@aws-sdk|firebase-admin|vault)`, flags: 'i', why: 'A cloud SDK or secrets manager was added; config is env only.' },
+    { kind: 'max-tool-calls', limit: 30, why: 'Shipping a four-file service should not take more than thirty tool calls.' },
+  ],
+};
+
+// ── app-quality ───────────────────────────────────────────────────────
+
+const QUALITY_1: EvalTask = {
+  id: 'app-quality/report-what-was-verified',
+  skill: 'app-quality',
+  args: 'The invoices page should let me mark an invoice paid and show overdue ones first. Verify it.',
+  files: {
+    ...APP_FILES,
+    'src/invoices.ts': "export function sortInvoices(rows: { status: string; due: string }[]) { return rows.sort((a, b) => a.due.localeCompare(b.due)); }\nconsole.log('debug');\n",
+    'test/invoices.test.ts': "import { it, expect } from 'vitest';\nimport { sortInvoices } from '../src/invoices.js';\nit('sorts', () => { expect(sortInvoices([]).length).toBe(0); });\n",
+  },
+  checks: [
+    { kind: 'output-matches', pattern: String.raw`RunChecks|typecheck|npm test|vitest`, why: 'The project’s own checks were not run or mentioned.' },
+    { kind: 'output-matches', pattern: String.raw`mark(ed)?[^\n]{0,20}paid`, flags: 'i', weight: 2, why: 'The requirement "mark an invoice paid" was not named as a check.' },
+    { kind: 'output-matches', pattern: String.raw`overdue`, flags: 'i', why: 'The requirement "overdue first" was not named as a check.' },
+    { kind: 'output-matches', pattern: String.raw`(?:PASS|FAIL|not verified|could not)`, weight: 2, why: 'No per-requirement result was reported.' },
+    { kind: 'output-lacks', pattern: String.raw`everything works|all good|works as expected`, flags: 'i', why: 'A blanket claim instead of named checks.' },
+    { kind: 'file-matches', path: 'src/invoices.ts', pattern: String.raw`^(?![\s\S]*console\.log\('debug'\))`, why: 'The stray console.log was left in.' },
+    { kind: 'max-tool-calls', limit: 20, why: 'Verifying a two-file feature should not take more than twenty tool calls.' },
+  ],
+};
+
 export const BUILTIN_CORPUS: readonly EvalTask[] = [
-  SEC_1, SEC_2, REV_1, REV_2, COMMIT_1, INIT_1, PLAN_1, PLAN_2, ARCH_1, ARCH_2,
+  SEC_1, SEC_2, REV_1, REV_2, COMMIT_1, INIT_1, PLAN_1, PLAN_2, ARCH_1, ARCH_2, SHIP_1, QUALITY_1,
 ];
 
 /** Where a user's own tasks live. */

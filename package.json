@@ -1,6 +1,6 @@
 {
   "name": "@suhail-akhtar/aico",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "AI Coder — multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Moonshot Kimi, DeepSeek, Z.AI (GLM), Ollama.",
   "keywords": [
     "ai",
@@ -59,6 +59,7 @@
     "test:miniapps": "npx tsup src/miniapps/server.ts --format esm --outDir dist-test/miniapps --target node22 --silent && node scripts/miniapp-probe.mjs",
     "test:apps": "npm run build && node scripts/apps-live.mjs",
     "test:templates": "node scripts/templates-live.mjs",
+    "test:deploy": "npm run build && node scripts/apps-deploy-live.mjs",
     "test:economy": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/economy-probe.mjs --out dist-test/economy-now.json && node scripts/economy-probe.mjs --compare scripts/fixtures/economy-baseline-0.11.json dist-test/economy-now.json",
     "test:supervision": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/supervision-live.mjs",
     "test:nextapp": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/nextapp-probe.mjs",

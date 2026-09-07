@@ -57,8 +57,9 @@ import { requestAgentStop } from '../tools/task.js';
 import {
   backlogProgress, deleteMiniApp, effectiveKind, getMiniApp, hasProcess, listMiniApps, miniAppDir, runProfileFor,
 } from '../miniapps/store.js';
-import { installApp, runningApps, startApp, stopAllApps, stopApp } from '../miniapps/process.js';
+import { installApp, runningApps, startApp, stopAllApps, stopApp, subscribeToApps } from '../miniapps/process.js';
 import { getTemplate, instantiateTemplate, listTemplates, nodeSatisfies } from '../apps/templates.js';
+import { deployApp, deployState } from '../apps/deploy.js';
 import { closeDatabase } from '../miniapps/data.js';
 import { setWakeDelivery } from '../work/watchers.js';
 
@@ -148,6 +149,15 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   });
 
   const hub = new EventHub();
+  /*
+    The Apps screen watches one topic instead of polling. Process state fans
+    out the moment the runner emits it — an install finishing, a dev server
+    printing its port, a deploy failing — and a create or delete announces that
+    the list itself changed, so the client refetches once rather than every
+    two seconds.
+  */
+  const announceApps = (): void => hub.publishTopic('apps', 'changed', {});
+  subscribeToApps(list => hub.publishTopic('apps', 'processes', { processes: list }));
   /**
    * The model a turn uses when the client names none.
    *
@@ -448,6 +458,53 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
+    if ((route === 'apps/events' || route === 'miniapps/events') && req.method === 'GET') {
+      // One full frame, then live: process state on every runner emit, and a
+      // `changed` frame when the list itself moved. The client refetches the
+      // list on `changed` and patches processes in place otherwise.
+      const detach = hub.subscribeTopic('apps', res);
+      req.on('close', detach);
+      const live = await loadSettings();
+      const apps = await listMiniApps(live, cwd);
+      const full = {
+        enabled: live.miniApps?.enabled === true,
+        host: miniApps?.url ?? null,
+        ...(miniAppsError ? { error: miniAppsError } : {}),
+        apps: await Promise.all(apps.map(async app => ({
+          ...app, kind: effectiveKind(app), backlog: await backlogProgress(miniAppDir(app.slug, live, cwd)),
+        }))),
+        processes: runningApps(),
+      };
+      res.write(`event: full\ndata: ${JSON.stringify({ type: 'full', topic: 'apps', data: full })}\n\n`);
+      return;
+    }
+
+    if (route === 'apps/deploy' && req.method === 'POST') {
+      // Run the app's own deploy script, or say plainly what is missing. The
+      // record runs under `<slug>#deploy`, beside — not instead of — the app's
+      // process, so the pane shows both.
+      const body = await readJson(req) as { slug?: string; target?: string };
+      if (!body.slug) { send(res, 400, { error: 'slug required' }); return; }
+      const live = await loadSettings();
+      const app = await getMiniApp(body.slug, live, cwd);
+      if (!app) { send(res, 404, { error: `no app "${body.slug}"` }); return; }
+      const started = await deployApp(app, miniAppDir(body.slug, live, cwd), body.target);
+      if (!started.ok) {
+        send(res, started.reason === 'unknown-target' ? 404 : started.reason === 'busy' ? 409 : 400,
+          { error: started.message, reason: started.reason, ...(started.missing ? { missing: started.missing } : {}) });
+        return;
+      }
+      send(res, 200, { deploy: started.record });
+      return;
+    }
+
+    if (route === 'apps/deploy' && req.method === 'GET') {
+      const slug = url.searchParams.get('slug');
+      if (!slug) { send(res, 400, { error: 'slug required' }); return; }
+      send(res, 200, { deploy: deployState(slug) ?? null });
+      return;
+    }
+
     if (route === 'apps/templates' && req.method === 'GET') {
       // The catalogue the Apps screen builds its "Start from a template" cards
       // from. Read from disk each time: a template dropped into
@@ -494,6 +551,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       // The same shape the listing gives: an absent kind means page on disk,
       // but a client should not have to know that.
       send(res, 200, { slug: app.slug, sessionId, app: { ...app, kind: effectiveKind(app), backlog: await backlogProgress(dir) } });
+      announceApps();
       return;
     }
 
@@ -522,6 +580,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       await stopApp(body.slug).catch(() => undefined);
       closeDatabase(miniAppDir(body.slug, live, cwd));
       send(res, 200, { deleted: await deleteMiniApp(body.slug, live, cwd) });
+      announceApps();
       return;
     }
 

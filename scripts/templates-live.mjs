@@ -32,7 +32,10 @@ const only = process.argv.slice(2);
 const ids = fs.readdirSync(templatesDir).filter(id => {
   if (only.length && !only.includes(id)) return false;
   const manifest = path.join(templatesDir, id, 'template.json');
-  return fs.existsSync(manifest) && JSON.parse(fs.readFileSync(manifest, 'utf8')).kind === 'process';
+  if (!fs.existsSync(manifest)) return false;
+  // Anything with a package.json is installed and checked: process apps, CLIs, mobile.
+  return fs.existsSync(path.join(templatesDir, id, 'package.json'))
+    && ['process', 'cli', 'mobile'].includes(JSON.parse(fs.readFileSync(manifest, 'utf8')).kind);
 });
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -41,7 +44,9 @@ function run(cwd, args, env = {}) {
   return { ok: r.status === 0, out: `${r.stdout ?? ''}\n${r.stderr ?? ''}`.trim().split('\n').slice(-25).join('\n') };
 }
 
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-templates-'));
+// The long path, not the 8.3 one: a temp directory under `SUHAIL~1` reaches
+// vite-node as `SUHAIL%7E1`, and its module resolution cannot find itself.
+const scratch = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'aico-templates-'));
 try {
   for (const id of ids) {
     console.log(`\n-- ${id} --`);

@@ -1,0 +1,23 @@
+services:
+  agent:
+    build: .
+    image: __APP_SLUG__
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      DATABASE_PATH: /app/data/app.sqlite
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-https://api.openai.com/v1}
+      MODEL_API_KEY: ${MODEL_API_KEY:?set MODEL_API_KEY in .env}
+      MODEL: ${MODEL:-gpt-4o-mini}
+    volumes:
+      - data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  data:

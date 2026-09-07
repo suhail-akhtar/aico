@@ -5,9 +5,40 @@
   "category": "internal-tool",
   "kind": "page",
   "summary": "A single-page tool over SQLite: a summary strip, a table, a form, edit and delete — the aico page runtime does the data layer. No install, no build, served the moment it is saved. The right start for trackers, registers, lists and small internal tools.",
-  "tags": ["page", "sqlite", "crud", "alpine", "internal", "tracker"],
-  "match": ["tracker", "register", "list", "records", "inventory", "invoices", "expenses", "habits", "contacts", "crud", "internal tool", "log", "notes", "tasks", "todo", "table"],
-  "substitute": ["README.md", "AICO.md", ".aico/backlog.md", "public/index.html", "deploy/README.md"],
+  "tags": [
+    "page",
+    "sqlite",
+    "crud",
+    "alpine",
+    "internal",
+    "tracker"
+  ],
+  "match": [
+    "tracker",
+    "register",
+    "list",
+    "records",
+    "inventory",
+    "invoices",
+    "expenses",
+    "habits",
+    "contacts",
+    "crud",
+    "internal tool",
+    "log",
+    "notes",
+    "tasks",
+    "todo",
+    "table"
+  ],
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    "public/index.html",
+    "deploy/README.md",
+    "deploy/*.mjs"
+  ],
   "deploy": [],
   "brief": "docs/EXTENDING.md"
 }

@@ -24,7 +24,7 @@ can measure its own skills against tasks with known answers.
 ❯ _
 ```
 
-**Status:** `0.12.0`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.13.0`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
@@ -43,7 +43,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.12.0 serve
+npx github:suhail-akhtar/aico#v0.13.0 serve
 ```
 
 ## Why this one
@@ -82,10 +82,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.12.0 serve
+npx github:suhail-akhtar/aico#v0.13.0 serve
 ```
 
-`#v0.12.0` is a tag, so it pins that release. `#release/v0.12` follows the 0.12
+`#v0.13.0` is a tag, so it pins that release. `#release/v0.13` follows the 0.13
 line as it gets fixes, and `#main` is the development trunk.
 
 To have `aico` on your `PATH` — which the VS Code extension needs — install it
@@ -93,7 +93,7 @@ globally from the same tag. aico is not on the npm registry; this builds from
 source and takes a minute the first time:
 
 ```sh
-npm install -g github:suhail-akhtar/aico#v0.12.0
+npm install -g github:suhail-akhtar/aico#v0.13.0
 ```
 
 From source:
@@ -433,11 +433,16 @@ settings, hooks, plan mode, sandbox policy, spend caps, and composed tool sets.
 
 **Apps** are real applications kept in the workspace and started from
 templates: a records page over SQLite, a static landing page, a Hono JSON API,
-a Next.js web app with accounts. Each template copies in as files (zero model
-tokens) with a worked feature, tests, notes for the agent (`AICO.md`), a backlog
-and a Dockerfile. One agent builds from there; `Investigate` is the only fan-out.
-`/app templates`, `/app new <template> "<name>" --brief "…"`, or the **Apps**
-screen in the web portal. The agent's side is the `AppManage` tool.
+a Next.js web app with accounts, a metrics dashboard, a documentation site, a
+command-line tool, an LLM agent service, and an Expo mobile app. Each template
+copies in as files (zero model tokens) with a worked feature, tests, notes for
+the agent (`AICO.md`), a backlog and a Dockerfile or deploy script. One agent
+builds from there following the `app-plan`, `app-architecture`, `app-ship` and
+`app-quality` skills; `Investigate` is the only fan-out. Whatever the stack, the
+turn cannot end until the app was opened in a real browser and its own checks
+are green; **Deploy** on the card runs the script the app ships with. `/app
+templates`, `/app new <template> "<name>" --brief "…"`, or the **Apps** screen
+in the web portal. The agent's side is the `AppManage` tool.
 
 ---
 
