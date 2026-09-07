@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #2f5df6;
+  --color-ink: #16181d;
+  --color-ink-muted: #5b6270;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f5f7fb;
+  --color-line: #e2e6ee;
+  --color-good: #157347;
+  --color-bad: #b42318;
+  --radius-card: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-ink: #eef1f6;
+    --color-ink-muted: #a3abba;
+    --color-surface: #0f1116;
+    --color-surface-alt: #171a21;
+    --color-line: #2a2f3a;
+  }
+}
+
+body { @apply bg-surface-alt text-ink antialiased; }
+.card { @apply rounded-card border border-line bg-surface p-5; }
+.kpi-label { @apply text-xs font-semibold uppercase tracking-wide text-ink-muted; }
+.kpi-value { @apply mt-1 text-3xl font-bold tabular-nums; }

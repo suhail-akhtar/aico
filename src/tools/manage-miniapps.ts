@@ -44,9 +44,12 @@ import {
 import { closeDatabase, describe as describeTables } from '../miniapps/data.js';
 import { appState, startApp, stopApp, type RunningApp } from '../miniapps/process.js';
 import { getTemplate, instantiateTemplate, nodeSatisfies, renderCatalogue } from '../apps/templates.js';
+import { deployApp, deployState } from '../apps/deploy.js';
 
 export interface AppManageInput {
-  action: 'list' | 'create' | 'describe' | 'tables' | 'delete' | 'templates' | 'start' | 'stop' | 'status';
+  action: 'list' | 'create' | 'describe' | 'tables' | 'delete' | 'templates' | 'start' | 'stop' | 'status' | 'deploy';
+  /** For deploy: which target from app.json (defaults to the first). */
+  target?: string;
   /** For create: what to call it. For everything else: which one. */
   name?: string;
   description?: string;
@@ -340,6 +343,29 @@ export async function executeAppManage(input: AppManageInput): Promise<string> {
       return `${describeProcess(appState(slug), slug)}\n${backlog}`;
     }
 
+    case 'deploy': {
+      const found = await find(input.name);
+      if (typeof found === 'string') return found;
+      const { slug, app } = found;
+      const dir = miniAppDir(slug, settings, cwd);
+      const started = await deployApp(app, dir, input.target);
+      if (!started.ok) return started.message;
+      // Wait for it to settle, within reason: a docker build is minutes, and a
+      // model that returns "started" and moves on never learns it failed.
+      const deadline = Date.now() + START_TIMEOUT_MS * 2;
+      let rec = deployState(slug);
+      while (rec && rec.state === 'working' && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 1000));
+        rec = deployState(slug);
+      }
+      const targets = (app.deploy ?? []).map(t => t.id).join(', ');
+      if (!rec) return `Deploy of "${slug}" produced no record.`;
+      const tail = rec.output.slice(-25).join('\n');
+      if (rec.state === 'done') return `Deployed "${slug}" (${input.target ?? app.deploy?.[0]?.id}). Last output:\n${tail}`;
+      if (rec.state === 'working') return `Deploy of "${slug}" is still running after ${(START_TIMEOUT_MS * 2) / 1000}s. Check again with AppManage status. Output so far:\n${tail}`;
+      return `Deploy of "${slug}" failed${rec.error ? ` — ${rec.error}` : ''}. Targets: ${targets}. Output:\n${tail}`;
+    }
+
     case 'delete': {
       if (!input.name) return 'Which app?';
       const slug = slugify(input.name);
@@ -401,13 +427,19 @@ export const appManageToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['templates', 'list', 'create', 'describe', 'tables', 'start', 'stop', 'status', 'delete'],
+        enum: ['templates', 'list', 'create', 'describe', 'tables', 'start', 'stop', 'status', 'deploy', 'delete'],
         description:
           'templates: the catalogue, best matches for `brief` first. create: make an app from `template` '
           + '(without one, returns the catalogue and makes nothing). list: every app, its kind and state. '
           + 'describe: the pointer or authoring guide for an existing app. tables: a page app\'s schema as it '
           + 'applied. start/stop/status: the process of a process app (start installs on first run and waits '
-          + 'for the URL). delete: remove an app and its data for good.',
+          + 'for the URL). deploy: run the app\'s own deploy script (`target` from app.json; docker by default) '
+          + 'and report the outcome — refuses plainly when a required tool is missing. delete: remove an app '
+          + 'and its data for good.',
+      },
+      target: {
+        type: 'string',
+        description: 'For deploy: the target id from the app\'s app.json (e.g. "docker"). Defaults to the first.',
       },
       name: {
         type: 'string',

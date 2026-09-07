@@ -1,0 +1,70 @@
+{
+  "id": "dashboard-next",
+  "version": "1.0.0",
+  "name": "Dashboard (Next.js)",
+  "category": "dashboard",
+  "kind": "process",
+  "summary": "A metrics dashboard: Next.js App Router, KPI tiles and an ECharts chart over a node:sqlite metrics table, an ingest API, seeded sample data, and aggregation tested with vitest. Add a source, get a page.",
+  "tags": [
+    "dashboard",
+    "nextjs",
+    "react",
+    "charts",
+    "echarts",
+    "metrics",
+    "analytics",
+    "sqlite",
+    "typescript"
+  ],
+  "match": [
+    "dashboard",
+    "analytics",
+    "metrics",
+    "kpi",
+    "report",
+    "reporting",
+    "chart",
+    "charts",
+    "graph",
+    "monitor",
+    "monitoring",
+    "stats",
+    "statistics",
+    "admin panel"
+  ],
+  "requires": {
+    "node": ">=22.5.0"
+  },
+  "run": {
+    "install": "npm install --no-audit --no-fund",
+    "dev": "npx next dev --port {port}",
+    "ready": "ready in|started server|Local:\\s+http",
+    "build": "npm run build",
+    "test": "npm test",
+    "typecheck": "npm run typecheck",
+    "lint": "npm run lint",
+    "start": "npm start"
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    "package.json",
+    "src/app/layout.tsx",
+    "src/app/page.tsx",
+    "deploy/README.md",
+    "compose.yaml",
+    "deploy/*.mjs"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "node deploy/docker.mjs",
+      "requires": [
+        "docker"
+      ]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

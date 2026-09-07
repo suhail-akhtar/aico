@@ -46,7 +46,14 @@ import {
   type Goal, type Feedback, type Deliverable, type Attachment, type SubAgentView,
   type PermissionRequest, type EditRequest,
   type HostAnswer, type HostCall, type HostToolName,
+  streamApps,
+  type MiniAppsView,
+  type MiniAppProcess,
 } from './api';
+
+/** The one Apps stream, shared by every pane that asks for it. */
+let appsHandle: ReturnType<typeof streamApps> | null = null;
+let appsRefs = 0;
 import {
   applyLogEvent, withPending, dropPending, emptyDraft,
   type Draft, type ReasoningBurst,
@@ -198,6 +205,17 @@ interface AppState {
   activeProvider: string | null;
   settings: Record<string, unknown>;
   system: SystemSnapshot | null;
+  /**
+   * The Apps screen's state, kept live by a topic stream rather than a poll:
+   * a full frame on connect, process state on every runner emit, and a refetch
+   * of the list when the server says it changed. Null until the first frame.
+   */
+  apps: MiniAppsView | null;
+  appsLive: 'connecting' | 'live' | 'lost' | 'off';
+  /** Open the stream; returns the closer. Reference-counted so two panes share one. */
+  connectApps: () => () => void;
+  /** One fetch, for the places that need the list without a stream. */
+  refreshApps: () => Promise<void>;
 
   // ── actions ──
   connect: (sessionId: string) => void;
@@ -454,6 +472,8 @@ export const useStore = create<AppState>((set, get) => ({
   activeProvider: null,
   settings: {},
   system: null,
+  apps: null,
+  appsLive: 'off',
 
   openMiniApp: async (slug) => {
     const { sessionId } = await api.openMiniAppSession(slug);
@@ -1024,6 +1044,44 @@ export const useStore = create<AppState>((set, get) => ({
       set({ title });
       void get().refreshSessions();
     } catch (err) { set({ error: (err as Error).message }); }
+  },
+
+  refreshApps: async () => {
+    try { set({ apps: await api.miniApps() }); }
+    catch { /* the pane shows its own error; a failed refresh keeps the last frame */ }
+  },
+
+  connectApps: () => {
+    /*
+      One stream, however many panes ask. The scope bar above the composer
+      and the Apps screen both want the same state; a stream each would double
+      every frame and make "which one is current" a question.
+    */
+    appsRefs += 1;
+    if (!appsHandle) {
+      appsHandle = streamApps(
+        event => {
+          if (event.type === 'full') {
+            set({ apps: event.data as MiniAppsView });
+          } else if (event.type === 'processes') {
+            const processes = (event.data as { processes: MiniAppProcess[] }).processes;
+            set(s => (s.apps ? { apps: { ...s.apps, processes } } : {}));
+          } else if (event.type === 'changed') {
+            void get().refreshApps();
+          }
+        },
+        status => set({ appsLive: status }),
+      );
+    }
+    return () => {
+      appsRefs -= 1;
+      if (appsRefs <= 0) {
+        appsRefs = 0;
+        appsHandle?.close();
+        appsHandle = null;
+        set({ appsLive: 'off' });
+      }
+    };
   },
 
   refreshSystem: async () => {

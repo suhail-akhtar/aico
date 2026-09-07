@@ -1,0 +1,9 @@
+node_modules
+dist
+.astro
+.git
+.aico
+.env
+*.md
+test
+deploy

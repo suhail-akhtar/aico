@@ -39,8 +39,58 @@ interface Subscriber {
   res: ServerResponse;
 }
 
+/** A stream watching a topic rather than a session — the Apps screen, say. */
+interface TopicSubscriber {
+  topic: string;
+  res: ServerResponse;
+}
+
 export class EventHub {
   private readonly subscribers = new Set<Subscriber>();
+  private readonly topics = new Set<TopicSubscriber>();
+
+  /**
+   * Attach a response to a topic.
+   *
+   * The same wire shape as a session stream — `event:` type, `data:` JSON —
+   * but keyed by a name instead of a session id, for state that is not a
+   * conversation's: which apps are running, say. Unlike a session stream
+   * there is no log to replay from; the caller sends a full frame first.
+   */
+  subscribeTopic(topic: string, res: ServerResponse): () => void {
+    try {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.write(': connected\n\n');
+    } catch {
+      // Closed before it was open — a tab that navigated away mid-request.
+      // Nothing to stream to; nothing to remember.
+      return () => undefined;
+    }
+    const sub: TopicSubscriber = { topic, res };
+    this.topics.add(sub);
+    return () => { this.topics.delete(sub); };
+  }
+
+  /** Fan a frame out to every stream watching a topic. */
+  publishTopic(topic: string, type: string, data: unknown): void {
+    const frame = `event: ${type}\ndata: ${JSON.stringify({ type, topic, data })}\n\n`;
+    for (const sub of this.topics) {
+      if (sub.topic !== topic) continue;
+      try { sub.res.write(frame); } catch { this.topics.delete(sub); }
+    }
+  }
+
+  /** How many streams watch a topic. Exposed for tests. */
+  topicSize(topic: string): number {
+    let n = 0;
+    for (const sub of this.topics) if (sub.topic === topic) n++;
+    return n;
+  }
 
   /**
    * Attach a response as an SSE stream.
@@ -95,6 +145,9 @@ export class EventHub {
         this.subscribers.delete(sub);
       }
     }
+    for (const sub of this.topics) {
+      try { sub.res.write(': ping\n\n'); } catch { this.topics.delete(sub); }
+    }
   }
 
   /** Close every stream — used on shutdown so the process can exit. */
@@ -103,6 +156,10 @@ export class EventHub {
       try { sub.res.end(); } catch { /* already gone */ }
     }
     this.subscribers.clear();
+    for (const sub of this.topics) {
+      try { sub.res.end(); } catch { /* already gone */ }
+    }
+    this.topics.clear();
   }
 
   get size(): number {

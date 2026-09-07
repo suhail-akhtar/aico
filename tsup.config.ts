@@ -25,7 +25,7 @@ export default defineConfig({
     if (fs.existsSync('templates')) {
       fs.cpSync('templates', 'dist/templates', {
         recursive: true,
-        filter: (src) => !/[\\/](node_modules|\.next|dist|coverage)([\\/]|$)/.test(src),
+        filter: (src) => !/[\\/](node_modules|\.next|\.astro|\.expo|dist|coverage|data)([\\/]|$)/.test(src),
       });
     }
   },

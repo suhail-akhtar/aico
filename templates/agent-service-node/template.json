@@ -1,0 +1,67 @@
+{
+  "id": "agent-service-node",
+  "version": "1.0.0",
+  "name": "Agent service (Node)",
+  "category": "agent",
+  "kind": "process",
+  "summary": "An LLM-powered service: a Hono API that runs a tool-calling agent loop against any OpenAI-compatible model, streams the answer over SSE, keeps conversations in node:sqlite, and ships a worked tool. Tested with a fake model, no key needed.",
+  "tags": [
+    "agent",
+    "llm",
+    "ai",
+    "chatbot",
+    "assistant",
+    "hono",
+    "sse",
+    "sqlite",
+    "typescript"
+  ],
+  "match": [
+    "agent",
+    "assistant",
+    "chatbot",
+    "bot",
+    "llm",
+    "ai",
+    "gpt",
+    "claude",
+    "copilot",
+    "conversation",
+    "rag",
+    "tool calling",
+    "automation"
+  ],
+  "requires": {
+    "node": ">=22.5.0"
+  },
+  "run": {
+    "install": "npm install --no-audit --no-fund",
+    "dev": "npx tsx watch src/index.ts",
+    "ready": "listening on",
+    "build": "npm run build",
+    "test": "npm test",
+    "typecheck": "npm run typecheck",
+    "start": "npm start"
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    "package.json",
+    "src/agent.ts",
+    "deploy/README.md",
+    "compose.yaml",
+    "deploy/*.mjs"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "node deploy/docker.mjs",
+      "requires": [
+        "docker"
+      ]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

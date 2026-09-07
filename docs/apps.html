@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apps — real applications your AI coding agent builds from templates</title>
+<meta name="description" content="Ask the aico agent for an app and get one from a template — a records page over SQLite, a landing site, a Hono API, a Next.js app with accounts — verified in a real browser and deployable from the files it ships.">
+<!-- seo:start -->
+<link rel="canonical" href="https://suhail-akhtar.github.io/aico/apps.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aico">
+<meta property="og:url" content="https://suhail-akhtar.github.io/aico/apps.html">
+<meta property="og:title" content="Apps — real applications your AI coding agent builds from templates">
+<meta property="og:description" content="Ask the aico agent for an app and get one from a template — a records page over SQLite, a landing site, a Hono API, a Next.js app with accounts — verified in a real browser and deployable from the files it ships.">
+<meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Apps — real applications your AI coding agent builds from templates">
+<meta name="twitter:description" content="Ask the aico agent for an app and get one from a template — a records page over SQLite, a landing site, a Hono API, a Next.js app with accounts — verified in a real browser and deployable from the files it ships.">
+<meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<!-- seo:end -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script><!-- blocking on purpose: sets the theme before first paint -->
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.13.0</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="vscode.html">VS Code</a>
+      <a href="automation.html">Automation</a>
+      <a href="compare.html">Compare</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="apps.html" aria-current="page">Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Apps</p>
+
+  <div class="prose">
+    <h1>Apps</h1>
+    <p class="lede">
+      Ask for an invoice ledger, a landing page, a JSON API or a web app with accounts,
+      and get a real one: started from a template in seconds, built by one agent
+      following a written plan, verified in a real browser whatever its stack, and
+      deployable from the files it carries. A chat answer disappears into scrollback;
+      this is a directory you can open, diff and run.
+    </p>
+
+    <div class="note">
+      <p>
+        <strong>Since v0.13.0.</strong> Mini Apps became Apps. Off by default — turn
+        the host on under Settings → Apps, which takes effect immediately. Everything
+        below is in the web portal's <strong>Apps</strong> screen and in the CLI as
+        <code>/app</code>.
+      </p>
+    </div>
+  </div>
+
+  <div class="shots">
+    <figure>
+      <img src="assets/miniapp-light.png" alt="An invoices app: three summary tiles showing outstanding, overdue and paid totals, above a ledger table with reference, customer, dates, totals and status pills." loading="lazy">
+      <figcaption>A records app on the shared host — the page kind, built from the <code>page-records</code> template.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/miniapp-dark.png" alt="The same invoices app rendered in dark mode." loading="lazy">
+      <figcaption>Dark mode follows the reader's system setting, with a toggle available.</figcaption>
+    </figure>
+  </div>
+
+  <div class="prose">
+    <h2>Templates first</h2>
+    <p>
+      An app starts from a template, not from a blank directory and two thousand tokens
+      of instructions. A template copies in as files — nothing is generated — and every
+      one carries a worked feature end to end, tests, a Dockerfile, and a short
+      <code>AICO.md</code> written for the agent: what the app is, how it is laid out,
+      and what to copy for the next feature. Four ship today:
+    </p>
+    <ul>
+      <li><strong>page-records</strong> — a one-screen tool over the shared SQLite host: summary strip, table, form, two-step delete. Nothing to install; serving the moment it is saved.</li>
+      <li><strong>landing-static</strong> — hero, features, pricing, FAQ, contact. Plain HTML and CSS, a strict content-security policy, and an nginx image.</li>
+      <li><strong>api-service-hono</strong> — a JSON API on Hono and Node's built-in SQLite: typed routes with field-level errors, an OpenAPI document, health and readiness, tests that run the app in memory, a multi-stage image.</li>
+      <li><strong>web-saas-next</strong> — Next.js App Router, Tailwind, node:sqlite, sign-up and sign-in with a signed cookie, an items feature from page to database to test, a standalone image.</li>
+    </ul>
+    <p>
+      Your own templates go in <code>~/.aico/templates/&lt;id&gt;/</code> or a project's
+      <code>.aico/templates/</code>; the later shelf wins by id. A template is a directory
+      with a <code>template.json</code> naming its kind, category, run commands and deploy
+      targets.
+    </p>
+
+    <h2>Four kinds, one screen</h2>
+    <p>
+      A kind is how the app runs, not which framework it uses. <strong>page</strong> and
+      <strong>static</strong> are served by aico's own host on a port of their own — a
+      different origin, so generated code cannot reach aico's API. A
+      <strong>process</strong> app has its own server, started and stopped from the
+      screen, installed the first time in the background while you type the brief. A
+      <strong>cli</strong> has nothing to open; its tests are its check.
+    </p>
+    <div class="note warn">
+      <p>
+        What is <em>not</em> contained: a process app runs code the agent wrote with your
+        permissions, on a port of its own. Its environment has every key, token and
+        password stripped by pattern, and it cannot reach aico's origin — but it is the
+        trust you extend to any repository you clone and run, not a sandbox.
+      </p>
+    </div>
+
+    <h2>One agent, a written plan, and a gate that opens the app</h2>
+    <p>
+      There is no build team of role-playing sub-agents; the measured result of those was
+      three to ten times the tokens for worse coordination. One agent builds. The
+      <code>app-plan</code> skill turns a brief into a one-page PRD and a backlog of
+      vertical slices, each with a <em>Done when</em> the browser can check;
+      <code>app-architecture</code> decides where a feature lives before it is written;
+      <code>app-ship</code> makes it runnable from a clean clone; <code>app-quality</code>
+      proves it with a check per requirement in your words. <code>Investigate</code> is the
+      only fan-out — read-only research, never writing.
+    </p>
+    <p>
+      Whatever the stack, the turn cannot end as finished until the app was opened. A
+      source write under a process app registers it; a passing <code>VerifyApp</code> verdict
+      against its origin clears it; a later write makes that verdict stale. When the app is
+      not running the gate says so and names the command. The project's own checks — from
+      <code>.aico/profile.json</code>, which remembers the commands that worked — must be
+      green first.
+    </p>
+
+    <h2>Deploy from the files it ships</h2>
+    <p>
+      Every process and static template carries a multi-stage Dockerfile, a
+      <code>compose.yaml</code>, an <code>.env.example</code>, a health route and a
+      <code>deploy/</code> folder with the exact command per host. <strong>Deploy</strong> on
+      the card runs the app's own script and shows its log; when the tool it needs is not on
+      this machine, the answer is a sentence, not a failing build. aico holds no cloud
+      credentials and ships no cloud SDK — a stateless process with one volume for data is
+      what makes the same image run on Fly, Render, Railway, a VPS or Kubernetes.
+    </p>
+
+    <h2>Apps do not send SQL</h2>
+    <p>
+      For page apps the shared host builds every statement: the page names a table and
+      passes values, identifiers are checked against the schema that actually applied, and
+      every value is bound. There is no path from a string in the browser to a token in a
+      query.
+    </p>
+<pre><code><span class="k">await</span> aico.db.list(<span class="s">'invoices'</span>, { where: { status: <span class="s">'sent'</span> },
+                              orderBy: <span class="s">'issued_at'</span>, direction: <span class="s">'desc'</span> })
+<span class="k">await</span> aico.db.create(<span class="s">'invoices'</span>, { customer: <span class="s">'Acme'</span>, total: <span class="w">1200</span> })
+<span class="k">await</span> aico.db.update(<span class="s">'invoices'</span>, id, { status: <span class="s">'paid'</span> })</code></pre>
+
+    <h2>The shape on disk</h2>
+<pre><code>&lt;workspace&gt;/miniapps/&lt;slug&gt;/
+  app.json            <span class="c">kind, category, template, run and deploy profiles</span>
+  AICO.md             <span class="c">what the agent needs to know — inlined into its prompt</span>
+  .aico/backlog.md    <span class="c">stories, ticked as they land</span>
+  .aico/decisions.md  <span class="c">what was decided and why; survives compaction</span>
+  .aico/profile.json  <span class="c">the commands that work, with provenance</span>
+  docs/EXTENDING.md   <span class="c">the worked feature to copy</span>
+  Dockerfile  compose.yaml  .env.example  deploy/</code></pre>
+
+    <h2>From the CLI</h2>
+<pre><code>/app templates a SaaS with accounts and billing
+/app new web-saas-next <span class="s">"Invoice Desk"</span> --brief <span class="s">"Invoices with customers and PDF export"</span>
+/app list
+/app start invoice-desk</code></pre>
+
+    <h2>A plugin, off by default</h2>
+<pre><code>{
+  <span class="k">"miniApps"</span>: {
+    <span class="k">"enabled"</span>: <span class="k">true</span>,
+    <span class="k">"port"</span>: <span class="w">7318</span>          <span class="c">// default: one above the aico server's</span>
+  }
+}</code></pre>
+    <p>
+      Off means the model cannot see the tool at all — not that it is asked not to use it.
+      The setting key keeps its old name so nothing you configured changes.
+    </p>
+
+    <h2>Tested where it matters</h2>
+    <p>
+      Every shipped template is instantiated in the test harness and checked for its
+      manifest, notes and backlog; the two process templates are installed from their
+      lockfiles and put through typecheck, lint, test and build before a release; the host
+      is exercised over real HTTP with a restart in the middle; the create, run, deploy and
+      profile routes are driven against a real server on a scratch store; and the Apps
+      screen and its wizard are measured in a real browser.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="install.html">Install →</a>
+      <a class="btn" href="widgets.html">← Charts and diagrams</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

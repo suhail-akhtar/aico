@@ -268,6 +268,7 @@ export { detectChecksFor } from './checks.js';
 export { projectRoot, currentApp } from './run-context.js';
 export { servedArtifacts } from './verification.js';
 export { gateChecks } from './tools/run-checks.js';
+export { deployKey, toolAvailable, missingRequirements, deployApp, deployState } from './apps/deploy.js';
 export { exportSkill } from './skills/import.js';
 export { listDirectory } from './tools/ls.js';
 export { globFiles } from './tools/glob.js';

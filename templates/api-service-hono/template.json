@@ -5,9 +5,33 @@
   "category": "api",
   "kind": "process",
   "summary": "A JSON API on Hono and node:sqlite: typed routes, validation, an OpenAPI document, a health route, vitest tests against the app in memory, and a multi-stage Dockerfile. One worked resource (items) to copy.",
-  "tags": ["api", "hono", "typescript", "sqlite", "openapi", "rest", "backend", "service"],
-  "match": ["api", "rest", "service", "backend", "endpoint", "endpoints", "webhook", "microservice", "json", "server", "integration", "openapi"],
-  "requires": { "node": ">=22.5.0" },
+  "tags": [
+    "api",
+    "hono",
+    "typescript",
+    "sqlite",
+    "openapi",
+    "rest",
+    "backend",
+    "service"
+  ],
+  "match": [
+    "api",
+    "rest",
+    "service",
+    "backend",
+    "endpoint",
+    "endpoints",
+    "webhook",
+    "microservice",
+    "json",
+    "server",
+    "integration",
+    "openapi"
+  ],
+  "requires": {
+    "node": ">=22.5.0"
+  },
   "run": {
     "install": "npm install --no-audit --no-fund",
     "dev": "npx tsx watch src/index.ts",
@@ -18,9 +42,25 @@
     "lint": "npm run lint",
     "start": "npm start"
   },
-  "substitute": ["README.md", "AICO.md", ".aico/backlog.md", "package.json", "src/openapi.ts", "deploy/README.md", "compose.yaml"],
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    "package.json",
+    "src/openapi.ts",
+    "deploy/README.md",
+    "compose.yaml",
+    "deploy/*.mjs"
+  ],
   "deploy": [
-    { "id": "docker", "label": "Docker image", "script": "node deploy/docker.mjs", "requires": ["docker"] }
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "node deploy/docker.mjs",
+      "requires": [
+        "docker"
+      ]
+    }
   ],
   "brief": "docs/EXTENDING.md"
 }

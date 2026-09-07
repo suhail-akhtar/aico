@@ -102,13 +102,14 @@ const META = {
       + 'of Mermaid diagram directly in the transcript — with a repair step when one will '
       + 'not parse.',
   },
-  'miniapps.html': {
-    title: 'Mini Apps — SQLite-backed apps your AI coding agent builds',
+  'apps.html': {
+    title: 'Apps — real applications your AI coding agent builds from templates',
     description:
-      'Ask the aico agent for an invoice ledger and get a real single-page app with a SQLite '
-      + 'database behind it, at its own local URL. Two kinds: a static page, or a full '
-      + 'Next.js application.',
+      'Ask the aico agent for an app and get one from a template — a records page over SQLite, '
+      + 'a landing site, a Hono API, a Next.js app with accounts — verified in a real browser and '
+      + 'deployable from the files it ships.',
   },
+  // miniapps.html is a redirect stub to apps.html (noindex); it carries no SEO block.
 };
 
 /**
@@ -216,6 +217,10 @@ for (const file of pages) {
   const full = path.join(docs, file);
   let html = fs.readFileSync(full, 'utf8');
   const before = html;
+
+  // A redirect stub says noindex and points its canonical elsewhere; it must
+  // not get a social card or a self-canonical, and it needs no META entry.
+  if (/<meta name="robots" content="noindex">/.test(html)) continue;
 
   const meta = META[file];
   if (!meta) {

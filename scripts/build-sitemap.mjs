@@ -99,9 +99,15 @@ function xmlEscape(value) {
     .replace(/'/g, '&apos;');
 }
 
+/** A redirect stub says so; it is not a page to crawl. */
+function isNoindex(name) {
+  try { return /<meta name="robots" content="noindex">/.test(fs.readFileSync(path.join(docsDir, name), 'utf8')); }
+  catch { return false; }
+}
+
 function build() {
   const pages = fs.readdirSync(docsDir)
-    .filter(name => name.endsWith('.html'))
+    .filter(name => name.endsWith('.html') && !isNoindex(name))
     .sort();
 
   const entries = pages.map((name) => {
@@ -191,7 +197,7 @@ function verify(xml) {
 
   // And every page on disk must be listed, which is the failure that has no
   // symptom at all — the page simply never gets crawled.
-  for (const name of fs.readdirSync(docsDir).filter(n => n.endsWith('.html'))) {
+  for (const name of fs.readdirSync(docsDir).filter(n => n.endsWith('.html') && !isNoindex(n))) {
     const expected = name === INDEX ? prefix : prefix + name;
     if (!locs.includes(expected)) problems.push(`in docs/ but not listed: ${name}`);
   }

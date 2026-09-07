@@ -1,0 +1,20 @@
+{
+  "name": "__APP_SLUG__",
+  "version": "0.1.0",
+  "description": "__APP_DESCRIPTION__",
+  "type": "module",
+  "bin": { "__APP_SLUG__": "dist/index.js" },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=22.5.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"const fs=require('fs');const f='dist/index.js';const s=fs.readFileSync(f,'utf8');if(!s.startsWith('#!'))fs.writeFileSync(f,'#!/usr/bin/env node\\n'+s)\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "id": "cli-node",
+  "version": "1.0.0",
+  "name": "Command-line tool (Node)",
+  "category": "cli",
+  "kind": "cli",
+  "summary": "A TypeScript command-line tool: argument parsing with node:util, one worked subcommand, help and version, exit codes, vitest tests, a build to a single bin. Publishable with npm pack.",
+  "tags": [
+    "cli",
+    "node",
+    "typescript",
+    "command-line",
+    "tool",
+    "script"
+  ],
+  "match": [
+    "cli",
+    "command line",
+    "command-line",
+    "terminal",
+    "script",
+    "tool",
+    "utility",
+    "batch",
+    "converter",
+    "generator",
+    "linter",
+    "checker"
+  ],
+  "requires": {
+    "node": ">=22.5.0"
+  },
+  "run": {
+    "install": "npm install --no-audit --no-fund",
+    "build": "npm run build",
+    "test": "npm test",
+    "typecheck": "npm run typecheck"
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    "package.json",
+    "src/cli.ts",
+    "deploy/README.md",
+    "deploy/*.mjs"
+  ],
+  "deploy": [
+    {
+      "id": "pack",
+      "label": "npm pack (tarball)",
+      "script": "node deploy/pack.mjs",
+      "requires": [
+        "npm"
+      ]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

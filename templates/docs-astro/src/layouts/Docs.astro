@@ -1,0 +1,62 @@
+---
+import { getCollection } from 'astro:content';
+import { buildNav, neighbours } from '@/lib/nav';
+import '@/styles/site.css';
+
+interface Props { title: string; description?: string; id?: string }
+const { title, description, id } = Astro.props;
+
+const nav = buildNav((await getCollection('docs')).map(e => ({
+  id: e.id, title: e.data.title, section: e.data.section, order: e.data.order, draft: e.data.draft,
+})));
+const { prev, next } = id ? neighbours(nav, id) : {};
+const current = Astro.url.pathname.replace(/\/$/, '');
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title} — __APP_TITLE__</title>
+  {description && <meta name="description" content={description} />}
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">__APP_TITLE__</a>
+    <button class="menu" type="button" aria-expanded="false" aria-controls="sidebar" data-menu>Menu</button>
+  </header>
+  <div class="shell">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      {nav.map(section => (
+        <section>
+          <h2>{section.section}</h2>
+          <ul>
+            {section.pages.map(page => (
+              <li><a href={page.href} aria-current={current === page.href.replace(/\/$/, '') ? 'page' : undefined}>{page.title}</a></li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </nav>
+    <main class="content">
+      <article class="prose">
+        <slot />
+      </article>
+      {(prev || next) && (
+        <footer class="pager">
+          {prev ? <a rel="prev" href={prev.href}>← {prev.title}</a> : <span />}
+          {next ? <a rel="next" href={next.href}>{next.title} →</a> : <span />}
+        </footer>
+      )}
+    </main>
+  </div>
+  <script>
+    const button = document.querySelector('[data-menu]');
+    const sidebar = document.getElementById('sidebar');
+    button?.addEventListener('click', () => {
+      const open = sidebar?.classList.toggle('is-open') ?? false;
+      button.setAttribute('aria-expanded', String(open));
+    });
+  </script>
+</body>
+</html>

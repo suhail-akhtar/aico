@@ -61,43 +61,29 @@ export function AppsPane({ onOpenChat }: Props): React.ReactElement {
   // Each app has one conversation, rejoined rather than restarted.
   const openMiniApp = useStore(s => s.openMiniApp);
 
-  const [view, setView] = useState<MiniAppsView | null>(null);
+  /*
+    Live, not polled. The store holds one stream for the Apps topic: a full
+    frame on connect, process state the moment the runner emits it — an install
+    finishing, a dev server printing its port, a deploy failing — and a refetch
+    when the list itself changed. A first `npm install` used to be a card that
+    did not move for minutes; now it moves as the output does.
+  */
+  const view = useStore(s => s.apps);
+  const live = useStore(s => s.appsLive);
+  const connectApps = useStore(s => s.connectApps);
+  const refresh = useStore(s => s.refreshApps);
   const [templates, setTemplates] = useState<AppTemplate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<MiniAppSummary | null>(null);
   const [wizard, setWizard] = useState<{ template?: AppTemplate } | null>(null);
 
-  const refresh = useCallback(async (): Promise<void> => {
-    try {
-      setView(await api.miniApps());
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  // On open, and again when a turn ends — an agent that just built one should
-  // not need a manual refresh to make it appear.
-  useEffect(() => { void refresh(); }, [refresh, busy]);
+  useEffect(() => connectApps(), [connectApps]);
+  // A turn that just built an app announces nothing on the topic (the agent
+  // wrote files, not a process), so the list is refetched when a turn ends.
+  useEffect(() => { void refresh().catch(err => setError(err instanceof Error ? err.message : String(err))); }, [refresh, busy]);
   useEffect(() => {
     void api.templates().then(r => setTemplates(r.templates)).catch(() => setTemplates([]));
   }, []);
-
-  /*
-    While something is installing or starting, keep asking.
-
-    A first `npm install` runs for minutes and prints nothing this side of the
-    process boundary. A card that does not change during it is indistinguishable
-    from one that has hung, which is the reading people act on. Polling stops the
-    moment nothing is in flight, so an idle pane costs nothing.
-  */
-  const inFlight = (view?.processes ?? []).some(
-    p => p.state === 'installing' || p.state === 'starting' || p.state === 'working');
-  useEffect(() => {
-    if (!inFlight) return;
-    const timer = setInterval(() => { void refresh(); }, 2000);
-    return () => clearInterval(timer);
-  }, [inFlight, refresh]);
 
   const buildByTalking = (): void => askAgentFor(
     'Build me an app. Ask me what it should do and who uses it, then pick a template with AppManage templates before you start.',
@@ -134,7 +120,14 @@ export function AppsPane({ onOpenChat }: Props): React.ReactElement {
     <div className="flex h-full flex-col overflow-y-auto" data-apps-pane>
       <div className="flex items-center gap-3 border-b border-aico-border-subtle px-5 py-3">
         <div>
-          <h2 className="text-[14px] font-semibold text-aico-primary">Apps</h2>
+          <h2 className="flex items-center gap-2 text-[14px] font-semibold text-aico-primary">
+            Apps
+            <span
+              data-apps-live={live}
+              title={live === 'live' ? 'Live: process state arrives as it happens' : live === 'lost' ? 'Connection lost; reconnecting' : 'Connecting'}
+              className={`inline-block h-1.5 w-1.5 rounded-full ${live === 'live' ? 'bg-emerald-500' : live === 'lost' ? 'bg-aico-danger' : 'bg-amber-400'}`}
+            />
+          </h2>
           <p className="text-[12px] text-aico-muted">
             Applications kept in this workspace, from one-screen tools to full-stack services.
           </p>
@@ -241,9 +234,19 @@ export function AppsPane({ onOpenChat }: Props): React.ReactElement {
                   app={app}
                   host={view?.host ?? null}
                   process={processes.find(p => p.slug === app.slug)}
+                  deploy={processes.find(p => p.slug === `${app.slug}#deploy`)}
                   onRun={async (action) => {
                     await api.runMiniApp(app.slug, action).catch(() => undefined);
                     void refresh();
+                  }}
+                  onDeploy={async (target) => {
+                    try {
+                      await api.deployApp(app.slug, target);
+                    } catch (err) {
+                      // The server's own sentence — "needs docker on this machine" —
+                      // is the useful one, and it belongs on the card, not in a toast.
+                      setError(err instanceof Error ? err.message : String(err));
+                    }
                   }}
                   onOpenSession={() => openSession(app.slug)}
                   onDelete={() => setConfirming(app)}
@@ -348,15 +351,20 @@ export function KindBadge({ kind }: { kind: MiniAppSummary['kind'] }): React.Rea
 }
 
 function AppCard(
-  { app, host, process, onRun, onOpenSession, onDelete }: {
+  { app, host, process, deploy, onRun, onDeploy, onOpenSession, onDelete }: {
     app: MiniAppSummary;
     host: string | null;
     process?: MiniAppProcess;
+    /** The last deploy's record, kept under `<slug>#deploy`. */
+    deploy?: MiniAppProcess;
     onRun: (action: 'start' | 'stop') => void;
+    onDeploy: (target?: string) => void;
     onOpenSession: () => void;
     onDelete: () => void;
   },
 ): React.ReactElement {
+  const targets = app.deploy ?? [];
+  const deploying = deploy?.state === 'working';
   const isProcess = ownsProcess(app.kind);
   const isCli = app.kind === 'cli';
   /*
@@ -426,6 +434,21 @@ function AppCard(
         </details>
       )}
 
+      {/*
+        The deploy's own words. A build that fails says where in its log, and a
+        build that finished printed the command to run the image.
+      */}
+      {deploy && deploy.state !== 'stopped' && (
+        <details className="mt-2" open={deploy.state === 'failed'} data-deploy-record>
+          <summary className={`cursor-pointer text-[11px] ${deploy.state === 'failed' ? 'text-aico-danger' : 'text-aico-muted'}`}>
+            {deploy.state === 'working' ? 'deploying…' : deploy.state === 'done' ? 'deployed' : `deploy failed${deploy.error ? ` — ${deploy.error}` : ''}`}
+          </summary>
+          <pre className="mt-1 max-h-40 overflow-auto rounded bg-aico-bg p-2 font-mono text-[10px] leading-relaxed text-aico-secondary">
+            {deploy.output.slice(-30).join('\n') || 'no output yet'}
+          </pre>
+        </details>
+      )}
+
       <div className="mt-3 flex items-center gap-1.5">
         {/*
           A plain link, opened in a new tab. Not an iframe: the whole point of
@@ -467,6 +490,36 @@ function AppCard(
         >
           Work on it
         </button>
+        {targets.length > 0 && app.built && (
+          /*
+            One target is a button; several are a select. The script and the
+            tool it needs are the app's own (app.json), and the server refuses
+            plainly when the tool is missing — that sentence lands on the pane.
+          */
+          targets.length === 1 ? (
+            <button
+              onClick={() => onDeploy(targets[0]!.id)}
+              disabled={deploying}
+              data-deploy
+              title={`${targets[0]!.label}${targets[0]!.requires?.length ? ` (needs ${targets[0]!.requires.join(', ')})` : ''}`}
+              className="rounded-lg px-2.5 py-1.5 text-[12px] text-aico-secondary
+                         transition-colors hover:bg-aico-hover hover:text-aico-primary disabled:opacity-50"
+            >
+              {deploying ? 'Deploying…' : 'Deploy'}
+            </button>
+          ) : (
+            <select
+              onChange={e => { if (e.target.value) { onDeploy(e.target.value); e.target.value = ''; } }}
+              disabled={deploying}
+              data-deploy
+              className="rounded-lg border border-aico-border bg-aico-bg px-2 py-1 text-[12px] text-aico-secondary"
+              defaultValue=""
+            >
+              <option value="">{deploying ? 'Deploying…' : 'Deploy…'}</option>
+              {targets.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          )
+        )}
         <div className="flex-1" />
         <button
           onClick={onDelete}

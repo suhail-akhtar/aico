@@ -324,6 +324,12 @@ export const api = {
   /** What an app can start from: the shipped templates plus the user's and the project's. */
   templates: () => get<{ templates: AppTemplate[] }>('apps/templates'),
 
+  /** Run the app's own deploy script. A missing requirement answers 400 with `missing`. */
+  deployApp: (slug: string, target?: string) =>
+    post<{ deploy: MiniAppProcess }>('apps/deploy', { slug, ...(target ? { target } : {}) }),
+  deployStatus: (slug: string) =>
+    get<{ deploy: MiniAppProcess | null }>(`apps/deploy?slug=${encodeURIComponent(slug)}`),
+
   /** The commands a project is held to, with provenance. Reading bootstraps the file from the manifest. */
   projectProfile: (cwd?: string) =>
     get<ProjectProfileView>(`project/profile${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''}`),
@@ -774,6 +780,8 @@ export interface MiniAppSummary {
   built: boolean;
   /** Stories ticked in .aico/backlog.md, when it has one. */
   backlog?: { done: number; total: number };
+  /** Deploy targets the app ships with, from app.json. */
+  deploy?: Array<{ id: string; label: string; script?: string; requires?: string[] }>;
 }
 
 export interface MiniAppsView {
@@ -1002,6 +1010,78 @@ export interface StreamEvent {
 
 export interface StreamHandle {
   close: () => void;
+}
+
+/** A frame on a topic stream: `full`, `processes` or `changed` for the Apps screen. */
+export interface TopicEvent<T = unknown> {
+  type: string;
+  topic: string;
+  data: T;
+}
+
+/**
+ * Subscribe to a topic stream, reconnecting forever.
+ *
+ * The same reader `streamSession` uses, for state that is not a
+ * conversation's — which apps are running, say. There is no resume point:
+ * the server sends a full frame on every connect, so a reconnect is a refresh.
+ */
+export function streamTopic<T = unknown>(
+  path: string,
+  onEvent: (event: TopicEvent<T>) => void,
+  onStatus?: (status: 'connecting' | 'live' | 'lost') => void,
+): StreamHandle {
+  let closed = false;
+  let attempt = 0;
+  let controller: AbortController | null = null;
+
+  const connect = async (): Promise<void> => {
+    if (closed) return;
+    onStatus?.('connecting');
+    controller = new AbortController();
+    try {
+      const res = await transportFetch(
+        `/api/${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(getToken())}`,
+        { signal: controller.signal, headers: { Accept: 'text/event-stream' } },
+      );
+      if (!res.ok || !res.body) throw new ApiError(`stream failed: ${res.status}`, res.status);
+      attempt = 0;
+      onStatus?.('live');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary: number;
+        while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const line = frame.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          try { onEvent(JSON.parse(line.slice(6)) as TopicEvent<T>); } catch { /* a bad frame is not a dead stream */ }
+        }
+      }
+    } catch (err) {
+      if (closed || (err as Error)?.name === 'AbortError') return;
+    }
+    if (closed) return;
+    onStatus?.('lost');
+    attempt += 1;
+    setTimeout(connect, Math.min(1000 * 2 ** (attempt - 1), 15_000));
+  };
+
+  void connect();
+  return { close: () => { closed = true; controller?.abort(); } };
+}
+
+/** The Apps screen's stream: one full frame, then process state and list changes. */
+export function streamApps(
+  onEvent: (event: TopicEvent<MiniAppsView | { processes: MiniAppProcess[] } | Record<string, never>>) => void,
+  onStatus?: (status: 'connecting' | 'live' | 'lost') => void,
+): StreamHandle {
+  return streamTopic('apps/events', onEvent, onStatus);
 }
 
 /**

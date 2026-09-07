@@ -314,7 +314,11 @@ try {
         // The template cards come from the catalogue route, not a hard-coded list.
         await page.waitForSelector('[data-template="page-records"]', { timeout: 30_000 });
         const cards = await page.$$('[data-apps-templates] [data-template]');
-        check(cards.length >= 4, `apps — the shipped templates are offered (${cards.length} cards)`);
+        check(cards.length >= 9, `apps — the shipped templates are offered (${cards.length} cards)`);
+        // The screen is live, not polled: the topic stream connects and says so.
+        await page.waitForSelector('[data-apps-live="live"]', { timeout: 15_000 }).catch(() => undefined);
+        const live = await page.$eval('[data-apps-live]', el => el.getAttribute('data-apps-live')).catch(() => 'missing');
+        check(live === 'live', `apps — the Apps stream is connected (${live})`);
         // The wizard: opens from the primary action, fits the viewport, closes on Escape.
         await page.click('[data-create-app]');
         await page.waitForSelector('[data-app-wizard] [role="dialog"]', { timeout: 10_000 });
