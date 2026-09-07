@@ -30,6 +30,8 @@ export interface TurnSummaryData {
   outputTokens: number;
   cachedTokens: number;
   files: Deliverable[];
+  /** Cache share for the turn and the session, and what moved in the prefix. Absent on old servers. */
+  cache?: { turnShare: number; sessionShare: number; resets: string[] };
 }
 
 export function TurnSummary(
@@ -55,6 +57,26 @@ export function TurnSummary(
 
       {summary.detail && (
         <p className="px-4 pb-2.5 text-[13px] text-aico-secondary">{summary.detail}</p>
+      )}
+
+      {/*
+        The cache line, only when there is something to say: a share once the
+        turn had more than one step (a single request has nothing to hit), and
+        the reason when the prefix moved — because "82%" on its own leaves the
+        reader guessing whether that is good, and "prefix changed: remembered"
+        tells them exactly what cost the other 18.
+      */}
+      {summary.cache && summary.inputTokens > 0 && (summary.steps > 1 || summary.cache.resets.length > 0) && (
+        <p
+          className={`px-4 pb-2.5 text-[12px] tabular-nums ${
+            summary.steps > 1 && summary.cache.turnShare < 0.5 ? 'text-aico-warning' : 'text-aico-muted'
+          }`}
+          data-cache-line
+          title={`Cached input over all input. This session: ${Math.round(summary.cache.sessionShare * 100)}%.`}
+        >
+          Cache {Math.round(summary.cache.turnShare * 100)}%
+          {summary.cache.resets.length > 0 && ` · ${summary.cache.resets.join(' · ')}`}
+        </p>
       )}
 
       {summary.files.length > 0 && (

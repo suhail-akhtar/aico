@@ -61,12 +61,14 @@ export function canonicalHeader(input: {
   model: string;
   systemPrompt: string;
   tools: string[];
+  sectionHashes?: Record<string, string>;
 }): RequestHeader {
   return {
     provider: input.provider,
     model: input.model,
     systemHash: crypto.createHash('sha256').update(input.systemPrompt).digest('hex').slice(0, 16),
     tools: [...input.tools].sort(),
+    ...(input.sectionHashes ? { sectionHashes: input.sectionHashes } : {}),
   };
 }
 

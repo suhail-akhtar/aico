@@ -51,6 +51,10 @@ export function Composer(): React.ReactElement {
   const followup = useStore(s => s.followup);
   const cancel = useStore(s => s.cancel);
   const usage = useStore(s => s.usage);
+  const turnSummary = useStore(s => s.turnSummary);
+  const lastTurnCache = turnSummary?.cache
+    ? { ...turnSummary.cache, steps: turnSummary.steps }
+    : null;
   const model = useStore(s => s.model ?? s.defaultModel);
 
   const [text, setText] = useState('');
@@ -527,7 +531,20 @@ ${prefill.text}` : prefill.text));
                 Out {usage.usageEstimated ? '~' : ''}{format(usage.output)}
               </span>
               {usage.cached > 0 && (
-                <span title={`${format(usage.cached)} tokens read from cache at ~0.1× rate`}>
+                /*
+                  Session share, coloured by the last turn: amber when a turn
+                  with more than one step read less than half its input from
+                  cache, because that is the signature of a prefix that moved
+                  mid-turn — the one thing about caching a reader can do
+                  something about, and the summary card names the section.
+                */
+                <span
+                  data-cache-share
+                  className={lastTurnCache && lastTurnCache.steps > 1 && lastTurnCache.turnShare < 0.5 ? 'text-aico-warning' : undefined}
+                  title={`${format(usage.cached)} tokens read from cache at ~0.1× rate`
+                    + (lastTurnCache ? ` · last turn ${Math.round(lastTurnCache.turnShare * 100)}%` : '')
+                    + (lastTurnCache?.resets.length ? ` · ${lastTurnCache.resets.join('; ')}` : '')}
+                >
                   Cache {Math.round((usage.cached / usage.input) * 100)}%
                 </span>
               )}

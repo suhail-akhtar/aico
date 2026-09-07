@@ -3,7 +3,67 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.12.0 — 2026-09-07
+
+### Changed
+
+- **Every step costs a tenth of the tail it used to.** The volatile tail — the
+  block sent after the conversation on every model request — carried the slash
+  command list, the tool roster, ten operating-process paragraphs, the
+  remembered facts and an uncapped `git status` on each step of each turn:
+  about 4,700 characters, roughly 1,200 tokens, paid forty times in a
+  forty-step build. The stable half now lives in the cached system prompt
+  (`runtime`, six `operating_processes`, `remembered`), the commands and tool
+  roster are gone (the model cannot run a slash command, and the tool schemas
+  already travel with the request), `git status` is capped at forty lines or
+  1,500 characters with a count of the rest, and a memory file longer than
+  1,500 characters is kept in the prefix but no longer reprised in the tail.
+  A quiet step's tail is now about 480 characters. Measured, before and
+  after, by `scripts/economy-probe.mjs` (`npm run test:economy`), which drives
+  the real loop with a scripted provider and records what each request was
+  sent; the baseline it compares against is `scripts/fixtures/economy-baseline-0.11.json`.
+- **A QA-shaped message no longer swaps the tool set.** One message with a URL
+  and the word "test" used to drop most built-ins and every MCP tool but
+  Playwright for that turn, which invalidated the cached prefix on both sides
+  of it. The conversation keeps its tool set whole; the browser-QA narrowing
+  applies to sub-agents only, where it costs nothing. The hint about working
+  quickly in the browser still rides in the tail.
+- **The log can say what moved.** The request header records a short hash per
+  prompt section, and hashes the cached prefix alone (the tail used to be
+  hashed in, which made every turn a "change"). A new `cacheResets` projection
+  names the section or tools that changed between requests; the turn summary
+  carries `cache: { turnShare, sessionShare, resets }`; the summary card shows
+  "Cache 82% · prefix changed: remembered", amber when a multi-step turn read
+  under half its input from cache; the composer's Cache figure carries the last
+  turn's share and reason in its tooltip and goes amber the same way.
+- **The bound app's moving state rides the tail.** Process state and URL,
+  backlog progress and host status for the app a session is building are one
+  `app_state` line in the tail, so a build that starts its own server mid-turn
+  does not move the cached prefix.
+- **The portal's left column, rebuilt.** The list is headed *Projects* — it is a
+  list of project directories, and calling them workspaces while the engine,
+  the System view and the docs each used that word for something else made
+  one word mean three things. The scratch directory sessions run in when no
+  project is chosen is listed as *Scratch*; the engine's scratch workspace keeps
+  its name in code and in Settings as "Scratch workspace". Four unlabelled
+  header icons became a **+** menu (New session, Open project…, New group…)
+  and a labelled *Archived* toggle. Search is always visible and matches
+  titles, ids, project names and paths, and group names, with AND across words.
+  *Recent* is five rows, fixed, hidden while searching and for short lists,
+  each row saying which project or group it lives in. Folds are remembered
+  across reloads; a first visit opens the three most active sections. The list
+  is a keyboard tree (arrows, Left/Right fold, Enter opens, `/` to search),
+  windowed past two hundred rows so five hundred sessions do not mount five
+  hundred rows, and a session can be dragged onto a group to file it. Making a
+  group no longer starts a session in it. Conversations bound to an App have
+  their own section instead of appearing under the scratch folder.
+- **Destinations and tabs are two axes.** Apps, System and Settings are the
+  destinations at the foot of the column, each with its own glyph (Settings
+  lights while the sheet is open); Chat, Changes and Trajectory are tabs on the
+  open session and no longer appear on the Apps or System screens, where
+  clicking one used to leave the screen silently. `?view=apps` and
+  `?view=system` open a destination by link, the way `?settings=` opens the
+  sheet. The mobile drawer is clamped to the phone's width and closes on Escape.
 
 ### Added
 
@@ -62,33 +122,6 @@ and each `release/vX.Y` branch is cut from it at the version it names.
   move mid-build (process state, URL, backlog counts) are a separate line.
 - **Deleting an app whose database had been opened failed on Windows** with
   EBUSY. The handle is closed first.
-
-### Changed
-
-- **The portal's left column, rebuilt.** The list is headed *Projects* — it is a
-  list of project directories, and calling them workspaces while the engine,
-  the System view and the docs each used that word for something else made
-  one word mean three things. The scratch directory sessions run in when no
-  project is chosen is listed as *Scratch*; the engine's scratch workspace keeps
-  its name in code and in Settings as "Scratch workspace". Four unlabelled
-  header icons became a **+** menu (New session, Open project…, New group…)
-  and a labelled *Archived* toggle. Search is always visible and matches
-  titles, ids, project names and paths, and group names, with AND across words.
-  *Recent* is five rows, fixed, hidden while searching and for short lists,
-  each row saying which project or group it lives in. Folds are remembered
-  across reloads; a first visit opens the three most active sections. The list
-  is a keyboard tree (arrows, Left/Right fold, Enter opens, `/` to search),
-  windowed past two hundred rows so five hundred sessions do not mount five
-  hundred rows, and a session can be dragged onto a group to file it. Making a
-  group no longer starts a session in it. Conversations bound to an App have
-  their own section instead of appearing under the scratch folder.
-- **Destinations and tabs are two axes.** Apps, System and Settings are the
-  destinations at the foot of the column, each with its own glyph (Settings
-  lights while the sheet is open); Chat, Changes and Trajectory are tabs on the
-  open session and no longer appear on the Apps or System screens, where
-  clicking one used to leave the screen silently. `?view=apps` and
-  `?view=system` open a destination by link, the way `?settings=` opens the
-  sheet. The mobile drawer is clamped to the phone's width and closes on Escape.
 
 ## 0.11.0 — 2026-09-03
 
