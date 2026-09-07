@@ -16,12 +16,27 @@
  * @module tools/run-checks
  */
 
+import path from 'path';
 import { bash } from './bash.js';
-import { currentCwd } from '../run-context.js';
+import { projectRoot } from '../run-context.js';
 import {
-  detectChecks, recordCheck, newestSourceChange,
+  detectChecksFor, recordCheck, newestSourceChange, touchedFiles,
   type Check, type CheckResult,
 } from '../checks.js';
+import { checksFor } from '../project/profile.js';
+
+/**
+ * Every check this turn is held to: the project's own (profile first, manifest
+ * second), plus those of any sub-project the turn touched — a generated app in
+ * a subdirectory has its own manifest and its checks run from there.
+ */
+export function gateChecks(root = projectRoot()): Check[] {
+  const own = checksFor(root);
+  const extra = detectChecksFor(touchedFiles(), root)
+    .filter(group => group.root !== path.resolve(root))
+    .flatMap(group => group.checks.map(c => ({ ...c, name: `${path.relative(root, group.root).replace(/\\/g, '/')}:${c.name}` })));
+  return [...own, ...extra];
+}
 
 /** How much of a failing command's output to keep. The tail is the useful half. */
 const OUTPUT_TAIL = 4000;
@@ -40,12 +55,12 @@ function tail(text: string): string {
 }
 
 export async function runChecks(input: RunChecksInput = {}): Promise<string> {
-  const root = currentCwd();
-  const all = detectChecks(root);
+  const root = projectRoot();
+  const all = gateChecks(root);
 
   if (all.length === 0) {
     return 'This project defines no checks — no package.json scripts, Cargo, pytest or Go '
-      + 'targets were found. Nothing to run, and nothing will be required of you.';
+      + 'targets were found, and .aico/profile.json names none. Nothing to run, and nothing will be required of you.';
   }
 
   const wanted = input.only?.length
@@ -70,6 +85,8 @@ export async function runChecks(input: RunChecksInput = {}): Promise<string> {
     const result = await bash({
       command: check.command,
       timeout: input.timeout ?? 600,
+      // A sub-project's check runs where its manifest is; the root's runs at the root.
+      cwd: check.cwd ?? root,
     });
     const ms = Date.now() - started;
     const passed = result.exit_code === 0;

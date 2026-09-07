@@ -17,7 +17,8 @@ import type { SubAgentType } from '../tools/index.js';
 // ── Shared blocks (composed into role prompts) ─────────────────────────────
 
 const STACK_DISCOVERY = `Before writing any code, discover the project's actual stack and conventions:
-- Read package.json / pyproject.toml / go.mod / Cargo.toml to detect the language, framework, and tooling.
+- If a "Project profile" block is in your brief, trust it — stack and commands are already known; skip the manifest read.
+- Otherwise read package.json / pyproject.toml / go.mod / Cargo.toml to detect the language, framework, and tooling.
 - Read 2-3 neighboring modules to learn the house style (naming, file layout, error-handling style, test style).
 - Mirror existing conventions exactly — a staff engineer's first rule is "make it look like the rest of the file."
 - Do NOT force a stack the project doesn't use. If the project is Python, write Python. If Go, write Go.`;

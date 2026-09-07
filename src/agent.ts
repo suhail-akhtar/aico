@@ -33,6 +33,7 @@ import type { ToolDef, ToolCall, FinishReason, ReasoningTrace } from './provider
 import type { Inbox, Session, TurnEndReason, Usage } from './session/index.js';
 import { canonicalHeader } from './session/index.js';
 import { sectionHashes } from './prompt/render.js';
+import { projectRoot } from './run-context.js';
 import type { PromptSection } from './prompt/types.js';
 import { LegacyTranscript, SessionTranscript, type Transcript } from './session/transcript.js';
 import { ToolPipeline, type AdditionalContext, type ToolCallContext } from './tools/pipeline.js';
@@ -81,7 +82,10 @@ import { getAgentRegistry } from './tools/task.js';
 import { investigate, investigateDefinition, type InvestigateInput } from './tools/investigate.js';
 import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
-import { checkProjectGate, detectChecks, resetChecks } from './checks.js';
+import { checkProjectGate, resetChecks } from './checks.js';
+import { gateChecks } from './tools/run-checks.js';
+import { loadProfile, renderProfile } from './project/profile.js';
+import { installProfileObserver } from './project/observe.js';
 import { skillCatalogue, matchingSkills } from './tools/skill.js';
 import { loadKnowledge } from './knowledge/store.js';
 import { beginCheckpoint, commitCheckpoint } from './checkpoint/index.js';
@@ -407,6 +411,8 @@ export interface AgentOptions {
    * each should be a line or two.
    */
   volatileSections?: PromptSection[];
+  /** The app this session is bound to, if any. Becomes the run's project root. */
+  app?: { slug: string; dir: string; kind: string; url?: string };
   /** Plan mode — only read-only tools allowed */
   planMode?: boolean;
   /** Effort level for system prompt (low/medium/high/max) */
@@ -1121,6 +1127,9 @@ export async function runAgent(opts: AgentOptions): Promise<string> {
     {
       cwd: opts.cwd ?? process.cwd(),
       model: opts.model,
+      // The app this session is building, so the gates judge it and not the
+      // workspace around it. See projectRoot().
+      ...(opts.app ? { app: opts.app } : {}),
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
       ...(opts.settings ? { settings: opts.settings } : {}),
       // Who applies this run's writes. Undefined means the filesystem, which is
@@ -1242,6 +1251,17 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   promptDoc.add({ id: 'runtime', order: 34, body: runtime.runtime });
   promptDoc.add({ id: 'operating_processes', order: 36, body: runtime.operatingProcesses });
   if (runtime.remembered) promptDoc.add({ id: 'remembered', order: 848, body: runtime.remembered });
+  /*
+    What this project is and how it is run, from `.aico/profile.json`.
+
+    In the cached prefix, never fetched by tool: the commands are needed on
+    every turn that changes source, and a tool step costs twenty to fifty times
+    what the cached read does. Rendered without ports so a dev server on a new
+    port does not move the prefix. Snapshotted per turn — a command the observer
+    records mid-turn appears on the next one.
+  */
+  const profileText = renderProfile(loadProfile(projectRoot()));
+  if (profileText) promptDoc.add({ id: 'project_profile', order: 845, body: profileText });
 
   // ── Volatile context ───────────────────────────────────────────────
   // Everything here changes between turns or steps: the working tree moves
@@ -1333,6 +1353,12 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // inherit them.
   const pipeline = opts.context?.get('toolPolicy')?.pipeline ?? new ToolPipeline();
   const toolRegistry = opts.context?.get('tools');
+
+  // Learn the project's commands from the ones that worked. Records only —
+  // never denies — and writes at `observed` rank, below anything a person or a
+  // template said. Idempotent by stage name, so a composed pipeline shared
+  // across sessions carries one observer, not one per turn.
+  installProfileObserver(pipeline, () => projectRoot());
 
   const handlerOpts: ToolHandlerOpts & { toolProfile: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly'; depth?: number } = {
     autoApprove, verbose, settings, onToolCall, onToolDone,
@@ -2026,7 +2052,9 @@ const GOAL_REMINDER_EVERY = 6;
           // the time. Silent when the project defines no checks or the turn
           // changed no source.
           if (completionGateEnabled && checksNudges < MAX_CHECKS_NUDGES) {
-            const gate = checkProjectGate(detectChecks(currentCwd()));
+            // The bound app's checks when there is one, the project's otherwise —
+            // profile first, manifest second — plus any sub-project this turn touched.
+            const gate = checkProjectGate(gateChecks());
             if (!gate.ok && gate.message) {
               checksNudges++;
               transcript.recordAssistant(text, [], stepUsage, stepReasoning);

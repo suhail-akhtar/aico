@@ -45,6 +45,47 @@ export interface Check {
    * behind a four-minute test suite that was going to fail for the same reason.
    */
   weight: number;
+  /**
+   * Where to run it, when not the project root: a generated app inside an
+   * ordinary repository has its own manifest, and its checks run from there.
+   */
+  cwd?: string;
+}
+
+/** Manifest files that mark the root a set of checks belongs to. */
+const MANIFESTS = ['package.json', 'Cargo.toml', 'pyproject.toml', 'setup.py', 'go.mod'];
+
+/**
+ * The checks for the files a turn touched, grouped by the nearest manifest.
+ *
+ * A repository with a `web/` and an `api/` — or a template dropped into a
+ * subdirectory — is several projects; running the root's checks says nothing
+ * about the one that changed. Each touched file is walked up to the nearest
+ * directory holding a manifest (stopping at `cwd`), and that directory's checks
+ * are what the file is held to. Files with no manifest above them fall to the
+ * root's. One entry per root, cheapest checks first, each check carrying the
+ * `cwd` it runs in.
+ */
+export function detectChecksFor(touched: readonly string[], cwd: string): Array<{ root: string; checks: Check[] }> {
+  const root = path.resolve(cwd);
+  const roots = new Set<string>();
+  for (const file of touched) {
+    let dir = path.dirname(path.resolve(file));
+    let found = root;
+    while (dir.startsWith(root)) {
+      if (MANIFESTS.some(m => fs.existsSync(path.join(dir, m)))) { found = dir; break; }
+      if (dir === root) break;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    roots.add(found);
+  }
+  if (roots.size === 0) roots.add(root);
+  return [...roots].sort().map(r => ({
+    root: r,
+    checks: detectChecks(r).map(c => (r === root ? c : { ...c, cwd: r })),
+  }));
 }
 
 /** What happened when a check ran. */

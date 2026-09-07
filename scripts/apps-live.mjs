@@ -145,6 +145,22 @@ try {
     }
   }
 
+  console.log('\n-- the project profile: seeded by the template, edited by a person --');
+  {
+    const dir = path.join(workspace, 'miniapps', slug);
+    const r = await api(`project/profile?cwd=${encodeURIComponent(dir)}`);
+    check(r.status === 200 && r.json?.cwd, 'GET project/profile answers for the app directory');
+    check(r.json?.profile?.stack?.source === 'template', `the stack label comes from the template (${r.json?.profile?.stack?.value})`);
+    check(Array.isArray(r.json?.names) && r.json.names.includes('test'), 'and the route lists the command names');
+    const set = await post('project/profile', { cwd: dir, name: 'test', command: 'npm run test:fast' });
+    check(set.status === 200 && set.json?.profile?.commands?.test?.source === 'user', 'a POST sets a command at user rank');
+    const bad = await post('project/profile', { cwd: dir, name: 'nope', command: 'x' });
+    check(bad.status === 400, 'an unknown command name is a 400');
+    const forgot = await post('project/profile', { cwd: dir, name: 'test', forget: true });
+    check(forgot.status === 200 && forgot.json?.profile?.commands?.test === undefined, 'forget removes it');
+    check(fs.existsSync(path.join(dir, '.aico', 'profile.json')), 'the profile lives in the app’s .aico/profile.json');
+  }
+
   console.log('\n-- a page app has no process; the session route rejoins; delete removes --');
   {
     const run = await post('apps/run', { slug, action: 'start' });

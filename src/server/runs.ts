@@ -36,7 +36,7 @@ import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../sessi
 import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
 import { currentMiniApp } from '../session/projections.js';
 import { appStateLine, miniAppContext } from '../miniapps/context.js';
-import { backlogProgress, hasProcess } from '../miniapps/store.js';
+import { backlogProgress, effectiveKind, hasProcess } from '../miniapps/store.js';
 import { appState } from '../miniapps/process.js';
 import type { PromptSection } from '../prompt/types.js';
 
@@ -84,6 +84,35 @@ import {
  * and the file list are exactly what a build session keeps changing, and a
  * prefix describing the app as it was an hour ago is worse than none.
  */
+/**
+ * The bound app as the run context carries it: the directory the gates judge,
+ * and where it is served — fixed for a host-served app, the running process's
+ * URL for a process app (undefined until it starts).
+ */
+async function boundApp(
+  session: Session,
+  settings: AicoSettings,
+  cwd: string,
+): Promise<{ slug: string; dir: string; kind: string; url?: string } | undefined> {
+  const slug = currentMiniApp(session);
+  if (!slug) return undefined;
+  try {
+    const app = await getMiniApp(slug, settings, cwd);
+    if (!app) return undefined;
+    const kind = effectiveKind(app);
+    let url: string | undefined;
+    if (hasProcess(app)) {
+      const proc = appState(slug);
+      url = proc?.state === 'running' ? proc.url : undefined;
+    } else if (kind !== 'cli' && settings.miniApps?.port) {
+      url = `http://${settings.miniApps.host ?? '127.0.0.1'}:${settings.miniApps.port}/${slug}/`;
+    }
+    return { slug, dir: miniAppDir(slug, settings, cwd), kind, ...(url ? { url } : {}) };
+  } catch {
+    return undefined;
+  }
+}
+
 async function miniAppInstructions(
   session: Session,
   settings: AicoSettings,
@@ -594,6 +623,7 @@ export class RunManager {
       // that grows from use is announced once, not on every token event.
       let windowAtStart = getContextWindow(model, settings);
       const appStateTail = await appStateSection(run.session, settings, run.cwd);
+      const boundAppOpt = await boundApp(run.session, settings, run.cwd);
       const result = await runAgent({
         task,
         // References go to the log; the bytes are fetched per request by the
@@ -630,6 +660,9 @@ export class RunManager {
         cwd: run.cwd,
         // The app's moving state, for the tail, when this session is about one.
         ...(appStateTail ? { volatileSections: [appStateTail] } : {}),
+        // The bound app becomes the run's project root: its checks, its served
+        // URL, its files are what the gates judge.
+        ...(boundAppOpt ? { app: boundAppOpt } : {}),
         // Whatever the user attached to this folder, re-read per turn so an
         // edit takes effect on the next message rather than the next restart.
         /*

@@ -36,6 +36,7 @@ import type { AicoSettings } from '../settings.js';
 import {
   createMiniApp, miniAppDir, type DeployTarget, type MiniApp, type MiniAppKind, type RunProfile,
 } from '../miniapps/store.js';
+import { profileFromTemplate } from '../project/profile.js';
 
 export interface TemplateManifest {
   id: string;
@@ -330,6 +331,10 @@ export async function instantiateTemplate(
   // The manifest the store wrote is authoritative; the copy must not have
   // overwritten it (the template has no app.json, but a user's might).
   await mkdir(dir, { recursive: true });
+
+  // Born knowing its commands, at template rank: above anything the manifest
+  // would be guessed to say, below anything the person later decides.
+  await profileFromTemplate(dir, template.run, `${template.name} (${template.id})`).catch(() => undefined);
   return { ...app, built: true };
 }
 

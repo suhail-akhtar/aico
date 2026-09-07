@@ -3,6 +3,45 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Every stack is verified in a real browser.** A session bound to an app with
+  its own process (Next.js, Hono) or a static site now has a *served* artifact:
+  any source write under the app registers it, an http verdict from `VerifyApp`
+  against the app's origin satisfies it, a later write makes that verdict
+  stale, and a `cli` app is never gated. The gate says what to do — "it is not
+  running: AppManage start, then VerifyApp the URL it reports" — because an
+  agent whose VerifyApp answered nothing used to go looking for the server.
+  The `.html` rule still covers page apps. The run context carries the bound
+  app, and `projectRoot()` answers with its directory, so the checks gate and
+  `RunChecks` judge the app's own manifest rather than the workspace around it.
+- **A project profile, with provenance.** `<project>/.aico/profile.json`
+  records the stack, package manager and commands (`setup`, `dev`, `typecheck`,
+  `lint`, `build`, `test`, `migrate`, `deploy`, `start`), each with where it
+  came from — `user` beats `template` beats `observed` beats `detected` — and
+  a merge that never downgrades. `RunChecks` and the gate read the profile
+  first and the manifest second, writing what they detect back as `detected`;
+  a templated app is born with its commands at `template` rank; a Bash command
+  that succeeds — an install, a dev server printing its port, a migration — is
+  recorded as `observed` by a pipeline stage that never denies anything. The
+  rendered profile is a cached prefix section (`project_profile`, ports left
+  out) and is appended to every sub-agent's brief, whose stack-discovery rule
+  now says to trust it and skip the manifest read. The System screen gains a
+  **Project commands** table with source badges; an edit there is `user` rank.
+- **Checks for the project a file actually belongs to.** `detectChecksFor`
+  groups the files a turn touched by their nearest manifest, so a generated app
+  in a subdirectory of an ordinary repository is measured by its own checks,
+  run in its own directory.
+- **Two app skills** ship as directory skills with eval tasks: `app-plan`
+  (three questions at most, a one-page `docs/PRD.md`, vertical-slice stories
+  with "Done when" lines appended to `.aico/backlog.md`, mirrored into
+  TodoWrite) and `app-architecture` (profile first, data model first, one
+  layout per stack copied from the worked feature, boundaries, reuse before
+  write, one decision line). Both under 3,300 characters, both with trigger
+  patterns, four tasks in the eval corpus.
+
 ## 0.12.0 — 2026-09-07
 
 ### Changed

@@ -263,8 +263,95 @@ const INIT_1: EvalTask = {
   ],
 };
 
+// ── app-plan ──────────────────────────────────────────────────────────
+
+/** A templated app, so the skill has an AICO.md to read instead of asking about the stack. */
+const APP_FILES = {
+  'AICO.md': '# Invoice Desk\n\nA Hono JSON API on node:sqlite. Resource pattern: one file per resource in src/ (type, parse, repo, routes). Tests: vitest in memory. Checks: npm run typecheck, npm test.\n',
+  'package.json': '{ "name": "invoice-desk", "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run", "dev": "tsx watch src/index.ts" } }\n',
+  'docs/EXTENDING.md': '# Extending\n\nCopy src/items.ts for a new resource; mount it in src/app.ts; document it in src/openapi.ts; test it in test/.\n',
+  'src/items.ts': "export interface Item { id: number; name: string }\nexport function parseItem(b: unknown) { return { value: { name: String((b as any).name) } }; }\n",
+  '.aico/backlog.md': '# Backlog\n\n## Iteration 0 — from the template\n\n- [x] items resource.\n      Done when: npm test passes.\n',
+};
+
+const PLAN_1: EvalTask = {
+  id: 'app-plan/backlog-from-brief',
+  skill: 'app-plan',
+  split: 'val',
+  args: 'A small studio sends invoices to customers. Invoices have line items, a due date and a status (draft, sent, paid, overdue). The owner mostly opens it to see who has not paid and to mark invoices paid. Done means: an invoice can be created with line items, sent, and marked paid, and the list shows overdue ones first.',
+  files: APP_FILES,
+  checks: [
+    { kind: 'file-exists', path: 'docs/PRD.md', weight: 2, why: 'No PRD was written; the plan is the deliverable.' },
+    { kind: 'file-matches', path: 'docs/PRD.md', pattern: String.raw`done when`, flags: 'i', why: 'The PRD has no "Done when" statements — nothing checkable.' },
+    { kind: 'file-matches', path: 'docs/PRD.md', pattern: String.raw`overdue`, flags: 'i', why: 'The status lifecycle from the brief (overdue) did not make it into the data section.' },
+    { kind: 'file-matches', path: '.aico/backlog.md', pattern: String.raw`## Iteration 1`, weight: 2, why: 'No new iteration was appended to the backlog.' },
+    { kind: 'file-matches', path: '.aico/backlog.md', pattern: String.raw`- \[ \] [^\n]+\n\s+Done when:`, weight: 2, why: 'Stories lack the "Done when" line, so nothing decides when one is finished.' },
+    { kind: 'file-matches', path: '.aico/backlog.md', pattern: String.raw`(mark(ed)? (an? invoice )?paid|paid)`, flags: 'i', why: 'The primary action — marking paid — is not a story.' },
+    { kind: 'file-matches', path: '.aico/backlog.md', pattern: String.raw`## Iteration 0[\s\S]*\[x\] items resource`, why: 'The existing iteration was rewritten instead of appended to.' },
+    { kind: 'output-lacks', pattern: String.raw`\b(express|fastify|next\.js|postgres)\b`, why: 'The plan proposed a stack the app does not have; AICO.md said Hono and node:sqlite.' },
+    { kind: 'max-tool-calls', limit: 14, why: 'Planning five files should not take more than fourteen tool calls.' },
+  ],
+};
+
+const PLAN_2: EvalTask = {
+  id: 'app-plan/asks-before-guessing',
+  skill: 'app-plan',
+  args: 'Build me something for my team.',
+  files: APP_FILES,
+  checks: [
+    { kind: 'output-matches', pattern: String.raw`\?`, weight: 2, why: 'A brief with no user, no action and no done-state was not questioned.' },
+    { kind: 'output-lacks', pattern: String.raw`(react|vue|angular|postgres|mongodb|which (stack|framework|language))`, flags: 'i', why: 'It asked about the stack, which AICO.md already settles.' },
+    { kind: 'no-file-changed', weight: 2, why: 'Files were written before the brief was clear enough to plan from.' },
+    { kind: 'max-tool-calls', limit: 6, why: 'Asking three questions should not take six tool calls.' },
+  ],
+};
+
+// ── app-architecture ─────────────────────────────────────────────────
+
+const ARCH_1: EvalTask = {
+  id: 'app-architecture/place-a-feature',
+  skill: 'app-architecture',
+  split: 'val',
+  args: 'Add customers to this API: a customer has a name and an email, and an item belongs to a customer.',
+  files: {
+    ...APP_FILES,
+    'src/app.ts': "import { Hono } from 'hono';\nimport { itemRoutes } from './items.js';\nexport function createApp(db: any) { const app = new Hono(); app.route('/items', itemRoutes(db)); return app; }\n",
+    'src/db.ts': "const MIGRATIONS = [\n  `CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`,\n];\nexport { MIGRATIONS };\n",
+    'test/items.test.ts': "import { it } from 'vitest';\nit('lists', () => {});\n",
+    '.aico/decisions.md': '# Decisions\n\n- Hono over Express — Web-standard Request/Response.\n',
+  },
+  checks: [
+    { kind: 'output-matches', pattern: String.raw`customers?[^\n]*\b(table|migration|CREATE TABLE)\b|\b(table|migration|CREATE TABLE)\b[^\n]*customers?`, flags: 'i', weight: 2, why: 'The data model was not named first.' },
+    { kind: 'output-matches', pattern: String.raw`(customer_id|REFERENCES customers|foreign key)`, flags: 'i', why: 'The relation from items to customers was not stated as a constraint.' },
+    { kind: 'output-matches', pattern: String.raw`src/customers\.ts`, weight: 2, why: 'The new resource was not placed on the worked pattern (one file per resource).' },
+    { kind: 'output-matches', pattern: String.raw`(src/app\.ts|mount)`, flags: 'i', why: 'Where the routes get mounted was not said.' },
+    { kind: 'output-matches', pattern: String.raw`test/customers\.test\.ts`, why: 'No test location was named.' },
+    { kind: 'output-lacks', pattern: String.raw`\b(models?/|services?/|controllers?/)\b`, flags: 'i', why: 'Proposed layer folders the codebase does not use.' },
+    { kind: 'output-lacks', pattern: String.raw`\b(prisma|typeorm|sequelize|mongoose)\b`, flags: 'i', why: 'Reached for an ORM the project does not have.' },
+    { kind: 'output-matches', pattern: String.raw`decisions\.md`, flags: 'i', why: 'The decision was not recorded (or the file not mentioned).' },
+    { kind: 'max-tool-calls', limit: 12, why: 'Placing one resource in a nine-file project should not take more than twelve tool calls.' },
+  ],
+};
+
+const ARCH_2: EvalTask = {
+  id: 'app-architecture/reuse-before-write',
+  skill: 'app-architecture',
+  args: 'Add a money formatting helper for the invoice totals shown in the API responses.',
+  files: {
+    ...APP_FILES,
+    'src/format.ts': "export function money(cents: number, currency = 'USD'): string { return new Intl.NumberFormat('en', { style: 'currency', currency }).format(cents / 100); }\n",
+    'src/items.ts': "import { money } from './format.js';\nexport function label(cents: number) { return money(cents); }\n",
+  },
+  checks: [
+    { kind: 'output-matches', pattern: String.raw`src/format\.ts|\bmoney\(`, weight: 2, why: 'The existing helper was not found; a second one was proposed.' },
+    { kind: 'output-lacks', pattern: String.raw`(create|add|new)[^\n]{0,30}(src/(utils|helpers|lib)/|formatMoney|currency\.ts)`, flags: 'i', weight: 2, why: 'Proposed a new helper beside an existing one.' },
+    { kind: 'no-file-changed', why: 'Placement is a decision, not an edit; nothing needed writing to say "use src/format.ts".' },
+    { kind: 'max-tool-calls', limit: 8, why: 'A Grep for money/format is enough; eight tool calls is generous.' },
+  ],
+};
+
 export const BUILTIN_CORPUS: readonly EvalTask[] = [
-  SEC_1, SEC_2, REV_1, REV_2, COMMIT_1, INIT_1,
+  SEC_1, SEC_2, REV_1, REV_2, COMMIT_1, INIT_1, PLAN_1, PLAN_2, ARCH_1, ARCH_2,
 ];
 
 /** Where a user's own tasks live. */

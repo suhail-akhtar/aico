@@ -4,6 +4,20 @@ import type { SubAgentType } from './index.js';
 import { runHooks } from '../hooks.js';
 import type { AicoSettings } from '../settings.js';
 import { AGENT_PROMPTS } from '../agents/prompts-registry.js';
+import { loadProfile, renderProfile } from '../project/profile.js';
+import { projectRoot } from '../run-context.js';
+
+/**
+ * The parent's project profile, appended to a sub-agent's brief.
+ *
+ * A specialist that has to rediscover the stack spends its first four tool
+ * calls reading manifests the parent already knows by heart. A few hundred
+ * tokens in the brief, once, is cheaper than that on every delegation.
+ */
+function withProjectProfile(brief: string): string {
+  const profile = renderProfile(loadProfile(projectRoot()));
+  return profile ? `${brief}\n\n---\n\nProject profile (trust this; skip the manifest read):\n${profile}` : brief;
+}
 import { currentCwd, currentRunContext } from '../run-context.js';
 import { openSession } from '../session/open.js';
 import { Inbox } from '../session/inbox.js';
@@ -595,7 +609,7 @@ export async function runTask(
     }
 
     const agentPromise = runAgent({
-      task: fullPrompt,
+      task: withProjectProfile(fullPrompt),
       token: opts.token ?? '',
       model: agentModel,
       autoApprove: opts.autoApprove,
