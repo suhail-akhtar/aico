@@ -358,6 +358,13 @@ try {
         await page.fill('[data-wizard-title]', '');
         const disabled = await page.$eval('[data-wizard-create]', b => b.disabled);
         check(disabled === true, 'apps — Create is disabled until the app has a name');
+        // The brief on the details step stays a field while it is typed into.
+        // It used to become a read-only box on the first character, taking the
+        // cursor with it.
+        await page.fill('[data-wizard-details-brief]', '');
+        await page.type('[data-wizard-details-brief]', 'Invoices for a studio', { delay: 15 });
+        const typed = await page.$eval('[data-wizard-details-brief]', el => el.value).catch(() => null);
+        check(typed === 'Invoices for a studio', `apps — the details step keeps the brief editable while typing (${JSON.stringify(typed)})`);
         await page.keyboard.press('Escape');
         await page.waitForSelector('[data-app-wizard]', { state: 'detached', timeout: 10_000 });
         return undefined;
