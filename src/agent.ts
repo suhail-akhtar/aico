@@ -100,7 +100,7 @@ process.setMaxListeners(50);
 
 // ── Retry helpers ────────────────────────────────────────────────────
 
-function isRetryableError(err: unknown): boolean {
+export function isRetryableError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
   // Cancellation / wall-clock timeout are terminal — never retry. These surface
@@ -113,8 +113,13 @@ function isRetryableError(err: unknown): boolean {
   // Other 4xx are bad-request errors caused by our payload — never retryable.
   if (/\b4[0-8][0-9]\b/.test(msg) || /\b490\b/.test(msg)) return false;
   const retryable = [
-    'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN',
+    'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN', 'ECONNABORTED',
     'socket hang up', 'network',
+    // A stream the gateway dropped mid-response. Node reports it as
+    // "Premature close" (undici: "terminated", "other side closed"); a GLM
+    // build ended a two-hour turn on one, with the step half-written and
+    // nothing wrong with the request.
+    'premature close', 'terminated', 'other side closed', 'fetch failed',
     // Match provider/socket timeouts specifically, NOT the wall-clock
     // "Agent timed out after Nms" (which is handled as a non-retryable abort).
     '502', '503', '529',

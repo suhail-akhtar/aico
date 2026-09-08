@@ -70,7 +70,7 @@ import {
   canonicalizeArguments,
   matchesPattern,
   resolveRepeatGuardConfig,
-  runAgent,
+  runAgent, isRetryableError,
   selectProvider,
   detectProviderType,
   requiresResponsesApi,
@@ -1979,6 +1979,12 @@ const baseRun = (provider, session, extra = {}) => runAgent({
   assert(threw, 'A non-retryable provider error propagates');
   const reason = session.lastTurnEndReason();
   assert(reason.kind === 'error', 'Failed turn ends as error');
+  // A stream the gateway dropped is a retry, not a verdict on the request: a
+  // two-hour turn ended on "Premature close" with the step half-written.
+  assert(isRetryableError(new Error('Premature close')) && isRetryableError(new Error('terminated')) && isRetryableError(new Error('fetch failed')),
+    'a dropped stream is retryable');
+  assert(!isRetryableError(new Error('[Mock] API error 400: bad request')) && !isRetryableError(new Error('Run cancelled')),
+    'a bad request and a cancellation are not');
   assert(reason.code === '400', `Error reason keeps the provider status code (got ${reason.code})`);
   assert(checkSessionInvariants(session).ok, 'Failed turn still leaves a balanced log');
 }
