@@ -19,6 +19,7 @@
 import path from 'path';
 import { bash } from './bash.js';
 import { projectRoot } from '../run-context.js';
+import { commandsRun } from '../checks.js';
 import {
   detectChecksFor, recordCheck, newestSourceChange, touchedFiles,
   type Check, type CheckResult,
@@ -46,7 +47,21 @@ export interface RunChecksInput {
   only?: string[];
   /** Seconds any single check may take. */
   timeout?: number;
+  /** Run even when nothing changed since the last green run. */
+  force?: boolean;
 }
+
+/**
+ * The last run in which every check passed, per project root.
+ *
+ * A build takes twenty to sixty seconds and an agent asks for it again after
+ * editing a Markdown file, or before a final report with nothing edited since
+ * the last green run. Nothing about the code has changed, so nothing about the
+ * answer can have — the answer is repeated and the minute is not spent. Keyed
+ * on the newest source modification time the run saw, which is also what the
+ * gate credits a check with.
+ */
+const lastGreen = new Map<string, { sourceMtimeMs: number; commands: number; names: string[]; at: number }>();
 
 /** Keep the end of the output, where a failure explains itself. */
 function tail(text: string): string {
@@ -76,6 +91,15 @@ export async function runChecks(input: RunChecksInput = {}): Promise<string> {
   // look as though it had been checked.
   const sourceMtimeMs = newestSourceChange();
 
+  const green = lastGreen.get(root);
+  const commands = commandsRun();
+  if (!input.force && green && green.sourceMtimeMs === sourceMtimeMs && green.commands === commands
+    && wanted.every(c => green.names.includes(c.name))) {
+    const when = new Date(green.at).toTimeString().slice(0, 8);
+    return `PASSED — unchanged since the last green run at ${when}: ${wanted.map(c => c.name).join(', ')} still green. `
+      + 'No source file changed since, so the checks were not re-run. Pass force: true to run them anyway.';
+  }
+
   const lines: string[] = [];
   const results: CheckResult[] = [];
   let failedAt: Check | undefined;
@@ -101,6 +125,15 @@ export async function runChecks(input: RunChecksInput = {}): Promise<string> {
     lines.push(`${passed ? 'PASS' : 'FAIL'}  ${check.name.padEnd(10)} ${check.command}  (${(ms / 1000).toFixed(1)}s)`);
 
     if (!passed) { failedAt = check; break; }
+  }
+
+  if (!failedAt) {
+    // Everything asked for passed on this code. A later partial run is covered
+    // only for the names it asked about; a full run covers all of them.
+    const names = new Set([...(green?.sourceMtimeMs === sourceMtimeMs && green.commands === commands ? green.names : []), ...wanted.map(c => c.name)]);
+    lastGreen.set(root, { sourceMtimeMs, commands, names: [...names], at: Date.now() });
+  } else {
+    lastGreen.delete(root);
   }
 
   const skipped = wanted.slice(wanted.indexOf(failedAt ?? wanted[wanted.length - 1]!) + 1);
@@ -152,6 +185,10 @@ export const runChecksDefinition = {
       timeout: {
         type: 'number',
         description: 'Seconds any single check may take. Default 600.',
+      },
+      force: {
+        type: 'boolean',
+        description: 'Run even when no source file changed since the last green run. Without it, an unchanged project answers with the last result instead of spending the minute again.',
       },
     },
   },

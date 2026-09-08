@@ -19,7 +19,7 @@ In a scratch copy or with the profile's commands: `setup` (install), `typecheck`
 
 ## 3. A health route and a clean stop
 
-- `GET /healthz` answers 200 fast; `/readyz` (or the same route) says whether the database answers.
+- `GET /healthz` answers 200 fast; `/readyz` (or the same route) says whether the database answers. If the app has no such route, writing it is the first edit — the image's `HEALTHCHECK` means nothing without it.
 - `SIGTERM` closes the server and the database; the process exits within ten seconds.
 - The port comes from `PORT`; the bind address from `HOST`, default `0.0.0.0` in a container.
 

@@ -375,7 +375,20 @@ export function resolveInstance(
   const namespaced = opts.model?.includes('/') ? opts.model.split('/')[0]! : undefined;
   if (namespaced && configured && isDirectVendor(configured.type)
       && normalizeVendorPrefix(namespaced) !== configured.type) {
-    const gateway = instances.find(i => !isDirectVendor(i.type));
+    /*
+      Which gateway. The first non-direct instance used to win, and with a
+      Poolside endpoint configured ahead of a derived OpenRouter one that sent
+      `z-ai/glm-5.3-flash` to Poolside — a server that had already listed its
+      two models and named neither — while OpenRouter, which fronts every
+      vendor, sat unused. So: a gateway that lists the model; else one that has
+      not said what it serves, or is OpenRouter, whose business is everything;
+      else, failing all that, the first.
+    */
+    const gateways = instances.filter(i => !isDirectVendor(i.type));
+    const gateway = gateways.find(i => i.models?.includes(opts.model!))
+      ?? gateways.find(i => i.type === 'openrouter')
+      ?? gateways.find(i => (i.models?.length ?? 0) === 0)
+      ?? gateways[0];
     if (gateway) return gateway;
   }
 

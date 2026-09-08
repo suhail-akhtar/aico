@@ -185,6 +185,9 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
         baseURL: 'https://openrouter.ai/api/v1',
         supportsStreamUsage: true,
         cacheControl,
+        // Reasoning models think inside this budget; 8,192 was reached
+        // mid-thought by GLM 5.3 Flash, with nothing written.
+        maxOutputTokens: settings?.providers?.openrouter?.maxOutputTokens ?? 32_768,
         sessionId: 'aico-' + (settings?.model ?? 'default'),
         // Derived from the routed model: OpenRouter fronts several vendors.
         promptDialect: dialectForRoutedModel(model),
@@ -487,6 +490,9 @@ export function providerFromInstance(
         baseURL,
         supportsStreamUsage: true,
         cacheControl,
+        // Reasoning models think inside this budget; 8,192 was reached
+        // mid-thought by GLM 5.3 Flash, with nothing written.
+        maxOutputTokens: pick<number>('maxOutputTokens') ?? 32_768,
         sessionId: `aico-${instance.id}`,
         promptDialect: dialectForRoutedModel(model),
         defaultHeaders: {

@@ -10,6 +10,7 @@ import { listDirectory, lsDefinition } from './ls.js';
 import { webFetch, webFetchDefinition } from './webfetch.js';
 import { verifyApp, verifyAppDefinition, formatVerdict } from './verify-app.js';
 import { recordVerification, noteFileWritten } from '../verification.js';
+import { noteCommandRun } from '../checks.js';
 import { withTimeout } from './timeout-policy.js';
 import { terminal, terminalDefinition } from './terminal.js';
 import { observe, blockedReason } from './observation.js';
@@ -484,6 +485,7 @@ export async function executeTool(
         { ...(args as unknown as Parameters<typeof bash>[0]), _defaultTimeout: _bashDefaultTimeout },
         signal,
       );
+      noteCommandRun();
       break;
     case 'Terminal':
       result = await terminal(args as unknown as Parameters<typeof terminal>[0]);

@@ -160,6 +160,11 @@ const BUILTIN_CAPABILITIES: CapabilityEntry[] = [
   // V4 reads images; the V3-era chat and reasoning endpoints do not. Left
   // narrow on purpose: the bare `deepseek-` fallback claiming vision would
   // extend it to every future id including text-only ones.
+  // The experimental vision build is the one id that certainly reads images;
+  // the gateways list the plain flash and pro ids as text. Named first so the
+  // broader v4 rule below cannot shadow it.
+  { match: 'deepseek/deepseek-v4-flash-vision', input: ['text', 'image'] },
+  { match: 'deepseek-v4-flash-vision', input: ['text', 'image'] },
   { match: 'deepseek/deepseek-v4', input: ['text', 'image'] },
   { match: 'deepseek-v4', input: ['text', 'image'] },
   { match: 'deepseek/deepseek-chat', input: ['text'] },
@@ -168,6 +173,11 @@ const BUILTIN_CAPABILITIES: CapabilityEntry[] = [
   { match: 'deepseek-chat', input: ['text'] },
 
   // ── Others in common use through gateways ──
+  // GLM 5.3 Flash and the 5v line read images and video (OpenRouter lists
+  // text/image/video for z-ai/glm-5.3-flash); the plain 5.3 is text. Bare
+  // `glm-` stays text-only so an unknown newer id is not credited with sight.
+  { match: 'glm-5.3-flash', input: ['text', 'image', 'video'] },
+  { match: 'glm-5v', input: ['text', 'image', 'video'] },
   { match: 'glm-4.6v', input: ['text', 'image'] },
   { match: 'glm-4v', input: ['text', 'image'] },
   { match: 'glm-', input: ['text'] },

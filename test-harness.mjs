@@ -755,6 +755,9 @@ resetCapabilityCache();
 
 // Vision families resolve, including through a gateway prefix.
 assert(modelAccepts('claude-opus-5', 'image'), 'Claude reads images');
+assert(modelAccepts('z-ai/glm-5.3-flash', 'image') && modelAccepts('glm-5.3-flash', 'video'), 'GLM 5.3 Flash reads images and video, with or without the vendor prefix');
+assert(modelAccepts('z-ai/glm-5.3', 'image') === false, 'the plain GLM 5.3 is text-only');
+assert(modelAccepts('deepseek/deepseek-v4-flash-vision-exp', 'image'), 'the DeepSeek vision build reads images');
 assert(modelAccepts('anthropic/claude-opus-5', 'image'),
   'and still does when a gateway prefixes the id');
 assert(modelAccepts('openai/gpt-4o-2024-11-20', 'image'),
@@ -4170,6 +4173,28 @@ console.log('  -- A model id that names a vendor beats the active provider --');
     'an id that names no vendor leaves the active provider alone');
 }
 
+{
+  // A router's id with a direct vendor active goes to a gateway — but to one
+  // that can serve it. A Poolside endpoint that had listed its two models won
+  // over a derived OpenRouter and answered "please check the model you
+  // provided" for z-ai/glm-5.3-flash, on every skill evaluation and a build.
+  const settings = {
+    activeProvider: 'kimi',
+    providerInstances: [
+      { id: 'kimi', type: 'kimi', name: 'Kimi', apiKey: 'sk-k' },
+      { id: 'poolside', type: 'openai-compatible', name: 'Poolside', apiKey: 'sk-p', baseUrl: 'https://inference.example/v1', models: ['poolside/laguna-s', 'poolside/laguna-xs'] },
+      { id: 'openrouter', type: 'openrouter', name: 'OpenRouter', apiKey: 'sk-or' },
+    ],
+  };
+  assert(resolveInstance(settings, { model: 'z-ai/glm-5.3-flash' }).id === 'openrouter',
+    'a router id skips a gateway that has listed its models and not this one');
+  assert(resolveInstance(settings, { model: 'poolside/laguna-s' }).id === 'poolside',
+    'and goes to the gateway that lists it when one does');
+  const noList = { ...settings, providerInstances: settings.providerInstances.map(i => i.id === 'poolside' ? { ...i, models: [] } : i) };
+  assert(resolveInstance(noList, { model: 'deepseek/deepseek-v4-flash-vision-exp' }).id === 'openrouter',
+    'OpenRouter is preferred to a compatible endpoint that has said nothing about what it serves');
+}
+
 console.log('  -- A gateway is never overridden: it fronts every vendor --');
 {
   const settings = {
@@ -4231,6 +4256,35 @@ console.log('  -- A run carries its own directory --');
     runInContext({ cwd: here }, async () => currentCwd()),
   ]);
   assert(a === tmp && b === here, "Concurrent runs do not see each other's directory");
+}
+
+console.log('  -- RunChecks does not spend the minute twice on unchanged code --');
+{
+  // The agent re-ran a green build after editing a Markdown file and again
+  // before its report. Nothing about the code had changed, so the answer is
+  // repeated; an edit through the write path or any shell command invalidates it.
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-checks-cache-'));
+  fs.writeFileSync(path.join(proj, 'package.json'), JSON.stringify({ name: 'cache-test', scripts: { typecheck: 'node -e 0', test: 'node -e 0' } }));
+  fs.writeFileSync(path.join(proj, 'index.ts'), 'export const a = 1;\n');
+  await runInContext({ cwd: proj }, async () => {
+    const first = await executeTool('RunChecks', {});
+    assert(/^PASSED/.test(first) && /PASS\s+typecheck/.test(first), `the first run runs the checks (${first.split('\n')[0]})`);
+    const second = await executeTool('RunChecks', {});
+    assert(/unchanged since the last green run/.test(second) && /typecheck, test still green/.test(second), `an unchanged project answers with the last result (${second.split('\n')[0]})`);
+    const forced = await executeTool('RunChecks', { force: true });
+    assert(/PASS\s+typecheck/.test(forced), 'force runs them anyway');
+    await new Promise(r => setTimeout(r, 20));
+    await executeTool('Read', { file_path: path.join(proj, 'index.ts') });
+    await executeTool('Write', { file_path: path.join(proj, 'index.ts'), content: 'export const a = 2;\n' });
+    const afterEdit = await executeTool('RunChecks', {});
+    assert(/PASS\s+typecheck/.test(afterEdit) && !/unchanged/.test(afterEdit), 'an edit through the write path re-runs them');
+    const again = await executeTool('RunChecks', {});
+    assert(/unchanged/.test(again), 'and the new green run is remembered');
+    await executeTool('Bash', { command: 'echo touched' });
+    const afterShell = await executeTool('RunChecks', {});
+    assert(/PASS\s+typecheck/.test(afterShell) && !/unchanged/.test(afterShell), 'any shell command since the green run re-runs them too');
+  });
+  fs.rmSync(proj, { recursive: true, force: true });
 }
 
 console.log('  -- A fork is a branch point, not a duplicate --');

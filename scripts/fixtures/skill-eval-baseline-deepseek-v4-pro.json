@@ -1,0 +1,100 @@
+{
+  "model": "deepseek-v4-pro",
+  "results": [
+    {
+      "skill": "app-plan",
+      "phase": "finished",
+      "cost": 0.062173695311999996,
+      "mean": 0.9583333333333333,
+      "tasks": [
+        {
+          "id": "app-plan/backlog-from-brief",
+          "score": 0.9166666666666666,
+          "cost": 0.0440182563552,
+          "missed": [
+            "Planning five files should not take more than fourteen tool calls."
+          ]
+        },
+        {
+          "id": "app-plan/asks-before-guessing",
+          "score": 1,
+          "cost": 0.0181554389568,
+          "missed": []
+        }
+      ]
+    },
+    {
+      "skill": "app-architecture",
+      "phase": "finished",
+      "cost": 0.1009498628544,
+      "mean": 0.7045454545454546,
+      "tasks": [
+        {
+          "id": "app-architecture/place-a-feature",
+          "score": 0.9090909090909091,
+          "cost": 0.0661774571664,
+          "missed": [
+            "Placing one resource in a nine-file project should not take more than twelve tool calls."
+          ]
+        },
+        {
+          "id": "app-architecture/reuse-before-write",
+          "score": 0.5,
+          "cost": 0.034772405688000003,
+          "missed": [
+            "Proposed a new helper beside an existing one.",
+            "A Grep for money/format is enough; eight tool calls is generous."
+          ]
+        }
+      ]
+    },
+    {
+      "skill": "app-design",
+      "phase": "finished",
+      "cost": 0.1399451569488,
+      "mean": 0.75,
+      "tasks": [
+        {
+          "id": "app-design/invoices-page-professional",
+          "score": 0.75,
+          "cost": 0.1399451569488,
+          "missed": [
+            "Money is not right-aligned in the table.",
+            "Restyling one page should not take more than sixteen tool calls."
+          ]
+        }
+      ]
+    },
+    {
+      "skill": "app-ship",
+      "phase": "finished",
+      "cost": 0.11290548526079999,
+      "mean": 0.8,
+      "tasks": [
+        {
+          "id": "app-ship/env-and-health",
+          "score": 0.8,
+          "cost": 0.11290548526079999,
+          "missed": [
+            "No health route was added.",
+            "Shipping a four-file service should not take more than thirty tool calls."
+          ]
+        }
+      ]
+    },
+    {
+      "skill": "app-quality",
+      "phase": "finished",
+      "cost": 0.0275952236208,
+      "mean": 1,
+      "tasks": [
+        {
+          "id": "app-quality/report-what-was-verified",
+          "score": 1,
+          "cost": 0.0275952236208,
+          "missed": []
+        }
+      ]
+    }
+  ]
+}

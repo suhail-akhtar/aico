@@ -59,6 +59,8 @@
     "test:miniapps": "npx tsup src/miniapps/server.ts --format esm --outDir dist-test/miniapps --target node22 --silent && node scripts/miniapp-probe.mjs",
     "test:apps": "npm run build && node scripts/apps-live.mjs",
     "test:templates": "node scripts/templates-live.mjs",
+    "test:apps:build": "npm run build && node scripts/apps-build-live.mjs",
+    "test:skills:live": "npm run build && node scripts/skill-eval-live.mjs",
     "test:deploy": "npm run build && node scripts/apps-deploy-live.mjs",
     "test:economy": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/economy-probe.mjs --out dist-test/economy-now.json && node scripts/economy-probe.mjs --compare scripts/fixtures/economy-baseline-0.11.json dist-test/economy-now.json",
     "test:supervision": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/supervision-live.mjs",

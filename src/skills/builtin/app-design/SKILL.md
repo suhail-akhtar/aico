@@ -9,7 +9,7 @@ Design is decided before the first component and checked in a screenshot after t
 
 ## 1. One shell, chosen once
 
-Signed-out pages sell: one hero, one primary action, a short feature list. Signed-in pages work: side navigation on wide screens (a menu button under `md`), a page header — title, one line of context, the primary action on the right — then the content. The shell lives in the layout, never per page. Working screens sit in a column up to 1,200px; reading pages ≤ 72ch.
+Signed-out pages sell: one hero, one primary action, a short feature list. Signed-in pages work: side navigation on wide screens (a menu button under `md`), a page header — title, one line of context, the primary action on the right — then the content. The shell lives in the layout, never per page. Working screens in a column ≤ 1,200px; reading ≤ 72ch.
 
 ## 2. Hierarchy and rhythm
 
@@ -25,13 +25,13 @@ Components use the theme's tokens (`brand`, `ink`, `ink-muted`, `surface`, `surf
 ## 4. Every state is a real screen
 
 - **Empty**: what the list is for, and the action that makes the first thing — never a bare "No results".
-- **Loading**: skeletons in the content's shape, or a spinner beside what loads — never a blank page.
+- **Loading**: skeletons in the content's shape, never a blank page.
 - **Error**: what went wrong, where, in the user's words, and what to do; inline for a field, a banner for a page.
 - **Success**: the screen visibly changes — the row appears, the count moves.
 
 ## 5. Forms and tables
 
-Labels above fields, help below, required marked. The button says the verb ("Create invoice"). Errors beside the field, the first one focused. Tables: ≤ 7 columns, the name first and widest, status as a pill with a word, actions last, the row a link when a detail page exists. Destructive actions take two steps.
+Labels above fields, help below, required marked. The button says the verb ("Create invoice"). Errors beside the field, the first one focused. Tables: ≤ 7 columns, the name first and widest, money `text-right tabular-nums` always, status as a pill with a word, actions last, the row a link when a detail page exists. Destructive actions take two steps.
 
 ## 6. Responsive and reachable
 

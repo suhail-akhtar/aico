@@ -387,6 +387,13 @@ export interface AgentOptions {
    * `undefined` for anything it cannot find.
    */
   resolveImages?: (refs: ImageRef[]) => Promise<Array<ImagePart | undefined>>;
+  /**
+   * Keep an image file the run produced — a verifier screenshot — so it can be
+   * shown to the model on the next step. Returns the reference `resolveImages`
+   * will answer for, or nothing when the store declines. Absent on the CLI,
+   * where there is no attachment store and the pictures stay on disk.
+   */
+  storeImage?: (file: string) => Promise<ImageRef | undefined>;
   /** Sub-agent type — restricts available tools */
   agentType?: SubAgentType;
   /**
@@ -2240,6 +2247,9 @@ const GOAL_REMINDER_EVERY = 6;
         // barriers. Dispatch overlaps, but results commit in MODEL order so the
         // log — and therefore the next request — reads in the order the model
         // asked, regardless of which call finished first.
+        // What each call answered, by id, for the post-step hooks that read a
+        // particular tool's result — the verifier's screenshots, for one.
+        const stepOutcomes = new Map<string, { result: unknown; isError: boolean }>();
         const scheduled = await scheduleToolCalls(toolCalls, {
           maxParallel,
           executionMode: (call) => getExecutionMode(call.name),
@@ -2282,6 +2292,7 @@ const GOAL_REMINDER_EVERY = 6;
           },
           onCommit: (call, outcome) => {
             if (!silent) stopSpinner();
+            stepOutcomes.set(call.id, { result: outcome.result, isError: outcome.isError });
             transcript.recordToolResult(
               call,
               typeof outcome.result === 'string' ? outcome.result : JSON.stringify(outcome.result),
@@ -2304,6 +2315,41 @@ const GOAL_REMINDER_EVERY = 6;
         // an advisory insertion.
         for (const context of scheduled.additionalContexts) {
           transcript.recordUserMessage(context.content, context.source);
+        }
+
+        /*
+          Eyes for the verifier, when the model has them.
+
+          VerifyApp saves a screenshot per check and names the paths. A model
+          that reads images asked Read for one and was handed bytes; a model
+          that does not could never look at all. Here the pictures a check
+          produced are stored as attachments and recorded as a user message
+          with image references, so the next request carries them — the same
+          path a person's pasted screenshot takes. Only for models that read
+          images; for the rest the paths in the verdict remain for the person.
+        */
+        if (opts.storeImage && modelAccepts(model, 'image', settings)) {
+          for (const call of toolCalls) {
+            if (call.name !== 'VerifyApp') continue;
+            const outcome = stepOutcomes.get(call.id);
+            const text = typeof outcome?.result === 'string' ? outcome.result : '';
+            const block = /Screenshots:\n((?:  - .+\n?)+)/.exec(text);
+            if (!block) continue;
+            const files = block[1]!.split('\n').map(l => l.replace(/^  - /, '').trim()).filter(Boolean).slice(0, 4);
+            const refs: ImageRef[] = [];
+            for (const file of files) {
+              const ref = await opts.storeImage(file).catch(() => undefined);
+              if (ref) refs.push(ref);
+            }
+            if (refs.length > 0) {
+              transcript.recordUserMessage(
+                `The ${refs.length === 1 ? 'screenshot' : `${refs.length} screenshots`} VerifyApp took, in order: ${refs.map(r => r.name ?? 'image').join(', ')}. `
+                + 'Look at them as a person would — hierarchy, spacing, empty states, anything cut off or overlapping — and fix what a paying user would notice.',
+                { kind: 'plugin', plugin: 'verify-app' },
+                refs,
+              );
+            }
+          }
         }
 
         // A cancelled step has recorded results for everything; surface the
