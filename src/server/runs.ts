@@ -823,7 +823,9 @@ export class RunManager {
       this.compactIfDue(run, settings, model, emit);
       // What this turn taught, filed as proposals for the person to keep or
       // dismiss. A projection over the log — no model call — and best effort.
-      const proposals = await learnFromTurn(run.session, run.cwd);
+      // Filed with the project the turn was about: for a session bound to an
+      // app, the app, not the workspace every app session shares.
+      const proposals = await learnFromTurn(run.session, boundAppOpt?.dir ?? run.cwd);
       emit('turn-end', {
         result,
         seq: run.session.length,

@@ -12836,6 +12836,23 @@ console.log('  -- Each extractor reads one kind of evidence from the log --');
   assert(fb[0].evidence.seqs.includes(reply.seq) && fb[0].evidence.turn === 1 && fb[0].expiresAt === 1000 + PROPOSAL_TTL_MS, 'with evidence and a thirty-day expiry');
   s.append('message/feedback', { targetSeq: reply.seq, rating: 'up' });
   assert(fromFeedback(s, 1).length === 0, 'a later rating withdraws it');
+
+  // A rating lands after its turn ended, so the turn that extracts it is the
+  // next one. A live run rated turn one and turn two's extraction found nothing.
+  const late = mkSession('learn-late');
+  late.append('turn/start', { turn: 1 });
+  late.append('user/message', { turn: 1, content: 'Build the invoices table with totals', source: { kind: 'human' } });
+  late.append('step/start', { turn: 1, step: 1 });
+  const lateReply = late.append('assistant/message', { turn: 1, step: 1, content: 'Done.' });
+  late.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  late.append('message/feedback', { targetSeq: lateReply.seq, rating: 'down', note: 'Money columns must be right-aligned with tabular-nums.' });
+  late.append('turn/start', { turn: 2 });
+  late.append('user/message', { turn: 2, content: 'Build the next story', source: { kind: 'human' } });
+  late.append('step/start', { turn: 2, step: 1 });
+  late.append('assistant/message', { turn: 2, step: 1, content: 'Done.' });
+  late.append('turn/end', { turn: 2, reason: { kind: 'completed' } });
+  const lateFound = extractFromTurn(late, 2);
+  assert(lateFound.some(p => /tabular-nums/.test(p.content)), 'extracting at the end of turn two still finds the rating given to turn one');
   void ask;
 
   // Turn 2: a steer mid-turn, a checks gate then a pass, a repeated error.

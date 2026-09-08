@@ -27,6 +27,11 @@ export function createApp(db: DatabaseSync): Hono {
   });
 
   app.get('/openapi.json', c => c.json(openapi));
+  // The front door for a browser: what this is and where the document lives.
+  // A JSON API opened by a person should say so rather than answer not_found.
+  app.get('/', c => c.json({ name: openapi.info?.title ?? 'api', openapi: '/openapi.json', health: '/healthz' }));
+  // Browsers ask for this on every visit; a 404 in the console reads as a fault.
+  app.get('/favicon.ico', c => c.body(null, 204));
   app.route('/items', itemRoutes(db));
 
   app.notFound(c => c.json({ error: 'not_found' }, 404));

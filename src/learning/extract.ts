@@ -309,6 +309,11 @@ export function extractFromTurn(
 ): Proposal[] {
   return dedupe([
     ...fromFeedback(session, turn, now),
+    // A rating lands after its turn ended — the person reads the reply, then
+    // clicks — so by the time anything extracts, it is the previous turn's
+    // message that carries it. A live run rated turn one, and turn two's
+    // extraction found nothing because it only looked at turn two.
+    ...(turn > 1 ? fromFeedback(session, turn - 1, now) : []),
     ...fromSteering(session, turn, now),
     ...fromChecksFix(session, turn, now),
     ...fromVerifyFix(session, turn, now),

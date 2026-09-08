@@ -1,0 +1,109 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "results": [
+    {
+      "skill": "app-plan",
+      "phase": "finished",
+      "cost": 0.12769973,
+      "mean": 0.7916666666666667,
+      "tasks": [
+        {
+          "id": "app-plan/backlog-from-brief",
+          "score": 0.75,
+          "cost": 0.10935348,
+          "missed": [
+            "Stories lack the \"Done when\" line, so nothing decides when one is finished.",
+            "Planning five files should not take more than fourteen tool calls."
+          ]
+        },
+        {
+          "id": "app-plan/asks-before-guessing",
+          "score": 0.8333333333333334,
+          "cost": 0.018346249999999998,
+          "missed": [
+            "Asking three questions should not take six tool calls."
+          ]
+        }
+      ]
+    },
+    {
+      "skill": "app-architecture",
+      "phase": "finished",
+      "cost": 0.12618184000000002,
+      "mean": 0.8257575757575758,
+      "tasks": [
+        {
+          "id": "app-architecture/place-a-feature",
+          "score": 0.8181818181818182,
+          "cost": 0.09391208000000001,
+          "missed": [
+            "No test location was named.",
+            "Placing one resource in a nine-file project should not take more than twelve tool calls."
+          ]
+        },
+        {
+          "id": "app-architecture/reuse-before-write",
+          "score": 0.8333333333333334,
+          "cost": 0.03226976,
+          "missed": [
+            "A Grep for money/format is enough; eight tool calls is generous."
+          ]
+        }
+      ]
+    },
+    {
+      "skill": "app-design",
+      "phase": "finished",
+      "cost": 0.0289131,
+      "mean": 0,
+      "tasks": [
+        {
+          "id": "app-design/invoices-page-professional",
+          "score": 0,
+          "cost": 0.0289131,
+          "error": "Upstream error from Relace: The model stopped before completing the response.",
+          "missed": [
+            "Money is not right-aligned in the table.",
+            "The narrow viewport was not considered or mentioned.",
+            "The empty state was not designed.",
+            "Restyling one page should not take more than sixteen tool calls."
+          ]
+        }
+      ]
+    },
+    {
+      "skill": "app-ship",
+      "phase": "finished",
+      "cost": 0.1008334,
+      "mean": 0.7333333333333333,
+      "tasks": [
+        {
+          "id": "app-ship/env-and-health",
+          "score": 0.7333333333333333,
+          "cost": 0.1008334,
+          "missed": [
+            "API_TOKEN is read by the code but not in .env.example.",
+            "No health route was added.",
+            "Shipping a four-file service should not take more than thirty tool calls."
+          ]
+        }
+      ]
+    },
+    {
+      "skill": "app-quality",
+      "phase": "finished",
+      "cost": 0.09863485,
+      "mean": 0.8888888888888888,
+      "tasks": [
+        {
+          "id": "app-quality/report-what-was-verified",
+          "score": 0.8888888888888888,
+          "cost": 0.09863485,
+          "missed": [
+            "Verifying a two-file feature should not take more than twenty tool calls."
+          ]
+        }
+      ]
+    }
+  ]
+}
