@@ -5,7 +5,7 @@ author: aico
 version: 1.0.0
 trigger: \b(build|create|make|plan|design|scaffold)\b.{0,40}\b(app|application|saas|site|website|service|api|dashboard|portal|tool|bot|platform)\b
 ---
-Plan the app before building it. Small brief, small plan: the whole of this fits on one page and takes one turn. {args}
+Plan the app before building it. Small brief, small plan: the whole of this fits on one page, takes one turn, and about ten tool calls — read `AICO.md` and the backlog, write the PRD and the backlog, done. {args}
 
 ## 1. The brief — three questions at most
 

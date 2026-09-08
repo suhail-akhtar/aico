@@ -28,7 +28,7 @@ Find the feature that already exists (a templated app names it in `docs/EXTENDIN
 
 ## 5. Reuse before write
 
-Before adding a helper, component or utility, search for one: Grep the name, the concept, and the neighbouring feature. Extending what exists beats a second copy; a second copy beats a premature abstraction.
+Before adding a helper, component or utility, search for one: Grep the name, the concept, and the neighbouring feature. When one exists, name it and use it — never write a second beside it. Extending what exists beats a second copy; a second copy beats a premature abstraction. A placement question is answered in words: it needs no edit, and about eight tool calls.
 
 ## 6. Record the decision
 

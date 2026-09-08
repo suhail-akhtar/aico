@@ -39,6 +39,21 @@ end, on a scratch store — and fixing what made it wander.
   app, its backlog progress, and offers "Build the next story", "Review what
   is built" and "Plan the next iteration".
 - GUIDE.md has "Building an app" and the learning paragraph.
+- **Eyes for the verifier.** When the session's model reads images, the
+  screenshots a `VerifyApp` call saved are stored as attachments and shown to
+  the model on the next step, with a note to look at them as a person would.
+  Text-only models keep the paths for the person. GLM 5.3 Flash and the
+  DeepSeek V4 Flash vision build are marked as reading images.
+- **Checks are not spent twice on unchanged code.** `RunChecks` remembers the
+  last green run per project; with no file written through the tools and no
+  shell command since, it answers with that result instead of a minute of
+  build. `force: true` runs them anyway.
+- **Two live probes.** `scripts/apps-build-live.mjs` drives the whole loop with
+  a real model — create from a template, plan, build story by story, rate a
+  reply and keep the proposal it produces, steer a turn, deploy, then open
+  every screen in a browser at two widths — and never cuts a busy turn short.
+  `scripts/skill-eval-live.mjs` scores the five app skills against their tasks.
+  `npm run test:apps:build`, `npm run test:skills:live`.
 
 ### Fixed
 
@@ -59,6 +74,15 @@ end, on a scratch store — and fixing what made it wander.
   skip, and the health check answers 200 through a build. The dev server's
   generated route types stay out of `npm run typecheck`, so deleting a page
   no longer fails the check until the server has noticed.
+- **OpenRouter's output ceiling was 8,192 tokens.** A reasoning model routed
+  through the gateway reached it mid-thought, with nothing written and the
+  step reported as cut off. The default is 32,768, as for Z.AI first-party;
+  `providers.openrouter.maxOutputTokens` overrides it.
+- **A router's model id went to the wrong gateway.** With a direct vendor
+  active, `z-ai/glm-5.3-flash` was sent to a compatible endpoint that had
+  listed its two models and named neither, and every skill evaluation and a
+  whole build failed with "please check the model you provided". A gateway
+  that lists the model wins; then OpenRouter; then one that has said nothing.
 - **A finished install read as "Stopped".** The work ledger closed a
   completed `npm install` as a stopped server; it now says "Installed", and an
   app that starts again after an ended record opens a new one.

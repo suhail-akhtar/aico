@@ -189,9 +189,26 @@ interface ChecksState {
   touched: Map<string, number>;
   /** The most recent result per check name. */
   results: Map<string, CheckResult>;
+  /**
+   * Shell commands this turn ran. A `sed` or a `git checkout` changes source
+   * without going through the write path, so a count of commands stands in
+   * for the files they may have touched: any command since a green run means
+   * the run cannot be trusted to still describe the code.
+   */
+  commands: number;
 }
 
-const state = runScoped<ChecksState>(() => ({ touched: new Map(), results: new Map() }));
+const state = runScoped<ChecksState>(() => ({ touched: new Map(), results: new Map(), commands: 0 }));
+
+/** Note that a shell command ran. Called from the Bash and Terminal paths. */
+export function noteCommandRun(): void {
+  state.get().commands++;
+}
+
+/** How many shell commands this turn has run so far. */
+export function commandsRun(): number {
+  return state.get().commands;
+}
 
 /** Start of turn: last turn's green suite says nothing about this turn's code. */
 export function resetChecks(): void {

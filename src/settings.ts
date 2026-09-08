@@ -39,7 +39,17 @@ export interface AicoSettings {
    * compatibility, and still the place vendor-specific tuning lives.
    */
   providers?: {
-    openrouter?: { apiKey?: string; defaultModel?: string };
+    openrouter?: {
+      apiKey?: string;
+      defaultModel?: string;
+      /**
+       * Output ceiling per request. Default 32,768: a reasoning model routed
+       * through the gateway spends its thinking inside this budget, and the
+       * old 8,192 was reached by GLM 5.3 Flash mid-thought, with nothing
+       * written and the step reported as cut off.
+       */
+      maxOutputTokens?: number;
+    };
     anthropic?: {
       apiKey?: string;
       defaultModel?: string;

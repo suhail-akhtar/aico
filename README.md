@@ -246,7 +246,9 @@ raises. A requirement that is a flow — "add a customer" — is a check with
 `steps` (goto, fill, click, select, press, wait) and an `expect` of a selector,
 text, URL or absence; checks in one call share the page and its cookies, so a
 sign-in check first leaves the rest signed in, and `screenshot: true` keeps a
-PNG of what each check saw.
+PNG of what each check saw. When the session's model reads images, those
+screenshots are shown to it on the next step, so "does it look right" is a
+question the agent can answer itself.
 
 Uses `playwright-core` against a Chrome or Edge you already have.
 
@@ -561,15 +563,21 @@ is a million tokens, stop compacting" is an instruction it can carry out.
 ## Testing
 
 ```sh
-npm test           # 2,512 offline assertions, no API key needed
-npm run test:live  # 93 live assertions per model — costs money
+npm test                 # 2,900 offline assertions, no API key needed
+npm run test:live        # 93 live assertions per model — costs money
+npm run test:apps:build  # a real model builds an app from a template, end to end
+npm run test:skills:live # the five app skills scored against their tasks
 npm run typecheck
 ```
 
 The live suite exercises what a mock cannot: wire-format compatibility,
 streaming shapes, tool round trips, prompt caching, truncation, cancellation,
 steering, compaction, sandbox confinement, and sub-agent inheritance — each
-asserted against a real model.
+asserted against a real model. The Apps build probe goes further: template,
+plan, stories, a rating kept as a lesson, a steer, a deploy, then every screen
+of the result opened in a browser at two widths — and it never cuts a busy
+turn short. `scripts/fixtures/skill-eval-baseline-deepseek-v4-pro.json` holds
+the skill scores to compare a change against.
 
 Session logs carry **runtime invariants** (`checkSessionInvariants`) covering
 sequence ordering, turn balance, call/result pairing, and replace-range sanity.

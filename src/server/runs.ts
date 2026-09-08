@@ -668,6 +668,19 @@ export class RunManager {
             return fresh ? [fresh] : [];
           },
         } : {}),
+        // A verifier screenshot becomes an attachment of this session, so the
+        // next request can show it to a model that reads images.
+        storeImage: async (file: string) => {
+          const { storeAttachment, IMAGE_MEDIA_TYPES } = await import('./attachments.js');
+          const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
+          const mediaType = IMAGE_MEDIA_TYPES[ext];
+          if (!mediaType) return undefined;
+          const bytes = await readFile(file);
+          const stored = await storeAttachment({
+            settings, cwd: run.cwd, sessionId, name: file.replace(/^.*[\\/]/, ''), mimeType: mediaType, base64: bytes.toString('base64'),
+          });
+          return { id: stored.id, mediaType, name: stored.name };
+        },
         // The bound app becomes the run's project root: its checks, its served
         // URL, its files are what the gates judge.
         ...(boundAppOpt ? { app: boundAppOpt } : {}),
