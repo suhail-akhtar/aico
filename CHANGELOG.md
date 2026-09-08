@@ -3,6 +3,28 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.17.0 — 2026-09-09
+
+### Changed
+
+- **A clean install now warns about nothing.** Seven deprecated packages came
+  in through three dependencies, and all three are gone:
+  - **exceljs** brought `archiver`, `unzipper`, `fstream`, `rimraf@2`,
+    `glob@7`, `inflight` (which leaks memory) and `lodash.isequal` — seven
+    warnings and two published advisories — to read a spreadsheet somebody
+    uploaded. Replaced by `src/tools/xlsx-lite.ts`, a reader over `fflate`
+    (no dependencies of its own): sheet names, shared and inline strings,
+    rich text, numbers, booleans, date-styled cells, formulas, blank rows,
+    row and sheet slicing. Twelve assertions cover it, on a workbook the
+    harness builds itself.
+  - **node-fetch** brought `node-domexception`. Node 22 has `fetch` built in,
+    which is what the engine requires anyway; the five imports are gone and
+    the MCP SSE client reads the native web stream instead of a Node one.
+  - **openai** was pinned at 4.x, whose `formdata-node` also brought
+    `node-domexception`. Now 7.x.
+- The remaining `uuid` override is still doing work (Mermaid), and
+  `npm audit` reports no vulnerabilities.
+
 ## 0.16.2 — 2026-09-09
 
 ### Fixed

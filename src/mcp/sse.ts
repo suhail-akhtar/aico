@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { McpBaseClient, type McpServerConfigV2, type McpHealthStatus } from './base.js';
 
 /**
@@ -47,15 +46,31 @@ export class McpSseClient extends McpBaseClient {
       this._reconnectAttempts = 0;
       this._sseBuffer = '';
 
-      resp.body.on('data', (chunk: Buffer) => this._handleSseChunk(chunk.toString()));
-      resp.body.on('end', () => {
-        this._healthy = false;
-        if (!this._stopped) this._scheduleReconnect();
-      });
-      resp.body.on('error', () => {
-        this._healthy = false;
-        if (!this._stopped) this._scheduleReconnect();
-      });
+      /*
+        A web stream, read to exhaustion in the background.
+
+        Node's own `fetch` answers with a `ReadableStream`, not the Node
+        stream `node-fetch` used to return, so there is no `on('data')` to
+        hook. Reading it in a detached loop keeps the constructor's contract —
+        connect and return — while `end` and `error` become the loop finishing
+        and the loop throwing.
+      */
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      void (async () => {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) this._handleSseChunk(decoder.decode(value, { stream: true }));
+          }
+        } catch {
+          // A dropped connection is a reconnect, not a crash.
+        } finally {
+          this._healthy = false;
+          if (!this._stopped) this._scheduleReconnect();
+        }
+      })();
     } catch {
       this._healthy = false;
       if (!this._stopped) this._scheduleReconnect();

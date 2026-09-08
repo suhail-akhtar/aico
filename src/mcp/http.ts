@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { McpBaseClient, type McpServerConfigV2, type McpHealthStatus } from './base.js';
 
 /**
