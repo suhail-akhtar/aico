@@ -16,7 +16,7 @@ Signed-out pages sell: one hero, one primary action, a short feature list. Signe
 - One primary button per screen; the rest are ghost buttons or links. Destructive is never the primary colour.
 - Spacing on a 4px scale (4/8/12/16/24/32/48): related things close, sections further apart than what is inside them.
 - Type on a scale — 12 meta, 14 tables and forms, 16 body, 20 section, 24–30 page title — two weights at most. Secondary text is muted, not smaller *and* muted.
-- Numbers right-aligned with `tabular-nums`; money with currency and two decimals; one date format everywhere.
+- Numbers right-aligned with `tabular-nums`; money grouped, with currency and two decimals; one date format.
 
 ## 3. Colour through tokens
 
