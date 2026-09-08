@@ -56,7 +56,9 @@ end, on a scratch store — and fixing what made it wander.
 - **A build check knocked the running dev server over.** `next dev` and
   `next build` wrote to the same `.next`; the two Next.js templates now give
   development its own directory (`.next-dev`), which the engine's file lists
-  skip, and the health check answers 200 through a build.
+  skip, and the health check answers 200 through a build. The dev server's
+  generated route types stay out of `npm run typecheck`, so deleting a page
+  no longer fails the check until the server has noticed.
 - **A finished install read as "Stopped".** The work ledger closed a
   completed `npm install` as a stopped server; it now says "Installed", and an
   app that starts again after an ended record opens a new one.
