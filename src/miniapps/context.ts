@@ -43,7 +43,7 @@ import { describe } from './data.js';
 import { effectiveKind, hasProcess, type MiniApp } from './store.js';
 
 /** Directories whose contents say nothing an author needs and cost a great deal. */
-const SKIP = new Set(['node_modules', '.next', 'dist', 'build', 'coverage', '.git', '.turbo', 'out']);
+const SKIP = new Set(['node_modules', '.next', '.next-dev', 'dist', 'build', 'coverage', '.git', '.turbo', 'out']);
 const MAX_ENTRIES = 40;
 /** The most of the app's own AICO.md that is inlined. */
 const MAX_AICO_MD = 2_000;

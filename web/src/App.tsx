@@ -198,7 +198,7 @@ export function App(): React.ReactElement {
             ordinary conversation has no right half; the panel renders nothing.
           */
           <div className="flex min-h-0 flex-1">
-            <div className="flex min-w-0 flex-1 flex-col">
+            <div className="relative flex min-w-0 flex-1 flex-col">
               {/* Above the transcript: the scope has to be readable before the
                   first message is, not discovered at the bottom of the page. */}
               <MiniAppScope />

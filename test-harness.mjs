@@ -6975,6 +6975,40 @@ if (!findBrowser()) {
   }
 
   {
+    // A requirement is several actions and one observation. "Add a customer"
+    // means fill the name, submit, and see the row — which one click could
+    // never express, and which sent an agent off to install a browser MCP and
+    // write its own HTTP driver rather than say it could not be checked.
+    const p = write('flow.html', `<!doctype html><title>t</title><body>
+      <h1>Customers</h1>
+      <form id=f><label>Name <input id=name></label><button id=add type=submit>Add customer</button></form>
+      <ul id=list></ul><a id=next href="#done">Next</a>
+      <script>
+        document.getElementById('f').onsubmit = e => {
+          e.preventDefault();
+          const li = document.createElement('li'); li.className = 'row';
+          li.textContent = document.getElementById('name').value; document.getElementById('list').append(li);
+        };
+      </script>`);
+    const v = await verifyApp({
+      target: p, settleMs: 300,
+      checks: [
+        { name: 'add a customer', steps: [{ fill: '#name', value: 'Acme Studio' }, { click: '#add' }], expect: { selector: '.row', text: 'Acme Studio' } },
+        { name: 'go to the next page', steps: [{ click: '#next' }], expect: { url: '#done' } },
+        { name: 'a missing field is named', steps: [{ fill: '#nope', value: 'x' }], expect: '.row' },
+        { name: 'a wrong expectation is named', steps: [{ fill: '#name', value: 'Beta' }, { click: '#add' }], expect: { absent: '.row' } },
+      ],
+    });
+    const by = Object.fromEntries([...v.brokenFlows.map(f => [f.name, f.detail])]);
+    assert(!('add a customer' in by), `fill + click + expect text passes (${by['add a customer'] ?? ''})`);
+    assert(!('go to the next page' in by), `an expected url passes (${by['go to the next page'] ?? ''})`);
+    assert(/nothing matches #nope/.test(by['a missing field is named'] ?? ''), `a step on a missing element says which (${by['a missing field is named']})`);
+    assert(/filled #name, clicked #add, but \.row is still on the page/.test(by['a wrong expectation is named'] ?? ''),
+      `a failed expectation says what was done and what was seen (${by['a wrong expectation is named']})`);
+    assert(v.flowsChecked === 4 && v.brokenFlows.length === 2, 'two of four step checks failed, as planted');
+  }
+
+  {
     // "No external requests" is checkable, and only from inside a browser: the
     // source says `<script src>`, the network says whether it went out.
     const p = write('external.html',
@@ -12162,6 +12196,15 @@ console.log('  -- A template becomes an app: copied, substituted, described in a
   assert(items === fs.readFileSync(path.join(t.dir, 'src', 'items.ts'), 'utf8'), 'files not named for substitution are byte-identical');
   const written = JSON.parse(fs.readFileSync(path.join(dir, 'app.json'), 'utf8'));
   assert(written.template?.id === 'api-service-hono' && written.run?.install, 'app.json on disk is v2');
+  // Runnable the moment it exists: the example's "change-me" secrets become
+  // real ones in .env.local, which the template's .gitignore already excludes.
+  const envLocal = path.join(dir, '.env.local');
+  assert(fs.existsSync(envLocal), '.env.local is written from .env.example at create');
+  assert(!/^[A-Z0-9_]+=change-me/m.test(fs.readFileSync(envLocal, 'utf8')), 'with no live change-me value left in it');
+  const saas = await instantiateTemplate({ template: getTemplate('web-saas-next'), title: 'Secret Test' }, settings, ws);
+  const saasEnv = fs.readFileSync(path.join(miniAppDir(saas.slug, settings, ws), '.env.local'), 'utf8');
+  assert(/^SESSION_SECRET=[0-9a-f]{48}$/m.test(saasEnv), `a change-me secret became a generated one (${saasEnv.split('\n').find(l => /SECRET/.test(l))})`);
+  assert(/change-me/.test(fs.readFileSync(path.join(miniAppDir(saas.slug, settings, ws), '.env.example'), 'utf8')), 'and the example still documents the placeholder');
   const progress = await backlogProgress(dir);
   assert(progress.total >= 4 && progress.done >= 1 && progress.done < progress.total, `backlog progress is counted (${progress.done}/${progress.total})`);
   const again = await getMiniApp(app.slug, settings, ws);
@@ -12394,6 +12437,42 @@ console.log('  -- The tail is small and the prefix carries the stable facts --')
   assert(headers[0].data.header.sectionHashes?.runtime, 'and it carries per-section hashes');
 }
 
+console.log('  -- The caller’s volatile sections are re-read before every step --');
+{
+  // The app a bound session builds starts and fails *during* a turn. A line
+  // computed once at the top said "installing" through twenty steps of a
+  // running app; now the caller is asked again before each request.
+  const tails = [];
+  let calls = 0;
+  const provider = {
+    id: 'mock', displayName: 'Mock',
+    async *chat(opts) {
+      tails.push(opts.volatileContext ?? '');
+      calls++;
+      if (calls === 1) {
+        yield { type: 'tool_call', id: 'c1', name: 'TodoRead', arguments: '{}' };
+        yield { type: 'finish', reason: 'tool_calls' };
+        return;
+      }
+      yield { type: 'text', content: 'ok' };
+      yield { type: 'usage', inputTokens: 10, outputTokens: 1 };
+      yield { type: 'finish', reason: 'stop' };
+    },
+  };
+  const session = mkSession('refresh-1');
+  const states = ['App x: process installing · backlog 0/5 done', 'App x: process running at http://h · backlog 0/5 done'];
+  let reads = 0;
+  await runAgent({
+    task: 'go', model: 'mock-model', showPlan: false, autoApprove: true, verbose: false, silent: true,
+    conversationHistory: [], sessionId: session.header.id, settings: { completionGate: { enabled: false }, cron: { enabled: false } }, provider, session,
+    volatileSections: [{ id: 'app_state', body: states[0] }],
+    refreshVolatile: async () => [{ id: 'app_state', body: states[Math.min(reads++, 1)] }],
+  });
+  assert(tails.length === 2, `two requests were made (${tails.length})`);
+  assert(/process installing/.test(tails[0]) && !/process running/.test(tails[0]), 'the first step sees the state as it was');
+  assert(/process running at http:\/\/h/.test(tails[1]) && !/process installing/.test(tails[1]), 'the second step sees the state as it is now');
+}
+
 // ═══════════════════════════════════════════════════════════
 // Gates for every stack, and a profile that remembers the commands
 // ═══════════════════════════════════════════════════════════
@@ -12594,7 +12673,7 @@ console.log('  -- The app skills ship, fit, and have tasks --');
       if ('pattern' in c) { try { new RegExp(c.pattern, c.flags ?? ''); } catch (e) { assert(false, `${t.id}: pattern compiles (${c.pattern})`); } }
     }
   }
-  for (const name of ['app-plan', 'app-architecture']) {
+  for (const name of ['app-plan', 'app-architecture', 'app-ship', 'app-quality', 'app-design']) {
     const file = path.join('src', 'skills', 'builtin', name, 'SKILL.md');
     const text = fs.readFileSync(file, 'utf8');
     assert(text.length <= 3_600, `${name} is under 3,600 chars (${text.length})`);

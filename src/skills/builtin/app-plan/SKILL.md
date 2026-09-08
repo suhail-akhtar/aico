@@ -45,7 +45,7 @@ Put every story in TodoWrite with the same words, so the completion gate holds t
 
 ## 5. Then build
 
-For each story in order: copy the worked feature in `docs/EXTENDING.md`, run RunChecks, then AppManage start and VerifyApp with a check named after the story's "Done when". Tick the story in `.aico/backlog.md` and the todo. When you settle a design choice that is not obvious from the code, append one line to `.aico/decisions.md`: what, and why.
+Before the first screen, Skill `app-design` (the shell, the hierarchy, the states). For each story in order: copy the worked feature in `docs/EXTENDING.md`, run RunChecks, then AppManage start and VerifyApp with a check named after the story's "Done when". Tick the story in `.aico/backlog.md` and the todo. When you settle a design choice that is not obvious from the code, append one line to `.aico/decisions.md`: what, and why.
 
 ## Do not
 

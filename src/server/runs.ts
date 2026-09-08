@@ -659,8 +659,15 @@ export class RunManager {
         // took a cwd, every session silently worked in whatever directory the
         // server process happened to be started in.
         cwd: run.cwd,
-        // The app's moving state, for the tail, when this session is about one.
-        ...(appStateTail ? { volatileSections: [appStateTail] } : {}),
+        // The app's moving state, for the tail, when this session is about one —
+        // and re-read before every step, because it moves during the turn.
+        ...(appStateTail ? {
+          volatileSections: [appStateTail],
+          refreshVolatile: async () => {
+            const fresh = await appStateSection(run.session, settings, run.cwd);
+            return fresh ? [fresh] : [];
+          },
+        } : {}),
         // The bound app becomes the run's project root: its checks, its served
         // URL, its files are what the gates judge.
         ...(boundAppOpt ? { app: boundAppOpt } : {}),

@@ -4,6 +4,10 @@ const nextConfig: NextConfig = {
   // Standalone output copies only what the server needs into .next/standalone,
   // which is what the Dockerfile ships.
   output: 'standalone',
+  // The dev server and `next build` write to the same directory by default, so a
+  // build check run while the app is being served knocked the server over.
+  // Development gets a directory of its own; production keeps .next for the image.
+  distDir: process.env.NODE_ENV === 'development' ? '.next-dev' : '.next',
   // This app is the root of its own trace, even when it lives inside a larger
   // repository that has its own lockfile.
   outputFileTracingRoot: import.meta.dirname,

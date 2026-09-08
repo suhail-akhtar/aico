@@ -26,6 +26,7 @@
  * @module apps/templates
  */
 
+import crypto from 'crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { cp, mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
@@ -287,7 +288,7 @@ function globToRegExp(glob: string): string {
 function walk(dir: string, rel = ''): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(path.join(dir, rel), { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === '.next' || entry.name === 'dist' || entry.name === 'data.sqlite') continue;
+    if (entry.name === 'node_modules' || entry.name === '.next' || entry.name === '.next-dev' || entry.name === 'dist' || entry.name === 'data.sqlite') continue;
     const next = rel ? `${rel}/${entry.name}` : entry.name;
     if (entry.isDirectory()) out.push(...walk(dir, next));
     else out.push(next);
@@ -337,7 +338,7 @@ export async function instantiateTemplate(
       const base = path.basename(src);
       // Local conveniences of a template's own development never travel: an
       // install, build output, a scratch database, a committed secret.
-      return base !== 'template.json' && base !== 'node_modules' && base !== '.next' && base !== 'data.sqlite'
+      return base !== 'template.json' && base !== 'node_modules' && base !== '.next' && base !== '.next-dev' && base !== 'data.sqlite'
         && base !== 'coverage' && base !== 'data' && base !== '.env' && base !== '.env.local'
         && base !== '.astro' && base !== '.expo' && base !== 'dist' && base !== 'web-build'
         && !base.endsWith('.tsbuildinfo') && base !== 'package-lock.json.bak';
@@ -352,6 +353,7 @@ export async function instantiateTemplate(
     const next = substituteTokens(text, values);
     if (next !== text) await writeFile(file, next, 'utf8');
   }
+  await writeLocalEnv(dir);
   // The manifest the store wrote is authoritative; the copy must not have
   // overwritten it (the template has no app.json, but a user's might).
   await mkdir(dir, { recursive: true });
@@ -360,6 +362,30 @@ export async function instantiateTemplate(
   // would be guessed to say, below anything the person later decides.
   await profileFromTemplate(dir, template.run, `${template.name} (${template.id})`).catch(() => undefined);
   return { ...app, built: true };
+}
+
+/**
+ * `.env.local` from `.env.example`, with every `change-me…` value replaced by
+ * a random secret.
+ *
+ * A template documents its configuration in `.env.example` and reads it from
+ * the environment, which is right for a repository and wrong for the first
+ * five minutes of an app: the first sign-up threw "SESSION_SECRET is missing"
+ * and an agent spent twenty steps on a form that was fine. The app should be
+ * runnable the moment it is created; the example stays as the documentation.
+ */
+export async function writeLocalEnv(dir: string): Promise<string | undefined> {
+  const example = path.join(dir, '.env.example');
+  const local = path.join(dir, '.env.local');
+  if (!existsSync(example) || existsSync(local)) return undefined;
+  const text = await readFile(example, 'utf8');
+  const out = text.split(/\r?\n/).map(line => {
+    const m = /^([A-Z0-9_]+)=(.*)$/.exec(line);
+    if (!m || !/^change-me/i.test(m[2] ?? '')) return line;
+    return `${m[1]}=${crypto.randomBytes(24).toString('hex')}`;
+  }).join('\n');
+  await writeFile(local, out, 'utf8');
+  return local;
 }
 
 /** Whether this process's Node satisfies a template's requirement, e.g. ">=22.5". */

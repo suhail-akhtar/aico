@@ -70,6 +70,18 @@ function findBrowser() {
 
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-layout-'));
 fs.writeFileSync(path.join(workspace, 'README.md'), '# layout probe\n');
+/*
+  The app host on a port of its own. The scratch store copies the reader's
+  settings, port included, and an aico already serving on this machine holds
+  that port — the probe's host then failed to bind and the workspace screen
+  had no preview to measure, which read as a regression and was not one.
+*/
+{
+  const settingsFile = path.join(process.env.AICO_HOME, 'settings.json');
+  const settings = fs.existsSync(settingsFile) ? JSON.parse(fs.readFileSync(settingsFile, 'utf8')) : {};
+  settings.miniApps = { ...(settings.miniApps ?? {}), enabled: true, port: 7431 };
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+}
 fs.mkdirSync(shots, { recursive: true });
 
 let child;

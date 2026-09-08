@@ -343,6 +343,42 @@ agent can read your Problems panel (`VSCodeDiagnostics`) and run your
 attached. The full write-up is on the
 [VS Code page](https://suhail-akhtar.github.io/aico/vscode.html).
 
+## Building an app
+
+**Apps** in the bottom navigation is where applications live: not files in a
+repository you brought, but things aico keeps in its workspace, starts, serves
+and deploys. Turn the host on once under Settings → Apps.
+
+**Create app** asks one question first — what do you want to build? Write it
+the way you would brief a colleague: who uses it, what they do most often, what
+must be true when it is done. As you type, the templates are ranked against your
+words and the best match is named with the words that matched. Nine templates
+ship: a records page over SQLite that needs no install, a static landing page, a
+JSON API, a full web application with accounts, a metrics dashboard, a
+documentation site, a command-line tool, an LLM agent service, and an Expo
+mobile app. Each copies in as files with a worked feature, tests, notes for the
+agent and a deploy script; nothing is generated, so the skeleton costs no
+tokens. Take the best match, browse *See all templates*, or *Let the agent
+choose and start*. Your brief becomes the first message of the conversation.
+
+That conversation is bound to the app, and the app sits beside it. **Preview**
+is the app itself, at desktop, tablet or phone width, reloaded when a turn ends.
+**Backlog** is the plan the agent wrote from your brief — stories with a *Done
+when* line each, and the next one a click from being built. **Decisions** is
+where design choices are recorded so they survive a long session. **Files** and
+**Logs** are what they say. Start, Stop, Deploy and Open sit in the panel's
+header.
+
+What holds the agent to the plan: a story is done only when its checks are green
+and the app was opened in a real browser and the *Done when* line was seen to be
+true. The turn cannot end as finished before that. A `process` app — anything
+with its own server — runs code the agent wrote with your permissions on a port
+of its own; it cannot reach aico's API, but it is the trust you extend to any
+repository you clone and run.
+
+From the terminal the same things are `/app templates`, `/app new <template>
+"<name>" --brief "…"`, and `/app list|start|stop|deploy`.
+
 ## Teaching it a correction
 
 When a reply misses, rate it **▼** and say why. **Remember this** turns your note
@@ -353,6 +389,18 @@ the trigger is shown the guidance before the agent starts.
 It is filed with the project by default. Tick *Every project* only when the
 lesson is about you rather than the code — a convention stored globally follows
 you into repositories where it is wrong.
+
+You do not have to catch everything yourself. After each turn aico reads its own
+log for the signals a review would look for — a rating with a note, a message
+you sent mid-turn to steer, a fix that followed a failing check or browser
+verdict, an error that repeated — and files each as a **proposal** under
+Settings → Memory → Suggested. Nothing is adopted on its own: read it, edit the
+trigger or the text, and *Keep* it, or *Dismiss* it. Kept proposals become
+knowledge, a project fact such as "this project uses npm", or a line in
+`~/.aico/USER.md`, which holds at most twelve short things about how you like to
+work. Design decisions the agent settles while building go to
+`.aico/decisions.md`, and a session that compacts keeps that file and writes the
+dropped detail to a report it names in the summary.
 
 ## Choosing a model
 

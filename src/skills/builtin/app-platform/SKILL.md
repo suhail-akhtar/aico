@@ -37,8 +37,9 @@ Your system prompt carries the app's identity, its `AICO.md` and a two-level fil
 
 1. `app-plan`: three questions at most, `docs/PRD.md`, stories with *Done when* appended to `.aico/backlog.md`, mirrored into TodoWrite.
 2. `app-architecture`: data model first, copy the worked feature's layout, one decision line per settled choice.
-3. Build one story at a time; `RunChecks`; `AppManage start`; `VerifyApp`; tick the story.
-4. `app-quality` before saying done; `app-ship` to make it deployable.
+3. `app-design` before the first screen: the shell, the hierarchy, the states — a product, not an admin panel.
+4. Build one story at a time; `RunChecks`; `AppManage start`; `VerifyApp`; tick the story.
+5. `app-quality` before saying done; `app-ship` to make it deployable.
 
 ## Do not
 

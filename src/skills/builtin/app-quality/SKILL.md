@@ -22,6 +22,7 @@ Console errors, failed requests, and unhandled rejections in the verdict are def
 ## 4. Tidy the trail
 
 - Remove dead code, commented-out blocks, unused imports and `console.log` left from debugging.
+- Grep for `Placeholder` and `lorem`: templates mark what to write with them, and none may reach a user.
 - Every form control has a label; every image `alt`; focus is visible; Escape closes a dialog; Enter submits a form; the page survives a 390px viewport.
 - Error states say what is wrong, where it is wrong, in words a user would use.
 

@@ -17,6 +17,7 @@
 
 import React from 'react';
 import type { Deliverable } from '../api';
+import { shortenPath } from '@aico/ui';
 
 export interface TurnSummaryData {
   outcome: 'completed' | 'incomplete' | 'cancelled' | 'failed';
@@ -94,7 +95,7 @@ export function TurnSummary(
                   {file.action === 'created' ? '+' : '~'}
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-aico-primary" title={file.path}>
-                  {file.path}
+                  {shortenPath(file.path)}
                 </span>
                 {file.touches > 1 && (
                   <span className="shrink-0 text-[11px] text-aico-muted" title={`Touched ${file.touches} times`}>

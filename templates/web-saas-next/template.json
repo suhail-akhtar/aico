@@ -1,6 +1,6 @@
 {
   "id": "web-saas-next",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Web app (Next.js)",
   "category": "saas",
   "kind": "process",
@@ -92,7 +92,8 @@
   "brief": "docs/EXTENDING.md",
   "features": [
     "Sign-up and sign-in with a signed HTTP-only cookie",
+    "A product shell: side navigation, page header, stat card, status pill, empty state",
     "An items feature end to end: page, server actions, data layer, tests",
-    "Tailwind tokens, standalone Docker image"
+    "Tailwind tokens with dark mode, standalone Docker image"
   ]
 }
