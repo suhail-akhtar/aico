@@ -228,7 +228,7 @@ export {
   learnFromError, resetReasoningForTest,
 } from '../shared/reasoning.js';
 export { resolvedEffort } from './run-context.js';
-export { resolveToolSet } from './agent.js';
+export { resolveToolSet, isRetryableError } from './agent.js';
 export { HOST_TOOLS, hostToolsFrom, isHostTool } from '../shared/host-tools.js';
 export {
   vsCodeDiagnostics, vsCodeTasks, vsCodeWorkspace,

@@ -3,6 +3,16 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.16.1 — 2026-09-08
+
+### Fixed
+
+- **A dropped stream ended the turn.** A gateway closing its response
+  mid-step surfaces as "Premature close" (or "terminated", "other side
+  closed", "fetch failed"), and the loop treated it as a verdict on the request
+  rather than a network fault. A GLM build lost a two-hour turn to one. It is
+  now retried with the other transient errors.
+
 ## 0.16.0 — 2026-09-08
 
 Found by watching real models build apps from the wizard, end to end, on a
