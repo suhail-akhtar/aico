@@ -121,7 +121,6 @@ export class SkillRegistry {
    * Saves to ~/.aico/skills/<name>.md
    */
   async install(url: string): Promise<Skill> {
-    const { default: fetch } = await import('node-fetch');
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}`);
     const content = await resp.text();

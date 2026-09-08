@@ -13045,6 +13045,69 @@ console.log('  -- The sub-agent recommendation comes from the naming table --');
   assert(suggestKnowledge('please add a button to the page', 'note').trigger === 'add button page', 'the shared suggestion helper drops filler');
 }
 
+console.log('  -- A spreadsheet is read without a deprecated dependency --');
+{
+  // ExcelJS brought archiver, unzipper, fstream, rimraf 2 and glob 7 — five
+  // deprecated packages, two with advisories — to read a file a person
+  // uploaded. This is the replacement, over fflate, on a workbook built here
+  // so the assertions are about the parser and not about a fixture.
+  const { readWorkbook, columnIndex, serialToIso, readAttachment } = await import('./dist-test/test-exports.js');
+  const { zipSync, strToU8 } = await import('fflate');
+
+  const part = (s) => strToU8(`<?xml version="1.0" encoding="UTF-8"?>\n${s}`);
+  const book = zipSync({
+    '[Content_Types].xml': part('<Types/>'),
+    'xl/workbook.xml': part('<workbook><sheets><sheet name="Ledger" sheetId="1" r:id="rId1"/><sheet name="Notes" sheetId="2" r:id="rId2"/></sheets></workbook>'),
+    'xl/_rels/workbook.xml.rels': part('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>'),
+    'xl/sharedStrings.xml': part('<sst><si><t>Customer</t></si><si><t>Total</t></si><si><r><t>Acme </t></r><r><t>&amp; Co</t></r></si></sst>'),
+    // Style 1 is a built-in date format; style 0 is not.
+    'xl/styles.xml': part('<styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>'),
+    'xl/worksheets/sheet1.xml': part(
+      '<worksheet><sheetData>'
+      + '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="inlineStr"><is><t>Due</t></is></c></row>'
+      + '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>1234.5</v></c><c r="C2" s="1"><v>45000</v></c><c r="E2" t="b"><v>1</v></c></row>'
+      + '<row r="3"/>'
+      + '<row r="4"><c r="A4" t="str"><v>=SUM(B2:B3)</v></c><c r="B4"><v>1234.5</v></c></row>'
+      + '</sheetData></worksheet>'),
+    'xl/worksheets/sheet2.xml': part('<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Second sheet</t></is></c></row></sheetData></worksheet>'),
+  });
+
+  const wb = readWorkbook(book);
+  assert(wb.sheets.join() === 'Ledger,Notes', `sheet names come from the workbook in order (${wb.sheets.join()})`);
+  const rows = wb.rows('Ledger');
+  assert(rows.get(1).join('|') === 'Customer|Total|Due', `shared and inline strings both read (${rows.get(1).join('|')})`);
+  assert(rows.get(2)[0] === 'Acme & Co', `rich text is joined and entities decoded (${rows.get(2)[0]})`);
+  assert(rows.get(2)[1] === '1234.5' && rows.get(2)[3] === '' && rows.get(2)[4] === 'TRUE',
+    `numbers stay numbers, a skipped column is a hole, a boolean is a word (${rows.get(2).join('|')})`);
+  assert(rows.get(2)[2] === serialToIso(45000) && /^\d{4}-\d{2}-\d{2}$/.test(rows.get(2)[2]),
+    `a date-styled number becomes a date (${rows.get(2)[2]})`);
+  assert(rows.get(3).length === 0 && rows.get(4)[0] === '=SUM(B2:B3)', 'an empty row is empty and a formula string survives');
+  assert(wb.rows('Notes').get(1)[0] === 'Second sheet', 'a second sheet reads through its own relationship');
+  assert(columnIndex('A1') === 0 && columnIndex('E2') === 4 && columnIndex('AA10') === 26, 'column letters map to indexes');
+
+  // And through the tool the model actually calls.
+  const xlsxDir = fs.mkdtempSync(path.join(process.cwd(), 'dist-test', 'xlsx-'));
+  const xlsxPath = path.join(xlsxDir, 'book.xlsx');
+  fs.writeFileSync(xlsxPath, book);
+  const printed = await readAttachment({ file_path: xlsxPath });
+  assert(/^Sheet: Ledger/.test(printed) && /Acme & Co \| 1234\.5/.test(printed) && !/^3:/m.test(printed),
+    `ReadAttachment prints the first sheet and skips blank rows (${printed.split('\n').slice(0, 5).join(' / ')})`);
+  const listed = await readAttachment({ file_path: xlsxPath, sheet: 'Nope' });
+  assert(/^Sheets:\n- Ledger\n- Notes$/.test(listed), `an unknown sheet lists what is there (${listed})`);
+  const sliced = await readAttachment({ file_path: xlsxPath, sheet: 'Ledger', start_row: 4, end_row: 4 });
+  assert(/Rows 4-4/.test(sliced) && /=SUM/.test(sliced) && !/Customer/.test(sliced), 'row bounds are honoured');
+  fs.rmSync(xlsxDir, { recursive: true, force: true });
+
+  // A file that is not a zip is a message, not a crash: this parses uploads.
+  const junkDir = fs.mkdtempSync(path.join(process.cwd(), 'dist-test', 'xlsx-bad-'));
+  const junk = path.join(junkDir, 'bad.xlsx');
+  fs.writeFileSync(junk, 'this is not a spreadsheet');
+  let threw = false;
+  try { await readAttachment({ file_path: junk }); } catch { threw = true; }
+  assert(threw, 'a file that is not a workbook fails loudly rather than returning nonsense');
+  fs.rmSync(junkDir, { recursive: true, force: true });
+}
+
 clearInterval(keepAliveForAbandonedTools);
 
 
