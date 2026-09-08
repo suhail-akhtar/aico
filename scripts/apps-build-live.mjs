@@ -158,8 +158,9 @@ check(backlog().done + backlog().open > 4, `turn1: the backlog has stories (${ba
 check(first.report.counts.Skill >= 1, 'turn1: a skill was consulted');
 check(first.report.counts.McpAddServer === undefined, 'turn1: no MCP server was installed to work around the verifier');
 check(first.report.verifyCalls >= 1, `turn1: VerifyApp ran (${first.report.verifyCalls} calls, ${first.report.stepChecks} step checks)`);
-check(first.report.end?.kind === 'completed', `turn1: the turn completed (${JSON.stringify(first.report.end)})`);
-if (first.report.end?.kind === 'error') {
+const endKind = (end) => end?.reason?.kind ?? end?.kind;
+check(endKind(first.report.end) === 'completed', `turn1: the turn completed (${JSON.stringify(first.report.end)})`);
+if (endKind(first.report.end) === 'error') {
   log('the first turn failed before building anything; nothing further can be measured');
   fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify({ model: MODEL, template: TEMPLATE, slug, failed, fails, turns: turnReports }, null, 2));
   try { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(server.pid), '/T', '/F']); else server.kill(); } catch {}
@@ -180,10 +181,13 @@ if (first.report.end?.kind === 'error') {
 
 // ── Following stories, with a steer during the first of them ────────────────
 let steerLanded = false;
+const reviewTask = 'Review this app as it stands: open it in the browser with VerifyApp, check every ticked story still holds, note anything a paying user would notice, fix what is small, and report.';
 for (let i = 2; i <= TURNS; i++) {
-  if (backlog().open === 0) { log('backlog complete before turn', i); break; }
+  // The rating's proposal is extracted when the *next* turn ends, so one more
+  // turn always runs; with nothing left to build it is a review.
+  if (backlog().open === 0 && i > 2) { log('backlog complete before turn', i); break; }
   const beforeEvents = events().length;
-  const submitted = api('submit', { sessionId, task: nextStory });
+  const submitted = api('submit', { sessionId, task: backlog().open === 0 ? reviewTask : nextStory });
   if (i === 2) {
     await sleep(20_000);
     const steer = await api('steer', { sessionId, content: 'Steer from the person: while you are in there, make sure every money value is right-aligned with tabular-nums. Carry on with the story.' });

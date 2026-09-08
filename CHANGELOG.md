@@ -3,10 +3,16 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.16.0 — 2026-09-08
 
-Found by watching a real model build an invoicing app from the wizard, end to
-end, on a scratch store — and fixing what made it wander.
+Found by watching real models build apps from the wizard, end to end, on a
+scratch store — and fixing what made them wander. Measured before release:
+DeepSeek V4 Pro built the whole API brief (eight stories, four verifier calls
+with twelve step checks) in sixteen minutes for fifteen cents, and five of six
+dashboard stories with zero console errors and no sideways scroll at 1280px or
+390px; it scores the five app skills at 96, 70, 75, 80 and 100 percent. GLM 5.3
+Flash reaches the same places more slowly and, reading images, receives the
+verifier's screenshots.
 
 ### Added
 
@@ -83,6 +89,15 @@ end, on a scratch store — and fixing what made it wander.
   listed its two models and named neither, and every skill evaluation and a
   whole build failed with "please check the model you provided". A gateway
   that lists the model wins; then OpenRouter; then one that has said nothing.
+- **A rating given after a turn ended was never extracted.** The person reads
+  the reply, then clicks 👎, so the rating lands after `turn/end`; extraction
+  at the end of the next turn only looked at that turn. It now also reads the
+  previous turn's ratings. Proposals from a session bound to an app are filed
+  with the app, not the workspace every app session shares.
+- **The API template answered a browser with not_found.** Its front door now
+  says what it is and where the OpenAPI document and health route are, and it
+  answers the favicon request a browser makes on every visit, which used to be
+  the one console error on an otherwise clean run.
 - **A finished install read as "Stopped".** The work ledger closed a
   completed `npm install` as a stopped server; it now says "Installed", and an
   app that starts again after an ended record opens a new one.
