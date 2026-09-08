@@ -120,6 +120,11 @@ export function isRetryableError(err: unknown): boolean {
     // build ended a two-hour turn on one, with the step half-written and
     // nothing wrong with the request.
     'premature close', 'terminated', 'other side closed', 'fetch failed',
+    // The OpenAI SDK's APIConnectionError, which every OpenAI-compatible
+    // provider throws when the socket fails: its message is exactly
+    // "Connection error." and carries no status. A GLM turn ended on one
+    // after two and a half hours of work.
+    'connection error',
     // Match provider/socket timeouts specifically, NOT the wall-clock
     // "Agent timed out after Nms" (which is handled as a non-retryable abort).
     '502', '503', '529',

@@ -3,6 +3,17 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.17.1 — 2026-09-09
+
+### Fixed
+
+- **A dropped connection ended the turn, the other way round.** 0.16.1 caught
+  the stream closing mid-response; this catches the socket failing to begin
+  with. Every OpenAI-compatible provider surfaces that as the SDK's
+  `APIConnectionError`, whose message is exactly "Connection error." and which
+  carries no status code, so the predicate did not recognise it. A GLM build
+  lost a turn to one after two and a half hours of work. Both are retried now.
+
 ## 0.17.0 — 2026-09-09
 
 ### Changed

@@ -1983,6 +1983,8 @@ const baseRun = (provider, session, extra = {}) => runAgent({
   // two-hour turn ended on "Premature close" with the step half-written.
   assert(isRetryableError(new Error('Premature close')) && isRetryableError(new Error('terminated')) && isRetryableError(new Error('fetch failed')),
     'a dropped stream is retryable');
+  assert(isRetryableError(new Error('[OpenRouter] API error undefined: Connection error.')),
+    'so is the OpenAI SDK’s APIConnectionError, whatever provider wraps it');
   assert(!isRetryableError(new Error('[Mock] API error 400: bad request')) && !isRetryableError(new Error('Run cancelled')),
     'a bad request and a cancellation are not');
   assert(reason.code === '400', `Error reason keeps the provider status code (got ${reason.code})`);
