@@ -19,6 +19,7 @@ export type { ChatMessage, MessageType, UsageSummary } from './types';
 export { EMPTY_USAGE } from './types';
 export { MarkdownRenderer } from './MarkdownRenderer';
 export { CodeBlock } from './CodeBlock';
+export { setPathRoots, shortenPath } from './paths';
 export { Diagram } from './Diagram';
 export { HtmlPreview } from './HtmlPreview';
 export { Widget } from './Widget';

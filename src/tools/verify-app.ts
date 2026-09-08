@@ -81,6 +81,8 @@ export interface VerifyVerdict {
   };
   flowsChecked: number;
   brokenFlows: FlowResult[];
+  /** Where the screenshots went, when they were asked for. */
+  screenshots: string[];
   /** Work that is described rather than done. Reported, but not blocking on its own. */
   placeholders: Placeholder[];
   /** The single question the gate asks. */
@@ -89,14 +91,40 @@ export interface VerifyVerdict {
   problems: string[];
 }
 
+/**
+ * One thing a person does on the page. A check is a list of these followed by
+ * what they expect to see — the shape of a requirement ("fill the form, submit,
+ * the row appears"), which a single click could never express.
+ */
+export type VerifyStep =
+  | { goto: string }
+  | { click: string }
+  | { fill: string; value: string }
+  | { select: string; value: string }
+  | { press: string }
+  | { wait: number | string };
+
+/** What must be true after the steps. A bare string is a selector that must match. */
+export type VerifyExpect = string | { selector?: string; text?: string; url?: string; absent?: string };
+
+export interface VerifyCheck {
+  name: string;
+  /** The one control to operate, when there are no steps. */
+  selector?: string;
+  steps?: VerifyStep[];
+  expect?: VerifyExpect;
+}
+
 export interface VerifyAppInput {
   /** File path or URL of the artifact under test. */
   target: string;
-  /** Named click-and-observe checks. */
-  checks?: { name: string; selector: string; expect?: string }[];
+  /** Named checks: one control, or a sequence of steps and an expectation. */
+  checks?: VerifyCheck[];
   /** Milliseconds to let the page settle before reading it. */
   settleMs?: number;
   viewport?: { width: number; height: number };
+  /** Save a PNG of the page after load and after each check, under `.aico/screenshots/`. */
+  screenshot?: boolean;
 }
 
 /** Where a browser might already be. Checked in order; first hit wins. */
@@ -280,6 +308,60 @@ async function drive(el: import('playwright-core').Locator): Promise<string> {
     : 'typed into it';
 }
 
+/** Do one step, and say what was done in the words the report will use. */
+async function perform(page: import('playwright-core').Page, step: VerifyStep, base: string): Promise<string> {
+  if ('goto' in step) {
+    const to = /^https?:\/\//i.test(step.goto) ? step.goto : new URL(step.goto, base).href;
+    await page.goto(to, { waitUntil: 'load', timeout: 30_000 });
+    return `opened ${step.goto}`;
+  }
+  if ('click' in step) {
+    const el = page.locator(step.click).first();
+    if (await el.count() === 0) throw new Error(`nothing matches ${step.click} to click`);
+    await el.click({ timeout: 5000 });
+    return `clicked ${step.click}`;
+  }
+  if ('fill' in step) {
+    const el = page.locator(step.fill).first();
+    if (await el.count() === 0) throw new Error(`nothing matches ${step.fill} to fill`);
+    await el.fill(step.value, { timeout: 5000 });
+    return `filled ${step.fill}`;
+  }
+  if ('select' in step) {
+    const el = page.locator(step.select).first();
+    if (await el.count() === 0) throw new Error(`nothing matches ${step.select} to select in`);
+    await el.selectOption(step.value, { timeout: 5000 });
+    return `chose "${step.value}" in ${step.select}`;
+  }
+  if ('press' in step) {
+    await page.keyboard.press(step.press);
+    return `pressed ${step.press}`;
+  }
+  if (typeof step.wait === 'number') {
+    await page.waitForTimeout(step.wait);
+    return `waited ${step.wait}ms`;
+  }
+  await page.locator(step.wait).first().waitFor({ timeout: 10_000 });
+  return `waited for ${step.wait}`;
+}
+
+/**
+ * What the check expected, against what the page shows. Null when satisfied;
+ * otherwise the sentence that says what was missing.
+ */
+async function expectation(page: import('playwright-core').Page, expect: VerifyExpect | undefined): Promise<string | null> {
+  if (expect === undefined) return null;
+  const want = typeof expect === 'string' ? { selector: expect } : expect;
+  if (want.selector && await page.locator(want.selector).count() === 0) return `nothing matched ${want.selector}`;
+  if (want.absent && await page.locator(want.absent).count() > 0) return `${want.absent} is still on the page`;
+  if (want.url && !page.url().includes(want.url)) return `the address is ${page.url()}, not one containing "${want.url}"`;
+  if (want.text) {
+    const body = await page.evaluate('document.body ? (document.body.innerText || "") : ""').catch(() => '') as string;
+    if (!body.includes(want.text)) return `the page does not show "${want.text}"`;
+  }
+  return null;
+}
+
 /** Trim a message to something a log can hold without losing the identifying part. */
 function brief(text: string, max = 300): string {
   const clean = String(text).replace(/\s+/g, ' ').trim();
@@ -347,8 +429,15 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
     // `pageerror` is the uncaught kind. It also surfaces in the console, so it
     // is de-duplicated later rather than counted twice.
     page.on('pageerror', err => uncaughtExceptions.push(brief(err.message)));
-    page.on('requestfailed', req =>
-      failedRequests.push(`${req.method()} ${brief(req.url(), 120)} — ${req.failure()?.errorText ?? 'failed'}`));
+    page.on('requestfailed', req => {
+      const why = req.failure()?.errorText ?? 'failed';
+      // The browser cancels a request when the page navigates away from it — a
+      // form POST answered by a redirect, a fetch abandoned by a route change.
+      // That is the page working, not failing; reporting it sent an agent on an
+      // eighteen-step hunt for a bug in a sign-up form that was fine.
+      if (why === 'net::ERR_ABORTED') return;
+      failedRequests.push(`${req.method()} ${brief(req.url(), 120)} — ${why}`);
+    });
     page.on('response', res => {
       if (res.status() >= 400) {
         failedRequests.push(`${res.status()} ${brief(res.url(), 120)}`);
@@ -382,37 +471,72 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
     // is the finding — a control that looks right and does nothing is exactly
     // what source inspection cannot catch.
     const flows: FlowResult[] = [];
+    const screenshots: string[] = [];
+    const snap = async (label: string) => {
+      if (!input.screenshot) return;
+      const dir = path.join(currentCwd(), '.aico', 'screenshots');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${label.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'page'}-${viewport.width}.png`);
+      await page.screenshot({ path: file, fullPage: true }).catch(() => undefined);
+      screenshots.push(file);
+    };
     if (loaded) {
+      await snap('load');
       for (const check of checks) {
-        const result: FlowResult = { name: check.name, selector: check.selector, ok: false, detail: '' };
+        const result: FlowResult = { name: check.name, selector: check.selector ?? '', ok: false, detail: '' };
         try {
-          const el = page.locator(check.selector).first();
-          if (await el.count() === 0) {
-            result.detail = 'no element matches this selector — the control is not on the page';
-            flows.push(result);
-            continue;
-          }
-          const before = String(await page.evaluate(SNAPSHOT));
           const errorsBefore = consoleErrors.length;
-          const how = await drive(el);
-          await page.waitForTimeout(600);
-          const after = String(await page.evaluate(SNAPSHOT));
-
-          if (consoleErrors.length > errorsBefore) {
-            result.detail = `${how} it raised: ${consoleErrors[errorsBefore]}`;
-          } else if (check.expect) {
-            const hit = await page.locator(check.expect).count();
-            result.ok = hit > 0;
-            if (!hit) result.detail = `${how}, but nothing matched ${check.expect}`;
-          } else if (before === after) {
-            result.detail = `${how}, and nothing on the page changed`;
+          if (check.steps && check.steps.length > 0) {
+            // A requirement in the user's words is several actions and one
+            // observation. Each step names what it did, so a failure reads
+            // "filled #email, clicked button — nothing matched .row", not a
+            // stack trace from the middle of a form.
+            const done: string[] = [];
+            for (const step of check.steps) done.push(await perform(page, step, url));
+            await page.waitForLoadState('load', { timeout: 5000 }).catch(() => undefined);
+            await page.waitForTimeout(600);
+            const how = done.join(', ');
+            if (consoleErrors.length > errorsBefore) {
+              result.detail = `${how}; it raised: ${consoleErrors[errorsBefore]}`;
+            } else {
+              const miss = await expectation(page, check.expect);
+              result.ok = miss === null;
+              if (miss) result.detail = `${how}, but ${miss}`;
+            }
           } else {
-            result.ok = true;
+            if (!check.selector) {
+              result.detail = 'the check names neither a selector nor steps — nothing to do';
+              flows.push(result);
+              continue;
+            }
+            const el = page.locator(check.selector).first();
+            if (await el.count() === 0) {
+              result.detail = 'no element matches this selector — the control is not on the page';
+              flows.push(result);
+              continue;
+            }
+            const before = String(await page.evaluate(SNAPSHOT));
+            const how = await drive(el);
+            await page.waitForTimeout(600);
+            const after = String(await page.evaluate(SNAPSHOT));
+
+            if (consoleErrors.length > errorsBefore) {
+              result.detail = `${how} it raised: ${consoleErrors[errorsBefore]}`;
+            } else if (check.expect) {
+              const miss = await expectation(page, check.expect);
+              result.ok = miss === null;
+              if (miss) result.detail = `${how}, but ${miss}`;
+            } else if (before === after) {
+              result.detail = `${how}, and nothing on the page changed`;
+            } else {
+              result.ok = true;
+            }
           }
         } catch (err) {
           result.detail = brief(err instanceof Error ? err.message : String(err), 160);
         }
         flows.push(result);
+        await snap(check.name);
       }
     }
 
@@ -469,6 +593,7 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
       rendered: view,
       flowsChecked: flows.length,
       brokenFlows: broken,
+      screenshots,
       placeholders,
       passed: problems.length === 0,
       problems,
@@ -504,6 +629,12 @@ export function formatVerdict(v: VerifyVerdict): string {
   if (v.flowsChecked > 0) {
     lines.push('');
     lines.push(`Interaction checks: ${v.flowsChecked - v.brokenFlows.length}/${v.flowsChecked} working`);
+  }
+
+  if (v.screenshots.length) {
+    lines.push('');
+    lines.push('Screenshots:');
+    for (const s of v.screenshots) lines.push(`  - ${s}`);
   }
 
   if (v.placeholders.length) {
@@ -548,27 +679,55 @@ export const verifyAppDefinition = {
       checks: {
         type: 'array',
         description:
-          'Interaction checks. Each clicks a selector and reports whether anything happened. '
-          + 'Cover the controls the user asked for — a button that renders but does nothing '
-          + 'cannot be caught any other way.',
+          'One check per requirement, named in the user\'s words. Either a single "selector" to '
+          + 'operate, or "steps" — goto, click, fill, select, press, wait — followed by "expect": '
+          + 'a selector, or { text, url, selector, absent }. Example: { name: "add a customer", '
+          + 'steps: [{ goto: "/customers" }, { fill: "#name", value: "Acme" }, { click: "button[type=submit]" }], '
+          + 'expect: { text: "Acme" } }. Checks run in order on one page and share its cookies, so a '
+          + 'check that registers or signs in first leaves the rest signed in. Loading is not '
+          + 'working: cover the interactions asked for.',
         items: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'What this control is meant to do.' },
-            selector: { type: 'string', description: 'CSS selector for the control to click.' },
+            name: { type: 'string', description: 'The requirement this proves, as the user phrased it.' },
+            selector: { type: 'string', description: 'CSS selector of one control to click or type into (when there are no steps).' },
+            steps: {
+              type: 'array',
+              description: 'Actions in order. Each is one of: { goto }, { click }, { fill, value }, { select, value }, { press }, { wait: ms | selector }.',
+              items: {
+                type: 'object',
+                properties: {
+                  goto: { type: 'string', description: 'A path (resolved against the target) or URL to open.' },
+                  click: { type: 'string', description: 'CSS selector to click.' },
+                  fill: { type: 'string', description: 'CSS selector of a field to fill with "value".' },
+                  select: { type: 'string', description: 'CSS selector of a <select> to set to "value".' },
+                  value: { type: 'string' },
+                  press: { type: 'string', description: 'A key, such as Enter or Escape.' },
+                  wait: { description: 'Milliseconds, or a selector to wait for.' },
+                },
+              },
+            },
             expect: {
-              type: 'string',
               description:
-                'Optional CSS selector that should match after the click. Without it, the check '
-                + 'passes if the page changed at all.',
+                'What must be true afterwards: a CSS selector string, or { selector, text, url, absent }. '
+                + 'Without it, a single-selector check passes if the page changed at all.',
             },
           },
-          required: ['name', 'selector'],
+          required: ['name'],
         },
       },
       settleMs: {
         type: 'number',
         description: 'How long to let the page settle before reading it (default 2500).',
+      },
+      viewport: {
+        type: 'object',
+        description: 'Window size; verify at { width: 390, height: 844 } as well as the default 1440×900 for anything a person uses on a phone.',
+        properties: { width: { type: 'number' }, height: { type: 'number' } },
+      },
+      screenshot: {
+        type: 'boolean',
+        description: 'Save a PNG after load and after each check under .aico/screenshots/ and list the paths — look at them when the question is how it looks.',
       },
     },
     required: ['target'],

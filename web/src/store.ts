@@ -1516,3 +1516,9 @@ function closeBursts(bursts: Map<number, ReasoningBurst>): Map<number, Reasoning
   }
   return changed ? next : bursts;
 }
+
+// Paths in tool rows and summaries read relative to the open project.
+import { setPathRoots as setUiPathRoots } from '@aico/ui';
+useStore.subscribe((state, previous) => {
+  if (state.project !== previous.project) setUiPathRoots(state.project ? [state.project] : []);
+});

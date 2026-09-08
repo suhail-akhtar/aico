@@ -15,6 +15,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { changeFromArgs, FileDiff } from './FileDiff';
+import { shortenPath } from './paths';
 import { formatResult, outcomeOf, trimForDisplay } from './tool-result';
 
 /**
@@ -24,12 +25,14 @@ import { formatResult, outcomeOf, trimForDisplay } from './tool-result';
  * is how a web search came out as a bare "Searched the web" with the query — the
  * only part anyone cares about — nowhere on the row.
  */
+const PATH_KEYS = new Set(['path', 'file_path', 'filePath', 'notebook_path', 'directory']);
+
 function describeArgs(args?: Record<string, unknown>): string {
   if (!args) return '';
   const first = (...keys: string[]): string => {
     for (const key of keys) {
       const value = args[key];
-      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (typeof value === 'string' && value.trim()) return PATH_KEYS.has(key) ? shortenPath(value.trim()) : value.trim();
       if (typeof value === 'number') return String(value);
     }
     return '';

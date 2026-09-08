@@ -4,11 +4,11 @@
 
 ```
 { name: "mark an invoice paid",
-  steps: "open /invoices, click Paid on the first open row",
-  expect: "the row's status pill reads paid and the Open total decreases" }
+  steps: [{ goto: "/invoices" }, { click: "tr:first-child button[name=paid]" }],
+  expect: { text: "Paid" } }
 ```
 
-Named in the user's words. Drives an interaction. Asserts what is seen, not what the code does.
+Named in the user's words. Drives an interaction — `goto`, `fill` + `value`, `select` + `value`, `click`, `press`, `wait` — and asserts what is seen: a selector, `{ text }`, `{ url }`, or `{ absent }`. Not what the code does. A flow that needs an account starts with the steps that create one. Add `screenshot: true` and look at the PNG when the question is how it looks; pass `viewport: { width: 390, height: 844 }` for the phone.
 
 ## What counts as a defect even when checks pass
 

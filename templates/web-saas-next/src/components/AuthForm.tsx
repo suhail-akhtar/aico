@@ -17,8 +17,8 @@ export function AuthForm({ title, submit, action, alternative, autoCompletePassw
   const [state, formAction, pending] = useActionState(action, {});
   const errors = state.errors ?? {};
   return (
-    <div className="mx-auto max-w-sm card">
-      <h1 className="text-2xl font-bold mb-6">{title}</h1>
+    <div className="card mx-auto mt-6 max-w-sm">
+      <h1 className="mb-6 text-2xl font-semibold tracking-tight">{title}</h1>
       <form action={formAction} className="space-y-4" noValidate>
         <div>
           <label className="label" htmlFor="email">Email</label>

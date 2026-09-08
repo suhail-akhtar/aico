@@ -411,8 +411,30 @@ const QUALITY_1: EvalTask = {
   ],
 };
 
+// ── app-design ────────────────────────────────────────────────────────
+
+const DESIGN_1: EvalTask = {
+  id: 'app-design/invoices-page-professional',
+  skill: 'app-design',
+  args: 'The invoices page looks like an admin panel. Make it look like a product a studio would pay for.',
+  files: {
+    ...APP_FILES,
+    'src/app/globals.css': '@theme { --color-brand: #2f5df6; --color-ink: #16181d; --color-ink-muted: #5b6270; --color-surface: #fff; --color-surface-alt: #f5f7fb; --color-line: #e2e6ee; --color-danger: #b42318; }\n',
+    'src/app/invoices/page.tsx': "export default function Invoices({ rows }: { rows: { id: number; number: string; total: number; status: string }[] }) {\n  return (\n    <div>\n      <p style={{ color: '#888' }}>Placeholder eyebrow</p>\n      <h1>Invoices</h1>\n      {rows.length === 0 ? <div>No results</div> : (\n        <table>{rows.map(r => <tr key={r.id}><td>{r.number}</td><td>{r.total}</td><td style={{ color: r.status === 'paid' ? 'green' : 'red' }}>{r.status}</td></tr>)}</table>\n      )}\n    </div>\n  );\n}\n",
+  },
+  checks: [
+    { kind: 'file-matches', path: 'src/app/invoices/page.tsx', pattern: String.raw`^(?![\s\S]*Placeholder eyebrow)`, weight: 2, why: 'Placeholder copy was shipped.' },
+    { kind: 'file-matches', path: 'src/app/invoices/page.tsx', pattern: String.raw`^(?![\s\S]*#[0-9a-fA-F]{3,6}\b)`, why: 'A raw hex colour is still in the component instead of a token.' },
+    { kind: 'file-matches', path: 'src/app/invoices/page.tsx', pattern: String.raw`^(?![\s\S]*>No results<)`, why: 'The empty state still says nothing about what the list is for.' },
+    { kind: 'file-matches', path: 'src/app/invoices/page.tsx', pattern: String.raw`tabular-nums|text-right`, why: 'Money is not right-aligned in the table.' },
+    { kind: 'output-matches', pattern: String.raw`390|responsive|phone|mobile`, flags: 'i', why: 'The narrow viewport was not considered or mentioned.' },
+    { kind: 'output-matches', pattern: String.raw`empty state|no invoices yet|first invoice`, flags: 'i', why: 'The empty state was not designed.' },
+    { kind: 'max-tool-calls', limit: 16, why: 'Restyling one page should not take more than sixteen tool calls.' },
+  ],
+};
+
 export const BUILTIN_CORPUS: readonly EvalTask[] = [
-  SEC_1, SEC_2, REV_1, REV_2, COMMIT_1, INIT_1, PLAN_1, PLAN_2, ARCH_1, ARCH_2, SHIP_1, QUALITY_1,
+  SEC_1, SEC_2, REV_1, REV_2, COMMIT_1, INIT_1, PLAN_1, PLAN_2, ARCH_1, ARCH_2, SHIP_1, QUALITY_1, DESIGN_1,
 ];
 
 /** Where a user's own tasks live. */

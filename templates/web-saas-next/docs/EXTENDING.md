@@ -12,9 +12,11 @@ Copy the items slice. For a feature called `projects`:
 3. **Actions.** Copy `src/app/items/actions.ts` → `src/app/projects/actions.ts`.
    Every action begins with `await requireUser()`; the user id comes from there.
 4. **Page.** Copy `src/app/items/page.tsx` → `src/app/projects/page.tsx`. Server
-   component: read with the lib, render, forms post to the actions. Add a client
-   component only where the browser needs state (inline errors, optimistic UI).
-5. **Nav.** One `Link` in `src/app/layout.tsx`.
+   component: `PageHeader` with the counts and the primary action, the content,
+   `EmptyState` when there is nothing. Add a client component only where the
+   browser needs state (inline errors, optimistic UI). A dashboard is three to
+   five `StatCard`s and a table; a status is a `StatusPill` with a word.
+5. **Nav.** One entry in `src/components/shell/nav.ts`.
 6. **Test.** Copy `test/items.test.ts`; cover parse, ordering, and owner scoping.
 7. `RunChecks`, then `AppManage start` and `VerifyApp` the page.
 

@@ -537,8 +537,13 @@ export function SidePanels(): React.ReactElement {
         buttons that answer a plan — became unreachable. There was no scrollbar
         because nothing was scrollable: the column had no limit to overflow.
       */
+      /*
+        Anchored to the chat column, not the viewport: a conversation about an
+        app has the app on the right, and a rail fixed to the window's edge sat
+        on top of that panel's header.
+      */
       className="pointer-events-none z-30 flex flex-col gap-2 px-5 pb-2
-                 xl:fixed xl:right-4 xl:top-16 xl:max-h-[calc(100vh_-_5rem)]
+                 xl:absolute xl:right-4 xl:top-3 xl:max-h-[calc(100%_-_2rem)]
                  xl:w-[290px] xl:overflow-y-auto xl:overscroll-contain xl:px-0"
     >
       <PlanCard />

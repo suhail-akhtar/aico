@@ -3,6 +3,75 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+Found by watching a real model build an invoicing app from the wizard, end to
+end, on a scratch store — and fixing what made it wander.
+
+### Added
+
+- **Checks that follow a requirement.** `VerifyApp` checks take `steps` — goto,
+  click, fill, select, press, wait — and an `expect` of a selector, `{ text }`,
+  `{ url }` or `{ absent }`, so "add a customer" is fill, submit, see the row.
+  Checks in one call share a page and its cookies, so a sign-in check first
+  leaves the rest signed in. `screenshot: true` saves a PNG after load and
+  after each check under `.aico/screenshots/` and names the paths;
+  `viewport` is documented for the phone width. A failed check says what was
+  done and what was missing ("filled #name, clicked #add, but nothing matched
+  .row"). Before this a check could click one selector, and the agent, asked
+  to verify a form flow, installed a browser MCP and wrote its own driver.
+- **A design skill.** `app-design` says what a screen people pay for looks
+  like — one shell, hierarchy and rhythm, tokens not hex, real empty, loading
+  and error states, forms and tables, 390px and keyboard — with the six shapes
+  as Tailwind sketches in its references, an eval task, and a place in the
+  plan and platform skills.
+- **The SaaS template has a product shell.** Signed in: side navigation from
+  one `nav.ts` list, a page header with the counts and the primary action,
+  `StatCard`, `StatusPill` and `EmptyState` components, a menu under `md`.
+  Signed out: a front door without placeholder copy. Success and warning
+  tokens, an icon, and a sentence in `AICO.md` naming the components and the
+  design skill.
+- **Apps are runnable the moment they exist.** Create writes `.env.local` from
+  a template's `.env.example` with every `change-me` value replaced by a
+  generated secret. The first sign-up used to throw "SESSION_SECRET is
+  missing" and the agent spent twenty steps on a form that was fine.
+- **A bound conversation starts with the app.** The empty state names the
+  app, its backlog progress, and offers "Build the next story", "Review what
+  is built" and "Plan the next iteration".
+- GUIDE.md has "Building an app" and the learning paragraph.
+
+### Fixed
+
+- **The app-state line was computed once per turn.** It said "installing"
+  through twenty steps of a running app, and the agent reported the state as
+  inconsistent and spent steps reconciling it. The caller's volatile sections
+  are now re-read before every step.
+- **MCP tools added mid-turn were not callable.** `McpAddServer` loaded the
+  server and said "24 tools", but the tool list the model saw was built at the
+  top of the turn, so it guessed at names. The set is synced before each step.
+- **A browser-cancelled request is not a failure.** `net::ERR_ABORTED` on a
+  form POST answered by a redirect was reported as "request failed".
+- **The side rail floated over the app panel.** Plan, checks and task cards
+  were fixed to the window's edge; they now anchor to the chat column.
+- **A build check knocked the running dev server over.** `next dev` and
+  `next build` wrote to the same `.next`; the two Next.js templates now give
+  development its own directory (`.next-dev`), which the engine's file lists
+  skip, and the health check answers 200 through a build.
+- **A finished install read as "Stopped".** The work ledger closed a
+  completed `npm install` as a stopped server; it now says "Installed", and an
+  app that starts again after an ended record opens a new one.
+- **Money is not maths.** "$240.00 (subtotal $200.00)" in a reply rendered as
+  a formula. A dollar that opens a plain number is escaped before the maths
+  pass; `$x^2$`, display maths, code spans and fences are untouched.
+- **Paths read relative to the project or the app.** Tool rows and the turn
+  summary showed sixty characters of temp directory before the file name; the
+  project root is stripped, and inside a bound app everything up to the app's
+  directory is.
+- The layout probe's app host takes a port of its own, so an aico already
+  serving on the machine no longer makes the workspace screen fail.
+- Ranking tests, workspace-root idempotence test, and the templates probe
+  (42 checks) were run before this entry.
+
 ## 0.15.0 — 2026-09-08
 
 ### Added

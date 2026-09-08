@@ -31,7 +31,7 @@ import { costFor } from '../tokens.js';
 import type { AicoSettings } from '../settings.js';
 import { registerStopHandle } from './handles.js';
 import { ledger } from './ledger.js';
-import type { WorkState } from './types.js';
+import { isTerminal, type WorkState } from './types.js';
 
 /** Settings for pricing. Set once at boot; absent just means list prices. */
 let settings: AicoSettings | undefined;
@@ -158,7 +158,19 @@ export function startLedgerMirroring(): void {
           app.error ?? (app.state === 'failed' ? 'Failed to start' : 'Stopped'));
         continue;
       }
-      if (!ledger.get(id)) {
+      // An install that finished is a job that finished, not a server that
+      // stopped: "Stopped, ran 6m30s" for a completed `npm install` sent an
+      // agent to check whether its app had died.
+      if (app.state === 'done') {
+        ledger.close(id, 'done', 'Installed');
+        continue;
+      }
+      // A record that already ended — the install that finished, the server
+      // that was stopped — is history; the app starting again is new work
+      // under the same id, and it opens a new record rather than beating a
+      // closed one, which the ledger rightly ignores.
+      const existing = ledger.get(id);
+      if (!existing || isTerminal(existing.state)) {
         ledger.open({
           id,
           kind: 'process',

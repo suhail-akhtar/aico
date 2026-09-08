@@ -35,6 +35,7 @@ import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
+import { protectCurrency } from './currency';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 // Chemistry in prose. mhchem extends KaTeX in place rather than exporting
@@ -222,7 +223,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
         // message rather than one formula.
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false, output: 'html' }]]}
         components={components}      >
-        {content}
+        {protectCurrency(content)}
       </ReactMarkdown>
     </div>
   );

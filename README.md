@@ -242,7 +242,11 @@ requirement and no click proves it.
 It drives each control the way its type demands. Clicking a `<input type=color>`
 opens a native dialog headless Chrome does not have, so a click proves nothing —
 value controls get a value and the `input`/`change` events a real interaction
-raises.
+raises. A requirement that is a flow — "add a customer" — is a check with
+`steps` (goto, fill, click, select, press, wait) and an `expect` of a selector,
+text, URL or absence; checks in one call share the page and its cookies, so a
+sign-in check first leaves the rest signed in, and `screenshot: true` keeps a
+PNG of what each check saw.
 
 Uses `playwright-core` against a Chrome or Edge you already have.
 
@@ -437,8 +441,8 @@ a Next.js web app with accounts, a metrics dashboard, a documentation site, a
 command-line tool, an LLM agent service, and an Expo mobile app. Each template
 copies in as files (zero model tokens) with a worked feature, tests, notes for
 the agent (`AICO.md`), a backlog and a Dockerfile or deploy script. One agent
-builds from there following the `app-plan`, `app-architecture`, `app-ship` and
-`app-quality` skills; `Investigate` is the only fan-out. Whatever the stack, the
+builds from there following the `app-plan`, `app-architecture`, `app-design`,
+`app-ship` and `app-quality` skills; `Investigate` is the only fan-out. Whatever the stack, the
 turn cannot end until the app was opened in a real browser and its own checks
 are green; **Deploy** on the card runs the script the app ships with. `/app
 templates`, `/app new <template> "<name>" --brief "…"`, or the **Apps** screen

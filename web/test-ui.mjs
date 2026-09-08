@@ -20,6 +20,8 @@ import { flattenRows, rowKey } from './dist-test/sidebar-rows.mjs';
 import { moveFocus } from './dist-test/sidebar-keys.mjs';
 import { dropAction } from './dist-test/sidebar-drop.mjs';
 import { parseBacklog, nextStory } from './dist-test/backlog.mjs';
+import { setPathRoots, shortenPath } from './dist-test/paths.mjs';
+import { protectCurrency } from './dist-test/currency.mjs';
 import {
   PANES, SECRET_ROOTS, allFields, assertNoSecrets, changedPaths,
   patchFor, readPath, searchFields,
@@ -2099,6 +2101,33 @@ test('the spellings are the ones each provider reads', () => {
   test('an empty file is an empty backlog', () => assert.deepEqual(parseBacklog(''), { iterations: [], done: 0, total: 0 }));
   test('stories before any heading get a default iteration', () => assert.equal(parseBacklog('- [ ] lone story').iterations[0].title, 'Stories'));
   test('CRLF files parse the same', () => assert.equal(parseBacklog(md.replace(/\n/g, '\r\n')).total, 4));
+}
+
+console.log('\n-- Paths read relative to the project or the app --');
+{
+  // A tool row that says "Read C:\Users\…\w… 41 lines" names no file. The
+  // project root goes; failing that, everything up to the app's directory.
+  setPathRoots(['C:\\Users\\Someone\\repo']);
+  test('a path under the project root is shown from the root', () => assert.equal(shortenPath('C:\\Users\\Someone\\repo\\src\\app.ts'), 'src/app.ts'));
+  test('the root itself is "."', () => assert.equal(shortenPath('C:/Users/Someone/repo'), '.'));
+  test('case and separators do not matter on the root', () => assert.equal(shortenPath('c:/users/someone/REPO/a.md'), 'a.md'));
+  test('a path inside a bound app is shown from the app', () => assert.equal(shortenPath('C:\\Temp\\ws\\miniapps\\invoice-desk\\src\\lib\\db.ts'), 'src/lib/db.ts'));
+  test('anything else is left whole', () => assert.equal(shortenPath('/etc/hosts'), '/etc/hosts'));
+  setPathRoots([]);
+  test('with no root, only the app rule applies', () => assert.equal(shortenPath('C:\\Users\\Someone\\repo\\src\\app.ts'), 'C:\\Users\\Someone\\repo\\src\\app.ts'));
+}
+
+console.log('\n-- Money is not maths --');
+{
+  // "$240.00 (subtotal $200.00)" rendered as a formula. Prices are escaped;
+  // TeX, code spans and fences are left exactly as written.
+  test('a price is escaped', () => assert.equal(protectCurrency('Total $240.00 (subtotal $200.00).'), 'Total \\$240.00 (subtotal \\$200.00).'));
+  test('two prices in a sentence', () => assert.equal(protectCurrency('$5 and $7,000 each'), '\\$5 and \\$7,000 each'));
+  test('inline maths keeps its dollars', () => assert.equal(protectCurrency('so $x^2$ and $2^n$ grow'), 'so $x^2$ and $2^n$ grow'));
+  test('display maths is untouched', () => assert.equal(protectCurrency('$$\n1 + 1\n$$'), '$$\n1 + 1\n$$'));
+  test('a shell positional in a code span stays', () => assert.equal(protectCurrency('run `echo $1` then pay $1'), 'run `echo $1` then pay \\$1'));
+  test('a fence is never rewritten', () => assert.equal(protectCurrency('```sh\ncost=$5\n```\ncost $5'), '```sh\ncost=$5\n```\ncost \\$5'));
+  test('text without dollars is returned as is', () => { const s = 'plain'; assert.equal(protectCurrency(s), s); });
 }
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

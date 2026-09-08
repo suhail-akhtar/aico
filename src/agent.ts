@@ -411,6 +411,16 @@ export interface AgentOptions {
    * each should be a line or two.
    */
   volatileSections?: PromptSection[];
+  /**
+   * The same sections, re-read before every step.
+   *
+   * A turn is many requests. The app an agent is building starts, installs
+   * and fails *during* the turn, and a line computed once at the top said
+   * "installing" through twenty steps of a running app — the agent reported
+   * the state as inconsistent and spent steps reconciling it. Sections
+   * returned here replace those with the same id for that step only.
+   */
+  refreshVolatile?: () => Promise<PromptSection[]>;
   /** The app this session is bound to, if any. Becomes the run's project root. */
   app?: { slug: string; dir: string; kind: string; url?: string };
   /** Plan mode — only read-only tools allowed */
@@ -1482,10 +1492,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // Add MCP tools. A browser-QA sub-agent keeps only the Playwright tools; the
   // conversation itself keeps every MCP tool it had, so the tool set — and the
   // cache behind it — does not change because one message mentioned a URL.
-  const mcpTools = mcpRegistry.getToolsForAgent().filter((t) =>
+  const currentMcpTools = () => mcpRegistry.getToolsForAgent().filter((t) =>
     toolProfile === 'browser-qa' && depth > 0 ? t.name.startsWith('mcp__playwright__') : true,
   );
-  for (const t of mcpTools) {
+  let mcpTools = currentMcpTools();
+  const installMcpHandler = (t: (typeof mcpTools)[number]) => {
     handlers.set(t.name, async (args: Record<string, unknown>, callId: string) => {
       if (!silent) showToolCall(t.name, args, verbose);
       onToolCall?.(t.name, args, callId);
@@ -1502,7 +1513,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         return { result: error };
       }
     });
-  }
+  };
+  for (const t of mcpTools) installMcpHandler(t);
 
   // Build ToolDef array for the provider
   const toolDefs: ToolDef[] = buildToolDefs({
@@ -1533,6 +1545,29 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   for (const t of mcpTools) {
     toolDefs.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
   }
+  /**
+   * Bring the MCP tools up to date with the registry, mid-turn.
+   *
+   * `McpAddServer` loads a server the moment it is called, and the reply says
+   * "healthy, 24 tools" — but the tool list the model was shown was built at
+   * the top of the turn, so the model guessed at names that did not exist and
+   * fell back to writing its own driver. Now a step after the registry changed
+   * offers, and can dispatch, what the registry holds. Returns whether the set
+   * moved, so the caller can leave the definitions — and the cache behind them
+   * — untouched on the steps where nothing did.
+   */
+  const syncMcpTools = (): boolean => {
+    const now = currentMcpTools();
+    const before = new Set(mcpTools.map(t => t.name));
+    const after = new Set(now.map(t => t.name));
+    if (before.size === after.size && [...before].every(n => after.has(n))) return false;
+    for (const name of before) if (!after.has(name)) handlers.delete(name);
+    for (const t of now) installMcpHandler(t);
+    for (let i = toolDefs.length - 1; i >= 0; i--) if (toolDefs[i]!.name.startsWith('mcp__')) toolDefs.splice(i, 1);
+    for (const t of now) toolDefs.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
+    mcpTools = now;
+    return true;
+  };
 
   // ── Build user message ─────────────────────────────────────────────
   /**
@@ -1901,6 +1936,21 @@ const GOAL_REMINDER_EVERY = 6;
       // append onto.
       transcript.beginStep();
       try {
+        // What moved since the last step: MCP tools a management call added
+        // or removed, and the caller's volatile sections — an app that
+        // started, an install that failed. Both are read here, per request,
+        // rather than once per turn; the tail is rebuilt only when the caller
+        // gave something to rebuild it from, so an ordinary turn pays nothing.
+        syncMcpTools();
+        let stepVolatileContext = volatileContext;
+        if (opts.refreshVolatile) {
+          const fresh = await opts.refreshVolatile().catch(() => [] as PromptSection[]);
+          if (fresh.length > 0) {
+            const stepDoc = volatileDoc.clone();
+            for (const section of fresh) stepDoc.add(section);
+            stepVolatileContext = renderTail(stepDoc, rendered.reprise, dialect, provider.id);
+          }
+        }
         const textParts: string[] = [];
         const toolCalls: ToolCall[] = [];
         // Accumulated separately from `textParts`: reasoning is not part of the
@@ -1930,7 +1980,7 @@ const GOAL_REMINDER_EVERY = 6;
           for await (const event of provider.chat({
             model,
             systemPrompt,
-            volatileContext,
+            volatileContext: stepVolatileContext,
             messages: requestMessages,
             tools: toolDefs,
             signal: loopSignal,

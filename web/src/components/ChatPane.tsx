@@ -498,6 +498,53 @@ function Working(): React.ReactElement {
 }
 
 function EmptyState(): React.ReactElement {
+  const miniApp = useStore(s => s.miniApp);
+  const apps = useStore(s => s.apps);
+  const submit = useStore(s => s.submit);
+  const busy = useStore(s => s.busy);
+  const app = miniApp ? apps?.apps.find(a => a.slug === miniApp) : undefined;
+
+  if (app) {
+    /*
+      A conversation bound to an app is never really empty: the app is on the
+      right, and its backlog says what comes next. The prompts here are the
+      three things people actually ask first, phrased so the agent starts with
+      the plan rather than with the code.
+    */
+    const progress = app.backlog && app.backlog.total > 0 ? `${app.backlog.done} of ${app.backlog.total} stories done` : 'no backlog yet';
+    const starters: Array<[string, string]> = app.backlog && app.backlog.total > 0
+      ? [
+        ['Build the next story', 'Build the next unticked story in .aico/backlog.md. Run the checks, start the app if it is not running, verify the Done-when line in the browser, then tick it.'],
+        ['Review what is built', 'Review this app as it stands: open it in the browser, check every ticked story still holds, note anything unprofessional in the UI, and report before changing anything.'],
+        ['Plan the next iteration', 'Read .aico/backlog.md and propose the next iteration as stories with Done-when lines. Ask me at most three questions first if the brief leaves them open.'],
+      ]
+      : [
+        ['Plan it with me', 'Read AICO.md and .aico/backlog.md if present, ask me at most three questions about what this app is for, then write the backlog as iterations of stories with a Done-when line each.'],
+        ['Show me around', 'Open the app in the browser and describe what it does today, screen by screen, before changing anything.'],
+      ];
+    return (
+      <div className="mt-24 text-center" data-empty-app>
+        <h1 className="text-[28px] font-semibold tracking-tight text-aico-primary">{app.title}</h1>
+        <p className="mx-auto mt-2 max-w-md text-[15px] text-aico-secondary">
+          {progress}. The app is on the right — ask for a change, or start with one of these.
+        </p>
+        <div className="mx-auto mt-5 flex max-w-lg flex-wrap justify-center gap-2">
+          {starters.map(([label, message]) => (
+            <button
+              key={label}
+              onClick={() => void submit(message)}
+              disabled={busy}
+              className="rounded-full border border-aico-border px-3.5 py-1.5 text-[13px] text-aico-primary hover:bg-aico-hover disabled:opacity-50"
+              data-empty-starter
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-24 text-center">
       <h1 className="text-[28px] font-semibold tracking-tight text-aico-primary">

@@ -10,6 +10,8 @@
   --color-surface-alt: #f5f7fb;
   --color-line: #e2e6ee;
   --color-danger: #b42318;
+  --color-success: #067647;
+  --color-warning: #b54708;
   --radius-card: 12px;
 }
 
@@ -20,6 +22,9 @@
     --color-surface: #0f1116;
     --color-surface-alt: #171a21;
     --color-line: #2a2f3a;
+    --color-danger: #f97066;
+    --color-success: #47cd89;
+    --color-warning: #f7b27a;
   }
 }
 

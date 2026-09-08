@@ -82,7 +82,7 @@ function suggestName(brief: string): string {
   return picked.join(' ');
 }
 
-const APP_TREE_SKIP = new Set(['node_modules', '.next', '.astro', '.expo', 'dist', 'build', 'coverage', '.git', '.turbo', 'out', 'data.sqlite', 'data.sqlite-wal', 'data.sqlite-shm']);
+const APP_TREE_SKIP = new Set(['node_modules', '.next', '.next-dev', '.astro', '.expo', 'dist', 'build', 'coverage', '.git', '.turbo', 'out', 'data.sqlite', 'data.sqlite-wal', 'data.sqlite-shm']);
 
 /** Two levels of an app's files for the workspace panel; directories deeper than that are named, not walked. */
 async function listAppFiles(dir: string): Promise<Array<{ path: string; dir: boolean; size?: number }>> {
