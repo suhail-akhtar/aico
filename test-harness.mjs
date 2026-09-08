@@ -332,6 +332,27 @@ const freshRead = await executeTool('Read', { file_path: tmpF });
 assert(freshRead.includes('cache-test-xyz'), 'Read after Write returns fresh data');
 fs.unlinkSync(tmpF);
 
+// A binary file is described, not dumped: a model handed a screenshot's bytes
+// as "lines" learns nothing and pays for eight thousand control characters.
+{
+  const png = path.resolve('./test-read-binary.png');
+  const header = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from([0, 0, 0, 13]), Buffer.from('IHDR'),
+    Buffer.from([0, 0, 0x05, 0xa0, 0, 0, 0x03, 0x84]), Buffer.alloc(5), Buffer.alloc(2000, 7),
+  ]);
+  fs.writeFileSync(png, header);
+  const described = await executeTool('Read', { file_path: png });
+  assert(/binary file \(PNG image, 2 KB, 1440×900\)/.test(described) && !/IHDR/.test(described.slice(0, 40)),
+    `Read describes a PNG rather than dumping it (${String(described).slice(0, 90)})`);
+  assert(/attachment/.test(described), 'and says how an image reaches a model that can see one');
+  fs.unlinkSync(png);
+  const nul = path.resolve('./test-read-binary.bin');
+  fs.writeFileSync(nul, Buffer.from([1, 2, 0, 3, 4]));
+  assert(/binary file \(unknown type/.test(await executeTool('Read', { file_path: nul })), 'a file with NUL bytes and no known extension is still called binary');
+  fs.unlinkSync(nul);
+}
+
 // Truncation test
 const longStr = 'x'.repeat(2000);
 const truncated = truncateResult(longStr, 100);

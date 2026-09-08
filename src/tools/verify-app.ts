@@ -41,7 +41,7 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { currentCwd } from '../run-context.js';
+import { currentCwd, projectRoot } from '../run-context.js';
 import { findPlaceholders, describePlaceholders, type Placeholder } from '../substance.js';
 
 /** Per-check click-and-observe result. */
@@ -474,7 +474,10 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
     const screenshots: string[] = [];
     const snap = async (label: string) => {
       if (!input.screenshot) return;
-      const dir = path.join(currentCwd(), '.aico', 'screenshots');
+      // Beside the app being verified, not the workspace the session runs in:
+      // a bound session's cwd is the workspace root, and the pictures of an
+      // app belong with the app.
+      const dir = path.join(projectRoot(), '.aico', 'screenshots');
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `${label.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'page'}-${viewport.width}.png`);
       await page.screenshot({ path: file, fullPage: true }).catch(() => undefined);
