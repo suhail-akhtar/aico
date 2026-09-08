@@ -221,20 +221,16 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
                        className="mt-1 w-full rounded-lg border border-aico-border bg-aico-bg px-3 py-2 text-[13px] text-aico-primary outline-none focus:ring-2 focus:ring-aico-accent/40" />
               </label>
 
-              {!brief.trim() && (
-                <label className="block">
-                  <span className="text-[12px] font-medium text-aico-primary">Brief for the agent <span className="font-normal text-aico-muted">(optional — starts the build)</span></span>
-                  <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={3} placeholder="Who uses it, what they do most often, what must be true when it is done."
-                            className="mt-1 w-full rounded-lg border border-aico-border bg-aico-bg px-3 py-2 text-[13px] text-aico-primary outline-none focus:ring-2 focus:ring-aico-accent/40" />
-                </label>
-              )}
-              {brief.trim() && (
-                <div className="rounded-lg border border-aico-border-subtle p-3 text-[12px]">
-                  <div className="text-[10px] uppercase tracking-wide text-aico-muted">The agent's brief</div>
-                  <p className="mt-0.5 text-aico-secondary">{brief.trim()}</p>
-                  <button onClick={() => setStep('describe')} className="mt-1 text-[11px] text-aico-accent hover:underline">Edit</button>
-                </div>
-              )}
+              {/*
+                One field, always editable. It used to be a textarea while empty
+                and a read-only box with an Edit link once it had text — so the
+                first character typed unmounted the field under the cursor.
+              */}
+              <label className="block">
+                <span className="text-[12px] font-medium text-aico-primary">The agent's brief <span className="font-normal text-aico-muted">{brief.trim() ? '(becomes the first message)' : '(optional — starts the build)'}</span></span>
+                <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={brief.trim() ? 4 : 3} placeholder="Who uses it, what they do most often, what must be true when it is done."
+                          className="mt-1 w-full rounded-lg border border-aico-border bg-aico-bg px-3 py-2 text-[13px] text-aico-primary outline-none focus:ring-2 focus:ring-aico-accent/40" data-wizard-details-brief />
+              </label>
 
               {isProcess && (
                 <div className="rounded-lg border border-aico-border-subtle p-3">

@@ -3,6 +3,17 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.16.2 — 2026-09-09
+
+### Fixed
+
+- **The brief field on the wizard's last step froze on the first character.**
+  Coming to "Name it" from the gallery, with no brief yet, the field was a
+  textarea while empty and a read-only box with an Edit link once it had
+  text — so typing one letter unmounted it under the cursor. It is one
+  editable field now, whichever way you arrived, and the layout probe types
+  into it.
+
 ## 0.16.1 — 2026-09-08
 
 ### Fixed
