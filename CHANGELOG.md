@@ -3,6 +3,56 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.18.0 — 2026-09-11
+
+Studied Microsoft's Spec Kit (spec-driven development) end to end, including a
+hands-on comparison that found it 2,577 lines and 33 minutes for a feature an
+iterative prompt built in 8 — and decided against adopting it wholesale: a
+standing constitution file and a separate plan-approval gate would reintroduce
+the Waterfall failure mode that comparison found, and would duplicate doctrine
+this project already enforces platform-wide. Adopted three pieces instead,
+each scoped to what the evidence actually supported.
+
+### Added
+
+- **A custom-stack path, beside the nine templates.** `AppManage create` with
+  `custom: true` (and the portal wizard's new "Custom stack" card) builds a
+  bare scaffold with no fixed frontend, backend, or database — for when no
+  template fits, or the brief is better left to the agent to decide. Nothing
+  is copied and nothing is wired, unlike a template, so this costs
+  meaningfully more of the model's tokens on the skeleton than a template
+  does. Deliberately not built: composable, swappable stack layers — decomposing
+  the nine templates into interchangeable pieces would trade a tested, wired
+  skeleton for an untested combinatorial explosion of pairings, for a need
+  the "decide it for me" path already covers.
+- **The PRD names the stack when there is no template.** Skill `app-plan`'s
+  brief step now points a custom app at a new "Stack" section of `docs/PRD.md`
+  — frontend, backend or API, database, monolith vs. services, and why —
+  filled from what was named, or decided and justified by the agent when it
+  was left open. A templated app still reads its stack from the template's
+  own `AICO.md`, as before.
+- **Every created app starts under its own git history.** A template
+  instantiation and a custom scaffold alike get `git init` and a first commit
+  under a local, per-repo identity ("AICO Agent") — never the person's global
+  config, and never impersonating them. Skill `app-plan` now commits after
+  each backlog story's "Done when" is verified, with the story's own words as
+  the message, so an app's history reads as the plan it was built from.
+
+### Rejected, and why
+
+- **A standing `constitution.md` per app.** The platform's own behaviour rules
+  already play this role across every project, not per-app; a second copy of
+  the same doctrine, per app, is a place for the two to drift.
+- **A separate `/plan`-style approval gate.** `app-plan` already stops for
+  clarification before code is written and mirrors the backlog into
+  `TodoWrite`, which the completion gate already holds the turn to — a second
+  gate would duplicate that stop without adding a check it does not already
+  make.
+- **`[NEEDS CLARIFICATION]` inline markers and a fixed clarify taxonomy.**
+  `app-plan`'s three-question brief step and its "Open questions" PRD section
+  already cover this; a new marker convention would be a second way to say
+  the same thing.
+
 ## 0.17.2 — 2026-09-10
 
 Found by reading a real client's transcript end to end after they reported the

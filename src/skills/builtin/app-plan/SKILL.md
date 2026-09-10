@@ -14,11 +14,12 @@ If the brief does not answer these, ask them with AskUserQuestion, all in one ca
 - What must be true when it is done? One sentence a person could check.
 - What already exists — data, accounts, an API, a design — that this must fit?
 
-Do not ask about the stack: an app made from a template already has one (read its `AICO.md`); otherwise the project profile says.
+Do not ask about the stack: a template already has one (read its `AICO.md`); a custom app decides it below; otherwise the project profile says.
 
 ## 2. `docs/PRD.md` — one page
 
 Write it with Write. Sections, each a few lines:
+- **Stack** — custom app only: frontend, backend/API, database, monolith vs. services, and why. Use what was named; decide and justify the rest.
 - **Purpose** — one sentence, the user's words.
 - **Users and the primary action** — who, and the thing done most often.
 - **Scope** — in this iteration / deliberately not.
@@ -45,7 +46,7 @@ Put every story in TodoWrite with the same words, so the completion gate holds t
 
 ## 5. Then build
 
-Before the first screen, Skill `app-design` (the shell, the hierarchy, the states). For each story in order: copy the worked feature in `docs/EXTENDING.md`, run RunChecks, then AppManage start and VerifyApp with a check named after the story's "Done when". Tick the story in `.aico/backlog.md` and the todo. When you settle a design choice that is not obvious from the code, append one line to `.aico/decisions.md`: what, and why.
+Before the first screen, Skill `app-design` (the shell, the hierarchy, the states). For each story in order: copy the worked feature in `docs/EXTENDING.md`, run RunChecks, then AppManage start and VerifyApp with a check named after the story's "Done when". Tick the story in `.aico/backlog.md` and the todo, then commit: `git add -A && git commit -m "<story>"`. When you settle a design choice that is not obvious from the code, append one line to `.aico/decisions.md`: what, and why.
 
 ## Do not
 

@@ -27,9 +27,11 @@
  */
 
 import crypto from 'crypto';
+import { execFile } from 'child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { cp, mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
+import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { aicoHome } from '../home.js';
 import { meaningfulWords } from '../knowledge/match.js';
@@ -38,6 +40,7 @@ import {
   createMiniApp, miniAppDir, type DeployTarget, type MiniApp, type MiniAppKind, type RunProfile,
 } from '../miniapps/store.js';
 import { profileFromTemplate } from '../project/profile.js';
+import { seedDecisions } from '../project/decisions.js';
 
 export interface TemplateManifest {
   id: string;
@@ -361,7 +364,49 @@ export async function instantiateTemplate(
   // Born knowing its commands, at template rank: above anything the manifest
   // would be guessed to say, below anything the person later decides.
   await profileFromTemplate(dir, template.run, `${template.name} (${template.id})`).catch(() => undefined);
+  // Last, so the first commit is the template exactly as it landed —
+  // substituted, with a generated .env.local already gitignored by every
+  // process template that ships one.
+  await initAppGit(dir, `Start from ${template.name} ${template.version}`);
   return { ...app, built: true };
+}
+
+export interface CustomAppInput {
+  title: string;
+  description?: string;
+  sessionId?: string;
+}
+
+/**
+ * Make a bare, stack-less app: the other door, beside a template.
+ *
+ * Nothing is copied and nothing is wired — the nine templates exist precisely
+ * because that costs no model tokens when one fits, and this path is for when
+ * none does, or the person wants the stack decided from the brief rather than
+ * picked from a list. What a template's own files would establish (the run
+ * profile, `AICO.md`, a fitted `.gitignore`) is left for Skill app-plan and
+ * the agent to write once the stack is actually chosen — this only makes the
+ * scaffold a decision has somewhere to land in: the app record, a decisions
+ * file so compaction has somewhere to point from turn one, a stack-agnostic
+ * `.gitignore` as a net until a real one replaces it, and a first commit.
+ */
+export async function createCustomApp(
+  input: CustomAppInput,
+  settings?: AicoSettings,
+  cwd = process.cwd(),
+): Promise<MiniApp> {
+  const app = await createMiniApp({
+    title: input.title,
+    kind: 'process',
+    ...(input.description ? { description: input.description } : {}),
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+  }, settings, cwd);
+  const dir = miniAppDir(app.slug, settings, cwd);
+  seedDecisions(dir, app.title);
+  await writeFile(path.join(dir, '.gitignore'),
+    'node_modules/\n.venv/\n__pycache__/\ndist/\nbuild/\n.env\n.env.local\n*.log\n', 'utf8');
+  await initAppGit(dir, 'Custom app scaffold — stack not yet chosen');
+  return app;
 }
 
 /**
@@ -386,6 +431,40 @@ export async function writeLocalEnv(dir: string): Promise<string | undefined> {
   }).join('\n');
   await writeFile(local, out, 'utf8');
   return local;
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * `git init` and a first commit, for an app that did not have either.
+ *
+ * Every app starts under version control the way a person starting a real
+ * project would — not because aico needs it, but because the person inherits
+ * it the moment they open the directory, and a project with no history is a
+ * worse handoff than one with a boring first commit.
+ *
+ * Best effort, and quiet about failing: a machine with no `git` on PATH, or a
+ * directory nested inside a repository that already claims it, must not stop
+ * the app from being created. The identity is set locally, in this repo only
+ * — never touching the person's own name or email — because these are commits
+ * the agent made, and saying so honestly is more correct than borrowing
+ * whoever's global git config happens to be sitting on the machine, which on
+ * a fresh one is usually nothing and would otherwise fail the very first
+ * commit with "Please tell me who you are".
+ */
+export async function initAppGit(dir: string, message: string): Promise<boolean> {
+  if (existsSync(path.join(dir, '.git'))) return false;
+  const git = (...args: string[]) => execFileAsync('git', args, { cwd: dir });
+  try {
+    await git('init', '--quiet', '-b', 'main');
+    await git('config', 'user.name', 'AICO Agent');
+    await git('config', 'user.email', 'agent@aico.local');
+    await git('add', '-A');
+    await git('commit', '--quiet', '-m', message);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether this process's Node satisfies a template's requirement, e.g. ">=22.5". */

@@ -370,7 +370,8 @@ export const api = {
    * for a process app, starts the install in the background — so the answer
    * carries the session to open, not just the slug.
    */
-  createApp: (input: { template: string; title: string; description?: string; install?: boolean }) =>
+  createApp: (input: { template: string; title: string; description?: string; install?: boolean }
+    | { custom: true; title: string; description?: string }) =>
     post<{ slug: string; sessionId: string; app: MiniAppSummary }>('apps/create', input),
 
   /** Stop one sub-agent without cancelling the turn its siblings are in. */

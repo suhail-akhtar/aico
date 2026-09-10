@@ -141,6 +141,7 @@ import {
   executeAppManage, appManageToolDefinition,
   listTemplates, getTemplate, validateManifest, suggestTemplates, matchScore, stem, renderCatalogue, substituteTokens,
   matchesSubstitute, instantiateTemplate, nodeSatisfies, bundledTemplatesDir, REQUIRED_TEMPLATE_FILES,
+  initAppGit, createCustomApp,
   miniAppContext, fileList, appStateLine, closeAllAppDatabases,
   buildRuntimeBlocks, capGitStatus, GIT_STATUS_MAX_LINES, GIT_STATUS_MAX_CHARS, MEMORY_REPRISE_MAX_CHARS,
   sectionHashes, cacheResets, cacheShare, describeReset,
@@ -12451,6 +12452,61 @@ console.log('  -- AppManage leads to a template, then points at the files --');
   assert(/Mini App "quick-list"/.test(page) && /schema\.sql/.test(page), 'kind: page still returns the authoring contract');
   const startPage = await inWs(() => executeAppManage({ action: 'start', name: 'quick-list' }));
   assert(/needs no start/.test(startPage) && /4321/.test(startPage), 'start on a page app names the host URL instead');
+  fs.rmSync(ws, { recursive: true, force: true });
+}
+
+console.log('  -- Every created app gets its own git history --');
+{
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-git-'));
+  const settings = { workspace: { path: ws } };
+
+  // A template instantiation is committed as the copied skeleton.
+  const templated = await instantiateTemplate({ template: getTemplate('landing-static'), title: 'Git Site' }, settings, ws);
+  const templatedDir = miniAppDir(templated.slug, settings, ws);
+  assert(fs.existsSync(path.join(templatedDir, '.git')), 'a templated app has its own git repo');
+  const templatedLog = execFileSync('git', ['log', '--format=%s'], { cwd: templatedDir, encoding: 'utf8' }).trim();
+  assert(/^Start from Landing page/.test(templatedLog), `the first commit names the template (${templatedLog})`);
+
+  // initAppGit is idempotent: a repo that already exists is left alone.
+  const again = await initAppGit(templatedDir, 'should not run');
+  assert(again === false, 'initAppGit refuses to re-init a repo that already has one');
+
+  // A fresh directory gets one, with an identity local to the repo.
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-git-bare-'));
+  fs.writeFileSync(path.join(bare, 'a.txt'), 'x');
+  const made = await initAppGit(bare, 'First commit');
+  assert(made === true, 'initAppGit succeeds on a fresh directory');
+  const name = execFileSync('git', ['config', 'user.name'], { cwd: bare, encoding: 'utf8' }).trim();
+  const email = execFileSync('git', ['config', 'user.email'], { cwd: bare, encoding: 'utf8' }).trim();
+  assert(name === 'AICO Agent' && email === 'agent@aico.local', 'the commit identity is local to the repo, not the person’s global config');
+  const log = execFileSync('git', ['log', '--format=%s'], { cwd: bare, encoding: 'utf8' }).trim();
+  assert(log === 'First commit', 'the message is exactly what was asked');
+  fs.rmSync(bare, { recursive: true, force: true });
+
+  // The custom-stack path: no template, its own git history, a starter .gitignore, decisions seeded.
+  const custom = await createCustomApp({ title: 'Custom Thing', description: 'no fixed stack' }, settings, ws);
+  const customDir = miniAppDir(custom.slug, settings, ws);
+  assert(custom.kind === 'process' && !custom.template, 'a custom app has a process kind and no template on record');
+  assert(fs.existsSync(path.join(customDir, '.git')), 'and its own git repo');
+  assert(fs.existsSync(path.join(customDir, '.gitignore')) && /node_modules/.test(fs.readFileSync(path.join(customDir, '.gitignore'), 'utf8')), 'and a starter .gitignore');
+  assert(fs.existsSync(path.join(customDir, '.aico', 'decisions.md')), 'the decisions file is seeded from turn one');
+  const customLog = execFileSync('git', ['log', '--format=%s'], { cwd: customDir, encoding: 'utf8' }).trim();
+  assert(/stack not yet chosen/.test(customLog), `the first commit says the stack is not chosen yet (${customLog})`);
+
+  fs.rmSync(ws, { recursive: true, force: true });
+}
+
+console.log('  -- AppManage: custom, no template, decided later --');
+{
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-appcustom-'));
+  const settings = { workspace: { path: ws } };
+  const inWs = (fn) => runInContext({ cwd: ws, sessionId: 'sess-1', settings }, fn);
+  const made = await inWs(() => executeAppManage({ action: 'create', name: 'No Stack Yet', custom: true, description: 'decide later' }));
+  assert(/no template, by request/.test(made) && /Skill app-plan/.test(made), 'the pointer explains there is no fixed stack yet');
+  assert(/already has its own git history/.test(made), 'and that git history already exists');
+  const dir = miniAppDir('no-stack-yet', settings, ws);
+  assert(fs.existsSync(path.join(dir, '.git')) && fs.existsSync(path.join(dir, '.gitignore')), 'the directory backs that up');
+  assert(appManageToolDefinition.inputSchema.properties.custom?.type === 'boolean', 'the tool schema documents the flag');
   fs.rmSync(ws, { recursive: true, force: true });
 }
 

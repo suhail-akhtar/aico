@@ -125,6 +125,18 @@ try {
     check(!fs.existsSync(path.join(dir, 'template.json')), 'and without the manifest');
   }
 
+  console.log('\n-- create custom: true builds a bare, git-backed scaffold with no template --');
+  {
+    const bad = await post('apps/create', { title: 'X', custom: false });
+    check(bad.status === 400, 'neither a template nor custom is still a 400');
+    const made = await post('apps/create', { custom: true, title: 'No Stack Yet', description: 'decide later' });
+    check(made.status === 200 && made.json?.slug === 'no-stack-yet', `create answers with the slug (${made.status} ${made.text.slice(0, 80)})`);
+    check(made.json?.app?.kind === 'process' && !made.json?.app?.template, 'the app has a process kind and no template on record');
+    const dir = path.join(workspace, 'miniapps', made.json?.slug ?? 'no-stack-yet');
+    check(fs.existsSync(path.join(dir, '.git')), 'its own git history exists from creation');
+    check(fs.existsSync(path.join(dir, '.gitignore')) && fs.existsSync(path.join(dir, '.aico', 'decisions.md')), 'and a starter .gitignore and decisions file');
+  }
+
   console.log('\n-- the listing carries kind, category and backlog progress --');
   {
     const r = await api('apps');
