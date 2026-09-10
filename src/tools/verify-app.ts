@@ -40,7 +40,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { currentCwd, projectRoot } from '../run-context.js';
 import { findPlaceholders, describePlaceholders, type Placeholder } from '../substance.js';
 
@@ -379,11 +379,32 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
   const { target, checks = [], settleMs = 2500, viewport = { width: 1440, height: 900 } } = input;
 
   const isUrl = /^https?:\/\//i.test(target);
+  /*
+   * A model asked for a path or an http(s) URL sometimes sends a "file:" one
+   * instead - every browser address bar accepts them, so it is an easy slip.
+   * The wrong turn was treating the whole string as a relative path: joined
+   * onto the cwd it produced something like "<cwd>/file:/C:/Users/...", which
+   * of course does not exist.
+   *
+   * Two spellings reach here, and they need different handling. A well-formed
+   * "file:///C:/a%20b.html" is a real URL - its host, if any, and its percent
+   * escapes matter, and `fileURLToPath` already knows how to undo them; doing
+   * that by hand (a bare prefix strip) left a literal "%20" or "%7E1" in the
+   * path, which is not a byte that exists on disk. The other spelling,
+   * "file:C:\Users\x", is not a URL by any RFC - no authority, backslashes -
+   * so `fileURLToPath` throws on it, and stripping the scheme is the whole
+   * fix: what is left is already the path exactly as typed.
+   */
+  const localPath = (() => {
+    if (!/^file:/i.test(target)) return target;
+    try { return fileURLToPath(target); } catch { /* not a real URL — fall through */ }
+    return target.replace(/^file:\/{0,3}/i, '');
+  })();
   let url: string;
   if (isUrl) {
     url = target;
   } else {
-    const abs = path.isAbsolute(target) ? target : path.join(currentCwd(), target);
+    const abs = path.isAbsolute(localPath) ? localPath : path.join(currentCwd(), localPath);
     if (!fs.existsSync(abs)) {
       throw new Error(
         `Nothing to verify: ${abs} does not exist. Build the artifact before verifying it.`,
@@ -396,7 +417,7 @@ export async function verifyApp(input: VerifyAppInput): Promise<VerifyVerdict> {
   // finds what breaks, this finds what was never written — a handler whose body
   // is a comment fires happily and does nothing anyone asked for.
   const placeholders = isUrl ? [] : findPlaceholders(
-    fs.readFileSync(path.isAbsolute(target) ? target : path.join(currentCwd(), target), 'utf8'),
+    fs.readFileSync(path.isAbsolute(localPath) ? localPath : path.join(currentCwd(), localPath), 'utf8'),
   );
 
   const executablePath = findBrowser();

@@ -100,11 +100,33 @@ export function readableRoots(cwd = currentCwd()): string[] {
 }
 
 /**
+ * The argument every path-resolving tool depends on, checked once.
+ *
+ * `path.resolve()` and `path.join()` throw `The "paths[1]" argument must be
+ * of type string. Received undefined` when a caller's value is missing — a
+ * message that names a Node internal, not the tool argument a person or model
+ * can actually see. A model that sent a malformed call (a missing `file_path`,
+ * or the field under a different key) read that error, could not connect it
+ * to what it had just sent, and spent several turns retrying variations of
+ * the same call before giving up and going around the tool with `Bash`. This
+ * says what is actually wrong, in the tool's own terms, on the first try.
+ */
+function requireStringPath(inputPath: unknown, label: string): asserts inputPath is string {
+  if (typeof inputPath !== 'string' || inputPath.length === 0) {
+    throw new Error(
+      `${label} is required and must be a non-empty string; received `
+      + `${inputPath === undefined ? 'nothing' : JSON.stringify(inputPath)}.`,
+    );
+  }
+}
+
+/**
  * Resolve a path a tool intends to read.
  *
  * Separate from the write path so widening one never widens the other.
  */
 export function resolveForReading(inputPath: string, label = 'path'): string {
+  requireStringPath(inputPath, label);
   const cwd = currentCwd();
   const resolved = path.resolve(cwd, inputPath);
   const roots = readableRoots(cwd);
@@ -128,6 +150,7 @@ export function resolveForReading(inputPath: string, label = 'path'): string {
  * the workspace tools report.
  */
 export function resolveInsideWorkspace(inputPath: string, label = 'path'): string {
+  requireStringPath(inputPath, label);
   const cwd = currentCwd();
   const resolved = path.resolve(cwd, inputPath);
   const roots = writableRoots(cwd);

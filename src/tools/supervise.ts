@@ -206,7 +206,16 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
       }
       // Claiming a kill that did not happen is worse than reporting the miss:
       // "stopped 3" when two had already exited makes the next decision wrong.
-      if (already.length) parts.push(`Already finished, nothing cancelled: ${already.join(', ')}.`);
+      //
+      // The pointer to "ack" is not decoration. Watched live: a caller read
+      // this line as its stop having failed, retried it, read the identical
+      // line again, and did that nine more times over the next hour — the
+      // fix was never "stop harder", it was to dismiss an outcome that had
+      // already landed. Said here, at the exact moment that confusion starts.
+      if (already.length) {
+        parts.push(`Already finished, nothing to stop: ${already.join(', ')}. `
+          + `If you are done with them, ack to clear them from "list" — stopping again will not.`);
+      }
       if (missing.length) parts.push(`Not found in this session: ${missing.join(', ')}.`);
       return parts.join(' ');
     }

@@ -3,6 +3,49 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.17.2 — 2026-09-10
+
+Found by reading a real client's transcript end to end after they reported the
+output as too repetitive. It was: four distinct causes, each confirmed against
+the exact evidence in the log.
+
+### Fixed
+
+- **A reply opened by narrating routine context.** "Acknowledged — today is
+  2026-09-09, git status is (clean or not a git repo)." led most replies for
+  the back half of one session. The date and git status carried in the tail
+  are plain facts, not a message from the user, and are now read and acted on
+  silently — the behaviour rules say so directly.
+- **A skill's full procedure was resent on every call.** A build with several
+  stories opens the same skill once per story; the procedure does not change
+  between them. One session sent `app-quality`'s ~600-word body back
+  nineteen times and `app-ship`'s nine, verbatim — paid once in tokens on the
+  way out and then again on every request after, for the rest of the run,
+  because it stayed in the transcript. A skill's full text is now given once
+  per session; a later call for the same name gets a short pointer instead,
+  with that call's own arguments still relayed since those do change.
+- **`Supervise stop` on a finished process invited a retry, not the fix.**
+  "Already finished, nothing cancelled" read, to one session, as the stop
+  having failed — it tried the same nine ids against the same message roughly
+  a dozen times over an hour before giving up and shelling out to `kill -9`
+  directly. The message now names the actual next step: ack clears a finished
+  outcome from the list; stopping it again will not.
+- **A missing tool argument threw a Node internal.** `Read`, `Write`, `Edit`
+  and `ReadAttachment` all resolve their path through the same two functions,
+  neither of which checked its argument was a string before handing it to
+  `path.resolve()` — a call missing `file_path`, or sending it under the
+  wrong key, surfaced as `The "paths[1]" argument must be of type string.
+  Received undefined`, four times in one session, each read as unrelated to
+  anything just sent. It now names the argument and says what was received.
+- **`VerifyApp` mishandled a `file:` target.** Every browser address bar
+  accepts one, so a model reaches for it in place of a plain path; the wrong
+  turn joined the whole string onto the working directory, producing a path
+  like `…/workspace/file:/C:/Users/…` that of course did not exist. A
+  well-formed `file:///…` URL is now decoded properly — its percent-escapes
+  included, so a short DOS path segment like `SUHAIL~1` round-trips correctly
+  — and the bare `file:C:\path` spelling some browsers also accept resolves
+  the same way a plain path would.
+
 ## 0.17.1 — 2026-09-09
 
 ### Fixed
