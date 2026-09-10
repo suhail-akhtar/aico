@@ -26,6 +26,7 @@ import fs from 'fs';
 import path from 'path';
 import { skillRegistry } from '../skills/index.js';
 import { disabledIn } from '../registry-state.js';
+import { runScoped } from '../run-scoped.js';
 import type { Skill } from '../skills/types.js';
 
 export interface SkillInput {
@@ -37,6 +38,21 @@ export interface SkillInput {
 
 /** How much of a bundled file to inline before pointing at it instead. */
 const INLINE_LIMIT = 4000;
+
+/**
+ * Which skills this session has already been given in full.
+ *
+ * A skill's procedure is static for the life of the process, and a build with
+ * several stories calls the same skill once per story — nine `app-ship`
+ * bodies and nineteen `app-quality` bodies came back verbatim in one real
+ * session, each a few hundred words the model had already been given minutes
+ * before. It cost the transcript and, worse, the context: each repeat stayed
+ * in the conversation for every request after it, for the rest of the run.
+ * Kept per session, not reset on compaction — a `RunChecks` result and a
+ * verified artifact survive compaction the same way, and a skill's text is no
+ * less durable than either.
+ */
+const shownSkills = runScoped<Set<string>>(() => new Set());
 
 /**
  * One line per skill, for the prompt.
@@ -123,6 +139,20 @@ export async function useSkill(input: SkillInput): Promise<string> {
     return `There is no skill called "${name}". Available: ${known.join(', ') || '(none installed)'}.`;
   }
 
+  const seen = shownSkills.get();
+  const canonical = skill.frontmatter.name;
+  if (seen.has(canonical)) {
+    // The args are the only part that changes call to call — which file, which
+    // brief — so those are worth relaying; the procedure around them is not.
+    return [
+      `Skill: ${canonical} — ${skill.frontmatter.description}`,
+      input.args?.trim() ? `For: ${input.args.trim()}` : '',
+      '',
+      'Already given in full earlier in this conversation; nothing about it has changed. Follow it — do not ask again for the procedure itself.',
+    ].filter(Boolean).join('\n');
+  }
+  seen.add(canonical);
+
   const body = skill.promptTemplate.replace(/\{args\}/g, input.args?.trim() ?? '');
 
   // A one-file skill that is mostly a pointer is more useful inlined than
@@ -158,7 +188,8 @@ export const skillDefinition = {
     'Open one of the installed skills and follow it. A skill is a procedure someone wrote '
     + 'down for a task like this one — use it when its description matches what you are about '
     + 'to do, rather than working the procedure out again. The available skills are listed in '
-    + 'your instructions; this returns the full text of one.',
+    + 'your instructions; this returns the full text of one, once per session — a later call '
+    + 'for the same name gets a short pointer instead, since the procedure has not changed.',
   inputSchema: {
     type: 'object' as const,
     properties: {

@@ -5616,6 +5616,22 @@ console.log('  -- The agent may write to its own workspace --');
   catch (err) { absolute = err.message; }
   assert(absolute !== '', 'an unrelated absolute path is refused');
 
+  // A model call missing `file_path` — or sending it under the wrong key —
+  // used to reach `path.resolve(cwd, undefined)` and throw a raw Node
+  // internal: "The \"paths[1]\" argument must be of type string. Received
+  // undefined." Four of those in one real session, each read as unrelated to
+  // anything the model had just sent. The tool's own argument name belongs in
+  // the message it gets back.
+  let noPath = '';
+  try { resolveInsideWorkspace(undefined, 'file_path'); }
+  catch (err) { noPath = err.message; }
+  assert(/file_path is required/.test(noPath) && !/paths\[1\]/.test(noPath),
+    `a missing path argument names itself, not a Node internal (${noPath})`);
+  let emptyPath = '';
+  try { resolveForReading('', 'file_path'); }
+  catch (err) { emptyPath = err.message; }
+  assert(/file_path is required/.test(emptyPath), `an empty string is refused the same way (${emptyPath})`);
+
   // Found in the browser, not in a test: a skill told the agent to read its own
   // bundled `references/tone.md`, Read refused because skills live under
   // ~/.aico/skills, and the agent only recovered by shelling out to `cat`. A
@@ -7201,6 +7217,20 @@ if (!findBrowser()) {
     assert(/does not exist/.test(threw), 'Verifying a missing file fails loudly');
   }
 
+  {
+    // A target starting "file:" — every browser address bar accepts one, so a
+    // model reaches for it — used to be joined onto the cwd whole, producing
+    // ".../workspace/file:/C:/Users/.../demo.html" and "does not exist". Two
+    // spellings, both real: no slashes and the RFC-correct triple slash.
+    const p = write('filescheme.html', '<!doctype html><title>t</title><body><h1>Hi</h1></body>');
+    const noSlash = await verifyApp({ target: `file:${p}`, settleMs: 300 });
+    assert(noSlash.passed && noSlash.url === pathToFileURL(p).href,
+      `"file:" with no slash resolves to the real file (${noSlash.url})`);
+    const tripleSlash = await verifyApp({ target: pathToFileURL(p).href, settleMs: 300 });
+    assert(tripleSlash.passed && tripleSlash.url === pathToFileURL(p).href,
+      `a proper file:/// URL still works (${tripleSlash.url})`);
+  }
+
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -7503,6 +7533,33 @@ function writeClaudeSkill(root, name, extra = {}) {
   assert(/Skill: commit/.test(opened), 'Opening one returns it');
   assert(/conventional commit/.test(opened), 'With its actual procedure');
   assert(!/\{args\}/.test(opened), 'And the placeholder substituted');
+
+  // A build with several stories opens the same skill once per story, and its
+  // procedure does not change between them. One real session sent the same
+  // ~600-word body back nineteen times for one skill and nine for another —
+  // paid once in tokens on the way out and then again on every request after,
+  // for the rest of the run, because it stayed in the transcript. Each session
+  // gets the full text once per skill; a later call gets a pointer instead.
+  await runInContext({ cwd: process.cwd(), sessionId: 'skill-memory-test' }, async () => {
+    // "conventional commit" is in the skill's one-line description, which both
+    // the full and the terse reply carry — the procedure proper is the steps
+    // below it, so that is what a repeat call must not still be paying for.
+    const first = await useSkill({ name: 'commit', args: 'scope: billing' });
+    assert(/git diff --staged/.test(first), 'the first call in a fresh session gets the full procedure');
+    const second = await useSkill({ name: 'commit', args: 'scope: invoices' });
+    assert(!/git diff --staged/.test(second), `a second call in the same session does not repeat the procedure (${second.slice(0, 120)})`);
+    assert(/Skill: commit/.test(second) && /already given in full/i.test(second), 'but still names the skill and says why');
+    assert(/scope: invoices/.test(second), 'and still relays this call’s own args, which do change');
+    // A different skill in the same session is unaffected — the memory is per name.
+    const other = await useSkill({ name: 'review', args: '' });
+    assert(/Skill: review/.test(other) && !/already given in full/i.test(other),
+      'a different skill name in the same session is not shadowed by the first');
+  });
+  // And a fresh session gets the full text again — this is not a permanent ban.
+  await runInContext({ cwd: process.cwd(), sessionId: 'skill-memory-test-2' }, async () => {
+    const again = await useSkill({ name: 'commit', args: 'scope: reports' });
+    assert(/git diff --staged/.test(again), 'a different session starts with no memory of its own');
+  });
 
   const missing = await useSkill({ name: 'no-such-skill' });
   assert(/no skill called/.test(missing), 'A wrong name is refused');
@@ -10580,6 +10637,19 @@ console.log('  -- A supervisor can stop one sub-agent, and is told when it canno
   });
   assert(/Not found/i.test(missing),
     `stopping work this session does not own reports the miss (got: ${missing.slice(0, 60)})`);
+
+  // Stopping something already terminal used to say only "nothing cancelled",
+  // and a real session read that as its stop having failed: it retried the
+  // same nine ids against the same message roughly a dozen times over an hour
+  // before giving up and shelling out to `kill -9` directly. The fix a caller
+  // actually needs at that moment is "ack", so the message names it.
+  ledger.resetForTest();
+  const doneId = ledger.open({ kind: 'process', title: 'already finished' });
+  ledger.close(doneId, 'done', 'finished on its own');
+  const alreadyDone = await executeSupervise({ action: 'stop', id: doneId, reason: 'cleanup' });
+  assert(/nothing to stop/i.test(alreadyDone) && /\back\b/.test(alreadyDone) && !/nothing cancelled/i.test(alreadyDone),
+    `stopping a finished id points at ack instead of inviting a retry (got: ${alreadyDone})`);
+  ledger.resetForTest();
 
   const noMsg = await executeSupervise({ action: 'guide', id: 'agent:x' });
   assert(/message is required/i.test(noMsg), 'guiding with nothing to say is refused');
