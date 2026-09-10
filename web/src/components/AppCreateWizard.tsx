@@ -39,6 +39,7 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
   const [step, setStep] = useState<Step>(initial ? 'details' : 'describe');
   const [brief, setBrief] = useState('');
   const [template, setTemplate] = useState<AppTemplate | undefined>(initial);
+  const [custom, setCustom] = useState(false);
   const [suggested, setSuggested] = useState<Array<{ id: string; matched: string[] }>>([]);
   const [suggestedName, setSuggestedName] = useState('');
   const [title, setTitle] = useState('');
@@ -66,10 +67,19 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
 
   const best = useMemo(() => (suggested[0] && suggested[0].matched.length > 0 ? templates.find(t => t.id === suggested[0]!.id) : undefined), [suggested, templates]);
   const isProcess = template?.kind === 'process' || template?.kind === 'mobile';
-  const canCreate = Boolean(template) && title.trim().length > 0 && !creating;
+  const canCreate = Boolean(template || custom) && title.trim().length > 0 && !creating;
 
   const choose = (t: AppTemplate): void => {
     setTemplate(t);
+    setCustom(false);
+    if (!title.trim() && suggestedName) setTitle(suggestedName);
+    if (!description.trim() && brief.trim()) setDescription(brief.trim().split(/[.\n]/)[0]!.slice(0, 120));
+    setStep('details');
+  };
+
+  const chooseCustom = (): void => {
+    setTemplate(undefined);
+    setCustom(true);
     if (!title.trim() && suggestedName) setTitle(suggestedName);
     if (!description.trim() && brief.trim()) setDescription(brief.trim().split(/[.\n]/)[0]!.slice(0, 120));
     setStep('details');
@@ -82,21 +92,24 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
   };
 
   const create = async (): Promise<void> => {
-    if (!template || !canCreate) return;
+    if (!(template || custom) || !canCreate) return;
     setCreating(true);
     setError(null);
     try {
-      const made = await api.createApp({
-        template: template.id,
-        title: title.trim(),
-        ...(description.trim() ? { description: description.trim() } : {}),
-        install: isProcess ? install : false,
-      });
+      const made = await api.createApp(custom
+        ? { custom: true, title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}) }
+        : {
+            template: template!.id,
+            title: title.trim(),
+            ...(description.trim() ? { description: description.trim() } : {}),
+            install: isProcess ? install : false,
+          });
       onCreated(made.slug);
       if (brief.trim()) {
-        setTimeout(() => {
-          void submit(`${brief.trim()}\n\nStart from this app's AICO.md and docs/EXTENDING.md, use the app-plan skill to turn this into docs/PRD.md and the first iteration of .aico/backlog.md, then build the first story and verify it in the browser.`);
-        }, 400);
+        const guidance = custom
+          ? 'Use the app-plan skill to decide the stack, write docs/PRD.md with it, then the first iteration of .aico/backlog.md, then build the first story and verify it in the browser.'
+          : "Start from this app's AICO.md and docs/EXTENDING.md, use the app-plan skill to turn this into docs/PRD.md and the first iteration of .aico/backlog.md, then build the first story and verify it in the browser.";
+        setTimeout(() => { void submit(`${brief.trim()}\n\n${guidance}`); }, 400);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -116,7 +129,7 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
             {steps.map((s, i) => (
               <li key={s.id} className="flex items-center gap-1">
                 <button
-                  onClick={() => { if (s.id === 'describe' || (s.id === 'choose') || (s.id === 'details' && template)) setStep(s.id); }}
+                  onClick={() => { if (s.id === 'describe' || (s.id === 'choose') || (s.id === 'details' && (template || custom))) setStep(s.id); }}
                   className={`rounded-full px-2 py-0.5 ${step === s.id ? 'bg-aico-accent text-white' : 'text-aico-muted hover:text-aico-primary'}`}
                   data-wizard-step={s.id}
                 >
@@ -180,26 +193,41 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
               </p>
               <TemplateGallery templates={templates} suggested={suggested} onPick={choose} compact />
               {templates.length === 0 && <p className="text-[13px] text-aico-primary">No templates are installed.</p>}
+              <button onClick={chooseCustom} data-wizard-custom
+                      className="w-full rounded-xl border border-dashed border-aico-border px-4 py-3 text-left hover:bg-aico-hover">
+                <div className="text-[13px] font-medium text-aico-primary">Custom stack</div>
+                <div className="text-[11px] text-aico-muted">No template fits, or you would rather it were decided from the brief. The stack is chosen and justified in the PRD, at a higher token cost than a template — nothing is pre-wired.</div>
+              </button>
             </div>
           )}
 
-          {step === 'details' && template && (
+          {step === 'details' && (template || custom) && (
             <div className="space-y-4">
-              <div className="flex items-start gap-3 rounded-lg border border-aico-border-subtle bg-aico-hover/30 p-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-medium text-aico-primary">{template.name}</span>
-                    <KindBadge kind={template.kind} />
-                    <span className="text-[11px] text-aico-muted">{categoryLabel(template.category)} · {KIND_WORDS[template.kind]}</span>
+              {template ? (
+                <div className="flex items-start gap-3 rounded-lg border border-aico-border-subtle bg-aico-hover/30 p-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-medium text-aico-primary">{template.name}</span>
+                      <KindBadge kind={template.kind} />
+                      <span className="text-[11px] text-aico-muted">{categoryLabel(template.category)} · {KIND_WORDS[template.kind]}</span>
+                    </div>
+                    <p className="mt-1 text-[12px] text-aico-muted">{template.summary}</p>
+                    {(template.features?.length ?? 0) > 0 && (
+                      <ul className="mt-1.5 space-y-0.5 text-[11px] text-aico-muted">{template.features!.map(f => <li key={f}>• {f}</li>)}</ul>
+                    )}
+                    {template.requires?.node && <p className="mt-1 text-[11px] text-aico-muted">Needs Node {template.requires.node}.</p>}
                   </div>
-                  <p className="mt-1 text-[12px] text-aico-muted">{template.summary}</p>
-                  {(template.features?.length ?? 0) > 0 && (
-                    <ul className="mt-1.5 space-y-0.5 text-[11px] text-aico-muted">{template.features!.map(f => <li key={f}>• {f}</li>)}</ul>
-                  )}
-                  {template.requires?.node && <p className="mt-1 text-[11px] text-aico-muted">Needs Node {template.requires.node}.</p>}
+                  <button onClick={() => setStep('choose')} className="shrink-0 text-[12px] text-aico-accent hover:underline">Change</button>
                 </div>
-                <button onClick={() => setStep('choose')} className="shrink-0 text-[12px] text-aico-accent hover:underline">Change</button>
-              </div>
+              ) : (
+                <div className="flex items-start gap-3 rounded-lg border border-aico-border-subtle bg-aico-hover/30 p-3">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[13px] font-medium text-aico-primary">Custom stack</span>
+                    <p className="mt-1 text-[12px] text-aico-muted">No fixed stack. The agent decides frontend, backend, and database from the brief with Skill app-plan, and puts the decision in the PRD.</p>
+                  </div>
+                  <button onClick={() => setStep('choose')} className="shrink-0 text-[12px] text-aico-accent hover:underline">Change</button>
+                </div>
+              )}
 
               <label className="block">
                 <span className="text-[12px] font-medium text-aico-primary">Name</span>
@@ -250,7 +278,7 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
           )}
         </div>
 
-        {step === 'details' && template && (
+        {step === 'details' && (template || custom) && (
           <div className="flex items-center justify-end gap-2 border-t border-aico-border-subtle px-5 py-3">
             <button onClick={onClose} className="rounded-lg border border-aico-border px-3 py-1.5 text-[13px] text-aico-primary hover:bg-aico-hover">Cancel</button>
             <button onClick={() => void create()} disabled={!canCreate} data-wizard-create

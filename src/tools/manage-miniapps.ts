@@ -34,7 +34,7 @@
 import path from 'path';
 import { currentCwd, currentRunContext } from '../run-context.js';
 import { loadSettings } from '../settings.js';
-import { authoringContract } from '../miniapps/contract.js';
+import { authoringContract, customAuthoringContract } from '../miniapps/contract.js';
 import { nextAuthoringContract } from '../miniapps/contract-nextjs.js';
 import {
   backlogProgress, createMiniApp, deleteMiniApp, effectiveKind, getMiniApp, hasProcess, listMiniApps,
@@ -43,7 +43,7 @@ import {
 } from '../miniapps/store.js';
 import { closeDatabase, describe as describeTables } from '../miniapps/data.js';
 import { appState, startApp, stopApp, type RunningApp } from '../miniapps/process.js';
-import { getTemplate, instantiateTemplate, nodeSatisfies, renderCatalogue } from '../apps/templates.js';
+import { createCustomApp, getTemplate, instantiateTemplate, nodeSatisfies, renderCatalogue } from '../apps/templates.js';
 import { deployApp, deployState } from '../apps/deploy.js';
 import { seedDecisions } from '../project/decisions.js';
 
@@ -58,8 +58,14 @@ export interface AppManageInput {
   template?: string;
   /** For templates and create-without-template: what the app is for, to rank suggestions. */
   brief?: string;
-  /** For create without a template: only "page" is honoured; everything else goes through a template. */
+  /** For create without a template: only "page" is honoured on its own; everything else needs `custom`. */
   kind?: MiniAppKind;
+  /**
+   * For create with no template: build a bare scaffold instead of the
+   * "pick a template" nudge. The stack is decided in Skill app-plan, not here
+   * — this only says the person explicitly wants that path.
+   */
+  custom?: boolean;
 }
 
 /** The old name, kept one release so a transcript that says it still works. */
@@ -247,6 +253,24 @@ export async function executeAppManage(input: AppManageInput): Promise<string> {
         return withNotice(authoringContract(app.slug, dir, await appUrl(app.slug)));
       }
 
+      /*
+        Explicitly asked for, not fallen into. The nine templates are a fixed
+        stack each, chosen and wired for zero model tokens on the skeleton;
+        this is the other door, for a stack none of them names or one the
+        person wants decided from the brief. `custom` has to be passed on
+        purpose — omitting a template by mistake still gets the catalogue
+        below, which is the safer default.
+      */
+      if (input.custom) {
+        const app = await createCustomApp({
+          title: input.name,
+          ...(input.description ? { description: input.description } : {}),
+          ...(sessionId ? { sessionId } : {}),
+        }, settings, cwd);
+        const dir = miniAppDir(app.slug, settings, cwd);
+        return withNotice(customAuthoringContract(app.slug, dir));
+      }
+
       // No template named: nothing is made. The catalogue is the answer, and
       // the next call names one.
       return `Nothing created yet — pick a template first.\n\n`
@@ -425,6 +449,9 @@ export const appManageToolDefinition = {
     'install), static (files), process (its own server — Next.js, Hono — installed and started by',
     '"start"), cli. After creating, read the app\'s AICO.md and docs/EXTENDING.md before writing',
     'anything; build by copying the worked feature; RunChecks; then "start" and VerifyApp.',
+    'No template fits, or the person wants the stack chosen from the brief instead of picked from a',
+    'list? "create" with `custom: true` and no template — Skill app-plan then decides the stack as',
+    'part of the PRD instead of assuming one. Every created app starts under its own git history.',
   ].join(' '),
   inputSchema: {
     type: 'object' as const,
@@ -461,6 +488,10 @@ export const appManageToolDefinition = {
         type: 'string',
         enum: ['page'],
         description: 'For create without a template: "page" makes a bare single-page app and returns its authoring guide. Prefer a template.',
+      },
+      custom: {
+        type: 'boolean',
+        description: 'For create without a template: build a bare scaffold with no fixed stack instead of the catalogue — the stack is decided in Skill app-plan, from the brief. Costs more than a template (nothing is pre-wired); use it when no template fits, or the person explicitly wants the stack chosen for them.',
       },
       description: {
         type: 'string',

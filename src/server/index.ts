@@ -58,7 +58,7 @@ import {
   backlogProgress, deleteMiniApp, effectiveKind, getMiniApp, hasProcess, listMiniApps, miniAppDir, runProfileFor,
 } from '../miniapps/store.js';
 import { installApp, runningApps, startApp, stopAllApps, stopApp, subscribeToApps } from '../miniapps/process.js';
-import { getTemplate, instantiateTemplate, listTemplates, matchScore, nodeSatisfies, stem, suggestTemplates } from '../apps/templates.js';
+import { createCustomApp, getTemplate, instantiateTemplate, listTemplates, matchScore, nodeSatisfies, stem, suggestTemplates } from '../apps/templates.js';
 import { meaningfulWords } from '../knowledge/match.js';
 import { promises as fsp } from 'fs';
 
@@ -667,22 +667,30 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         reader is still typing their brief rather than after.
       */
       const body = await readJson(req) as {
-        template?: string; title?: string; description?: string; install?: boolean; brief?: string;
+        template?: string; title?: string; description?: string; install?: boolean; brief?: string; custom?: boolean;
       };
-      if (!body.template) { send(res, 400, { error: 'template required' }); return; }
+      if (!body.template && !body.custom) { send(res, 400, { error: 'template required' }); return; }
       if (!body.title?.trim()) { send(res, 400, { error: 'title required' }); return; }
-      const template = getTemplate(body.template, cwd);
-      if (!template) { send(res, 404, { error: `no template "${body.template}"` }); return; }
-      if (!nodeSatisfies(template.requires?.node)) {
-        send(res, 400, { error: `template "${template.id}" needs Node ${template.requires?.node}; this machine runs ${process.versions.node}` });
-        return;
-      }
       const live = await loadSettings();
-      const app = await instantiateTemplate({
-        template,
-        title: body.title.trim(),
-        ...(body.description?.trim() ? { description: body.description.trim() } : {}),
-      }, live, cwd);
+      let app: Awaited<ReturnType<typeof instantiateTemplate>>;
+      if (body.custom) {
+        app = await createCustomApp({
+          title: body.title.trim(),
+          ...(body.description?.trim() ? { description: body.description.trim() } : {}),
+        }, live, cwd);
+      } else {
+        const template = getTemplate(body.template!, cwd);
+        if (!template) { send(res, 404, { error: `no template "${body.template}"` }); return; }
+        if (!nodeSatisfies(template.requires?.node)) {
+          send(res, 400, { error: `template "${template.id}" needs Node ${template.requires?.node}; this machine runs ${process.versions.node}` });
+          return;
+        }
+        app = await instantiateTemplate({
+          template,
+          title: body.title.trim(),
+          ...(body.description?.trim() ? { description: body.description.trim() } : {}),
+        }, live, cwd);
+      }
       const dir = miniAppDir(app.slug, live, cwd);
       const profile = runProfileFor(app);
       if (body.install !== false && profile?.install && hasProcess(app)) {

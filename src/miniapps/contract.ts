@@ -234,3 +234,39 @@ This is a real application, not a demo. Cover the whole thing:
 Then open ${url} and check it: every button, a bad form, a deletion, and
 a reload to confirm the data persisted.`;
 }
+
+/**
+ * What a custom-stack app's author is told.
+ *
+ * The nine bundled templates are a fixed stack each — chosen, wired, and
+ * tested once, so building from one costs no tokens on the skeleton. This is
+ * the other door: no template, so nothing is wired yet, and the first job is
+ * to decide what will be before writing anything. Short on purpose — the
+ * real procedure lives in Skill app-plan, which this points at rather than
+ * repeats.
+ */
+export function customAuthoringContract(slug: string, dir: string): string {
+  return `App "${slug}" — no template, by request
+
+  Directory  ${dir}
+
+There is no fixed stack here. Before writing any code:
+
+  1. Skill app-plan. Its brief step now includes a Stack section: name the
+     frontend, backend or API layer, database, and monolith vs. services —
+     take what was asked for, decide the rest yourself, and say why. That
+     becomes the first section of docs/PRD.md, before Purpose.
+  2. Set this app's run commands to match what you chose: edit app.json's
+     "run" object (install, dev with {port}, ready, build, test, typecheck,
+     lint, start) the way a template's would have shipped it.
+  3. Write AICO.md yourself, the way a template's documents its own layout —
+     what the app is, where things live, what to copy for the next feature.
+     Nobody else will write it for a stack nobody chose in advance.
+
+From there the ordinary loop applies: RunChecks, AppManage start, VerifyApp,
+one backlog story at a time. Skill app-design before the first screen,
+app-ship to make it deployable, app-quality before calling anything done.
+
+This already has its own git history (git log to see it) and a .gitignore
+you should extend once you know what your stack generates.`;
+}

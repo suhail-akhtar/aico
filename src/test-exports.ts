@@ -330,6 +330,7 @@ export { miniAppContext, fileList, appStateLine } from './miniapps/context.js';
 export {
   listTemplates, getTemplate, validateManifest, suggestTemplates, matchScore, stem, renderCatalogue, substituteTokens,
   matchesSubstitute, instantiateTemplate, nodeSatisfies, bundledTemplatesDir, REQUIRED_TEMPLATE_FILES,
+  initAppGit, createCustomApp,
 } from './apps/templates.js';
 export { executeAppManage, appManageToolDefinition } from './tools/manage-miniapps.js';
 export { runAgent } from './agent.js';
