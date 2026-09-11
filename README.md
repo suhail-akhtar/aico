@@ -1,6 +1,8 @@
 # aico — open-source AI coding agent
 
 An **AI coding agent** for the terminal, a local web portal and a native
+
+[![aico on StartupScores](https://startupscores.com/badge/aico.svg?style=shield&v=combo&theme=dark)](https://startupscores.com/open-source/aico)
 **VS Code** panel, with a durable session log at its core. Self-hosted and MIT
 licensed: **bring your own API key** for OpenAI, Anthropic, OpenRouter, Google
 Gemini, Moonshot Kimi, Z.AI (GLM) or DeepSeek — or run it entirely offline against a local
