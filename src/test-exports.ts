@@ -90,6 +90,7 @@ export {
   DEEPSEEK_BASE_URL,
   DEEPSEEK_DEFAULT_MAX_OUTPUT_TOKENS,
 } from './providers/deepseek.js';
+export { chainAbort, withIdleTimeout, STREAM_IDLE_TIMEOUT_MS } from './providers/idle-timeout.js';
 // ── Provider usage normalization + Anthropic prompt caching ───────────
 export {
   normalizeUsage,

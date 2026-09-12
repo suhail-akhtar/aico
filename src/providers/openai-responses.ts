@@ -48,6 +48,7 @@ import OpenAI, { APIError } from 'openai';
 import { resolvedEffort } from '../run-context.js';
 import { supportsReasoning } from '../../shared/reasoning.js';
 import { normalizeUsage } from './usage.js';
+import { chainAbort, withIdleTimeout } from './idle-timeout.js';
 import { OPENAI_DIALECT } from '../prompt/dialects.js';
 import type {
   AicoMessage,
@@ -137,11 +138,12 @@ export class OpenAIResponsesProvider implements ProviderAPI {
       store: false,
     };
 
+    const controller = chainAbort(opts.signal);
     let stream: AsyncIterable<ResponseStreamEvent>;
     try {
       stream = (await this.client.responses.create(
         body as never,
-        { signal: opts.signal },
+        { signal: controller.signal },
       )) as unknown as AsyncIterable<ResponseStreamEvent>;
     } catch (err) {
       throw normalizeResponsesError(err, this.displayName);
@@ -153,7 +155,7 @@ export class OpenAIResponsesProvider implements ProviderAPI {
     const pending = new Map<string, { callId: string; name: string; args: string }>();
     let finish: FinishReason | undefined;
 
-    for await (const event of stream) {
+    for await (const event of withIdleTimeout(stream, () => controller.abort())) {
       switch (event.type) {
         case 'response.output_text.delta':
           if (event.delta) yield { type: 'text', content: event.delta };

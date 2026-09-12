@@ -3,6 +3,52 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.18.1 — 2026-09-12
+
+Found by running the platform against real models on purpose, to answer a
+direct question about how it actually performs rather than how it is
+documented to perform: a live DeepSeek turn sat completely idle for 40+
+minutes with no error and no progress, and the built-in "steer a stuck turn"
+recovery could not reach it, because there was no next model call for the
+steer to attach to until the stuck one finished.
+
+### Fixed
+
+- **No provider request had a timeout.** Every provider (Anthropic, OpenAI,
+  the OpenAI Responses API, DeepSeek, Kimi) read its streamed response with
+  its own `for await` loop and no guard against the stream simply going
+  silent — no chunk, no error, no close. The only timeout in the whole path,
+  `settings.agentTimeout`, is a whole-turn wall clock that defaults to *off*.
+  A new shared `withIdleTimeout` (`src/providers/idle-timeout.ts`) now wraps
+  every provider's stream: two minutes with no new chunk aborts the
+  underlying request and fails the step with a clear error, instead of
+  hanging indefinitely. Generous on purpose — it guards against silence, not
+  against a model that is legitimately still thinking.
+- **A live-model test script had two of its own bugs**, both from assuming
+  every app template looks like a Next.js one: a placeholder-copy scan
+  crashed on `landing-static` and `page-records` (they ship under `public/`,
+  not `src/`), and the browser-walk step guessed a URL for `cli-node` from
+  the shared host and reported a 404 as a console error — a CLI app is never
+  served. Both fixed in `scripts/apps-build-live.mjs`; neither was a defect
+  in the product itself.
+
+### Changed
+
+- **The app-skill eval corpus grew from 7 tasks to 12** (`app-architecture`
+  2→4, `app-ship`/`app-quality`/`app-design` 1→2 each), specifically to stop
+  resting a skill's score on one or two single-shot tasks. Real run against
+  the new corpus: `app-architecture` dropped from a nominal 70% to 62%
+  overall, with the two new harder tasks (a shared cross-cutting concern, a
+  different stack's file layout) scoring 44% and 30% — confirming it is
+  genuinely the weakest of the five skills, not a fluke of a thin corpus.
+- All six previously-unverified app templates (`landing-static`,
+  `page-records`, `cli-node`, `agent-service-node`, `docs-astro`,
+  `mobile-expo`) were driven end to end by a real model (`deepseek-flash`)
+  for the first time: every one finished its full backlog, passed its own
+  typecheck/test where it has one, and showed zero console errors across
+  every screen. Of the nine shipped templates, all nine now have live-model
+  evidence, not three.
+
 ## 0.18.0 — 2026-09-11
 
 Studied Microsoft's Spec Kit (spec-driven development) end to end, including a

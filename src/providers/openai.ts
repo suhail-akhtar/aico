@@ -11,6 +11,7 @@
 import OpenAI, { APIError } from 'openai';
 import type { ProviderAPI, ProviderChatOptions, ChatEvent, AicoMessage, FinishReason } from './types.js';
 import { normalizeUsage } from './usage.js';
+import { chainAbort, withIdleTimeout } from './idle-timeout.js';
 import { resolvedEffort } from '../run-context.js';
 import { supportsReasoning } from '../../shared/reasoning.js';
 import { DEFAULT_DIALECT } from '../prompt/dialects.js';
@@ -285,13 +286,15 @@ export class OpenAICompatibleProvider implements ProviderAPI {
       ...this.reasoningFields(opts.model),
     });
 
+    const controller = chainAbort(opts.signal);
+
     // Typed explicitly rather than inferred from create(): the body is cast to
     // `never` because the installed SDK's types lag the API (its ReasoningEffort
     // enum has no 'xhigh'/'minimal'/'max'), and that cast also erases the
     // `stream: true` discriminant the return type would otherwise key on.
     const send = async (): Promise<AsyncIterable<OpenAI.Chat.ChatCompletionChunk>> =>
       (await this.client.chat.completions.create(
-        buildBody() as never, { signal: opts.signal },
+        buildBody() as never, { signal: controller.signal },
       )) as unknown as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
 
     // Each healable parameter gets one chance to be blamed and dropped, and the
@@ -319,7 +322,7 @@ export class OpenAICompatibleProvider implements ProviderAPI {
     }
 
     let finalUsage: ReturnType<typeof normalizeUsage> | undefined;
-    for await (const chunk of stream) {
+    for await (const chunk of withIdleTimeout(stream, () => controller.abort())) {
       // Usage: on the final chunk with include_usage, or on every chunk from
       // some endpoints. Held, not emitted — see after the loop.
       if (chunk.usage) {

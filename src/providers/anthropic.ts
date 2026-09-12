@@ -12,6 +12,7 @@ import { learnFromError } from '../../shared/reasoning.js';
 import { resolvedEffort } from '../run-context.js';
 import type { ProviderAPI, ProviderChatOptions, ChatEvent, AicoMessage, ToolDef, FinishReason } from './types.js';
 import { normalizeUsage } from './usage.js';
+import { chainAbort, withIdleTimeout } from './idle-timeout.js';
 import { ANTHROPIC_DIALECT } from '../prompt/dialects.js';
 
 /** Map an Anthropic `stop_reason` onto the normalized finish vocabulary. */
@@ -160,6 +161,7 @@ export class AnthropicProvider implements ProviderAPI {
       is a comment that costs a test run.
     */
     let effortForRequest: AnthropicConfig['effort'] | undefined;
+    const controller = chainAbort(opts.signal);
     try {
       const adaptive = this.thinking === 'adaptive' && supportsAdaptiveThinking(opts.model);
       effortForRequest = anthropicEffort(resolvedEffort(opts.model)) ?? this.effort;
@@ -181,7 +183,7 @@ export class AnthropicProvider implements ProviderAPI {
           the request.
         */
         ...(effortForRequest ? { output_config: { effort: effortForRequest } } : {}),
-      } as never, { signal: opts.signal });
+      } as never, { signal: controller.signal });
     } catch (err) {
       // A refused effort level teaches the table, so the next request does not
       // send the same rejected value. Only when we actually sent one.
@@ -207,7 +209,7 @@ export class AnthropicProvider implements ProviderAPI {
     let cacheReadTokens = 0;
     let cacheWriteTokens = 0;
 
-    for await (const event of response as unknown as AsyncIterable<AnthropicStreamEvent>) {
+    for await (const event of withIdleTimeout(response as unknown as AsyncIterable<AnthropicStreamEvent>, () => controller.abort())) {
       switch (event.type) {
 
         case 'message_start': {
