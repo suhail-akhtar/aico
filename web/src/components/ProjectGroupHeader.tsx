@@ -58,6 +58,8 @@ export interface ProjectGroupHeaderProps {
   onDropSession?: (sessionId: string) => void;
   /** For the apps section: where its `+` goes. */
   onOpenApps?: () => void;
+  /** For a project section: where its name and "Open workspace" menu item go. */
+  onOpenWorkspace?: () => void;
   /** Uniform-height rows, for the windowed list. */
   dense?: boolean;
   /** Keyboard focus marker and the id `aria-activedescendant` points at. */
@@ -67,7 +69,8 @@ export interface ProjectGroupHeaderProps {
 
 export function ProjectGroupHeader({
   label, path, kind, known, isLaunch, collapsed, onToggle, count,
-  filtering = false, acceptsDrop = false, onDropSession, onOpenApps, dense = false, focused = false, rowId,
+  filtering = false, acceptsDrop = false, onDropSession, onOpenApps, onOpenWorkspace,
+  dense = false, focused = false, rowId,
 }: ProjectGroupHeaderProps): React.ReactElement {
   const newSessionIn = useStore(s => s.newSessionIn);
   const updateProject = useStore(s => s.updateProject);
@@ -182,39 +185,68 @@ export function ProjectGroupHeader({
                   ${over && acceptsDrop ? 'ring-1 ring-aico-accent bg-aico-accent-soft/60' : ''}
                   ${focused ? 'outline outline-1 outline-aico-accent/60' : ''}`}
     >
-      <button
-        onClick={onToggle}
-        title={collapsed ? `Show ${count} session${count === 1 ? '' : 's'}` : 'Collapse'}
-        aria-expanded={!collapsed}
-        tabIndex={-1}
-        className="flex min-w-0 flex-1 items-center gap-1.5 px-2 text-left text-[11px] font-medium
-                   tracking-wider text-aico-muted"
-      >
-        <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
-        <Icon
-          name={glyph}
-          size={18}
-          strokeWidth={1.7}
-          filled={Boolean(entry?.color)}
-          {...(entry?.color
-            ? { style: { color: entry.color } }
-            : { className: 'text-aico-muted' })}
-        />
-        {entry?.pinned && (
-          <Icon name="pin" size={11} className="shrink-0 text-aico-accent" />
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 px-2 text-[11px] font-medium tracking-wider text-aico-muted">
+        <button
+          onClick={onToggle}
+          title={collapsed ? `Show ${count} session${count === 1 ? '' : 's'}` : 'Collapse'}
+          aria-expanded={!collapsed}
+          tabIndex={-1}
+          className="flex shrink-0 items-center gap-1.5"
+        >
+          <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+          <Icon
+            name={glyph}
+            size={18}
+            strokeWidth={1.7}
+            filled={Boolean(entry?.color)}
+            {...(entry?.color
+              ? { style: { color: entry.color } }
+              : { className: 'text-aico-muted' })}
+          />
+          {entry?.pinned && (
+            <Icon name="pin" size={11} className="shrink-0 text-aico-accent" />
+          )}
+        </button>
+        {/*
+          A workspace's own page, one click away — the label is the link,
+          because the row's other affordances (the caret, the count) all mean
+          "fold this", and a workspace is a place, not a fold. Groups and the
+          apps section have no page of their own yet, so their label still
+          just toggles, exactly as before.
+        */}
+        {kind === 'project' && known && onOpenWorkspace ? (
+          <button
+            onClick={onOpenWorkspace}
+            tabIndex={-1}
+            title={`Open ${label}`}
+            className="min-w-0 flex-1 truncate text-left hover:text-aico-primary hover:underline"
+          >
+            {label}
+          </button>
+        ) : (
+          <button
+            onClick={onToggle}
+            tabIndex={-1}
+            title={entry?.description || (isApps ? 'Conversations bound to an app' : path)}
+            className="min-w-0 flex-1 truncate text-left"
+          >
+            {label}
+          </button>
         )}
-        <span className="min-w-0 truncate" title={entry?.description || (isApps ? 'Conversations bound to an app' : path)}>
-          {label}
-        </span>
         {/*
           The count, always. It used to appear only when folded, so an open
           folder with sixty rows gave no number — and while filtering, the
           number is the search result.
         */}
-        <span className="shrink-0 tabular-nums opacity-70" title={filtering ? 'matches' : 'sessions'}>
+        <button
+          onClick={onToggle}
+          tabIndex={-1}
+          className="shrink-0 tabular-nums opacity-70"
+          title={filtering ? 'matches' : 'sessions'}
+        >
           {count}
-        </span>
-      </button>
+        </button>
+      </div>
 
       {(known || isApps) && (
         <>
@@ -253,6 +285,17 @@ export function ProjectGroupHeader({
           className="fixed z-50 w-[204px] overflow-hidden rounded-xl border border-aico-border
                      bg-aico-bg py-1 shadow-2xl"
         >
+          {kind === 'project' && onOpenWorkspace && (
+            <button
+              role="menuitem"
+              onClick={() => { setMenuOpen(false); onOpenWorkspace(); }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-primary
+                         transition-colors hover:bg-aico-hover"
+            >
+              <Icon name="grid" size={15} className="text-aico-muted" /> Open workspace
+            </button>
+          )}
+
           <button
             role="menuitem"
             onClick={() => { setMenuOpen(false); setDraft(label); setEditing(true); }}

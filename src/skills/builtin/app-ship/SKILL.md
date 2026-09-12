@@ -25,7 +25,7 @@ In a scratch copy or with the profile's commands: `setup` (install), `typecheck`
 
 ## 4. The image
 
-A multi-stage Dockerfile: install with the lockfile, build, then a runtime stage with production dependencies only, a non-root user, `EXPOSE`, `HEALTHCHECK`, a `VOLUME` for data, `CMD` of the start command. `compose.yaml` runs it with the volume and the env. Build it if Docker is available (`AppManage deploy`, target `docker`); if not, say so and stop at the files.
+A multi-stage Dockerfile: install with the lockfile, build, then a runtime stage with production dependencies only, a non-root user, `EXPOSE`, `HEALTHCHECK`, a `VOLUME` for data, `CMD` of the start command. `compose.yaml` runs it with the volume and the env. The files are the deliverable regardless of whether a build runs. If this is a bound app, `AppManage deploy` (target `docker`) builds it and reports pass or fail — that is the only way to build; never shell out to `docker build` yourself to check your own work, it is slow and not the point. No bound app, or Docker unavailable: say so and stop at the files.
 
 ## 5. README Run section
 
@@ -40,3 +40,4 @@ Exactly: how to run locally (three commands), how to configure (the table from `
 - Add a cloud SDK, a secrets manager, or credentials to the app to "make deploy easier".
 - Change the app's behaviour to suit a host; change the config.
 - Call it shipped without a passing run from clean and a health check answered.
+- Retry the same failing command a third time. Two attempts is enough to tell whether the fix worked; a third is the same guess again. Say what failed and move to the next file.

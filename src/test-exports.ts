@@ -242,7 +242,13 @@ export { observe, blockedReason, resetObservations, isObserved } from './tools/o
 export { runScoped } from './run-scoped.js';
 export { detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck, checkProjectGate, checkResults, newestSourceChange, touchedFiles } from './checks.js';
 export { runChecks } from './tools/run-checks.js';
-export { listChanges, diffOf, revertFile, isGitRepo } from './server/changes.js';
+export { listChanges, diffOf, revertFile, isGitRepo, gitLog } from './server/changes.js';
+export { projectStats } from './project/stats.js';
+export {
+  listProjects, addProject, updateProject, removeProject, normalizeProjectPath,
+  isKnownProject, instructionsFor,
+} from './server/projects.js';
+export { handleSystemRoute } from './server/api-system.js';
 export { useSkill, skillCatalogue, skillDefinition, describeSize } from './tools/skill.js';
 export { skillRegistry } from './skills/registry.js';
 export { executeSkillCreate } from './skills/create.js';

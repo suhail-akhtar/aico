@@ -182,6 +182,57 @@ export async function listChanges(cwd: string, sessionFiles: string[] = []): Pro
   };
 }
 
+export interface CommitInfo {
+  hash: string;
+  shortHash: string;
+  author: string;
+  /** ISO 8601, author date. */
+  date: string;
+  subject: string;
+}
+
+export interface GitLogPage {
+  isRepo: boolean;
+  commits: CommitInfo[];
+  /** True when there is at least one commit older than the last one returned. */
+  hasMore: boolean;
+}
+
+// Unit/record separators rather than a printable delimiter: a commit subject
+// can contain almost anything printable, but never these two control bytes.
+const LOG_FIELD_SEP = '\x1f';
+const LOG_RECORD_SEP = '\x1e';
+const LOG_FORMAT = `%H${LOG_FIELD_SEP}%h${LOG_FIELD_SEP}%an${LOG_FIELD_SEP}%aI${LOG_FIELD_SEP}%s${LOG_RECORD_SEP}`;
+
+/**
+ * Commit history, newest first.
+ *
+ * Paginated by hash rather than by offset: `before` names the commit to
+ * continue from, read as "this one and everything older" via `<hash>^` —
+ * stable even if new commits land on the branch between pages. The root
+ * commit has no parent, so an out-of-range `before` degrades to an empty
+ * page rather than an error.
+ */
+export async function gitLog(cwd: string, opts: { limit?: number; before?: string } = {}): Promise<GitLogPage> {
+  if (!await isGitRepo(cwd)) return { isRepo: false, commits: [], hasMore: false };
+
+  const limit = Math.max(1, Math.min(opts.limit ?? 30, 200));
+  // One more than asked for, so "is there another page" is answered without
+  // a second round trip.
+  const args = ['log', `--pretty=format:${LOG_FORMAT}`, '-n', String(limit + 1)];
+  if (opts.before) args.push(`${opts.before}^`);
+
+  let out = '';
+  try { out = await git(cwd, args); } catch { return { isRepo: true, commits: [], hasMore: false }; }
+
+  const records = out.split(LOG_RECORD_SEP).map(r => r.trim()).filter(Boolean);
+  const commits: CommitInfo[] = records.slice(0, limit).map((r) => {
+    const [hash, shortHash, author, date, subject] = r.split(LOG_FIELD_SEP);
+    return { hash: hash ?? '', shortHash: shortHash ?? '', author: author ?? '', date: date ?? '', subject: subject ?? '' };
+  });
+  return { isRepo: true, commits, hasMore: records.length > limit };
+}
+
 /** The unified diff for one file, or the whole of a new one. */
 export async function diffOf(cwd: string, rel: string): Promise<string> {
   const safe = safeRelative(cwd, rel);

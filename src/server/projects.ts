@@ -94,8 +94,14 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
   const rank = new Map(byNewest.map((p, i) => [p, i]));
   configured.sort((a, b) => (rank.get(a.path) ?? 0) - (rank.get(b.path) ?? 0));
 
+  // Configured entries first, so a path that has since been given a name,
+  // colour or note — including the launch directory or the scratch
+  // workspace, once `updateProject` has recorded something about either —
+  // is shown with what was recorded rather than the bare fallback below.
   const seen = new Map<string, Entry>();
-  seen.set(launch, { path: launch, name: defaultName(launch) });
+  for (const entry of configured) seen.set(entry.path, entry);
+
+  if (!seen.has(launch)) seen.set(launch, { path: launch, name: defaultName(launch) });
 
   // The workspace is always offered, because the portal now defaults to it.
   // A directory that sessions are filed under but that never appears in the
@@ -110,8 +116,6 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
       path: workspace, name: 'Scratch', description: 'Where sessions run when no project is chosen.',
     });
   }
-
-  for (const entry of configured) if (!seen.has(entry.path)) seen.set(entry.path, entry);
 
   return Promise.all([...seen.values()].map(async (entry): Promise<ProjectSummary> => {
     let exists = false;
@@ -190,7 +194,8 @@ export async function addProject(dir: string, name?: string): Promise<ProjectSum
 
   const settings = await loadSettings();
   const existing = settings.projects ?? [];
-  if (!existing.some(entry => normalizeProjectPath(entry.path) === target)) {
+  const already = existing.find(entry => normalizeProjectPath(entry.path) === target);
+  if (!already) {
     await saveUserSetting('projects', [
       ...existing,
       { path: target, ...(name?.trim() ? { name: name.trim() } : {}), addedAt: Date.now() },
@@ -199,7 +204,10 @@ export async function addProject(dir: string, name?: string): Promise<ProjectSum
 
   return {
     path: target,
-    name: name?.trim() || defaultName(target),
+    // A path already on the list keeps what is actually recorded — the `name`
+    // argument on this call was never stored, and echoing it back would claim
+    // a rename that did not happen.
+    name: already ? (already.name?.trim() || defaultName(target)) : (name?.trim() || defaultName(target)),
     isLaunch: false,
     exists: true,
     sessions: (await listSessionSummaries(target).catch(() => [])).length,
@@ -234,12 +242,32 @@ export async function updateProject(dir: string, patch: ProjectPatch): Promise<b
   const target = normalizeProjectPath(dir);
   const settings = await loadSettings();
   const existing = settings.projects ?? [];
-  if (!existing.some(entry => normalizeProjectPath(entry.path) === target)) return false;
 
   const clean = (value?: string): string | undefined => {
     const trimmed = value?.trim();
     return trimmed ? trimmed : undefined;
   };
+
+  // The launch directory, and any folder a session has run in without ever
+  // being explicitly "added", are real projects `listProjects` already shows
+  // — just with nothing recorded about them yet. Editing one's properties is
+  // the moment it is worth recording, not a no-op because the list happens
+  // not to mention it.
+  if (!existing.some(entry => normalizeProjectPath(entry.path) === target)) {
+    await saveUserSetting('projects', [
+      ...existing,
+      {
+        path: target,
+        addedAt: Date.now(),
+        ...(patch.name !== undefined ? { name: clean(patch.name) } : {}),
+        ...(patch.description !== undefined ? { description: clean(patch.description) } : {}),
+        ...(patch.instructions !== undefined ? { instructions: clean(patch.instructions) } : {}),
+        ...(patch.pinned !== undefined ? { pinned: patch.pinned || undefined } : {}),
+        ...(patch.color !== undefined ? { color: clean(patch.color) } : {}),
+      },
+    ]);
+    return true;
+  }
 
   await saveUserSetting('projects', existing.map((entry) => {
     if (normalizeProjectPath(entry.path) !== target) return entry;

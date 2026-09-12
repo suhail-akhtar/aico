@@ -3,6 +3,55 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.19.0 — 2026-09-12
+
+A workspace was a label in the sidebar and nothing else — clicking one only
+folded it, and an open chat never said which folder it was in. Both are fixed
+by making a workspace a first-class, visible, navigable thing.
+
+### Added
+
+- **A workspace's own page.** Click a project's name in the sidebar, its new
+  "Open workspace" menu item, or the new path indicator in a chat's header,
+  and it opens: editable properties (name, colour, description, custom
+  instructions — the same form as before, just reachable from a real page
+  now), the stack and commands already shown in System, every chat that has
+  ever happened there with search and an archived filter, its commit history
+  (paginated, newest first), and totals across its whole life — chats, turns,
+  cost, last active, and a small bar of activity over the last 30 days.
+  Deep-linkable: `?view=project&path=<encoded path>`.
+- **A chat says which folder it's in.** A small muted path indicator now sits
+  in the chat header next to the title, for any session (or a fresh one with
+  a folder already picked) that has one — click it to open that workspace's
+  page. Nothing shows for a scratch session with no folder to point at.
+- Two new routes power the page's new pieces, `GET /api/project/git-log` and
+  `GET /api/project/stats` (`src/server/changes.ts`'s new `gitLog`,
+  `src/project/stats.ts`'s new `projectStats`) — everything else on the page
+  (properties, commands, the chat list) reuses data and components the portal
+  already had.
+
+### Fixed
+
+Both found by actually using "Edit properties" against a real, previously
+unconfigured folder while building the page above — neither is new; both
+have been there as long as the code they're in.
+
+- **Editing a folder's properties silently did nothing** for any project
+  `listProjects` shows but nobody had explicitly "added" — the launch
+  directory, most obviously, since almost nobody adds the folder the server
+  already started in. `updateProject` refused to write anything for a path
+  with no existing `settings.projects[]` entry; it now creates one.
+- **Even after that fix, the launch directory still ignored what was saved
+  about it.** `listProjects` unconditionally pre-seeded the launch directory
+  with a bare `{path, name}` before ever looking at configured entries, so a
+  newly-created one for that same path was silently skipped by the merge.
+  Configured entries are now seeded first, so anything actually recorded
+  about a path — launch directory included — wins.
+- `addProject` on a path already on the list echoed back the `name` argument
+  from that call instead of what was actually stored, so calling it twice
+  with two different names appeared to rename a project that had not moved.
+  It now returns what is actually on disk.
+
 ## 0.18.1 — 2026-09-12
 
 Found by running the platform against real models on purpose, to answer a
