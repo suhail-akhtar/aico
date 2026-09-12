@@ -58,6 +58,7 @@
 
 import OpenAI, { APIError } from 'openai';
 import { normalizeUsage } from './usage.js';
+import { chainAbort, withIdleTimeout } from './idle-timeout.js';
 import type { EffortLevel } from '../../shared/reasoning.js';
 import { resolvedEffort } from '../run-context.js';
 import { KIMI_DIALECT } from '../prompt/dialects.js';
@@ -213,12 +214,13 @@ export class KimiProvider implements ProviderAPI {
       ...reasoningFieldsFor(opts.model, resolvedEffort(opts.model) ?? this.thinking),
     });
 
+    const controller = chainAbort(opts.signal);
     const wantStreamUsage = !this.streamUsageDisabled;
     let stream: AsyncIterable<KimiChunk>;
     try {
       stream = (await this.client.chat.completions.create(
         buildBody(wantStreamUsage) as never,
-        { signal: opts.signal },
+        { signal: controller.signal },
       )) as unknown as AsyncIterable<KimiChunk>;
     } catch (err) {
       if (wantStreamUsage && isStreamOptionsError(err)) {
@@ -226,7 +228,7 @@ export class KimiProvider implements ProviderAPI {
         try {
           stream = (await this.client.chat.completions.create(
             buildBody(false) as never,
-            { signal: opts.signal },
+            { signal: controller.signal },
           )) as unknown as AsyncIterable<KimiChunk>;
         } catch (err2) {
           throw normalizeKimiError(err2);
@@ -237,7 +239,7 @@ export class KimiProvider implements ProviderAPI {
     }
 
     let finalUsage: ReturnType<typeof normalizeUsage> | undefined;
-    for await (const chunk of stream) {
+    for await (const chunk of withIdleTimeout(stream, () => controller.abort())) {
       // Held rather than emitted — reported once, after the loop, however
       // many chunks carry it (see providers/openai.ts for the reason).
       if (chunk.usage) {

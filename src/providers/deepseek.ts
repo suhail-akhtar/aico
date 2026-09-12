@@ -63,6 +63,7 @@
 
 import OpenAI, { APIError } from 'openai';
 import { normalizeUsage } from './usage.js';
+import { chainAbort, withIdleTimeout } from './idle-timeout.js';
 import type { EffortLevel } from '../../shared/reasoning.js';
 import { resolvedEffort } from '../run-context.js';
 import { DEEPSEEK_DIALECT } from '../prompt/dialects.js';
@@ -173,12 +174,13 @@ export class DeepSeekProvider implements ProviderAPI {
       thinking: thinkingFor(resolvedEffort(opts.model) ?? this.thinking),
     });
 
+    const controller = chainAbort(opts.signal);
     const wantStreamUsage = !this.streamUsageDisabled;
     let stream: AsyncIterable<DeepSeekChunk>;
     try {
       stream = (await this.client.chat.completions.create(
         buildBody(wantStreamUsage) as never,
-        { signal: opts.signal },
+        { signal: controller.signal },
       )) as unknown as AsyncIterable<DeepSeekChunk>;
     } catch (err) {
       if (wantStreamUsage && isStreamOptionsError(err)) {
@@ -186,7 +188,7 @@ export class DeepSeekProvider implements ProviderAPI {
         try {
           stream = (await this.client.chat.completions.create(
             buildBody(false) as never,
-            { signal: opts.signal },
+            { signal: controller.signal },
           )) as unknown as AsyncIterable<DeepSeekChunk>;
         } catch (err2) {
           throw normalizeDeepSeekError(err2);
@@ -197,7 +199,7 @@ export class DeepSeekProvider implements ProviderAPI {
     }
 
     let finalUsage: ReturnType<typeof normalizeUsage> | undefined;
-    for await (const chunk of stream) {
+    for await (const chunk of withIdleTimeout(stream, () => controller.abort())) {
       // Held rather than emitted — reported once, after the loop.
       if (chunk.usage) {
         // hit + miss partition prompt_tokens (measured: 5888 + 124 = 6012), so

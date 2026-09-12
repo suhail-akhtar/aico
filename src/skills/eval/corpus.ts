@@ -350,6 +350,48 @@ const ARCH_2: EvalTask = {
   ],
 };
 
+const ARCH_3: EvalTask = {
+  id: 'app-architecture/one-cross-cutting-concern',
+  skill: 'app-architecture',
+  args: 'Every list endpoint needs the same pagination — limit and offset, capped at 100 — and right now nothing has it. Add it.',
+  files: APP_FILES,
+  checks: [
+    { kind: 'output-matches', pattern: String.raw`src/(pagination|paginate)\.ts`, flags: 'i', weight: 2, why: 'A shared pagination concern was not placed in one file.' },
+    { kind: 'output-lacks', pattern: String.raw`(each|every|both|all)[^\n]{0,40}(resource|route)[^\n]{0,40}(own|separate|its own)[^\n]{0,20}(limit|offset|pagination)`, flags: 'i', weight: 2, why: 'Pagination was duplicated per resource instead of shared once.' },
+    { kind: 'output-matches', pattern: String.raw`\b100\b`, why: 'The cap from the brief was dropped.' },
+    { kind: 'output-matches', pattern: String.raw`src/items\.ts|src/app\.ts`, flags: 'i', why: 'Where the existing resource would call the new helper from was not said.' },
+    { kind: 'output-matches', pattern: String.raw`decisions\.md`, flags: 'i', why: 'A cross-cutting decision like this is exactly what decisions.md is for, and it was not mentioned.' },
+    { kind: 'output-lacks', pattern: String.raw`\b(prisma|typeorm|sequelize|mongoose)\b`, flags: 'i', why: 'Reached for an ORM the project does not have.' },
+    { kind: 'max-tool-calls', limit: 10, why: 'Placing one shared helper in a nine-file project should not take more than ten tool calls.' },
+  ],
+};
+
+const ARCH_4: EvalTask = {
+  id: 'app-architecture/next-stack-generalises',
+  skill: 'app-architecture',
+  args: "Add teams to this app: a team has a name, and a project belongs to a team. Members seeing only their own team's projects is a later iteration.",
+  files: {
+    'AICO.md': '# Team SaaS\n\nNext.js App Router on node:sqlite. Resource pattern: one route file per resource in src/app/api/<resource>/route.ts, backed by src/db/<resource>.ts (schema + queries), a page at src/app/<resource>/page.tsx. Tests: vitest. Checks: npm run typecheck, npm test.\n',
+    'package.json': '{ "name": "team-saas", "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run", "dev": "next dev" } }\n',
+    'docs/EXTENDING.md': '# Extending\n\nCopy src/db/projects.ts and src/app/api/projects/route.ts for a new resource; add its page under src/app/<resource>/page.tsx; document it here.\n',
+    'src/db/projects.ts': "export interface Project { id: number; name: string }\nexport const MIGRATIONS = [\n  `CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`,\n];\n",
+    'src/app/api/projects/route.ts': "export async function GET() { return Response.json([]); }\n",
+    'src/app/projects/page.tsx': 'export default function Projects() { return <div>Projects</div>; }\n',
+    'test/projects.test.ts': "import { it } from 'vitest';\nit('lists', () => {});\n",
+    '.aico/decisions.md': '# Decisions\n\n- node:sqlite over Prisma — no ORM needed at this scale.\n',
+  },
+  checks: [
+    { kind: 'output-matches', pattern: String.raw`teams?[^\n]*\b(table|migration|CREATE TABLE)\b|\b(table|migration|CREATE TABLE)\b[^\n]*teams?`, flags: 'i', weight: 2, why: 'The data model was not named first.' },
+    { kind: 'output-matches', pattern: String.raw`(team_id|REFERENCES teams|foreign key)`, flags: 'i', why: 'The relation from projects to teams was not stated as a constraint.' },
+    { kind: 'output-matches', pattern: String.raw`src/db/teams\.ts`, weight: 2, why: 'The new resource was not placed on this codebase’s own pattern, not the Hono-API one from the other architecture task.' },
+    { kind: 'output-matches', pattern: String.raw`src/app/api/teams/route\.ts`, why: 'The route file location for this stack was not named.' },
+    { kind: 'output-lacks', pattern: String.raw`\b(models?/|services?/|controllers?/)\b`, flags: 'i', why: 'Proposed layer folders this codebase does not use.' },
+    { kind: 'output-lacks', pattern: String.raw`\b(prisma|typeorm|sequelize|mongoose)\b`, flags: 'i', why: 'Reached for an ORM the project does not have.' },
+    { kind: 'output-matches', pattern: String.raw`decisions\.md`, flags: 'i', why: 'The decision was not recorded (or the file not mentioned).' },
+    { kind: 'max-tool-calls', limit: 12, why: 'Placing one resource in an eight-file project should not take more than twelve tool calls.' },
+  ],
+};
+
 // ── app-ship ──────────────────────────────────────────────────────────
 
 const SHIP_1: EvalTask = {
@@ -389,6 +431,38 @@ const SHIP_1: EvalTask = {
   ],
 };
 
+const SHIP_2: EvalTask = {
+  id: 'app-ship/migrate-before-start',
+  skill: 'app-ship',
+  args: 'Get this ready to deploy with Docker. It writes to a sqlite file that must survive a restart, and any pending migration must run before the server starts serving requests.',
+  files: {
+    'package.json': '{ "name": "ledger-api", "scripts": { "start": "node src/index.js", "migrate": "node src/migrate.js", "test": "node --test" }, "dependencies": { "hono": "^4.7.0", "@hono/node-server": "^1.14.0" } }\n',
+    'package-lock.json': '{ "name": "ledger-api", "lockfileVersion": 3, "packages": {} }\n',
+    'src/index.js': [
+      "import { serve } from '@hono/node-server';",
+      "import { Hono } from 'hono';",
+      'const app = new Hono();',
+      "const dbPath = process.env.DATABASE_PATH || './ledger.sqlite';",
+      "app.get('/entries', c => c.json([]));",
+      'serve({ fetch: app.fetch, port: 3000 });',
+      '',
+    ].join('\n'),
+    'src/migrate.js': "console.log('applying migrations');\n",
+    '.gitignore': 'node_modules\n*.sqlite\n',
+    'README.md': '# ledger-api\n\nA ledger service.\n',
+  },
+  checks: [
+    { kind: 'file-exists', path: 'Dockerfile', weight: 2, why: 'No Dockerfile was written.' },
+    { kind: 'file-matches', path: 'Dockerfile', pattern: String.raw`migrate[\s\S]*(start|index\.js)|CMD[^\n]*migrate`, flags: 'i', weight: 2, why: 'Nothing in the image runs the migration before the server starts.' },
+    { kind: 'file-matches', path: 'Dockerfile', pattern: String.raw`VOLUME|/data`, flags: 'i', why: 'The sqlite file has nowhere durable to live; a restart would lose it.' },
+    { kind: 'file-exists', path: '.env.example', weight: 2, why: 'No .env.example; DATABASE_PATH is undocumented.' },
+    { kind: 'file-matches', path: '.env.example', pattern: String.raw`DATABASE_PATH`, why: 'DATABASE_PATH is read by the code but not in .env.example.' },
+    { kind: 'output-matches', pattern: String.raw`(volume|persist|survive|durable)`, flags: 'i', why: 'The database file surviving a restart was not addressed.' },
+    { kind: 'output-lacks', pattern: String.raw`(postgres|mysql|DATABASE_URL=)`, flags: 'i', why: 'A different database was substituted instead of keeping sqlite durable.' },
+    { kind: 'max-tool-calls', limit: 25, why: 'Shipping a four-file service with one added migration step should not take more than twenty-five tool calls.' },
+  ],
+};
+
 // ── app-quality ───────────────────────────────────────────────────────
 
 const QUALITY_1: EvalTask = {
@@ -408,6 +482,25 @@ const QUALITY_1: EvalTask = {
     { kind: 'output-lacks', pattern: String.raw`everything works|all good|works as expected`, flags: 'i', why: 'A blanket claim instead of named checks.' },
     { kind: 'file-matches', path: 'src/invoices.ts', pattern: String.raw`^(?![\s\S]*console\.log\('debug'\))`, why: 'The stray console.log was left in.' },
     { kind: 'max-tool-calls', limit: 20, why: 'Verifying a two-file feature should not take more than twenty tool calls.' },
+  ],
+};
+
+const QUALITY_2: EvalTask = {
+  id: 'app-quality/refuses-when-it-should',
+  skill: 'app-quality',
+  args: 'Customers should not be deletable while they still have invoices. Verify it.',
+  files: {
+    'schema.sql': 'CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);\nCREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, total INTEGER NOT NULL);\n',
+    'public/index.html': '<div x-data="resource(\'customers\')"></div>\n',
+    'public/app.js': '// no delete guard\n',
+    '.aico/backlog.md': '# Backlog\n\n## Iteration 1\n\n- [ ] Customers cannot be deleted while they have invoices.\n      Done when: deleting a customer with invoices is refused.\n',
+  },
+  checks: [
+    { kind: 'output-matches', pattern: String.raw`(delete|remov(e|ing))[^\n]{0,40}(customer)[^\n]{0,40}(invoice)`, flags: 'i', weight: 2, why: 'The actual requirement — refusing to delete a customer with invoices — was not restated as a check.' },
+    { kind: 'output-matches', pattern: String.raw`(FAIL|not (met|satisfied|enforced|verified)|no guard|missing (constraint|guard|check))`, flags: 'i', weight: 3, why: 'The fixture has no delete guard at all; reporting this as passing would be a false claim.' },
+    { kind: 'output-matches', pattern: String.raw`(REFERENCES|foreign key|ON DELETE)`, flags: 'i', why: 'Whether the database itself could enforce the rule was not considered.' },
+    { kind: 'output-lacks', pattern: String.raw`everything works|all good|works as expected|\bPASS\b.*delet`, flags: 'i', weight: 2, why: 'A blanket or false "it works" claim instead of naming what is missing.' },
+    { kind: 'max-tool-calls', limit: 20, why: 'Verifying one rule against a three-file app should not take more than twenty tool calls.' },
   ],
 };
 
@@ -433,8 +526,31 @@ const DESIGN_1: EvalTask = {
   ],
 };
 
+const DESIGN_2: EvalTask = {
+  id: 'app-design/dashboard-empty-state',
+  skill: 'app-design',
+  args: 'This is the dashboard a reader sees the moment they sign in, before they have any data. Right now it just shows a blank grid. Design what a brand-new account should see.',
+  files: {
+    ...APP_FILES,
+    'src/app/globals.css': '@theme { --color-brand: #2f5df6; --color-ink: #16181d; --color-ink-muted: #5b6270; --color-surface: #fff; --color-surface-alt: #f5f7fb; --color-line: #e2e6ee; }\n',
+    'src/app/dashboard/page.tsx': "export default function Dashboard({ items }: { items: unknown[] }) {\n  return (\n    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>\n      {items.length === 0 ? null : items.map((_, i) => <div key={i} />)}\n    </div>\n  );\n}\n",
+  },
+  checks: [
+    { kind: 'file-matches', path: 'src/app/dashboard/page.tsx', pattern: String.raw`^(?![\s\S]*items\.length === 0[\s\S]{0,20}(?:null|<\/>))`, weight: 2, why: 'An empty account still renders nothing — the blank-when-empty branch was left in place.' },
+    { kind: 'output-matches', pattern: String.raw`(empty state|first (run|visit)|new account|no data yet)`, flags: 'i', weight: 2, why: 'The empty state was not treated as a screen to design.' },
+    { kind: 'output-matches', pattern: String.raw`(get started|create|add your first|import)`, flags: 'i', why: 'The empty state has no next action for a brand-new reader.' },
+    { kind: 'output-lacks', pattern: String.raw`no results|nothing (here|to show)\b`, flags: 'i', why: 'Generic emptiness copy instead of one that teaches what to do next.' },
+    { kind: 'max-tool-calls', limit: 16, why: 'Designing one empty state should not take more than sixteen tool calls.' },
+  ],
+};
+
 export const BUILTIN_CORPUS: readonly EvalTask[] = [
-  SEC_1, SEC_2, REV_1, REV_2, COMMIT_1, INIT_1, PLAN_1, PLAN_2, ARCH_1, ARCH_2, SHIP_1, QUALITY_1, DESIGN_1,
+  SEC_1, SEC_2, REV_1, REV_2, COMMIT_1, INIT_1,
+  PLAN_1, PLAN_2,
+  ARCH_1, ARCH_2, ARCH_3, ARCH_4,
+  SHIP_1, SHIP_2,
+  QUALITY_1, QUALITY_2,
+  DESIGN_1, DESIGN_2,
 ];
 
 /** Where a user's own tasks live. */

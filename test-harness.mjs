@@ -111,6 +111,9 @@ import {
   normalizeUsage,
   CACHE_READ_RATE_MULTIPLIER,
   CACHE_WRITE_RATE_MULTIPLIER,
+  chainAbort,
+  withIdleTimeout,
+  STREAM_IDLE_TIMEOUT_MS,
   toAnthropicMessages,
   applyMessageCacheBreakpoints,
   MESSAGE_CACHE_BREAKPOINTS,
@@ -3869,6 +3872,59 @@ console.log('  -- Cost model charges each tier at its own rate --');
     'Tracker reports the full prompt size on a warm Anthropic cache');
   assert(tracked.estimateCost(MODEL) > 0,
     'A fully-cached Anthropic turn still costs something (reads are not free)');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 33b. A SILENT STREAM FAILS, INSTEAD OF HANGING THE TURN FOREVER
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ 33b. STREAM IDLE TIMEOUT ══');
+{
+  // A live DeepSeek call once sat open with no chunk for 40+ minutes at ~0%
+  // CPU — no error, no close, and no wall-clock agentTimeout is on by
+  // default, so nothing ever recovered it. This is the regression test for
+  // that: a stream that goes silent must fail fast, not hang.
+  async function* neverYields() { await new Promise(() => {}); }
+  async function* threeChunks() { yield 1; yield 2; yield 3; }
+  async function* yieldsThenHangs() { yield 'a'; await new Promise(() => {}); }
+
+  let aborted = false;
+  let threw = '';
+  const start = Date.now();
+  try { for await (const _ of withIdleTimeout(neverYields(), () => { aborted = true; }, 50)) { /* noop */ } }
+  catch (err) { threw = err.message; }
+  assert(/No data from the model for/.test(threw), `a stream with no first chunk times out instead of hanging (got "${threw}")`);
+  assert(Date.now() - start < 2000, 'the timeout actually fired promptly (50ms budget)');
+  assert(aborted === true, 'the underlying connection was told to abort, not left to leak');
+
+  const collected = [];
+  for await (const v of withIdleTimeout(threeChunks(), () => {}, 5_000)) collected.push(v);
+  assert(collected.join(',') === '1,2,3', 'a normal stream passes every chunk through untouched');
+
+  let abortedMidStream = false;
+  let threwMidStream = '';
+  const seen = [];
+  try { for await (const v of withIdleTimeout(yieldsThenHangs(), () => { abortedMidStream = true; }, 50)) seen.push(v); }
+  catch (err) { threwMidStream = err.message; }
+  assert(/No data from the model/.test(threwMidStream), `going silent mid-stream (after a first chunk) still times out (got "${threwMidStream}")`);
+  assert(seen.join(',') === 'a' && abortedMidStream, 'the chunk that did arrive was kept, and the stall after it still aborted');
+
+  assert(STREAM_IDLE_TIMEOUT_MS >= 60_000, `the real default is generous, not a latency budget (${STREAM_IDLE_TIMEOUT_MS}ms)`);
+}
+
+console.log('  -- chainAbort forwards one way, and does not require a caller signal --');
+{
+  const parent = new AbortController();
+  const child = chainAbort(parent.signal);
+  assert(!child.signal.aborted, 'starts unaborted');
+  parent.abort();
+  assert(child.signal.aborted, 'the child aborts when the parent does');
+
+  const already = new AbortController();
+  already.abort();
+  assert(chainAbort(already.signal).signal.aborted, 'a signal that is already aborted is respected immediately, not missed by a late listener');
+
+  const standalone = chainAbort(undefined);
+  assert(!standalone.signal.aborted, 'with no caller signal at all, the controller is just its own — never pre-aborted');
 }
 
 // ═══════════════════════════════════════════════════════════

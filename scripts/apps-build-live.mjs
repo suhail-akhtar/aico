@@ -43,6 +43,10 @@ const BRIEFS = {
   'api-service-hono': { title: 'Booking API', brief: 'A JSON API for a small venue: rooms, bookings with start and end times that must not overlap for the same room, and a daily availability endpoint. Field-level validation errors, an OpenAPI document that matches, and tests that run the app in memory.' },
   'landing-static': { title: 'Ledgerly', brief: 'A landing page for Ledgerly, bookkeeping software for freelancers: hero, three benefits, pricing with two tiers, an FAQ, and a contact form. Copy in the product\'s voice, no placeholder text anywhere.' },
   'page-records': { title: 'Reading Log', brief: 'A reading log: books with title, author, status (want, reading, finished), rating and notes; a summary strip of counts; filter by status. Simple and quick.' },
+  'cli-node': { title: 'Task Tracker', brief: "A command-line todo tracker: add a task, list tasks (open ones first, then done), mark one done by its number, and remove one. Tasks persist between runs in a local file. `--help` lists every command with an example." },
+  'agent-service-node': { title: 'Support Triage', brief: 'A customer-support triage service: POST a message and get back a suggested priority (low, medium or high) and a one-line summary, using a tool that looks up whether the customer is on a paid plan to help decide priority. Conversations persist so a follow-up message continues the same thread.' },
+  'docs-astro': { title: 'Pochette Docs', brief: 'Documentation for a small open-source library called Pochette, which manages a wallet\'s session tokens: a Quickstart, an API Reference page, and a Troubleshooting page, organised under two sidebar sections (Guide, Reference). Real, specific content, not placeholder text.' },
+  'mobile-expo': { title: 'Quick List', brief: 'A shopping list app: add an item with a quantity, tick items off while shopping, and clear ticked items in one action. It should feel good to use one-handed while walking through a store — big tap targets, the input always reachable by thumb.' },
 };
 const brief = BRIEFS[TEMPLATE] ?? BRIEFS['web-saas-next'];
 
@@ -229,7 +233,15 @@ if (fs.existsSync(path.join(appDir, 'package.json'))) {
     check(r.status === 0, `the app's own ${script} passes (${(r.stdout + r.stderr).trim().split('\n').filter(Boolean).slice(-1)[0] ?? ''})`);
   }
 }
-check(!/Placeholder eyebrow|lorem ipsum/i.test(fs.readdirSync(path.join(appDir, 'src'), { recursive: true }).filter(f => /\.(tsx|html|astro|md)$/.test(String(f))).map(f => { try { return fs.readFileSync(path.join(appDir, 'src', String(f)), 'utf8'); } catch { return ''; } }).join('\n')), 'no placeholder copy is left in the source');
+// Not every template has a src/ directory — landing-static and page-records
+// ship under public/ only, and Expo's screens live under app/, not src/app/.
+// Scan whichever of these actually exist rather than assuming one.
+const sourceText = ['src', 'app', 'public'].filter(d => fs.existsSync(path.join(appDir, d))).flatMap(d =>
+  fs.readdirSync(path.join(appDir, d), { recursive: true })
+    .filter(f => /\.(tsx?|html|astro|md|js)$/.test(String(f)))
+    .map(f => { try { return fs.readFileSync(path.join(appDir, d, String(f)), 'utf8'); } catch { return ''; } })
+).join('\n');
+check(!/Placeholder eyebrow|lorem ipsum/i.test(sourceText), 'no placeholder copy is left in the source');
 
 // ── Deploy from the files it ships ──────────────────────────────────────────
 if (DEPLOY) {
@@ -247,13 +259,16 @@ if (DEPLOY) {
 // ── Every screen, as a first user, with a browser ───────────────────────────
 const view = await api('apps');
 const app = view.apps.find(a => a.slug === slug);
-let appUrl = (view.processes ?? []).find(p => p.slug === slug)?.url;
-if (!appUrl && app?.kind && !['page', 'static'].includes(app.kind)) {
+// A cli app is never served — nothing to start, nothing to open in a
+// browser, and a URL guessed from the shared host would be a 404, not a
+// finding.
+let appUrl = app?.kind === 'cli' ? undefined : (view.processes ?? []).find(p => p.slug === slug)?.url;
+if (!appUrl && app?.kind && !['page', 'static', 'cli'].includes(app.kind)) {
   await api('apps/run', { slug, action: 'start' });
   for (let i = 0; i < 60; i++) { const v = await api('apps'); appUrl = (v.processes ?? []).find(p => p.slug === slug)?.url; if (appUrl) break; await sleep(3000); }
 }
-if (!appUrl && view.host) appUrl = `${view.host}/${slug}/`;
-check(Boolean(appUrl), `the app is served (${appUrl})`);
+if (!appUrl && view.host && app?.kind !== 'cli') appUrl = `${view.host}/${slug}/`;
+if (app?.kind !== 'cli') check(Boolean(appUrl), `the app is served (${appUrl})`);
 
 if (appUrl) {
   const BROWSERS = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'];
