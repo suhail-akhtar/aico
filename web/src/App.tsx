@@ -14,7 +14,9 @@ import { Sidebar } from './components/Sidebar';
 import {
   DEFAULT_ROUTE, headerTitle, parseView, showsSessionTabs, withTab, type Route,
 } from './navigation';
+import { basename } from './grouping';
 import { AppsPane } from './components/AppsPane';
+import { WorkspacePage } from './components/WorkspacePage';
 import { AppWorkspace } from './components/apps/AppWorkspace';
 import { MiniAppScope } from './components/MiniAppScope';
 import { ChatPane } from './components/ChatPane';
@@ -44,11 +46,12 @@ export function App(): React.ReactElement {
   const [route, setRoute] = useState<Route>(() => {
     try {
       const url = new URL(window.location.href);
-      const destination = parseView(url.search);
-      if (!destination) return DEFAULT_ROUTE;
+      const parsed = parseView(url.search);
+      if (!parsed) return DEFAULT_ROUTE;
       url.searchParams.delete('view');
+      url.searchParams.delete('path');
       window.history.replaceState({}, '', url.pathname + url.search + url.hash);
-      return { ...DEFAULT_ROUTE, destination };
+      return { ...DEFAULT_ROUTE, destination: parsed.destination, ...(parsed.projectPath ? { projectPath: parsed.projectPath } : {}) };
     } catch { return DEFAULT_ROUTE; }
   });
   const onSessions = route.destination === 'sessions';
@@ -106,6 +109,16 @@ export function App(): React.ReactElement {
   const title = useStore(s => s.title);
   const busy = useStore(s => s.busy);
   const status = useStore(s => s.status);
+  const currentProject = useStore(s => s.project);
+  const projects = useStore(s => s.projects);
+  const labelFor = (path: string): string => projects.find(p => p.path === path)?.name ?? basename(path);
+  // The open session's project (for the chat-header indicator) and the
+  // workspace page's own project (for its header title) are two different
+  // things — a workspace page for "aico" opened while the last session was
+  // in "Scratch" must say "aico", not carry the session's project over.
+  const currentProjectLabel = currentProject ? labelFor(currentProject) : undefined;
+  const routeProjectLabel = route.projectPath ? labelFor(route.projectPath) : undefined;
+  const openWorkspace = (path: string): void => setRoute({ ...route, destination: 'project', projectPath: path });
 
   useEffect(() => {
     if (!hasToken) return;
@@ -155,8 +168,26 @@ export function App(): React.ReactElement {
           </button>
 
           <span className="min-w-0 max-w-[40%] truncate text-[14px] font-medium text-aico-primary">
-            {headerTitle(route, title)}
+            {headerTitle(route, title, route.destination === 'project' ? routeProjectLabel : currentProjectLabel)}
           </span>
+
+          {/*
+            Which folder this chat is in. Nothing else in the chat view says
+            so — the path is otherwise only a sidebar tooltip away — and a
+            person working across several projects has no other way to tell
+            which one an open conversation belongs to. Omitted for a scratch
+            session with no folder at all: there is nothing to point at.
+          */}
+          {onSessions && currentProject && (
+            <button
+              onClick={() => openWorkspace(currentProject)}
+              title={currentProject}
+              className="min-w-0 max-w-[30%] shrink truncate rounded px-1.5 py-0.5 font-mono text-[11px]
+                         text-aico-muted transition-colors hover:bg-aico-hover hover:text-aico-primary"
+            >
+              {currentProjectLabel}
+            </button>
+          )}
 
           {/* Three readings of one session — what was said, what it did to the
               tree, and what happened in what order — so they are tabs on it
@@ -222,6 +253,12 @@ export function App(): React.ReactElement {
         {onSessions && view === 'trajectory' && <Trajectory />}
         {view === 'system' && <SystemPanel />}
         {view === 'apps' && <AppsPane onOpenChat={() => setRoute(withTab(route, 'chat'))} />}
+        {view === 'project' && route.projectPath && (
+          <WorkspacePage
+            projectPath={route.projectPath}
+            onOpenChat={() => setRoute(withTab(route, 'chat'))}
+          />
+        )}
       </main>
 
       {settingsOpen && (

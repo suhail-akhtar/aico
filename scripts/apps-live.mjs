@@ -173,6 +173,22 @@ try {
     check(fs.existsSync(path.join(dir, '.aico', 'profile.json')), 'the profile lives in the app’s .aico/profile.json');
   }
 
+  console.log('\n-- the workspace page: git history and totals across every session --');
+  {
+    const dir = path.join(workspace, 'miniapps', slug);
+    const log = await api(`project/git-log?path=${encodeURIComponent(dir)}&limit=5`);
+    check(log.status === 200 && log.json?.isRepo === true, 'GET project/git-log recognises the app’s own git history');
+    check(Array.isArray(log.json?.commits) && log.json.commits.length >= 1, `and lists at least the initial commit (${log.json?.commits?.length})`);
+    check(/^Start from/.test(log.json?.commits?.[0]?.subject ?? ''), `the first commit is the template scaffold (${log.json?.commits?.[0]?.subject})`);
+    const noRepo = await api(`project/git-log?path=${encodeURIComponent(workspace)}`);
+    check(noRepo.status === 200 && noRepo.json?.isRepo === false, 'a directory with no git history says so, not an error');
+
+    const stats = await api(`project/stats?path=${encodeURIComponent(dir)}`);
+    check(stats.status === 200 && typeof stats.json?.sessions === 'number' && typeof stats.json?.costUsd === 'number', `GET project/stats answers totals (${stats.status} ${JSON.stringify(stats.json).slice(0, 100)})`);
+    const emptyStats = await api(`project/stats?path=${encodeURIComponent(path.join(workspace, 'nowhere'))}`);
+    check(emptyStats.status === 200 && emptyStats.json?.sessions === 0 && emptyStats.json?.firstActive === null, 'a workspace with no sessions at all answers zeroes');
+  }
+
   console.log('\n-- learning and economy routes answer on a real server --');
   {
     const dir = path.join(workspace, 'miniapps', slug);

@@ -204,7 +204,11 @@ import {
   observe, blockedReason, resetObservations, isObserved,
   todoRead,
   runScoped, currentRequirements,
-  listChanges, diffOf, revertFile, isGitRepo,
+  listChanges, diffOf, revertFile, isGitRepo, gitLog,
+  projectStats,
+  listProjects, addProject, updateProject, removeProject, normalizeProjectPath,
+  isKnownProject, instructionsFor,
+  loadSettings,
   importSkill, removeSkill, skillCatalogue, useSkill, loadAllSkills,
   executeSkillCreate,
   listDirectory, globFiles, grepFiles, getBuiltinDir,
@@ -8409,6 +8413,170 @@ function makeRepo() {
   assert(report.isRepo === false, 'A non-repo says so');
   assert(report.files.length === 0, 'And lists nothing rather than throwing');
   fs.rmSync(plain, { recursive: true, force: true });
+}
+
+console.log('\n══ COMMIT HISTORY, PAGINATED BY HASH ══');
+
+{
+  const dir = makeRepo();
+  const commit = (msg, author) => {
+    fs.writeFileSync(path.join(dir, 'kept.txt'), `${msg}\n`);
+    execFileSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['-c', `user.name=${author}`, 'commit', '-qm', msg], { cwd: dir, stdio: 'ignore' });
+  };
+  for (let i = 1; i <= 4; i++) commit(`change ${i}`, i % 2 === 0 ? 'Alice' : 'probe');
+
+  // 5 commits total: makeRepo's "first", then change 1..4 — oldest to newest.
+  const page1 = await gitLog(dir, { limit: 2 });
+  assert(page1.isRepo === true, 'a repo says so');
+  assert(page1.commits.length === 2, `the page is capped at the limit (${page1.commits.length})`);
+  assert(page1.commits[0].subject === 'change 4', `newest first (${page1.commits[0].subject})`);
+  assert(page1.commits[1].subject === 'change 3', 'and the second-newest next');
+  assert(/^[0-9a-f]{40}$/.test(page1.commits[0].hash) && /^[0-9a-f]{7,}$/.test(page1.commits[0].shortHash),
+    'a full and a short hash are both present');
+  assert(page1.commits[0].author === 'Alice', 'the author is carried through');
+  assert(!Number.isNaN(Date.parse(page1.commits[0].date)), `the date parses (${page1.commits[0].date})`);
+  assert(page1.hasMore === true, 'more commits exist than the page held (change 2, change 1, first remain)');
+
+  const page2 = await gitLog(dir, { limit: 2, before: page1.commits[1].hash });
+  assert(page2.commits.map(c => c.subject).join(',') === 'change 2,change 1', `the next page continues where the first left off (${page2.commits.map(c => c.subject).join(',')})`);
+  assert(page2.hasMore === true, 'the root commit ("first") still remains beyond this page');
+
+  const page3 = await gitLog(dir, { limit: 2, before: page2.commits[1].hash });
+  assert(page3.commits.map(c => c.subject).join(',') === 'first', `the root commit is the last page (${page3.commits.map(c => c.subject).join(',')})`);
+  assert(page3.hasMore === false, 'nothing remains after the root commit');
+
+  const page4 = await gitLog(dir, { limit: 10, before: page3.commits[0].hash });
+  assert(page4.commits.length === 0 && page4.hasMore === false, 'paging past the root commit is an empty page, not an error');
+
+  const notRepo = await gitLog(os.tmpdir());
+  assert(notRepo.isRepo === false && notRepo.commits.length === 0, 'a non-repo says so and lists nothing');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('\n══ A WORKSPACE\'S TOTALS ACROSS EVERY SESSION IT HAS HAD ══');
+
+{
+  const MODEL = 'claude-sonnet-4-6';
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-projstats-'));
+  const dir = getSessionDir(cwd);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const line = (type, data, timestamp) => JSON.stringify({ seq: 0, type, timestamp, data });
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+
+  // Session A: two turns, one model throughout.
+  const usageA1 = { inputTokens: 1000, outputTokens: 200, cachedTokens: 0 };
+  const usageA2 = { inputTokens: 500, outputTokens: 100, cachedTokens: 100 };
+  fs.writeFileSync(path.join(dir, 'sess-a.events.jsonl'), [
+    line('request/header', { header: { model: MODEL, provider: 'anthropic', systemHash: 'x', tools: [] }, reason: 'initial' }, now - 2 * DAY),
+    line('user/message', { turn: 1, content: 'hi', source: 'user' }, now - 2 * DAY),
+    line('assistant/message', { turn: 1, step: 1, content: 'hello', usage: usageA1 }, now - 2 * DAY),
+    line('user/message', { turn: 2, content: 'again', source: 'user' }, now - DAY),
+    line('assistant/message', { turn: 2, step: 1, content: 'again back', usage: usageA2 }, now - DAY),
+  ].join('\n') + '\n');
+
+  // Session B: far outside the 30-day window, and a stray unparsable line —
+  // neither should break the scan.
+  const usageB = { inputTokens: 300, outputTokens: 50, cachedTokens: 0 };
+  fs.writeFileSync(path.join(dir, 'sess-b.events.jsonl'), [
+    'not json at all "user/message"',
+    line('request/header', { header: { model: MODEL, provider: 'anthropic', systemHash: 'x', tools: [] }, reason: 'initial' }, now - 60 * DAY),
+    line('user/message', { turn: 1, content: 'old', source: 'user' }, now - 60 * DAY),
+    line('assistant/message', { turn: 1, step: 1, content: 'old reply', usage: usageB }, now - 60 * DAY),
+  ].join('\n') + '\n');
+
+  const settings = {};
+  const stats = await projectStats(cwd, settings);
+  assert(stats.sessions === 2, `both session files are counted (${stats.sessions})`);
+  assert(stats.turns === 3, `every user turn across every session is counted (${stats.turns})`);
+  const expectedCost = costFor(MODEL, usageA1, settings) + costFor(MODEL, usageA2, settings) + costFor(MODEL, usageB, settings);
+  assert(Math.abs(stats.costUsd - expectedCost) < 1e-9, `cost sums with the same pricing the rest of the engine uses (${stats.costUsd} vs ${expectedCost})`);
+  assert(stats.firstActive === now - 60 * DAY, 'the oldest turn sets firstActive');
+  assert(stats.lastActive === now - DAY, 'the newest turn sets lastActive');
+  assert(stats.byDay.every(d => new Date(d.date).getTime() >= now - 30 * DAY - DAY), 'byDay excludes anything older than 30 days');
+  assert(stats.byDay.reduce((n, d) => n + d.count, 0) === 2, `only the two in-window turns show up in byDay (${stats.byDay.reduce((n, d) => n + d.count, 0)})`);
+  assert(stats.byDay[0].date <= stats.byDay[stats.byDay.length - 1].date, 'byDay is sorted oldest first');
+
+  const empty = await projectStats(fs.mkdtempSync(path.join(os.tmpdir(), 'aico-projstats-empty-')));
+  assert(empty.sessions === 0 && empty.turns === 0 && empty.costUsd === 0 && empty.firstActive === null,
+    'a workspace with no sessions at all answers zeroes, not an error');
+
+  fs.rmSync(cwd, { recursive: true, force: true });
+}
+
+console.log('\n══ PROJECTS: THE LAUNCH DIRECTORY, AND EVERY FOLDER ADDED TO IT ══');
+
+{
+  const launch = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-proj-launch-'));
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-proj-folder-'));
+
+  assert(normalizeProjectPath(`${folder}${path.sep}.`) === normalizeProjectPath(folder), 'normalizeProjectPath resolves . and trailing separators to the same identity');
+
+  const listed = await listProjects(launch);
+  assert(listed.some(p => normalizeProjectPath(p.path) === normalizeProjectPath(launch) && p.isLaunch === true),
+    'the launch directory is always listed, with isLaunch true, even though it was never explicitly added');
+  assert(!listed.some(p => normalizeProjectPath(p.path) === normalizeProjectPath(folder)), 'an unrelated folder is not listed until something puts it there');
+
+  assert(!await isKnownProject(launch, folder), 'a folder nobody has added or launched in is not a known project');
+  const added = await addProject(folder, 'My Folder');
+  assert(added.path === normalizeProjectPath(folder) && added.name === 'My Folder', 'addProject returns the new entry, named');
+  assert(await isKnownProject(launch, folder), 'and now it is known');
+  const again = await addProject(folder, 'Renamed On Purpose');
+  assert(again.name === 'My Folder', 'adding the same path again is a no-op, not a silent rename');
+
+  let threw = '';
+  try { await addProject(path.join(folder, 'does-not-exist')); } catch (err) { threw = err.message; }
+  assert(/No such directory/.test(threw), `addProject refuses a directory that is not there (${threw})`);
+
+  console.log('  -- updateProject: the launch directory has no entry until it is edited --');
+  {
+    // This is the bug the workspace page's "Edit properties" surfaced: a
+    // folder listProjects shows (the launch directory, or any folder a
+    // session has run in without ever being explicitly "added") has no
+    // settings.projects[] entry to update — and updateProject used to just
+    // return false and change nothing, so a person's edit silently vanished.
+    const before = (await loadSettings()).projects ?? [];
+    assert(!before.some(p => normalizeProjectPath(p.path) === normalizeProjectPath(launch)), 'confirmed: nothing is recorded about the launch directory yet');
+
+    const ok = await updateProject(launch, { description: 'The directory the server started in.' });
+    assert(ok === true, 'updateProject succeeds even with no prior entry');
+    const after = (await loadSettings()).projects ?? [];
+    const entry = after.find(p => normalizeProjectPath(p.path) === normalizeProjectPath(launch));
+    assert(entry?.description === 'The directory the server started in.', `the description is actually on disk now (${entry?.description})`);
+
+    const relisted = await listProjects(launch);
+    const launchEntry = relisted.find(p => normalizeProjectPath(p.path) === normalizeProjectPath(launch));
+    assert(launchEntry?.description === 'The directory the server started in.' && launchEntry.isLaunch === true,
+      'and listProjects reflects it, still marked as the launch directory');
+  }
+
+  console.log('  -- updateProject: an existing entry updates in place --');
+  {
+    assert((await updateProject(folder, { name: 'Renamed', color: '#3e63dd', pinned: true })) === true, 'updates an already-configured project');
+    const entry = (await loadSettings()).projects.find(p => normalizeProjectPath(p.path) === normalizeProjectPath(folder));
+    assert(entry.name === 'Renamed' && entry.color === '#3e63dd' && entry.pinned === true, `every patched field lands (${JSON.stringify(entry)})`);
+    assert((await updateProject(folder, { color: '' })) === true, 'a blank value is accepted');
+    const cleared = (await loadSettings()).projects.find(p => normalizeProjectPath(p.path) === normalizeProjectPath(folder));
+    assert(cleared.color === undefined, 'and clears the field rather than storing an empty string');
+  }
+
+  console.log('  -- instructionsFor, and removing --');
+  {
+    await updateProject(folder, { instructions: 'Always run the linter first.' });
+    assert(await instructionsFor(folder) === 'Always run the linter first.', 'instructions are read back for the project itself');
+    assert(await instructionsFor(path.join(folder, 'nested', 'deep')) === undefined, 'but not for a path merely underneath it — instructionsFor matches the project exactly, not a prefix');
+    assert((await instructionsFor(launch)) === undefined, 'a project with a description but no instructions has none');
+
+    assert((await removeProject(folder)) === true, 'removing a configured project succeeds');
+    assert((await removeProject(folder)) === false, 'removing it again is a no-op, reported honestly');
+    assert((await updateProject(launch, { description: '' })) === true, 'the launch directory itself can still be edited after an unrelated project was removed');
+  }
+
+  fs.rmSync(launch, { recursive: true, force: true });
+  fs.rmSync(folder, { recursive: true, force: true });
 }
 
 console.log('\n══ THE PROJECT SAYS WHAT WORKING MEANS ══');

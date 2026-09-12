@@ -365,6 +365,16 @@ export const api = {
     post<ProjectProfileView>('project/profile', { cwd, name, command }),
   forgetProjectCommand: (cwd: string | undefined, name: string) =>
     post<ProjectProfileView>('project/profile', { cwd, name, forget: true }),
+  /** A workspace's commit history, newest first, paginated by the hash to continue before. */
+  gitLog: (path: string, opts: { limit?: number; before?: string } = {}) => {
+    const params = new URLSearchParams({ path });
+    if (opts.limit) params.set('limit', String(opts.limit));
+    if (opts.before) params.set('before', opts.before);
+    return get<GitLogPage>(`project/git-log?${params.toString()}`);
+  },
+  /** Totals across every session a workspace has ever had. */
+  projectStats: (path: string) =>
+    get<ProjectStats>(`project/stats?path=${encodeURIComponent(path)}`),
   /**
    * Make an app from a template. The server also binds its conversation and,
    * for a process app, starts the install in the background — so the answer
@@ -802,6 +812,33 @@ export interface ProjectProfileView {
     packageManager?: { value: string; source: ProfileSource; at: string };
     commands: Record<string, { command: string; source: ProfileSource; at: string; port?: number } | undefined>;
   };
+}
+
+export interface CommitInfo {
+  hash: string;
+  shortHash: string;
+  author: string;
+  /** ISO 8601, author date. */
+  date: string;
+  subject: string;
+}
+
+export interface GitLogPage {
+  cwd: string;
+  isRepo: boolean;
+  commits: CommitInfo[];
+  hasMore: boolean;
+}
+
+/** Totals across every session a workspace has ever had. */
+export interface ProjectStats {
+  cwd: string;
+  sessions: number;
+  turns: number;
+  costUsd: number;
+  firstActive: number | null;
+  lastActive: number | null;
+  byDay: Array<{ date: string; count: number }>;
 }
 
 /** What runs an app: the shared host (page, static), its own process, or nothing served (cli). */

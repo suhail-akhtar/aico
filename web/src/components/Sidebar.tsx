@@ -231,6 +231,9 @@ export function Sidebar(
             acceptsDrop={acceptsDrop(section)}
             onDropSession={id => onDrop(section, id)}
             onOpenApps={() => { onRoute({ ...route, destination: 'apps' }); onClose(); }}
+            {...(section.kind === 'project'
+              ? { onOpenWorkspace: () => { onRoute({ ...route, destination: 'project', projectPath: section.path }); onClose(); } }
+              : {})}
             dense={dense}
             focused={focused}
             rowId={rowId(index)}

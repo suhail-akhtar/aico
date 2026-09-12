@@ -20,18 +20,20 @@
  * @module navigation
  */
 
-export type Destination = 'sessions' | 'apps' | 'system';
+export type Destination = 'sessions' | 'apps' | 'system' | 'project';
 export type SessionTab = 'chat' | 'changes' | 'trajectory';
 
 export interface Route {
   destination: Destination;
   /** Which reading of the open session is shown. Kept while visiting Apps or System, so coming back lands where you were. */
   tab: SessionTab;
+  /** Which workspace, when the destination is `'project'`. An absolute path. */
+  projectPath?: string;
 }
 
 export const DEFAULT_ROUTE: Route = { destination: 'sessions', tab: 'chat' };
 
-const DESTINATIONS: readonly Destination[] = ['sessions', 'apps', 'system'];
+const DESTINATIONS: readonly Destination[] = ['sessions', 'apps', 'system', 'project'];
 const TABS: readonly SessionTab[] = ['chat', 'changes', 'trajectory'];
 
 export function isDestination(value: unknown): value is Destination {
@@ -52,31 +54,45 @@ export function showsSessionTabs(route: Route): boolean {
  *
  * On a destination the header names the place. On the sessions destination it
  * names the conversation, which for a brand-new one is "New session" until the
- * first exchange gives it a title.
+ * first exchange gives it a title. On a workspace page it names the workspace —
+ * `projectLabel` is the caller's job to resolve (a project's own name, falling
+ * back to its last path segment), since this module knows nothing about the
+ * project list.
  */
-export function headerTitle(route: Route, sessionTitle: string | undefined): string {
+export function headerTitle(route: Route, sessionTitle: string | undefined, projectLabel?: string): string {
   if (route.destination === 'apps') return 'Apps';
   if (route.destination === 'system') return 'System';
+  if (route.destination === 'project') return projectLabel?.trim() || 'Workspace';
   return sessionTitle?.trim() || 'New session';
 }
 
 /**
  * The destination a link asked for, if it asked for a valid one.
  *
- * `?view=apps` opens the Apps screen; `?view=system` opens System. Anything
- * else — including the old `miniapps` value, which no surface ever linked to —
- * is ignored rather than guessed at, so a typo lands on the sessions like a
- * plain visit would. Same one-shot contract as `?settings=`: the caller strips
- * the parameter once read, because a deep link is an entry point, not a mode.
+ * `?view=apps` opens the Apps screen; `?view=system` opens System;
+ * `?view=project&path=<encoded absolute path>` opens a workspace page — `path`
+ * is read only alongside `view=project` and ignored otherwise, so it can never
+ * silently attach itself to an unrelated destination. Anything else —
+ * including the old `miniapps` value, which no surface ever linked to — is
+ * ignored rather than guessed at, so a typo lands on the sessions like a plain
+ * visit would. Same one-shot contract as `?settings=`: the caller strips the
+ * parameters once read, because a deep link is an entry point, not a mode.
  */
-export function parseView(search: string): Destination | null {
-  let value: string | null = null;
+export function parseView(search: string): { destination: Destination; projectPath?: string } | null {
+  let params: URLSearchParams;
   try {
-    value = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search).get('view');
+    params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
   } catch {
     return null;
   }
-  return isDestination(value) && value !== 'sessions' ? value : null;
+  const value = params.get('view');
+  if (!isDestination(value) || value === 'sessions') return null;
+  if (value === 'project') {
+    const projectPath = params.get('path')?.trim();
+    if (!projectPath) return null;
+    return { destination: value, projectPath };
+  }
+  return { destination: value };
 }
 
 /** Move to a destination, keeping the session tab for the way back. */

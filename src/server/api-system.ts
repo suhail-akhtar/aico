@@ -266,6 +266,34 @@ export async function handleSystemRoute(
       return { status: 200, body: { cwd, profile: next } };
     }
 
+    // ── workspace page ────────────────────────────────────────────────
+    //
+    // The two pieces of a workspace's history that no session-scoped route
+    // answers: its commit log (`changes.ts` only diffs the working tree
+    // against HEAD) and totals across every session it has ever had (cost
+    // and usage otherwise live only on a currently-open session's tracker).
+    case 'project/git-log': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { gitLog } = await import('./changes.js');
+      const { default: path } = await import('path');
+      const cwd = path.resolve(query.get('path') || process.cwd());
+      const limit = Number(query.get('limit') ?? '30') || 30;
+      const before = query.get('before') || undefined;
+      const page = await gitLog(cwd, { limit, ...(before ? { before } : {}) });
+      return { status: 200, body: { cwd, ...page } };
+    }
+
+    case 'project/stats': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { projectStats } = await import('../project/stats.js');
+      const { default: path } = await import('path');
+      const cwd = path.resolve(query.get('path') || process.cwd());
+      const { loadSettings: loadCurrentSettings } = await import('../settings.js');
+      const settings = await loadCurrentSettings();
+      const stats = await projectStats(cwd, settings);
+      return { status: 200, body: { cwd, ...stats } };
+    }
+
     case 'agents': {
       if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
       const { listAgentSpecs } = await import('../agents/registry.js');
