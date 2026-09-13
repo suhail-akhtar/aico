@@ -194,6 +194,9 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
       if (message?.t === 'open-workspace') {
         void vscode.commands.executeCommand('aico.open'); return;
       }
+      if (message?.t === 'open-workspace-page') {
+        void vscode.commands.executeCommand('aico.openWorkspacePage'); return;
+      }
       /*
         There is nothing to work in, so offer the one thing that fixes it.
 

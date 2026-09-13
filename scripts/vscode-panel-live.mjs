@@ -297,9 +297,17 @@ let panel;
 try {
   console.log('\nVS CODE PANEL — in a real editor\n');
 
+  // Sorted by version, not lexically — "0.6.9" strings greater than "0.6.10"
+  // once picked a stale build over one just packaged, silently testing
+  // whatever the last double-digit-patch release had left behind.
+  const versionOf = (file) => (file.match(/(\d+)\.(\d+)\.(\d+)\.vsix$/) ?? []).slice(1).map(Number);
   const vsix = fs.readdirSync(path.join(repoRoot, 'vscode-extension'))
     .filter(f => f.endsWith('.vsix'))
-    .sort()
+    .sort((a, b) => {
+      const [va, vb] = [versionOf(a), versionOf(b)];
+      for (let i = 0; i < 3; i++) if (va[i] !== vb[i]) return (va[i] ?? 0) - (vb[i] ?? 0);
+      return 0;
+    })
     .pop();
   if (!vsix) throw new Error('no .vsix — run `npm --prefix vscode-extension run package` first');
 
@@ -953,6 +961,88 @@ try {
       return null;
     }, 20_000, 500);
     check(Boolean(kept), `the correction lands as project knowledge the engine loads (${kept ?? 'no file'})`);
+
+    /*
+      ── this folder's workspace page, from the panel's own menu ───────────
+
+      A different claim from everything above: not that the panel works, but
+      that the panel can hand off to the *other* surface — a real second
+      webview panel, opened by a real command, pointed at the real folder
+      this whole editor is open on. The shell that panel loads is a bare
+      iframe with no #root to key on, so it is found by what it points at
+      instead: a src containing `view=project`.
+    */
+    const menuOpened = await evaluate(`
+      (() => {
+        const btn = document.querySelector('button[aria-label="This conversation"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      })()
+    `).catch(() => false);
+    check(menuOpened === true, 'the session menu opens');
+
+    const pageItemClicked = await until(async () => evaluate(`
+      (() => {
+        const btn = [...document.querySelectorAll('button')]
+          .find(b => /open this folder's workspace page/i.test(b.textContent || ''));
+        if (!btn) return false;
+        btn.click();
+        return true;
+      })()
+    `).catch(() => false), 5_000, 250);
+    check(pageItemClicked === true, '"Open this folder\'s workspace page" is in the menu and clickable');
+
+    await workbench.discoverChildren();
+    const workspacePageSrc = await until(async () => {
+      for (const [sessionId, info] of workbench.attached) {
+        /*
+          Not filtered on `info.url` containing "vscode-webview" — the sidebar
+          panel's target reports that, but an editor-tab webview panel's
+          `Target.attachedToTarget` info can carry an empty `url` even once it
+          is fully attached and scriptable. `type === 'iframe'` is what both
+          shapes agree on.
+        */
+        if (info.type !== 'iframe' || sessionId === panelSession.sessionId) continue;
+        try {
+          await workbench.send('Runtime.enable', {}, sessionId);
+          await workbench.discoverChildren(sessionId);
+          for (const contextId of await workbench.frameContexts(sessionId)) {
+            const src = await workbench
+              .evaluate("document.querySelector('iframe')?.src ?? ''", sessionId, contextId)
+              .catch(() => '');
+            if (src.includes('view=project')) return src;
+          }
+        } catch { /* a frame that is gone, or not scriptable */ }
+      }
+      return null;
+    }, 20_000, 1000);
+
+    if (!workspacePageSrc) {
+      console.log('\n  — frames seen, for diagnosis (looking for the workspace-page panel):');
+      for (const [sessionId, info] of workbench.attached) {
+        let iframeSrc = '(not scriptable)';
+        try {
+          await workbench.send('Runtime.enable', {}, sessionId);
+          for (const contextId of await workbench.frameContexts(sessionId)) {
+            const src = await workbench.evaluate("document.querySelector('iframe')?.src ?? '(no iframe)'", sessionId, contextId).catch(() => null);
+            if (src) { iframeSrc = src; break; }
+          }
+        } catch { /* not scriptable */ }
+        console.log(`      ${info.type} url=${(info.url ?? '').slice(0, 90)} iframe=${iframeSrc.slice(0, 90)}`);
+      }
+      const editorTabs = await workbench.evaluate(`
+        [...document.querySelectorAll('.tabs-container .tab .label-name')].map(e => e.textContent).join(' | ')
+      `).catch(() => '(could not read)');
+      console.log(`      open editor tabs: ${editorTabs}\n`);
+    }
+    check(Boolean(workspacePageSrc), `a second panel opens, pointed at a workspace page (${workspacePageSrc ?? 'not found'})`);
+
+    const openedPath = workspacePageSrc ? new URL(workspacePageSrc).searchParams.get('path') : null;
+    check(
+      Boolean(openedPath) && fs.realpathSync(openedPath) === fs.realpathSync(workspace),
+      `and the folder it names is this one (${openedPath ?? 'no path param'})`,
+    );
   }
 } catch (err) {
   failed += 1;

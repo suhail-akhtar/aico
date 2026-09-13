@@ -37,19 +37,21 @@ export class WorkspacePanel {
   private readonly panel: vscode.WebviewPanel;
   private disposed = false;
 
-  static show(server: RunningServer, sessionId?: string, settings?: boolean | string): void {
+  static show(
+    server: RunningServer, sessionId?: string, settings?: boolean | string, project?: string,
+  ): void {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
 
     if (WorkspacePanel.current && !WorkspacePanel.current.disposed) {
       WorkspacePanel.current.panel.reveal(column, true);
-      // Reload only when pointed at a different conversation. Reloading on
-      // every reveal would throw away scroll position and any half-typed
-      // message every time the status bar was clicked.
-      if (sessionId || settings) WorkspacePanel.current.load(server, sessionId, settings);
+      // Reload only when pointed at something different. Reloading on every
+      // reveal would throw away scroll position and any half-typed message
+      // every time the status bar was clicked.
+      if (sessionId || settings || project) WorkspacePanel.current.load(server, sessionId, settings, project);
       return;
     }
 
-    WorkspacePanel.current = new WorkspacePanel(server, column, sessionId, settings);
+    WorkspacePanel.current = new WorkspacePanel(server, column, sessionId, settings, project);
   }
 
   static dispose(): void {
@@ -59,7 +61,7 @@ export class WorkspacePanel {
 
   private constructor(
     server: RunningServer, column: vscode.ViewColumn,
-    sessionId?: string, settings?: boolean | string,
+    sessionId?: string, settings?: boolean | string, project?: string,
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'aico.workspace',
@@ -88,10 +90,10 @@ export class WorkspacePanel {
       WorkspacePanel.current = undefined;
     });
 
-    this.load(server, sessionId, settings);
+    this.load(server, sessionId, settings, project);
   }
 
-  load(server: RunningServer, sessionId?: string, settings?: boolean | string): void {
+  load(server: RunningServer, sessionId?: string, settings?: boolean | string, project?: string): void {
     const target = new URL(`http://localhost:${server.port}/`);
     target.searchParams.set('token', server.token);
     if (sessionId) target.searchParams.set('session', sessionId);
@@ -106,6 +108,13 @@ export class WorkspacePanel {
       right width and one click.
     */
     if (settings) target.searchParams.set('settings', typeof settings === 'string' ? settings : '1');
+    /*
+      Straight to this folder's own page — its properties, its stack, every
+      chat it has had, its commit history, what it has cost. Same deep link
+      the web client answers to (`?view=project&path=`), so the tab and the
+      browser agree about what one looks like.
+    */
+    if (project) { target.searchParams.set('view', 'project'); target.searchParams.set('path', project); }
     this.panel.webview.html = shell(target.toString(), server.port);
   }
 }

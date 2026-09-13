@@ -109,6 +109,11 @@ export function SessionMenu({ title, onRenaming }: {
             onPick={() => { setOpen(false); host.openWorkspace(); }}
           />
           <Item
+            label="Open this folder's workspace page"
+            hint="Its properties, stack, every chat it has had, and its commit history."
+            onPick={() => { setOpen(false); host.openWorkspacePage(); }}
+          />
+          <Item
             label="Settings"
             hint="Providers, models, MCP, skills and memory."
             onPick={() => { setOpen(false); host.openSettings(); }}

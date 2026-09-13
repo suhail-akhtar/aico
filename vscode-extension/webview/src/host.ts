@@ -225,6 +225,7 @@ export function remember(what: { sessionId?: string; model?: string | null }): v
 
 export const host = {
   openWorkspace: () => vscodeApi.postMessage({ t: 'open-workspace' }),
+  openWorkspacePage: () => vscodeApi.postMessage({ t: 'open-workspace-page' }),
   openSettings: (pane?: string) => vscodeApi.postMessage({ t: 'open-settings', ...(pane ? { pane } : {}) }),
   openFolder: () => vscodeApi.postMessage({ t: 'open-folder' }),
 };
