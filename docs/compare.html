@@ -3,22 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aico vs Claude Code, OpenCode, Aider and Cline — compared</title>
-<meta name="description" content="An honest comparison of the aico AI coding agent with Claude Code, OpenCode, Aider, Cline and Cursor — what is genuinely different, and where the alternatives are clearly ahead.">
+<title>aico vs Claude Code, Devin, Replit, Lovable and Bolt.new — compared</title>
+<meta name="description" content="An honest, self-hosted alternative to Claude Code, Codex, OpenCode, Aider, Cline and Cursor — and to the app builders Devin, Replit Agent, Lovable and Bolt.new. What is genuinely different, and where each one is clearly ahead.">
 <!-- seo:start -->
 <link rel="canonical" href="https://suhail-akhtar.github.io/aico/compare.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="aico">
 <meta property="og:url" content="https://suhail-akhtar.github.io/aico/compare.html">
-<meta property="og:title" content="aico vs Claude Code, OpenCode, Aider and Cline — compared">
-<meta property="og:description" content="An honest comparison of the aico AI coding agent with Claude Code, OpenCode, Aider, Cline and Cursor — what is genuinely different, and where the alternatives are clearly ahead.">
+<meta property="og:title" content="aico vs Claude Code, Devin, Replit, Lovable and Bolt.new — compared">
+<meta property="og:description" content="An honest, self-hosted alternative to Claude Code, Codex, OpenCode, Aider, Cline and Cursor — and to the app builders Devin, Replit Agent, Lovable and Bolt.new. What is genuinely different, and where each one is clearly ahead.">
 <meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="aico vs Claude Code, OpenCode, Aider and Cline — compared">
-<meta name="twitter:description" content="An honest comparison of the aico AI coding agent with Claude Code, OpenCode, Aider, Cline and Cursor — what is genuinely different, and where the alternatives are clearly ahead.">
+<meta name="twitter:title" content="aico vs Claude Code, Devin, Replit, Lovable and Bolt.new — compared">
+<meta name="twitter:description" content="An honest, self-hosted alternative to Claude Code, Codex, OpenCode, Aider, Cline and Cursor — and to the app builders Devin, Replit Agent, Lovable and Bolt.new. What is genuinely different, and where each one is clearly ahead.">
 <meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <!-- seo:end -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.17.2</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.19.1</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -51,9 +51,11 @@
   <div class="prose">
     <h1>aico vs the alternatives</h1>
     <p class="lede">
-      There are a lot of good AI coding agents. This page is about where aico is
-      genuinely different, and — because a comparison that only flatters itself is
-      worthless — where the alternatives are ahead.
+      There are a lot of good AI coding agents, and a separate crowd of
+      chat-to-app builders people compare against them anyway. This page
+      covers both: where aico is genuinely different, and — because a
+      comparison that only flatters itself is worthless — where the
+      alternatives are ahead.
     </p>
 
     <div class="note warn">
@@ -91,6 +93,12 @@
         </tbody>
       </table>
     </div>
+    <p style="font-size:.9rem;color:var(--muted)">
+      OpenAI's <a href="https://github.com/openai/codex" rel="noopener">Codex CLI</a>
+      belongs in this table too and is not shown for space — same shape as Claude
+      Code: closed source, no BYOK for third-party models, its own editor
+      extension. It sits where Claude Code does in every row above.
+    </p>
     <p style="font-size:.9rem;color:var(--muted)">
       Compiled August 2026 from each project's own documentation. Fast-moving
       software — check the source before relying on a row.
@@ -235,6 +243,107 @@
       layer, so it is not a second implementation of the agent, and it is not an
       inline-completion tool.
     </p>
+
+    <h2>aico vs the app builders — Devin, Replit Agent, Lovable, Bolt.new</h2>
+    <p>
+      A different shape of product from everything above. Lovable and
+      Bolt.new are chat-to-app builders — prompt in, app out, one review cycle
+      at a time. Replit Agent is a full hosted platform (editor, database,
+      auth, deploy) with an agent built in. Devin is an autonomous agent for
+      an existing repo, closer to what aico is, but cloud-hosted and
+      subscription-only. Anyone deciding how an AI should build their project
+      ends up weighing these against a terminal agent anyway, so here is the
+      honest look.
+    </p>
+
+    <div class="note warn">
+      <p>
+        <strong>The honest part, again.</strong> All four of these have been
+        used by vastly more people, for vastly longer, than aico has. Lovable
+        reported $17M in ARR within three months of an update; Replit and
+        Bolt.new each have large, active user bases. Devin has independently
+        measured benchmark results (SWE-bench) and third-party trial reports —
+        aico has neither yet. If what you want is the tool with the most
+        real-world hours logged against it, one of these four is that tool
+        today, and saying otherwise would be the exact mistake this page
+        already warns against.
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>&nbsp;</th><th>aico</th><th>Devin</th><th>Replit Agent</th><th>Lovable</th><th>Bolt.new</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Open source</td><td>MIT</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+          <tr><td>Self-hosted</td><td>Yes</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+          <tr><td>Bring your own key</td><td>Yes, 7+ providers</td><td>No</td><td>Partial (paid plans)</td><td>No</td><td>Partial (Bedrock)</td></tr>
+          <tr><td>Stack</td><td>9 templates, or custom</td><td>Your existing repo</td><td>Flexible, hosted-locked</td><td>Fixed: Vite + React + Supabase</td><td>Mostly fixed, Claude-generated</td></tr>
+          <tr><td>Pricing model</td><td>Pay your provider, no markup</td><td>$20/mo + ~$2.25 per unit of work</td><td>Per-checkpoint, effort-based</td><td>Monthly + credits</td><td>Free tier, then token packs</td></tr>
+          <tr><td>Real spend, publicly reported</td><td>Cents per app in this project's own tests</td><td>Usage-driven, well past the $20 door fee</td><td>Reports up to $1,900+ in weeks on a small app</td><td>$30–400+/mo once credits and Supabase are added</td><td>Usually within the token plan</td></tr>
+          <tr><td>Autonomy</td><td>Plans, builds, verifies; you approve</td><td>Most autonomous — own sandbox, PR + human merge</td><td>Agentic; frequent correction reported</td><td>Turn-by-turn, not autonomous</td><td>Turn-by-turn, not autonomous</td></tr>
+          <tr><td>Independent benchmark</td><td>None yet</td><td>SWE-bench + third-party trials</td><td>None found</td><td>None found</td><td>None found</td></tr>
+          <tr><td>Git history</td><td>Every app, from the first commit</td><td>Yours already</td><td>Not the default flow</td><td>Exportable</td><td>One-click export</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Pricing and spend figures are publicly reported by each vendor or by
+      users of theirs, compiled September 2026 — check the current plan pages
+      before relying on a number here.
+    </p>
+
+    <h3>Where aico is genuinely different</h3>
+    <ul>
+      <li>
+        <strong>No markup on the model.</strong> There is no credits system and
+        no per-checkpoint billing — you pay whichever provider you chose,
+        directly, at their price. A full-stack template build in this
+        project's own live tests costs a few cents to about fifteen.
+      </li>
+      <li>
+        <strong>Bring your own key, genuinely.</strong> Seven providers plus
+        local Ollama, none of the four above offer that; the best any of them
+        do is let a paid plan route through your own cloud account.
+      </li>
+      <li>
+        <strong>The stack is a decision, not a default.</strong> Nine fixed
+        templates for the well-trodden shapes, or hand the brief to the agent
+        and get a stack it chose and justified in the PRD — never one
+        framework you are stuck with.
+      </li>
+      <li>
+        <strong>Ownership from the first commit,</strong> not an export
+        button. Every app gets its own git history the moment it exists.
+      </li>
+    </ul>
+
+    <h3>Where they are ahead</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>If you want…</th><th>Use</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>The most autonomous agent, with independently-verified benchmark results</td>
+            <td><a href="https://devin.ai" rel="noopener">Devin</a></td>
+          </tr>
+          <tr>
+            <td>One hosted platform — editor, database, auth and deploy — with nothing to install</td>
+            <td><a href="https://replit.com" rel="noopener">Replit</a></td>
+          </tr>
+          <tr>
+            <td>The fastest path from a sentence to a working visual prototype, no code read required</td>
+            <td><a href="https://lovable.dev" rel="noopener">Lovable</a> or
+                <a href="https://bolt.new" rel="noopener">Bolt.new</a></td>
+          </tr>
+          <tr>
+            <td>The largest real-world track record of any tool on this page</td>
+            <td>Any of the four above — all have far more hours logged than aico does</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <h2>Who it is actually for</h2>
     <ul>

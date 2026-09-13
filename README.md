@@ -6,6 +6,13 @@ licensed: **bring your own API key** for OpenAI, Anthropic, OpenRouter, Google
 Gemini, Moonshot Kimi, Z.AI (GLM) or DeepSeek — or run it entirely offline against a local
 **Ollama** model.
 
+A self-hosted, open-source alternative to **Claude Code**, **Codex**,
+**Devin**, **Replit Agent**, **Lovable** and **Bolt.new** — a real coding
+agent (terminal, web portal, VS Code) plus a template-or-custom-stack app
+builder in one, for people who want to keep their own key, their own git
+history and their own code rather than pay a platform's markup on top of the
+model.
+
 It opens what it builds in a real browser before calling a turn done, keeps one
 supervised ledger of everything running in the background, speaks **MCP** so
 another AI can hand it work, turns your corrections into knowledge it keeps, and
@@ -24,15 +31,18 @@ can measure its own skills against tasks with known answers.
 ❯ _
 ```
 
-**Status:** `0.17.2`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.19.1`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
 background supervision, visuals and Apps.
 
-**How does it compare to Claude Code, OpenCode, Aider or Cline?**
+**How does it compare to Claude Code, Codex, OpenCode, Aider or Cline — or to
+Devin, Replit Agent, Lovable and Bolt.new?**
 [There is an honest page for that](https://suhail-akhtar.github.io/aico/compare.html),
-including where those are clearly ahead.
+including where those are clearly ahead — cost structure, ownership and
+model choice are where aico differs; hours of real-world use and independent
+verification are where it does not, yet.
 
 New here? [**GUIDE.md**](GUIDE.md) walks through actually using it — the web
 client, planning before building, what the checks are doing when they push back,
@@ -43,7 +53,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.17.2 serve
+npx github:suhail-akhtar/aico#v0.19.1 serve
 ```
 
 ## Why this one
@@ -82,10 +92,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.17.2 serve
+npx github:suhail-akhtar/aico#v0.19.1 serve
 ```
 
-`#v0.17.2` is a tag, so it pins that release. `#release/v0.17` follows the 0.17
+`#v0.19.1` is a tag, so it pins that release. `#release/v0.19` follows the 0.19
 line as it gets fixes, and `#main` is the development trunk.
 
 To have `aico` on your `PATH` — which the VS Code extension needs — install it
@@ -93,7 +103,7 @@ globally from the same tag. aico is not on the npm registry; this builds from
 source and takes a minute the first time:
 
 ```sh
-npm install -g github:suhail-akhtar/aico#v0.17.2
+npm install -g github:suhail-akhtar/aico#v0.19.1
 ```
 
 From source:
