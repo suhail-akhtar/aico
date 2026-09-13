@@ -3,6 +3,31 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.19.1 — 2026-09-13
+
+The VS Code extension had gone five releases (0.17.1 through 0.19.0) without
+a rebuild — still shipping VSIX `0.6.10`, so a marketplace install today
+carried none of that work. This catches it up and adds one native piece: the
+sidebar panel is always scoped to the one folder VS Code has open, so — unlike
+the web portal, which juggles several — a path indicator would have nothing
+to disambiguate; a direct link to *that* folder's new workspace page does.
+
+### Added
+
+- **"Open this folder's workspace page"**, in the panel's `⋯` menu beside
+  "Open the full workspace" — opens an editor tab straight to the current
+  folder's properties, stack, chats and commit history
+  (`aico.openWorkspacePage`, also reachable from the command palette).
+  `WorkspacePanel` gained a `project` parameter that sets `view=project&path=`
+  on the embedded iframe, the same deep link the web client answers to.
+
+### Fixed
+
+- `scripts/vscode-panel-live.mjs` (the extension's live-VS-Code test) picked
+  its VSIX by lexical string sort — `"0.6.9" > "0.6.10"` as strings — so it
+  had been silently testing a stale build for a while. Sorts by parsed
+  version now.
+
 ## 0.19.0 — 2026-09-12
 
 A workspace was a label in the sidebar and nothing else — clicking one only

@@ -25,6 +25,7 @@ import { ServerManager } from './server';
 import { WorkspacePanel } from './panel';
 import { StatusBar } from './status';
 import { AicoViewProvider, supportsSecondarySidebar } from './view/provider';
+import { canonicalFolder } from './paths';
 
 /**
  * Activated on `onStartupFinished`, not on first command.
@@ -140,6 +141,23 @@ export function activate(context: vscode.ExtensionContext): void {
       const running = await ready();
       if (running) {
         WorkspacePanel.show(running);
+        status.refresh();
+      }
+    }),
+
+    /*
+      This folder's own page — its properties, its stack, every chat it has
+      had, its commit history, what it has cost. The sidebar panel is always
+      scoped to one folder already, so there is no picker here: it is the one
+      VS Code has open, the same folder `boot.folder` resolves to everywhere
+      else in this extension.
+    */
+    vscode.commands.registerCommand('aico.openWorkspacePage', async () => {
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!folder) return;
+      const running = await ready();
+      if (running) {
+        WorkspacePanel.show(running, undefined, undefined, canonicalFolder(folder));
         status.refresh();
       }
     }),
