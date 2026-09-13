@@ -89,11 +89,18 @@ const META = {
       + 'another AI can delegate work to aico.',
   },
   'compare.html': {
-    title: 'aico vs Claude Code, OpenCode, Aider and Cline — compared',
+    title: 'aico vs Claude Code, Devin, Replit, Lovable and Bolt.new — compared',
     description:
-      'An honest comparison of the aico AI coding agent with Claude Code, OpenCode, Aider, '
-      + 'Cline and Cursor — what is genuinely different, and where the alternatives are '
-      + 'clearly ahead.',
+      'An honest, self-hosted alternative to Claude Code, Codex, OpenCode, Aider, Cline and '
+      + 'Cursor — and to the app builders Devin, Replit Agent, Lovable and Bolt.new. What is '
+      + 'genuinely different, and where each one is clearly ahead.',
+  },
+  'vscode.html': {
+    title: 'aico in VS Code — a native panel, not a web page in a frame',
+    description:
+      'aico runs in a tab of its own in the VS Code Secondary Side Bar. Edits land as '
+      + 'WorkspaceEdits so Ctrl+Z takes them back, approvals are native modals, and the '
+      + 'agent can read your Problems panel and run your tasks.json tasks.',
   },
   'widgets.html': {
     title: 'Charts, diagrams and maths in AI agent answers — aico',
