@@ -19,18 +19,22 @@ For a served app: `AppManage start` if it is not running, then `VerifyApp` on th
 
 Console errors, failed requests, and unhandled rejections in the verdict are defects even when the check passed. Fix them; verify again. A verdict from before the fix is not evidence.
 
-## 4. Tidy the trail
+## 4. Interrogate each check before trusting it
+
+A check that only loads a page proves the page loads, nothing else. For each check that passed, ask: would it also have passed against a plausible wrong implementation — the guard missing, the sort unchanged, the state lost on reload? If yes, the check proved presence, not behaviour, and is not evidence yet. Strengthen it (assert the rejection, the new order, the value after reload) or, if the app has no way to satisfy the requirement at all, report FAIL and name what's missing — do not report a requirement as met because nothing in the UI complained.
+
+## 5. Tidy the trail
 
 - Remove dead code, commented-out blocks, unused imports and `console.log` left from debugging.
 - Grep for `Placeholder` and `lorem`: templates mark what to write with them, and none may reach a user.
 - Every form control has a label; every image `alt`; focus is visible; Escape closes a dialog; Enter submits a form; the page survives a 390px viewport.
 - Error states say what is wrong, where it is wrong, in words a user would use.
 
-## 5. Tick and record
+## 6. Tick and record
 
 Tick each story in `.aico/backlog.md` whose "Done when" was observed — only those. Update TodoWrite to match. Add a CHANGELOG line if the project keeps one.
 
-## 6. Report exactly what was verified
+## 7. Report exactly what was verified
 
 Finish with a short list: each requirement, the check that covered it, and its result — plus anything not covered and why. Never write "everything works"; name the checks.
 
@@ -40,3 +44,4 @@ Finish with a short list: each requirement, the check that covered it, and its r
 - Write checks that only load the page when it has controls to exercise.
 - Delete a failing test to make the suite green; fix the code or say the test is wrong and why.
 - Claim coverage of a requirement no check exercised.
+- Report a check as passing because nothing complained, without asking what wrong behaviour it would have caught.
