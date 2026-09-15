@@ -1,0 +1,27 @@
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 6c9ecbc..3c215a6 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -346,7 +346,7 @@ class ContinuousBase(Scale):
+                 vmin, vmax = data.min(), data.max()
+             else:
+                 vmin, vmax = new.norm
+-            vmin, vmax = axis.convert_units((vmin, vmax))
++            vmin, vmax = map(float, axis.convert_units((vmin, vmax)))
+             a = forward(vmin)
+             b = forward(vmax) - forward(vmin)
+ 
+diff --git a/tests/test_core.py b/tests/test_core.py
+index 798a8d6..6652587 100644
+--- a/tests/test_core.py
++++ b/tests/test_core.py
+@@ -1294,9 +1294,6 @@ class TestVectorPlotter:
+             ["numeric", "category", "datetime"]
+         )
+     )
+-    @pytest.mark.parametrize(
+-        "NA,var_type",
+-    )
+     def comp_data_missing_fixture(self, request):
+ 
+         # This fixture holds the logic for parameterizing
