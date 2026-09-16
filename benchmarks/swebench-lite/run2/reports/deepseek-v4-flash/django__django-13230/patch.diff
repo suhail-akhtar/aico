@@ -1,0 +1,40 @@
+diff --git a/django/contrib/syndication/views.py b/django/contrib/syndication/views.py
+index 68ffb0bfe0..a09cc5fe74 100644
+--- a/django/contrib/syndication/views.py
++++ b/django/contrib/syndication/views.py
+@@ -214,6 +214,7 @@ class Feed:
+                 author_link=author_link,
+                 categories=self._get_dynamic_attr('item_categories', item),
+                 item_copyright=self._get_dynamic_attr('item_copyright', item),
++                comments=self._get_dynamic_attr('item_comments', item),
+                 **self.item_extra_kwargs(item)
+             )
+         return feed
+diff --git a/docs/ref/contrib/syndication.txt b/docs/ref/contrib/syndication.txt
+index 13aa944e8a..b8ff26159d 100644
+--- a/docs/ref/contrib/syndication.txt
++++ b/docs/ref/contrib/syndication.txt
+@@ -889,6 +889,23 @@ This example illustrates all possible attributes and methods for a
+ 
+         item_copyright = 'Copyright (c) 2007, Sally Smith' # Hard-coded copyright notice.
+ 
++        # ITEM COMMENTS -- One of the following three is optional. The
++        # framework looks for them in this order. These are only used in RSS
++        # feeds.
++
++        def item_comments(self, obj):
++            """
++            Takes an item, as returned by items(), and returns the item's
++            comments as a normal Python string.
++            """
++
++        def item_comments(self):
++            """
++            Returns the comments for every item in the feed.
++            """
++
++        item_comments = 'http://www.example.com/comments' # Hard-coded comments.
++
+ 
+ The low-level framework
+ =======================

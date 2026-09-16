@@ -17,6 +17,8 @@ Two strategies:
 Usage:
     pip install datasets   # in a throwaway venv, never the system Python
     python scripts/swebench-select-instances.py --strategy random --count 40 --seed 20260915 --out instances.json
+    # exclude instances an earlier run already covered, to build toward full coverage:
+    python scripts/swebench-select-instances.py --strategy random --count 40 --seed 7 --exclude-ids-file run1/instance_ids.txt --out run2/instances.json
 """
 import argparse
 import json
@@ -30,12 +32,19 @@ parser.add_argument("--out", default="instances.json")
 parser.add_argument("--strategy", choices=["random", "diverse"], default="random")
 parser.add_argument("--seed", type=int, default=20260915)
 parser.add_argument("--skip-repos", nargs="*", default=[])
+parser.add_argument("--exclude-ids-file", default=None, help="path to a whitespace-separated instance-id file (e.g. a prior run's instance_ids.txt) to exclude from selection")
 args = parser.parse_args()
 
 ds = load_dataset("princeton-nlp/SWE-bench_Lite", split="test")
 print("total instances:", len(ds))
 
-rows = [r for r in ds if r["repo"] not in args.skip_repos]
+exclude_ids = set()
+if args.exclude_ids_file:
+    with open(args.exclude_ids_file, encoding="utf-8") as f:
+        exclude_ids = set(f.read().split())
+    print(f"excluding {len(exclude_ids)} previously-used instance ids")
+
+rows = [r for r in ds if r["repo"] not in args.skip_repos and r["instance_id"] not in exclude_ids]
 
 if args.strategy == "random":
     rng = random.Random(args.seed)
