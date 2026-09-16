@@ -1,0 +1,70 @@
+{
+  "model": "deepseek-v4-flash",
+  "brief": "team-goals",
+  "title": "Goalboard",
+  "slug": "goalboard",
+  "appDir": "C:\\Users\\Suhail Akhtar\\AppData\\Local\\Temp\\aico-build-custom-LDeQcU\\workspace\\miniapps\\goalboard",
+  "testHome": "C:\\Users\\SUHAIL~1\\AppData\\Local\\Temp\\aico-apps-build-custom-live-home-EbM0ni\\.aico",
+  "turns": [
+    {
+      "label": "turn1",
+      "minutes": 20.44,
+      "steps": 99,
+      "toolCalls": 226,
+      "counts": {
+        "Skill": 4,
+        "Bash": 43,
+        "AppManage": 9,
+        "TodoWrite": 6,
+        "Write": 41,
+        "Edit": 77,
+        "Read": 6,
+        "RunChecks": 16,
+        "Supervise": 2,
+        "VerifyApp": 21,
+        "WorkspaceInfo": 1
+      },
+      "verifyCalls": 21,
+      "stepChecks": 103,
+      "end": {
+        "turn": 1,
+        "reason": {
+          "kind": "completed"
+        }
+      },
+      "backlog": {
+        "done": 6,
+        "open": 0
+      },
+      "usage": {
+        "inputTokens": 15890092,
+        "outputTokens": 198333,
+        "cachedTokens": 15570560,
+        "cacheWriteTokens": 0,
+        "sessions": 99,
+        "costUsd": 0.143865288,
+        "costEstimated": true,
+        "usageEstimated": false,
+        "contextWindow": 1000000
+      }
+    }
+  ],
+  "backlog": {
+    "done": 6,
+    "open": 0
+  },
+  "usage": {
+    "inputTokens": 15890092,
+    "outputTokens": 198333,
+    "cachedTokens": 15570560,
+    "cacheWriteTokens": 0,
+    "sessions": 99,
+    "costUsd": 0.143865288,
+    "costEstimated": true,
+    "usageEstimated": false,
+    "contextWindow": 1000000
+  },
+  "passed": 17,
+  "failed": 0,
+  "fails": []
+}

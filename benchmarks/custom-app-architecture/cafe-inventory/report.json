@@ -1,0 +1,55 @@
+{
+  "model": "deepseek-v4-flash",
+  "brief": "cafe-inventory",
+  "slug": "stockcup",
+  "failed": 1,
+  "fails": [
+    "turn1: the turn completed ({\"turn\":1,\"reason\":{\"kind\":\"error\",\"message\":\"Agent exceeded the iteration cap (100) without finishing. Increase settings.maxIterations or restructure the task into smaller sub-tasks.\",\"code\":\"UNKNOWN\"}})"
+  ],
+  "turns": [
+    {
+      "label": "turn1",
+      "minutes": 13.82,
+      "steps": 100,
+      "toolCalls": 153,
+      "counts": {
+        "Skill": 3,
+        "Bash": 27,
+        "AppManage": 3,
+        "Supervise": 3,
+        "Write": 31,
+        "TodoWrite": 2,
+        "Read": 12,
+        "RunChecks": 10,
+        "Edit": 48,
+        "VerifyApp": 13,
+        "Git": 1
+      },
+      "verifyCalls": 13,
+      "stepChecks": 33,
+      "end": {
+        "turn": 1,
+        "reason": {
+          "kind": "error",
+          "message": "Agent exceeded the iteration cap (100) without finishing. Increase settings.maxIterations or restructure the task into smaller sub-tasks.",
+          "code": "UNKNOWN"
+        }
+      },
+      "backlog": {
+        "done": 3,
+        "open": 2
+      },
+      "usage": {
+        "inputTokens": 11659288,
+        "outputTokens": 133578,
+        "cachedTokens": 11404800,
+        "cacheWriteTokens": 0,
+        "sessions": 100,
+        "costUsd": 0.10496360000000002,
+        "costEstimated": true,
+        "usageEstimated": false,
+        "contextWindow": 1000000
+      }
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "model": "deepseek-v4-flash",
+  "brief": "note-board",
+  "title": "Stickyboard",
+  "slug": "stickyboard",
+  "appDir": "C:\\Users\\Suhail Akhtar\\AppData\\Local\\Temp\\aico-build-custom-J6apc8\\workspace\\miniapps\\stickyboard",
+  "testHome": "C:\\Users\\SUHAIL~1\\AppData\\Local\\Temp\\aico-apps-build-custom-live-home-Yb62ox\\.aico",
+  "turns": [
+    {
+      "label": "turn1",
+      "minutes": 10.38,
+      "steps": 60,
+      "toolCalls": 97,
+      "counts": {
+        "Skill": 3,
+        "LS": 1,
+        "Bash": 29,
+        "Read": 7,
+        "AppManage": 2,
+        "Write": 21,
+        "TodoWrite": 2,
+        "Edit": 15,
+        "RunChecks": 6,
+        "VerifyApp": 8,
+        "Git": 1,
+        "Supervise": 2
+      },
+      "verifyCalls": 8,
+      "stepChecks": 54,
+      "end": {
+        "turn": 1,
+        "reason": {
+          "kind": "completed"
+        }
+      },
+      "backlog": {
+        "done": 5,
+        "open": 0
+      },
+      "usage": {
+        "inputTokens": 6130741,
+        "outputTokens": 99213,
+        "cachedTokens": 5937664,
+        "cacheWriteTokens": 0,
+        "sessions": 60,
+        "costUsd": 0.0714358792,
+        "costEstimated": true,
+        "usageEstimated": false,
+        "contextWindow": 1000000
+      }
+    }
+  ],
+  "backlog": {
+    "done": 5,
+    "open": 0
+  },
+  "usage": {
+    "inputTokens": 6130741,
+    "outputTokens": 99213,
+    "cachedTokens": 5937664,
+    "cacheWriteTokens": 0,
+    "sessions": 60,
+    "costUsd": 0.0714358792,
+    "costEstimated": true,
+    "usageEstimated": false,
+    "contextWindow": 1000000
+  },
+  "passed": 17,
+  "failed": 0,
+  "fails": []
+}

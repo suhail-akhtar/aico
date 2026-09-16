@@ -1,0 +1,70 @@
+{
+  "model": "deepseek-v4-flash",
+  "brief": "timeoff",
+  "title": "DaysOff",
+  "slug": "daysoff",
+  "appDir": "C:\\Users\\Suhail Akhtar\\AppData\\Local\\Temp\\aico-build-custom-f7huyn\\workspace\\miniapps\\daysoff",
+  "testHome": "C:\\Users\\SUHAIL~1\\AppData\\Local\\Temp\\aico-apps-build-custom-live-home-rLNdUf\\.aico",
+  "turns": [
+    {
+      "label": "turn1",
+      "minutes": 14.59,
+      "steps": 96,
+      "toolCalls": 151,
+      "counts": {
+        "Skill": 4,
+        "Bash": 18,
+        "AppManage": 9,
+        "Write": 34,
+        "TodoWrite": 3,
+        "Supervise": 4,
+        "Read": 5,
+        "Edit": 52,
+        "RunChecks": 13,
+        "VerifyApp": 8,
+        "Git": 1
+      },
+      "verifyCalls": 8,
+      "stepChecks": 41,
+      "end": {
+        "turn": 1,
+        "reason": {
+          "kind": "completed"
+        }
+      },
+      "backlog": {
+        "done": 5,
+        "open": 0
+      },
+      "usage": {
+        "inputTokens": 11333602,
+        "outputTokens": 136341,
+        "cachedTokens": 11084800,
+        "cacheWriteTokens": 0,
+        "sessions": 96,
+        "costUsd": 0.1040452,
+        "costEstimated": true,
+        "usageEstimated": false,
+        "contextWindow": 1000000
+      }
+    }
+  ],
+  "backlog": {
+    "done": 5,
+    "open": 0
+  },
+  "usage": {
+    "inputTokens": 11333602,
+    "outputTokens": 136341,
+    "cachedTokens": 11084800,
+    "cacheWriteTokens": 0,
+    "sessions": 96,
+    "costUsd": 0.1040452,
+    "costEstimated": true,
+    "usageEstimated": false,
+    "contextWindow": 1000000
+  },
+  "passed": 17,
+  "failed": 0,
+  "fails": []
+}
