@@ -1,0 +1,69 @@
+{
+  "model": "deepseek-v4-flash",
+  "brief": "venue-scheduling",
+  "title": "VenueSlot",
+  "slug": "venueslot",
+  "appDir": "C:\\Users\\Suhail Akhtar\\AppData\\Local\\Temp\\aico-build-custom-9AyBFQ\\workspace\\miniapps\\venueslot",
+  "testHome": "C:\\Users\\SUHAIL~1\\AppData\\Local\\Temp\\aico-apps-build-custom-live-home-rvtFDk\\.aico",
+  "turns": [
+    {
+      "label": "turn1",
+      "minutes": 15.58,
+      "steps": 87,
+      "toolCalls": 158,
+      "counts": {
+        "Skill": 3,
+        "Bash": 29,
+        "Write": 31,
+        "Read": 5,
+        "TodoWrite": 6,
+        "AppManage": 1,
+        "RunChecks": 13,
+        "Edit": 60,
+        "VerifyApp": 9,
+        "Git": 1
+      },
+      "verifyCalls": 9,
+      "stepChecks": 34,
+      "end": {
+        "turn": 1,
+        "reason": {
+          "kind": "completed"
+        }
+      },
+      "backlog": {
+        "done": 5,
+        "open": 0
+      },
+      "usage": {
+        "inputTokens": 11089118,
+        "outputTokens": 139508,
+        "cachedTokens": 10841472,
+        "cacheWriteTokens": 0,
+        "sessions": 87,
+        "costUsd": 0.10408880160000002,
+        "costEstimated": true,
+        "usageEstimated": false,
+        "contextWindow": 1000000
+      }
+    }
+  ],
+  "backlog": {
+    "done": 5,
+    "open": 0
+  },
+  "usage": {
+    "inputTokens": 11089118,
+    "outputTokens": 139508,
+    "cachedTokens": 10841472,
+    "cacheWriteTokens": 0,
+    "sessions": 87,
+    "costUsd": 0.10408880160000002,
+    "costEstimated": true,
+    "usageEstimated": false,
+    "contextWindow": 1000000
+  },
+  "passed": 17,
+  "failed": 0,
+  "fails": []
+}
