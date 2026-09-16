@@ -41,8 +41,12 @@ background supervision, visuals and Apps.
 Devin, Replit Agent, Lovable and Bolt.new?**
 [There is an honest page for that](https://suhail-akhtar.github.io/aico/compare.html),
 including where those are clearly ahead — cost structure, ownership and
-model choice are where aico differs; hours of real-world use and independent
-verification are where it does not, yet.
+model choice are where aico differs; hours of real-world use and
+independently-*audited* verification are where it does not, yet. It does
+have a real, self-run number: **73 of 80 (91%) real SWE-bench Lite
+instances resolved**, across two independent random samples, working
+blind — [methodology and full evidence in the
+repo](benchmarks/swebench-lite/README.md).
 
 New here? [**GUIDE.md**](GUIDE.md) walks through actually using it — the web
 client, planning before building, what the checks are doing when they push back,
