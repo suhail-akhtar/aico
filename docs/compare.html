@@ -261,12 +261,13 @@
         <strong>The honest part, again.</strong> All four of these have been
         used by vastly more people, for vastly longer, than aico has. Lovable
         reported $17M in ARR within three months of an update; Replit and
-        Bolt.new each have large, active user bases. Devin has independently
-        measured benchmark results (SWE-bench) and third-party trial reports —
-        aico has neither yet. If what you want is the tool with the most
-        real-world hours logged against it, one of these four is that tool
-        today, and saying otherwise would be the exact mistake this page
-        already warns against.
+        Bolt.new each have large, active user bases. Devin has
+        independently-verified benchmark results (SWE-bench) and third-party
+        trial reports — aico's own numbers, below, are self-run, not
+        independently audited, and should be read with that difference in
+        mind. If what you want is the tool with the most real-world hours
+        logged against it, one of these four is that tool today, and saying
+        otherwise would be the exact mistake this page already warns against.
       </p>
     </div>
 
@@ -284,6 +285,7 @@
           <tr><td>Real spend, publicly reported</td><td>Cents per app in this project's own tests</td><td>Usage-driven, well past the $20 door fee</td><td>Reports up to $1,900+ in weeks on a small app</td><td>$30–400+/mo once credits and Supabase are added</td><td>Usually within the token plan</td></tr>
           <tr><td>Autonomy</td><td>Plans, builds, verifies; you approve</td><td>Most autonomous — own sandbox, PR + human merge</td><td>Agentic; frequent correction reported</td><td>Turn-by-turn, not autonomous</td><td>Turn-by-turn, not autonomous</td></tr>
           <tr><td>Independent benchmark</td><td>None yet</td><td>SWE-bench + third-party trials</td><td>None found</td><td>None found</td><td>None found</td></tr>
+          <tr><td>Self-run SWE-bench Lite result</td><td>91% resolved (n=80, two independent random samples, no overlap) — <a href="https://github.com/suhail-akhtar/aico/tree/main/benchmarks/swebench-lite">evidence in repo</a></td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
           <tr><td>Git history</td><td>Every app, from the first commit</td><td>Yours already</td><td>Not the default flow</td><td>Exportable</td><td>One-click export</td></tr>
         </tbody>
       </table>
@@ -293,6 +295,26 @@
       users of theirs, compiled September 2026 — check the current plan pages
       before relying on a number here.
     </p>
+
+    <div class="note">
+      <p>
+        <strong>A real SWE-bench result, self-run.</strong> aico resolved
+        73 of 80 real SWE-bench Lite instances (91%) across two independent,
+        non-overlapping random samples — working blind, with no dependency
+        install and no local test execution, on the open-weight
+        <code>deepseek-v4-flash</code> model. Every failure in both runs was
+        individually checked against its actual test output, not just the
+        grading harness's aggregate score. This is <em>not</em> an
+        independently-audited or leaderboard-submitted number — it is
+        self-produced, using the standard <code>swebench</code> harness, and
+        SWE-bench's well-known contamination risk (these are years-old
+        public GitHub fixes) applies here as it does to any model's score.
+        Read that as "produced the correct patch reliably," not proof of
+        reasoning on genuinely unseen code. Full methodology, per-repo
+        breakdown, and every patch and test log are in the repo at
+        <a href="https://github.com/suhail-akhtar/aico/tree/main/benchmarks/swebench-lite">benchmarks/swebench-lite</a>.
+      </p>
+    </div>
 
     <h3>Where aico is genuinely different</h3>
     <ul>
