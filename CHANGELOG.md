@@ -3,6 +3,27 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.19.2 — 2026-09-17
+
+`defaultModel` and `settings` are loaded once, at each client's own startup
+— the web portal, the VS Code panel, a second browser tab. Change the model
+in one and the others kept showing what they loaded at boot; `settings`
+routes are deliberately poll-only (see `server/api-system.ts`'s own header
+comment), so nothing was pushing the change out.
+
+### Fixed
+
+- Providers and settings now re-fetch when a client regains focus
+  (`use-refresh-on-focus.ts`, wired into both the web portal's `App.tsx` and
+  the VS Code panel), which is the moment a stale copy actually bites:
+  change the model elsewhere, switch back, it is already current. VS Code
+  webviews implement the Page Visibility API, so this fires there the same
+  as an ordinary browser tab.
+- The model picker's existing refresh button now also pulls in a model or
+  key changed from another open client, not just the provider's catalogue —
+  a manual affordance for the moment before focus-refresh would have caught
+  it anyway.
+
 ## 0.19.1 — 2026-09-13
 
 The VS Code extension had gone five releases (0.17.1 through 0.19.0) without
