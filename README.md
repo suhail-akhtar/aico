@@ -31,7 +31,7 @@ can measure its own skills against tasks with known answers.
 ❯ _
 ```
 
-**Status:** `0.19.1`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.19.2`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
@@ -57,7 +57,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.19.1 serve
+npx github:suhail-akhtar/aico#v0.19.2 serve
 ```
 
 ## Why this one
@@ -96,10 +96,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.19.1 serve
+npx github:suhail-akhtar/aico#v0.19.2 serve
 ```
 
-`#v0.19.1` is a tag, so it pins that release. `#release/v0.19` follows the 0.19
+`#v0.19.2` is a tag, so it pins that release. `#release/v0.19` follows the 0.19
 line as it gets fixes, and `#main` is the development trunk.
 
 To have `aico` on your `PATH` — which the VS Code extension needs — install it
@@ -107,7 +107,7 @@ globally from the same tag. aico is not on the npm registry; this builds from
 source and takes a minute the first time:
 
 ```sh
-npm install -g github:suhail-akhtar/aico#v0.19.1
+npm install -g github:suhail-akhtar/aico#v0.19.2
 ```
 
 From source:

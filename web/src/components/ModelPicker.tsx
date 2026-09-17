@@ -44,6 +44,7 @@ export function ModelPicker(): React.ReactElement {
   const setModel = useStore(s => s.setModel);
   const providers = useStore(s => s.providers);
   const activeProvider = useStore(s => s.activeProvider);
+  const refreshProviders = useStore(s => s.refreshProviders);
 
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<string[] | null>(null);
@@ -60,7 +61,12 @@ export function ModelPicker(): React.ReactElement {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.providerModels();
+      // Alongside the catalogue: `defaultModel`/`activeProvider` were loaded
+      // once at startup, so this is also the one button that can pull in a
+      // model or a key changed from another open client (the web portal, the
+      // VS Code panel, a second tab) without waiting for this one to regain
+      // focus.
+      const [result] = await Promise.all([api.providerModels(), refreshProviders()]);
       setModels(result.models);
       setCaps(result.capabilities ?? {});
       if (result.error) setError(result.error);
@@ -70,7 +76,7 @@ export function ModelPicker(): React.ReactElement {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshProviders]);
 
   // The catalogue belongs to the provider, so a different one invalidates it.
   useEffect(() => { setModels(null); setCaps({}); }, [activeProvider]);
@@ -158,8 +164,8 @@ export function ModelPicker(): React.ReactElement {
               />
               <button
                 onClick={() => void load()}
-                title="Ask the provider again"
-                aria-label="Refresh model list"
+                title="Ask the provider again, and pick up a default changed elsewhere"
+                aria-label="Refresh models and the default"
                 className="shrink-0 rounded p-1 text-aico-muted hover:text-aico-primary"
               >
                 <Icon name="undo" size={14} />

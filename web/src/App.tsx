@@ -36,6 +36,7 @@ import { Icon } from './components/Icon';
 import { applyTheme, type ThemeChoice } from './theme';
 import { getToken, setToken, setTokenRejectedHandler } from './api';
 import { useStore } from './store';
+import { useRefreshOnFocus } from './use-refresh-on-focus';
 
 export function App(): React.ReactElement {
   /*
@@ -131,6 +132,10 @@ export function App(): React.ReactElement {
     // Deliberately once: `connect` is what changes the session, not this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasToken]);
+
+  // Switching back to this tab after changing the model or a key in another
+  // one is the moment the stale copy actually bites — see use-refresh-on-focus.
+  useRefreshOnFocus(refreshProviders, refreshSettings, hasToken);
 
   // The page starts in the system's theme so a dark-mode machine never gets a
   // flash of white, and switches the moment the stored preference is known.

@@ -27,6 +27,7 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '@web/store';
 import { setTokenRejectedHandler } from '@web/api';
+import { useRefreshOnFocus } from '@web/use-refresh-on-focus';
 import { onBoot, signalReady, host, remember, type BootInfo } from './host';
 import { sameFolder } from './paths';
 import { Header } from './components/Header';
@@ -72,6 +73,12 @@ export function Panel(): React.ReactElement {
 
   useEffect(() => onBoot(setBoot), []);
   useEffect(() => { signalReady(); }, []);
+
+  // Switching back to this panel after changing the model or a key from the
+  // web portal, or another window, is the moment the stale copy actually
+  // bites — see use-refresh-on-focus. VS Code webviews implement the Page
+  // Visibility API, so this fires the same way it does in a browser tab.
+  useRefreshOnFocus(refreshProviders, refreshSettings, Boolean(boot));
 
   /*
     Keep the folder's memory current as the conversation and the model change.
