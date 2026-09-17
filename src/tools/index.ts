@@ -87,6 +87,9 @@ import {
   vsCodeDiagnostics, vsCodeDiagnosticsDefinition,
   vsCodeTasks, vsCodeTasksDefinition,
   vsCodeWorkspace, vsCodeWorkspaceDefinition,
+  vsCodeReferences, vsCodeReferencesDefinition,
+  vsCodeRename, vsCodeRenameDefinition,
+  vsCodeFormat, vsCodeFormatDefinition,
 } from './vscode.js';
 import { contextWindowToolDefinition, executeContextWindow } from './context-window.js';
 import {
@@ -249,6 +252,9 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...vsCodeDiagnosticsDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   { ...vsCodeTasksDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   { ...vsCodeWorkspaceDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  { ...vsCodeReferencesDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
+  { ...vsCodeRenameDefinition, isConcurrencySafe: false, maxResultSizeChars: 10_000 },
+  { ...vsCodeFormatDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...contextWindowToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 5_000 },
   { ...agentCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
@@ -655,6 +661,15 @@ export async function executeTool(
       break;
     case 'VSCodeWorkspace':
       result = await vsCodeWorkspace(args as unknown as Parameters<typeof vsCodeWorkspace>[0]);
+      break;
+    case 'VSCodeReferences':
+      result = await vsCodeReferences(args as unknown as Parameters<typeof vsCodeReferences>[0]);
+      break;
+    case 'VSCodeRename':
+      result = await vsCodeRename(args as unknown as Parameters<typeof vsCodeRename>[0]);
+      break;
+    case 'VSCodeFormat':
+      result = await vsCodeFormat(args as unknown as Parameters<typeof vsCodeFormat>[0]);
       break;
     case 'WorkspaceInfo':
       result = await executeWorkspaceInfo();

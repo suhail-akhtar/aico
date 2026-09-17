@@ -3,6 +3,53 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.19.3 — 2026-09-17
+
+Phase 1 of deepening VS Code integration: the agent can now reach into the
+editor's own language server for three things it structurally could not do
+from outside VS Code — real semantic references, a real cross-file rename,
+and formatting with whatever the user actually has configured. Deliberately
+does not touch the terminal or add a "run any VS Code command" tool; both
+were already considered and rejected in this codebase, with reasons — see
+`shared/host-tools.ts`.
+
+### Added
+
+- **`VSCodeReferences`, `VSCodeRename`, `VSCodeFormat`** — three new tools on
+  the existing host-tool bridge (`VSCodeDiagnostics`/`Tasks`/`Workspace`'s
+  own mechanism, purely extended, no new architecture). `VSCodeReferences`
+  finds every real usage of a symbol via the language server, not text
+  matching — will not confuse an unrelated identifier that happens to share
+  a name the way Grep can. `VSCodeRename` renames a symbol everywhere it is
+  used, across every file, the same accuracy as pressing F2, and saves every
+  changed file before returning. `VSCodeFormat` formats a file with its
+  actual configured formatter (`editor.defaultFormatter`, Prettier, Black,
+  gofmt, whatever the user has), not an opinion of aico's own. None of the
+  three need a cursor position — the model only ever has a 1-indexed line
+  and the identifier's own text (what `Read`/`Grep` already showed it), so
+  the extension locates the exact column itself and refuses with the exact
+  columns of every match when a line is ambiguous, rather than guessing.
+- Verified live against a real TypeScript language server, not just `tsc`:
+  References found all 5 real cross-file locations of a test symbol
+  (import, declaration, three call sites); the ambiguity refusal named the
+  exact columns and mutated nothing; Format actually reformatted a
+  deliberately mangled file and saved it. One open, documented question:
+  a cross-file rename invoked from a usage site (rather than the
+  declaration) was reproducibly seen renaming only within that one file on
+  this machine's TS server, even though References independently proved
+  the same cross-file resolution works — not chased to a root cause this
+  session; flagged rather than silently shipped as fully verified.
+
+### Fixed
+
+- `scripts/vscode-panel-live.mjs`'s (and the new `vscode-host-tools-live.mjs`'s)
+  `code` launch could silently mis-parse `--user-data-dir`/`--extensions-dir`
+  when the path contained a space (this machine's own username does) — Node's
+  `spawn(..., {shell: true})` does not auto-quote array arguments for the
+  `cmd.exe` shell a `.cmd` shim always goes through on Windows, surfacing far
+  downstream as `ENOTDIR: not a directory, mkdir 'c:\Users\Firstname'` with no
+  obvious connection to the real cause.
+
 ## 0.19.2 — 2026-09-17
 
 `defaultModel` and `settings` are loaded once, at each client's own startup

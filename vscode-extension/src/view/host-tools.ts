@@ -1,10 +1,12 @@
 /**
  * The editor half of the host tools.
  *
- * Three things the engine cannot do from outside VS Code, done here and reported
- * back: read the Problems panel, run a configured task, and change what the
- * window has open. The contract lives in `shared/host-tools`; this is the only
- * file that knows how any of it is actually accomplished.
+ * Six things the engine cannot do from outside VS Code, done here and reported
+ * back: read the Problems panel, run a configured task, change what the window
+ * has open, find every real reference to a symbol, rename one everywhere via
+ * the language server, and format a file with whatever the user actually has
+ * configured. The contract lives in `shared/host-tools`; this is the only file
+ * that knows how any of it is actually accomplished.
  *
  * ## Everything returns rather than throws
  *
@@ -38,7 +40,8 @@ import * as path from 'path';
 */
 export interface HostCall {
   id: string;
-  tool: 'VSCodeDiagnostics' | 'VSCodeTasks' | 'VSCodeWorkspace';
+  tool: 'VSCodeDiagnostics' | 'VSCodeTasks' | 'VSCodeWorkspace'
+    | 'VSCodeReferences' | 'VSCodeRename' | 'VSCodeFormat';
   input: Record<string, unknown>;
 }
 
@@ -64,12 +67,18 @@ const TASK_TIMEOUT_MAX_MS = 600_000;
 /** Problems reported per call. Beyond this it is a build log, not an answer. */
 const MAX_DIAGNOSTICS = 200;
 
+/** References reported per call. Beyond this it is a codebase inventory, not an answer. */
+const MAX_REFERENCES = 200;
+
 export async function runHostCall(call: HostCall, folder: string): Promise<HostAnswer> {
   try {
     switch (call.tool) {
       case 'VSCodeDiagnostics': return await diagnostics(call.input, folder);
       case 'VSCodeTasks': return await tasks(call.input);
       case 'VSCodeWorkspace': return await workspace(call.input, folder);
+      case 'VSCodeReferences': return await references(call.input, folder);
+      case 'VSCodeRename': return await rename(call.input, folder);
+      case 'VSCodeFormat': return await format(call.input, folder);
       default:
         return { ok: false, error: `unknown host tool ${String((call as HostCall).tool)}` };
     }
@@ -344,6 +353,243 @@ async function workspace(input: Record<string, unknown>, folder: string): Promis
   }
 
   return { ok: false, error: `unknown action ${JSON.stringify(input.action)}` };
+}
+
+// ── Locating a symbol with no cursor ────────────────────────────────
+
+/**
+ * Turn a file + 1-indexed line + symbol text into a VS Code Position.
+ *
+ * The model has never seen a column — only what Read or Grep showed it, which
+ * is 1-indexed lines and line text. So it supplies the identifier's own text
+ * instead of a coordinate, and this finds it. A single match on the line
+ * resolves outright; more than one refuses and reports the exact columns, so
+ * the caller's next attempt — now carrying `occurrence` — is unambiguous
+ * rather than a guess at the wrong one.
+ */
+async function locateSymbol(
+  input: Record<string, unknown>, folder: string,
+): Promise<{ ok: true; uri: vscode.Uri; position: vscode.Position } | { ok: false; error: string }> {
+  const rawPath = String(input.path ?? '');
+  const target = resolveInside(rawPath, folder);
+  if (!target) return { ok: false, error: `path is outside the project: ${rawPath}` };
+
+  const line = typeof input.line === 'number' ? input.line : NaN;
+  if (!Number.isInteger(line) || line < 1) {
+    return { ok: false, error: 'line must be a 1-indexed line number, as Read reports it.' };
+  }
+
+  const symbol = typeof input.symbol === 'string' ? input.symbol.trim() : '';
+  if (!symbol) return { ok: false, error: 'symbol is required — the identifier\'s exact text on that line.' };
+
+  let doc: vscode.TextDocument;
+  try {
+    doc = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
+  } catch {
+    return { ok: false, error: `could not open ${rawPath}` };
+  }
+
+  const lineIndex = line - 1;
+  if (lineIndex >= doc.lineCount) {
+    return { ok: false, error: `${rawPath} has ${doc.lineCount} lines; line ${line} does not exist.` };
+  }
+  const text = doc.lineAt(lineIndex).text;
+
+  const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\b${escaped}\\b`, 'g');
+  const columns: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) columns.push(m.index);
+
+  if (columns.length === 0) {
+    return {
+      ok: false,
+      error: `"${symbol}" was not found on line ${line} of ${rawPath}. Check the exact text `
+        + 'and line number, e.g. with Read.',
+    };
+  }
+
+  const occurrence = typeof input.occurrence === 'number' ? input.occurrence : 1;
+  if (columns.length > 1 && typeof input.occurrence !== 'number') {
+    return {
+      ok: false,
+      error: `"${symbol}" appears ${columns.length} times on line ${line}, at columns `
+        + `${columns.map(c => c + 1).join(', ')}. Pass "occurrence" (1-indexed) to pick one.`,
+    };
+  }
+  const charIndex = columns[occurrence - 1];
+  if (charIndex === undefined) {
+    return {
+      ok: false,
+      error: `occurrence ${occurrence} does not exist — "${symbol}" appears ${columns.length} `
+        + `time(s) on line ${line}.`,
+    };
+  }
+
+  return { ok: true, uri: doc.uri, position: new vscode.Position(lineIndex, charIndex) };
+}
+
+// ── References ───────────────────────────────────────────────────────
+
+async function references(input: Record<string, unknown>, folder: string): Promise<HostAnswer> {
+  const located = await locateSymbol(input, folder);
+  if (!located.ok) return { ok: false, error: located.error };
+
+  const locations = await vscode.commands.executeCommand<vscode.Location[]>(
+    'vscode.executeReferenceProvider', located.uri, located.position,
+  );
+
+  if (!locations || locations.length === 0) {
+    return {
+      ok: true,
+      result: {
+        references: [], total: 0,
+        note: 'No references found. Either the symbol truly has none, or no language server '
+          + 'is running for this file type — Grep does not depend on the editor.',
+      },
+    };
+  }
+
+  const sorted = [...locations].sort((a, b) =>
+    a.uri.fsPath.localeCompare(b.uri.fsPath) || a.range.start.line - b.range.start.line);
+
+  const entries: Array<{ file: string; line: number; column: number; preview: string }> = [];
+  let dropped = 0;
+  for (const loc of sorted) {
+    if (entries.length >= MAX_REFERENCES) { dropped += 1; continue; }
+    let preview = '';
+    try {
+      const doc = await vscode.workspace.openTextDocument(loc.uri);
+      preview = doc.lineAt(loc.range.start.line).text.trim();
+    } catch { /* best-effort */ }
+    entries.push({
+      file: path.relative(folder, loc.uri.fsPath) || path.basename(loc.uri.fsPath),
+      line: loc.range.start.line + 1,
+      column: loc.range.start.character + 1,
+      preview,
+    });
+  }
+
+  return {
+    ok: true,
+    result: {
+      references: entries,
+      total: entries.length + dropped,
+      ...(dropped ? { note: `${dropped} more not shown` } : {}),
+    },
+  };
+}
+
+// ── Rename ───────────────────────────────────────────────────────────
+
+async function rename(input: Record<string, unknown>, folder: string): Promise<HostAnswer> {
+  const located = await locateSymbol(input, folder);
+  if (!located.ok) return { ok: false, error: located.error };
+
+  const newName = typeof input.newName === 'string' ? input.newName.trim() : '';
+  if (!newName) return { ok: false, error: 'VSCodeRename needs newName.' };
+
+  const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>(
+    'vscode.executeDocumentRenameProvider', located.uri, located.position, newName,
+  );
+
+  if (!edit || edit.size === 0) {
+    return {
+      ok: false,
+      error: 'no rename information is available at that location — the symbol may not be '
+        + 'renameable, the name may already be taken, or no language server is running for '
+        + 'this file type.',
+    };
+  }
+
+  const entries = edit.entries();
+  const applied = await vscode.workspace.applyEdit(edit);
+  if (!applied) return { ok: false, error: 'VS Code refused to apply the rename' };
+
+  const changed: string[] = [];
+  const failedSaves: string[] = [];
+  let editCount = 0;
+  for (const [uri, edits] of entries) {
+    if (edits.length === 0) continue;
+    editCount += edits.length;
+    const rel = path.relative(folder, uri.fsPath) || path.basename(uri.fsPath);
+    changed.push(rel);
+    try {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      if (doc.isDirty && !(await doc.save())) failedSaves.push(rel);
+    } catch {
+      failedSaves.push(rel);
+    }
+  }
+  changed.sort();
+
+  if (failedSaves.length > 0) {
+    return {
+      ok: false,
+      error: `the rename was applied but ${failedSaves.length} file(s) could not be saved: `
+        + `${failedSaves.join(', ')}. Disk and editor now disagree there — check directly.`,
+    };
+  }
+
+  try {
+    const originDoc = await vscode.workspace.openTextDocument(located.uri);
+    void vscode.window.showTextDocument(originDoc, { preview: true, preserveFocus: true });
+  } catch { /* best-effort */ }
+
+  return {
+    ok: true,
+    result: { symbol: String(input.symbol), newName, filesChanged: changed, edits: editCount },
+  };
+}
+
+// ── Format ───────────────────────────────────────────────────────────
+
+async function format(input: Record<string, unknown>, folder: string): Promise<HostAnswer> {
+  const rawPath = String(input.path ?? '');
+  const target = resolveInside(rawPath, folder);
+  if (!target) return { ok: false, error: `path is outside the project: ${rawPath}` };
+
+  const uri = vscode.Uri.file(target);
+  let doc: vscode.TextDocument;
+  try {
+    doc = await vscode.workspace.openTextDocument(uri);
+  } catch {
+    return { ok: false, error: `could not open ${rawPath}` };
+  }
+
+  const config = vscode.workspace.getConfiguration('editor', uri);
+  const options: vscode.FormattingOptions = {
+    tabSize: config.get<number>('tabSize', 4),
+    insertSpaces: config.get<boolean>('insertSpaces', true),
+  };
+
+  const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>(
+    'vscode.executeFormatDocumentProvider', uri, options,
+  );
+
+  if (!edits || edits.length === 0) {
+    return {
+      ok: true,
+      result: {
+        changed: false,
+        note: 'No changes. Either the file is already formatted, or no formatter is registered '
+          + 'for this language — check the "editor.defaultFormatter" setting.',
+      },
+    };
+  }
+
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  workspaceEdit.set(uri, edits);
+  const applied = await vscode.workspace.applyEdit(workspaceEdit);
+  if (!applied) return { ok: false, error: 'VS Code refused to apply the formatting edit' };
+
+  if (!(await doc.save())) {
+    return { ok: false, error: 'the file was formatted but could not be saved — disk and editor now disagree.' };
+  }
+
+  void vscode.window.showTextDocument(doc, { preview: true, preserveFocus: true });
+
+  return { ok: true, result: { changed: true, edits: edits.length } };
 }
 
 // ── Paths ────────────────────────────────────────────────────────────

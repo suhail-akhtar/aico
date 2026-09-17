@@ -1,5 +1,5 @@
 /**
- * The three tools an editor lends the agent.
+ * The six tools an editor lends the agent.
  *
  * Each is a thin shell: validate the arguments, hand the call to whatever is
  * driving this run, return what came back. There is no VS Code code in here and
@@ -10,7 +10,7 @@
  *
  * ## Diagnostics is the one that changes how the agent works
  *
- * The other two are conveniences. This one closes a loop the agent has never
+ * The others are conveniences. This one closes a loop the agent has never
  * had: after an edit it can ask the language server what it thinks, rather than
  * grepping for the shape of an error message or running a build to find out.
  * It is the difference between "I changed the type" and "I changed the type and
@@ -20,6 +20,15 @@
  * reports asynchronously, and reading Problems the instant after a write
  * reliably returns the *previous* state — which reads as "no errors" and is the
  * most damaging possible wrong answer.
+ *
+ * ## References, Rename and Format have no cursor to work from
+ *
+ * The model never has a live selection — only what `Read` or `Grep` already
+ * showed it, a 1-indexed line and its text. So these three take a `path`, a
+ * `line`, and the identifier's own `symbol` text rather than a column; the
+ * extension finds the column itself by searching the line for that word, and
+ * refuses with the exact columns of every match when the line has more than
+ * one, rather than guessing.
  *
  * @module tools/vscode
  */
@@ -178,5 +187,131 @@ export const vsCodeWorkspaceDefinition = {
       path: { type: 'string', description: 'Absolute, or relative to the project root.' },
     },
     required: ['action'],
+  },
+};
+
+// ── References ───────────────────────────────────────────────────────
+
+export interface ReferencesInput {
+  /** File containing the symbol, relative to the project root. */
+  path: string;
+  /** 1-indexed line the symbol appears on — the same numbering `Read` reports. */
+  line: number;
+  /** The identifier's exact text, as it appears on that line. */
+  symbol: string;
+  /**
+   * Which occurrence on the line, 1-indexed, when the symbol appears more
+   * than once. Omit on the first call; if the line is ambiguous the tool
+   * reports the columns and asks for this.
+   */
+  occurrence?: number;
+}
+
+export function vsCodeReferences(input: ReferencesInput): Promise<unknown> {
+  if (!input.path?.trim()) throw new Error('VSCodeReferences: needs a path.');
+  if (!Number.isInteger(input.line) || input.line < 1) {
+    throw new Error('VSCodeReferences: line must be a 1-indexed line number, as Read reports it.');
+  }
+  if (!input.symbol?.trim()) {
+    throw new Error('VSCodeReferences: needs symbol, the identifier\'s exact text on that line.');
+  }
+  return ask('VSCodeReferences', { ...input });
+}
+
+export const vsCodeReferencesDefinition = {
+  name: 'VSCodeReferences',
+  description:
+    'Find every real usage of a symbol — the identifier at a given file and line — using the '
+    + 'editor\'s language server, the same "Find All References" the user would run themselves. '
+    + 'Prefer this to Grep for a name: it understands scope and imports, and will not match an '
+    + 'unrelated identifier that merely shares the same text. Only available when the session is '
+    + 'open in VS Code.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'File containing the symbol, relative to the project root.' },
+      line: { type: 'number', description: '1-indexed line the symbol appears on, as Read reports it.' },
+      symbol: { type: 'string', description: 'The identifier\'s exact text, as it appears on that line.' },
+      occurrence: {
+        type: 'number',
+        description: 'If the symbol appears more than once on the line, which occurrence '
+          + '(1-indexed). Only needed after a first call reports the ambiguity.',
+      },
+    },
+    required: ['path', 'line', 'symbol'],
+  },
+};
+
+// ── Rename ───────────────────────────────────────────────────────────
+
+export interface RenameInput {
+  path: string;
+  line: number;
+  symbol: string;
+  newName: string;
+  occurrence?: number;
+}
+
+export function vsCodeRename(input: RenameInput): Promise<unknown> {
+  if (!input.path?.trim()) throw new Error('VSCodeRename: needs a path.');
+  if (!Number.isInteger(input.line) || input.line < 1) {
+    throw new Error('VSCodeRename: line must be a 1-indexed line number, as Read reports it.');
+  }
+  if (!input.symbol?.trim()) {
+    throw new Error('VSCodeRename: needs symbol, the identifier\'s current exact text.');
+  }
+  if (!input.newName?.trim()) throw new Error('VSCodeRename: needs newName.');
+  return ask('VSCodeRename', { ...input });
+}
+
+export const vsCodeRenameDefinition = {
+  name: 'VSCodeRename',
+  description:
+    'Rename a symbol everywhere it is used, across every file, using the editor\'s language '
+    + 'server — the same "Rename Symbol" and the same accuracy the user would get pressing F2. '
+    + 'Every changed file is saved to disk before this returns, so subsequent tools see the real '
+    + 'state. Only available when the session is open in VS Code.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'File containing the symbol, relative to the project root.' },
+      line: { type: 'number', description: '1-indexed line the symbol appears on, as Read reports it.' },
+      symbol: { type: 'string', description: 'The identifier\'s current exact text, as it appears on that line.' },
+      newName: { type: 'string', description: 'The replacement identifier.' },
+      occurrence: {
+        type: 'number',
+        description: 'If the symbol appears more than once on the line, which occurrence '
+          + '(1-indexed). Only needed after a first call reports the ambiguity.',
+      },
+    },
+    required: ['path', 'line', 'symbol', 'newName'],
+  },
+};
+
+// ── Format ───────────────────────────────────────────────────────────
+
+export interface FormatInput {
+  /** File to format, relative to the project root. */
+  path: string;
+}
+
+export function vsCodeFormat(input: FormatInput): Promise<unknown> {
+  if (!input.path?.trim()) throw new Error('VSCodeFormat: needs a path.');
+  return ask('VSCodeFormat', { ...input });
+}
+
+export const vsCodeFormatDefinition = {
+  name: 'VSCodeFormat',
+  description:
+    'Format one file with whatever formatter is actually configured for it in the user\'s editor '
+    + '— their Prettier, Black, gofmt, rustfmt, or whatever "editor.defaultFormatter" says — '
+    + 'rather than an opinion of aico\'s own. The file is saved afterward. Only available when '
+    + 'the session is open in VS Code.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'File to format, relative to the project root.' },
+    },
+    required: ['path'],
   },
 };

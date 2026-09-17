@@ -2,10 +2,12 @@
  * Tools the *editor* runs, not the engine.
  *
  * Everything else aico can do, it does itself: read a file, run a command,
- * search a tree. These three cannot be done that way at all. Nothing outside VS
+ * search a tree. These six cannot be done that way at all. Nothing outside VS
  * Code can read the Problems panel, because the diagnostics live in a language
  * server the editor is talking to and nobody else is. Nothing outside VS Code
- * can run a `tasks.json` task, or open a folder as a workspace.
+ * can run a `tasks.json` task, open a folder as a workspace, or ask that same
+ * language server who else uses a symbol, rename it correctly everywhere, or
+ * format a file with whichever formatter the user actually has configured.
  *
  * So they round-trip: the tool call suspends, the client is asked, and the
  * answer becomes the tool's result. That is the exact mechanism permissions and
@@ -20,7 +22,7 @@
  * do, including deleting files, changing settings, and installing extensions —
  * an unbounded surface that no permission prompt can describe honestly, because
  * the prompt would have to say "run `workbench.action.something`" and nobody can
- * judge that. Three named tools with named actions can each be described in a
+ * judge that. Six named tools with named actions can each be described in a
  * sentence, and a reader can answer.
  *
  * ## What is not here, and why
@@ -35,7 +37,10 @@
  */
 
 /** The tools that only exist when an editor is driving the run. */
-export const HOST_TOOLS = ['VSCodeDiagnostics', 'VSCodeTasks', 'VSCodeWorkspace'] as const;
+export const HOST_TOOLS = [
+  'VSCodeDiagnostics', 'VSCodeTasks', 'VSCodeWorkspace',
+  'VSCodeReferences', 'VSCodeRename', 'VSCodeFormat',
+] as const;
 
 export type HostToolName = (typeof HOST_TOOLS)[number];
 
