@@ -40,6 +40,17 @@ function check(cond, label) {
   else { failed++; fails.push(label); console.log(`  ✗ ${label}`); }
 }
 
+/*
+  Node's spawn(..., {shell: true}) does not auto-quote an array argument for
+  the cmd.exe shell it invokes on Windows -- `code` is a .cmd shim, so it
+  always goes through cmd.exe here. A path with a space (a username with one
+  in it, say) silently splits into two arguments at the space, which VS Code
+  then mis-parses as a --user-data-dir one directory short and a stray
+  positional after it -- surfacing much later as `ENOTDIR: not a directory,
+  mkdir 'c:\Users\Firstname'`, nowhere near the real cause. Quoting any arg
+  containing whitespace fixes it.
+*/
+const q = (arg) => (/\s/.test(arg) ? `"${arg}"` : arg);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function until(fn, timeoutMs = 30_000, every = 500) {
@@ -210,7 +221,7 @@ async function killEditor() {
 async function openFile(file, line) {
   await new Promise((resolve) => {
     const p = spawn('code', [
-      '--user-data-dir', userData, '--extensions-dir', extensions,
+      '--user-data-dir', q(userData), '--extensions-dir', q(extensions),
       '--reuse-window', '--goto', `${file}:${line}:1`,
     ], { shell: process.platform === 'win32', stdio: 'ignore' });
     p.on('exit', resolve);
@@ -314,8 +325,8 @@ try {
   // ── install into a profile of its own ───────────────────────────────
   await new Promise((resolve, reject) => {
     const install = spawn('code', [
-      '--user-data-dir', userData, '--extensions-dir', extensions,
-      '--install-extension', path.join(repoRoot, 'vscode-extension', vsix), '--force',
+      '--user-data-dir', q(userData), '--extensions-dir', q(extensions),
+      '--install-extension', q(path.join(repoRoot, 'vscode-extension', vsix)), '--force',
     ], { shell: process.platform === 'win32' });
     let out = '';
     install.stdout?.on('data', d => { out += d; });
@@ -326,7 +337,7 @@ try {
 
   // ── launch with a debugger attached ─────────────────────────────────
   editor = spawn('code', [
-    '--user-data-dir', userData, '--extensions-dir', extensions,
+    '--user-data-dir', q(userData), '--extensions-dir', q(extensions),
     `--remote-debugging-port=${PORT}`,
     /*
       A throwaway folder is an untrusted one, and VS Code disables every
@@ -335,7 +346,7 @@ try {
       reports it as "the view container never registered".
     */
     '--disable-workspace-trust',
-    '--new-window', workspace,
+    '--new-window', q(workspace),
   ], { shell: process.platform === 'win32', stdio: 'ignore' });
 
   const workbenchTarget = await until(async () => {

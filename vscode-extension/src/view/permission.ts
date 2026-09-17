@@ -37,6 +37,9 @@ const VERB: Record<string, string> = {
   WebFetch: 'fetch a URL',
   WebSearch: 'search the web',
   Task: 'delegate to a sub-agent',
+  VSCodeReferences: 'find references to a symbol',
+  VSCodeRename: 'rename a symbol across files',
+  VSCodeFormat: "format a file with the user's configured formatter",
 };
 
 /**
