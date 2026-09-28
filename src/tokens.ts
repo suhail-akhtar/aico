@@ -1,4 +1,6 @@
-import { CACHE_READ_RATE_MULTIPLIER, CACHE_WRITE_RATE_MULTIPLIER } from './providers/usage.js';
+import {
+  CACHE_READ_RATE_MULTIPLIER, CACHE_WRITE_1H_RATE_MULTIPLIER, CACHE_WRITE_RATE_MULTIPLIER,
+} from './providers/usage.js';
 import type { AicoSettings } from './settings.js';
 
 export interface TokenUsage {
@@ -50,6 +52,16 @@ const COST_RATES: Array<{ match: string; rate: CostRate }> = [
   { match: 'gpt-4.1',          rate: { input: 2.0,  output: 8.0 } },
   { match: 'gpt-4o-mini',      rate: { input: 0.15, output: 0.60 } },
   { match: 'gpt-4o',           rate: { input: 2.5,  output: 10.0 } },
+  // Standard, short-context rates from OpenAI's pricing page, checked
+  // 2026-09-28; cached input is a tenth of input on all six. Without these the
+  // GPT-5.6 models fell to the `gpt-5` row and were costed at $5/$15 —
+  // twenty-five times the real price of gpt-5.6-luna — and GPT-6 had no row.
+  { match: 'gpt-6-astra',      rate: { input: 10.0, output: 50.0 } },
+  { match: 'gpt-6-sol',        rate: { input: 2.0,  output: 10.0 } },
+  { match: 'gpt-6-luna',       rate: { input: 0.10, output: 0.50 } },
+  { match: 'gpt-5.6-sol',      rate: { input: 4.0,  output: 20.0 } },
+  { match: 'gpt-5.6-terra',    rate: { input: 2.0,  output: 12.0 } },
+  { match: 'gpt-5.6-luna',     rate: { input: 0.20, output: 1.20 } },
   { match: 'gpt-5',            rate: { input: 5.0,  output: 15.0 } },
   // ── Google Gemini ──
   { match: 'gemini-2',         rate: { input: 1.25, output: 5.0 } },
@@ -57,8 +69,13 @@ const COST_RATES: Array<{ match: string; rate: CostRate }> = [
   // ── DeepSeek Platform (api.deepseek.com; `input` is the cache-MISS rate) ──
   // Caching is automatic with no write premium, and a hit costs ~1/50th of a
   // miss — the steepest cache discount of any provider AICO speaks to.
+  //
+  // Off-peak rates from the platform's pricing page, checked 2026-09-28. Peak
+  // hours (01:00-04:00 and 06:00-10:00 UTC, weekdays) bill exactly double, so
+  // an estimate for a run in those hours is half the real figure.
+  { match: 'deepseek-flash',    rate: { input: 0.15,  output: 0.60, cacheRead: 0.02, cacheWrite: 1 } },
   { match: 'deepseek-v4-flash', rate: { input: 0.14,  output: 0.28, cacheRead: 0.02, cacheWrite: 1 } },
-  { match: 'deepseek-v4-pro',   rate: { input: 0.435, output: 0.87, cacheRead: 0.00833, cacheWrite: 1 } },
+  { match: 'deepseek-v4-pro',   rate: { input: 0.66,  output: 1.98, cacheRead: 0.0333, cacheWrite: 1 } },
   { match: 'deepseek-',         rate: { input: 0.14,  output: 0.28, cacheRead: 0.02, cacheWrite: 1 } },
   // ── DeepSeek (via OpenRouter) ──
   { match: 'deepseek/',        rate: { input: 0.27, output: 1.10 } },
@@ -206,6 +223,8 @@ export interface CostableUsage {
   outputTokens?: number;
   cachedTokens?: number;
   cacheWriteTokens?: number;
+  /** Subset of `cacheWriteTokens` written to a one-hour cache tier (2x, not 1.25x). */
+  cacheWrite1hTokens?: number;
 }
 
 /**
@@ -243,7 +262,13 @@ export function costFor(
   const cacheReadCost = (cachedTokens / 1_000_000) * (rate.input * readMultiplier);
   const cacheWriteCost = (cacheWriteTokens / 1_000_000) * (rate.input * writeMultiplier);
   const outputCost = (outputTokens / 1_000_000) * rate.output;
-  return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+  // The one-hour tier's premium over the default write rate. Only where the
+  // model has no write rate of its own — that is, priced the Anthropic way.
+  const longWrite = rate.cacheWrite === undefined
+    ? ((usage.cacheWrite1hTokens ?? 0) / 1_000_000) * rate.input
+      * (CACHE_WRITE_1H_RATE_MULTIPLIER - CACHE_WRITE_RATE_MULTIPLIER)
+    : 0;
+  return inputCost + outputCost + cacheReadCost + cacheWriteCost + longWrite;
 }
 
 /** Exact id, then the longest matching prefix. */
@@ -264,6 +289,7 @@ export function createTokenTracker() {
   let outputTokens = 0;
   let cachedTokens = 0;
   let cacheWriteTokens = 0;
+  let cacheWrite1hTokens = 0;
   let sessions = 0;
   /**
    * Requests whose numbers were counted here rather than reported by the API.
@@ -283,8 +309,9 @@ export function createTokenTracker() {
      * cache counts are subsets of it — providers normalize to that convention
      * before the numbers get here (see providers/usage.ts).
      */
-    add(input: number, output: number, cached = 0, cacheWrite = 0, measured = true): void {
+    add(input: number, output: number, cached = 0, cacheWrite = 0, measured = true, cacheWrite1h = 0): void {
       if (!measured) estimatedRequests++;
+      cacheWrite1hTokens += Math.ceil(cacheWrite1h);
       inputTokens += Math.ceil(input);
       outputTokens += Math.ceil(output);
       cachedTokens += Math.ceil(cached);
@@ -332,7 +359,7 @@ export function createTokenTracker() {
      */
     estimateCost(model: string, settings?: AicoSettings): number {
       return costFor(model, {
-        inputTokens, outputTokens, cachedTokens, cacheWriteTokens,
+        inputTokens, outputTokens, cachedTokens, cacheWriteTokens, cacheWrite1hTokens,
       }, settings);
     },
 
@@ -389,9 +416,9 @@ export function createChildTracker(parent: ReturnType<typeof createTokenTracker>
   const child = createTokenTracker();
   return {
     ...child,
-    add(input: number, output: number, cached = 0, cacheWrite = 0, measured = true): void {
-      child.add(input, output, cached, cacheWrite, measured);
-      parent.add(input, output, cached, cacheWrite, measured);
+    add(input: number, output: number, cached = 0, cacheWrite = 0, measured = true, cacheWrite1h = 0): void {
+      child.add(input, output, cached, cacheWrite, measured, cacheWrite1h);
+      parent.add(input, output, cached, cacheWrite, measured, cacheWrite1h);
     },
     // Bound explicitly rather than left to the spread: the methods above close
     // over `child`'s own state, and a spread copies the function references

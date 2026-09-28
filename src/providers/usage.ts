@@ -94,6 +94,8 @@ export function normalizeUsage(raw: RawUsage): NormalizedUsage {
  */
 export const CACHE_READ_RATE_MULTIPLIER = 0.1;
 export const CACHE_WRITE_RATE_MULTIPLIER = 1.25;
+/** Anthropic's one-hour cache tier: writes bill at 2x the input rate. */
+export const CACHE_WRITE_1H_RATE_MULTIPLIER = 2;
 
 function nonNegative(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0

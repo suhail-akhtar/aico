@@ -36,6 +36,10 @@ const BUILTIN_CONTEXT_WINDOWS: Array<{ match: string; tokens: number }> = [
   // the bare `deepseek-` fallback below would otherwise cap them at 128K and
   // trigger compaction at roughly an eighth of the real window.
   { match: 'deepseek-v4',             tokens: 1_000_000 },
+  // The current flash id (the platform renamed deepseek-v4-flash to it). 1M
+  // per the platform's pricing page (checked 2026-09-28); without this entry it
+  // fell to the 128K fallback below and compacted at an eighth of its window.
+  { match: 'deepseek-flash',          tokens: 1_000_000 },
   { match: 'deepseek-',               tokens: 128_000 },
 
   // ── Anthropic Claude ──
@@ -60,6 +64,10 @@ const BUILTIN_CONTEXT_WINDOWS: Array<{ match: string; tokens: number }> = [
   // endpoint — so these come from published documentation and carry the date
   // they were checked. They are the entries most likely to go stale, because
   // nothing here can refresh them automatically.
+  // gpt-6 luna, sol and astra: "1,050,000 context window" on each model's page,
+  // checked 2026-09-28. Without it gpt-6 was assumed to hold 128K and its
+  // context was managed at a sixteenth of the real window.
+  { match: 'gpt-6',                   tokens: 1_050_000 },
   { match: 'gpt-5.6',                 tokens: 1_048_576 },  // 5.6 family, checked 2026-09
   { match: 'gpt-5',                   tokens: 400_000 },    // earlier 5.x
   { match: 'gpt-4.1-mini',            tokens: 1_000_000 },

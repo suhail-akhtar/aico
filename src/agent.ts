@@ -10,7 +10,7 @@ import { mcpRegistry } from './mcp.js';
 import { checkPermission } from './permissions.js';
 import { classifyBashCommand, isBashReadOnly } from './safety.js';
 import { canAskUser, setAskUserCallback } from './tools/askuser.js';
-import { getOpenTodoCount } from './tools/todo.js';
+import { getOpenTodoCount, pendingTodoLines, readTodos, todoChecklist } from './tools/todo.js';
 import {
   showToolCall,
   showToolResult,
@@ -36,6 +36,7 @@ import { sectionHashes } from './prompt/render.js';
 import { projectRoot } from './run-context.js';
 import type { PromptSection } from './prompt/types.js';
 import { LegacyTranscript, SessionTranscript, type Transcript } from './session/transcript.js';
+import { ContextManager, HANDOFF_INSTRUCTION } from './session/context-manager.js';
 import { ToolPipeline, type AdditionalContext, type ToolCallContext } from './tools/pipeline.js';
 import { RepeatToolGuard } from './tools/repeat-guard.js';
 import { resolveMaxParallel, scheduleToolCalls, type ExecutionMode } from './tools/scheduler.js';
@@ -46,6 +47,15 @@ import type { ToolDefinition } from './tools/index.js';
 /** Recorded as the result of a call cancelled before it was dispatched. */
 const TOOL_ABORTED_BEFORE_DISPATCH =
   'Error: tool call aborted before dispatch (the step was cancelled).';
+
+/**
+ * Largest sub-agent report returned into the parent's context, in characters.
+ *
+ * About ten thousand tokens: room for a thorough report with its evidence,
+ * while a child that dumps everything it read cannot crowd out the parent's
+ * own work. Anything past it is kept on disk and named in the excerpt.
+ */
+const SUBAGENT_RESULT_MAX_CHARS = 40_000;
 
 /**
  * Whether a tool may overlap with others in the same step.
@@ -125,6 +135,12 @@ export function isRetryableError(err: unknown): boolean {
     // "Connection error." and carries no status. A GLM turn ended on one
     // after two and a half hours of work.
     'connection error',
+    // Our own idle guard (`providers/idle-timeout.ts`) tearing down a stream
+    // that went silent. It was added to stop a forty-minute hang, and it did —
+    // by ending the turn. A silent socket is the same class of failure as a
+    // dropped one, and one retry usually gets a live connection; ending hours
+    // of work over it was the wrong trade.
+    'connection stalled',
     // Match provider/socket timeouts specifically, NOT the wall-clock
     // "Agent timed out after Nms" (which is handled as a non-retryable abort).
     '502', '503', '529',
@@ -242,6 +258,7 @@ export interface TokenTracker {
    */
   add(
     input: number, output: number, cached?: number, cacheWrite?: number, measured?: boolean,
+    cacheWrite1h?: number,
   ): void;
   getUsage(): {
     inputTokens: number;
@@ -438,6 +455,11 @@ export interface AgentOptions {
    * returned here replace those with the same id for that step only.
    */
   refreshVolatile?: () => Promise<PromptSection[]>;
+  /**
+   * Something the run did to its own context that the person should know
+   * about — older output cleared, earlier steps condensed. Shown, not sent.
+   */
+  onNotice?: (text: string) => void;
   /** The app this session is bound to, if any. Becomes the run's project root. */
   app?: { slug: string; dir: string; kind: string; url?: string };
   /** Plan mode — only read-only tools allowed */
@@ -1440,16 +1462,29 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // its tool set whole.
   if (depth < 4 && (toolProfile !== 'browser-qa' || depth === 0)) {
     handlers.set(taskToolDefinition.name, async (args: Record<string, unknown>, callId: string) => {
-      const { description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout } = args as {
+      const {
+        description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout,
+        isolation, detach,
+      } = args as {
         description: string; prompt: string; model?: string;
         subagent_type?: SubAgentType; agent_name?: string;
         agent_spec?: { instructions?: string; tools?: string[] | 'all' | 'readonly'; model?: string; role?: string };
         timeout?: number;
+        isolation?: 'worktree';
+        detach?: boolean;
       };
       onToolCall?.(taskToolDefinition.name, args, callId);
       try {
-        const result = await runTask(
-          { description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout },
+        // `isolation` and `detach` are in the tool's schema and implemented in
+        // `runTask`, and were dropped right here — the model was offered both
+        // and neither ever reached the child. The loop's signal goes along too:
+        // without it, cancelling the parent waited for every child to finish.
+        const raw = await runTask(
+          {
+            description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout,
+            ...(isolation === 'worktree' ? { isolation } : {}),
+            ...(detach === true ? { detach } : {}),
+          },
           {
             token: opts.token ?? '',
             model,
@@ -1457,6 +1492,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             verbose,
             depth,
             settings,
+            abortSignal: loopSignal,
             // Constraints the child must inherit — see the note in runTask.
             ...(opts.context ? { context: opts.context } : {}),
             ...(tokenTracker ? { tokenTracker } : {}),
@@ -1465,6 +1501,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             onSubagentStop: opts.onSubagentStop,
           },
         );
+        // Bounded like every other tool's output. A child's final report came
+        // back whole, so one verbose sub-agent could put more into the parent's
+        // context than the parent's own work — the opposite of why the work
+        // was delegated. The full report stays on disk, named in the excerpt.
+        const result = spillResult(raw, SUBAGENT_RESULT_MAX_CHARS, 'Task', callId) as string;
         onToolDone?.(taskToolDefinition.name, { result }, callId);
         return { result: { result } };
       } catch (err) {
@@ -1482,19 +1523,23 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       handlers.set(investigateDefinition.name, async (args: Record<string, unknown>, callId: string) => {
         onToolCall?.(investigateDefinition.name, args, callId);
         try {
-          const result = await investigate(args as InvestigateInput, {
+          const raw = await investigate(args as InvestigateInput, {
             token: opts.token ?? '',
             model,
             autoApprove,
             verbose,
             depth,
             settings,
+            // Reaches every investigator, so a cancel stops the whole fan-out.
+            abortSignal: loopSignal,
             ...(opts.context ? { context: opts.context } : {}),
             ...(tokenTracker ? { tokenTracker } : {}),
             ...(opts.planMode ? { planMode: true } : {}),
             onSubagentStart: opts.onSubagentStart,
             onSubagentStop: opts.onSubagentStop,
           });
+          // Up to eight concatenated reports; bounded for the same reason as Task.
+          const result = spillResult(raw, SUBAGENT_RESULT_MAX_CHARS * 2, 'Investigate', callId) as string;
           onToolDone?.(investigateDefinition.name, { result }, callId);
           return { result: { result } };
         } catch (err) {
@@ -1712,7 +1757,37 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     tools: toolDefs.map(d => d.name),
   }));
 
+  /*
+    A turn the process died in the middle of.
+
+    Every normal exit closes its turn, including errors and cancels — so a
+    turn still open when the next one starts means the process stopped mid-
+    step: a crash, a closed terminal, a restarted server. The log then held a
+    turn with no end, and the model was handed its half-finished work with no
+    word that it had been interrupted. Closed here, honestly labelled, and
+    the new turn is told — so "continue" resumes from what is on disk instead
+    of assuming the last step completed.
+  */
+  let interruptedNote: string | undefined;
+  if (opts.session?.hasOpenTurn) {
+    const turn = opts.session.lastTurn;
+    opts.session.append('turn/end', {
+      turn,
+      reason: { kind: 'aborted', cause: 'interrupted — the process stopped before the turn finished' },
+    });
+    const open = await pendingTodoLines().catch(() => [] as string[]);
+    interruptedNote = [
+      `[Resuming] The previous turn (turn ${turn}) was interrupted before it finished — the `
+        + 'process stopped mid-step. Whatever it changed up to that point is on disk; the step it '
+        + 'was on may be half-done. Check the actual state before building on it.',
+      ...(open.length > 0 ? [`Open todos at the time:\n${open.join('\n')}`] : []),
+    ].join('\n');
+  }
+
   transcript.beginTurn();
+  if (interruptedNote) {
+    transcript.recordUserMessage(interruptedNote, { kind: 'plugin', plugin: 'resume' });
+  }
   // The images ride with this exact message, not the turn: a completion-gate
   // nudge later in the same turn is a different message and must not inherit
   // the reader's screenshot.
@@ -1869,20 +1944,81 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // Assigned by whichever path ends the loop; the caller closes the turn with it.
   let turnEndReason: TurnEndReason | undefined;
 
+  const notice = (text: string): void => {
+    opts.onNotice?.(text);
+    if (!silent) showError(text);
+  };
+
+  /*
+    Context management inside the turn — see `session/context-manager.ts`.
+
+    Only on the session path: masking and compaction are log events, and the
+    legacy transcript has no log to write them to.
+  */
+  const contextManager = transcript.session
+    ? new ContextManager({
+      session: transcript.session,
+      model,
+      settings,
+      overheadTokens: estimateTokens(systemPrompt) + estimateTokens(JSON.stringify(toolDefs))
+        + estimateTokens(volatileContext ?? ''),
+      notice,
+      // Appended at the end of the history, so the cached prefix is untouched.
+      warn: (text) => transcript.recordUserMessage(text, { kind: 'plugin', plugin: 'context-manager' }),
+      readTodos: () => readTodos(),
+      /*
+        The model's own handoff, asked for with the exact request it was about
+        to make plus one instruction appended — the same system prompt, tools
+        and history, so the whole thing is a cache read and only the note
+        itself is paid for at full price. Any failure falls back to the
+        heuristic summary rather than failing the turn.
+      */
+      summarize: async () => {
+        const history = await projectImages(
+          transcript.messages(), model, settings, opts.resolveImages, imageCache,
+        );
+        let text = '';
+        for await (const event of provider.chat({
+          model,
+          systemPrompt,
+          messages: [...history, { role: 'user', content: HANDOFF_INSTRUCTION }],
+          tools: toolDefs,
+          maxTokens: 2_000,
+          signal: loopSignal,
+        })) {
+          if (event.type === 'text') text += event.content;
+          else if (event.type === 'usage') {
+            const read = event.cacheReadTokens ?? 0;
+            const write = event.cacheWriteTokens ?? 0;
+            tokenTracker?.add(event.inputTokens, event.outputTokens, read, write, true, event.cacheWrite1hTokens ?? 0);
+            onTokens?.(event.inputTokens, event.outputTokens, read, write);
+          }
+        }
+        return text.trim() || undefined;
+      },
+    })
+    : undefined;
+  const reciteTodos = depth === 0 && settings?.contextManagement?.reciteTodos !== false;
+
+  // Per turn, not per attempt. These lived inside `runLoop`, and `withRetry`
+  // re-runs `runLoop` after a transient failure — so every dropped connection
+  // reset the step cap and every gate's nudge budget, and a turn that retried
+  // five times could run five times the steps the cap promised.
+  let iterations = 0;
+  // Track how many times the completion gate has nudged the model to keep
+  // working despite open todos. Capped so a stuck agent isn't trapped forever.
+  let completionNudges = 0;
+  /** Recovery attempts after a step was cut off at the output ceiling. */
+  let truncationRetries = 0;
+  /** Times this turn has been sent back for an unverified or failing artifact. */
+  let verificationNudges = 0;
+  /** Times this turn has been sent back over failing or stale project checks. */
+  let checksNudges = 0;
+
   async function runLoop(): Promise<void> {
     throwIfLoopAborted();
     if (!silent) startSpinner('Thinking…');
 
-    let iterations = 0;
-    // Track how many times the completion gate has nudged the model to keep
-    // working despite open todos. Capped so a stuck agent isn't trapped forever.
-    let completionNudges = 0;
-    /** Recovery attempts after a step was cut off at the output ceiling. */
-    let truncationRetries = 0;
-    /** Times this turn has been sent back for an unverified or failing artifact. */
-    let verificationNudges = 0;
-    /** Times this turn has been sent back over failing or stale project checks. */
-    let checksNudges = 0;
     /**
  * How many times a turn may recover from an output-ceiling truncation.
  *
@@ -1941,10 +2077,26 @@ const GOAL_REMINDER_EVERY = 6;
 
       if (++iterations > maxIterations) {
         if (!silent) stopSpinner();
-        throw new Error(
-          `Agent exceeded the iteration cap (${maxIterations}) without finishing. ` +
-          `Increase settings.maxIterations or restructure the task into smaller sub-tasks.`,
-        );
+        // A pause, not a crash. The cap exists to stop a runaway loop, but most
+        // turns that reach it are long, legitimate work — and throwing threw
+        // away the one thing a reader needs next: where it got to. The work
+        // done so far is in the log and on disk either way; this says so and
+        // makes "continue" the obvious next message.
+        const open = await pendingTodoLines().catch(() => [] as string[]);
+        finalContent = [
+          `⏸ Paused after ${maxIterations} steps — the per-turn step cap `
+            + '(settings.maxIterations). Nothing was lost: every change made so far is on disk '
+            + 'and in this conversation.',
+          open.length > 0 ? `\nStill open:\n${open.join('\n')}` : '',
+          '\nSend "continue" to carry on from here.',
+          finalContent ? `\n\nLast update before pausing:\n${finalContent}` : '',
+        ].join('');
+        turnEndReason = {
+          kind: 'error',
+          code: 'iteration-cap',
+          message: `paused at the ${maxIterations}-step cap`,
+        };
+        break;
       }
 
       // One step = one model request plus the tools it calls. The boundary is
@@ -1980,6 +2132,30 @@ const GOAL_REMINDER_EVERY = 6;
         let stepUsage: Usage | undefined;
         let finishReason: FinishReason | undefined;
 
+        // Make room before the request, not after the provider refuses it:
+        // mask old tool output, and compact inside the turn if that is not
+        // enough. Both are log events, so the derivation below sees them.
+        await contextManager?.beforeStep(iterations);
+
+        /*
+          The open todo list, recited at the end of every request.
+
+          In a long turn the list is written once near the start and then sits
+          dozens of tool results behind every decision — where models attend
+          least. Repeating the open items in the tail puts what is left to do
+          next to where the next action is chosen. The tail is after every
+          cache breakpoint, so this costs its own few tokens and nothing else.
+        */
+        if (reciteTodos) {
+          const todos = await readTodos().catch(() => []);
+          const open = todos.filter(t => t.status === 'pending' || t.status === 'in_progress');
+          if (open.length > 0) {
+            const done = todos.filter(t => t.status === 'done').length;
+            stepVolatileContext = `${stepVolatileContext ?? ''}\n\nTodo list — ${done} of ${todos.length} done. `
+              + `Still open (keep it current with TodoWrite):\n${todoChecklist(open).join('\n')}`;
+          }
+        }
+
         // Derived fresh every step. On the session path this means the log IS
         // the request rather than a mirror of it, so anything the model sees is
         // by construction reconstructable.
@@ -1990,6 +2166,7 @@ const GOAL_REMINDER_EVERY = 6;
         const requestMessages = await projectImages(
           transcript.messages(), model, settings, opts.resolveImages, imageCache,
         );
+        contextManager?.noteRequest();
 
         // Stream from provider — forward the merged signal so a cancel/timeout
         // tears down the in-flight HTTP stream instead of leaking the socket.
@@ -2035,6 +2212,7 @@ const GOAL_REMINDER_EVERY = 6;
               const cacheWrite = event.cacheWriteTokens ?? 0;
               totalInputTokens += event.inputTokens;
               totalOutputTokens += event.outputTokens;
+              contextManager?.noteUsage(event.inputTokens);
               totalCachedTokens += cacheRead;
               totalCacheWriteTokens += cacheWrite;
               /*
@@ -2055,7 +2233,9 @@ const GOAL_REMINDER_EVERY = 6;
               // after the loop. A turn can make up to `maxIterations` model
               // calls, so a tracker that only learns about them afterwards
               // cannot stop a runaway turn — it can only describe one.
-              tokenTracker?.add(event.inputTokens, event.outputTokens, cacheRead, cacheWrite);
+              tokenTracker?.add(
+                event.inputTokens, event.outputTokens, cacheRead, cacheWrite, true, event.cacheWrite1hTokens ?? 0,
+              );
               committedRequests++;
               stepUsage = {
                 inputTokens: event.inputTokens,

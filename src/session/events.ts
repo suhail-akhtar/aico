@@ -212,6 +212,24 @@ export interface SessionEventMap {
    */
   'context/cleared': { throughSeq: Seq; reason: 'user' };
 
+  /**
+   * RECORD. Older tool output is shown as a placeholder from here on.
+   *
+   * Every maskable `tool/result` at or before `throughSeq` projects as a short
+   * note saying what was there, and oversized arguments of the calls before it
+   * are abbreviated (see `session/mask.ts`). Nothing is deleted. A record, not
+   * a `replace`, because it changes how existing events render rather than
+   * standing in for a range — and because it is sticky, the shortened prefix
+   * is what gets cached afterwards.
+   */
+  'context/masked': {
+    throughSeq: Seq;
+    /** Where the full text of a masked result was kept, keyed by the result's seq. */
+    spills?: Record<string, string>;
+    /** Estimated tokens this mask removed from the request, for telemetry. */
+    tokensFreed: number;
+  };
+
   /** RECORD. A durable inbox mutation, replayed on resume. */
   'inbox/spliced': {
     target: InboxTarget;

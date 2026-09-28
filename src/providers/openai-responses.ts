@@ -81,6 +81,14 @@ export interface OpenAIResponsesConfig {
    * model no room to answer at all.
    */
   maxOutputTokens?: number;
+  /**
+   * OpenAI's `prompt_cache_key`: requests sharing one are routed to the same
+   * cache-warm machines. The Chat Completions adapter always sent it and this
+   * one never did — and every gpt-5.6 and gpt-6 request comes through here.
+   * Measured without it: 6% of a 16.7M-token run served from cache, on a
+   * conversation whose prefix only ever grows.
+   */
+  promptCacheKey?: string;
 }
 
 /** Default output ceiling; see {@link OpenAIResponsesConfig.maxOutputTokens}. */
@@ -93,9 +101,11 @@ export class OpenAIResponsesProvider implements ProviderAPI {
   private readonly client: OpenAI;
   private readonly reasoningEffort: ReasoningEffort;
   private readonly maxOutputTokens: number;
+  private readonly promptCacheKey?: string;
 
   constructor(config: OpenAIResponsesConfig) {
     this.id = config.id;
+    this.promptCacheKey = config.promptCacheKey;
     this.displayName = config.displayName;
     this.reasoningEffort = config.reasoningEffort ?? 'low';
     this.maxOutputTokens = config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
@@ -136,6 +146,7 @@ export class OpenAIResponsesProvider implements ProviderAPI {
       // Never persist server-side. The session log is the source of truth, and
       // a stored response would create a second one that can drift from it.
       store: false,
+      ...(this.promptCacheKey ? { prompt_cache_key: this.promptCacheKey } : {}),
     };
 
     const controller = chainAbort(opts.signal);

@@ -1,0 +1,34 @@
+{
+  "model": "gpt-6-luna",
+  "mode": "off",
+  "overhead": 16380,
+  "steps": 46,
+  "masks": 0,
+  "compactions": 0,
+  "turnEnds": [
+    {
+      "kind": "completed"
+    },
+    {
+      "kind": "completed"
+    }
+  ],
+  "inputTokens": 5330971,
+  "cachedTokens": 733410,
+  "outputTokens": 7802,
+  "peakRequest": 200548,
+  "costUsd": 0.4709912,
+  "minutes": 2.7,
+  "correct": 30,
+  "passed": 3,
+  "failed": 0,
+  "tools": {
+    "Pwd": 1,
+    "LS": 1,
+    "TodoWrite": 3,
+    "Read": 37,
+    "Write": 1,
+    "Edit": 1
+  },
+  "notices": []
+}

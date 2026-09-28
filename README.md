@@ -31,7 +31,7 @@ can measure its own skills against tasks with known answers.
 ❯ _
 ```
 
-**Status:** `0.19.4`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.20.0`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
@@ -57,7 +57,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.19.4 serve
+npx github:suhail-akhtar/aico#v0.20.0 serve
 ```
 
 ## Why this one
@@ -96,10 +96,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.19.4 serve
+npx github:suhail-akhtar/aico#v0.20.0 serve
 ```
 
-`#v0.19.4` is a tag, so it pins that release. `#release/v0.19` follows the 0.19
+`#v0.20.0` is a tag, so it pins that release. `#release/v0.20` follows the 0.20
 line as it gets fixes, and `#main` is the development trunk.
 
 To have `aico` on your `PATH` — which the VS Code extension needs — install it
@@ -107,7 +107,7 @@ globally from the same tag. aico is not on the npm registry; this builds from
 source and takes a minute the first time:
 
 ```sh
-npm install -g github:suhail-akhtar/aico#v0.19.4
+npm install -g github:suhail-akhtar/aico#v0.20.0
 ```
 
 From source:
@@ -427,10 +427,26 @@ records a result for every call it was asked to make.
 plugin can register a tool with no edit to core, and a child scope can hold a
 different tool set than its parent in the same process.
 
-**Compaction.** Cuts on turn boundaries (never splitting a tool group), appends
-a summary that shadows the originals rather than deleting them, and refuses to
-run if the result would not be smaller. Measured: 3,045 → 215 tokens, with the
-model still answering from the summary.
+**Long runs keep their context focused, inside the turn.** Before every step
+the loop measures the next request from the provider's own token count and, in
+order of cost:
+
+1. *masks* older tool output — file bodies, logs, search hits — behind a short
+   note saying what was there and where the full text is saved, keeping the
+   most recent results whole; in batches, so the cached prefix breaks rarely;
+2. *condenses* earlier steps of the running turn into a handoff note if that is
+   not enough, cutting on a step boundary so no call loses its result. The
+   note carries your messages word for word, the plan and whether you approved
+   it, the todo list, and every file changed or read — taken from the record,
+   not trusted to a summary — plus the model's own account of where it stands.
+   An earlier note's sections are carried forward, not re-summarized, so a run
+   that condenses five times still has your original request;
+3. *stops with a reason* if a single step is larger than the model's window,
+   rather than summarizing in a loop.
+
+The open todo list is repeated at the end of every request while work remains.
+Between turns, whole turns fold the same way. Nothing is deleted: masks and
+summaries are log events that shadow the originals.
 
 ---
 
@@ -542,6 +558,10 @@ costs nothing to retry from, and three rejections in a row end the run.
   "providers": { "openai": { "reasoningEffort": "high" } },
 
   "autoCompact": { "thresholdPercent": 75, "keepRecentTurns": 3 },
+  // Inside a running turn. All on by default; these are the defaults.
+  "contextManagement": { "keepRecentToolResults": 6, "midTurnCompaction": true, "reciteTodos": true },
+  // Anthropic: tools + system prompt cached for an hour, the conversation for five minutes.
+  "promptCaching": { "prefixTtl": "1h" },
   "maxParallelToolCalls": 8,
   "sandbox": { "mode": "workspace-write" },
   "repeatGuard": { "thresholds": [3, 5, 8] },
@@ -577,12 +597,18 @@ is a million tokens, stop compacting" is an instruction it can carry out.
 ## Testing
 
 ```sh
-npm test                 # 2,900 offline assertions, no API key needed
+npm test                 # 3,000+ offline assertions, no API key needed
 npm run test:live        # 93 live assertions per model — costs money
 npm run test:apps:build  # a real model builds an app from a template, end to end
 npm run test:skills:live # the five app skills scored against their tasks
+node scripts/long-horizon-live.mjs deepseek-flash default 30   # a long run, checked against ground truth
 npm run typecheck
 ```
+
+The long-horizon probe reads dozens of files in one turn and checks every value
+it reports; `off` and `tight` modes give the baseline and a run under forced
+pressure. Results and what they do and do not show:
+[`benchmarks/long-horizon/`](benchmarks/long-horizon/README.md).
 
 The live suite exercises what a mock cannot: wire-format compatibility,
 streaming shapes, tool round trips, prompt caching, truncation, cancellation,

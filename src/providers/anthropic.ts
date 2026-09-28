@@ -90,7 +90,26 @@ export const ANTHROPIC_DEFAULT_MAX_TOKENS = 64_000;
 
 export interface AnthropicConfig {
   apiKey: string;
+  /**
+   * An Anthropic-compatible endpoint other than api.anthropic.com. Provider
+   * instances with a base URL always passed one; this field did not exist, so
+   * it was dropped without a word and every such instance talked to Anthropic.
+   */
+  baseURL?: string;
   cacheControl?: boolean;
+  /**
+   * How long the static prefix — tool definitions and system prompt — stays
+   * cached. The conversation tail always uses the 5-minute default.
+   *
+   * `'1h'` by default. A person reading, testing or thinking between turns
+   * routinely takes longer than five minutes, and every such pause used to
+   * re-write the whole prefix at 1.25x. A one-hour entry costs 2x to write
+   * once and is then read at 0.1x for the hour — it pays for itself the
+   * second time a pause would have let a 5-minute entry lapse. Only the
+   * prefix: the tail changes every step, and writing each step's new tokens
+   * at 2x instead of 1.25x would cost more than it saves.
+   */
+  cacheTtl?: '5m' | '1h';
   /**
    * Adaptive thinking. `'off'` sends `{type:'disabled'}`; the default sends
    * `{type:'adaptive', display:'summarized'}` on models that support it.
@@ -111,16 +130,28 @@ export class AnthropicProvider implements ProviderAPI {
   readonly promptDialect = ANTHROPIC_DIALECT;
   private readonly client: Anthropic;
   private readonly cacheControl: boolean;
+  private readonly prefixCache: { type: 'ephemeral'; ttl?: '1h' };
   private readonly thinking: 'adaptive' | 'off';
   private readonly effort?: AnthropicConfig['effort'];
   private readonly maxTokens: number;
 
   constructor(config: AnthropicConfig) {
-    this.client = new Anthropic({ apiKey: config.apiKey });
+    this.client = new Anthropic({
+      apiKey: config.apiKey,
+      // The SDK appends `/v1/messages` itself, and a base URL copied from
+      // documentation or another client usually already ends in `/v1` — which
+      // would send every request to `/v1/v1/messages` and a 404.
+      ...(config.baseURL ? { baseURL: config.baseURL.trim().replace(/\/+$/, '').replace(/\/v1$/, '') } : {}),
+    });
     // Prompt caching is on by default — the system prompt + tool definitions
     // are the largest static content and yield ~90% input-token savings on
     // repeat turns. Disable via settings.promptCaching.enabled = false.
     this.cacheControl = config.cacheControl ?? true;
+    // Longer TTLs must come before shorter ones in a request, and the prefix
+    // (tools, then system) is always before the tail — so this order is valid.
+    this.prefixCache = config.cacheTtl === '5m'
+      ? { type: 'ephemeral' }
+      : { type: 'ephemeral', ttl: '1h' };
     this.thinking = config.thinking ?? 'adaptive';
     this.effort = config.effort;
     this.maxTokens = config.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
@@ -128,7 +159,7 @@ export class AnthropicProvider implements ProviderAPI {
 
   async *chat(opts: ProviderChatOptions): AsyncGenerator<ChatEvent> {
     const messages = toAnthropicMessages(opts.messages);
-    const tools = toAnthropicTools(opts.tools, this.cacheControl);
+    const tools = toAnthropicTools(opts.tools, this.cacheControl ? this.prefixCache : undefined);
 
     // Cache the conversation tail, not just the static prefix. Without this the
     // whole transcript is re-billed at full input rate on every step of an
@@ -147,7 +178,7 @@ export class AnthropicProvider implements ProviderAPI {
     // array with an ephemeral cache_control breakpoint. The array form is
     // required to attach cache_control — a plain string cannot be cached.
     const system: string | Anthropic.TextBlockParam[] = this.cacheControl
-      ? [{ type: 'text', text: opts.systemPrompt, cache_control: { type: 'ephemeral' } }]
+      ? [{ type: 'text', text: opts.systemPrompt, cache_control: this.prefixCache }]
       : opts.systemPrompt;
 
     let response: Awaited<ReturnType<typeof this.client.messages.create>>;
@@ -208,6 +239,9 @@ export class AnthropicProvider implements ProviderAPI {
     let startInputTokens = 0;
     let cacheReadTokens = 0;
     let cacheWriteTokens = 0;
+    // The part of the write that went to the one-hour tier, which bills 2x
+    // rather than 1.25x; reported separately so the estimate can say so.
+    let cacheWrite1hTokens = 0;
 
     for await (const event of withIdleTimeout(response as unknown as AsyncIterable<AnthropicStreamEvent>, () => controller.abort())) {
       switch (event.type) {
@@ -217,6 +251,7 @@ export class AnthropicProvider implements ProviderAPI {
           startInputTokens = usage?.input_tokens ?? 0;
           cacheReadTokens = usage?.cache_read_input_tokens ?? 0;
           cacheWriteTokens = usage?.cache_creation_input_tokens ?? 0;
+          cacheWrite1hTokens = usage?.cache_creation?.ephemeral_1h_input_tokens ?? 0;
           break;
         }
 
@@ -304,6 +339,7 @@ export class AnthropicProvider implements ProviderAPI {
               outputTokens: usage.outputTokens,
               ...(usage.cacheReadTokens ? { cacheReadTokens: usage.cacheReadTokens } : {}),
               ...(usage.cacheWriteTokens ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+              ...(cacheWrite1hTokens ? { cacheWrite1hTokens: Math.min(cacheWrite1hTokens, usage.cacheWriteTokens) } : {}),
             };
           }
           // `stop_reason` rides on message_delta. Report it independently of
@@ -527,7 +563,10 @@ function markCacheBreakpoint(message: Anthropic.MessageParam): boolean {
   return false;
 }
 
-function toAnthropicTools(defs: ToolDef[], cacheControl: boolean): Anthropic.Tool[] {
+function toAnthropicTools(
+  defs: ToolDef[],
+  cacheControl: { type: 'ephemeral'; ttl?: '1h' } | undefined,
+): Anthropic.Tool[] {
   return defs.map((d, i) => {
     const tool: Anthropic.Tool = {
       name: d.name,
@@ -538,7 +577,7 @@ function toAnthropicTools(defs: ToolDef[], cacheControl: boolean): Anthropic.Too
     // caches up to the breakpoint, so the entire static tool list (often the
     // bulk of the request) is cached on every subsequent turn.
     if (cacheControl && i === defs.length - 1) {
-      (tool as any).cache_control = { type: 'ephemeral' };
+      (tool as any).cache_control = cacheControl;
     }
     return tool;
   });
@@ -555,6 +594,7 @@ interface AnthropicStreamEvent {
       input_tokens?: number;
       cache_read_input_tokens?: number;
       cache_creation_input_tokens?: number;
+      cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number };
     };
   };
   content_block?: {

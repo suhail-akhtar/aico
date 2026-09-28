@@ -268,6 +268,31 @@ export interface AicoSettings {
     thresholdPercent?: number;
     keepRecentTurns?: number;
   };
+  /**
+   * Keeping a long run's context focused while it is still running — see
+   * `session/context-manager.ts`. Everything is on by default.
+   */
+  contextManagement?: {
+    enabled?: boolean;
+    /**
+     * Context size, in tokens, above which older tool output is replaced by a
+     * placeholder. Default: half the model's window, at most 100,000.
+     */
+    maskAtTokens?: number;
+    /** Most recent tool results always shown in full. Default: 6. */
+    keepRecentToolResults?: number;
+    /**
+     * Tool results from this many most recent steps are never cleared, however
+     * many there are. Default: 8.
+     */
+    keepRecentSteps?: number;
+    /** Compact inside a long turn, not only between turns. Default: true. */
+    midTurnCompaction?: boolean;
+    /** Let the model write the "where things stand" part of a summary. Default: true. */
+    modelSummary?: boolean;
+    /** Repeat the open todo list at the end of each request. Default: true. */
+    reciteTodos?: boolean;
+  };
   /** MCP security posture controls and trust metadata. */
   mcpSecurity?: {
     trustedServers?: string[];
@@ -334,6 +359,11 @@ export interface AicoSettings {
    */
   promptCaching?: {
     enabled?: boolean;          // default: true
+    /**
+     * Anthropic only: how long the tool definitions and system prompt stay
+     * cached. Default '1h' — see `AnthropicConfig.cacheTtl` for why.
+     */
+    prefixTtl?: '5m' | '1h';
   };
   /** Terminal theme: 'dark' (default), 'light', or 'auto' */
   theme?: 'dark' | 'light' | 'auto';
@@ -534,7 +564,7 @@ async function tryReadJson(filePath: string): Promise<AicoSettings> {
  * means and what a reader expects.
  */
 const MERGED_SECTIONS = [
-  'providers', 'hooks', 'env', 'mcpServers', 'workspace', 'autoCompact',
+  'providers', 'hooks', 'env', 'mcpServers', 'workspace', 'autoCompact', 'contextManagement',
   'mcpSecurity', 'skills', 'memory', 'cron', 'promptCaching', 'contextWindows',
   'modelCapabilities',
   'modelPricing',

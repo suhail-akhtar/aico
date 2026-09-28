@@ -1,0 +1,37 @@
+{
+  "model": "gpt-6-luna",
+  "mode": "tight",
+  "overhead": 16380,
+  "steps": 24,
+  "masks": 0,
+  "compactions": 1,
+  "turnEnds": [
+    {
+      "kind": "completed"
+    },
+    {
+      "kind": "completed"
+    }
+  ],
+  "inputTokens": 708204,
+  "cachedTokens": 374854,
+  "outputTokens": 3287,
+  "peakRequest": 50972,
+  "costUsd": 0.042573520000000004,
+  "minutes": 1.3,
+  "correct": 10,
+  "passed": 3,
+  "failed": 0,
+  "tools": {
+    "TodoWrite": 6,
+    "Pwd": 1,
+    "LS": 1,
+    "ReadAttachment": 10,
+    "Write": 1,
+    "Read": 2,
+    "Edit": 1
+  },
+  "notices": [
+    "Condensed 12 earlier step(s) of this turn into a handoff note to make room (~51,483 → ~20,205 tokens); the 1 most recent step(s) stay in full."
+  ]
+}

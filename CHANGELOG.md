@@ -3,6 +3,86 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.20.0 — 2026-09-28
+
+Long runs keep their context focused while they run — without losing the
+thread, and without paying for the privilege. Before this, compaction only
+happened *between* turns and summarized with regular expressions, so one long
+autonomous turn could fill the window on its own and simply end, and a summary
+kept 300 characters of what you had asked for. Researched against Claude Code,
+Anthropic's and OpenAI's context APIs, Manus, and the 2025 study comparing
+observation masking with summarization; measured live (see
+`benchmarks/long-horizon/`).
+
+### Added
+
+- **Context management inside the turn** (`session/context-manager.ts`). Before
+  every step the loop measures the next request from the provider's own token
+  count, then — cheapest first — masks older tool output behind a note saying
+  what was there and where the full text is saved; condenses earlier steps of
+  the running turn if that is not enough, cutting on a step boundary; and stops
+  with a reason if one step is larger than the model's window, instead of
+  summarizing in a loop. Output from the last 8 steps is never masked, however
+  much of it there is — a model reading eight files at once must get to use
+  them. Masks come in batches and only when they free enough to be worth
+  breaking the prompt cache, and a condensation is skipped when it would not
+  make the context smaller.
+- **Handoffs that keep the specifics.** A condensation writes your messages
+  word for word, the plan and whether you approved it, the todo list, and the
+  files changed and read — read from the log and the todo list, not trusted to
+  a summarizer — plus the model's own account of where it stands. An earlier
+  handoff's sections are carried forward rather than re-summarized, so the
+  original request survives any number of condensations.
+- **The model is warned before anything is cleared**, once, to keep the values
+  and findings it will need. Without it, a run under pressure re-read the same
+  files: 55 reads for 10 files before, 13 after.
+- **The open todo list is recited at the end of every request** while work
+  remains, where the next action is chosen.
+- **Anthropic caches the tool definitions and system prompt for an hour**, the
+  conversation for five minutes (`promptCaching.prefixTtl`, default `1h`). A
+  pause over five minutes no longer re-writes the whole prefix. One-hour writes
+  are costed at their real 2x.
+- **A turn the process died in is closed as interrupted** and the next turn is
+  told before it acts, instead of silently building on a half-finished step.
+
+### Fixed
+
+- **gpt-6 models could not run a single tool.** They reject function tools with
+  reasoning on Chat Completions; they now go through the Responses API like
+  gpt-5.6.
+- **The Responses API path never sent `prompt_cache_key`**, which the Chat
+  Completions path always did — and every gpt-5.6 and gpt-6 request takes it.
+  Measured before the fix: 6% of a 16.7M-token run served from cache.
+- **Windows**: `deepseek-flash` was treated as 128K and gpt-6 assumed 128K; they
+  hold 1M and 1.05M. Compaction and masking fired at a fraction of the real
+  window.
+- **Prices**: gpt-5.6 models were costed at the `gpt-5` row — gpt-5.6-luna 25x
+  its real price — and gpt-6 had none; deepseek-flash and deepseek-v4-pro used
+  outdated rates. All now match the published pages (checked 2026-09-28).
+- **Anthropic provider instances ignored their base URL** — a gateway set in
+  settings was silently bypassed. A URL ending in `/v1` is accepted too.
+- **`Task` dropped `detach` and `isolation`**, both offered in its schema, and
+  cancelling a turn waited for every sub-agent to finish; `Task` and
+  `Investigate` now forward the cancel, and their reports are size-bounded like
+  every other tool's.
+- **Non-studio sub-agents were killed at five minutes** while working steadily;
+  the ceiling is now 15 (30 for studio roles), raised by an explicit timeout.
+- **A stalled stream ended the turn**; it is now retried like a dropped one.
+- **The step cap pauses instead of throwing the turn away**, says what is still
+  open, and makes "continue" the next move. Retries no longer reset it.
+- **`npm run build:vscode` packaged a stale webview panel** — it never rebuilt
+  it. It does now.
+
+### Verified
+
+Offline suite 3060/3060, web end-to-end 206/206, live suite 184/184 on
+`deepseek-flash` and `gpt-6-luna`. The new long-horizon probe
+(`scripts/long-horizon-live.mjs`): six runs across both models, every value
+correct, peak context roughly halved at default settings, cost unchanged within
+run-to-run variance — see `benchmarks/long-horizon/README.md`, including the
+failures that shaped the defaults. Anthropic was not run live (the key was
+rejected); its one-hour cache is verified against a recorded request.
+
 ## 0.19.4 — 2026-09-28
 
 A chat and its workspace, made honest in the web portal. Four reported

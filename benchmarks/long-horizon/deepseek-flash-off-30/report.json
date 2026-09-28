@@ -1,0 +1,36 @@
+{
+  "model": "deepseek-flash",
+  "mode": "off",
+  "overhead": 22938,
+  "steps": 39,
+  "masks": 0,
+  "compactions": 0,
+  "turnEnds": [
+    {
+      "kind": "completed"
+    },
+    {
+      "kind": "completed"
+    }
+  ],
+  "inputTokens": 4907797,
+  "cachedTokens": 4695808,
+  "outputTokens": 17954,
+  "peakRequest": 201056,
+  "costUsd": 0.056658174000000006,
+  "minutes": 2.2,
+  "correct": 30,
+  "passed": 3,
+  "failed": 0,
+  "tools": {
+    "LS": 1,
+    "Pwd": 1,
+    "TodoWrite": 9,
+    "Read": 32,
+    "WorkspaceWrite": 5,
+    "Write": 1,
+    "Edit": 1,
+    "Bash": 1
+  },
+  "notices": []
+}

@@ -311,7 +311,9 @@ export const taskToolDefinition = {
       },
       timeout: {
         type: 'number',
-        description: 'Timeout in seconds for this sub-agent. Default: 120 (2 min). Use 300-600 for complex implementation phases.',
+        description: 'Idle timeout in seconds: the sub-agent is stopped after this long with no tool activity. '
+          + 'Default: 60 (120 for studio roles). A hard ceiling of 15 min (30 for studio roles) also applies; '
+          + 'a larger timeout raises it. Use 300-600 for complex implementation phases.',
       },
       isolation: {
         type: 'string',
@@ -582,8 +584,17 @@ export async function runTask(
       ?? opts.subagentTimeout
       ?? (isStudioAgent ? 120_000 : 60_000);  // 2 min idle for studio, 1 min for others
 
-    // Absolute max: safety net to prevent truly infinite runs
-    const absoluteMaxMs = isStudioAgent ? 1_800_000 : 300_000;  // 30 min studio, 5 min others
+    // Absolute max: safety net to prevent truly infinite runs. The idle timeout
+    // above is what catches a stuck agent; this only bounds one that keeps
+    // working. It was five minutes for every non-studio role, which killed
+    // healthy research and review agents mid-stride — a sub-agent making steady
+    // tool calls is the thing that should be allowed to finish. An explicit
+    // timeout from the caller raises it, since asking for a long idle window
+    // on a job the ceiling then cuts short is a contradiction.
+    const absoluteMaxMs = Math.max(
+      isStudioAgent ? 1_800_000 : 900_000,  // 30 min studio, 15 min others
+      args.timeout ? args.timeout * 1000 * 3 : 0,
+    );
 
     let lastActivity = Date.now();
     let toolCallCount = 0;

@@ -266,7 +266,18 @@ export function maybeAutoCompactConversation(
  * @param toSummarise - the messages being replaced.
  * @returns the summary text the model will see in their place.
  */
-export function buildConversationSummary(toSummarise: CompactableMessage[]): string {
+export function buildConversationSummary(
+  toSummarise: CompactableMessage[],
+  options: {
+    /**
+     * `'failures'` keeps a tool line only when it reads as an error. For a
+     * summary that already lists every file read and written by path, a
+     * successful result's first line says nothing new — but a failure is what
+     * the next attempt most needs not to repeat.
+     */
+    toolLines?: 'all' | 'failures';
+  } = {},
+): string {
   // ── Phase 1: Extract high-value content from all summarised messages ──
   const allPaths = new Set<string>();
   const allDecisions: string[] = [];
@@ -349,12 +360,17 @@ export function buildConversationSummary(toSummarise: CompactableMessage[]): str
       const content = msg.content.length > 300 ? msg.content.slice(0, 300) + '…' : msg.content;
       summaryParts.push(`[user] ${content}`);
     } else if (msg.role === 'assistant') {
+      // A step that only called tools has no text; its call shows up as the
+      // [tool] line after it, so an empty "[assistant]" line is pure noise.
+      if (!msg.content.trim()) continue;
       // Keep assistant's key points
       const content = msg.content.length > 200 ? msg.content.slice(0, 200) + '…' : msg.content;
       summaryParts.push(`[assistant] ${content}`);
     } else if (msg.role === 'tool') {
       // Tool results — keep very short (just the signature)
       const content = msg.content.split('\n')[0].slice(0, 100);
+      if (options.toolLines === 'failures'
+          && !/error|fail|exception|denied|not found|refus/i.test(content)) continue;
       summaryParts.push(`[tool] ${content}`);
     }
   }

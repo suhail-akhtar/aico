@@ -67,7 +67,8 @@ export function applyLogEvent(
           id: `seq-${seq}`,
           type: 'system',
           content: kind === 'compaction'
-            ? `Earlier turns were summarised to save context.\n\n${content}`
+            // Earlier *steps* too, now: a long turn condenses itself as it runs.
+            ? `Earlier conversation was condensed to save context.\n\n${content}`
             : content,
           // Named, because "the system said this" invites the next question.
           // A nudge you can attribute is one you can go and change.

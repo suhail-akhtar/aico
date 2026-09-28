@@ -74,6 +74,7 @@ async function appStateSection(
 }
 import { getMiniApp, miniAppDir } from '../miniapps/store.js';
 import { maybeCompactSession } from '../session/compact.js';
+import { readTodos } from '../tools/todo.js';
 import {
   hostToolsFrom, type HostAnswer, type HostCall, type HostToolName,
 } from '../../shared/host-tools.js';
@@ -447,7 +448,7 @@ export class RunManager {
       it. Checked here as well as after the turn so a session reopened after a
       long absence is folded before its first new request, not after.
     */
-    this.compactIfDue(run, settings, model, emit);
+    await this.compactIfDue(run, settings, model, emit);
 
     // The agent can ask a question, and until now the web had no way to hear
     // it. `askUser` falls back to readline when nothing registers a callback,
@@ -645,6 +646,9 @@ export class RunManager {
       const boundAppOpt = await boundApp(run.session, settings, run.cwd);
       const result = await runAgent({
         task,
+        // What the run did to its own context — older output cleared, earlier
+        // steps condensed — so the reader sees why the meter dropped.
+        onNotice: (text) => emit('notice', { text }),
         // References go to the log; the bytes are fetched per request by the
         // resolver below. Whether they are fetched at all is a question about
         // the model, answered inside the run where the model is known.
@@ -838,7 +842,7 @@ export class RunManager {
       run.conversationHistory.push({ role: 'assistant', content: result });
       // After the turn too, so the meter drops now rather than at the start
       // of the next message — which is when the reader is looking at it.
-      this.compactIfDue(run, settings, model, emit);
+      await this.compactIfDue(run, settings, model, emit);
       // What this turn taught, filed as proposals for the person to keep or
       // dismiss. A projection over the log — no model call — and best effort.
       // Filed with the project the turn was about: for a session bound to an
@@ -1295,13 +1299,15 @@ export class RunManager {
    * from the session when it has one, so the array is not what gets sent —
    * but a list that grows for ever is a leak whether or not anyone reads it.
    */
-  private compactIfDue(
+  private async compactIfDue(
     run: ActiveRun,
     settings: AicoSettings,
     model: string,
     emit: (type: string, data: unknown) => void,
-  ): void {
-    const result = maybeCompactSession(run.session, settings, model);
+  ): Promise<void> {
+    // The todo list goes into the handoff, so it survives the fold word for word.
+    const todos = await readTodos(run.sessionId).catch(() => undefined);
+    const result = maybeCompactSession(run.session, settings, model, todos ? { todos } : {});
     if (!result.compacted) return;
     const keep = Math.max(1, settings.autoCompact?.keepRecentTurns ?? 3) * 2;
     run.conversationHistory = run.conversationHistory.slice(-keep);

@@ -1,0 +1,40 @@
+{
+  "model": "deepseek-flash",
+  "mode": "default",
+  "overhead": 22940,
+  "steps": 46,
+  "masks": 4,
+  "compactions": 0,
+  "turnEnds": [
+    {
+      "kind": "completed"
+    },
+    {
+      "kind": "completed"
+    }
+  ],
+  "inputTokens": 3635799,
+  "cachedTokens": 3273088,
+  "outputTokens": 34764,
+  "peakRequest": 114975,
+  "costUsd": 0.085084314,
+  "minutes": 2.8,
+  "correct": 30,
+  "passed": 3,
+  "failed": 0,
+  "tools": {
+    "LS": 1,
+    "Pwd": 1,
+    "TodoWrite": 26,
+    "Read": 33,
+    "Write": 1,
+    "Bash": 2,
+    "Edit": 1
+  },
+  "notices": [
+    "Cleared older tool output from the context (~40,654 tokens); the 6 most recent results stay in full.",
+    "Cleared older tool output from the context (~31,457 tokens); the 6 most recent results stay in full.",
+    "Cleared older tool output from the context (~31,489 tokens); the 6 most recent results stay in full.",
+    "Cleared older tool output from the context (~31,467 tokens); the 6 most recent results stay in full."
+  ]
+}

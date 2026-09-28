@@ -2052,6 +2052,9 @@ assert(!requiresResponsesApi('gpt-5.5'), 'gpt-5.5 stays on Chat Completions');
 assert(!requiresResponsesApi('gpt-5.4-mini'), 'gpt-5.4-mini stays on Chat Completions');
 assert(!requiresResponsesApi('gpt-4o'), 'gpt-4o stays on Chat Completions');
 assert(!requiresResponsesApi('gpt-56-fake'), 'A near-miss name does not match the 5.6 test');
+assert(requiresResponsesApi('gpt-6-luna') && requiresResponsesApi('gpt-6-sol') && requiresResponsesApi('gpt-6-astra'),
+  'the gpt-6 family requires the Responses API too — its 400 says so');
+assert(!requiresResponsesApi('gpt-60-fake'), 'and a near-miss name does not match that either');
 
 // ── max_tokens vs max_completion_tokens ──
 assert(usesMaxCompletionTokens('gpt-5'), 'gpt-5 requires max_completion_tokens');
@@ -2773,7 +2776,7 @@ function appendTurn(s, turn, { withTool = true, bulk = 400 } = {}) {
   const called = new Set(msgs.flatMap(m => (m.toolCalls ?? []).map(c => c.id)));
   const orphans = msgs.filter(m => m.role === 'tool' && !called.has(m.toolCallId)).length;
   assert(orphans === 0, `No orphan tool result after compaction (${orphans})`);
-  assert(msgs[0].content.includes('Auto-compacted') || msgs[0].content.includes('Files Referenced'),
+  assert(msgs[0].content.startsWith('[Context checkpoint]'),
     'The summary is the first thing the model sees');
 }
 
@@ -3409,11 +3412,19 @@ console.log('\n══ 31. SUB-AGENT INHERITANCE AUDIT ══');
   assert(/abortSignal: abortController\.signal/.test(call), 'abort is wired');
 
   const agentSrc = fs.readFileSync('src/agent.ts', 'utf8');
-  const handlerStart = agentSrc.indexOf('const result = await runTask(');
+  const handlerStart = agentSrc.indexOf('const raw = await runTask(');
   const handler = agentSrc.slice(handlerStart, agentSrc.indexOf('onSubagentStop', handlerStart));
+  assert(handlerStart > 0, 'the Task handler is where this test expects it');
   assert(/settings,/.test(handler), 'runAgent passes settings into runTask');
   assert(/context: opts\.context/.test(handler), 'runAgent passes its context into runTask');
   assert(/tokenTracker/.test(handler), 'runAgent passes its token tracker into runTask');
+  // The schema offers these three; they were dropped here, so a detached or
+  // isolated sub-agent was never either, and cancelling waited for children.
+  assert(/abortSignal: loopSignal/.test(handler), 'runAgent passes its cancel signal into runTask');
+  assert(/isolation/.test(handler) && /detach/.test(handler), 'isolation and detach reach runTask');
+  const fanStart = agentSrc.indexOf('const raw = await investigate(');
+  assert(/abortSignal: loopSignal/.test(agentSrc.slice(fanStart, fanStart + 600)),
+    'and Investigate forwards the cancel signal to every investigator');
 }
 
 {
@@ -4176,6 +4187,10 @@ console.log('  -- Context window --');
   assert(getContextWindow('deepseek-v4-flash') === 1_000_000,
     'deepseek-v4-flash is 1M, not the generic 128K deepseek- fallback');
   assert(getContextWindow('deepseek-v4-pro') === 1_000_000, 'deepseek-v4-pro is 1M');
+  // The platform's current flash id. It used to fall through to the 128K
+  // `deepseek-` fallback and compact at an eighth of its real window.
+  assert(getContextWindow('deepseek-flash') === 1_000_000, 'deepseek-flash is 1M');
+  assert(getContextWindow('gpt-6-luna') === 1_050_000, 'gpt-6-luna is 1.05M, not an assumed 128K');
 }
 
 console.log('  -- The trace survives the session log (the point of storing it) --');
@@ -13540,6 +13555,323 @@ console.log('  -- A spreadsheet is read without a deprecated dependency --');
   try { await readAttachment({ file_path: junk }); } catch { threw = true; }
   assert(threw, 'a file that is not a workbook fails loudly rather than returning nonsense');
   fs.rmSync(junkDir, { recursive: true, force: true });
+}
+
+console.log('\n══ LONG-HORIZON CONTEXT: MASK, CONDENSE, RESUME ══');
+{
+  const T = await import('./dist-test/test-exports.js');
+  const big = (tag, n = 6000) => `${tag} first line\n${'x'.repeat(n)}`;
+
+  console.log('  -- Masking is a log event, and derivation honours it --');
+  {
+    const s = mkSession('lh-mask-derive');
+    s.append('turn/start', { turn: 1 });
+    s.append('user/message', { turn: 1, content: 'the task', source: { kind: 'human' } }, { surfaceOp: { op: 'append' } });
+    const results = [];
+    const add = (i, name, content, isError, input) => {
+      const call = { id: `c${i}`, name, input: input ?? { file_path: `/f${i}.ts` } };
+      s.append('assistant/message', { turn: 1, step: i + 1, content: '', toolCalls: [call] }, { surfaceOp: { op: 'append' } });
+      s.append('tool/call', { turn: 1, step: i + 1, callId: call.id, name, arguments: JSON.stringify(call.input) });
+      results.push(s.append('tool/result', {
+        turn: 1, step: i + 1, callId: call.id, name, content, ...(isError ? { isError: true } : {}),
+      }, { surfaceOp: { op: 'append' } }).seq);
+    };
+    add(0, 'Write', 'wrote /f0.ts', false, { file_path: '/f0.ts', content: 'y'.repeat(3000) });
+    add(1, 'Read', big('file1'));
+    add(2, 'Bash', big('boom'), true);
+    add(3, 'Task', big('subagent report'));
+    add(4, 'Read', big('file4'));
+    s.append('context/masked', { throughSeq: results[3], tokensFreed: 1 });
+    s.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+
+    const tools = T.deriveMessages(s.events).filter(m => m.role === 'tool');
+    assert(tools[1].content.startsWith('[Earlier Read output') && tools[1].content.includes('file1 first line'),
+      `an old observation becomes a placeholder that says what it was (${tools[1].content.slice(0, 70)}…)`);
+    assert(tools[2].content === big('boom'), 'an error is never masked — the model needs it not to repeat the mistake');
+    assert(tools[3].content === big('subagent report'), 'a sub-agent report is never masked — it cannot be re-fetched cheaply');
+    assert(tools[4].content === big('file4'), 'results after the mask are untouched');
+    const write = T.deriveMessages(s.events).find(m => m.toolCalls?.[0]?.name === 'Write').toolCalls[0];
+    assert(/^\[3,000 chars cleared/.test(write.input.content) && write.id === 'c0',
+      'an old Write keeps its call id but not the whole file body it carried');
+    assert(T.deriveMessages(s.events, { unmasked: true }).filter(m => m.role === 'tool')[1].content === big('file1'),
+      'the unmasked projection still has the original text, for the record kept on disk');
+    assert(checkSessionInvariants(s).violations.length === 0, 'a masked log satisfies every invariant');
+  }
+
+  console.log('  -- The manager masks in one batch, and only when it is worth breaking the cache --');
+  {
+    const s = mkSession('lh-mask-manager');
+    s.append('turn/start', { turn: 1 });
+    s.append('user/message', { turn: 1, content: 'read them all', source: { kind: 'human' } }, { surfaceOp: { op: 'append' } });
+    for (let i = 0; i < 6; i++) {
+      const call = { id: `r${i}`, name: 'Read', input: { file_path: `/r${i}` } };
+      s.append('assistant/message', { turn: 1, step: i + 1, content: '', toolCalls: [call] }, { surfaceOp: { op: 'append' } });
+      s.append('tool/result', { turn: 1, step: i + 1, callId: call.id, name: 'Read', content: big(`r${i}`, 9000) }, { surfaceOp: { op: 'append' } });
+    }
+    const notices = [];
+    const cm = new T.ContextManager({
+      session: s, model: 'mock-model', overheadTokens: 500, notice: t => notices.push(t),
+      settings: { contextManagement: { maskAtTokens: 3000, keepRecentToolResults: 4, keepRecentSteps: 2 }, autoCompact: { thresholdTokens: 100_000 } },
+    });
+    const before = cm.measure();
+    await cm.beforeStep(1);
+    await cm.beforeStep(2);
+    const masks = s.events.filter(e => e.type === 'context/masked');
+    assert(masks.length === 1, `one batch, not one mask per step (${masks.length})`);
+    assert(cm.measure() < before * 0.5, `the context more than halved (${before} → ${cm.measure()})`);
+    const shown = T.deriveMessages(s.events).filter(m => m.role === 'tool');
+    assert(shown.slice(-2).every(m => m.content.length > 9000) && shown.slice(0, 4).every(m => m.content.startsWith('[Earlier')),
+      'a window of four: once a mask fires, half of it (two) stays whole and the four older are masked');
+    assert(notices.some(n => /Cleared older tool output/.test(n)), 'the person is told it happened');
+  }
+
+  console.log('  -- Output the model has only just seen is never cleared, however much of it there is --');
+  {
+    // The live failure: a model reading eight files at once had them masked a
+    // step later, before it had noted anything, and read them all again.
+    const s = mkSession('lh-parallel');
+    s.append('turn/start', { turn: 1 });
+    s.append('user/message', { turn: 1, content: 'read all of them', source: { kind: 'human' } }, { surfaceOp: { op: 'append' } });
+    for (let step = 1; step <= 2; step++) {
+      const calls = Array.from({ length: 8 }, (_, i) => ({ id: `p${step}-${i}`, name: 'Read', input: { file_path: `/p${step}-${i}` } }));
+      s.append('assistant/message', { turn: 1, step, content: '', toolCalls: calls }, { surfaceOp: { op: 'append' } });
+      for (const c of calls) {
+        s.append('tool/result', { turn: 1, step, callId: c.id, name: 'Read', content: big(c.id, 9000) }, { surfaceOp: { op: 'append' } });
+      }
+    }
+    const cm = new T.ContextManager({
+      session: s, model: 'mock-model', overheadTokens: 500,
+      settings: { contextManagement: { maskAtTokens: 3000, keepRecentToolResults: 3, keepRecentSteps: 3 }, autoCompact: { thresholdTokens: 100_000 } },
+    });
+    await cm.beforeStep(3);
+    assert(s.events.filter(e => e.type === 'context/masked').length === 0,
+      'sixteen results from the last two steps stay whole, even with a count window of three');
+  }
+
+  console.log('  -- A long turn compacts itself mid-turn, keeping the task, the todos and the files --');
+  {
+    const dir = fs.mkdtempSync(path.join(process.cwd(), 'dist-test', 'lh-files-'));
+    const files = [0, 1, 2, 3, 4, 5, 6].map(i => {
+      const f = path.join(dir, `part${i}.txt`);
+      fs.writeFileSync(f, `PART ${i} VALUE=${i * 7}\n`);
+      return f;
+    });
+    const TASK = 'Read every part file and report the VALUE in each one. Exact words matter.';
+    let n = 0;
+    const provider = {
+      id: 'mock', displayName: 'Mock', requests: [], handoffs: 0, tails: [],
+      async *chat(opts) {
+        const last = opts.messages[opts.messages.length - 1];
+        const chars = opts.messages.reduce((t, m) => t + (m.content?.length ?? 0) + JSON.stringify(m.toolCalls ?? []).length, 0);
+        yield { type: 'usage', inputTokens: Math.ceil(chars / 4) + 800, outputTokens: 20 };
+        if (typeof last.content === 'string' && last.content.includes('Context checkpoint')) {
+          this.handoffs++;
+          yield { type: 'text', content: 'HANDOFF NOTE: parts read so far are recorded; next read the following part.' };
+          yield { type: 'finish', reason: 'stop' };
+          return;
+        }
+        this.requests.push(chars);
+        this.tails.push(opts.volatileContext ?? '');
+        const i = n++;
+        if (i >= 1000) { yield { type: 'text', content: 'Values: 0,7,14,21,28,35,42' }; yield { type: 'finish', reason: 'stop' }; return; }
+        if (i === 0) {
+          yield { type: 'tool_call', id: 'todo', name: 'TodoWrite', input: { todos: [
+            { id: 'a', title: 'Read all seven parts', status: 'in_progress', priority: 'high' },
+            { id: 'b', title: 'Report every VALUE', status: 'pending', priority: 'high' },
+          ] } };
+        } else if (i <= files.length) {
+          // Long working notes each step: the model's own text, which no mask
+          // can clear — so only compaction can keep this turn bounded.
+          yield { type: 'text', content: `Notes on part ${i}: ` + 'careful analysis '.repeat(800) };
+          yield { type: 'tool_call', id: `read${i}`, name: 'Read', input: { file_path: files[i - 1] } };
+        } else {
+          yield { type: 'tool_call', id: 'done', name: 'TodoWrite', input: { todos: [
+            { id: 'a', title: 'Read all seven parts', status: 'done', priority: 'high' },
+            { id: 'b', title: 'Report every VALUE', status: 'done', priority: 'high' },
+          ] } };
+          n = 1000;
+        }
+        yield { type: 'finish', reason: 'tool_calls' };
+      },
+    };
+    const session = mkSession('lh-midturn');
+    const notices = [];
+    const result = await baseRun(provider, session, {
+      task: TASK,
+      onNotice: t => notices.push(t),
+      settings: {
+        completionGate: { enabled: false }, cron: { enabled: false },
+        autoCompact: { thresholdTokens: 9_000 },
+        contextManagement: { keepRecentToolResults: 50 },
+      },
+    });
+    const turnEnds = session.events.filter(e => e.type === 'turn/end');
+    const compactions = session.events.filter(e => e.type === 'compaction/summary');
+    assert(turnEnds.length === 1 && turnEnds[0].data.reason.kind === 'completed',
+      `the turn finished normally (${JSON.stringify(turnEnds.map(e => e.data.reason))})`);
+    assert(compactions.length >= 1, `it compacted inside the turn (${compactions.length} time(s)), not only between turns`);
+    const summary = session.events.find(e => e.type === 'user/message' && e.data.source.kind === 'compaction')?.data.content ?? '';
+    const asked = T.sectionOf(summary, T.ASKED_HEADING) ?? '';
+    assert(asked.includes(TASK), 'the handoff carries the person\'s request word for word');
+    assert(/Read all seven parts/.test(T.sectionOf(summary, T.TODO_HEADING) ?? ''), 'and the todo list');
+    assert(/part0\.txt/.test(T.sectionOf(summary, '## Files read') ?? ''), 'and the files already read');
+    assert(/HANDOFF NOTE/.test(summary) && provider.handoffs >= 1, 'and the model\'s own account of where it stands');
+    // Seven steps of ~13.6KB notes: kept whole, over 20K tokens of context.
+    // Compaction keeps every request near its 9K mark.
+    const noteTokens = 7 * 'careful analysis '.repeat(800).length / 4;
+    const peak = Math.max(...provider.requests) / 4;
+    assert(noteTokens > 20_000 && peak < 13_000,
+      `the context stayed bounded (peak request ~${Math.round(peak)} tokens; the notes alone are ~${Math.round(noteTokens)})`);
+    assert(provider.tails.some(t => /Todo list — 0 of 2 done/.test(t) && /Read all seven parts/.test(t)),
+      'the open todos are recited in the request tail while work remains');
+    assert(/Values:/.test(result), 'and the work still reached its answer');
+    assert(notices.some(t => /Condensed \d+ earlier step/.test(t)), 'the person is told a condensation happened');
+    const warnings = session.events.filter(e => e.type === 'user/message' && e.data.source.plugin === 'context-manager');
+    assert(warnings.length === 1 && /record|Keep the values/i.test(warnings[0].data.content),
+      'the model is warned once, before anything is cleared, to keep what it will need');
+    const detailed = T.deriveMessagesDetailed(session.events);
+    assert(detailed.repairs.synthesizedResults.length === 0 && detailed.repairs.droppedOrphanResults.length === 0,
+      'cutting on a step boundary left no call without its result, and no result without its call');
+    assert(checkSessionInvariants(session).violations.length === 0, 'the compacted log satisfies every invariant');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  console.log('  -- When one step alone overfills the real window, it stops with a reason instead of looping --');
+  {
+    const dir = fs.mkdtempSync(path.join(process.cwd(), 'dist-test', 'lh-huge-'));
+    const huge = path.join(dir, 'huge.txt');
+    // Long lines, so even the 2,000 lines Read returns are larger than the
+    // whole 30K window below — one result no mask or summary can make fit.
+    fs.writeFileSync(huge, `${'a line of a very large file, padded well past the usual width '.repeat(2)}\n`.repeat(3000));
+    let requests = 0;
+    const provider = {
+      id: 'mock', displayName: 'Mock',
+      async *chat(opts) {
+        const chars = opts.messages.reduce((t, m) => t + (m.content?.length ?? 0), 0);
+        yield { type: 'usage', inputTokens: Math.ceil(chars / 4) + 800, outputTokens: 10 };
+        const last = opts.messages[opts.messages.length - 1];
+        if (typeof last.content === 'string' && last.content.includes('Context checkpoint')) {
+          yield { type: 'text', content: 'note' }; yield { type: 'finish', reason: 'stop' }; return;
+        }
+        requests++;
+        yield { type: 'tool_call', id: `h${requests}`, name: 'Read', input: { file_path: huge } };
+        yield { type: 'finish', reason: 'tool_calls' };
+      },
+    };
+    const session = mkSession('lh-thrash');
+    let error;
+    await baseRun(provider, session, {
+      // A model name of its own: the runtime learns windows from prompts a
+      // model accepted, and earlier tests teach 'mock-model' a large one.
+      model: 'lh-small-window-model',
+      settings: { completionGate: { enabled: false }, cron: { enabled: false }, maxIterations: 60, contextWindows: { 'lh-small-window-model': 30_000 } },
+    }).catch(e => { error = e; });
+    assert(error && /stays above|nothing earlier/.test(error.message),
+      `the turn ends with a reason, not a loop (${error?.message?.slice(0, 90)})`);
+    assert(requests < 12, `and it gave up early (${requests} requests of 60 allowed)`);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  console.log('  -- The step cap pauses with a note instead of throwing the turn away --');
+  {
+    const session = mkSession('lh-cap');
+    const result = await baseRun(runawayProvider(100), session, {
+      settings: { completionGate: { enabled: false }, cron: { enabled: false }, maxIterations: 3 },
+    });
+    const end = session.events.filter(e => e.type === 'turn/end').pop();
+    assert(/Paused after 3 steps/.test(result) && /continue/.test(result), 'the reader is told it paused and how to go on');
+    assert(end.data.reason.kind === 'error' && end.data.reason.code === 'iteration-cap',
+      'and the log records exactly why the turn stopped');
+  }
+
+  console.log('  -- A turn the process died in is closed honestly, and the next one is told --');
+  {
+    const session = mkSession('lh-resume');
+    session.append('turn/start', { turn: 1 });
+    session.append('user/message', { turn: 1, content: 'long job', source: { kind: 'human' } }, { surfaceOp: { op: 'append' } });
+    session.append('assistant/message', { turn: 1, step: 1, content: '', toolCalls: [{ id: 'x1', name: 'Bash', input: { command: 'build' } }] }, { surfaceOp: { op: 'append' } });
+    // Dispatched, then the process died before the result came back.
+    session.append('tool/call', { turn: 1, step: 1, callId: 'x1', name: 'Bash', arguments: '{"command":"build"}' });
+    await baseRun(mockProvider([[{ type: 'text', content: 'resumed' }, { type: 'finish', reason: 'stop' }]]), session, { task: 'continue' });
+    const firstEnd = session.events.find(e => e.type === 'turn/end');
+    assert(firstEnd?.data.turn === 1 && /interrupted/.test(firstEnd.data.reason.cause ?? ''),
+      'the dead turn is closed as interrupted, not left open');
+    assert(session.events.some(e => e.type === 'user/message' && e.data.source.plugin === 'resume' && /interrupted/.test(e.data.content)),
+      'and the new turn is told before it acts');
+    assert(checkSessionInvariants(session).violations.length === 0, 'the repaired log satisfies every invariant');
+  }
+
+  console.log('  -- Small wiring --');
+  assert(isRetryableError(new Error('No data from the model for 120s — the connection stalled.')),
+    'a stalled stream is retried, not fatal to hours of work');
+  {
+    const base = costFor('claude-sonnet-5', { inputTokens: 1_000_000 });
+    const plain = costFor('claude-sonnet-5', { inputTokens: 1_000_000, cacheWriteTokens: 1_000_000 });
+    const long = costFor('claude-sonnet-5', { inputTokens: 1_000_000, cacheWriteTokens: 1_000_000, cacheWrite1hTokens: 1_000_000 });
+    assert(Math.abs(plain - base * 1.25) < 1e-9 && Math.abs(long - base * 2) < 1e-9,
+      `one-hour cache writes are costed at 2x, five-minute at 1.25x (${base}, ${plain}, ${long})`);
+  }
+
+  // Published rates (checked 2026-09-28): these fell to the `gpt-5` and
+  // `deepseek-` rows and were costed at many times — or a fraction of — the real price.
+  const million = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+  assert(Math.abs(costFor('gpt-6-luna', million) - 0.60) < 1e-9, `gpt-6-luna is $0.10 in, $0.50 out (${costFor('gpt-6-luna', million)})`);
+  assert(Math.abs(costFor('gpt-5.6-luna', million) - 1.40) < 1e-9, `gpt-5.6-luna is $0.20 in, $1.20 out (${costFor('gpt-5.6-luna', million)})`);
+  assert(Math.abs(costFor('deepseek-flash', million) - 0.75) < 1e-9, `deepseek-flash is $0.15 in, $0.60 out off-peak (${costFor('deepseek-flash', million)})`);
+
+  console.log('  -- Anthropic: the static prefix is cached for an hour, the tail for five minutes --');
+  {
+    const http = await import('http');
+    const bodies = [];
+    const paths = [];
+    const server = http.createServer((req, res) => {
+      paths.push(req.url);
+      let raw = '';
+      req.on('data', c => { raw += c; });
+      req.on('end', () => {
+        bodies.push(JSON.parse(raw));
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        const ev = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+        ev('message_start', { message: { id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-5', content: [], stop_reason: null,
+          usage: { input_tokens: 10, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 500,
+            cache_creation: { ephemeral_5m_input_tokens: 100, ephemeral_1h_input_tokens: 400 } } } });
+        ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } });
+        ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text: 'ok' } });
+        ev('content_block_stop', { index: 0 });
+        ev('message_delta', { delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } });
+        ev('message_stop', {});
+        res.end();
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const baseURL = `http://127.0.0.1:${server.address().port}`;
+    const ask = async (config) => {
+      const provider = new T.AnthropicProvider({ apiKey: 'test', baseURL, thinking: 'off', ...config });
+      // eslint-disable-next-line no-unused-vars
+      const events = [];
+      for await (const e of provider.chat({
+        model: 'claude-sonnet-5', systemPrompt: 'SYSTEM',
+        tools: [{ name: 'Read', description: 'read', inputSchema: { type: 'object', properties: {} } }],
+        messages: [{ role: 'user', content: 'one' }, { role: 'assistant', content: 'two' }, { role: 'user', content: 'three' }],
+      })) events.push(e);
+      return events;
+    };
+    const events = await ask({});
+    const body = bodies[0];
+    const tailMarks = body.messages.flatMap(m => Array.isArray(m.content) ? m.content : []).filter(b => b.cache_control);
+    assert(body.system[0].cache_control?.ttl === '1h' && body.tools.at(-1).cache_control?.ttl === '1h',
+      'the system prompt and tool definitions ask for the one-hour tier');
+    assert(tailMarks.length > 0 && tailMarks.every(b => b.cache_control.ttl === undefined),
+      'the conversation tail stays on the five-minute default');
+    assert(events.find(e => e.type === 'usage')?.cacheWrite1hTokens === 400,
+      'the one-hour share of a cache write is reported, so it can be costed');
+    await ask({ cacheTtl: '5m' });
+    assert(bodies[1].system[0].cache_control.ttl === undefined, 'and it can be set back to five minutes');
+    await ask({ baseURL: `${baseURL}/v1/` });
+    assert(paths.length === 3 && paths.every(p => p.startsWith('/v1/messages')),
+      `a configured base URL is honoured, with or without a trailing /v1 (${paths.join(', ')})`);
+    server.close();
+  }
 }
 
 clearInterval(keepAliveForAbandonedTools);

@@ -1,0 +1,35 @@
+{
+  "model": "deepseek-flash",
+  "mode": "tight",
+  "overhead": 22938,
+  "steps": 19,
+  "masks": 0,
+  "compactions": 1,
+  "turnEnds": [
+    {
+      "kind": "completed"
+    },
+    {
+      "kind": "completed"
+    }
+  ],
+  "inputTokens": 831785,
+  "cachedTokens": 736640,
+  "outputTokens": 9914,
+  "peakRequest": 59979,
+  "costUsd": 0.024004163999999998,
+  "minutes": 1,
+  "correct": 10,
+  "passed": 3,
+  "failed": 0,
+  "tools": {
+    "LS": 2,
+    "TodoWrite": 13,
+    "Read": 12,
+    "Write": 1,
+    "Edit": 1
+  },
+  "notices": [
+    "Condensed 7 earlier step(s) of this turn into a handoff note to make room (~65,140 → ~34,414 tokens); the 1 most recent step(s) stay in full."
+  ]
+}

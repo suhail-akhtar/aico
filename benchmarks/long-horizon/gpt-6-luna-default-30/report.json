@@ -1,0 +1,38 @@
+{
+  "model": "gpt-6-luna",
+  "mode": "default",
+  "overhead": 16382,
+  "steps": 73,
+  "masks": 3,
+  "compactions": 0,
+  "turnEnds": [
+    {
+      "kind": "completed"
+    },
+    {
+      "kind": "completed"
+    }
+  ],
+  "inputTokens": 5212209,
+  "cachedTokens": 1157300,
+  "outputTokens": 27521,
+  "peakRequest": 105145,
+  "costUsd": 0.43082440000000005,
+  "minutes": 5.3,
+  "correct": 30,
+  "passed": 3,
+  "failed": 0,
+  "tools": {
+    "LS": 1,
+    "TodoWrite": 31,
+    "Read": 32,
+    "TodoRead": 5,
+    "Write": 1,
+    "Edit": 1
+  },
+  "notices": [
+    "Cleared older tool output from the context (~45,147 tokens); the 6 most recent results stay in full.",
+    "Cleared older tool output from the context (~35,957 tokens); the 6 most recent results stay in full.",
+    "Cleared older tool output from the context (~31,485 tokens); the 6 most recent results stay in full."
+  ]
+}

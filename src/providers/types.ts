@@ -184,6 +184,11 @@ export type ChatEvent =
        * premium and reports none, leaving this 0.
        */
       cacheWriteTokens?: number;
+      /**
+       * Subset of `cacheWriteTokens` written to Anthropic's one-hour tier,
+       * which bills 2x the input rate rather than 1.25x.
+       */
+      cacheWrite1hTokens?: number;
     }
   | {
       /**

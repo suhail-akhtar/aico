@@ -41,7 +41,10 @@ import path from 'path';
 import type { AicoSettings } from '../settings.js';
 import { getWorkspaceInfo } from '../workspace.js';
 import { decisionsNote } from '../project/decisions.js';
-import { deriveMessages } from './derive.js';
+import { deriveMessages, maskState } from './derive.js';
+import { STATE_HEADING, buildHandoff, sectionOf } from './handoff.js';
+import { isMaskable } from './mask.js';
+import type { Todo } from '../tools/todo.js';
 
 /**
  * Keep the full text of what a compaction drops, on disk, and say where.
@@ -128,7 +131,7 @@ export function maybeCompactSession(
   session: Session,
   settings: AicoSettings | undefined,
   model?: string,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; todos?: readonly Todo[] } = {},
 ): SessionCompactionResult {
   const cfg = settings?.autoCompact;
   const force = options.force ?? false;
@@ -183,9 +186,7 @@ export function maybeCompactSession(
   const dropped = deriveMessages(session.events.filter(e => e.seq <= cutEnd));
   if (dropped.length === 0) return idle('replaced range projects to nothing');
 
-  const plain = dropped.map(m => ({ role: m.role, content: m.content }));
-  const spilled = spillDropped(session, settings, plain, cutEnd);
-  const summary = (spilled.line ? `${spilled.line}\n\n` : '') + buildConversationSummary(plain);
+  const summary = composeSummary(session, settings, { start: cutStart, end: cutEnd }, undefined, options.todos);
 
   // `dropped` is the projection of the prefix and `before` the full projection,
   // so the tail past `dropped.length` is exactly what survives. That makes the
@@ -231,6 +232,139 @@ export function maybeCompactSession(
     tokensAfter,
     droppedTurns: droppedTurns.length,
   };
+}
+
+/**
+ * The text that replaces `range`: the full original kept on disk, and a
+ * handoff that carries the specifics from the record rather than trusting a
+ * summarizer with them (see `session/handoff.ts`).
+ *
+ * @param narrative - a model-written account of the work; when absent, the
+ *   heuristic summary is used for that one section.
+ */
+export function composeSummary(
+  session: Session,
+  settings: AicoSettings | undefined,
+  range: { start: Seq; end: Seq },
+  narrative?: string,
+  todos?: readonly Todo[],
+): string {
+  // Unmasked: the record on disk and the fallback summary describe what was
+  // actually said, not the placeholders observation masking shows the model.
+  const folded = deriveMessages(session.events.filter(e => e.seq <= range.end), { unmasked: true });
+  const plain = folded.map(m => ({ role: m.role, content: m.content }));
+  const spilled = spillDropped(session, settings, plain, range.end);
+  // The heuristic narrative is built from the same messages the handoff
+  // already quotes, so the person's requests are pointed at rather than
+  // repeated, and an earlier summary contributes only its account of where
+  // things stood — its verbatim sections are carried separately.
+  const quoted = new Set(session.events
+    .filter(e => e.type === 'user/message' && e.seq <= range.end
+      && (e.data as { source: { kind: string } }).source.kind === 'human')
+    .map(e => (e.data as { content: string }).content));
+  const forStory = plain.map(m => {
+    if (m.role !== 'user') return m;
+    if (quoted.has(m.content)) return { role: m.role, content: '(quoted above)' };
+    if (m.content.startsWith('[Context checkpoint]')) {
+      return { role: m.role, content: `Earlier: ${sectionOf(m.content, STATE_HEADING) ?? ''}` };
+    }
+    return m;
+  });
+  // Its own banner says what the checkpoint preamble already said.
+  const story = narrative?.trim()
+    || buildConversationSummary(forStory, { toolLines: 'failures' }).replace(/^\[Auto-compacted[^\n]*\n/, '');
+  return buildHandoff(session, range, story, todos, spilled.line);
+}
+
+/** Where a cut inside the current turn would fall, and what it keeps. */
+export interface MidTurnCut {
+  start: Seq;
+  end: Seq;
+  /** Steps kept verbatim after the summary. */
+  keptSteps: number;
+  /** Steps folded into it. */
+  foldedSteps: number;
+}
+
+/** Rough tokens one visible surface event costs in a request, masking included. */
+function eventTokens(event: SessionEvent, maskedThrough: Seq): number {
+  if (event.type === 'assistant/message') {
+    const data = event.data as { content: string; toolCalls?: unknown[] };
+    return estimateTokens(data.content + (data.toolCalls ? JSON.stringify(data.toolCalls) : '')) + 4;
+  }
+  const data = event.data as { content: string; name?: string; isError?: boolean };
+  if (event.type === 'tool/result' && event.seq <= maskedThrough
+      && isMaskable(data.name ?? '', data.content, data.isError)) {
+    return 60;
+  }
+  return estimateTokens(data.content) + 4;
+}
+
+/**
+ * Choose a cut on a *step* boundary, for compacting inside a long turn.
+ *
+ * Whole-turn compaction cannot help a turn that is itself the problem: one
+ * autonomous turn can run a hundred steps, and the turn-based cut keeps the
+ * last three turns whole — including that one. Cutting just before an
+ * assistant message is as safe as cutting between turns: every tool result
+ * follows the assistant message that asked for it, so nothing kept can lose
+ * its call.
+ *
+ * Keeps the most recent steps up to `keepTokens` (always at least the last),
+ * and folds everything before them. Returns undefined when there is nothing
+ * to fold — a context that is one enormous step cannot be cut, only masked.
+ */
+export function planMidTurnCut(session: Session, keepTokens: number): MidTurnCut | undefined {
+  const visible = session.surfaceEvents();
+  const assistants = visible.filter(e => e.type === 'assistant/message');
+  if (assistants.length < 2) return undefined;
+  const maskedThrough = maskState(session.events).through;
+
+  // Tokens per step: an assistant message and everything visible after it,
+  // up to the next assistant message.
+  const stepTokens = assistants.map((a, i) => {
+    const next = assistants[i + 1]?.seq ?? Number.MAX_SAFE_INTEGER;
+    return visible
+      .filter(e => e.seq >= a.seq && e.seq < next)
+      .reduce((n, e) => n + eventTokens(e, maskedThrough), 0);
+  });
+
+  let keepFrom = assistants.length - 1;
+  let kept = stepTokens[keepFrom]!;
+  while (keepFrom > 1 && kept + stepTokens[keepFrom - 1]! <= keepTokens) {
+    keepFrom--;
+    kept += stepTokens[keepFrom]!;
+  }
+
+  const firstKept = assistants[keepFrom]!.seq;
+  const before = visible.filter(e => e.seq < firstKept);
+  if (before.length === 0) return undefined;
+  return {
+    start: visible[0]!.seq,
+    end: before[before.length - 1]!.seq,
+    keptSteps: assistants.length - keepFrom,
+    foldedSteps: keepFrom,
+  };
+}
+
+/**
+ * Fold a mid-turn cut into a summary.
+ *
+ * @returns estimated tokens of the request history after folding.
+ */
+export function foldRange(
+  session: Session,
+  settings: AicoSettings | undefined,
+  range: { start: Seq; end: Seq },
+  summary: string,
+  tokensBefore: number,
+): number {
+  session.appendCompactionSummary(summary, range, {
+    before: tokensBefore,
+    after: estimateMessages(deriveMessages(session.events.filter(e => e.seq < range.start || e.seq > range.end)))
+      + estimateTokens(summary),
+  });
+  return estimateMessages(deriveMessages(session.events));
 }
 
 /**

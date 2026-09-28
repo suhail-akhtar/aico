@@ -39,6 +39,7 @@
 import type { AicoMessage, ImageRef, ReasoningTrace, ToolCall } from '../providers/types.js';
 import type { SessionEvent, Seq } from './events.js';
 import { isSurfaceEvent } from './events.js';
+import { isMaskable, maskedCall, maskedResult } from './mask.js';
 
 /** Text used for a tool call whose result never reached the log. */
 export const MISSING_RESULT_TEXT =
@@ -93,13 +94,40 @@ export function computeShadowedSeqs(events: readonly SessionEvent[]): Set<Seq> {
 }
 
 /**
+ * How far observation masking reaches, and where masked text was saved.
+ *
+ * The furthest `context/masked` wins — masks only ever move forward — and
+ * every mask's spill paths are kept, since each one saved different results.
+ */
+export function maskState(events: readonly SessionEvent[]): {
+  through: Seq;
+  spills: Record<string, string>;
+} {
+  let through = 0;
+  const spills: Record<string, string> = {};
+  for (const event of events) {
+    if (event.type !== 'context/masked') continue;
+    const data = event.data as { throughSeq: Seq; spills?: Record<string, string> };
+    if (data.throughSeq > through) through = data.throughSeq;
+    Object.assign(spills, data.spills ?? {});
+  }
+  return { through, spills };
+}
+
+/**
  * Project a session log into the message list a provider receives.
  *
  * @param events - the full log, in seq order.
  * @returns the derived messages plus any invariant repairs that were applied.
  */
-export function deriveMessagesDetailed(events: readonly SessionEvent[]): DeriveResult {
+export function deriveMessagesDetailed(
+  events: readonly SessionEvent[],
+  options: { unmasked?: boolean } = {},
+): DeriveResult {
   const shadowed = computeShadowedSeqs(events);
+  // Unmasked for the few callers that need what was actually said — the
+  // record a compaction keeps on disk must hold the text, not placeholders.
+  const mask = options.unmasked ? { through: 0, spills: {} as Record<string, string> } : maskState(events);
 
   // ── Order surface events, honouring replace positioning ────────────
   // Each surviving surface event gets a sort key: its own seq normally, or its
@@ -165,7 +193,11 @@ export function deriveMessagesDetailed(events: readonly SessionEvent[]): DeriveR
         toolCalls?: ToolCall[];
         reasoning?: ReasoningTrace;
       };
-      const toolCalls = data.toolCalls ?? [];
+      // What the calls *did* stays in the pairing below; only their oversized
+      // arguments are shortened once masked, so the ids still match results.
+      const toolCalls = event.seq <= mask.through
+        ? (data.toolCalls ?? []).map(maskedCall)
+        : (data.toolCalls ?? []);
       messages.push({
         role: 'assistant',
         // An assistant turn with neither content nor tool calls is a valid
@@ -207,11 +239,14 @@ export function deriveMessagesDetailed(events: readonly SessionEvent[]): DeriveR
         continue;
       }
       pending.satisfied = true;
+      const masked = event.seq <= mask.through && isMaskable(data.name, data.content, data.isError);
       messages.push({
         role: 'tool',
         toolCallId: data.callId,
         toolName: data.name,
-        content: data.content,
+        content: masked
+          ? maskedResult(data.name, data.content, mask.spills[String(event.seq)])
+          : data.content,
       });
       continue;
     }
@@ -227,6 +262,9 @@ export function deriveMessagesDetailed(events: readonly SessionEvent[]): DeriveR
  * Convenience wrapper over {@link deriveMessagesDetailed} for the common case
  * where the caller does not inspect repairs.
  */
-export function deriveMessages(events: readonly SessionEvent[]): AicoMessage[] {
-  return deriveMessagesDetailed(events).messages;
+export function deriveMessages(
+  events: readonly SessionEvent[],
+  options: { unmasked?: boolean } = {},
+): AicoMessage[] {
+  return deriveMessagesDetailed(events, options).messages;
 }

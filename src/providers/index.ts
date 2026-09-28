@@ -42,14 +42,17 @@ export { isDeepSeekPlatformModel, isDirectVendor, vendorForModel } from './model
  * The gpt-5.6 family rejects function tools whenever a reasoning effort is set
  * on Chat Completions, so an agent harness has to choose between tools and
  * reasoning there. Responses supports both. Verified live against
- * `gpt-5.6-luna` and `gpt-5.6-terra`.
+ * `gpt-5.6-luna` and `gpt-5.6-terra`. The gpt-6 family does the same — its
+ * 400 says so outright ("To use function tools, use /v1/responses"), seen
+ * live against `gpt-6-luna` on 2026-09-28, which could not run a single tool
+ * until this matched it.
  *
  * Kept as an explicit prefix list rather than "everything gpt-5+": the earlier
  * gpt-5.x models work fine on Chat Completions, and silently rerouting them
  * would change behaviour nobody asked to change.
  */
 export function requiresResponsesApi(model: string): boolean {
-  return /^gpt-5\.6(-|$)/i.test(model);
+  return /^gpt-(5\.6|6(\.\d+)?)(-|$)/i.test(model);
 }
 
 // ── Default models per provider ─────────────────────────────────────
@@ -226,6 +229,7 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
       return new AnthropicProvider({
         apiKey: key,
         cacheControl,
+        cacheTtl: settings?.promptCaching?.prefixTtl ?? '1h',
         ...(settings?.providers?.anthropic?.thinking
           ? { thinking: settings.providers.anthropic.thinking }
           : {}),
@@ -252,6 +256,7 @@ export function selectProvider(model: string, settings?: AicoSettings): Provider
           id: 'openai',
           displayName: 'OpenAI',
           apiKey: key,
+          promptCacheKey: 'aico-' + (settings?.model ?? 'default'),
           ...(baseURL ? { baseURL } : {}),
           ...(configured ? { reasoningEffort: configured } : {}),
           ...(settings?.providers?.openai?.maxOutputTokens
@@ -411,6 +416,7 @@ export function providerFromInstance(
       return new AnthropicProvider({
         apiKey,
         cacheControl,
+        cacheTtl: settings.promptCaching?.prefixTtl ?? '1h',
         ...(instance.baseUrl ? { baseURL } : {}),
         ...(thinking ? { thinking } : {}),
         ...(effort ? { effort } : {}),
@@ -441,6 +447,8 @@ export function providerFromInstance(
           displayName: instance.name,
           apiKey,
           baseURL,
+          // Same key the Chat Completions path uses for this instance.
+          promptCacheKey: `aico-${instance.id}`,
           ...(reasoningEffort ? { reasoningEffort } : {}),
           ...(maxOutputTokens ? { maxOutputTokens } : {}),
         });

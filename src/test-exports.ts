@@ -367,3 +367,11 @@ export { effortDisplay, tuningPatch, tuningChoice, FAMILY_REASONING } from '../s
 
 export { readWorkbook, columnIndex, serialToIso } from './tools/xlsx-lite.js';
 export { readAttachment } from './tools/read-attachment.js';
+// -- Long-horizon context management --
+export { ContextManager, ContextOverflowError, HANDOFF_INSTRUCTION } from './session/context-manager.js';
+export { maskedResult, maskedCall, isMaskable, MASK_EXEMPT_TOOLS } from './session/mask.js';
+export { buildHandoff, sectionOf, ASKED_HEADING, TODO_HEADING, PLAN_HEADING, CHANGED_HEADING } from './session/handoff.js';
+export { planMidTurnCut, composeSummary } from './session/compact.js';
+export { maskState } from './session/derive.js';
+export { AnthropicProvider } from './providers/anthropic.js';
+export { readTodos } from './tools/todo.js';

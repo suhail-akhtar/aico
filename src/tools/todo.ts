@@ -82,6 +82,24 @@ export async function getOpenTodoCount(): Promise<number> {
   return todos.filter(t => t.status === 'pending' || t.status === 'in_progress').length;
 }
 
+/** The whole list, for callers that show it rather than count it. */
+export async function readTodos(sessionId?: string): Promise<Todo[]> {
+  return loadTodos(sessionId);
+}
+
+/** One line per item, as a checklist a model or a person reads at a glance. */
+export function todoChecklist(todos: readonly Todo[]): string[] {
+  const mark = (s: Todo['status']): string =>
+    s === 'done' ? '[x]' : s === 'in_progress' ? '[~]' : s === 'cancelled' ? '[-]' : '[ ]';
+  return todos.map(t => `${mark(t.status)} ${t.title}`);
+}
+
+/** The open items only, as checklist lines. */
+export async function pendingTodoLines(sessionId?: string): Promise<string[]> {
+  const todos = await loadTodos(sessionId);
+  return todoChecklist(todos.filter(t => t.status === 'pending' || t.status === 'in_progress'));
+}
+
 export interface TodoWriteInput {
   todos: Todo[];
 }
@@ -95,7 +113,7 @@ export async function todoWrite(input: TodoWriteInput): Promise<string> {
 
 export const todoReadDefinition = {
   name: 'TodoRead',
-  description: 'Read the current todo list from .aico-todos.json in the user home directory.',
+  description: 'Read the current todo list for this session.',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -105,7 +123,7 @@ export const todoReadDefinition = {
 
 export const todoWriteDefinition = {
   name: 'TodoWrite',
-  description: 'Write (replace) the todo list in .aico-todos.json.',
+  description: 'Write (replace) the todo list for this session.',
   inputSchema: {
     type: 'object',
     properties: {
