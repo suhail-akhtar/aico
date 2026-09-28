@@ -3,6 +3,50 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.19.4 — 2026-09-28
+
+A chat and its workspace, made honest in the web portal. Four reported
+problems: a new chat never said which folder it was in or let you change it;
+there was no "current" workspace new chats started in; empty workspaces piled
+up; and removing a workspace that had chats "didn't work" — it silently
+orphaned them.
+
+### Added
+
+- **A folder picker in the composer**, shown only before the first message.
+  Lists your workspaces, or browses to any folder. Switching keeps the same
+  chat and whatever you have typed.
+- **New chats start in the workspace you last used**, remembered per browser,
+  instead of always landing in Scratch.
+
+### Fixed
+
+- **The header's folder label is right from the first message.** A brand-new
+  chat never had its folder set client-side, so the label only appeared after
+  reopening the chat from the sidebar. `GET /api/session` now returns the
+  chat's actual directory.
+- **A folder becomes a workspace when a message is sent there, not when it is
+  browsed to.** Opening or picking an empty folder and backing out leaves
+  nothing in the sidebar. Reopening a folder that already has chats registers
+  it at once and brings its history back.
+- **Removing a workspace says exactly what happens and does it.** The dialog
+  names the number of chats it will hide and how to get them back; they leave
+  the sidebar immediately; and they no longer reappear on the next reload
+  while the server still holds one of them in memory. Removing the workspace
+  of the chat you are in moves you to a fresh chat in Scratch rather than
+  leaving that chat open under another folder's name. The actions menu is
+  visible without hovering on empty workspaces.
+- Workspace chat counts no longer include chats that were opened and never
+  used.
+
+### Internal
+
+- `RunManager.ensure()` may move a run to a different directory only while it
+  has written nothing; any session that has said anything keeps its directory
+  for life, as before.
+- New `web-live-test.mjs` section drives the whole flow against a real model:
+  pick, send, register, remove, reload, reopen.
+
 ## 0.19.3 — 2026-09-17
 
 Phase 1 of deepening VS Code integration: the agent can now reach into the

@@ -805,6 +805,52 @@ section('Reloading mid-run does not disturb the run');
 }
 
 // ─────────────────────────────────────────────────────────────────────
+section('A chat and its folder: picked before sending, registered on send, removed honestly');
+{
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-web-folder-'));
+  const same = (a, b) => path.resolve(a ?? '').toLowerCase() === path.resolve(b ?? '').toLowerCase();
+  const isProject = async () => (await json('projects')).projects.some(p => same(p.path, folder));
+  const listed = async (id) => (await json('sessions')).sessions.some(s => s.id === id);
+  const folderSession = `web-folder-${Date.now()}`;
+
+  // Opening the stream is what opens a run, and it happens before anything is
+  // typed — so the run starts wherever the fallback is, not in the folder.
+  const streaming = readStream(folderSession, 0, ev => ev.type === 'turn-end', 240_000);
+  await sleep(500);
+  const before = await json(`session?id=${folderSession}`);
+  check(!same(before.project, folder), 'a fresh chat starts in the fallback, and says which');
+  check(!await isProject(), 'picking a folder registers nothing by itself');
+
+  await post('submit', {
+    sessionId: folderSession, task: 'Reply with exactly: ok. Use no tools.', model: MODEL, project: folder,
+  });
+  await streaming;
+  check(await isProject(), 'the first real message registers the folder');
+  const after = await json(`session?id=${folderSession}`);
+  check(same(after.project, folder), `the still-empty run moved to the folder it was sent to (${after.project})`);
+  check(await listed(folderSession), 'and the chat is listed');
+
+  const removed = await post('projects/remove', { path: folder });
+  check(removed.status === 200, `removing the folder succeeds (${removed.status})`);
+  check(!await listed(folderSession),
+    'its chat leaves the list — even though the server still holds the run in memory');
+
+  // Reopening from the folder picker: a folder with history registers at once,
+  // an empty one does not.
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-web-empty-'));
+  const reopenEmpty = await (await post('projects/add', { path: empty, ifHasHistory: true })).json();
+  check(reopenEmpty.project === null
+    && !(await json('projects')).projects.some(p => same(p.path, empty)),
+  'reopening an empty folder registers nothing');
+  const reopened = await (await post('projects/add', { path: folder, ifHasHistory: true })).json();
+  check(reopened.project && await isProject(), 'reopening a folder that has chats registers it at once');
+  check(await listed(folderSession), 'and brings the chat back without a new message');
+  await post('projects/remove', { path: folder });
+  fs.rmSync(folder, { recursive: true, force: true });
+  fs.rmSync(empty, { recursive: true, force: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────
 section('Malformed input');
 {
   const noTask = await api('submit', { method: 'POST', body: JSON.stringify({ sessionId: 'x' }) });

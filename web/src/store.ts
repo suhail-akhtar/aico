@@ -26,6 +26,7 @@
 
 import { create } from 'zustand';
 import { initialSessionId, rememberSession, freshSessionId } from './session-memory';
+import { lastWorkspace, rememberWorkspace } from './workspace-memory';
 import { loadDismissals, saveDismissals } from './panel-memory';
 import type { ChatMessage } from '@aico/ui';
 import { PLAN_REPLY } from './plans';
@@ -387,6 +388,16 @@ interface AppState {
   }) => Promise<void>;
   /** Start a session in a specific folder, whatever is currently selected. */
   newSessionIn: (path: string) => void;
+  /**
+   * Change which folder the *current, still-empty* draft will run in.
+   *
+   * Unlike `selectProject`/`newSessionIn`, this keeps the session id — and so
+   * the composer's typed text, which is local state never tied to it. Only
+   * meaningful before the first message: once a turn has been sent the
+   * directory is fixed for the run's whole life (`RunManager.ensure`), so
+   * this is a no-op past that point.
+   */
+  retargetDraft: (path: string) => void;
   refreshGroups: () => Promise<void>;
   /** Make a group and return its id. Does not start a session in it — that is a separate act. */
   createGroup: (name: string) => Promise<string | undefined>;
@@ -435,7 +446,10 @@ export const useStore = create<AppState>((set, get) => ({
   projects: [],
   groups: [],
   pendingGroup: null,
-  project: null,
+  // Seeded from whatever project was last actually used, the same way
+  // `sessionId` below is seeded from the last session — a brand-new chat
+  // defaults to it rather than always landing in Scratch with no say in it.
+  project: lastWorkspace(),
   showArchived: false,
   sessions: [],
   activeSessions: [],
@@ -526,9 +540,16 @@ export const useStore = create<AppState>((set, get) => ({
     // Usage lives on the server's run, not in the log, so replaying events
     // cannot restore it — a reopened session showed 0 tokens and $0.00 for a
     // conversation that had cost real money.
-    void api.session(sessionId)
+    //
+    // The same `project` rides along here as on the stream subscribe above,
+    // so the two concurrent requests can't resolve to different fallbacks —
+    // and the answer that comes back is this chat's actual directory, which
+    // is what makes the header's project pill accurate for a brand-new chat
+    // that had none set yet.
+    void api.session(sessionId, project ?? undefined)
       .then(snapshot => {
         if (get().sessionId !== sessionId) return;
+        if (snapshot.project && get().project === null) set({ project: snapshot.project });
         const u = snapshot.usage ?? {};
         set({
           usage: {
@@ -884,10 +905,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   addProject: async (path, name) => {
+    // Registration only — starting a session in it is a separate decision
+    // callers make for themselves (see `newSessionIn`). A caller that wants
+    // both still gets one: registering an already-known path is a no-op on
+    // the server, so `newSessionIn` after this is cheap either way.
     try {
-      const { project } = await api.addProject(path, name);
+      await api.addProject(path, name);
       await get().refreshProjects();
-      get().selectProject(project.path);
     } catch (err) { set({ error: (err as Error).message }); }
   },
 
@@ -904,6 +928,16 @@ export const useStore = create<AppState>((set, get) => ({
     // no meaningful "new session here while I am looking at somewhere else".
     set({ project: path });
     get().newSession();
+  },
+
+  retargetDraft: (path) => {
+    if (get().logged.size > 0 || get().project === path) return;
+    set({ project: path });
+    // Reconnects the same session id — `connect` resets more than `project`
+    // (dismissals, persona, usage), all of which are meaningless for a draft
+    // that has said nothing yet, so replaying that reset here is harmless and
+    // is what carries the new `?project=` to the server's retarget guard.
+    get().connect(get().sessionId);
   },
 
   refreshGroups: async () => {
@@ -969,12 +1003,25 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await api.removeProject(path);
       const { projects } = await api.projects();
+      // Purged immediately rather than left for the next `/sessions` refresh
+      // to silently drop: a project with real chats used to linger client-side
+      // as a broken, half-orphaned section until that happened, which is what
+      // "removing doesn't work" actually was. The dialog just promised a clean
+      // removal, so completing it in one step is what makes that promise true.
+      const wasHere = get().project === path;
       set(state => ({
         projects,
-        ...(state.project === path
-          ? { project: projects.find(p => p.isLaunch)?.path ?? null }
+        sessions: state.sessions.filter(s => s.project !== path),
+        // Scratch, not the launch directory: the web never defaults to where
+        // the server happened to be started.
+        ...(wasHere
+          ? { project: (projects.find(p => p.isWorkspace) ?? projects.find(p => p.isLaunch))?.path ?? null }
           : {}),
       }));
+      // The open chat ran in the folder just removed. Staying in it showed a
+      // chat the sidebar no longer lists, labelled with the fallback folder's
+      // name — wrong on both counts — so move to a fresh one instead.
+      if (wasHere) get().newSession();
     } catch (err) { set({ error: (err as Error).message }); }
   },
 
@@ -1517,8 +1564,13 @@ function closeBursts(bursts: Map<number, ReasoningBurst>): Map<number, Reasoning
   return changed ? next : bursts;
 }
 
-// Paths in tool rows and summaries read relative to the open project.
+// Paths in tool rows and summaries read relative to the open project, and
+// whatever project a chat actually ends up using — picked or defaulted to —
+// becomes what the next new chat starts in (see workspace-memory.ts).
 import { setPathRoots as setUiPathRoots } from '@aico/ui';
 useStore.subscribe((state, previous) => {
-  if (state.project !== previous.project) setUiPathRoots(state.project ? [state.project] : []);
+  if (state.project !== previous.project) {
+    setUiPathRoots(state.project ? [state.project] : []);
+    if (state.project) rememberWorkspace(state.project);
+  }
 });

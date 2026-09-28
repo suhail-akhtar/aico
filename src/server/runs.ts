@@ -307,7 +307,25 @@ export class RunManager {
   /** Open (or rejoin) a session. Idempotent — reconnecting must not reset state. */
   async ensure(sessionId: string, cwd: string): Promise<ActiveRun> {
     const existing = this.runs.get(sessionId);
-    if (existing) return existing;
+    if (existing) {
+      /*
+        Connecting is not committing. The SSE stream opens the instant a chat
+        tab does, well before the first character is typed, so a run with zero
+        events yet has made no promise about its directory — there is nothing
+        on disk, no tool has run, no persona has been resolved. Only *that*
+        window is safe to move; once a run has written anything, its directory
+        is fixed for its whole life, same as every other session.
+      */
+      if (!existing.busy && existing.session.length === 0 && existing.cwd !== cwd) {
+        await existing.close();
+        const opened = await openSession(sessionId, cwd);
+        existing.cwd = cwd;
+        existing.session = opened.session;
+        existing.inbox = new Inbox(opened.session);
+        existing.close = opened.close;
+      }
+      return existing;
+    }
 
     const opened = await openSession(sessionId, cwd);
     const run: ActiveRun = {

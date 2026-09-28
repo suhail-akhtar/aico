@@ -28,7 +28,7 @@ import { resolveWorkspaceRoot } from '../workspace.js';
 import os from 'os';
 import path from 'path';
 import { loadSettings, saveUserSetting } from '../settings.js';
-import { eventLogPath, listSessionSummaries } from '../session/persistence.js';
+import { eventLogPath, isUsedSession, listSessionSummaries } from '../session/persistence.js';
 
 export interface ProjectSummary {
   path: string;
@@ -43,6 +43,13 @@ export interface ProjectSummary {
   instructions?: string;
   /** The directory the server was launched in. Cannot be removed. */
   isLaunch: boolean;
+  /**
+   * The synthetic fallback offered when no project is chosen ("Scratch" by
+   * default). A positional fact, not a name match — the row is renameable via
+   * `updateProject`, so matching on `name === 'Scratch'` client-side would
+   * break the moment someone did.
+   */
+  isWorkspace: boolean;
   /** False when the directory has since been deleted or renamed. */
   exists: boolean;
   sessions: number;
@@ -132,8 +139,9 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
       ...(entry.description ? { description: entry.description } : {}),
       ...(entry.instructions ? { instructions: entry.instructions } : {}),
       isLaunch: entry.path === launch,
+      isWorkspace: entry.path === workspace,
       exists,
-      sessions: sessions.length,
+      sessions: sessions.filter(isUsedSession).length,
       updatedAt: sessions[0]?.updatedAt ?? 0,
     };
   }));
@@ -209,8 +217,9 @@ export async function addProject(dir: string, name?: string): Promise<ProjectSum
     // a rename that did not happen.
     name: already ? (already.name?.trim() || defaultName(target)) : (name?.trim() || defaultName(target)),
     isLaunch: false,
+    isWorkspace: false,
     exists: true,
-    sessions: (await listSessionSummaries(target).catch(() => [])).length,
+    sessions: (await listSessionSummaries(target).catch(() => [])).filter(isUsedSession).length,
     updatedAt: 0,
   };
 }

@@ -36,14 +36,14 @@ export interface ProjectPickerProps {
 }
 
 export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactElement {
-  const addProject = useStore(s => s.addProject);
+  const newSessionIn = useStore(s => s.newSessionIn);
+  const refreshProjects = useStore(s => s.refreshProjects);
   const projects = useStore(s => s.projects);
 
   const [view, setView] = useState<BrowseResult | null>(null);
   const [typed, setTyped] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   const go = async (target?: string): Promise<void> => {
@@ -72,15 +72,17 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
   }, [onClose]);
 
   const open = async (dir: string): Promise<void> => {
-    setBusy(true);
-    setError(null);
+    // An empty folder is not registered here — only a session that actually
+    // sends something there should turn it into a project (see `submit`
+    // server-side), so browsing to it and backing out leaves no trace. A
+    // folder that already holds chats is the exception: reopening it is how a
+    // removed project's history comes back, so it is registered at once.
     try {
-      await addProject(dir);
-      onClose();
-    } catch (err) {
-      setError((err as Error).message);
-      setBusy(false);
-    }
+      const { project } = await api.reopenProject(dir);
+      if (project) await refreshProjects();
+    } catch { /* unreadable: the new session falls back exactly as before */ }
+    newSessionIn(dir);
+    onClose();
   };
 
   const already = (dir: string): boolean => projects.some(p => p.path === dir);
@@ -183,10 +185,9 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
                 ) : (
                   <button
                     onClick={() => void open(entry.path)}
-                    disabled={busy}
                     className="shrink-0 rounded-full px-2.5 py-1 text-[12px] text-aico-accent opacity-0
                                transition-opacity hover:bg-aico-accent-soft focus:opacity-100
-                               group-hover/row:opacity-100 disabled:opacity-40"
+                               group-hover/row:opacity-100"
                   >
                     Open
                   </button>
@@ -215,11 +216,11 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.ReactEleme
           </button>
           <button
             onClick={() => view && void open(view.path)}
-            disabled={!view || busy || already(view.path)}
+            disabled={!view || already(view.path)}
             className="rounded-full bg-aico-accent px-4 py-1.5 text-[12px] font-medium text-aico-on-accent
                        transition-colors hover:bg-aico-accent-hover disabled:opacity-40"
           >
-            {already(view?.path ?? '') ? 'Already open' : busy ? 'Opening…' : 'Open this folder'}
+            {already(view?.path ?? '') ? 'Already open' : 'Open this folder'}
           </button>
         </footer>
       </div>

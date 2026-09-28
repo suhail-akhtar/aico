@@ -34,7 +34,7 @@ import path from 'path';
 import { EventHub } from './events.js';
 import { RunManager } from './runs.js';
 import { deriveMessages } from '../session/derive.js';
-import { forkSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
+import { forkSession, isUsedSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
 import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
 import { activeProviderType } from '../providers/instances.js';
@@ -766,14 +766,19 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         On `events`, not `turns`: a session interrupted during its first turn
         has events and no completed turns, and hiding that would lose real work.
       */
-      const used = stored.filter(s => s.events === undefined || s.events > 0);
+      const used = stored.filter(isUsedSession);
 
       const open = new Map(runs.list().map(r => [r.sessionId, r]));
       // A session written this process but not yet flushed still belongs in the
       // list — the in-memory record is ahead of the disk scan. Only if it has
-      // something in it; an empty one is the case above.
+      // something in it; an empty one is the case above. And only if its folder
+      // is still a project: the disk scan above covers known projects and
+      // nothing else, so without this a removed project's chats came straight
+      // back after a reload, as long as the server still held them in memory.
+      const known = new Set(projects.map(p => normalizeProjectPath(p.path)));
       for (const run of open.values()) {
-        if (run.session.length > 0 && !used.some(s => s.id === run.sessionId)) {
+        if (run.session.length > 0 && known.has(normalizeProjectPath(run.cwd))
+          && !used.some(s => s.id === run.sessionId)) {
           used.unshift({ id: run.sessionId, updatedAt: Date.now(), turns: 0, project: run.cwd });
         }
       }
@@ -950,13 +955,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       if (!run) {
         // Never opened in this process. Read the log if there is one; a session
         // that has never run reports nothing, which is what it has.
-        const stored = await loadEventLog(sessionId, await resolveCwd(sessionId)).catch(() => null);
+        // Resolved (not just peeked) so the caller learns the same answer
+        // `/api/events` is about to commit to — the two requests fire
+        // concurrently, and a `?project=` here lets them agree instead of race.
+        const project = await resolveCwd(sessionId, url.searchParams.get('project'));
+        const stored = await loadEventLog(sessionId, project).catch(() => null);
         send(res, 200, {
           sessionId,
           seq: stored?.length ?? 0,
           busy: false,
           messages: stored ? deriveMessages(stored.events) : [],
           usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+          project,
         });
         return;
       }
@@ -964,6 +974,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         sessionId,
         seq: run.session.length,
         busy: run.busy,
+        project: run.cwd,
         agent: runs.agentOf(sessionId) ?? null,
         // Null means this session never expressed a preference, which is not
         // the same as having chosen whatever the default currently is — the
@@ -1006,9 +1017,19 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     switch (route) {
       case 'projects/add': {
-        const { path: dir, name } = body as { path?: string; name?: string };
+        const { path: dir, name, ifHasHistory } = body as { path?: string; name?: string; ifHasHistory?: boolean };
         if (!dir) { send(res, 400, { error: 'path required' }); return; }
         try {
+          // Opening a folder is not using it — a new, empty one becomes a project
+          // on its first message (see `submit`). But a folder that already holds
+          // chats is not empty: reopening it is how a removed project gets its
+          // history back, and making that wait for a new message would hide the
+          // very chats the removal dialog promised re-adding restores.
+          if (ifHasHistory) {
+            const used = (await listSessionSummaries(normalizeProjectPath(dir)).catch(() => []))
+              .filter(isUsedSession);
+            if (used.length === 0) { send(res, 200, { project: null }); return; }
+          }
           send(res, 200, { project: await addProject(dir, name) });
         } catch (err) {
           send(res, 400, { error: (err as Error).message });
@@ -1073,7 +1094,20 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // Answer immediately and let the work stream. A ten-minute turn must
         // not be held open on a request that any proxy or browser will time out.
         send(res, 202, { accepted: true });
-        const runCwd = await resolveCwd(sessionId, (body as { project?: string }).project);
+        const draftProject = (body as { project?: string }).project;
+        // Registered on first real use, not on browse. A folder picked in the
+        // draft picker or the "open a folder" dialog has said nothing yet — it
+        // becomes a project only once a message actually goes to it, which is
+        // what stops empty, never-used workspaces from piling up in the sidebar.
+        if (draftProject
+          && (!peek(sessionId) || peek(sessionId)!.session.length === 0)
+          && !await isKnownProject(cwd, draftProject)) {
+          await addProject(draftProject).catch(() => {
+            // Unreadable, or a race registered it first. Either way `resolveCwd`
+            // falls back exactly as it would have without this registration.
+          });
+        }
+        const runCwd = await resolveCwd(sessionId, draftProject);
         // Resolved now, not at boot. Choosing a different model in settings
         // has to affect the next turn rather than the next restart.
         //

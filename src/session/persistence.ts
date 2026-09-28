@@ -236,6 +236,17 @@ export interface SessionSummary {
 }
 
 /**
+ * Whether a session earns a place in a list — a session that was opened and
+ * never used is a header and nothing else, not a conversation. `events` is
+ * `undefined` for a caller that never asked (treated as used, not unused —
+ * absence of data is not evidence of emptiness) and `0` for one that asked
+ * and found nothing.
+ */
+export function isUsedSession(row: Pick<SessionSummary, 'events'>): boolean {
+  return row.events === undefined || row.events > 0;
+}
+
+/**
  * Summaries for every session in this project, most recently touched first.
  *
  * Titles are extracted by scanning each log for its last `session/title` line

@@ -193,7 +193,7 @@ export {
   TITLE_MAX_BYTES, FALLBACK_MAX_WORDS,
 } from './session/title.js';
 export { writeFallbackTitle, writeUserTitle, pickNamingModel } from './session/title-service.js';
-export { listSessionSummaries } from './session/persistence.js';
+export { listSessionSummaries, isUsedSession } from './session/persistence.js';
 // -- Session projections (goal, feedback, deliverables, timing) --
 export {
   currentGoal,

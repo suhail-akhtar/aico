@@ -23,6 +23,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { ModelPicker } from './ModelPicker';
+import { DraftProjectPicker } from './DraftProjectPicker';
 import { AgentPicker } from './AgentPicker';
 import { EffortPicker } from './EffortPicker';
 import { ApprovalPicker, type ApprovalMode } from './ApprovalPicker';
@@ -56,6 +57,9 @@ export function Composer(): React.ReactElement {
     ? { ...turnSummary.cache, steps: turnSummary.steps }
     : null;
   const model = useStore(s => s.model ?? s.defaultModel);
+  // Whether anything has been said yet in this chat — the only window in
+  // which its folder can still change (see `DraftProjectPicker`).
+  const isDraft = useStore(s => s.logged.size === 0);
 
   const [text, setText] = useState('');
   // From the store, not local state. A plan approved in the side panel turns
@@ -387,6 +391,8 @@ ${prefill.text}` : prefill.text));
             </button>
 
             <SetGoalButton />
+
+            {isDraft && <DraftProjectPicker />}
 
             </div>
 

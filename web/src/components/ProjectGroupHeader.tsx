@@ -257,8 +257,14 @@ export function ProjectGroupHeader({
               tabIndex={-1}
               aria-label={`Actions for ${label}`}
               aria-haspopup="menu"
+              // Visible by default once there is nothing in the section: a
+              // row with content earns hover-only chrome, but an empty
+              // project has no content for the trigger to crowd, and this is
+              // exactly the case ("hard to find") the user was piling up and
+              // wanted an easy way out of.
               className={`shrink-0 rounded p-0.5 text-aico-muted transition-opacity hover:text-aico-primary
-                          ${menuOpen ? 'opacity-100' : 'opacity-0 focus:opacity-100 group-hover/proj:opacity-100'}`}
+                          ${menuOpen || count === 0
+                            ? 'opacity-100' : 'opacity-0 focus:opacity-100 group-hover/proj:opacity-100'}`}
             >
               <Icon name="ellipsis" size={14} />
             </button>
@@ -338,7 +344,22 @@ export function ProjectGroupHeader({
               <p className="text-[11px] leading-snug text-aico-secondary">
                 {isGroup
                   ? 'Delete this group? Its sessions go back to their own projects.'
-                  : 'Remove from the list? The sessions stay on disk.'}
+                  // The used-session count, honestly: this used to say "the
+                  // sessions stay on disk" no matter how many there were, which
+                  // was true of the files and false of what removing actually
+                  // did to the sidebar — every one of them vanished, with no
+                  // way back short of remembering the exact path. Naming the
+                  // count and the actual consequence is what the user asked
+                  // for over blocking removal outright.
+                  : (project?.sessions ?? 0) > 0
+                    ? project!.sessions === 1
+                      ? `${label} has 1 chat. Removing it hides that chat from the sidebar; its `
+                        + 'history stays on disk as a file, and re-adding this exact folder later '
+                        + 'brings it back.'
+                      : `${label} has ${project!.sessions} chats. Removing it hides all of them from `
+                        + 'the sidebar; their history stays on disk as files, and re-adding this '
+                        + 'exact folder later brings them back.'
+                    : 'Remove from the list? There are no chats here to lose.'}
               </p>
               <div className="mt-1.5 flex gap-1.5">
                 <button

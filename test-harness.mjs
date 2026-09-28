@@ -60,6 +60,7 @@ import {
   initEventLog,
   currentTitle,
   listSessionSummaries,
+  isUsedSession,
   loadEventLog,
   persistSession,
   eventLogPath,
@@ -151,7 +152,7 @@ import {
   loadProfile, mergeProfile, saveProfile, updateProfile, checksFor, renderProfile, profileFromTemplate,
   detectStack, forgetCommand, emptyProfile, profilePath, COMMAND_NAMES, PROFILE_RENDER_MAX,
   observeCommand, installProfileObserver, detectChecksFor, projectRoot, currentApp, servedArtifacts, gateChecks,
-  deployKey, toolAvailable, missingRequirements, deployApp, deployState, EventHub,
+  deployKey, toolAvailable, missingRequirements, deployApp, deployState, EventHub, RunManager,
   extractFromTurn, fromFeedback, fromSteering, fromChecksFix, fromVerifyFix, fromRepeatedErrors,
   dedupeProposals, normaliseError, wordOverlap, PROPOSAL_TTL_MS,
   listProposals, addProposals, setProposalStatus, adoptProposal, markAdoptedByContent, proposalsFile, MAX_OPEN,
@@ -8577,6 +8578,87 @@ console.log('\n══ PROJECTS: THE LAUNCH DIRECTORY, AND EVERY FOLDER ADDED TO 
 
   fs.rmSync(launch, { recursive: true, force: true });
   fs.rmSync(folder, { recursive: true, force: true });
+}
+
+console.log('  -- isUsedSession: a session earns its place by containing something --');
+{
+  assert(isUsedSession({ events: undefined }) === true, 'undefined means a caller that never asked — treated as used, not as evidence of emptiness');
+  assert(isUsedSession({ events: 0 }) === false, 'zero real events is a header nobody used, not a conversation');
+  assert(isUsedSession({ events: 1 }) === true, 'one real event earns its place');
+}
+
+console.log('  -- listProjects: the session count excludes headers nobody used --');
+{
+  // The bug this covers: a chat tab opens an SSE stream (and so a session
+  // file) before anyone types anything, so a project's session count used to
+  // include every tab ever opened in it, not just the ones somebody used —
+  // which is what made the removal dialog's "N chats" warning meaningless.
+  const launch = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-proj-count-launch-'));
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-proj-count-'));
+  await addProject(target, 'Counted');
+
+  const used = new Session({ id: 'count-used', cwd: target, startedAt: Date.now() });
+  await initEventLog(used.header);
+  const attached = persistSession(used);
+  used.append('user/message', { content: 'hi' });
+  await attached.detach();
+
+  // Header-only: `initEventLog` alone, exactly what an opened-but-never-typed
+  // chat tab leaves behind — no event ever appended.
+  const empty = new Session({ id: 'count-empty', cwd: target, startedAt: Date.now() });
+  await initEventLog(empty.header);
+
+  const summaries = await listSessionSummaries(target);
+  assert(summaries.length === 2, `both files are on disk (${summaries.length})`);
+  assert(summaries.filter(isUsedSession).length === 1, 'isUsedSession keeps only the one with a real event');
+
+  const listed = await listProjects(launch);
+  const entry = listed.find(p => normalizeProjectPath(p.path) === normalizeProjectPath(target));
+  assert(entry?.sessions === 1, `listProjects counts only the used session, not the header-only one (${entry?.sessions})`);
+
+  await removeProject(target);
+  fs.rmSync(launch, { recursive: true, force: true });
+  fs.rmSync(target, { recursive: true, force: true });
+}
+
+console.log('\n══ RUNMANAGER: A CHAT’S DIRECTORY IS FIXED ONLY ONCE IT HAS SAID SOMETHING ══');
+
+{
+  // `ensure()`'s virgin-retarget guard: connecting a session's SSE stream must
+  // not be the moment its directory is committed, because the stream opens
+  // the instant a chat tab does — before the composer's draft-project picker,
+  // or a `submit`'s own `?project=`, ever gets a say. Only a run that is not
+  // busy and has written zero events is still safe to move.
+  const hub = new EventHub();
+  const runs = new RunManager(hub, {});
+  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-run-a-'));
+  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-run-b-'));
+
+  const virgin = await runs.ensure('draft-1', dirA);
+  assert(virgin.cwd === dirA && virgin.session.length === 0, 'a fresh run opens in the directory it was asked for, with nothing written yet');
+
+  const retargeted = await runs.ensure('draft-1', dirB);
+  assert(retargeted === virgin, 'the same ActiveRun object is returned — a retarget rebinds it in place, it does not replace it');
+  assert(retargeted.cwd === dirB, 'and it now runs in the newly requested directory');
+
+  const reconnect = await runs.ensure('draft-1', dirB);
+  assert(reconnect.cwd === dirB, 'asking again for the directory it is already on is a no-op, not a second reopen');
+
+  virgin.session.append('user/message', { content: 'this session has said something now' });
+  assert(virgin.session.length > 0, 'sanity: the log now has a real event');
+
+  const afterUse = await runs.ensure('draft-1', dirA);
+  assert(afterUse.cwd === dirB, 'once a run has written anything, its directory is fixed for its whole life — a later request naming a different one is ignored');
+
+  const busy = await runs.ensure('busy-1', dirA);
+  busy.busy = true;
+  const stillBusy = await runs.ensure('busy-1', dirB);
+  assert(stillBusy.cwd === dirA, 'a busy run cannot be retargeted even with zero events — a turn in flight already committed to its directory');
+
+  await virgin.close();
+  await busy.close();
+  fs.rmSync(dirA, { recursive: true, force: true });
+  fs.rmSync(dirB, { recursive: true, force: true });
 }
 
 console.log('\n══ THE PROJECT SAYS WHAT WORKING MEANS ══');

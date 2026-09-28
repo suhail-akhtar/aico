@@ -186,6 +186,10 @@ export const api = {
   addProject: (path: string, name?: string) =>
     post<{ project: Project }>('projects/add', { path, name }),
 
+  /** Register a folder only if it already holds chats; `project` is null otherwise. */
+  reopenProject: (path: string) =>
+    post<{ project: Project | null }>('projects/add', { path, ifHasHistory: true }),
+
   removeProject: (path: string) => post<{ removed: boolean }>('projects/remove', { path }),
 
   /**
@@ -218,7 +222,7 @@ export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`fs/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
 
-  session: (id: string) => request<{
+  session: (id: string, project?: string) => request<{
     sessionId: string;
     seq: number;
     busy: boolean;
@@ -226,7 +230,9 @@ export const api = {
     // Mixed on purpose: counts, two estimate flags, and the window's
     // provenance as a string. Typed loosely here and narrowed where it is read.
     usage: Record<string, unknown>;
-  }>(`session?id=${encodeURIComponent(id)}`),
+    /** The directory this session actually resolved to — always present. */
+    project: string;
+  }>(`session?id=${encodeURIComponent(id)}${project ? `&project=${encodeURIComponent(project)}` : ''}`),
 
   submit: (opts: SubmitOptions) => post<{ accepted: boolean }>('submit', opts),
   cancel: (sessionId: string) => post<{ cancelled: boolean }>('cancel', { sessionId }),
@@ -596,6 +602,8 @@ export interface Project {
   instructions?: string;
   /** The directory the server was launched in. Cannot be removed. */
   isLaunch: boolean;
+  /** The synthetic fallback offered when no project is chosen ("Scratch"). */
+  isWorkspace: boolean;
   /** False once the directory has been deleted or renamed underneath us. */
   exists: boolean;
   sessions: number;
