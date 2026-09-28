@@ -13819,6 +13819,59 @@ console.log('\n══ LONG-HORIZON CONTEXT: MASK, CONDENSE, RESUME ══');
   assert(Math.abs(costFor('gpt-5.6-luna', million) - 1.40) < 1e-9, `gpt-5.6-luna is $0.20 in, $1.20 out (${costFor('gpt-5.6-luna', million)})`);
   assert(Math.abs(costFor('deepseek-flash', million) - 0.75) < 1e-9, `deepseek-flash is $0.15 in, $0.60 out off-peak (${costFor('deepseek-flash', million)})`);
 
+  console.log('  -- Git on the workspace page: look, switch, branch, revert — and never lose work --');
+  {
+    const { execFileSync } = await import('child_process');
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-git-ops-'));
+    const g = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 't@t'); g('config', 'user.name', 'T'); g('config', 'core.autocrlf', 'false');
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'one\n'); g('add', '.'); g('commit', '-qm', 'first');
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'one\ntwo\n'); g('commit', '-qam', 'second');
+    const second = g('rev-parse', 'HEAD').trim();
+    const first = g('rev-parse', 'HEAD~1').trim();
+
+    const detail = await T.showCommit(repo, second);
+    assert(detail.subject === 'second' && detail.files[0]?.path === 'a.txt' && /\+two/.test(detail.diff),
+      'a commit opens to its subject, files and diff');
+    let refused = false;
+    try { await T.showCommit(repo, '--oneline'); } catch { refused = true; }
+    assert(refused, 'something that is not a hash never reaches git');
+
+    await T.createBranch(repo, 'restore-first', first, false);
+    let branches = await T.listBranches(repo);
+    assert(branches.current === 'main' && branches.branches.some(b => b.name === 'restore-first'),
+      'branching from an old commit leaves the current branch where it was');
+    assert(!T.isValidBranchName('--force') && !T.isValidBranchName('a..b') && T.isValidBranchName('feature/x'),
+      'branch names that git would read as a flag or a range are refused');
+
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'uncommitted\n');
+    let dirtyRefused = '';
+    try { await T.switchBranch(repo, 'restore-first'); } catch (err) { dirtyRefused = err.message; }
+    assert(/uncommitted changes/.test(dirtyRefused) && fs.readFileSync(path.join(repo, 'a.txt'), 'utf8') === 'uncommitted\n'
+      && (await T.listBranches(repo)).current === 'main',
+    'switching with uncommitted changes is refused, and the changes are untouched');
+    g('checkout', '--', 'a.txt');
+
+    await T.switchBranch(repo, 'restore-first');
+    branches = await T.listBranches(repo);
+    assert(branches.current === 'restore-first' && fs.readFileSync(path.join(repo, 'a.txt'), 'utf8') === 'one\n',
+      'switching to the restored branch brings back that state');
+    await T.switchBranch(repo, 'main');
+
+    await T.revertCommit(repo, second);
+    assert(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8') === 'one\n' && /Revert/.test(g('log', '-1', '--format=%s')),
+      'a revert undoes a commit with a new commit, history kept');
+
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'something else entirely\n'); g('commit', '-qam', 'rewrite');
+    let conflict = '';
+    try { await T.revertCommit(repo, second); } catch (err) { conflict = err.message; }
+    assert(/cancelled; nothing changed/.test(conflict) && g('status', '--porcelain').trim() === ''
+      && fs.readFileSync(path.join(repo, 'a.txt'), 'utf8') === 'something else entirely\n',
+    'a revert that conflicts is cancelled and leaves the tree exactly as it was');
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+
   console.log('  -- Settings are saved one value at a time, and Reset really removes --');
   {
     const file = path.join(process.env.AICO_HOME, 'settings.json');

@@ -15,8 +15,10 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { api, type CommitInfo, type GitLogPage, type ProjectStats } from '../api';
-import { basename, matchesSession, searchTerms, type MatchContext } from '../grouping';
+import { api, type ProjectStats } from '../api';
+import { basename } from '../grouping';
+import { ChatList } from './ChatList';
+import { GitPanel } from './GitPanel';
 import { ProjectCommands } from './ProjectCommands';
 import { ProjectSettings } from './ProjectSettings';
 import { Icon } from './Icon';
@@ -29,62 +31,30 @@ interface Props {
 
 export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactElement {
   const projects = useStore(s => s.projects);
-  const groups = useStore(s => s.groups);
   const sessions = useStore(s => s.sessions);
   const openSession = useStore(s => s.openSession);
   const updateProject = useStore(s => s.updateProject);
-  const showArchived = useStore(s => s.showArchived);
-  const toggleArchived = useStore(s => s.toggleArchived);
+  const newSessionIn = useStore(s => s.newSessionIn);
+  const isTarget = useStore(s => s.project === projectPath && s.targetGroup === null);
+  const selectTarget = useStore(s => s.selectTarget);
+  const clearTarget = useStore(s => s.clearTarget);
 
   const project = projects.find(p => p.path === projectPath);
   const label = project?.name ?? basename(projectPath);
 
-  const [filter, setFilter] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stats, setStats] = useState<ProjectStats | null>(null);
-  const [log, setLog] = useState<GitLogPage | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
 
-  // Both fetches are keyed on the path, not the project object, so switching
-  // workspaces (or the same workspace losing/gaining a `Project` entry) always
+  // Keyed on the path, not the project object, so switching workspaces always
   // reloads rather than showing the last one's numbers under a new name.
   useEffect(() => {
     setStats(null);
     void api.projectStats(projectPath).then(setStats).catch(() => setStats(null));
   }, [projectPath]);
 
-  useEffect(() => {
-    setLog(null);
-    void api.gitLog(projectPath, { limit: 20 }).then(setLog).catch(() => setLog(null));
-  }, [projectPath]);
-
-  const loadMoreCommits = async (): Promise<void> => {
-    const last = log?.commits[log.commits.length - 1];
-    if (!log?.hasMore || !last || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const next = await api.gitLog(projectPath, { limit: 20, before: last.hash });
-      setLog(prev => (prev ? { ...next, commits: [...prev.commits, ...next.commits] } : next));
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  const ctx: MatchContext = useMemo(() => ({
-    projects: new Map(projects.map(p => [p.path, p])),
-    groups: new Map(groups.map(g => [g.id, g])),
-  }), [projects, groups]);
-
-  const chats = useMemo(() => {
-    const terms = searchTerms(filter);
-    return sessions
-      .filter(s => s.project === projectPath)
-      .filter(s => showArchived || !s.archived)
-      .filter(s => matchesSession(s, terms, ctx))
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [sessions, projectPath, showArchived, filter, ctx]);
-
+  const chats = useMemo(() => sessions.filter(s => s.project === projectPath), [sessions, projectPath]);
   const openChat = (id: string): void => { void openSession(id).then(onOpenChat); };
+  const startHere = (): void => { newSessionIn(projectPath); onOpenChat(); };
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -109,13 +79,32 @@ export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactEl
               </p>
             )}
           </div>
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="shrink-0 rounded-full border border-aico-border px-3 py-1.5 text-[12px] text-aico-primary
-                       transition-colors hover:bg-aico-hover"
-          >
-            Edit properties
-          </button>
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            <button
+              onClick={startHere}
+              className="flex items-center gap-1.5 rounded-full bg-aico-accent px-3 py-1.5 text-[12px] font-medium
+                         text-aico-on-accent transition-colors hover:bg-aico-accent-hover"
+            >
+              <Icon name="plus" size={14} /> New session
+            </button>
+            <button
+              onClick={() => (isTarget ? clearTarget() : selectTarget({ kind: 'project', path: projectPath }))}
+              aria-pressed={isTarget}
+              title={isTarget ? 'New chats go here. Click to send them to the default workspace instead.'
+                : 'Send new chats here by default'}
+              className={`rounded-full border px-3 py-1.5 text-[12px] transition-colors
+                          ${isTarget ? 'border-aico-accent/50 bg-aico-accent-soft text-aico-accent' : 'border-aico-border text-aico-primary hover:bg-aico-hover'}`}
+            >
+              {isTarget ? 'Default for new chats ✓' : 'Use for new chats'}
+            </button>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="rounded-full border border-aico-border px-3 py-1.5 text-[12px] text-aico-primary
+                         transition-colors hover:bg-aico-hover"
+            >
+              Edit properties
+            </button>
+          </div>
         </header>
 
         <StatsTiles stats={stats} />
@@ -125,81 +114,11 @@ export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactEl
         </Section>
 
         <Section title="Chats" icon="stack" count={chats.length}>
-          <div className="mb-2 flex items-center gap-2">
-            <div className="relative flex-1">
-              <Icon name="search" size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-aico-muted" />
-              <input
-                value={filter}
-                onChange={e => setFilter(e.target.value)}
-                placeholder="Search chats in this workspace…"
-                className="w-full rounded-lg border border-aico-border-subtle bg-aico-surface py-1.5 pl-8 pr-3
-                           text-[12px] text-aico-primary placeholder:text-aico-muted
-                           transition-colors focus:border-aico-accent/60 focus:outline-none"
-              />
-            </div>
-            <button
-              onClick={() => toggleArchived()}
-              aria-pressed={showArchived}
-              title={showArchived ? 'Hide archived chats' : 'Show archived chats'}
-              className={`flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[12px] transition-colors
-                          ${showArchived ? 'border-aico-accent/50 bg-aico-accent-soft text-aico-accent' : 'border-aico-border-subtle text-aico-muted hover:text-aico-primary'}`}
-            >
-              <Icon name="archive" size={14} /> Archived
-            </button>
-          </div>
-          {chats.length === 0 ? (
-            <p className="py-3 text-[12px] text-aico-muted">
-              {filter ? 'No chats match.' : 'No chats here yet.'}
-            </p>
-          ) : (
-            <ul className="divide-y divide-aico-border-subtle">
-              {chats.map(chat => (
-                <li key={chat.id}>
-                  <button
-                    onClick={() => openChat(chat.id)}
-                    className="flex w-full items-center gap-2 py-2 text-left transition-colors hover:bg-aico-hover"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-aico-primary">
-                      {chat.title?.trim() || 'New session'}
-                    </span>
-                    {chat.archived && <Icon name="archive" size={12} className="shrink-0 text-aico-muted" />}
-                    <span className="shrink-0 tabular-nums text-[11px] text-aico-muted">
-                      {chat.turns ?? 0} turn{chat.turns === 1 ? '' : 's'}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-aico-muted">
-                      {new Date(chat.updatedAt).toLocaleDateString()}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+          <ChatList chats={chats} scope="workspace" onOpen={openChat} />
         </Section>
 
-        <Section title="Git history" icon="fork">
-          {!log ? (
-            <p className="py-3 text-[12px] text-aico-muted">Loading…</p>
-          ) : !log.isRepo ? (
-            <p className="py-3 text-[12px] text-aico-muted">This workspace is not a git repository.</p>
-          ) : log.commits.length === 0 ? (
-            <p className="py-3 text-[12px] text-aico-muted">No commits yet.</p>
-          ) : (
-            <>
-              <ul className="divide-y divide-aico-border-subtle">
-                {log.commits.map(commit => <CommitRow key={commit.hash} commit={commit} />)}
-              </ul>
-              {log.hasMore && (
-                <button
-                  onClick={() => void loadMoreCommits()}
-                  disabled={loadingMore}
-                  className="mt-2 w-full rounded-lg border border-aico-border-subtle py-1.5 text-[12px] text-aico-secondary
-                             transition-colors hover:bg-aico-hover disabled:opacity-50"
-                >
-                  {loadingMore ? 'Loading…' : 'Load more'}
-                </button>
-              )}
-            </>
-          )}
+        <Section title="Git" icon="fork">
+          <GitPanel path={projectPath} />
         </Section>
       </div>
 
@@ -227,21 +146,6 @@ function Section(
       </h2>
       {children}
     </section>
-  );
-}
-
-function CommitRow({ commit }: { commit: CommitInfo }): React.ReactElement {
-  return (
-    <li className="flex items-center gap-2.5 py-1.5">
-      <span className="shrink-0 rounded bg-aico-hover px-1.5 py-0.5 font-mono text-[11px] text-aico-secondary" title={commit.hash}>
-        {commit.shortHash}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-[13px] text-aico-primary">{commit.subject}</span>
-      <span className="shrink-0 text-[11px] text-aico-muted">{commit.author}</span>
-      <span className="shrink-0 text-[11px] text-aico-muted" title={commit.date}>
-        {Number.isNaN(Date.parse(commit.date)) ? '' : new Date(commit.date).toLocaleDateString()}
-      </span>
-    </li>
   );
 }
 

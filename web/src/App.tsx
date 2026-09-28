@@ -17,6 +17,7 @@ import {
 import { basename } from './grouping';
 import { AppsPane } from './components/AppsPane';
 import { WorkspacePage } from './components/WorkspacePage';
+import { GroupPage } from './components/GroupPage';
 import { AppWorkspace } from './components/apps/AppWorkspace';
 import { MiniAppScope } from './components/MiniAppScope';
 import { ChatPane } from './components/ChatPane';
@@ -51,8 +52,14 @@ export function App(): React.ReactElement {
       if (!parsed) return DEFAULT_ROUTE;
       url.searchParams.delete('view');
       url.searchParams.delete('path');
+      url.searchParams.delete('id');
       window.history.replaceState({}, '', url.pathname + url.search + url.hash);
-      return { ...DEFAULT_ROUTE, destination: parsed.destination, ...(parsed.projectPath ? { projectPath: parsed.projectPath } : {}) };
+      return {
+        ...DEFAULT_ROUTE,
+        destination: parsed.destination,
+        ...(parsed.projectPath ? { projectPath: parsed.projectPath } : {}),
+        ...(parsed.groupId ? { groupId: parsed.groupId } : {}),
+      };
     } catch { return DEFAULT_ROUTE; }
   });
   const onSessions = route.destination === 'sessions';
@@ -118,7 +125,10 @@ export function App(): React.ReactElement {
   // things — a workspace page for "aico" opened while the last session was
   // in "Scratch" must say "aico", not carry the session's project over.
   const currentProjectLabel = currentProject ? labelFor(currentProject) : undefined;
-  const routeProjectLabel = route.projectPath ? labelFor(route.projectPath) : undefined;
+  const groups = useStore(s => s.groups);
+  const routeProjectLabel = route.destination === 'group'
+    ? groups.find(g => g.id === route.groupId)?.name
+    : route.projectPath ? labelFor(route.projectPath) : undefined;
   const openWorkspace = (path: string): void => setRoute({ ...route, destination: 'project', projectPath: path });
 
   useEffect(() => {
@@ -173,7 +183,7 @@ export function App(): React.ReactElement {
           </button>
 
           <span className="min-w-0 max-w-[40%] truncate text-[14px] font-medium text-aico-primary">
-            {headerTitle(route, title, route.destination === 'project' ? routeProjectLabel : currentProjectLabel)}
+            {headerTitle(route, title, route.destination === 'project' || route.destination === 'group' ? routeProjectLabel : currentProjectLabel)}
           </span>
 
           {/*
@@ -258,6 +268,12 @@ export function App(): React.ReactElement {
         {onSessions && view === 'trajectory' && <Trajectory />}
         {view === 'system' && <SystemPanel />}
         {view === 'apps' && <AppsPane onOpenChat={() => setRoute(withTab(route, 'chat'))} />}
+        {view === 'group' && route.groupId && (
+          <GroupPage
+            groupId={route.groupId}
+            onOpenChat={() => setRoute(withTab(route, 'chat'))}
+          />
+        )}
         {view === 'project' && route.projectPath && (
           <WorkspacePage
             projectPath={route.projectPath}

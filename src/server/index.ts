@@ -34,7 +34,7 @@ import path from 'path';
 import { EventHub } from './events.js';
 import { RunManager } from './runs.js';
 import { deriveMessages } from '../session/derive.js';
-import { forkSession, isUsedSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
+import { eventLogPath, forkSession, isUsedSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
 import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
 import { activeProviderType } from '../providers/instances.js';
@@ -898,6 +898,40 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       if (!sessionId || !title) { send(res, 400, { error: 'sessionId and title required' }); return; }
       await runs.ensure(sessionId, await resolveCwd(sessionId));
       send(res, 200, { renamed: runs.rename(sessionId, title) });
+      return;
+    }
+
+    /*
+      Delete chats for good.
+
+      Until now a chat could only be archived — hidden, never gone — so a
+      workspace full of test runs stayed full. This removes the log itself.
+      A chat that is running right now is refused (its turn would keep writing
+      to a file that no longer exists); everything else is released from
+      memory first, then its files removed. The client asks before calling.
+    */
+    if (route === 'sessions/delete' && req.method === 'POST') {
+      const { ids } = await readJson(req) as { ids?: unknown };
+      if (!Array.isArray(ids) || ids.length === 0 || ids.some(id => typeof id !== 'string' || !/^[\w.-]+$/.test(id))) {
+        send(res, 400, { error: 'ids must be a non-empty list of session ids' });
+        return;
+      }
+      const deleted: string[] = [];
+      const skipped: Array<{ id: string; reason: string }> = [];
+      for (const id of ids as string[]) {
+        if (runs.get(id)?.busy) { skipped.push({ id, reason: 'still running — stop it first' }); continue; }
+        await runs.release(id);
+        const dir = await resolveCwd(id);
+        const logFile = eventLogPath(id, dir);
+        let removed = false;
+        for (const file of [logFile, path.join(path.dirname(logFile), `${id}.jsonl`)]) {
+          try { fs.rmSync(file); removed = true; } catch { /* not there */ }
+        }
+        sessionCwd.delete(id);
+        if (removed) deleted.push(id);
+        else skipped.push({ id, reason: 'no log found' });
+      }
+      send(res, 200, { deleted, skipped });
       return;
     }
 

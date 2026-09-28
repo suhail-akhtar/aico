@@ -26,7 +26,7 @@
 
 import { create } from 'zustand';
 import { initialSessionId, rememberSession, freshSessionId } from './session-memory';
-import { lastWorkspace, rememberWorkspace } from './workspace-memory';
+import { lastTargetGroup, lastWorkspace, rememberTargetGroup, rememberWorkspace } from './workspace-memory';
 import { loadDismissals, saveDismissals } from './panel-memory';
 import type { ChatMessage } from '@aico/ui';
 import { PLAN_REPLY } from './plans';
@@ -142,6 +142,17 @@ interface AppState {
    * written on the first submit, when the session becomes real.
    */
   pendingGroup: string | null;
+  /**
+   * The group new chats go into by default, chosen by selecting it in the
+   * sidebar. `null` means none: new chats land in `project` alone.
+   */
+  targetGroup: string | null;
+  /** Make a folder or a group the default for new chats. */
+  selectTarget: (target: { kind: 'project'; path: string } | { kind: 'group'; id: string }) => void;
+  /** Back to the plain workspace for new chats. */
+  clearTarget: () => void;
+  /** Remove chats for good. Running ones are refused; returns what was removed. */
+  deleteSessions: (ids: string[]) => Promise<{ deleted: string[]; skipped: Array<{ id: string; reason: string }> }>;
 
   // ── sessions ──
   sessions: SessionSummary[];
@@ -223,7 +234,8 @@ interface AppState {
   /** Reconnect in place, replaying only the gap since `lastSeq`. */
   resume: () => void;
   disconnect: () => void;
-  newSession: () => void;
+  /** A fresh chat. `useTarget: false` ignores the default group — for an explicit folder. */
+  newSession: (opts?: { useTarget?: boolean }) => void;
   openSession: (id: string) => Promise<void>;
   submit: (task: string, opts?: {
     planMode?: boolean; model?: string; retireTasks?: 'done' | 'cancelled';
@@ -446,6 +458,7 @@ export const useStore = create<AppState>((set, get) => ({
   projects: [],
   groups: [],
   pendingGroup: null,
+  targetGroup: lastTargetGroup(),
   // Seeded from whatever project was last actually used, the same way
   // `sessionId` below is seeded from the last session — a brand-new chat
   // defaults to it rather than always landing in Scratch with no say in it.
@@ -585,7 +598,13 @@ export const useStore = create<AppState>((set, get) => ({
     handle = null;
   },
 
-  newSession: () => {
+  newSession: (opts) => {
+    // A chosen default group files every new chat into it, unless this new
+    // chat was already aimed somewhere (a group's own "+", say).
+    const target = get().targetGroup;
+    if (opts?.useTarget !== false && get().pendingGroup === null && target && get().groups.some(g => g.id === target)) {
+      set({ pendingGroup: target });
+    }
     get().connect(freshSessionId());
     void get().refreshSessions();
   },
@@ -927,7 +946,7 @@ export const useStore = create<AppState>((set, get) => ({
     // session belongs to exactly one directory for its whole life, so there is
     // no meaningful "new session here while I am looking at somewhere else".
     set({ project: path });
-    get().newSession();
+    get().newSession({ useTarget: false });
   },
 
   retargetDraft: (path) => {
@@ -987,6 +1006,33 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err) {
       set({ error: (err as Error).message });
       await get().refreshSessions();
+    }
+  },
+
+  selectTarget: (target) => {
+    if (target.kind === 'project') {
+      set({ project: target.path, targetGroup: null });
+    } else {
+      const group = get().groups.find(g => g.id === target.id);
+      set({ targetGroup: target.id, ...(group?.cwd ? { project: group.cwd } : {}) });
+    }
+  },
+
+  clearTarget: () => {
+    const scratch = get().projects.find(p => p.isWorkspace)?.path ?? null;
+    set({ targetGroup: null, project: scratch });
+  },
+
+  deleteSessions: async (ids) => {
+    try {
+      const result = await api.deleteSessions(ids);
+      const gone = new Set(result.deleted);
+      set(state => ({ sessions: state.sessions.filter(s => !gone.has(s.id)) }));
+      if (gone.has(get().sessionId)) get().newSession();
+      return result;
+    } catch (err) {
+      set({ error: (err as Error).message });
+      return { deleted: [], skipped: ids.map(id => ({ id, reason: (err as Error).message })) };
     }
   },
 
@@ -1573,4 +1619,5 @@ useStore.subscribe((state, previous) => {
     setUiPathRoots(state.project ? [state.project] : []);
     if (state.project) rememberWorkspace(state.project);
   }
+  if (state.targetGroup !== previous.targetGroup) rememberTargetGroup(state.targetGroup);
 });

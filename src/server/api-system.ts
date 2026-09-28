@@ -283,6 +283,43 @@ export async function handleSystemRoute(
       return { status: 200, body: { cwd, ...page } };
     }
 
+    /*
+      Git beyond the log: a commit's changes, the branches, and the three
+      moves the workspace page offers (switch, branch from a commit, revert).
+      Only for a directory that is actually a workspace — this is not a
+      general "run git anywhere" door. See git-ops.ts for what each refuses.
+    */
+    case 'project/git-show':
+    case 'project/git-branches':
+    case 'project/git-action': {
+      const { default: path } = await import('path');
+      const { isKnownProject } = await import('./projects.js');
+      const ops = await import('./git-ops.js');
+      const raw = route === 'project/git-action' ? (body.path as string | undefined) : query.get('path');
+      if (!raw) return { status: 400, body: { error: 'path required' } };
+      const cwd = path.resolve(raw);
+      if (!await isKnownProject(process.cwd(), cwd)) return { status: 403, body: { error: 'not a workspace' } };
+      try {
+        if (route === 'project/git-show') {
+          if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+          return { status: 200, body: await ops.showCommit(cwd, query.get('hash') ?? '') };
+        }
+        if (route === 'project/git-branches') {
+          if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+          return { status: 200, body: await ops.listBranches(cwd) };
+        }
+        if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+        const { action, name, at, switchTo } = body as { action?: string; name?: string; at?: string; switchTo?: boolean };
+        if (action === 'switch') await ops.switchBranch(cwd, String(name ?? ''));
+        else if (action === 'branch') await ops.createBranch(cwd, String(name ?? ''), String(at ?? ''), switchTo === true);
+        else if (action === 'revert') await ops.revertCommit(cwd, String(at ?? ''));
+        else return { status: 400, body: { error: 'action must be switch, branch or revert' } };
+        return { status: 200, body: { ok: true, ...(await ops.listBranches(cwd)) } };
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } };
+      }
+    }
+
     case 'project/stats': {
       if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
       const { projectStats } = await import('../project/stats.js');

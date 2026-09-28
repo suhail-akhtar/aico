@@ -62,6 +62,16 @@ export function Sidebar(
   const sessionId = useStore(s => s.sessionId);
   const openSession = useStore(s => s.openSession);
   const newSession = useStore(s => s.newSession);
+  const project = useStore(s => s.project);
+  const targetGroup = useStore(s => s.targetGroup);
+  const selectTarget = useStore(s => s.selectTarget);
+  const clearTarget = useStore(s => s.clearTarget);
+  const removeProject = useStore(s => s.removeProject);
+  const deleteGroup = useStore(s => s.deleteGroup);
+  // Select mode: several folders or groups at once, to remove them together.
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
   const moveToGroup = useStore(s => s.moveToGroup);
   const showArchived = useStore(s => s.showArchived);
   const toggleArchived = useStore(s => s.toggleArchived);
@@ -232,8 +242,33 @@ export function Sidebar(
             onDropSession={id => onDrop(section, id)}
             onOpenApps={() => { onRoute({ ...route, destination: 'apps' }); onClose(); }}
             {...(section.kind === 'project'
-              ? { onOpenWorkspace: () => { onRoute({ ...route, destination: 'project', projectPath: section.path }); onClose(); } }
+              ? { onOpenWorkspace: () => {
+                // Opening a folder also makes it where new chats go — selected
+                // is the default; "Stop using for new chats" or the chip under
+                // New session puts it back to the plain workspace.
+                selectTarget({ kind: 'project', path: section.path });
+                onRoute({ ...route, destination: 'project', projectPath: section.path });
+                onClose();
+              } }
               : {})}
+            {...(section.kind === 'group'
+              ? { onOpenGroup: () => {
+                selectTarget({ kind: 'group', id: section.path });
+                onRoute({ ...route, destination: 'group', groupId: section.path });
+                onClose();
+              } }
+              : {})}
+            selected={section.kind === 'group'
+              ? targetGroup === section.path
+              : section.kind === 'project' && targetGroup === null && project === section.path
+                && !projects.some(p => p.path === section.path && p.isWorkspace)}
+            selectable={selecting && known && !projects.some(p => p.path === section.path && (p.isLaunch || p.isWorkspace))}
+            checked={picked.has(section.path)}
+            onCheck={() => setPicked((prev) => {
+              const next = new Set(prev);
+              if (next.has(section.path)) next.delete(section.path); else next.add(section.path);
+              return next;
+            })}
             dense={dense}
             focused={focused}
             rowId={rowId(index)}
@@ -244,7 +279,7 @@ export function Sidebar(
         return (
           <p className={`px-3 text-[12px] text-aico-muted ${dense ? 'flex h-8 items-center' : 'pb-1'}`}>
             {filtering ? 'No match here.'
-              : row.section.kind === 'group' ? 'No sessions here yet. Drop one on the name, or use ⋯ → Move to group.'
+              : row.section.kind === 'group' ? 'No sessions here yet. Press + to start one here, or drop one on the name.'
               : row.section.kind === 'apps' ? 'No app conversations yet.'
               : 'No sessions here yet.'}
           </p>
@@ -327,6 +362,7 @@ export function Sidebar(
           >
             <Icon name="plus" size={17} className="text-aico-muted" /> New session
           </button>
+          <TargetChip />
         </div>
 
         {/*
@@ -379,6 +415,14 @@ export function Sidebar(
           </span>
           <div className="flex-1" />
           <button
+            onClick={() => { setSelecting(v => !v); setPicked(new Set()); setConfirmBulk(false); }}
+            aria-pressed={selecting}
+            title={selecting ? 'Stop selecting' : 'Select several folders or groups to remove'}
+            className={`${TOOLBAR_CONTROL} ${toolbarTone(selecting)} text-[12px]`}
+          >
+            <Icon name="check" size={14} /> Select
+          </button>
+          <button
             onClick={flipArchived}
             aria-pressed={showArchived}
             title={showArchived ? 'Hide archived sessions' : 'Show archived sessions'}
@@ -395,6 +439,48 @@ export function Sidebar(
             onNewGroup={() => setNaming(true)}
           />
         </div>
+
+        {selecting && (
+          <div role="region" aria-label="Selection" className="mx-3 mb-1 flex flex-wrap items-center gap-2 rounded-lg
+                          border border-aico-border-subtle bg-aico-surface px-2.5 py-1.5 text-[12px] text-aico-secondary">
+            {!confirmBulk ? (
+              <>
+                <span className="flex-1">{picked.size === 0 ? 'Tick folders or groups' : `${picked.size} selected`}</span>
+                <button
+                  disabled={picked.size === 0}
+                  onClick={() => setConfirmBulk(true)}
+                  className="rounded-lg border border-aico-danger/40 px-2 py-0.5 text-aico-danger hover:bg-aico-danger/10 disabled:opacity-40"
+                >
+                  Remove…
+                </button>
+              </>
+            ) : (
+              <span role="alert" className="flex flex-wrap items-center gap-2">
+                <span className="text-aico-danger">
+                  Remove {picked.size} from the list? Folders' chats are hidden (their history stays on disk and
+                  comes back if you add the folder again); groups are deleted and their chats go back to their folders.
+                </span>
+                <button
+                  onClick={async () => {
+                    // One after another: each removal re-reads the project list.
+                    for (const key of picked) {
+                      if (groups.some(g => g.id === key)) await deleteGroup(key);
+                      else await removeProject(key);
+                    }
+                    setPicked(new Set());
+                    setConfirmBulk(false);
+                    setSelecting(false);
+                  }}
+                  className="rounded-lg border border-aico-danger/40 bg-aico-danger/10 px-2 py-0.5 text-aico-danger"
+                >
+                  Remove
+                </button>
+                <button onClick={() => setConfirmBulk(false)}
+                  className="rounded-lg border border-aico-border-subtle px-2 py-0.5 hover:bg-aico-hover">Keep</button>
+              </span>
+            )}
+          </div>
+        )}
 
         {naming && (
           <div className="px-3 pb-1">
@@ -657,6 +743,7 @@ function AddMenu(
         aria-haspopup="menu"
         aria-expanded={open}
         title="New session, open a project, or make a group"
+        aria-label="New session, open a project, or make a group"
         className={`${TOOLBAR_CONTROL} ${toolbarTone(open)} w-7 justify-center px-0`}
       >
         <Icon name="plus" size={16} />
@@ -731,3 +818,35 @@ function NavButton(
 }
 
 export { APPS_SECTION };
+
+/**
+ * Where a new chat will go, said under the button that makes one.
+ *
+ * Selecting a folder or a group makes it the default for new chats; this is
+ * the visible half of that, and its ✕ is how to go back to the plain
+ * workspace. Hidden when new chats already go to the default workspace.
+ */
+function TargetChip(): React.ReactElement | null {
+  const project = useStore(s => s.project);
+  const projects = useStore(s => s.projects);
+  const targetGroup = useStore(s => s.targetGroup);
+  const group = useStore(s => s.groups.find(g => g.id === s.targetGroup));
+  const clearTarget = useStore(s => s.clearTarget);
+  const folder = projects.find(p => p.path === project);
+  const name = targetGroup && group ? group.name : folder && !folder.isWorkspace ? folder.name : null;
+  if (!name) return null;
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 px-1 text-[11px] text-aico-muted">
+      <Icon name={targetGroup ? 'stack' : 'folder'} size={12} />
+      <span className="min-w-0 flex-1 truncate">New chats go to <span className="text-aico-accent">{name}</span></span>
+      <button
+        onClick={clearTarget}
+        aria-label="Send new chats to the default workspace"
+        title="Send new chats to the default workspace"
+        className="shrink-0 rounded p-0.5 hover:bg-aico-hover hover:text-aico-primary"
+      >
+        <Icon name="close" size={12} />
+      </button>
+    </div>
+  );
+}

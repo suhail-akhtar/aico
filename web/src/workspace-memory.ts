@@ -50,3 +50,27 @@ export function rememberWorkspace(path: string, store: SessionStore | null = def
 export function forgetWorkspace(store: SessionStore | null = defaultStore()): void {
   try { store?.removeItem(LAST_PROJECT_KEY); } catch { /* see above */ }
 }
+
+const TARGET_GROUP_KEY = 'aico.targetGroup';
+
+/**
+ * The group new chats are filed into by default, if one was chosen.
+ *
+ * Selecting a group in the sidebar makes it the default the same way selecting
+ * a folder does; clearing it sends new chats back to the plain workspace.
+ */
+export function lastTargetGroup(store: SessionStore | null = defaultStore()): string | null {
+  try {
+    return store?.getItem(TARGET_GROUP_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Record, or with `null` forget, the default group. */
+export function rememberTargetGroup(id: string | null, store: SessionStore | null = defaultStore()): void {
+  try {
+    if (id) store?.setItem(TARGET_GROUP_KEY, id);
+    else store?.removeItem(TARGET_GROUP_KEY);
+  } catch { /* see above */ }
+}

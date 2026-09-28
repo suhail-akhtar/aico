@@ -740,7 +740,10 @@ section('Reloading mid-run does not disturb the run');
   await sleep(300);
   await post('submit', {
     sessionId: runId,
-    task: 'Count from 1 to 30, one number per line, with a short clause about each number.',
+    // Long enough to still be streaming after the disconnect: 1 to 30 was
+    // finished inside the test's 1.2-second pause by fast models, which made
+    // this section fail on timing rather than on anything the server did.
+    task: 'Count from 1 to 120, one number per line, with a short clause about each number.',
     model: MODEL,
   });
 
@@ -845,6 +848,19 @@ section('A chat and its folder: picked before sending, registered on send, remov
   const reopened = await (await post('projects/add', { path: folder, ifHasHistory: true })).json();
   check(reopened.project && await isProject(), 'reopening a folder that has chats registers it at once');
   check(await listed(folderSession), 'and brings the chat back without a new message');
+
+  // Deleting chats for good.
+  const badIds = await post('sessions/delete', { ids: ['../escape'] });
+  check(badIds.status === 400, `an id that could reach outside the store is refused (${badIds.status})`);
+  const deleted = await (await post('sessions/delete', { ids: [folderSession] })).json();
+  check(deleted.deleted?.includes(folderSession) && !await listed(folderSession),
+    'a deleted chat is gone from the list');
+  check(!fs.readdirSync(path.join(process.env.AICO_HOME, 'projects'), { recursive: true })
+    .some(f => String(f).includes(`${folderSession}.events.jsonl`)), 'and its log is gone from disk');
+
+  // Git routes only work on a workspace, never an arbitrary directory.
+  const outsider = await api(`project/git-branches?path=${encodeURIComponent(os.tmpdir())}`);
+  check(outsider.status === 403, `git is refused for a folder that is not a workspace (${outsider.status})`);
   await post('projects/remove', { path: folder });
   fs.rmSync(folder, { recursive: true, force: true });
   fs.rmSync(empty, { recursive: true, force: true });

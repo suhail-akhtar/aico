@@ -55,6 +55,8 @@ export interface ProjectSummary {
   sessions: number;
   /** Most recent session activity, for ordering. */
   updatedAt: number;
+  /** When the folder was added, so a new one can sort to the top. */
+  addedAt?: number;
 }
 
 /** The directory's own name, which is what people call a project. */
@@ -79,7 +81,7 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
 
   type Entry = {
     path: string; name: string; pinned?: boolean; color?: string;
-    description?: string; instructions?: string;
+    description?: string; instructions?: string; addedAt?: number;
   };
   const configured: Entry[] = (settings.projects ?? []).map(entry => ({
     path: normalizeProjectPath(entry.path),
@@ -143,6 +145,7 @@ export async function listProjects(launchCwd: string): Promise<ProjectSummary[]>
       exists,
       sessions: sessions.filter(isUsedSession).length,
       updatedAt: sessions[0]?.updatedAt ?? 0,
+      ...(typeof entry.addedAt === 'number' ? { addedAt: entry.addedAt } : {}),
     };
   }));
 }
@@ -221,6 +224,7 @@ export async function addProject(dir: string, name?: string): Promise<ProjectSum
     exists: true,
     sessions: (await listSessionSummaries(target).catch(() => [])).filter(isUsedSession).length,
     updatedAt: 0,
+    addedAt: already?.addedAt ?? Date.now(),
   };
 }
 

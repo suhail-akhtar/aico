@@ -173,7 +173,7 @@ export function groupByProject(
   sessions: SessionSummary[],
   projects: Array<{ path: string; name: string; pinned?: boolean; addedAt?: number }>,
   filter = '',
-  groups: Array<{ id: string; name: string; pinned?: boolean }> = [],
+  groups: Array<{ id: string; name: string; pinned?: boolean; createdAt?: number }> = [],
 ): Section[] {
   const terms = searchTerms(filter);
   const ctx: MatchContext = {
@@ -244,9 +244,24 @@ export function groupByProject(
     ...groups.map((g, index) => [g.id, index] as const),
     ...projects.map((p, index) => [p.path, groups.length + index] as const),
   ]);
+  /*
+    Being created counts as activity.
+
+    A new group or folder has no sessions, so sorting by the newest session put
+    it below every section that had one — at the bottom of a long list, where
+    the person who had just made it had to search for it. Now a section's
+    activity is its newest session or the moment it was made, whichever is
+    later: a new one arrives on top, and sinks only as others are used.
+  */
+  const createdAt = new Map<string, number>([
+    ...groups.map(g => [g.id, g.createdAt ?? 0] as const),
+    ...projects.map(p => [p.path, p.addedAt ?? 0] as const),
+  ]);
+  const activityOf = (s: Section): number =>
+    Math.max(s.items[0]?.updatedAt ?? 0, createdAt.get(s.path) ?? 0);
   return kept.sort((a, b) => {
     if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
-    const activity = (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0);
+    const activity = activityOf(b) - activityOf(a);
     if (activity !== 0) return activity;
     return (addedRank.get(a.path) ?? 1e9) - (addedRank.get(b.path) ?? 1e9);
   });

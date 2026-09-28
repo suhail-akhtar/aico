@@ -20,7 +20,7 @@
  * @module navigation
  */
 
-export type Destination = 'sessions' | 'apps' | 'system' | 'project';
+export type Destination = 'sessions' | 'apps' | 'system' | 'project' | 'group';
 export type SessionTab = 'chat' | 'changes' | 'trajectory';
 
 export interface Route {
@@ -29,11 +29,13 @@ export interface Route {
   tab: SessionTab;
   /** Which workspace, when the destination is `'project'`. An absolute path. */
   projectPath?: string;
+  /** Which group, when the destination is `'group'`. */
+  groupId?: string;
 }
 
 export const DEFAULT_ROUTE: Route = { destination: 'sessions', tab: 'chat' };
 
-const DESTINATIONS: readonly Destination[] = ['sessions', 'apps', 'system', 'project'];
+const DESTINATIONS: readonly Destination[] = ['sessions', 'apps', 'system', 'project', 'group'];
 const TABS: readonly SessionTab[] = ['chat', 'changes', 'trajectory'];
 
 export function isDestination(value: unknown): value is Destination {
@@ -63,6 +65,7 @@ export function headerTitle(route: Route, sessionTitle: string | undefined, proj
   if (route.destination === 'apps') return 'Apps';
   if (route.destination === 'system') return 'System';
   if (route.destination === 'project') return projectLabel?.trim() || 'Workspace';
+  if (route.destination === 'group') return projectLabel?.trim() || 'Group';
   return sessionTitle?.trim() || 'New session';
 }
 
@@ -78,7 +81,7 @@ export function headerTitle(route: Route, sessionTitle: string | undefined, proj
  * visit would. Same one-shot contract as `?settings=`: the caller strips the
  * parameters once read, because a deep link is an entry point, not a mode.
  */
-export function parseView(search: string): { destination: Destination; projectPath?: string } | null {
+export function parseView(search: string): { destination: Destination; projectPath?: string; groupId?: string } | null {
   let params: URLSearchParams;
   try {
     params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
@@ -87,6 +90,10 @@ export function parseView(search: string): { destination: Destination; projectPa
   }
   const value = params.get('view');
   if (!isDestination(value) || value === 'sessions') return null;
+  if (value === 'group') {
+    const groupId = params.get('id')?.trim();
+    return groupId ? { destination: value, groupId } : null;
+  }
   if (value === 'project') {
     const projectPath = params.get('path')?.trim();
     if (!projectPath) return null;

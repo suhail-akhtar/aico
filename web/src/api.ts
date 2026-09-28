@@ -378,6 +378,18 @@ export const api = {
     if (opts.before) params.set('before', opts.before);
     return get<GitLogPage>(`project/git-log?${params.toString()}`);
   },
+  /** One commit: files, message and diff. */
+  gitShow: (path: string, hash: string) =>
+    get<CommitDetail>(`project/git-show?${new URLSearchParams({ path, hash }).toString()}`),
+  /** Local branches, the current one marked. */
+  gitBranches: (path: string) =>
+    get<BranchList>(`project/git-branches?${new URLSearchParams({ path }).toString()}`),
+  /** Switch branch, branch from a commit, or revert one. Refused on a dirty tree. */
+  gitAction: (path: string, action: 'switch' | 'branch' | 'revert', opts: { name?: string; at?: string; switchTo?: boolean }) =>
+    post<BranchList & { ok: true }>('project/git-action', { path, action, ...opts }),
+  /** Remove chats for good. Running ones are refused and reported. */
+  deleteSessions: (ids: string[]) =>
+    post<{ deleted: string[]; skipped: Array<{ id: string; reason: string }> }>('sessions/delete', { ids }),
   /** Totals across every session a workspace has ever had. */
   projectStats: (path: string) =>
     get<ProjectStats>(`project/stats?path=${encodeURIComponent(path)}`),
@@ -611,6 +623,8 @@ export interface Project {
   exists: boolean;
   sessions: number;
   updatedAt: number;
+  /** When the folder was added, so a new one sorts to the top. */
+  addedAt?: number;
 }
 
 /**
@@ -832,6 +846,23 @@ export interface CommitInfo {
   /** ISO 8601, author date. */
   date: string;
   subject: string;
+}
+
+export interface CommitDetail {
+  hash: string;
+  shortHash: string;
+  author: string;
+  date: string;
+  subject: string;
+  body: string;
+  files: Array<{ status: string; path: string }>;
+  diff: string;
+  truncated: boolean;
+}
+
+export interface BranchList {
+  current: string | null;
+  branches: Array<{ name: string; current: boolean; lastCommit: string; lastDate: string }>;
 }
 
 export interface GitLogPage {

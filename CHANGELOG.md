@@ -3,6 +3,45 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.22.0 — 2026-09-29
+
+Groups and folders have pages, one of them is where new chats go, and a
+workspace's git history can be acted on.
+
+### Added
+
+- **A group opens its own page**, like a folder does: New session, Use for new
+  chats, Edit properties, chat/turn/last-active tiles, and its chats.
+  `?view=group&id=…` links straight to it.
+- **A default target for new chats.** Opening a folder or group, or choosing
+  "Use for new chats" from its menu or page, makes it where New session puts
+  the next chat; the sidebar shows "New chats go to X" under New session, and
+  ✕ sends new chats back to the default workspace. The choice survives reloads.
+- **Chat lists on folder and group pages** with search, archived toggle,
+  checkboxes, select-all, bulk archive/restore and **Delete…** — permanent,
+  confirmed inline, and a running chat is skipped with the reason shown.
+  `POST /api/sessions/delete` validates every id and releases the run before
+  removing its files.
+- **Select mode in the sidebar** removes several folders or groups at once.
+- **Git on the workspace page**: branch chips (click to switch), a commit
+  expands to its files and coloured diff, *Branch from here* (optionally
+  switching to it) restores any commit without touching the current branch,
+  and *Revert…* undoes a commit with a new one. Uncommitted tracked changes
+  block a switch or revert; a conflicting revert is aborted with nothing
+  changed; hashes and branch names are validated; only registered workspaces
+  are served. History is never rewritten.
+
+### Fixed
+
+- **A new folder or group sorted into the middle of the list** and had to be
+  searched for. Creation time now counts as activity, so it lands on top.
+- **"+" on an empty group was hidden** until hover, so a chat could not easily
+  be started in a new group. It now shows while the group is empty.
+- **The "…" menu and its delete confirmation ran off the bottom of the
+  screen** for items near the foot of the sidebar. The menu now flips upward
+  when there is no room and scrolls if it is taller than the window.
+- The sidebar's "+" menu button had a tooltip but no accessible name.
+
 ## 0.21.0 — 2026-09-28
 
 Every setting that has a sensible control now has one, and CI tests the code

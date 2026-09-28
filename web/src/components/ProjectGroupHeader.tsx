@@ -32,7 +32,7 @@
  * @module components/ProjectGroupHeader
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { Portal } from './Portal';
 import { Icon } from './Icon';
@@ -60,6 +60,14 @@ export interface ProjectGroupHeaderProps {
   onOpenApps?: () => void;
   /** For a project section: where its name and "Open workspace" menu item go. */
   onOpenWorkspace?: () => void;
+  /** For a group section: where its name and "Open group" menu item go. */
+  onOpenGroup?: () => void;
+  /** This section is the default place new chats go. */
+  selected?: boolean;
+  /** Multi-select mode: a checkbox before the name. */
+  selectable?: boolean;
+  checked?: boolean;
+  onCheck?: () => void;
   /** Uniform-height rows, for the windowed list. */
   dense?: boolean;
   /** Keyboard focus marker and the id `aria-activedescendant` points at. */
@@ -70,6 +78,7 @@ export interface ProjectGroupHeaderProps {
 export function ProjectGroupHeader({
   label, path, kind, known, isLaunch, collapsed, onToggle, count,
   filtering = false, acceptsDrop = false, onDropSession, onOpenApps, onOpenWorkspace,
+  onOpenGroup, selected = false, selectable = false, checked = false, onCheck,
   dense = false, focused = false, rowId,
 }: ProjectGroupHeaderProps): React.ReactElement {
   const newSessionIn = useStore(s => s.newSessionIn);
@@ -101,6 +110,33 @@ export function ProjectGroupHeader({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [over, setOver] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const selectTarget = useStore(s => s.selectTarget);
+  const clearTarget = useStore(s => s.clearTarget);
+
+  /*
+    Kept on screen.
+
+    The menu was placed under its row once, with no thought for the bottom of
+    the window: on a row near the bottom it opened half off-screen, and the
+    Remove / Keep buttons of the confirmation — which grows the menu in place —
+    were below the fold with no way to reach them. Measured after it renders,
+    and again whenever the confirmation changes its height: it opens upward
+    when there is more room above, and scrolls rather than overflow.
+  */
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const box = buttonRef.current?.getBoundingClientRect();
+    const menu = menuRef.current;
+    if (!box || !menu) return;
+    const height = menu.offsetHeight;
+    const below = window.innerHeight - box.bottom - 8;
+    const above = box.top - 8;
+    const top = height <= below || below >= above
+      ? box.bottom + 4
+      : Math.max(8, box.top - 4 - Math.min(height, above));
+    setAt({ top, left: Math.min(box.left, window.innerWidth - 210) });
+  }, [menuOpen, confirming]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -180,7 +216,9 @@ export function ProjectGroupHeader({
         e.preventDefault();
         onDropSession?.(id);
       }}
+      aria-selected={selected || undefined}
       className={`group/proj flex items-center gap-0.5 rounded-lg px-1 hover:bg-aico-hover/60
+                  ${selected ? 'bg-aico-accent-soft/60' : ''}
                   ${dense ? 'h-8' : 'pb-1 pt-3'}
                   ${over && acceptsDrop ? 'ring-1 ring-aico-accent bg-aico-accent-soft/60' : ''}
                   ${focused ? 'outline outline-1 outline-aico-accent/60' : ''}`}
@@ -214,12 +252,32 @@ export function ProjectGroupHeader({
           apps section have no page of their own yet, so their label still
           just toggles, exactly as before.
         */}
-        {kind === 'project' && known && onOpenWorkspace ? (
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => onCheck?.()}
+            aria-label={`Select ${label}`}
+            className="h-3.5 w-3.5 shrink-0 accent-aico-accent"
+          />
+        )}
+        {isGroup && known && onOpenGroup ? (
+          <button
+            onClick={onOpenGroup}
+            tabIndex={-1}
+            title={`Open ${label}`}
+            className={`min-w-0 flex-1 truncate text-left hover:text-aico-primary hover:underline
+                        ${selected ? 'text-aico-accent' : ''}`}
+          >
+            {label}
+          </button>
+        ) : kind === 'project' && known && onOpenWorkspace ? (
           <button
             onClick={onOpenWorkspace}
             tabIndex={-1}
             title={`Open ${label}`}
-            className="min-w-0 flex-1 truncate text-left hover:text-aico-primary hover:underline"
+            className={`min-w-0 flex-1 truncate text-left hover:text-aico-primary hover:underline
+                        ${selected ? 'text-aico-accent' : ''}`}
           >
             {label}
           </button>
@@ -274,8 +332,10 @@ export function ProjectGroupHeader({
             tabIndex={-1}
             aria-label={isApps ? 'Open Apps' : `New session in ${label}`}
             title={isApps ? 'Open Apps' : `New session in ${label}`}
-            className="shrink-0 rounded p-0.5 text-aico-muted opacity-0 transition-opacity
-                       hover:text-aico-primary focus:opacity-100 group-hover/proj:opacity-100"
+            // Visible on an empty section for the same reason as "…": it is the
+            // one thing a new, empty group or folder is for.
+            className={`shrink-0 rounded p-0.5 text-aico-muted transition-opacity hover:text-aico-primary
+                        ${count === 0 ? 'opacity-100' : 'opacity-0 focus:opacity-100 group-hover/proj:opacity-100'}`}
           >
             <Icon name={isApps ? 'grid' : 'plus'} size={14} />
           </button>
@@ -285,12 +345,38 @@ export function ProjectGroupHeader({
       {menuOpen && (
         <Portal>
         <div
+          ref={menuRef}
           data-project-menu
           role="menu"
-          style={{ top: at.top, left: at.left }}
-          className="fixed z-50 w-[204px] overflow-hidden rounded-xl border border-aico-border
+          style={{ top: at.top, left: at.left, maxHeight: 'calc(100vh - 16px)' }}
+          className="fixed z-50 w-[204px] overflow-y-auto rounded-xl border border-aico-border
                      bg-aico-bg py-1 shadow-2xl"
         >
+          {isGroup && onOpenGroup && (
+            <button
+              role="menuitem"
+              onClick={() => { setMenuOpen(false); onOpenGroup(); }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-primary
+                         transition-colors hover:bg-aico-hover"
+            >
+              <Icon name="grid" size={15} className="text-aico-muted" /> Open group
+            </button>
+          )}
+          {(isGroup || kind === 'project') && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                if (selected) clearTarget();
+                else selectTarget(isGroup ? { kind: 'group', id: path } : { kind: 'project', path });
+              }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-aico-primary
+                         transition-colors hover:bg-aico-hover"
+            >
+              <Icon name={selected ? 'close' : 'check'} size={15} className="text-aico-muted" />
+              {selected ? 'Stop using for new chats' : 'Use for new chats'}
+            </button>
+          )}
           {kind === 'project' && onOpenWorkspace && (
             <button
               role="menuitem"

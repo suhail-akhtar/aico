@@ -189,6 +189,24 @@ test('matching sees title, id, project name and path, and group name', () => {
   assert.equal(matchesSession(auth, [], CTX), true, 'no terms matches everything');
 });
 
+test('a group or folder just made sorts to the top, not below everything with chats', () => {
+  const old = Date.now() - 86_400_000;
+  const sessions = [{ id: 's1', updatedAt: old, turns: 1, project: '/busy' }];
+  const sections = groupByProject(
+    sessions,
+    [{ path: '/busy', name: 'busy' }, { path: '/new-folder', name: 'new-folder', addedAt: Date.now() - 1000 }],
+    '',
+    [{ id: 'fresh', name: 'Fresh group', createdAt: Date.now() }],
+  );
+  assert.deepEqual(sections.map(s => s.path), ['fresh', '/new-folder', '/busy'],
+    'newest-made first, then the busy one — it sinks only as others are used');
+});
+
+test('?view=group opens a group page by id', () => {
+  assert.deepEqual(parseView('?view=group&id=client-a'), { destination: 'group', groupId: 'client-a' });
+  assert.equal(parseView('?view=group'), null, 'a group page with no id is not a link');
+});
+
 test('filtering through groupByProject keeps a project found by its own name, and drops the rest', () => {
   const sections = groupByProject(SESSIONS, PROJECTS, 'marketing', GROUPS);
   // The docs session lives in the marketing project but is filed in a group, so
