@@ -52,6 +52,8 @@ export interface Field {
   step?: number;
   /** Rendered inside the number input's trailing slot: `s`, `%`, `USD`. */
   unit?: string;
+  /** Shown value = stored value ÷ scale; e.g. 1000 shows milliseconds as seconds. */
+  scale?: number;
   placeholder?: string;
   /**
    * What the engine does when this is unset. Shown as the resting state of the
@@ -210,7 +212,8 @@ export const PANES: Pane[] = [
   },
   {
     id: 'agent',
-    label: 'Agent',
+    // Not "Agent": beside the "Agents" pane the two read as the same thing.
+    label: 'Permissions',
     icon: 'shield',
     blurb: 'What the agent is allowed to do, and how hard it tries before it stops.',
     groups: [
@@ -340,10 +343,70 @@ export const PANES: Pane[] = [
         ],
       },
       {
+        title: 'Long runs',
+        hint: 'Inside a single long turn: older tool output is cleared behind a short note, and earlier '
+          + 'steps are condensed if that is not enough — keeping your words, the plan, the todo list '
+          + 'and the files touched. On by default; the defaults were chosen from live runs.',
+        fields: [
+          {
+            path: 'contextManagement.enabled',
+            label: 'Manage context during a turn',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'mask clear tool output long run context focused',
+          },
+          {
+            path: 'contextManagement.keepRecentSteps',
+            label: 'Steps always kept in full',
+            hint: 'Output the model saw this recently is never cleared, however much of it there is.',
+            kind: 'number',
+            fallback: 8,
+            min: 1,
+            max: 100,
+            unit: 'steps',
+            keywords: 'mask window recent',
+          },
+          {
+            path: 'contextManagement.keepRecentToolResults',
+            label: 'Results always kept in full',
+            kind: 'number',
+            fallback: 6,
+            min: 1,
+            max: 100,
+            unit: 'results',
+            keywords: 'mask window recent',
+          },
+          {
+            path: 'contextManagement.midTurnCompaction',
+            label: 'Condense inside a turn',
+            hint: 'Only when clearing old output is not enough.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'compact mid turn handoff',
+          },
+          {
+            path: 'contextManagement.modelSummary',
+            label: 'Let the model write the handoff note',
+            hint: 'Off uses a free heuristic summary instead of one short model call.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'summary handoff',
+          },
+          {
+            path: 'contextManagement.reciteTodos',
+            label: 'Repeat open todos each step',
+            hint: 'Keeps what is left to do next to where the next action is chosen.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'todo recite',
+          },
+        ],
+      },
+      {
         title: 'Apps',
         hint: 'Single-page apps the agent builds, each with its own SQLite database, served from a '
           + 'second local port. The separate port is the security boundary — it is what keeps a '
-          + 'generated page from reaching the API that runs shell commands. Takes effect on restart.',
+          + 'generated page from reaching the API that runs shell commands. Applied as soon as it is saved.',
         fields: [
           {
             path: 'miniApps.enabled',
@@ -376,6 +439,19 @@ export const PANES: Pane[] = [
             kind: 'toggle',
             fallback: true,
             keywords: 'prompt cache cost savings',
+          },
+          {
+            path: 'promptCaching.prefixTtl',
+            label: 'Anthropic: keep the cached prefix for',
+            hint: 'An hour costs 2× to write once instead of 1.25× every time a pause passes five minutes. '
+              + 'The conversation itself always uses five minutes.',
+            kind: 'select',
+            fallback: '1h',
+            options: [
+              { value: '1h', label: 'One hour' },
+              { value: '5m', label: 'Five minutes' },
+            ],
+            keywords: 'anthropic claude cache ttl hour',
           },
         ],
       },
@@ -414,6 +490,27 @@ export const PANES: Pane[] = [
             placeholder: 'no ceiling',
             keywords: 'budget tokens',
           },
+          {
+            path: 'safetyLimits.maxCostPerSubagent',
+            label: 'Cost ceiling per sub-agent',
+            hint: 'Stops one runaway helper without stopping the rest of the work.',
+            kind: 'number',
+            min: 0,
+            step: 0.1,
+            unit: 'USD',
+            placeholder: 'no ceiling',
+            keywords: 'budget sub-agent delegate task',
+          },
+          {
+            path: 'safetyLimits.maxTokensPerSubagent',
+            label: 'Token ceiling per sub-agent',
+            kind: 'number',
+            min: 0,
+            step: 10000,
+            unit: 'tokens',
+            placeholder: 'no ceiling',
+            keywords: 'budget sub-agent tokens',
+          },
         ],
       },
       {
@@ -436,7 +533,10 @@ export const PANES: Pane[] = [
             kind: 'number',
             fallback: 0,
             min: 0,
-            unit: 'ms',
+            // Stored in milliseconds, shown in seconds: beside a shell timeout in
+            // seconds, typing 300 here set a 0.3-second turn limit.
+            unit: 's',
+            scale: 1000,
             keywords: 'deadline hang stuck',
           },
         ],

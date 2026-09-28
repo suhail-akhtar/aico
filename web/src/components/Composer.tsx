@@ -196,10 +196,15 @@ ${prefill.text}` : prefill.text));
     // A blocked turn takes precedence over every other reading of Enter. It
     // cannot reach a step boundary, so steering would queue the answer behind
     // a boundary that never arrives.
-    if (question !== null) { await answer(content); return; }
-    if (mode === 'steer') await steer(content);
+    const before = useStore.getState().error;
+    if (question !== null) await answer(content);
+    else if (mode === 'steer') await steer(content);
     else if (mode === 'followup') await followup(content);
     else await submit(content, { planMode, effort, approval });
+    // The box was cleared optimistically; a send that failed gives the words
+    // back rather than making the person type them again.
+    const after = useStore.getState().error;
+    if (after && after !== before) setText(current => current || content);
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -226,6 +231,9 @@ ${prefill.text}` : prefill.text));
     }
 
     if (event.key !== 'Enter' || event.shiftKey) return;
+    // Enter that confirms an IME composition (Chinese, Japanese, Korean) is
+    // not a send — it used to post the message mid-word.
+    if (event.nativeEvent.isComposing) return;
     event.preventDefault();
     // While running, plain Enter steers — the action someone reaching for the
     // keyboard mid-run almost always wants. Ctrl/Cmd+Enter queues instead.
@@ -305,6 +313,7 @@ ${prefill.text}` : prefill.text));
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             rows={1}
+            aria-label={question !== null ? 'Answer the agent' : busy ? 'Steer the running turn' : 'Message the agent'}
             placeholder={question !== null
               ? 'Answer to continue…'
               : busy ? 'Steer the running turn…' : 'Message the agent'}
@@ -689,6 +698,12 @@ function WindowPopover({ total, source, onClose }: {
   total: number; source: string; onClose: () => void;
 }): React.ReactElement {
   const model = useStore(s => s.model ?? s.defaultModel);
+  // What compaction is actually set to, not a fixed "75%" that ignored both
+  // the percentage setting and whether compaction is on at all.
+  const compact = useStore(s => s.settings.autoCompact as { enabled?: boolean; thresholdPercent?: number } | undefined);
+  const compactNote = compact?.enabled === false
+    ? 'Automatic compaction is off.'
+    : `Compaction runs at ${compact?.thresholdPercent ?? 75}% of this.`;
   const [value, setValue] = useState(String(total));
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -771,7 +786,7 @@ function WindowPopover({ total, source, onClose }: {
         </button>
       </div>
       <div className="mt-1.5 flex items-center justify-between">
-        <span className="text-[11px] text-aico-muted">Compaction runs at 75% of this.</span>
+        <span className="text-[11px] text-aico-muted">{compactNote}</span>
         {source === 'user' && (
           <button
             onClick={() => void apply(null)}

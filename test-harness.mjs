@@ -13819,6 +13819,63 @@ console.log('\n══ LONG-HORIZON CONTEXT: MASK, CONDENSE, RESUME ══');
   assert(Math.abs(costFor('gpt-5.6-luna', million) - 1.40) < 1e-9, `gpt-5.6-luna is $0.20 in, $1.20 out (${costFor('gpt-5.6-luna', million)})`);
   assert(Math.abs(costFor('deepseek-flash', million) - 0.75) < 1e-9, `deepseek-flash is $0.15 in, $0.60 out off-peak (${costFor('deepseek-flash', million)})`);
 
+  console.log('  -- Settings are saved one value at a time, and Reset really removes --');
+  {
+    const file = path.join(process.env.AICO_HOME, 'settings.json');
+    const original = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+    fs.writeFileSync(file, JSON.stringify({ autoCompact: { enabled: true, keepRecentTurns: 3 }, model: 'm' }));
+    await T.patchUserSettingPath('autoCompact.thresholdPercent', 60);
+    let now = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert(now.autoCompact.thresholdPercent === 60 && now.autoCompact.keepRecentTurns === 3 && now.model === 'm',
+      'one leaf is set and its siblings are untouched');
+    await T.patchUserSettingPath('contextManagement.keepRecentSteps', 5);
+    await T.patchUserSettingPath('contextManagement.keepRecentSteps', null);
+    now = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert(!('contextManagement' in now), 'reset removes the value, and the object it leaves empty');
+    let refused = false;
+    try { await T.patchUserSettingPath('providers.openai.apiKey', 'x'); } catch { refused = true; }
+    assert(refused, 'credential roots are never written by path');
+    if (original === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, original);
+  }
+
+  console.log('  -- OpenAI Responses: requests are append-only, so the cache can grow --');
+  {
+    const http = await import('http');
+    const bodies = [];
+    const server = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', c => { raw += c; });
+      req.on('end', () => {
+        bodies.push(JSON.parse(raw));
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        const ev = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+        ev('response.output_text.delta', { delta: 'ok' });
+        ev('response.completed', { response: { id: 'r', status: 'completed', usage: { input_tokens: 10, output_tokens: 1, input_tokens_details: { cached_tokens: 0 } } } });
+        res.end();
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const provider = new T.OpenAIResponsesProvider({ id: 'openai', displayName: 'OpenAI', apiKey: 'test', baseURL: `http://127.0.0.1:${server.address().port}/v1` });
+    const send = async (messages, tail) => {
+      try { for await (const _ of provider.chat({ model: 'gpt-6-luna', systemPrompt: 'SYS', tools: [], messages, volatileContext: tail })) { /* drain */ } } catch { /* the body is what is under test */ }
+    };
+    const step1 = [{ role: 'user', content: 'task' }];
+    const step2 = [...step1, { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'Read', input: {} }] }, { role: 'tool', toolCallId: 'c1', toolName: 'Read', content: 'body' }];
+    await send(step1, 'TAIL-1');
+    await send(step2, 'TAIL-2');
+    const a = JSON.stringify(bodies[0].input);
+    const b = JSON.stringify(bodies[1].input);
+    assert(b.startsWith(a.slice(0, -1)), 'each request contains the previous one whole, earlier tail included');
+    assert(bodies[1].input.at(-1).content === 'TAIL-2', 'and the newest tail is last');
+    // A rewritten history (masking, condensing) must not get tails spliced into it.
+    await send([{ role: 'user', content: 'task' }, { ...step2[1] }, { ...step2[2], content: '[masked]' }], 'TAIL-3');
+    assert(!JSON.stringify(bodies[2].input).includes('TAIL-2'),
+      'a tail whose history changed is dropped, not misplaced');
+    await send([{ role: 'user', content: 'another conversation' }], 'TAIL-X');
+    assert(!JSON.stringify(bodies[3].input).includes('TAIL-1'), 'and another conversation never sees them');
+    server.close();
+  }
+
   console.log('  -- Anthropic: the static prefix is cached for an hour, the tail for five minutes --');
   {
     const http = await import('http');

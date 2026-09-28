@@ -375,3 +375,5 @@ export { planMidTurnCut, composeSummary } from './session/compact.js';
 export { maskState } from './session/derive.js';
 export { AnthropicProvider } from './providers/anthropic.js';
 export { readTodos } from './tools/todo.js';
+export { OpenAIResponsesProvider } from './providers/openai-responses.js';
+export { patchUserSettingPath } from './settings.js';

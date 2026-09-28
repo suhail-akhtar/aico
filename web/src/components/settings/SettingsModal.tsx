@@ -72,7 +72,16 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
   // the browser's own find, which would search a sheet that mostly is not here.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') { onClose(); return; }
+      // Escape backs out one level: an active search first, then the dialog.
+      if (event.key === 'Escape') {
+        if (searchRef.current && searchRef.current.value) {
+          event.preventDefault();
+          setQuery('');
+          return;
+        }
+        onClose();
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         searchRef.current?.focus();
@@ -82,27 +91,63 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  /*
+    A failure anywhere in here is shown here.
+
+    The custom panes — models, MCP, skills — fire their actions and forget
+    them, and several have no catch, so a failed activate or install vanished:
+    the only error banner is on the chat screen, behind this dialog. Any
+    rejection that nothing else handled while the dialog is open lands in the
+    dialog's own failure line instead.
+  */
+  useEffect(() => {
+    const onRejection = (event: PromiseRejectionEvent): void => {
+      const reason = event.reason as { message?: string } | undefined;
+      setSave('failed');
+      setFailure(reason?.message ?? String(event.reason));
+    };
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => window.removeEventListener('unhandledrejection', onRejection);
+  }, []);
+
   const changed = useMemo(() => new Set(changedPaths(settings)), [settings]);
   const hits = useMemo(() => searchFields(query), [query]);
   const pane = PANES.find(p => p.id === paneId) ?? PANES[0]!;
 
-  const write = async (path: string, value: unknown): Promise<void> => {
-    setSave('saving');
-    setFailure(null);
-    try {
-      await api.saveSettings(patchFor(settings, path, value));
-      await refreshSettings();
-      setSave('saved');
-    } catch (err) {
-      setSave('failed');
-      setFailure((err as Error).message);
-    }
+  /*
+    One leaf at a time, one save at a time.
+
+    This used to rebuild the whole top-level key from the merged settings it
+    happened to hold at render time and write it into the user's file — which
+    copied a project's values into the global file, raced itself when two
+    fields under one key changed quickly, and "reset" a value by sending
+    `undefined`, which JSON drops, so nothing changed while the badge said
+    Saved. Now the server sets or removes the one path, in the user's own file
+    only, and saves are chained so they land in the order they were made.
+  */
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const write = (path: string, value: unknown): Promise<void> => {
+    patchFor(settings, path, value); // guards credential roots; the patch itself is not sent
+    queue.current = queue.current.then(async () => {
+      setSave('saving');
+      setFailure(null);
+      try {
+        await api.saveSettingPath(path, value);
+        await refreshSettings();
+        setSave('saved');
+      } catch (err) {
+        setSave('failed');
+        setFailure((err as Error).message);
+      }
+    });
+    return queue.current;
   };
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-0 sm:p-6"
-      onMouseDown={onClose}
+      // Not closed by a click outside: that discarded a half-typed API key, a
+      // pasted skill or MCP config with no warning. Escape and the X close it.
       role="dialog"
       aria-modal="true"
       aria-label="Settings"
@@ -121,6 +166,7 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
             <Icon name="search" size={18} className="text-aico-muted" />
             <input
               ref={searchRef}
+              autoFocus
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Search every setting"

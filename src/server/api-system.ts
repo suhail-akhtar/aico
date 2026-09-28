@@ -34,7 +34,7 @@ import {
   redactInstance, validateInstance,
 } from '../providers/instances.js';
 import type { ProviderInstance } from '../providers/instances.js';
-import { loadSettings, patchUserProviderTuning, saveUserSetting } from '../settings.js';
+import { loadSettings, patchUserProviderTuning, patchUserSettingPath, saveUserSetting } from '../settings.js';
 import { FAMILY_REASONING, tuningChoice, tuningPatch, type FamilyDefault } from '../../shared/reasoning.js';
 import { getModelCapabilities } from '../model-capabilities.js';
 import type { ModelCapabilities } from '../model-capabilities.js';
@@ -957,6 +957,19 @@ ${content || 'Describe the procedure here.'}
       // Applied key by key so a partial update cannot blank the rest of the file.
       for (const [key, value] of Object.entries(body)) {
         await saveUserSetting(key, value);
+      }
+      return { status: 200, body: redactSettings(await loadSettings()) };
+    }
+
+    // One value by dotted path, global file only; `null` removes it.
+    case 'settings/path': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST' } };
+      const { path: dotted, value } = body as { path?: unknown; value?: unknown };
+      if (typeof dotted !== 'string' || !dotted.trim()) return { status: 400, body: { error: 'path required' } };
+      try {
+        await patchUserSettingPath(dotted, value === undefined ? null : value);
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } };
       }
       return { status: 200, body: redactSettings(await loadSettings()) };
     }

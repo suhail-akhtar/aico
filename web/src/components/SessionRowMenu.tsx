@@ -87,7 +87,7 @@ export function SessionRowMenu(
         aria-haspopup="menu"
         aria-expanded={open}
         className={`shrink-0 rounded px-1 text-aico-muted transition-opacity hover:text-aico-primary
-                    ${open ? 'opacity-100' : 'opacity-0 focus:opacity-100 group-hover/row:opacity-100'}`}
+                    ${open ? 'opacity-100' : 'opacity-0 focus:opacity-100 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100'}`}
       >
         <Icon name="ellipsis" size={17} />
       </button>

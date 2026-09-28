@@ -94,6 +94,9 @@ export interface OpenAIResponsesConfig {
 /** Default output ceiling; see {@link OpenAIResponsesConfig.maxOutputTokens}. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
 
+/** Earlier volatile tails kept in place before starting over (see `keptTails`). */
+const MAX_KEPT_TAILS = 60;
+
 export class OpenAIResponsesProvider implements ProviderAPI {
   readonly id: string;
   readonly displayName: string;
@@ -116,8 +119,66 @@ export class OpenAIResponsesProvider implements ProviderAPI {
     });
   }
 
+  /**
+   * Earlier requests' volatile tails, and where each was sent.
+   *
+   * OpenAI's cache only grows when a request contains the previous request's
+   * prompt whole. A tail sent last and then dropped on the next step broke
+   * that every step: measured live on gpt-5.6-luna and gpt-6-luna, the cached
+   * share stayed at the ~14K static prefix for a whole turn while the prompt
+   * climbed past 24K — 14-22% cached on long runs. Folding the tail into the
+   * last item did not help either. Keeping each tail where it was sent makes
+   * the requests append-only, and the cache then tracked the entire previous
+   * prompt at every step (14,060 → 16,602 → 19,144 → 21,686 cached). It is
+   * how Claude Code carries its own system reminders.
+   *
+   * Local to this provider — Anthropic's explicit breakpoints and DeepSeek's
+   * prefix cache already work with a dropped tail — and guarded, because the
+   * log is the source of truth: a tail is only re-inserted while the message
+   * it followed is still exactly there, so a masked or condensed history, or
+   * another conversation, simply starts fresh.
+   */
+  private keptTails: Array<{ at: number; after: string; text: string }> = [];
+  private keptFor = '';
+
+  /** The request's messages with earlier tails put back where they were sent. */
+  private withKeptTails(opts: ProviderChatOptions): AicoMessage[] {
+    const messages = opts.messages;
+    const key = (m: AicoMessage | undefined): string =>
+      m ? `${m.role}\u0000${'toolCallId' in m ? m.toolCallId : ''}\u0000${m.content.length}\u0000${m.content.slice(-200)}` : '';
+    const conversation = key(messages[0]);
+    if (conversation !== this.keptFor) {
+      this.keptFor = conversation;
+      this.keptTails = [];
+    }
+    // Keep a tail only while the history before it is unchanged; the first
+    // one that no longer lines up ends the run of reusable tails.
+    const valid: typeof this.keptTails = [];
+    for (const tail of this.keptTails) {
+      if (tail.at > messages.length || key(messages[tail.at - 1]) !== tail.after) break;
+      valid.push(tail);
+    }
+    // Bounded: past this many, start over rather than let tails pile up.
+    this.keptTails = valid.length >= MAX_KEPT_TAILS ? [] : valid;
+
+    const out: AicoMessage[] = [];
+    let next = 0;
+    for (let i = 0; i < messages.length; i++) {
+      out.push(messages[i]!);
+      while (next < this.keptTails.length && this.keptTails[next]!.at === i + 1) {
+        out.push({ role: 'user', content: this.keptTails[next]!.text });
+        next++;
+      }
+    }
+    if (opts.volatileContext?.trim()) {
+      this.keptTails.push({ at: messages.length, after: key(messages[messages.length - 1]), text: opts.volatileContext });
+      out.push({ role: 'user', content: opts.volatileContext });
+    }
+    return out;
+  }
+
   async *chat(opts: ProviderChatOptions): AsyncGenerator<ChatEvent> {
-    const input = toResponsesInput(opts.messages, opts.volatileContext);
+    const input = toResponsesInput(this.withKeptTails(opts));
     const tools = toResponsesTools(opts.tools);
     const effortForRequest = supportsReasoning(opts.model)
       ? (resolvedEffort(opts.model) ?? this.reasoningEffort)
@@ -348,7 +409,8 @@ export function toResponsesInput(
     });
   }
 
-  // Tail position, behind everything cacheable — see ProviderChatOptions.
+  // Tail position, behind everything cacheable — see ProviderChatOptions, and
+  // `OpenAIResponsesProvider.withKeptTails` for why earlier tails stay put.
   if (volatileContext?.trim()) {
     items.push({ role: 'user', content: volatileContext });
   }

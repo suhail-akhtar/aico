@@ -77,9 +77,9 @@ export function Field({ spec, value, onChange, changed, breadcrumb }: FieldProps
                 <button
                   onClick={() => onChange(undefined)}
                   title="Put this back to the default"
+                  // Always visible on a changed row: hover-only hid it from touch.
                   className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-aico-muted
-                             opacity-0 transition-opacity hover:text-aico-primary
-                             focus:opacity-100 group-hover/field:opacity-100"
+                             transition-colors hover:text-aico-primary"
                 >
                   <Icon name="undo" size={16} /> Reset
                 </button>
@@ -197,30 +197,70 @@ function Toggle(
  * being read at a glance. Blank means unset, which is not the same as zero —
  * zero is a real value for the timeouts, and it means "no limit".
  */
+/**
+ * A draft that is only committed when the person is done with it.
+ *
+ * These fields used to save on every keystroke, and showed the stored value
+ * back while the save and the re-read were in flight — so fast typing lost
+ * characters, and every intermediate number was written: typing 8080 into a
+ * port moved a server through ports 8, 80 and 808 on the way. The draft is
+ * the person's; it is committed on Enter or on leaving the field, and Escape
+ * puts back what is saved.
+ */
+function useDraft(value: unknown): [string, (s: string) => void, () => void] {
+  const stored = value === undefined || value === null ? '' : String(value);
+  const [draft, setDraft] = React.useState(stored);
+  const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => { if (!editing) setDraft(stored); }, [stored, editing]);
+  const set = (s: string): void => { setEditing(true); setDraft(s); };
+  const done = (): void => setEditing(false);
+  return [draft, set, done];
+}
+
 function NumberInput(
   { spec, value, onChange }: { spec: FieldSpec; value: unknown; onChange: (v: unknown) => void },
 ): React.ReactElement {
-  const shown = value === undefined || value === null ? '' : String(value);
-  const placeholder = spec.placeholder ?? (spec.fallback !== undefined ? String(spec.fallback) : '');
+  const scale = spec.scale ?? 1;
+  const [draft, setDraft, done] = useDraft(typeof value === 'number' ? value / scale : value);
+  const [error, setError] = React.useState<string | null>(null);
+  const placeholder = spec.placeholder
+    ?? (typeof spec.fallback === 'number' ? String(spec.fallback / scale) : '');
+  const commit = (): void => {
+    done();
+    const raw = draft.trim();
+    if (raw === '') { setError(null); if (value !== undefined) onChange(undefined); return; }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) { setError('Not a number'); return; }
+    if (spec.min !== undefined && n < spec.min) { setError(`At least ${spec.min}`); return; }
+    if (spec.max !== undefined && n > spec.max) { setError(`At most ${spec.max}`); return; }
+    setError(null);
+    if (n * scale !== value) onChange(n * scale);
+  };
   return (
-    <div className="flex items-center gap-1.5 rounded-full border border-aico-border-subtle bg-aico-surface
-                    pl-3 pr-3 transition-colors focus-within:border-aico-accent/60">
-      <input
-        type="number"
-        value={shown}
-        placeholder={placeholder}
-        {...(spec.min !== undefined ? { min: spec.min } : {})}
-        {...(spec.max !== undefined ? { max: spec.max } : {})}
-        {...(spec.step !== undefined ? { step: spec.step } : {})}
-        onChange={e => {
-          const raw = e.target.value.trim();
-          onChange(raw === '' ? undefined : Number(raw));
-        }}
-        aria-label={spec.label}
-        className="w-[5.5rem] bg-transparent py-1.5 text-right text-[13px] tabular-nums
-                   text-aico-primary placeholder:text-aico-muted focus:outline-none"
-      />
-      {spec.unit && <span className="text-[12px] text-aico-muted">{spec.unit}</span>}
+    <div className="flex flex-col items-end gap-1">
+      <div className={`flex items-center gap-1.5 rounded-full border bg-aico-surface pl-3 pr-3 transition-colors
+                      focus-within:border-aico-accent/60 ${error ? 'border-red-500/70' : 'border-aico-border-subtle'}`}>
+        <input
+          type="number"
+          value={draft}
+          placeholder={placeholder}
+          {...(spec.min !== undefined ? { min: spec.min } : {})}
+          {...(spec.max !== undefined ? { max: spec.max } : {})}
+          {...(spec.step !== undefined ? { step: spec.step } : {})}
+          onChange={e => { setDraft(e.target.value); setError(null); }}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+            if (e.key === 'Escape') { e.stopPropagation(); setError(null); done(); }
+          }}
+          aria-label={spec.label}
+          aria-invalid={error ? true : undefined}
+          className="w-[5.5rem] bg-transparent py-1.5 text-right text-[13px] tabular-nums
+                     text-aico-primary placeholder:text-aico-muted focus:outline-none"
+        />
+        {spec.unit && <span className="text-[12px] text-aico-muted">{spec.unit}</span>}
+      </div>
+      {error && <span role="alert" className="text-[11px] text-red-500">{error} — not saved</span>}
     </div>
   );
 }
@@ -228,14 +268,22 @@ function NumberInput(
 function TextInput(
   { spec, value, onChange }: { spec: FieldSpec; value: unknown; onChange: (v: unknown) => void },
 ): React.ReactElement {
+  const [draft, setDraft, done] = useDraft(value);
+  const commit = (): void => {
+    done();
+    const next = draft.trim() === '' ? undefined : draft;
+    if (next !== value) onChange(next);
+  };
   return (
     <input
       type="text"
-      value={value === undefined || value === null ? '' : String(value)}
+      value={draft}
       placeholder={spec.placeholder ?? ''}
-      onChange={e => {
-        const raw = e.target.value;
-        onChange(raw.trim() === '' ? undefined : raw);
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+        if (e.key === 'Escape') { e.stopPropagation(); done(); }
       }}
       aria-label={spec.label}
       className="w-full rounded-full border border-aico-border-subtle bg-aico-surface px-3.5 py-1.5

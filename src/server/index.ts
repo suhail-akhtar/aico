@@ -1007,7 +1007,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       // A settings write can turn the Mini Apps host on, off, or move it. Doing
       // that here rather than asking the reader to restart is the difference
       // between a switch and a note about a switch.
-      if (route === 'settings' && req.method === 'POST') await reconcileMiniApps(port);
+      if ((route === 'settings' || route === 'settings/path') && req.method === 'POST') await reconcileMiniApps(port);
       send(res, handled.status, handled.body);
       return;
     }

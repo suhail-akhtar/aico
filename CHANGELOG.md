@@ -3,6 +3,65 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.20.1 — 2026-09-28
+
+OpenAI's prompt cache now grows with the conversation, and the settings screen
+saves what you type — only what you type, only where you meant.
+
+### Fixed
+
+- **OpenAI served almost nothing from cache on long turns.** On the Responses
+  API (every gpt-5.6 and gpt-6 request), the cached share stayed at the ~14K
+  static prefix for a whole turn while the prompt grew — 14–22% cached on the
+  long-horizon probe. Found with a recording proxy
+  (`scripts/openai-cache-probe.mjs`): the requests were prefix-stable, but the
+  per-step volatile note was sent last and then dropped, and OpenAI only
+  extends its cache when a request contains the previous one whole. Each
+  step's note now stays where it was sent (guarded: a rewritten history or
+  another conversation starts fresh). Measured on gpt-6-luna and gpt-5.6-luna:
+  cached tokens per step went from a flat 13.9K to the entire previous prompt
+  (14,054 → 16,589 → 19,124 → 21,659).
+- **Settings lost what you typed.** Number and text fields saved on every
+  keystroke and echoed the stored value back mid-save, dropping characters and
+  writing every intermediate value (8080 moved the Apps server through ports 8,
+  80 and 808). Fields now keep a draft and save once, on Enter or leaving the
+  field; Escape puts back what is saved.
+- **Reset did nothing** for many rows while saying "Saved" — a removed value was
+  sent as `undefined`, which JSON drops. It now really removes it.
+- **Editing one setting copied project settings into your global file.** The
+  screen rebuilt a whole section from the merged view. Saves now go through a
+  new single-value endpoint (`POST /api/settings/path`) that writes one leaf in
+  your own file only; credential sections are refused.
+- **Out-of-range numbers were saved silently.** They now show an inline
+  "At least 10 — not saved" and are not sent.
+- **Turn timeout was in milliseconds** beside a shell timeout in seconds, so 300
+  meant 0.3 s. It is shown and entered in seconds.
+- A click outside the Settings dialog discarded half-typed input; it no longer
+  closes it. Escape clears an active search before closing.
+- Failures in the Models, MCP and Skills panes were silent; they now show in the
+  dialog.
+- Reset is visible without hovering, and the chat row menu is reachable on touch
+  screens.
+- The composer: Enter no longer sends mid-word in Chinese, Japanese or Korean
+  input; a failed send gives your text back; the message box has an accessible
+  label; the context meter states the real compaction point.
+
+### Added
+
+- **Settings for long runs** (Context → Long runs): manage context during a
+  turn, steps and results always kept in full, condense inside a turn, model-
+  written handoff, todo recitation. Also the Anthropic cache lifetime and
+  per-sub-agent cost and token ceilings.
+- The "Agent" settings pane is now "Permissions", so it no longer reads as the
+  same thing as "Agents".
+- The website covers long-horizon context management and the provider changes.
+
+### Verified
+
+Offline 3067/3067, web end-to-end 206/206; the OpenAI fix measured live on
+gpt-6-luna and gpt-5.6-luna; the settings fixes walked in a real browser (one
+save per value, project value not copied, Reset removes, out-of-range refused).
+
 ## 0.20.0 — 2026-09-28
 
 Long runs keep their context focused while they run — without losing the

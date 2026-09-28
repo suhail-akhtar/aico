@@ -28,7 +28,7 @@
   "name": "aico",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
-  "softwareVersion": "0.20.0",
+  "softwareVersion": "0.20.1",
   "url": "https://suhail-akhtar.github.io/aico/",
   "downloadUrl": "https://github.com/suhail-akhtar/aico",
   "codeRepository": "https://github.com/suhail-akhtar/aico",
@@ -135,7 +135,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.20.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.20.1</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -163,7 +163,7 @@
     </p>
 
     <div class="install">
-      <code>$ npx github:suhail-akhtar/aico#v0.20.0 serve</code>
+      <code>$ npx github:suhail-akhtar/aico#v0.20.1 serve</code>
       <button type="button">Copy</button>
     </div>
 
@@ -342,6 +342,43 @@ What rendered:
       Both at <code>reasoningEffort: high</code>. Two different implementations, both fully
       correct on tests neither model saw. Reproduce it yourself with
       <code>npm run test:live</code> — it costs money, because it calls real models.
+    </p>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Long runs keep their context focused</h2>
+      <p>
+        One long autonomous turn can fill a model's window on its own. aico manages
+        context <em>inside</em> the turn: before every step it measures the next request
+        and does the cheapest thing that fits.
+      </p>
+      <ul>
+        <li><strong>Old tool output is masked</strong> behind a note saying what was there and where the full text is saved. Output from the last 8 steps is never masked.</li>
+        <li><strong>If that is not enough, earlier steps are condensed</strong> into a handoff that keeps your messages word for word, the plan and whether you approved it, the todo list, and the files changed and read — taken from the log, not trusted to a summarizer.</li>
+        <li><strong>The model is warned once before anything is cleared</strong>, so it keeps what it will need. Without the warning, a run under pressure made 55 reads for 10 files; with it, 13.</li>
+        <li><strong>A step too big for the window stops the turn with a reason</strong>, instead of summarizing in a loop.</li>
+      </ul>
+    </div>
+
+    <div class="table-wrap prose">
+      <table>
+        <thead><tr><th></th><th>Peak request, unmanaged</th><th>Peak request, default</th><th>Values correct</th></tr></thead>
+        <tbody>
+          <tr><td>deepseek-flash</td><td>201K</td><td><strong>115K</strong></td><td>30 / 30 both ways</td></tr>
+          <tr><td>gpt-6-luna</td><td>201K</td><td><strong>105K</strong></td><td>30 / 30 both ways</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose" style="font-size:.9rem">
+      Six live runs across both models, including deliberately tight limits and a
+      follow-up turn: every one of 140 values correct. Peak context roughly halved at
+      default settings. Cost is <strong>not</strong> claimed as saved — it was unchanged
+      within run-to-run variance, because every mask breaks the prompt cache once.
+      Self-run, one synthetic task shape, one run per cell;
+      <a href="https://github.com/suhail-akhtar/aico/tree/main/benchmarks/long-horizon">the
+      full results, and the failures that shaped the defaults</a>.
     </p>
   </section>
 
@@ -528,7 +565,7 @@ What rendered:
     <div class="prose">
       <h2>Try it</h2>
       <div class="install">
-        <code>$ npx github:suhail-akhtar/aico#v0.20.0 serve</code>
+        <code>$ npx github:suhail-akhtar/aico#v0.20.1 serve</code>
         <button type="button">Copy</button>
       </div>
       <p style="margin-top:1rem">

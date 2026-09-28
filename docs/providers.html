@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.20.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.20.1</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html" aria-current="page">Providers</a>
@@ -64,7 +64,7 @@
           <tr><td><strong>OpenRouter</strong></td><td><code>OPENROUTER_API_KEY</code></td><td>Routes any model; sticky session routing keeps the cache warm</td></tr>
           <tr><td><strong>Google Gemini</strong></td><td><code>GEMINI_API_KEY</code></td><td>Via the OpenAI-compatible endpoint</td></tr>
           <tr><td><strong>Moonshot Kimi</strong></td><td><code>MOONSHOT_API_KEY</code></td><td>Kimi K3, K2.7 Code, K2.6; reasoning replayed as <code>reasoning_content</code>; automatic caching</td></tr>
-          <tr><td><strong>DeepSeek</strong></td><td><code>DEEPSEEK_API_KEY</code></td><td>First-party V4; cache hits at ~1/50th of a miss</td></tr>
+          <tr><td><strong>DeepSeek</strong></td><td><code>DEEPSEEK_API_KEY</code></td><td>First-party V4; <code>deepseek-flash</code> at its full 1M window; cache hits at ~1/50th of a miss</td></tr>
           <tr><td><strong>Z.AI (GLM)</strong></td><td><code>ZAI_API_KEY</code></td><td>Implicit caching; Coding Plan endpoint supported</td></tr>
           <tr><td><strong>Ollama</strong></td><td><em>none</em></td><td>Local, free, private</td></tr>
         </tbody>
@@ -135,12 +135,13 @@
   }
 }</code></pre>
 
-    <h2>gpt-5.6 needs the Responses API</h2>
+    <h2>gpt-5.6 and gpt-6 need the Responses API</h2>
     <p>
       The gpt-5.6 family (<code>luna</code>, <code>terra</code>, <code>sol</code>) cannot be
       driven agentically through Chat Completions at all. It rejects
       <code>max_tokens</code>, and refuses function tools whenever any reasoning effort is
-      set:
+      set. The gpt-6 family (<code>luna</code>, <code>sol</code>, <code>astra</code>, with a
+      1.05M window) refuses them the same way:
     </p>
 <pre><code><span class="d">Function tools with reasoning_effort are not supported … use /v1/responses
 or set reasoning_effort to 'none'.</span></code></pre>
@@ -158,8 +159,8 @@ or set reasoning_effort to 'none'.</span></code></pre>
       hits instead of being invalidated by a reshuffled history.
     </p>
     <ul>
-      <li><strong>Anthropic</strong> — explicit <code>cache_control</code> breakpoints, roughly 90% off repeat input.</li>
-      <li><strong>OpenAI, OpenRouter, Gemini, Z.AI</strong> — server-side caching that aico reports hit rates from rather than guesses at.</li>
+      <li><strong>Anthropic</strong> — explicit <code>cache_control</code> breakpoints, roughly 90% off repeat input. Tool definitions and the system prompt are cached for an hour and the conversation for five minutes, so a pause over five minutes no longer re-writes the whole prefix. One-hour writes are costed at their real 2x.</li>
+      <li><strong>OpenAI, OpenRouter, Gemini, Z.AI</strong> — server-side caching that aico reports hit rates from rather than guesses at. OpenAI requests carry a <code>prompt_cache_key</code> on both Chat Completions and Responses, and on the Responses API each step's volatile note stays where it was sent, so every request contains the previous one whole — OpenAI's cache then grows with the conversation instead of stopping at the system prompt (measured: the cached share of each step went from a flat ~14K to the entire previous prompt).</li>
       <li><strong>OpenRouter</strong> — sticky session routing, so repeat turns land on a machine that already holds the prefix.</li>
     </ul>
     <p>
@@ -168,7 +169,9 @@ or set reasoning_effort to 'none'.</span></code></pre>
     </p>
     <p style="font-size:.9rem;color:var(--muted)">
       Switch it off with <code>"promptCaching": { "enabled": false }</code> if you are
-      debugging something and want every request built fresh.
+      debugging something and want every request built fresh. Anthropic's prefix
+      lifetime is <code>"promptCaching": { "prefixTtl": "1h" }</code> by default;
+      <code>"5m"</code> uses the shorter one.
     </p>
 
     <h2>Switching mid-session</h2>
@@ -193,7 +196,10 @@ or set reasoning_effort to 'none'.</span></code></pre>
   }
 }</code></pre>
     <p style="font-size:.9rem;color:var(--muted)">
-      Both are off unless set — no default can be guessed honestly.
+      Both are off unless set — no default can be guessed honestly. Spend is costed
+      at each provider's published rates; the gpt-5.6, gpt-6, <code>deepseek-flash</code> and
+      <code>deepseek-v4-pro</code> rates were
+      checked against the published pages on 2026-09-28.
     </p>
 
     <div class="next">

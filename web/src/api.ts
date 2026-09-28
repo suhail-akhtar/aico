@@ -535,6 +535,9 @@ export const api = {
 
   settings: () => request<Record<string, unknown>>('settings'),
   saveSettings: (patch: Record<string, unknown>) => post<Record<string, unknown>>('settings', patch),
+  /** One value by dotted path, in the user's own file only; `undefined` removes it. */
+  saveSettingPath: (path: string, value: unknown) =>
+    post<Record<string, unknown>>('settings/path', { path, value: value === undefined ? null : value }),
 
   /** What the server believes this model's window is, and why. */
   contextWindow: (model: string) =>

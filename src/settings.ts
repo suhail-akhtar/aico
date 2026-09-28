@@ -748,6 +748,57 @@ export async function saveUserSetting(key: string, value: unknown): Promise<void
   await writeFile(filePath, JSON.stringify(existing, null, 2));
 }
 
+/** Settings roots that hold credentials; never written by path. */
+const CREDENTIAL_ROOTS = new Set(['providers', 'providerInstances', 'env', 'mcpServers', 'hooks']);
+
+/**
+ * Set — or with `null`, remove — one value in the user's settings file.
+ *
+ * The settings screen used to rebuild a whole top-level key from the *merged*
+ * settings and write it into the global file, which copied a project's own
+ * values into every project, and it removed a value by sending `undefined`,
+ * which JSON drops — so Reset said "Saved" and changed nothing. This reads the
+ * global file only, touches only the one leaf, and prunes objects the removal
+ * leaves empty, so "back to the default" leaves no trace on disk.
+ */
+export async function patchUserSettingPath(dotted: string, value: unknown): Promise<void> {
+  const keys = dotted.split('.').filter(Boolean);
+  if (keys.length === 0) throw new Error('empty settings path');
+  if (CREDENTIAL_ROOTS.has(keys[0]!)) throw new Error(`"${keys[0]}" holds credentials and is not written by path`);
+  const dir = aicoHome();
+  await mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, 'settings.json');
+  let root: Record<string, unknown> = {};
+  try {
+    root = JSON.parse(await readFile(filePath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    // no file yet
+  }
+  const trail: Array<[Record<string, unknown>, string]> = [];
+  let cursor = root;
+  for (const key of keys.slice(0, -1)) {
+    const next = cursor[key];
+    if (!next || typeof next !== 'object' || Array.isArray(next)) {
+      if (value === null) return;
+      cursor[key] = {};
+    }
+    trail.push([cursor, key]);
+    cursor = cursor[key] as Record<string, unknown>;
+  }
+  const leaf = keys[keys.length - 1]!;
+  if (value === null || value === undefined) {
+    delete cursor[leaf];
+    for (let i = trail.length - 1; i >= 0; i--) {
+      const [parent, key] = trail[i]!;
+      if (Object.keys(parent[key] as object).length > 0) break;
+      delete parent[key];
+    }
+  } else {
+    cursor[leaf] = value;
+  }
+  await writeFile(filePath, JSON.stringify(root, null, 2));
+}
+
 /**
  * Change one provider family's tuning in the user's settings file.
  *
