@@ -10,12 +10,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      # Both versions report, so one failing never hides whether the other passes:
+      # with fail-fast on, a failing 20 job cancelled 22 on every run for weeks.
+      fail-fast: false
       matrix:
-        # 20 is the floor because playwright-core requires it, and the browser
-        # verification gate is not an optional part of this tool. 18 is also
-        # end-of-life. 22 is here so a break on current Node is caught before
-        # users on it are.
-        node-version: [20, 22]
+        # 22 is the floor: aico uses Node's built-in `node:sqlite`, which arrived
+        # in 22.5 (`engines` says so too). Node 20 failed every run with
+        # ERR_UNKNOWN_BUILTIN_MODULE. 24 is here so a break on current Node is
+        # caught before users on it are.
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
@@ -38,3 +41,11 @@ jobs:
         env:
           # Ensure tests don't try to connect to real providers
           CI: true
+
+      # The web client's own unit suites (reducer, navigation, settings schema).
+      # They were never run here, and a stale assertion sat red for two releases.
+      - name: Install web client dependencies
+        run: npm --prefix web ci || npm --prefix web install
+
+      - name: Web unit tests
+        run: npm run test:web:unit

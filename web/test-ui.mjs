@@ -256,8 +256,12 @@ test('session tabs only exist on the sessions destination', () => {
 });
 
 test('?view= opens a destination and ignores anything else', () => {
-  assert.equal(parseView('?view=apps'), 'apps');
-  assert.equal(parseView('?token=abc&view=system'), 'system');
+  // An object since 0.19.0, so a workspace page can carry its path; this test
+  // still expected the old bare string.
+  assert.deepEqual(parseView('?view=apps'), { destination: 'apps' });
+  assert.deepEqual(parseView('?token=abc&view=system'), { destination: 'system' });
+  assert.deepEqual(parseView('?view=project&path=%2Fhome%2Fme%2Fapp'), { destination: 'project', projectPath: '/home/me/app' });
+  assert.equal(parseView('?view=project'), null, 'a workspace page with no path is not a link');
   assert.equal(parseView('?view=miniapps'), null, 'the old value was never linked and is not guessed at');
   assert.equal(parseView('?view=sessions'), null, 'the default is not a link');
   assert.equal(parseView(''), null);

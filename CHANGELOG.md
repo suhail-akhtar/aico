@@ -3,6 +3,41 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.21.0 — 2026-09-28
+
+Every setting that has a sensible control now has one, and CI tests the code
+again.
+
+### Added
+
+- **Settings for what was file-only**: tools the agent may not use, extra
+  folders it may write to, whether partial sandboxing is announced, repeat-
+  guard thresholds and exclusions, a fixed-size compaction point, extra skill
+  folders and hiding the built-in skills, memory-file refresh, size and
+  watching, the Apps listen address (with a warning about `0.0.0.0`), and
+  scheduled jobs on/off and how many run at once.
+- **A list field** for those: comma-separated, saved as a real array, numbers
+  checked where the setting takes numbers ("Numbers only — not saved").
+- **Deleting a scheduled job asks first**, inline, like every other destructive
+  action; pause, resume and delete failures now say so.
+- **Keyboard focus stays in the Settings dialog** and returns where it was when
+  the dialog closes.
+
+### Fixed
+
+- **CI had failed on every push since at least 2026-09-13.** It ran Node 20,
+  which has no `node:sqlite` (AICO needs 22.5+, as `engines` and the install
+  page already said), and fail-fast then cancelled the Node 22 job, so nothing
+  was tested on Linux at all. CI now runs Node 22 and 24, both always report,
+  and the web client's own unit suites run too.
+- Two web unit tests were stale — one since 0.19.0 (`parseView` returns an
+  object), one since 0.20.0 (the condensed-context label). Both now assert the
+  current behaviour; the reducer and UI suites pass 35/35 and 232/232.
+
+Still file-only, deliberately: model prices and capabilities, per-role models,
+MCP security and hooks — structured values or credentials that a one-line
+control would get wrong.
+
 ## 0.20.1 — 2026-09-28
 
 OpenAI's prompt cache now grows with the conversation, and the settings screen

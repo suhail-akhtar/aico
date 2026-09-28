@@ -29,7 +29,7 @@
 /** Top-level settings keys this screen must never read back or write. */
 export const SECRET_ROOTS = ['providers', 'providerInstances', 'env', 'mcpServers', 'hooks'] as const;
 
-export type FieldKind = 'segmented' | 'select' | 'toggle' | 'number' | 'text';
+export type FieldKind = 'segmented' | 'select' | 'toggle' | 'number' | 'text' | 'list';
 
 export interface FieldOption {
   value: string;
@@ -54,6 +54,10 @@ export interface Field {
   unit?: string;
   /** Shown value = stored value ÷ scale; e.g. 1000 shows milliseconds as seconds. */
   scale?: number;
+  /** `list` only: the items are numbers. */
+  numeric?: boolean;
+  /** `list` only: what the engine uses when unset, shown as the placeholder. */
+  fallbackList?: Array<string | number>;
   placeholder?: string;
   /**
    * What the engine does when this is unset. Shown as the resting state of the
@@ -165,7 +169,29 @@ export const PANES: Pane[] = [
     blurb: 'Procedures someone already worked out. Every one is offered to the agent by name and '
       + 'description on every turn, and the description is what decides whether it gets used.',
     custom: 'skills',
-    groups: [],
+    groups: [
+      {
+        title: 'Where skills come from',
+        fields: [
+          {
+            path: 'skills.dirs',
+            label: 'Extra skill folders',
+            hint: 'Folders searched for SKILL.md files, besides your own and the built-in ones. Comma-separated.',
+            kind: 'list',
+            placeholder: 'none',
+            keywords: 'skills folder directory path',
+          },
+          {
+            path: 'skills.disableBuiltins',
+            label: 'Hide the built-in skills',
+            hint: 'Only your own skills are offered to the agent.',
+            kind: 'toggle',
+            fallback: false,
+            keywords: 'skills builtin disable',
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'mcp',
@@ -208,7 +234,40 @@ export const PANES: Pane[] = [
     blurb: 'Facts the agent carries between turns. Scope decides how far each one travels — everywhere, '
       + 'this project, or just this conversation.',
     custom: 'memory',
-    groups: [],
+    groups: [
+      {
+        title: 'Memory files',
+        fields: [
+          {
+            path: 'memory.cacheTtl',
+            label: 'Re-read memory files after',
+            kind: 'number',
+            fallback: 60,
+            min: 0,
+            unit: 's',
+            keywords: 'memory cache',
+          },
+          {
+            path: 'memory.maxSizePerType',
+            label: 'Largest memory section',
+            hint: 'Anything longer is cut, so one runaway file cannot fill the context.',
+            kind: 'number',
+            fallback: 50000,
+            min: 1000,
+            step: 1000,
+            unit: 'chars',
+            keywords: 'memory size limit',
+          },
+          {
+            path: 'memory.watchFiles',
+            label: 'Notice edits to memory files immediately',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'memory watch',
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'agent',
@@ -298,6 +357,52 @@ export const PANES: Pane[] = [
             fallback: true,
             keywords: 'loop repeat stuck',
           },
+          {
+            path: 'repeatGuard.thresholds',
+            label: 'Remind after this many repeats',
+            hint: 'Each number is one stronger reminder.',
+            kind: 'list',
+            numeric: true,
+            fallbackList: [3, 5, 8],
+            keywords: 'loop repeat thresholds',
+          },
+          {
+            path: 'repeatGuard.exclude',
+            label: 'Tools never counted as repeats',
+            hint: 'Names or patterns, comma-separated — for tools that are meant to be called the same way twice.',
+            kind: 'list',
+            placeholder: 'none',
+            keywords: 'loop repeat exclude',
+          },
+        ],
+      },
+      {
+        title: 'Tools and folders',
+        fields: [
+          {
+            path: 'disabledTools',
+            label: 'Tools the agent may not use',
+            hint: 'Removed from every request, not just refused when called. Comma-separated names, e.g. WebFetch, Bash.',
+            kind: 'list',
+            placeholder: 'none',
+            keywords: 'disable tools block',
+          },
+          {
+            path: 'sandbox.additionalWritableRoots',
+            label: 'Extra folders the agent may write to',
+            hint: 'Beyond the project and the workspace. Comma-separated absolute paths.',
+            kind: 'list',
+            placeholder: 'none',
+            keywords: 'sandbox writable folders paths',
+          },
+          {
+            path: 'sandbox.warnOnPartial',
+            label: 'Say when confinement is only partial',
+            hint: 'On platforms where the sandbox cannot cover everything, the agent is told so.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'sandbox warning',
+          },
         ],
       },
     ],
@@ -339,6 +444,17 @@ export const PANES: Pane[] = [
             min: 1,
             max: 40,
             unit: 'turns',
+          },
+          {
+            path: 'autoCompact.thresholdTokens',
+            label: 'Or compact at a fixed size',
+            hint: 'Used only when "Compact at" is empty. Most people want the percentage.',
+            kind: 'number',
+            min: 1000,
+            step: 1000,
+            unit: 'tokens',
+            placeholder: 'use the percentage',
+            keywords: 'compaction tokens threshold',
           },
         ],
       },
@@ -427,6 +543,14 @@ export const PANES: Pane[] = [
             max: 65535,
             keywords: 'mini apps port',
           },
+          {
+            path: 'miniApps.host',
+            label: 'Listen on',
+            hint: '127.0.0.1 keeps Apps on this machine. 0.0.0.0 shows them to your whole network — only on a network you trust.',
+            kind: 'text',
+            placeholder: '127.0.0.1',
+            keywords: 'mini apps host network lan',
+          },
         ],
       },
       {
@@ -510,6 +634,29 @@ export const PANES: Pane[] = [
             unit: 'tokens',
             placeholder: 'no ceiling',
             keywords: 'budget sub-agent tokens',
+          },
+        ],
+      },
+      {
+        title: 'Scheduled jobs',
+        fields: [
+          {
+            path: 'cron.enabled',
+            label: 'Run scheduled jobs',
+            hint: 'Off pauses every schedule without deleting any.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'cron schedule jobs',
+          },
+          {
+            path: 'cron.maxConcurrentJobs',
+            label: 'Jobs at once',
+            kind: 'number',
+            fallback: 3,
+            min: 1,
+            max: 20,
+            unit: 'jobs',
+            keywords: 'cron concurrency',
           },
         ],
       },
@@ -666,6 +813,7 @@ export function changedPaths(settings: Record<string, unknown>, panes: Pane[] = 
         const value = readPath(settings, field.path);
         if (value === undefined || value === '') continue;
         if (field.fallback !== undefined && value === field.fallback) continue;
+        if (field.fallbackList && JSON.stringify(value) === JSON.stringify(field.fallbackList)) continue;
         changed.push(field.path);
       }
     }

@@ -43,7 +43,7 @@ export function Field({ spec, value, onChange, changed, breadcrumb }: FieldProps
     label at any width this client is usable at, and moving them down would
     strand a small control on an empty line for no gain.
   */
-  const wide = spec.kind === 'text' || spec.kind === 'select';
+  const wide = spec.kind === 'text' || spec.kind === 'select' || spec.kind === 'list';
 
   return (
     <div className="group/field border-b border-aico-border-subtle py-4 last:border-b-0">
@@ -112,7 +112,54 @@ function Control(
     case 'number': return <NumberInput spec={spec} value={value} onChange={onChange} />;
     case 'select': return <Select spec={spec} value={value} onChange={onChange} />;
     case 'text': return <TextInput spec={spec} value={value} onChange={onChange} />;
+    case 'list': return <ListInput spec={spec} value={value} onChange={onChange} />;
   }
+}
+
+/**
+ * A short list, typed as comma-separated items.
+ *
+ * Tool names, folders, thresholds — lists of a few words each, where a
+ * repeater with add and remove buttons would be more machinery than the data.
+ * Saved as an array; blank means unset.
+ */
+function ListInput(
+  { spec, value, onChange }: { spec: FieldSpec; value: unknown; onChange: (v: unknown) => void },
+): React.ReactElement {
+  const [draft, setDraft, done] = useDraft(Array.isArray(value) ? value.join(', ') : value);
+  const [error, setError] = React.useState<string | null>(null);
+  const placeholder = spec.placeholder
+    ?? (Array.isArray(spec.fallbackList) ? spec.fallbackList.join(', ') : '');
+  const commit = (): void => {
+    done();
+    const items = draft.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+    if (items.length === 0) { setError(null); if (value !== undefined) onChange(undefined); return; }
+    const next: unknown[] = spec.numeric ? items.map(Number) : items;
+    if (spec.numeric && next.some(n => !Number.isFinite(n as number))) { setError('Numbers only'); return; }
+    setError(null);
+    if (JSON.stringify(next) !== JSON.stringify(value)) onChange(next);
+  };
+  return (
+    <div className="flex flex-col items-end gap-1 max-md:w-full">
+      <input
+        type="text"
+        value={draft}
+        placeholder={placeholder}
+        onChange={e => { setDraft(e.target.value); setError(null); }}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          if (e.key === 'Escape') { e.stopPropagation(); setError(null); done(); }
+        }}
+        aria-label={spec.label}
+        aria-invalid={error ? true : undefined}
+        className={`w-full rounded-full border bg-aico-surface px-3.5 py-1.5 text-[13px] text-aico-primary
+                   placeholder:text-aico-muted transition-colors focus:border-aico-accent/60 focus:outline-none
+                   md:w-[15rem] ${error ? 'border-red-500/70' : 'border-aico-border-subtle'}`}
+      />
+      {error && <span role="alert" className="text-[11px] text-red-500">{error} — not saved</span>}
+    </div>
+  );
 }
 
 /**

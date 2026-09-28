@@ -274,7 +274,9 @@ test('a compaction summary says that is what it is', () => {
     source: { kind: 'compaction' },
   }]]));
   assert.equal(messages[0].type, 'system');
-  assert.match(messages[0].content, /summarised/,
+  // "condensed", not "summarised": since 0.20 it can be earlier steps of the
+  // current turn as well as earlier turns.
+  assert.match(messages[0].content, /condensed to save context/,
     'a summary presented as a user instruction is how a transcript starts lying');
 });
 

@@ -256,26 +256,7 @@ export function SystemPanel(): React.ReactElement {
                     <div className="mt-0.5 text-xs text-aico-muted">has not run yet</div>
                   )}
                 </div>
-                <button
-                  onClick={async () => {
-                    await api.cronAction(job.paused ? 'resume' : 'pause', job.id);
-                    void refreshSystem();
-                  }}
-                  className="shrink-0 rounded border border-aico-hover px-2 py-1 text-xs
-                             text-aico-secondary hover:bg-aico-hover"
-                >
-                  {job.paused ? 'Resume' : 'Pause'}
-                </button>
-                <button
-                  onClick={async () => {
-                    await api.cronAction('delete', job.id);
-                    void refreshSystem();
-                  }}
-                  className="shrink-0 rounded border border-aico-danger/40 px-2 py-1 text-xs
-                             text-aico-danger hover:bg-aico-danger/10"
-                >
-                  Delete
-                </button>
+                <JobActions id={job.id} paused={job.paused === true} onDone={() => void refreshSystem()} />
               </div>
             </Row>
           ))}
@@ -438,6 +419,64 @@ function Section(
       </h2>
       <div className="space-y-2">{children}</div>
     </section>
+  );
+}
+
+/**
+ * Pause, resume or delete one scheduled job.
+ *
+ * Delete asks first, inline, like every other destructive action in the app —
+ * it was the one that did not, and a job's schedule and prompt are gone with
+ * it. Failures say so rather than leaving the row looking unchanged.
+ */
+function JobActions({ id, paused, onDone }: { id: string; paused: boolean; onDone: () => void }): React.ReactElement {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (action: 'pause' | 'resume' | 'delete'): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.cronAction(action, id);
+      onDone();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+  const button = 'shrink-0 rounded border px-2 py-1 text-xs disabled:opacity-50';
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-1">
+      <div className="flex gap-1.5">
+        {confirming ? (
+          <>
+            <span className="self-center text-xs text-aico-secondary">Delete this job?</span>
+            <button disabled={busy} onClick={() => void run('delete')}
+              className={`${button} border-aico-danger/40 text-aico-danger hover:bg-aico-danger/10`}>
+              Delete
+            </button>
+            <button disabled={busy} onClick={() => setConfirming(false)}
+              className={`${button} border-aico-hover text-aico-secondary hover:bg-aico-hover`}>
+              Keep
+            </button>
+          </>
+        ) : (
+          <>
+            <button disabled={busy} onClick={() => void run(paused ? 'resume' : 'pause')}
+              className={`${button} border-aico-hover text-aico-secondary hover:bg-aico-hover`}>
+              {paused ? 'Resume' : 'Pause'}
+            </button>
+            <button disabled={busy} onClick={() => setConfirming(true)}
+              className={`${button} border-aico-danger/40 text-aico-danger hover:bg-aico-danger/10`}>
+              Delete
+            </button>
+          </>
+        )}
+      </div>
+      {error && <span role="alert" className="text-xs text-aico-danger">{error}</span>}
+    </div>
   );
 }
 

@@ -110,6 +110,29 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
     return () => window.removeEventListener('unhandledrejection', onRejection);
   }, []);
 
+  /*
+    Keyboard focus stays in the dialog, and goes back where it was after.
+
+    Tab used to walk out of the dialog into the chat behind it — an aria-modal
+    dialog that is modal to everyone except keyboard users.
+  */
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    return () => { before?.focus?.(); };
+  }, []);
+  const trapTab = (event: React.KeyboardEvent): void => {
+    if (event.key !== 'Tab' || !dialogRef.current) return;
+    const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+    )].filter(el => el.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
+
   const changed = useMemo(() => new Set(changedPaths(settings)), [settings]);
   const hits = useMemo(() => searchFields(query), [query]);
   const pane = PANES.find(p => p.id === paneId) ?? PANES[0]!;
@@ -153,6 +176,8 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
       aria-label="Settings"
     >
       <div
+        ref={dialogRef}
+        onKeyDown={trapTab}
         onMouseDown={e => e.stopPropagation()}
         className="flex h-full w-full max-w-4xl flex-col overflow-hidden bg-aico-bg shadow-2xl
                    sm:h-[min(46rem,92vh)] sm:rounded-2xl sm:border sm:border-aico-border"
