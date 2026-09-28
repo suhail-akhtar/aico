@@ -49,3 +49,12 @@ jobs:
 
       - name: Web unit tests
         run: npm run test:web:unit
+
+      # The desktop app's pure modules: the widget kit, the maths core (plot,
+      # geometry, calc), plugin manifests, prefs, turn grouping, theme. No
+      # Electron needed, so its download is skipped.
+      - name: Install desktop dependencies
+        run: npm --prefix desktop ci --ignore-scripts || npm --prefix desktop install --ignore-scripts
+
+      - name: Desktop unit tests
+        run: npm --prefix desktop test

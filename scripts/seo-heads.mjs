@@ -95,6 +95,13 @@ const META = {
       + 'Cursor — and to the app builders Devin, Replit Agent, Lovable and Bolt.new. What is '
       + 'genuinely different, and where each one is clearly ahead.',
   },
+  'desktop.html': {
+    title: 'AICO Desktop — an AI coding agent with its own IDE, browser and plugins',
+    description:
+      'AICO Desktop for Windows and Linux: a ChatGPT-style chat with dashboards, charts, maths '
+      + 'and physics that are really computed, a Monaco editor, real terminals, full Git and '
+      + 'GitHub, a built-in browser the agent drives for web QA, and plugins the agent can write for you.',
+  },
   'vscode.html': {
     title: 'aico in VS Code — a native panel, not a web page in a frame',
     description:

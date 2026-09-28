@@ -31,7 +31,7 @@ can measure its own skills against tasks with known answers.
 ❯ _
 ```
 
-**Status:** `0.22.0`. Used daily, tested hard, not yet 1.0.
+**Status:** `0.23.0`. Used daily, tested hard, not yet 1.0.
 
 **Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
 workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
@@ -57,7 +57,7 @@ and what to do when something goes wrong.
 ### npx
 
 ```sh
-npx github:suhail-akhtar/aico#v0.22.0 serve
+npx github:suhail-akhtar/aico#v0.23.0 serve
 ```
 
 ## Why this one
@@ -96,10 +96,10 @@ A real session log looks like this:
 Run the latest release without installing anything:
 
 ```sh
-npx github:suhail-akhtar/aico#v0.22.0 serve
+npx github:suhail-akhtar/aico#v0.23.0 serve
 ```
 
-`#v0.22.0` is a tag, so it pins that release. `#release/v0.22` follows the 0.22
+`#v0.23.0` is a tag, so it pins that release. `#release/v0.23` follows the 0.23
 line as it gets fixes, and `#main` is the development trunk.
 
 To have `aico` on your `PATH` — which the VS Code extension needs — install it
@@ -107,7 +107,7 @@ globally from the same tag. aico is not on the npm registry; this builds from
 source and takes a minute the first time:
 
 ```sh
-npm install -g github:suhail-akhtar/aico#v0.22.0
+npm install -g github:suhail-akhtar/aico#v0.23.0
 ```
 
 From source:
@@ -726,6 +726,47 @@ Reload the window afterwards — VS Code does not load a newly installed extensi
 into windows that are already open, and a keypress in one of those does nothing
 at all. `aico: Check the Setup` in the command palette reports whether the
 binary was found and where the server is.
+
+### Desktop app (Windows, Linux)
+
+[`desktop/`](desktop/) is AICO as a native app: a ChatGPT-style chat in front
+and an IDE behind it. Installers — `AICO-Setup-<version>-win-x64.exe`, an
+`.AppImage` and a `.deb` — are attached to each
+[release](https://github.com/suhail-akhtar/aico/releases). No Node install is
+needed: the engine runs in Electron's own Node, in a process of its own.
+
+- **Answers that compute.** Everything the web portal renders, plus a kit of 54
+  dashboard widgets on a 12-column grid (```` ```widgets ````), and three blocks
+  whose numbers are calculated rather than written: ```` ```plot ```` (functions,
+  symbolic derivatives, parametric and polar curves, integrals),
+  ```` ```geometry ```` (a figure to scale with its lengths, angles and areas
+  measured) and ```` ```calc ```` (a worked calculation with units and physical
+  constants). Answers copy as rich content; chats export as PDF, standalone
+  HTML, Markdown or text.
+- **An IDE.** Monaco editor and explorer with quick open and search, real
+  terminals (node-pty), source control (status, stage, commit, diff, branches,
+  stash, fetch, fast-forward pull, push — never forced), GitHub through the
+  `gh` CLI (pull requests, checks, issues, Actions), and an Activity monitor.
+- **A browser the agent drives.** Chromium with its own profile, beside the
+  chat. The agent reads it as a snapshot with element refs and drives it with
+  trusted input — for testing the app it just built — and hands it to you for
+  sign-ins and CAPTCHAs.
+- **Plugins, all the way down.** Every feature is a plugin you can switch off;
+  yours live in `~/.aico/desktop/plugins` as a JSON manifest (pages, commands,
+  themes, prompts, widgets, standing instructions). The agent drives the IDE
+  through its own MCP tools (`ide_*`, `browser_*`) and can write a plugin for
+  you: *"make me a plugin that…"*.
+
+It is a client, not a fork: the same engine as `aico serve`, the web portal's
+state layer and renderers, and the same `~/.aico`. Build it yourself:
+
+```sh
+npm ci && npm --prefix web ci && npm --prefix desktop ci
+npm --prefix desktop start          # build and run
+npm --prefix desktop run package    # installer for this OS
+```
+
+The builds are not code-signed yet; Windows SmartScreen asks once.
 
 ---
 

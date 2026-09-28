@@ -1,0 +1,161 @@
+@import '../../../../shared/ui/theme.css';
+@import 'katex/dist/katex.min.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * AICO Desktop. The shared theme (imported above) styles the transcript and
+ * every renderer; the tokens themselves are set at runtime by theme.ts from the
+ * three colours the Appearance screen edits. This file is the desktop chrome.
+ */
+
+html { font-size: var(--desk-font-size, 14px); }
+html, body, #root { height: 100%; overflow: hidden; }
+body {
+  background: var(--aico-bg);
+  color: var(--aico-text-primary);
+  font-family: var(--aico-font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+/* Content people read is selectable; chrome is not. */
+.markdown-body, .selectable, input, textarea, pre, code, [contenteditable='true'], .monaco-editor, .xterm { user-select: text; }
+
+/* ── Window chrome ────────────────────────────────────────────────── */
+.drag { -webkit-app-region: drag; }
+.no-drag, .drag button, .drag input, .drag a, .drag [role='button'], .drag select { -webkit-app-region: no-drag; }
+/* Room for the OS window controls drawn over the top-right corner. */
+.titlebar-inset { padding-right: 140px; }
+html[data-platform='darwin'] .titlebar-inset { padding-right: 12px; }
+html[data-platform='darwin'] .traffic-inset { padding-left: 76px; }
+
+@keyframes desk-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes desk-pop { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes desk-slide-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes desk-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+@keyframes desk-spin { to { transform: rotate(360deg); } }
+@keyframes desk-breathe { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+
+@layer components {
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium
+           transition-colors disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap;
+  }
+  .btn-primary { @apply btn bg-aico-primary text-aico-bg hover:opacity-90; }
+  .btn-accent { @apply btn bg-aico-accent text-aico-on-accent hover:bg-aico-accent-hover; }
+  .btn-outline { @apply btn border border-aico-border text-aico-primary hover:bg-aico-hover; }
+  .btn-ghost { @apply btn text-aico-secondary hover:bg-aico-hover hover:text-aico-primary; }
+  .btn-danger { @apply btn border border-aico-danger/40 text-aico-danger hover:bg-aico-danger/10; }
+  .btn-sm { @apply px-2.5 py-1 text-[12px]; }
+  .icon-btn {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-lg text-aico-secondary transition-colors
+           hover:bg-aico-hover hover:text-aico-primary disabled:opacity-40 disabled:hover:bg-transparent;
+  }
+  .icon-btn-sm { @apply icon-btn h-7 w-7 rounded-md; }
+
+  /* Inputs */
+  .input {
+    @apply w-full rounded-lg border border-aico-border bg-aico-bg px-3 py-1.5 text-[13px] text-aico-primary
+           placeholder:text-aico-muted outline-none transition-colors focus:border-aico-accent/70;
+  }
+  .select { @apply input appearance-none pr-8 cursor-pointer; }
+  .label { @apply text-[12px] font-medium text-aico-secondary; }
+
+  /* Sidebar rows */
+  .nav-item {
+    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-[13.5px] text-aico-primary
+           transition-colors hover:bg-aico-hover;
+  }
+  .nav-item-active { @apply bg-aico-hover font-medium; }
+  .side-row {
+    @apply flex w-full items-center gap-2 rounded-lg px-2.5 py-[6px] text-left text-[13.5px] text-aico-primary
+           transition-colors hover:bg-aico-hover;
+  }
+  .side-heading { @apply px-2.5 pb-1 pt-4 text-[12.5px] font-medium text-aico-muted; }
+
+  /* Surfaces */
+  .card { @apply rounded-2xl border border-aico-border-subtle bg-aico-bg; }
+  .panel { @apply rounded-xl border border-aico-border-subtle bg-aico-surface; }
+  .menu {
+    @apply z-50 min-w-[200px] rounded-2xl border border-aico-border-subtle bg-aico-bg p-1.5 text-[13.5px]
+           shadow-[var(--desk-shadow)] animate-pop-in;
+  }
+  .menu-item {
+    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-aico-primary transition-colors
+           hover:bg-aico-hover disabled:opacity-50;
+  }
+  .menu-sep { @apply my-1.5 border-t border-aico-border-subtle; }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-aico-border-subtle px-2.5 py-1 text-[12px]
+           text-aico-secondary transition-colors hover:bg-aico-hover hover:text-aico-primary;
+  }
+  .kbd {
+    @apply inline-flex min-w-[20px] items-center justify-center rounded-md border border-aico-border bg-aico-surface
+           px-1.5 font-mono text-[11px] text-aico-secondary;
+  }
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium; }
+
+  /* Toggle switch (Antigravity style) */
+  .switch {
+    @apply relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full bg-aico-border transition-colors;
+  }
+  .switch[aria-checked='true'] { @apply bg-aico-accent; }
+  .switch > span {
+    @apply inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow transition-transform;
+  }
+  .switch[aria-checked='true'] > span { @apply translate-x-[22px]; }
+
+  /* Segmented control */
+  .segmented { @apply inline-flex rounded-lg bg-aico-hover p-0.5; }
+  .segmented > button { @apply rounded-md px-3 py-1 text-[12.5px] text-aico-secondary transition-colors; }
+  .segmented > button[aria-pressed='true'] { @apply bg-aico-bg text-aico-primary shadow-sm; }
+
+  /* Settings rows */
+  .set-group { @apply overflow-hidden rounded-xl border border-aico-border-subtle bg-aico-bg; }
+  .set-row { @apply flex items-center gap-4 border-b border-aico-border-subtle px-4 py-3 last:border-b-0; }
+  .set-title { @apply text-[13.5px] font-medium text-aico-primary; }
+  .set-desc { @apply mt-0.5 text-[12px] text-aico-muted; }
+  .set-heading { @apply mb-2 mt-7 text-[14px] font-semibold text-aico-primary first:mt-0; }
+
+  .skeleton {
+    background: linear-gradient(90deg, var(--aico-hover) 0px, var(--aico-border-subtle) 80px, var(--aico-hover) 160px);
+    background-size: 800px 100%;
+    animation: desk-shimmer 1.4s linear infinite;
+    @apply rounded-md;
+  }
+  .spinner {
+    @apply inline-block h-4 w-4 rounded-full border-2 border-aico-border border-t-aico-accent;
+    animation: desk-spin .7s linear infinite;
+  }
+  .live-dot { @apply inline-block h-2 w-2 rounded-full bg-aico-accent; animation: desk-breathe 1.6s ease-in-out infinite; }
+}
+
+/* ── Transcript refinements for the desktop ──────────────────────── */
+.transcript .markdown-body { font-size: 15px; line-height: 1.7; }
+.transcript .markdown-body pre { border-radius: 14px; }
+.user-bubble { background: var(--desk-pill); }
+.composer-shell {
+  background: var(--aico-bg);
+  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 24px rgba(0,0,0,.06);
+}
+html.dark .composer-shell { box-shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35); background: var(--desk-pill); }
+.home-glow {
+  background: radial-gradient(ellipse at center, var(--aico-hover) 0%, transparent 65%);
+}
+
+/* Scrollbars in chrome stay thin. */
+.thin-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 8px; }
+.thin-scroll:hover::-webkit-scrollbar-thumb { background: var(--aico-border); }
+
+/* Focus rings only for keyboard users. */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--aico-accent); outline-offset: 2px; border-radius: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

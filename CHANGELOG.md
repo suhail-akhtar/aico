@@ -3,6 +3,82 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.23.0 — 2026-09-29
+
+AICO Desktop: the agent as a native app for Windows and Linux, with its own IDE,
+a browser it drives, and plugins it can write. And every client now draws
+dashboards, plots, geometry and computed calculations.
+
+### Added — AICO Desktop (`desktop/`)
+
+- **A native app for Windows and Linux** (NSIS installer, AppImage, deb). The
+  engine is `serve()` in an Electron utility process — no Node install needed —
+  and the interface talks to it through an `aico://` scheme that attaches the
+  token in main, so the renderer never holds it. Same `~/.aico`, same sessions as
+  the CLI, the web portal and VS Code: a client, not a fork (the Electron client
+  removed in `a2c3ecf` duplicated the engine's plumbing; this one does not).
+- **ChatGPT's chat, Antigravity's sidebar.** "Where should we begin?", a pill
+  composer with Think, model, approval, project and a context meter; projects
+  that open to their chats with ages and live/unread dots; turns folded under
+  "Worked for 1m 12s" with the steps one click away; copy (Markdown + rich),
+  rate, retry, branch, export (PDF, HTML, Markdown, text).
+- **An IDE**: Monaco editor and explorer (quick open, search in files, live
+  reload), real terminals (node-pty), source control, GitHub through the `gh`
+  CLI (pull requests with checks and diffs, issues, Actions — with "Review",
+  "Fix" and "Diagnose" with AI), Activity monitor, command palette (Ctrl+K),
+  chat search over titles and transcripts, Library, Scheduled jobs, project and
+  group pages, back/forward, native notifications, tray, prevent-sleep.
+- **A built-in browser the agent drives**: Chromium with its own profile, beside
+  the chat. `browser_*` tools read the page as a snapshot with element refs and
+  act with trusted DevTools-protocol input; `browser_handoff` gives it to you for
+  sign-ins and CAPTCHAs.
+- **Plugins, all the way down.** Every feature is a plugin that can be switched
+  off. User plugins are JSON manifests in `~/.aico/desktop/plugins` (pages,
+  commands, themes, prompts, status items, chat widgets, standing instructions);
+  script views run sandboxed and ask for trust once. The agent drives the IDE
+  through `ide_*` tools and writes plugins with `ide_plugin_save` — watched
+  live: it built, validated (fixing its own first mistake) and installed a
+  plugin with a page, a command and a theme, then opened it.
+- **Settings like Antigravity's**: every engine setting from the shared schema,
+  plus Appearance (theme, contrast, light/dark background/foreground/accent,
+  fonts, width), providers, skills, MCP servers, agents, browser, shortcuts
+  (rebindable), and per-project settings.
+
+### Added — for every client
+
+- **A widget kit**: 54 dashboard widgets (stat tiles, gauges, time series,
+  heatmaps, sankey, radar, boxplot, calendar, gantt, pipelines, scorecards, SLOs,
+  network and service maps, doc panels, action buttons) on a 12-column grid, in a
+  ```` ```widgets ```` block. `WidgetSpec("widgets.<id>")` gives the model each
+  widget's exact options and an example.
+- **Maths that is computed**: ```` ```plot ```` (functions, symbolic
+  derivatives, parametric and polar curves, integrals by Simpson's rule),
+  ```` ```geometry ```` (a figure to scale with lengths, angles, areas measured
+  from the coordinates) and ```` ```calc ```` (a worked calculation with units,
+  conversions and physical constants), all evaluated with mathjs.
+- **Source control in the engine**: status, per-file diffs, stage, unstage,
+  discard (tracked files only), commit, fast-forward pull, push (never forced),
+  fetch, stash, new/merged-branch delete, init — new `project/git-status`,
+  `project/git-diff`, `project/git-stashes` routes and more `git-action`s.
+- **MCP**: a server's `instructions` now reach the agent's prompt, and a host
+  process can contribute servers for one run through `AICO_HOST_MCP` — never
+  written to settings, kept across reloads, shown in the system snapshot.
+
+### Fixed
+
+- A table in a reply that was still streaming showed "failed to render" with a
+  Fix button; it now says "Table arriving…" like charts and diagrams.
+- mathjs picked display units from whatever it had last seen — a fall time after
+  a `km/h` line printed as "0.000561 h". Results now simplify into SI.
+
+Verified: engine 3095/3095 (20 new: source control, host MCP, kit specs), titles
+65/65, mini apps 38/38, web unit 35/35 + 234/234, web e2e 210/210, desktop unit
+44/44; typecheck clean for engine, web, desktop main and renderer. Walked live
+in the app with deepseek-flash: streaming chat with charts, tables and maths; the
+agent opening and reading a page in the built-in browser and switching the
+theme; the agent writing a plugin; the packaged Windows build starting its
+engine and connecting its 32 IDE and browser tools. VSIX 0.6.17 → 0.6.18.
+
 ## 0.22.0 — 2026-09-29
 
 Groups and folders have pages, one of them is where new chats go, and a

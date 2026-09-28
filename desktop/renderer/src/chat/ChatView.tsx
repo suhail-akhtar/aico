@@ -1,0 +1,107 @@
+/**
+ * Home and the conversation — one view.
+ *
+ * An empty chat is the home screen: "Where should we begin?" over a centred
+ * composer, the folder it will work in just above it (Antigravity), and quick
+ * prompts from plugins below. Once anything is said, the same chat becomes a
+ * transcript with the composer pinned to the bottom.
+ *
+ * @module desktop/renderer/chat/ChatView
+ */
+
+import React, { useEffect, useMemo, useRef } from 'react';
+import { useStore } from '@web/store';
+import { useDesk } from '@/state/desk';
+import { usePrompts } from '@/plugins/registry';
+import { Icon } from '@/lib/icons';
+import { markSeen } from '@/lib/local';
+import type { ViewProps } from '@/plugins/registry';
+import { Composer, ProjectChip } from './Composer';
+import { Transcript } from './Transcript';
+import { Attention } from './Attention';
+import { openChat } from './actions';
+
+function greeting(name: string | undefined): string {
+  const h = new Date().getHours();
+  const part = h < 5 ? 'Working late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  return name ? `${part}, ${name.split(/[.\s_-]/)[0]!.replace(/^./, c => c.toUpperCase())}` : part;
+}
+
+export function ChatView({ params }: ViewProps): React.ReactElement {
+  const sessionId = useStore(s => s.sessionId);
+  const logged = useStore(s => s.logged);
+  const busy = useStore(s => s.busy);
+  const route = useDesk(s => s.route);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Arriving at chat/<id> (back/forward, a notification, a link) opens that chat.
+  useEffect(() => {
+    const id = params?.id;
+    if (route.view === 'chat' && id && id !== sessionId) void openChat(id);
+  }, [params?.id, route.view, sessionId]);
+
+  useEffect(() => { if (!busy) markSeen(sessionId); }, [busy, sessionId, logged.size]);
+
+  const empty = logged.size === 0 && !busy;
+  if (empty) return <Home />;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        <Transcript scrollRef={scrollRef} />
+      </div>
+      <div className="shrink-0 px-6 pb-4 pt-1">
+        <Attention />
+        <Composer />
+        <p className="mt-1.5 text-center text-[11px] text-aico-muted">AICO runs on this computer. The agent can make mistakes — check important work.</p>
+      </div>
+    </div>
+  );
+}
+
+function Home(): React.ReactElement {
+  const info = useDesk(s => s.info);
+  const prompts = usePrompts();
+  const prefill = useStore(s => s.prefillComposer);
+  const home = useMemo(() => prompts.filter(p => p.home).slice(0, 6), [prompts]);
+  const recent = useStore(s => s.sessions);
+  const latest = useMemo(() => [...recent].filter(s => !s.archived).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3), [recent]);
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 pb-16">
+      <div className="home-glow pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[900px] -translate-x-1/2 -translate-y-1/2" />
+      <div className="relative w-full max-w-[760px]">
+        <h1 className="mb-7 text-center text-[28px] font-medium tracking-tight text-aico-primary">
+          Where should we begin?
+        </h1>
+        <div className="mb-2 flex justify-center"><ProjectChip large /></div>
+        <Attention />
+        <Composer home />
+        {home.length > 0 && (
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            {home.map(p => (
+              <button key={`${p.pluginId}:${p.id}`} className="chip py-1.5 text-[13px]" onClick={() => prefill(p.prompt)}>
+                {p.icon && <Icon name={p.icon} size={14} />}{p.title}
+              </button>
+            ))}
+          </div>
+        )}
+        {latest.length > 0 && (
+          <div className="mx-auto mt-10 max-w-[560px]">
+            <div className="mb-2 text-center text-[12px] text-aico-muted">{greeting(info?.user)} — pick up where you left off</div>
+            <div className="flex flex-col gap-1">
+              {latest.map(s => (
+                <button key={s.id} className="flex items-center gap-3 rounded-xl px-3 py-2 text-left text-[13.5px] text-aico-secondary transition-colors hover:bg-aico-hover hover:text-aico-primary"
+                  onClick={() => void openChat(s.id)}>
+                  <Icon name={s.running ? 'activity' : 'chat'} size={15} className={s.running ? 'text-aico-accent' : 'text-aico-muted'} />
+                  <span className="min-w-0 flex-1 truncate">{s.title || 'New chat'}</span>
+                  <Icon name="arrow-right" size={14} className="text-aico-muted" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

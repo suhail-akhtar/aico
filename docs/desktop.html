@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AICO Desktop — an AI coding agent with its own IDE, browser and plugins</title>
+<meta name="description" content="AICO Desktop for Windows and Linux: a ChatGPT-style chat with dashboards, charts, maths and physics that are really computed, a Monaco editor, real terminals, full Git and GitHub, a built-in browser the agent drives for web QA, and plugins the agent can write for you.">
+<!-- seo:start -->
+<link rel="canonical" href="https://suhail-akhtar.github.io/aico/desktop.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aico">
+<meta property="og:url" content="https://suhail-akhtar.github.io/aico/desktop.html">
+<meta property="og:title" content="AICO Desktop — an AI coding agent with its own IDE, browser and plugins">
+<meta property="og:description" content="AICO Desktop for Windows and Linux: a ChatGPT-style chat with dashboards, charts, maths and physics that are really computed, a Monaco editor, real terminals, full Git and GitHub, a built-in browser the agent drives for web QA, and plugins the agent can write for you.">
+<meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AICO Desktop — an AI coding agent with its own IDE, browser and plugins">
+<meta name="twitter:description" content="AICO Desktop for Windows and Linux: a ChatGPT-style chat with dashboards, charts, maths and physics that are really computed, a Monaco editor, real terminals, full Git and GitHub, a built-in browser the agent drives for web QA, and plugins the agent can write for you.">
+<meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<!-- seo:end -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script><!-- blocking on purpose: sets the theme before first paint -->
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.23.0</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="desktop.html" aria-current="page">Desktop</a>
+      <a href="vscode.html">VS Code</a>
+      <a href="automation.html">Automation</a>
+      <a href="compare.html">Compare</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="apps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Desktop</p>
+
+  <div class="prose">
+    <h1>AICO Desktop</h1>
+    <p class="lede">
+      The AICO agent as a native app for Windows and Linux: a calm chat in front, an IDE
+      behind it — editor, terminals, Git and GitHub — and a browser the agent can drive. It
+      runs on your computer, with your own keys, and nothing about it needs Node installed.
+    </p>
+
+    <h2>Install it</h2>
+    <p>
+      Download the installer for your system from the
+      <a href="https://github.com/suhail-akhtar/aico/releases/latest">latest release</a>:
+      <code>AICO-Setup-0.23.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
+      <code>.deb</code> for Linux. The builds are not code-signed yet, so Windows SmartScreen
+      asks once ("More info → Run anyway"). Your chats, providers and settings are the same
+      ones the CLI, the web portal and VS Code use — everything lives in <code>~/.aico</code>.
+    </p>
+  </div>
+
+  <figure>
+    <img class="crop" src="assets/desktop/home.png" alt="AICO Desktop's home screen: a sidebar with New chat, Search, Library, Scheduled, Plugins, Projects, Files and Browser, and a centred composer under the heading Where should we begin?" loading="lazy">
+    <figcaption>Home: the folder the chat will work in above the composer, model, approval and project below it, and starter prompts that plugins contribute.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h2>Answers that draw themselves — and compute</h2>
+    <p>
+      Everything the web portal renders — ECharts, Vega-Lite, Mermaid, KaTeX with chemistry,
+      tables — plus a <strong>widget kit of 54 dashboard widgets</strong> (stat tiles, gauges,
+      time series, heatmaps, sankey, radar, gantt, pipelines, scorecards, network maps) laid
+      out on a 12-column grid by a <code>```widgets</code> block. For maths and physics there
+      are three blocks whose numbers are <em>computed</em>, not written by the model:
+    </p>
+    <ul>
+      <li><code>```plot</code> — functions, derivatives (symbolic), parametric and polar curves, and the shaded, calculated area of an integral;</li>
+      <li><code>```geometry</code> — a construction drawn to scale with its lengths, angles, areas and perimeters measured from the coordinates;</li>
+      <li><code>```calc</code> — a worked calculation line by line, with units carried through every step, unit conversion and physical constants.</li>
+    </ul>
+    <p>
+      Any answer copies as rich content (charts and formulas as they look, plus the Markdown),
+      and any chat exports as PDF or a standalone HTML page with every visual inlined, as
+      well as Markdown or text.
+    </p>
+  </div>
+
+  <div class="shots">
+    <figure>
+      <img src="assets/desktop/dashboard.png" alt="A dashboard drawn in a chat reply: three stat tiles and a requests-per-minute time series." loading="lazy">
+      <figcaption>A <code>widgets</code> block: stat tiles and an interactive time series.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/desktop/widgets.png" alt="A radial CPU gauge, a traffic-by-region donut and a five-stage release pipeline." loading="lazy">
+      <figcaption>Gauge, share and a release pipeline — the same kit, same reply.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/desktop/math.png" alt="A plotted logistic curve with its derivative, and a calc block computing kinetic energy with units." loading="lazy">
+      <figcaption>A plot with its symbolic derivative, and a calculation that carries its units.</figcaption>
+    </figure>
+  </div>
+
+  <div class="prose">
+    <h2>An IDE behind the chat</h2>
+    <ul>
+      <li><strong>Files</strong> — an explorer and Monaco, the editor VS Code is built on: tabs, quick open (Ctrl+P), search in files, Markdown preview, and live reload when the agent edits a file you have open. "Ask AI" sends the file or the selection to a chat.</li>
+      <li><strong>Terminals</strong> — real pseudo-terminals (PowerShell on Windows, your shell on Linux), not a pipe, in a bottom panel you toggle with Ctrl+J.</li>
+      <li><strong>Source control</strong> — status, staged and unstaged changes with diffs, stage, unstage, discard, commit (or have the agent write the message), branches, stash, fetch, fast-forward pull and push, and the full history. It never force-pushes, never resets, and a pull that would need a merge says so.</li>
+      <li><strong>GitHub</strong> — pull requests with checks, files and diff; issues; Actions runs; open, comment, check out, merge — and "Review with AI", "Fix with AI", "Diagnose" on anything. Through the GitHub CLI's own sign-in: AICO never stores a GitHub token.</li>
+      <li><strong>Activity</strong> — everything running in the background in one list: chats mid-turn, sub-agents, scheduled jobs, processes, app servers, terminals — with Stop.</li>
+    </ul>
+  </div>
+
+  <figure>
+    <img class="crop" src="assets/desktop/ide.png" alt="The Files view: a project tree, README.md open in the editor, and a PowerShell terminal in the bottom panel." loading="lazy">
+    <figcaption>Explorer, editor and a real terminal — the same window as the chat.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h2>A browser the agent drives</h2>
+    <p>
+      The built-in browser is real Chromium with its own profile, beside the chat or full
+      size. The agent drives it with trusted input — it reads the page as an accessibility
+      snapshot with numbered elements, clicks, types, selects, waits, reads the console and
+      the network log, and takes screenshots — so it can test the app it just built, end to
+      end. It will not solve a CAPTCHA or type a password it was not given: it hands the
+      browser to you with a message, and carries on when you press Done.
+    </p>
+
+    <h2>Every piece is a plugin — and the agent can write them</h2>
+    <p>
+      Chat history, Library, Scheduled, Projects, Files, Source control, GitHub, Browser,
+      Terminal, Apps, Activity, the status bar — each is a plugin that registers its pages,
+      commands and settings the same way yours would, and each can be switched off. A plugin
+      is a folder with a JSON manifest: sidebar pages (Markdown with every widget, prompt
+      boards, link lists, or your own HTML in a sandbox), palette commands, themes, quick
+      prompts, status items, chat widgets and standing instructions.
+    </p>
+    <p>
+      The agent knows the whole IDE through its own tools — what is open, every view and
+      command, every plugin — and can reshape it for you without anyone touching AICO's code:
+      "make me a plugin that…" and it writes, validates and installs one, then opens it.
+    </p>
+  </div>
+
+  <figure>
+    <img class="crop" src="assets/desktop/plugins.png" alt="The Plugins page listing built-in features as switchable plugins, with a New button." loading="lazy">
+    <figcaption>Built-in features are plugins you can switch off; yours sit beside them.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h2>One engine, four surfaces</h2>
+    <p>
+      The desktop app is a client, not a fork. It runs the same engine as <code>aico serve</code>
+      in a process of its own (Electron's Node, so no install is needed), shares the web
+      portal's conversation state and renderers, and keeps its own code for what only a
+      desktop can do: the window, tray and notifications, the IDE, the browser, and plugins.
+      A chat started in the desktop opens in the browser client, in VS Code and in the
+      terminal, and <em>Open in web browser</em> is one click in the account menu.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="https://github.com/suhail-akhtar/aico/releases/latest">Download →</a>
+      <a class="btn" href="widgets.html">What it renders →</a>
+      <a class="btn" href="install.html">Other ways to install →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · MIT</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

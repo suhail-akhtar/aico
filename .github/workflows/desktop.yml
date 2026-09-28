@@ -1,0 +1,74 @@
+name: Desktop
+
+# Builds AICO Desktop for Windows (NSIS installer) and Linux (AppImage, deb).
+# On a version tag the installers are attached to that GitHub release; on a
+# manual run they are kept as workflow artifacts.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: ubuntu-latest
+            target: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install engine dependencies
+        run: npm ci
+
+      - name: Install web client dependencies (the shared store and renderers)
+        run: npm --prefix web ci
+
+      - name: Install desktop dependencies
+        run: npm --prefix desktop ci
+
+      - name: Desktop unit tests
+        run: npm --prefix desktop test
+
+      - name: Typecheck
+        run: npm --prefix desktop run typecheck
+
+      - name: Package
+        run: npm --prefix desktop run package:${{ matrix.target }}
+        env:
+          # No code-signing certificate is configured; electron-builder must not
+          # go looking for one.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Keep the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: aico-desktop-${{ matrix.target }}
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The release is created by hand (with notes) when the tag is pushed;
+          # wait for it briefly rather than racing it.
+          for i in $(seq 1 30); do gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break; sleep 20; done
+          gh release upload "$GITHUB_REF_NAME" desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb --clobber 2>/dev/null \
+            || gh release upload "$GITHUB_REF_NAME" $(ls desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb 2>/dev/null) --clobber

@@ -1,0 +1,110 @@
+{
+  "name": "aico-desktop",
+  "productName": "AICO",
+  "private": true,
+  "type": "module",
+  "version": "0.23.0",
+  "description": "AICO Desktop — the AICO coding agent as a native app for Windows and Linux.",
+  "author": {
+    "name": "Suhail Akhtar",
+    "email": "suhailakhtar@live.com"
+  },
+  "license": "MIT",
+  "homepage": "https://suhail-akhtar.github.io/aico/",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && electron .",
+    "dev": "electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p renderer/tsconfig.json",
+    "test": "node scripts/test-unit.mjs",
+    "test:live": "node scripts/build.mjs && node scripts/desktop-live.mjs",
+    "package": "node scripts/build.mjs && node scripts/icons.mjs && electron-builder --publish never",
+    "package:win": "node scripts/build.mjs && node scripts/icons.mjs && electron-builder --win --publish never",
+    "package:linux": "node scripts/build.mjs && node scripts/icons.mjs && electron-builder --linux --publish never"
+  },
+  "dependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.15",
+    "playwright-core": "^1.63.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@vitejs/plugin-react": "^4.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "autoprefixer": "^10.6.1",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "monaco-editor": "^0.57.0",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3"
+  },
+  "build": {
+    "appId": "dev.aico.desktop",
+    "productName": "AICO",
+    "executableName": "aico-desktop",
+    "copyright": "Copyright © Suhail Akhtar",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "!dist/**/*.map",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "dist/engine/templates/**",
+      "node_modules/@lydell/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "AICO-Setup-${version}-win-x64.${ext}",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AICO"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development",
+      "synopsis": "AI coding agent with a built-in IDE and browser",
+      "maintainer": "Suhail Akhtar <suhailakhtar@live.com>",
+      "artifactName": "AICO-${version}-linux-x64.${ext}",
+      "icon": "build/icons"
+    },
+    "npmRebuild": false,
+    "extraMetadata": {
+      "main": "dist/main.cjs"
+    }
+  }
+}

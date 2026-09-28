@@ -1,0 +1,25 @@
+/**
+ * Every desktop-only service, registered in one place.
+ *
+ * Each module exports `register(ctx)`. Adding a service is one import and one
+ * line here; nothing else in main needs to know it exists.
+ *
+ * @module desktop/electron/features
+ */
+
+import type { DesktopContext } from './context';
+import { registerPlugins } from './plugins';
+import { registerTerminal } from './terminal';
+import { registerFiles } from './files';
+import { registerBrowser } from './browser';
+import { registerGitHub } from './github';
+import { registerRendererBridge } from './renderer-bridge';
+
+export function registerFeatures(ctx: DesktopContext): void {
+  registerRendererBridge(ctx);
+  registerPlugins(ctx);
+  registerTerminal(ctx);
+  registerFiles(ctx);
+  registerBrowser(ctx);
+  registerGitHub(ctx);
+}
