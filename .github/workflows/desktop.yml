@@ -7,6 +7,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Attach the installers to this release tag (e.g. v0.23.0); empty keeps them as artifacts only'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -62,13 +67,14 @@ jobs:
           if-no-files-found: error
 
       - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # The release is created by hand (with notes) when the tag is pushed;
           # wait for it briefly rather than racing it.
-          for i in $(seq 1 30); do gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break; sleep 20; done
-          gh release upload "$GITHUB_REF_NAME" desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb --clobber 2>/dev/null \
-            || gh release upload "$GITHUB_REF_NAME" $(ls desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb 2>/dev/null) --clobber
+          TAG="${{ inputs.release }}"
+          [ -n "$TAG" ] || TAG="$GITHUB_REF_NAME"
+          for i in $(seq 1 30); do gh release view "$TAG" >/dev/null 2>&1 && break; sleep 20; done
+          gh release upload "$TAG" $(ls desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb 2>/dev/null) --clobber

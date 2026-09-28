@@ -1,6 +1,5 @@
 node_modules/
 dist/
 release/
-build/icon.*
-build/icons/
+build/.icon-render.cjs
 *.log

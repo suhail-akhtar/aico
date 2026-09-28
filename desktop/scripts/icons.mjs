@@ -44,6 +44,17 @@ app.whenReady().then(async () => {
   app.quit();
 });`;
 
+// The icons are committed. Rendering needs a display, which CI runners do not
+// have, so render only when asked (--force) or when an icon is missing; a
+// normal build just copies the window icon into dist/.
+const have = fs.existsSync(path.join(desktop, 'build', 'icon.png')) && fs.existsSync(path.join(desktop, 'build', 'icons', '256x256.png'));
+if (have && !process.argv.includes('--force')) {
+  fs.mkdirSync(path.join(desktop, 'dist'), { recursive: true });
+  fs.copyFileSync(path.join(desktop, 'build', 'icons', '256x256.png'), path.join(desktop, 'dist', 'icon.png'));
+  console.log('icons: using the committed build/icon.png (pass --force to re-render)');
+  process.exit(0);
+}
+
 const tmp = path.join(desktop, 'build', '.icon-render.cjs');
 fs.mkdirSync(path.dirname(tmp), { recursive: true });
 fs.writeFileSync(tmp, renderer);
