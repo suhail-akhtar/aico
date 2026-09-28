@@ -151,6 +151,19 @@ export function App(): React.ReactElement {
   // flash of white, and switches the moment the stored preference is known.
   useEffect(() => { applyTheme(theme); }, [theme]);
 
+  // Buttons inside a widgets block (the kit's action row) ask through a window
+  // event: compose the prompt, or send it when the button says so.
+  useEffect(() => {
+    const onAsk = (e: Event): void => {
+      const d = (e as CustomEvent<{ text?: string; send?: boolean }>).detail ?? {};
+      if (!d.text) return;
+      if (d.send) void useStore.getState().submit(d.text);
+      else useStore.getState().prefillComposer(d.text);
+    };
+    window.addEventListener('aico:ask', onAsk);
+    return () => window.removeEventListener('aico:ask', onAsk);
+  }, []);
+
   if (!hasToken) {
     return (
       <TokenGate

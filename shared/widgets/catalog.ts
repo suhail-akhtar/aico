@@ -36,6 +36,20 @@
  */
 
 import { DIAGRAM_TYPES, diagramIndex } from './diagram-types.js';
+import { KIT_CATALOG } from '../kit/catalog.js';
+import { OPTION_CONTRACTS } from '../kit/contracts.js';
+
+/** The kit's widgets by category, one short line each, for the widgets spec. */
+function kitIndex(): string {
+  const byCat = new Map<string, string[]>();
+  for (const w of KIT_CATALOG) {
+    const sig = OPTION_CONTRACTS[w.id]?.signature ?? '';
+    const short = sig.length > 110 ? sig.slice(0, 107) + '…' : sig;
+    const line = `  ${w.id} — ${w.description}` + (short ? `\n      ${short}` : '');
+    byCat.set(w.category, [...(byCat.get(w.category) ?? []), line]);
+  }
+  return [...byCat.entries()].map(([c, lines]) => `${c}:\n${lines.join('\n')}`).join('\n');
+}
 
 export interface WidgetKind {
   /** Stable identity. Names the renderer and labels the widget frame. */
@@ -265,6 +279,101 @@ architecture-beta; "the plan" is gantt or timeline.
 
 Node text containing brackets, quotes or parentheses must be quoted. That is
 the single most common reason a diagram fails to parse.`,
+  },
+  {
+    id: 'widgets',
+    languages: ['widgets', 'aico-widgets', 'aetnic-widgets', 'kit'],
+    extension: 'json',
+    framed: true,
+    summary: `a dashboard grid of rich widgets — ${KIT_CATALOG.length} kinds: stat/KPI tiles, gauges, `
+      + 'time series, bar/pie/scatter/radar/sankey/boxplot/funnel, heatmaps, calendars, treemaps, gantt, '
+      + 'pipelines, scorecards, SLOs, network and service maps, doc panels and action buttons',
+    spec: `{"title":"Release health","widgets":[
+  {"widget":"stat","title":"Build time","span":{"w":4,"h":1},"options":{"label":"p50","value":142,"unit":"s","previous":171,"lowIsGood":true}},
+  {"widget":"radial","title":"Coverage","span":{"w":4,"h":2},"options":{"value":81,"min":0,"max":100,"unit":"%","warn":70,"crit":50}},
+  {"widget":"barchart","title":"Bugs by area","span":{"w":4,"h":2},"options":{"items":[["API",12],["UI",7],["DB",3]]}}
+]}
+
+A 12-column grid. Each widget: "widget" (an id below), "title", "span" {"w":1-12,"h":1-8}
+(h is rows of ~100px), "options" (that widget's own shape), optional "note" and
+"section" (a heading above it). Put related numbers side by side: w 3-4 for tiles,
+w 6-12 for charts. The data is what you write — use real values, never invented ones.
+
+Before writing a widget you have not used in this conversation, call WidgetSpec
+with "widgets.<id>" (e.g. "widgets.gantt") for its exact options and an example.
+Widget options differ from ECharts options: do not mix them.
+
+Widgets by purpose:
+${kitIndex()}`,
+  },
+  {
+    id: 'plot',
+    languages: ['plot2d', 'function', 'functions', 'fplot', 'graph'],
+    extension: 'json',
+    framed: true,
+    summary: 'mathematical functions plotted exactly — y=f(x), derivatives, parametric and polar curves, points, and the computed area of an integral',
+    spec: `{"title":"sin and its derivative","x":[-6.2832,6.2832],"y":[-1.5,1.5],
+ "functions":[{"fn":"sin(x)","label":"sin x"},{"fn":"x^2/10","dashed":true}],
+ "derivatives":false,"integral":[0,3.1416],
+ "points":[[1.5708,1,"max"]],
+ "parametric":[{"x":"cos(t)","y":"sin(t)","t":[0,6.2832],"label":"unit circle"}],
+ "polar":[{"r":"1+cos(theta)","label":"cardioid"}]}
+
+Or just lines:  y = x^3 - 3x   /   f(x) = exp(-x^2)   /   x: -3..3
+
+Functions are evaluated here, so write the function, not points. Syntax is
+mathjs: ^ power, * explicit multiply, sqrt, exp, log (natural), log10, abs,
+sin/cos/tan (radians), pi, e. "derivatives": true adds each derivative (computed
+symbolically). "integral": [a, b] shades the area under the first function and
+reports its value (computed with Simpson's rule). Discontinuities (tan, 1/x) are
+broken, not joined, when "y" is given.`,
+  },
+  {
+    id: 'geometry',
+    languages: ['geometry', 'geo', 'construction', 'figure'],
+    extension: 'json',
+    framed: true,
+    summary: 'a geometric figure drawn to scale — points, segments, lines, vectors, circles, polygons and marked angles, with lengths, angles and areas computed',
+    spec: `{"title":"Right triangle","points":{"A":[0,0],"B":[4,0],"C":[0,3]},
+ "polygons":[["A","B","C"]],
+ "segments":[["A","B","4"],["B","C","5"]],
+ "angles":[["B","A","C"],["A","B","C"]],
+ "circles":[{"center":"A","through":"B"}],
+ "vectors":[["A","C","v"]],
+ "lines":[], "rays":[], "labels":[{"at":"C","text":"apex"}],
+ "grid":true, "axes":false, "measure":true}
+
+Coordinates are real units with y up. Everything refers to points by name.
+segments take an optional label; angles are [arm, vertex, arm] (a right angle
+draws a square marker). Lengths, angles, polygon areas/perimeters and circle
+measures are computed from the coordinates and listed under the figure — so put
+the true coordinates in, and the numbers will be right.`,
+  },
+  {
+    id: 'calc',
+    languages: ['calc', 'calculation', 'physics', 'units', 'mathjs'],
+    extension: 'txt',
+    framed: true,
+    summary: 'a worked calculation that is really computed — step by step, typeset, with units, unit conversion and physical constants',
+    spec: `# Kinetic energy of a thrown ball
+mass = 0.145 kg
+v0 = 40 m/s
+KE = 1/2 * mass * v0^2        # joules
+KE to J
+height = KE / (mass * g0)      # if all of it became height
+height to m
+f(x) = 3x^2 + 2
+f(4)
+
+One statement per line, evaluated in order; names carry forward. Units attach
+to numbers (5 kg, 9.81 m/s^2, 3 km/h, 20 degC) and flow through the arithmetic;
+"expr to unit" converts. Comments start with # (a line of its own is a heading).
+Constants: g0 (standard gravity), c0 (speed of light), G, planck, hbar, kB,
+NA, qe, me, mp, eps0, mu0, R_gas, sigma_sb — or mathjs names like speedOfLight.
+
+NEVER name a variable after a unit: m, s, g, h, J, N, K, A, V, W, Pa, L, t, in,
+ft are units, and "3 m/s" after "m = 2" silently uses your m. Use mass, t1, len.
+Every result shown is computed here — write the formula, not the answer.`,
   },
   {
     id: 'html',

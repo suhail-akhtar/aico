@@ -377,4 +377,5 @@ export { AnthropicProvider } from './providers/anthropic.js';
 export { readTodos } from './tools/todo.js';
 export { OpenAIResponsesProvider } from './providers/openai-responses.js';
 export { patchUserSettingPath } from './settings.js';
-export { showCommit, listBranches, switchBranch, createBranch, revertCommit, isValidBranchName } from './server/git-ops.js';
+export { showCommit, listBranches, switchBranch, createBranch, revertCommit, isValidBranchName, gitStatus, fileDiff, stage, unstage, discard, commit as gitCommit, push as gitPush, stashList, stashPush, stashPop, deleteBranch } from './server/git-ops.js';
+export { parseHostMcp } from './bootstrap.js';

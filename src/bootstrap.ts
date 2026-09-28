@@ -93,6 +93,16 @@ export async function initializeFeatures(opts: BootstrapOptions): Promise<void> 
     mcpRegistry.startHealthChecks();
   }
 
+  // Servers the hosting process contributes for this run only (the desktop
+  // app's IDE and browser tools). Passed in the environment so nothing about
+  // them — a random port, a one-run token — is ever saved to settings.
+  const host = parseHostMcp(process.env.AICO_HOST_MCP);
+  if (host) {
+    await mcpRegistry.setHostServers(host)
+      .catch((err: unknown) => { warn(`  ⚠ Host MCP server failed: ${String(err)}`); });
+    mcpRegistry.startHealthChecks();
+  }
+
   setBackgroundAgentOpts({
     token: process.env.GITHUB_TOKEN ?? '',
     model,
@@ -108,6 +118,22 @@ export async function initializeFeatures(opts: BootstrapOptions): Promise<void> 
       autoApprove,
       settings,
     }).catch((err: unknown) => { warn(`  ⚠ Cron scheduler failed to start: ${String(err)}`); });
+  }
+}
+
+/** `AICO_HOST_MCP`: a JSON object of HTTP/SSE MCP server configs, or nothing. */
+export function parseHostMcp(raw: string | undefined): Record<string, McpServerConfigV2> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const out: Record<string, McpServerConfigV2> = {};
+    for (const [name, cfg] of Object.entries(parsed as Record<string, McpServerConfigV2>)) {
+      if (cfg && typeof cfg === 'object' && (cfg.type === 'http' || cfg.type === 'sse') && typeof cfg.url === 'string') out[name] = cfg;
+    }
+    return Object.keys(out).length ? out : null;
+  } catch {
+    return null;
   }
 }
 

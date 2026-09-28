@@ -32,15 +32,24 @@ function format(value: number): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-export function DataTable({ source }: { source: string }): React.ReactElement {
+export function DataTable({ source, streaming = false }: { source: string; streaming?: boolean }): React.ReactElement {
   const parsed = useMemo(() => parseTableSpec(source), [source]);
+  if (parsed.error) {
+    // Half a table is not a broken table. While the reply is still arriving,
+    // JSON that does not parse yet is expected — say so instead of offering a
+    // Fix for something that is simply not finished. (Charts, diagrams and
+    // math already waited; the table was the one that failed mid-stream.)
+    if (streaming) return <div className="px-3 py-4 text-[12px] text-aico-muted">Table arriving…</div>;
+    // Thrown, not rendered: the widget frame owns every failure state so a bad
+    // table offers the same Fix action as a bad chart.
+    throw new Error(parsed.error);
+  }
+  return <TableBody spec={parsed.spec!} />;
+}
+
+function TableBody({ spec }: { spec: TableSpec }): React.ReactElement {
   const [sort, setSort] = useState<{ index: number; descending: boolean } | null>(null);
   const [showStats, setShowStats] = useState(false);
-
-  // Thrown, not rendered: the widget frame owns every failure state so a bad
-  // table offers the same Fix action as a bad chart.
-  if (parsed.error) throw new Error(parsed.error);
-  const spec = parsed.spec!;
 
   const numeric = useMemo(() => numericColumns(spec), [spec]);
   const rows = useMemo(() => {

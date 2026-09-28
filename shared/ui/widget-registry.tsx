@@ -37,6 +37,21 @@ import { Viz } from './Viz';
 import { Dashboard } from './Dashboard';
 import { MathBlock } from './MathBlock';
 
+/*
+  The widget kit and the maths renderers are loaded on first use: together
+  they bring a charting engine, a schema library and an expression engine, and
+  a conversation that never draws a dashboard or a function plot should not pay
+  for them.
+*/
+const Cluster = React.lazy(() => import('../kit/Cluster').then(m => ({ default: m.Cluster })));
+const Plot = React.lazy(() => import('../kit/math/Plot').then(m => ({ default: m.Plot })));
+const Geometry = React.lazy(() => import('../kit/math/Geometry').then(m => ({ default: m.Geometry })));
+const Calc = React.lazy(() => import('../kit/math/Calc').then(m => ({ default: m.Calc })));
+
+function Lazy({ children }: { children: React.ReactNode }): React.ReactElement {
+  return <React.Suspense fallback={<p className="p-2 text-[11px] text-aico-muted">Loading…</p>}>{children}</React.Suspense>;
+}
+
 export type { CatalogEntry, WidgetKind };
 export { widgetForLanguage, widgetById, WIDGET_CATALOG } from '../widgets/catalog';
 
@@ -75,9 +90,13 @@ const RENDERERS: Record<WidgetId, React.ComponentType<WidgetRenderProps>> = {
   viz: ({ source, streaming }) => <Viz source={source} streaming={streaming ?? false} />,
   dashboard: ({ source, streaming }) => <Dashboard source={source} streaming={streaming ?? false} />,
   math: ({ source, streaming }) => <MathBlock source={source} streaming={streaming ?? false} />,
-  table: ({ source }) => <DataTable source={source} />,
+  table: ({ source, streaming }) => <DataTable source={source} streaming={streaming} />,
   diagram: ({ source, streaming }) => <Diagram source={source} streaming={streaming ?? false} />,
   html: ({ source, language }) => <HtmlPreview html={source} language={language} />,
+  widgets: ({ source, streaming }) => <Lazy><Cluster source={source} streaming={streaming} /></Lazy>,
+  plot: ({ source, streaming }) => <Lazy><Plot source={source} streaming={streaming} /></Lazy>,
+  geometry: ({ source, streaming }) => <Lazy><Geometry source={source} streaming={streaming} /></Lazy>,
+  calc: ({ source, streaming }) => <Lazy><Calc source={source} streaming={streaming} /></Lazy>,
 };
 
 /** The component for a kind, or undefined if the fence is ordinary code. */

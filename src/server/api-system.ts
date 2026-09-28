@@ -116,16 +116,28 @@ export async function systemSnapshot(): Promise<Record<string, unknown>> {
     // Names alone said nothing about whether a server was doing anything. A
     // server contributing zero tools is the commonest way this is
     // misconfigured, and the panel is where someone would look.
-    mcpServers: Object.keys(settings.mcpServers ?? {}).map(name => {
-      const info = mcpRegistry.getServerInfos().find(s => s.name === name);
-      return {
-        name,
-        enabled: !disabledMcp.has(name.toLowerCase()),
-        health: info?.health ?? 'not loaded',
-        toolCount: info?.toolCount ?? 0,
-        resourceCount: info?.resourceCount ?? 0,
-      };
-    }),
+    mcpServers: [
+      ...Object.keys(settings.mcpServers ?? {}).map(name => {
+        const info = mcpRegistry.getServerInfos().find(s => s.name === name);
+        return {
+          name,
+          enabled: !disabledMcp.has(name.toLowerCase()),
+          health: info?.health ?? 'not loaded',
+          toolCount: info?.toolCount ?? 0,
+          resourceCount: info?.resourceCount ?? 0,
+        };
+      }),
+      // Servers the host process contributed for this run (the desktop app's
+      // IDE and browser tools). Not in settings, so listed from the registry.
+      ...mcpRegistry.getServerInfos().filter(s => s.host && !(s.name in (settings.mcpServers ?? {}))).map(s => ({
+        name: s.name,
+        enabled: true,
+        health: s.health,
+        toolCount: s.toolCount,
+        resourceCount: s.resourceCount,
+        host: true,
+      })),
+    ],
     workspace: describeWorkspace(settings),
   };
 }
@@ -291,6 +303,9 @@ export async function handleSystemRoute(
     */
     case 'project/git-show':
     case 'project/git-branches':
+    case 'project/git-status':
+    case 'project/git-diff':
+    case 'project/git-stashes':
     case 'project/git-action': {
       const { default: path } = await import('path');
       const { isKnownProject } = await import('./projects.js');
@@ -308,13 +323,44 @@ export async function handleSystemRoute(
           if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
           return { status: 200, body: await ops.listBranches(cwd) };
         }
+        if (route === 'project/git-status') {
+          if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+          return { status: 200, body: await ops.gitStatus(cwd) };
+        }
+        if (route === 'project/git-diff') {
+          if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+          return { status: 200, body: await ops.fileDiff(cwd, query.get('file') ?? '', query.get('staged') === '1') };
+        }
+        if (route === 'project/git-stashes') {
+          if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+          return { status: 200, body: { stashes: await ops.stashList(cwd) } };
+        }
         if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
-        const { action, name, at, switchTo } = body as { action?: string; name?: string; at?: string; switchTo?: boolean };
-        if (action === 'switch') await ops.switchBranch(cwd, String(name ?? ''));
-        else if (action === 'branch') await ops.createBranch(cwd, String(name ?? ''), String(at ?? ''), switchTo === true);
-        else if (action === 'revert') await ops.revertCommit(cwd, String(at ?? ''));
-        else return { status: 400, body: { error: 'action must be switch, branch or revert' } };
-        return { status: 200, body: { ok: true, ...(await ops.listBranches(cwd)) } };
+        const { action, name, at, switchTo, paths, message, all, includeUntracked, ref } = body as {
+          action?: string; name?: string; at?: string; switchTo?: boolean;
+          paths?: string[] | 'all'; message?: string; all?: boolean; includeUntracked?: boolean; ref?: string;
+        };
+        let detail: unknown;
+        switch (action) {
+          case 'switch': await ops.switchBranch(cwd, String(name ?? '')); break;
+          case 'branch': await ops.createBranch(cwd, String(name ?? ''), String(at ?? ''), switchTo === true); break;
+          case 'revert': await ops.revertCommit(cwd, String(at ?? '')); break;
+          case 'new-branch': await ops.newBranchHere(cwd, String(name ?? '')); break;
+          case 'delete-branch': await ops.deleteBranch(cwd, String(name ?? '')); break;
+          case 'stage': await ops.stage(cwd, paths === 'all' ? 'all' : (paths ?? [])); break;
+          case 'unstage': await ops.unstage(cwd, paths === 'all' ? 'all' : (paths ?? [])); break;
+          case 'discard': await ops.discard(cwd, Array.isArray(paths) ? paths : []); break;
+          case 'commit': detail = await ops.commit(cwd, String(message ?? ''), { all: all === true }); break;
+          case 'push': detail = await ops.push(cwd); break;
+          case 'pull': detail = await ops.pull(cwd); break;
+          case 'fetch': detail = await ops.fetchAll(cwd); break;
+          case 'stash': await ops.stashPush(cwd, String(message ?? ''), includeUntracked === true); break;
+          case 'stash-pop': await ops.stashPop(cwd, String(ref ?? '')); break;
+          case 'init': await ops.initRepo(cwd); break;
+          default:
+            return { status: 400, body: { error: 'unknown git action' } };
+        }
+        return { status: 200, body: { ok: true, detail, ...(await ops.listBranches(cwd).catch(() => ({ current: null, branches: [] }))), status: await ops.gitStatus(cwd) } };
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } };
       }

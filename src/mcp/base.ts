@@ -37,6 +37,9 @@ export interface McpResourceContent {
 
 export type McpHealthStatus = 'healthy' | 'degraded' | 'disconnected';
 
+/** A server's instructions are capped: they ride in every request's prompt. */
+const MAX_INSTRUCTIONS = 6000;
+
 /** JSON-RPC request/response shapes */
 interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -57,6 +60,12 @@ interface JsonRpcResponse {
  */
 export abstract class McpBaseClient {
   protected initialized = false;
+  /**
+   * What the server said about how to use it (`instructions` in the MCP
+   * initialize result). Kept so it can reach the agent — a server that ships a
+   * manual for its tools is telling the model something the tool schemas cannot.
+   */
+  instructions?: string;
 
   /** Send a JSON-RPC request and return the result */
   abstract send(method: string, params?: unknown): Promise<unknown>;
@@ -71,11 +80,14 @@ export abstract class McpBaseClient {
   abstract getHealth(): McpHealthStatus;
 
   async initialize(): Promise<void> {
-    await this.send('initialize', {
+    const result = await this.send('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: { name: 'aico', version: '1.0.0' },
-    });
+    }) as { instructions?: unknown } | undefined;
+    if (typeof result?.instructions === 'string' && result.instructions.trim()) {
+      this.instructions = result.instructions.trim().slice(0, MAX_INSTRUCTIONS);
+    }
     // Send initialized notification — no response expected
     await this.sendNotification('notifications/initialized', {});
     this.initialized = true;

@@ -1,0 +1,22 @@
+/*
+ * How a widget grid sits in AICO: hand-written, unlike kit.css (generated).
+ * The grid lives inside the shared widget frame, so it drops the console's
+ * outer padding and takes the transcript's rounded, quiet surfaces.
+ */
+.aico-kit .kit-grid { padding: 10px; gap: 10px; }
+.aico-kit .kit-title { padding: 10px 12px 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.aico-kit .kit-section { grid-column: 1 / -1; padding: 6px 2px 0; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink3); }
+.aico-kit .wg { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.aico-kit .wg-h { padding: 8px 12px; }
+.aico-kit .wg-h h5 { font-size: 12px; font-weight: 600; color: var(--ink2); }
+.aico-kit .wg-b { padding: 12px; }
+.aico-kit .wg-error { font-size: 12px; color: var(--crit); line-height: 1.5; }
+.aico-kit .wg-error b { display: block; margin-bottom: 2px; }
+@media (max-width: 720px) { .aico-kit .wg { grid-column: span 12 !important; } }
+
+/* Charts fill their panel: the frame is a column and the body grows, so a
+   panel's height (its span) is the chart's height, not a 60px sliver. */
+.aico-kit .wg { display: flex; flex-direction: column; }
+.aico-kit .wg-b { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.aico-kit .wg-b > .wg-chart { flex: 1 1 auto; height: auto; min-height: 120px; }
+.aico-kit .wg-b > .wg-chart > .wg-canvas { flex: 1 1 auto; min-height: 100px; }

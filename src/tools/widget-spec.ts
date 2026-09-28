@@ -26,6 +26,25 @@
 
 import { WIDGET_CATALOG, widgetById, widgetForLanguage } from '../../shared/widgets/catalog.js';
 import { DIAGRAM_TYPES, diagramType } from '../../shared/widgets/diagram-types.js';
+import { kitEntry, KIT_CATALOG } from '../../shared/kit/catalog.js';
+import { OPTION_CONTRACTS } from '../../shared/kit/contracts.js';
+
+/** One widget of the dashboard kit, as the model needs it inside a ```widgets block. */
+function kitSpec(id: string): string | undefined {
+  const entry = kitEntry(id);
+  if (!entry) return undefined;
+  const c = OPTION_CONTRACTS[entry.id];
+  return [
+    `${entry.id} — ${entry.name} (${entry.category}): ${entry.description}`,
+    c?.when ? `Use when: ${c.when}` : '',
+    '',
+    'Inside a ```widgets block, as one entry of "widgets":',
+    `{ "widget": "${entry.id}", "title": "…", "span": { "w": 4, "h": 2 }, "options": ${c?.example ?? '{}'} }`,
+    '',
+    c ? `options: ${c.signature}` : '',
+    c?.note ? `NOTE: ${c.note}` : '',
+  ].filter(Boolean).join('\n');
+}
 
 export interface WidgetSpecInput {
   /** The kind to describe. A fence language works too. */
@@ -34,6 +53,13 @@ export interface WidgetSpecInput {
 
 export function getWidgetSpec(input: WidgetSpecInput): string {
   const wanted = (input.kind ?? '').trim();
+
+  // A widget of the dashboard kit: "widgets.gantt" (or "kit.gantt").
+  const kitRef = /^(?:widgets?|kit)[.:/](.+)$/i.exec(wanted);
+  if (kitRef) {
+    return kitSpec(kitRef[1]!)
+      ?? `No widget "${kitRef[1]}" in the kit. Available: ${KIT_CATALOG.map(k => k.id).join(', ')}.`;
+  }
 
   // No argument is a reasonable question — "what can I draw?" — and answering
   // it with an error would be pedantry. The list is short.
@@ -70,6 +96,10 @@ export function getWidgetSpec(input: WidgetSpecInput): string {
   }
 
   if (!kind) {
+    // A bare kit widget id ("stat", "sankey"), checked after block kinds and
+    // diagram types so neither is shadowed.
+    const kit = kitSpec(wanted);
+    if (kit) return kit;
     return `No rendered block named "${wanted}". Available: `
       + `${WIDGET_CATALOG.map(k => k.id).join(', ')}. `
       + `Diagram types: ${DIAGRAM_TYPES.map(d => d.syntax).join(', ')}.`;

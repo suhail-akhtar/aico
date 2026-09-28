@@ -13872,6 +13872,81 @@ console.log('\n══ LONG-HORIZON CONTEXT: MASK, CONDENSE, RESUME ══');
     fs.rmSync(repo, { recursive: true, force: true });
   }
 
+  console.log('  -- Source control: status, stage, commit, discard, stash — and nothing forced --');
+  {
+    const { execFileSync } = await import('child_process');
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-git-tree-'));
+    const g = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 't@t'); g('config', 'user.name', 'T'); g('config', 'core.autocrlf', 'false');
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'one\n'); g('add', '.'); g('commit', '-qm', 'first');
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'one\ntwo\n');
+    fs.writeFileSync(path.join(repo, 'new.txt'), 'fresh\n');
+
+    let st = await T.gitStatus(repo);
+    assert(st.isRepo && st.branch === 'main' && st.unstaged.some(e => e.path === 'a.txt') && st.untracked.some(e => e.path === 'new.txt'),
+      'status splits modified from untracked, and names the branch');
+    const untrackedDiff = await T.fileDiff(repo, 'new.txt', false);
+    assert(/\+fresh/.test(untrackedDiff.diff), 'an untracked file diffs as all-new');
+
+    await T.stage(repo, ['a.txt']);
+    st = await T.gitStatus(repo);
+    assert(st.staged.some(e => e.path === 'a.txt') && !st.unstaged.some(e => e.path === 'a.txt'), 'staging moves a file to staged');
+    assert(/\+two/.test((await T.fileDiff(repo, 'a.txt', true)).diff), 'the staged diff is the staged change');
+    await T.unstage(repo, ['a.txt']);
+    assert((await T.gitStatus(repo)).unstaged.some(e => e.path === 'a.txt'), 'unstaging puts it back');
+
+    let empty = '';
+    try { await T.gitCommit(repo, '   '); } catch (err) { empty = err.message; }
+    assert(/needs a message/.test(empty), 'a commit without a message is refused');
+    const done = await T.gitCommit(repo, 'second', { all: true });
+    assert(/^[0-9a-f]{4,}$/.test(done.hash) && (await T.gitStatus(repo)).untracked.length === 0, 'commit all stages everything first');
+
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'oops\n');
+    await T.discard(repo, ['a.txt']);
+    assert(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8') === 'one\ntwo\n', 'discard returns a tracked file to HEAD');
+    fs.writeFileSync(path.join(repo, 'loose.txt'), 'x');
+    let loose = '';
+    try { await T.discard(repo, ['loose.txt']); } catch (err) { loose = err.message; }
+    assert(/not tracked/.test(loose) && fs.existsSync(path.join(repo, 'loose.txt')), 'discard never deletes an untracked file');
+    let climb = '';
+    try { await T.stage(repo, ['../outside']); } catch (err) { climb = err.message; }
+    assert(/not a usable path/.test(climb), 'a path that climbs out of the repo is refused');
+
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'stashed\n');
+    await T.stashPush(repo, 'wip', true);
+    assert(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8') === 'one\ntwo\n' && (await T.stashList(repo)).length === 1, 'stash saves and cleans the tree');
+    await T.stashPop(repo, 'stash@{0}');
+    assert(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8') === 'stashed\n' && (await T.stashList(repo)).length === 0, 'stash pop brings it back');
+
+    let noRemote = '';
+    try { await T.gitPush(repo); } catch (err) { noRemote = err.message; }
+    assert(/no remote/.test(noRemote), 'push without a remote says so');
+    g('checkout', '-q', '-b', 'side'); g('commit', '-qam', 'side work'); g('checkout', '-q', 'main');
+    let unmerged = '';
+    try { await T.deleteBranch(repo, 'side'); } catch (err) { unmerged = err.message; }
+    assert(/not merged/.test(unmerged) && (await T.listBranches(repo)).branches.some(b => b.name === 'side'), 'an unmerged branch is never deleted');
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+
+  console.log('  -- MCP: a host process contributes servers for one run, with instructions the agent reads --');
+  {
+    assert(T.parseHostMcp(undefined) === null && T.parseHostMcp('not json') === null, 'no or bad AICO_HOST_MCP means no host servers');
+    const host = T.parseHostMcp(JSON.stringify({ desk: { type: 'http', url: 'http://127.0.0.1:1/mcp', headers: { Authorization: 'Bearer x' } }, bad: { type: 'stdio', command: 'x' } }));
+    assert(host && host.desk && !host.bad, 'only http/sse host servers are accepted (never a command to run)');
+    const blocks = T.buildRuntimeBlocks({
+      tools: [], mcpServers: [{ name: 'desk', config: { type: 'http' }, health: 'healthy', toolCount: 3, resourceCount: 0, lastChecked: 0, instructions: 'Call ide_describe first.' }],
+      workspace: { root: '/w' }, agents: [], skills: [], cronJobs: [], backgroundAgents: [], subAgents: [],
+    });
+    assert(/<mcp_server_instructions server="desk">\nCall ide_describe first\.\n<\/mcp_server_instructions>/.test(blocks.runtime),
+      "a server's instructions reach the agent's runtime prompt, under its name");
+    const kit = T.getWidgetSpec({ kind: 'widgets.gantt' });
+    assert(/"widget": "gantt"/.test(kit) && /options:/.test(kit), 'WidgetSpec answers for a kit widget with its options and an example');
+    assert(/stat — /.test(T.getWidgetSpec({ kind: 'widgets' })), 'the widgets block spec lists the kit');
+    assert(/mass = 0\.145 kg/.test(T.getWidgetSpec({ kind: 'calc' })) && /NEVER name a variable after a unit/.test(T.getWidgetSpec({ kind: 'physics' })),
+      'calc (and its physics alias) warns about naming variables after units');
+  }
+
   console.log('  -- Settings are saved one value at a time, and Reset really removes --');
   {
     const file = path.join(process.env.AICO_HOME, 'settings.json');

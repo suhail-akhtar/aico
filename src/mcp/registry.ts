@@ -12,6 +12,10 @@ export interface McpServerInfo {
   toolCount: number;
   resourceCount: number;
   lastChecked: number;
+  /** The server's own instructions for its tools, when it sent any. */
+  instructions?: string;
+  /** Contributed by the process hosting the engine (not in settings). */
+  host?: boolean;
 }
 
 type SubscriberFn = (servers: McpServerInfo[]) => void;
@@ -23,12 +27,25 @@ class McpServerRegistry {
   private _configs = new Map<string, McpServerConfigV2>();
   private _subscribers: SubscriberFn[] = [];
   private _healthTimer?: ReturnType<typeof setInterval>;
+  /**
+   * Servers the hosting process provides — the desktop app's IDE and browser
+   * endpoint, say. Never written to settings (its port and token are only
+   * good for this run), and kept across reloads: reloading the user's servers
+   * must not unplug the window the engine is running in.
+   */
+  private _host: Record<string, McpServerConfigV2> = {};
+
+  /** Register the host's servers and connect them now. */
+  async setHostServers(config: Record<string, McpServerConfigV2>): Promise<void> {
+    this._host = { ...config };
+    await this.loadServers(Object.fromEntries([...this._configs.entries()].filter(([n]) => !(n in this._host))));
+  }
 
   async loadServers(config: Record<string, McpServerConfigV2>): Promise<void> {
     // Stop any previously running clients
     this.stopAll();
 
-    for (const [name, serverConfig] of Object.entries(config)) {
+    for (const [name, serverConfig] of Object.entries({ ...config, ...this._host })) {
       try {
         const client = this._createClient(serverConfig);
         await client.initialize();
@@ -137,6 +154,8 @@ class McpServerRegistry {
       toolCount: this._toolCache.get(name)?.length ?? 0,
       resourceCount: this._resourceCache.get(name)?.length ?? 0,
       lastChecked: Date.now(),
+      ...(client.instructions ? { instructions: client.instructions } : {}),
+      ...(name in this._host ? { host: true } : {}),
     }));
   }
 

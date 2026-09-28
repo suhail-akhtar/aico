@@ -387,6 +387,17 @@ export const api = {
   /** Switch branch, branch from a commit, or revert one. Refused on a dirty tree. */
   gitAction: (path: string, action: 'switch' | 'branch' | 'revert', opts: { name?: string; at?: string; switchTo?: boolean }) =>
     post<BranchList & { ok: true }>('project/git-action', { path, action, ...opts }),
+  /** The working tree: staged, unstaged, untracked and conflicted files, and the upstream. */
+  gitStatus: (path: string) =>
+    get<GitStatus>(`project/git-status?${new URLSearchParams({ path }).toString()}`),
+  /** One file's diff — staged or not; an untracked file comes back as all-added. */
+  gitDiff: (path: string, file: string, staged: boolean) =>
+    get<{ diff: string; truncated: boolean }>(`project/git-diff?${new URLSearchParams({ path, file, staged: staged ? '1' : '0' }).toString()}`),
+  gitStashes: (path: string) =>
+    get<{ stashes: Array<{ ref: string; message: string; date: string }> }>(`project/git-stashes?${new URLSearchParams({ path }).toString()}`),
+  /** Every other git move: stage, unstage, discard, commit, push, pull, fetch, stash, branches, init. */
+  gitRun: (path: string, action: GitRunAction, opts: { name?: string; paths?: string[] | 'all'; message?: string; all?: boolean; includeUntracked?: boolean; ref?: string } = {}) =>
+    post<BranchList & { ok: true; detail?: unknown; status: GitStatus }>('project/git-action', { path, action, ...opts }),
   /** Remove chats for good. Running ones are refused and reported. */
   deleteSessions: (ids: string[]) =>
     post<{ deleted: string[]; skipped: Array<{ id: string; reason: string }> }>('sessions/delete', { ids }),
@@ -858,6 +869,23 @@ export interface CommitDetail {
   files: Array<{ status: string; path: string }>;
   diff: string;
   truncated: boolean;
+}
+
+export type GitRunAction = 'new-branch' | 'delete-branch' | 'stage' | 'unstage' | 'discard' | 'commit' | 'push' | 'pull' | 'fetch' | 'stash' | 'stash-pop' | 'init' | 'switch';
+
+export interface GitStatusEntry { path: string; from?: string; index: string; worktree: string }
+
+export interface GitStatus {
+  isRepo: boolean;
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  staged: GitStatusEntry[];
+  unstaged: GitStatusEntry[];
+  untracked: GitStatusEntry[];
+  conflicted: GitStatusEntry[];
+  remotes: string[];
 }
 
 export interface BranchList {

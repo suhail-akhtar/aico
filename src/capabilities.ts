@@ -180,6 +180,10 @@ export function buildRuntimeBlocks(input: RuntimeBlocksInput): RuntimeBlocks {
       `<agents>${agents}</agents>`,
       `<skills>${skills}</skills>`,
       `<cron_jobs>${cron}</cron_jobs>`,
+      // A server's own manual for its tools. Stable for the life of a
+      // connection, so it belongs in the cached prefix with the rest of this.
+      ...input.mcpServers.filter((s) => s.instructions).map((s) =>
+        `<mcp_server_instructions server="${s.name}">\n${s.instructions}\n</mcp_server_instructions>`),
       // Background and sub-agent rosters used to be listed here as well. They
       // are not any more: the `<running_work>` block built from the work
       // ledger is the one view, and it knows things these lines could not.
