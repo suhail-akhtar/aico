@@ -46,6 +46,8 @@ import {
 import { createGroup, deleteGroup, listGroups, updateGroup } from './groups.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
+import { handleCanvasRoute } from './canvas-routes.js';
+import { onCanvasChange } from '../canvas/store.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
 import { isEffortChoice } from '../../shared/reasoning.js';
@@ -211,6 +213,13 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   */
   const announceApps = (): void => hub.publishTopic('apps', 'changed', {});
   subscribeToApps(list => hub.publishTopic('apps', 'processes', { processes: list }));
+  /*
+    Canvas writes — the agent's tool and the person's editor alike — go out on
+    the session's stream, so an open editor or card refreshes the moment the
+    other side changes the document. Ephemeral like a chunk: a client that
+    missed it reads the current version when it next opens the canvas.
+  */
+  const stopCanvasEvents = onCanvasChange(change => hub.publish({ type: 'canvas', sessionId: change.sessionId, data: change }));
   /**
    * The model a turn uses when the client names none.
    *
@@ -1068,6 +1077,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
+    // Canvas documents: reads and writes, each with its own body handling.
+    if (await handleCanvasRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;
+
     // Settings, provider onboarding, and system state. Consulted before the
     // POST guard because several of these are reads.
     const systemBody = req.method === 'POST' ? await readJson(req) : {};
@@ -1644,6 +1656,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     url,
     close: async () => {
       clearInterval(heartbeat);
+      stopCanvasEvents();
       hub.closeAll();
       await runs.closeAll();
       await miniApps?.close();

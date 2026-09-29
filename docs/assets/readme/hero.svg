@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-labelledby="t d">
+  <title id="t">AICO — the open-source AI agent that runs on your computer</title>
+  <desc id="d">Terminal, web portal, VS Code and a native desktop app over one engine. Bring your own key; eight providers or fully offline.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/>
+      <stop offset="0.55" stop-color="#141B3A"/>
+      <stop offset="1" stop-color="#1F2A6B"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.18" r="0.6">
+      <stop offset="0" stop-color="#6D8BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#6D8BFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="logo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7C9CFF"/>
+      <stop offset="1" stop-color="#3B5BDB"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#B9C6FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="400" rx="28" fill="url(#bg)"/>
+  <rect width="1280" height="400" rx="28" fill="url(#glow)"/>
+  <g opacity="0.08" stroke="#FFFFFF">
+    <path d="M0 80H1280M0 160H1280M0 240H1280M0 320H1280"/>
+    <path d="M160 0V400M320 0V400M480 0V400M640 0V400M800 0V400M960 0V400M1120 0V400"/>
+  </g>
+
+  <g transform="translate(72 72)">
+    <rect width="84" height="84" rx="22" fill="url(#logo)"/>
+    <path d="M42 18 L64 66 H54 L49 54 H35 L30 66 H20 Z M38.5 46 H45.5 L42 37 Z" fill="#FFFFFF"/>
+    <text x="108" y="62" font-family="Segoe UI, Inter, -apple-system, Helvetica, Arial, sans-serif" font-size="64" font-weight="800" letter-spacing="-1" fill="url(#word)">AICO</text>
+  </g>
+
+  <text x="72" y="222" font-family="Segoe UI, Inter, -apple-system, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" fill="#FFFFFF">The open-source AI agent that runs on your computer.</text>
+  <text x="72" y="266" font-family="Segoe UI, Inter, -apple-system, Helvetica, Arial, sans-serif" font-size="21" fill="#C9D3FF">Writes and fixes real code, builds and checks apps, drives a browser, and answers with maps,</text>
+  <text x="72" y="294" font-family="Segoe UI, Inter, -apple-system, Helvetica, Arial, sans-serif" font-size="21" fill="#C9D3FF">charts and live cards — with your own key, your own history and nobody's markup.</text>
+
+  <g font-family="Segoe UI, Inter, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="600">
+    <g transform="translate(72 324)">
+      <rect width="118" height="38" rx="19" fill="#FFFFFF" fill-opacity="0.12" stroke="#FFFFFF" stroke-opacity="0.25"/>
+      <text x="59" y="25" text-anchor="middle" fill="#FFFFFF">Desktop</text>
+    </g>
+    <g transform="translate(202 324)">
+      <rect width="118" height="38" rx="19" fill="#FFFFFF" fill-opacity="0.12" stroke="#FFFFFF" stroke-opacity="0.25"/>
+      <text x="59" y="25" text-anchor="middle" fill="#FFFFFF">VS Code</text>
+    </g>
+    <g transform="translate(332 324)">
+      <rect width="130" height="38" rx="19" fill="#FFFFFF" fill-opacity="0.12" stroke="#FFFFFF" stroke-opacity="0.25"/>
+      <text x="65" y="25" text-anchor="middle" fill="#FFFFFF">Web portal</text>
+    </g>
+    <g transform="translate(474 324)">
+      <rect width="118" height="38" rx="19" fill="#FFFFFF" fill-opacity="0.12" stroke="#FFFFFF" stroke-opacity="0.25"/>
+      <text x="59" y="25" text-anchor="middle" fill="#FFFFFF">Terminal</text>
+    </g>
+    <g transform="translate(624 324)">
+      <rect width="210" height="38" rx="19" fill="#7C9CFF" fill-opacity="0.28" stroke="#9FB4FF" stroke-opacity="0.6"/>
+      <text x="105" y="25" text-anchor="middle" fill="#FFFFFF">8 providers · or offline</text>
+    </g>
+    <g transform="translate(846 324)">
+      <rect width="96" height="38" rx="19" fill="#7C9CFF" fill-opacity="0.28" stroke="#9FB4FF" stroke-opacity="0.6"/>
+      <text x="48" y="25" text-anchor="middle" fill="#FFFFFF">MIT</text>
+    </g>
+  </g>
+
+  <g transform="translate(1036 44)" font-family="Consolas, 'Cascadia Code', 'JetBrains Mono', monospace" font-size="14">
+    <rect width="196" height="160" rx="14" fill="#0B1020" fill-opacity="0.65" stroke="#FFFFFF" stroke-opacity="0.18"/>
+    <circle cx="20" cy="20" r="5" fill="#FF6B6B"/><circle cx="38" cy="20" r="5" fill="#FFD93D"/><circle cx="56" cy="20" r="5" fill="#6BCB77"/>
+    <text x="16" y="48" fill="#7C9CFF">turn/start</text>
+    <text x="16" y="70" fill="#C9D3FF">tool/call  Read</text>
+    <text x="16" y="92" fill="#C9D3FF">tool/call  Edit</text>
+    <text x="16" y="114" fill="#C9D3FF">tool/call  RunChecks</text>
+    <text x="16" y="136" fill="#6BCB77">✓ 23/23 passed</text>
+    <text x="16" y="152" fill="#7C9CFF" opacity="0">turn/end   done</text>
+  </g>
+</svg>

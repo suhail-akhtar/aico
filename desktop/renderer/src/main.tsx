@@ -21,6 +21,8 @@ import { installNotifications } from './notifications';
 import { installRendererBridge } from './bridge';
 import { installUpdateListener } from './updates';
 import { installChatRouteSync } from './chat/actions';
+import { installCanvasHost } from '@web/canvas-host';
+import { CanvasCode, useCanvasPanel } from './chat/CanvasPanel';
 
 document.documentElement.dataset.platform = String(platform);
 
@@ -96,6 +98,8 @@ async function boot(): Promise<void> {
   installRendererBridge();
   installUpdateListener();
   installChatRouteSync();
+  // Canvases open beside the chat here, and code canvases get Monaco.
+  installCanvasHost({ openPanel: ref => useCanvasPanel.getState().show(ref), CodeEditor: CanvasCode });
   desktop.onCommand((cmd) => { if (!runCommand(cmd.id, cmd.args)) console.warn('Unknown command', cmd.id); });
   // Buttons inside widgets (the kit's action row) ask through window events.
   window.addEventListener('aico:ask', (e) => {

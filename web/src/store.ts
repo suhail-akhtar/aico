@@ -31,6 +31,7 @@ import { loadDismissals, saveDismissals } from './panel-memory';
 import type { ChatMessage } from '@aico/ui';
 import { PLAN_REPLY } from './plans';
 import { shouldClearBusy, type ServerTurn } from './turn-state';
+import { emitCanvasEvent } from '../../shared/ui/canvas/host';
 
 /** The answers the plan panel can give. `amend` is not one — it sends nothing. */
 export type PlanAnswer =
@@ -1525,6 +1526,13 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       set(() => ({ goal: status === 'cleared' ? null : { text, status, since: Date.now() } }));
       return;
     }
+
+    // A canvas was written — by the agent or by an editor. Handed to the
+    // canvas components rather than kept here: the document lives on the
+    // server, and what the open editors need is the nudge to re-read it.
+    case 'canvas':
+      emitCanvasEvent(data);
+      return;
 
     case 'feedback': {
       const targetSeq = Number((data as { targetSeq?: number }).targetSeq);

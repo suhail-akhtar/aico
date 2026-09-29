@@ -588,6 +588,65 @@ name     shown instead of the file name from the path; size is bytes;
 List only files you actually wrote in this conversation. Alias: \`\`\`downloads.`,
   },
   {
+    id: 'sports',
+    languages: ['sports', 'scores', 'scoreboard'],
+    extension: 'json',
+    framed: true,
+    summary: 'a live scoreboard — game cards with crests, scores and a LIVE/FINAL/start-time state, and/or a league table '
+      + '(the SportsScores tool returns it)',
+    spec: `A scoreboard: one card per game (both sides with crest, score, winner in
+bold; a pulsing LIVE pill with the clock, FINAL, or the start in the reader's
+local time), a sideways row when there are many, and an optional league table.
+Use the SportsScores tool for live data and paste its block as it is; never
+invent or "remember" scores — if the tool could not get them, say so.
+
+{"title":"Premier League","league":"Premier League","sport":"soccer","date":"2026-09-20",
+ "games":[
+  {"id":"401879272","status":"final","start":"2026-09-20T13:00:00Z","venue":"Etihad Stadium",
+   "home":{"name":"Manchester City","short":"MNC","logo":"https://a.espncdn.com/i/teamlogos/soccer/500/382.png","score":"5","winner":true},
+   "away":{"name":"Sunderland","short":"SUN","score":"3"}},
+  {"status":"live","clock":"67'","home":{"name":"Fulham","score":"1"},"away":{"name":"Manchester United","score":"1"}},
+  {"status":"scheduled","start":"2026-10-10T11:30:00Z","home":{"name":"Arsenal"},"away":{"name":"Leeds United"},"note":"Matchday 8"}],
+ "standings":{"columns":["GP","W","D","L","GD","Pts"],"groups":[{"name":"Premier League","rows":[
+  {"team":"Manchester City","logo":"https://…/382.png","values":[5,5,0,0,"+8",15]},
+  {"team":"Arsenal","values":[5,4,0,1,"+4",12]}]}]},
+ "source":"ESPN","updatedAt":"2026-09-29T09:40:19Z"}
+
+status   scheduled | live | final | postponed
+clock    what the clock says while live ("67'", "Q3 4:12", "Top 7th"); for a
+         final, only when it adds something ("AET", "Final/OT")
+start    ISO 8601 with a zone (UTC "Z") — shown in the reader's own time
+home, away   name required; short, logo (https), score (string or number),
+         record ("12-4", or the overs in cricket), winner (true on the final's winner)
+sport    soccer and cricket list the home side first; basketball, football,
+         baseball and hockey list the away side first
+standings   columns are the header labels; each row's values follow them in order;
+         rows are listed in table order (position = row number)
+Needs "games" or "standings". Always give source and updatedAt — scores move.
+Aliases: \`\`\`scores, \`\`\`scoreboard.`,
+  },
+  {
+    id: 'canvas',
+    languages: ['canvas'],
+    extension: 'json',
+    // The card is its own chrome; the frame's copy/download would act on a
+    // three-field reference, not on the document.
+    framed: false,
+    summary: 'a card that opens a Canvas (the Canvas tool returns it) — for anything the user will iterate on — '
+      + 'essays, emails, reports, specs, a code file — create a Canvas instead of pasting long text into the chat',
+    spec: `A reference card for a canvas: a document or code file the user edits
+directly beside the chat. The Canvas tool creates it and returns this block —
+paste it as it is. It carries no content; the card reads the live document.
+
+{"id":"cv-3f9a01bc2e","title":"Launch announcement","kind":"document"}
+
+id      required — from Canvas create/list; never invent one
+kind    document (Markdown) or code; language for code ("python")
+Write the text with the Canvas tool (create, then edit/update), never inside
+this block and never pasted again into the reply. The user may edit the canvas
+between turns, so read it before changing it.`,
+  },
+  {
     id: 'html',
     languages: ['html', 'htm', 'svg', 'preview'],
     extension: 'html',

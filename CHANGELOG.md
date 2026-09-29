@@ -3,6 +3,41 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.26.0 — 2026-09-29
+
+Write together in a canvas, follow live sports, and a README that says what AICO
+is and what it has proven.
+
+### Added
+
+- **Canvas documents** (every client; side panel in the desktop). The agent
+  creates a document or code file with the new `Canvas` tool (`create`, `read`,
+  `update`, `edit` by exact find/replace, `list`) and puts a small reference card
+  in its reply — the document is the single source of truth, not the transcript.
+  You edit it directly: Markdown source with a live preview (rendered by the chat's
+  own renderer) and a formatting toolbar, or Monaco for code in the desktop.
+  Autosave, 50-version history with who wrote each (agent or you), restore,
+  copy, download, and **Ask AI** on a selection (plus quick actions). Writes are
+  optimistic-concurrency checked both ways: the agent must name the version it
+  read, and a stale save from either side is refused with the latest text, so
+  nobody's edit is silently overwritten. Every change is pushed live to open
+  clients. Routes `canvas/list|get|save|restore`; stored per session.
+  (Source editing rather than WYSIWYG on purpose: a rich-text round trip rewrites
+  lines you never touched and breaks the agent's next exact edit.)
+- **Live sports** — the `SportsScores` tool (ESPN's public scoreboards and
+  standings for 14 soccer leagues, NBA, WNBA, NFL, college sports, MLB, NHL and 9
+  cricket leagues; TheSportsDB for team lookups and national cricket sides) and
+  the `sports` widget: game cards with crests, LIVE pill and clock, FINAL or local
+  start time, a carousel for many games, and league tables. Every result names
+  its source and time; the model is told never to invent a score.
+
+### Changed
+
+- **README** rewritten: what AICO is, downloads for every platform, measured
+  results as infographics (SWE-bench Lite 73/80, prompt-cache hit rates,
+  long-horizon correctness), token saving and long-horizon design, the software
+  engineering evidence, architecture diagrams and screenshots of the desktop app.
+
 ## 0.25.0 — 2026-09-29
 
 Answers about the world, drawn like it: maps of real places, weather, currency,

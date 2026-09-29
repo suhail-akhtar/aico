@@ -1,6 +1,6 @@
 /*
  * The rich answer blocks: places, images, products, video, news, draft,
- * weather, currency, files.
+ * weather, currency, files, sports.
  *
  * Plain CSS rather than utility classes, scoped under `.aw`, because these
  * render in three builds (web, desktop, VS Code panel) whose Tailwind content
@@ -679,3 +679,98 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .aw .leaflet-tile-pan
 }
 .aw .aw-file-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .aw .aw-file-actions .aw-btn { height: 28px; margin-right: 2px; }
+
+/* ── Sports ─────────────────────────────────────────────────────── */
+.aw.aw-sports {
+  --aw-live: #d92d20;
+  --aw-live-soft: rgba(217, 45, 32, 0.1);
+  border: 1px solid var(--aw-line); border-radius: 14px; padding: 14px; background: var(--aw-card);
+}
+:root[data-theme='dark'] .aw.aw-sports,
+.dark .aw.aw-sports,
+body.vscode-dark .aw.aw-sports,
+body.vscode-high-contrast:not(.vscode-high-contrast-light) .aw.aw-sports {
+  --aw-live: #ff6b5f;
+  --aw-live-soft: rgba(255, 107, 95, 0.14);
+}
+.aw .aw-sp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 0 2px 10px; }
+.aw .aw-sp-titles { display: flex; flex-direction: column; min-width: 0; }
+.aw .aw-sp-title { font-size: 15px; font-weight: 650; }
+.aw .aw-sp-titles .aw-muted { font-size: 12px; }
+.aw .aw-sp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.aw .aw-sp-row .aw-sp-card { width: 236px; }
+.aw .aw-sp-card {
+  display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 10px 12px 11px;
+  border: 1px solid var(--aw-line); border-radius: 12px; background: var(--aw-card);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.aw a.aw-sp-card:hover { border-color: var(--aico-text-muted); box-shadow: var(--aw-shadow); }
+.aw .aw-sp-card.is-live { border-color: color-mix(in srgb, var(--aw-live) 40%, var(--aw-line)); }
+.aw .aw-sp-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; }
+.aw .aw-sp-note { font-size: 11px; color: var(--aico-text-muted); text-align: right; }
+.aw .aw-sp-state { font-size: 11px; font-weight: 650; letter-spacing: 0.03em; text-transform: uppercase; color: var(--aico-text-secondary); white-space: nowrap; }
+.aw .aw-sp-state.is-soon { text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--aico-text-primary); }
+.aw .aw-sp-state.is-off { color: var(--aico-danger); }
+.aw .aw-sp-live {
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; flex: none;
+  border-radius: 999px; background: var(--aw-live-soft); color: var(--aw-live);
+  font-size: 11px; font-weight: 750; letter-spacing: 0.04em; white-space: nowrap;
+}
+.aw .aw-sp-live.is-head { height: 22px; font-weight: 650; letter-spacing: 0; }
+.aw .aw-sp-clock { font-weight: 600; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.aw .aw-sp-dot {
+  position: relative; width: 6px; height: 6px; border-radius: 50%; background: var(--aw-live); flex: none;
+}
+.aw .aw-sp-dot::after {
+  content: ''; position: absolute; inset: -3px; border-radius: 50%; background: var(--aw-live);
+  opacity: 0.45; animation: aw-sp-pulse 1.6s ease-out infinite;
+}
+@keyframes aw-sp-pulse { 0% { transform: scale(0.4); opacity: 0.5; } 100% { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .aw .aw-sp-dot::after { animation: none; opacity: 0; } }
+.aw .aw-sp-side { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 9px; font-size: 13.5px; }
+.aw .aw-sp-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.aw .aw-sp-record { font-size: 11px; color: var(--aico-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aw .aw-sp-score { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.aw .aw-sp-side.is-winner .aw-sp-name > :first-child,
+.aw .aw-sp-side.is-winner .aw-sp-score { font-weight: 750; }
+.aw .aw-sp-side.is-dim { color: var(--aico-text-muted); }
+.aw .aw-sp-venue { font-size: 11px; color: var(--aico-text-muted); margin-top: -1px; }
+.aw .aw-sp-crest { display: inline-grid; place-items: center; flex: none; }
+.aw .aw-sp-crest img { width: 100%; height: 100%; object-fit: contain; }
+.aw .aw-sp-badge {
+  display: inline-grid; place-items: center; border-radius: 50%;
+  background: var(--aico-accent-soft); color: var(--aico-accent); font-weight: 700; line-height: 1;
+}
+.aw .aw-sp-standings.is-spaced { margin-top: 14px; }
+.aw .aw-sp-group + .aw-sp-group { margin-top: 12px; }
+.aw .aw-sp-group-name { font-size: 12px; font-weight: 650; color: var(--aico-text-secondary); margin: 0 2px 4px; }
+.aw .aw-sp-scroll { overflow-x: auto; scrollbar-width: thin; }
+.aw.aw-sports .aw-sp-table { width: 100%; margin: 0; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.aw.aw-sports .aw-sp-table th,
+.aw.aw-sports .aw-sp-table td {
+  padding: 6px 8px; text-align: right; white-space: nowrap; vertical-align: middle;
+  border-bottom: 1px solid var(--aw-soft);
+}
+.aw.aw-sports .aw-sp-table th {
+  font-size: 11px; font-weight: 600; color: var(--aico-text-muted); border-bottom-color: var(--aw-line);
+}
+.aw.aw-sports .aw-sp-table tr:last-child td { border-bottom: 0; }
+/* Position and team stay put while the numbers scroll under them on a phone. */
+.aw.aw-sports .aw-sp-table .aw-sp-pos {
+  position: sticky; left: 0; z-index: 1; box-sizing: border-box; width: 28px; min-width: 28px; padding-left: 2px;
+  text-align: left; color: var(--aico-text-muted); background: var(--aw-card);
+}
+.aw.aw-sports .aw-sp-table .aw-sp-team {
+  position: sticky; left: 28px; z-index: 1; width: 100%; text-align: left; background: var(--aw-card);
+}
+.aw.aw-sports .aw-sp-table td.is-key { font-weight: 700; }
+.aw .aw-sp-team-cell { display: flex; align-items: center; gap: 8px; min-width: 130px; max-width: 260px; font-weight: 500; }
+@media (max-width: 480px) {
+  .aw.aw-sports { padding: 12px 10px; }
+  .aw .aw-sp-row .aw-sp-card { width: 214px; }
+  /* Narrow enough that a six-column table keeps its points column on screen. */
+  .aw.aw-sports .aw-sp-table th, .aw.aw-sports .aw-sp-table td { padding: 6px 4px; }
+  .aw.aw-sports .aw-sp-table .aw-sp-pos { width: 22px; min-width: 22px; }
+  .aw.aw-sports .aw-sp-table .aw-sp-team { left: 22px; }
+  .aw .aw-sp-team-cell { gap: 6px; min-width: 80px; max-width: 104px; }
+}

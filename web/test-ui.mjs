@@ -2299,6 +2299,54 @@ console.log('\n-- Rich answer blocks: parsing, links, arithmetic --');
   test('files: name from a Windows path', () => assert.equal(rich.parseFiles('{"files":["C:\\\\work\\\\q3\\\\report.pdf"]}').files[0].name, 'report.pdf'));
   test('formatBytes', () => { assert.equal(rich.formatBytes(512), '512 B'); assert.equal(rich.formatBytes(482133), '471 KB'); assert.equal(rich.formatBytes(5_302_112), '5.1 MB'); });
   test('files: a pathless file names the index', () => throwsLike(() => rich.parseFiles('{"files":[{"name":"x"}]}'), /files\[0\] has no "path"/));
+
+  // sports
+  const sp = rich.parseSports(JSON.stringify({ league: 'Premier League', sport: 'Soccer', date: '2026-09-20', source: 'ESPN', updatedAt: '2026-09-29T09:40:19Z', games: [
+    { id: 'a', status: 'final', home: { name: 'Manchester City', score: 5, logo: 'https://a.espncdn.com/382.png' }, away: { name: 'Sunderland', score: '3' } },
+    { status: 'LIVE', clock: "67'", home: { name: 'Fulham', score: 1, winner: true }, away: { name: 'Chelsea', score: 1 } },
+    { status: 'scheduled', start: '2026-10-10T11:30:00Z', home: { name: 'Arsenal', score: 0 }, away: 'Leeds United' },
+    { status: 'STATUS_POSTPONED', home: { name: 'A' }, away: { name: 'B', logo: 'javascript:alert(1)' } },
+  ] }));
+  test('sports: games keep their order and ids (index when absent)', () => assert.deepEqual(sp.games.map(g => g.id), ['a', '1', '2', '3']));
+  test('sports: statuses are normalised', () => assert.deepEqual(sp.games.map(g => g.status), ['final', 'live', 'scheduled', 'postponed']));
+  test('sports: scores become strings', () => { assert.equal(sp.games[0].home.score, '5'); assert.equal(sp.games[0].away.score, '3'); });
+  test('sports: a final with plain numbers infers the winner', () => { assert.equal(sp.games[0].home.winner, true); assert.equal(sp.games[0].away.winner, false); });
+  test('sports: a live game has no winner, whatever the block says', () => assert.equal(sp.games[1].home.winner, false));
+  test('sports: a scheduled game drops a pre-match "0"', () => assert.equal(sp.games[2].home.score, undefined));
+  test('sports: a side may be a bare name', () => assert.equal(sp.games[2].away.name, 'Leeds United'));
+  test('sports: unsafe logos are dropped', () => { assert.equal(sp.games[3].away.logo, undefined); assert.equal(sp.games[0].home.logo, 'https://a.espncdn.com/382.png'); });
+  test('sports: sport is lower-cased; source and updatedAt kept', () => { assert.equal(sp.sport, 'soccer'); assert.equal(sp.source, 'ESPN'); assert.equal(sp.updatedAt, '2026-09-29T09:40:19Z'); });
+  test('sports: a cricket final with "161/5" names no winner by arithmetic', () => {
+    const c = rich.parseSports('{"games":[{"status":"final","home":{"name":"RCB","score":"161/5"},"away":{"name":"GT","score":"155/8"}}]}');
+    assert.equal(c.games[0].home.winner || c.games[0].away.winner, false);
+  });
+  test('sports: status synonyms', () => {
+    assert.equal(rich.sportsStatus('in progress'), 'live'); assert.equal(rich.sportsStatus('HT'), 'live'); assert.equal(rich.sportsStatus('FT'), 'final');
+    assert.equal(rich.sportsStatus('Final/OT'), 'final'); assert.equal(rich.sportsStatus('Cancelled'), 'postponed'); assert.equal(rich.sportsStatus('pre'), 'scheduled');
+    assert.equal(rich.sportsStatus(undefined), 'scheduled');
+  });
+  test('sports: a bare array is a list of games', () => assert.equal(rich.parseSports('[{"home":"A","away":"B"}]').games.length, 1));
+  test('sports: homeTeam/awayTeam are accepted', () => assert.equal(rich.parseSports('{"matches":[{"homeTeam":{"name":"A"},"awayTeam":{"name":"B"}}]}').games[0].home.name, 'A'));
+  test('sports: standings alone are enough', () => {
+    const t = rich.parseSports('{"standings":{"columns":["P","Pts"],"groups":[{"name":"Group A","rows":[{"team":"X","values":[3,9]},{"team":"Y","values":[3,null]}]}]}}');
+    assert.equal(t.games.length, 0); assert.deepEqual(t.standings.groups[0].rows[0].values, ['3', '9']); assert.equal(t.standings.groups[0].rows[1].values[1], '–');
+  });
+  test('sports: standings rows without groups', () => assert.equal(rich.parseSports('{"standings":{"columns":["Pts"],"rows":[{"team":"X","values":[1]}]}}').standings.groups.length, 1));
+  test('sports: nothing to draw names both fields', () => throwsLike(() => rich.parseSports('{"league":"NBA"}'), /neither "games" nor "standings"/));
+  test('sports: a nameless side names the game', () => throwsLike(() => rich.parseSports('{"games":[{"home":{"score":1},"away":{"name":"B"}}]}'), /games\[0\]\.home has no "name"/));
+  test('sports: "games" must be an array', () => throwsLike(() => rich.parseSports('{"games":{"home":"A"}}'), /"games" must be an array/));
+  test('sports: standings need columns', () => throwsLike(() => rich.parseSports('{"standings":{"rows":[{"team":"X","values":[1]}]}}'), /no "columns"/));
+  test('sports: a teamless standings row names its index', () => throwsLike(() => rich.parseSports('{"standings":{"columns":["P"],"rows":[{"values":[1]}]}}'), /rows\[0\] has no "team"/));
+  test('sports: bad JSON says what is expected', () => throwsLike(() => rich.parseSports('{"games":['), /not valid JSON.*"games"/));
+  test('sports: soccer and cricket list home first, the American sports away first', () => {
+    assert.equal(rich.homeFirst('soccer'), true); assert.equal(rich.homeFirst('cricket'), true); assert.equal(rich.homeFirst(undefined), true);
+    assert.equal(rich.homeFirst('basketball'), false); assert.equal(rich.homeFirst('baseball'), false); assert.equal(rich.homeFirst('hockey'), false);
+  });
+  test('startLabel: today is just the time', () => assert.equal(rich.startLabel('2026-09-29T18:30:00Z', Date.parse('2026-09-29T09:00:00Z'), 'en-US', 'UTC'), '6:30 PM'));
+  test('startLabel: tomorrow says so', () => assert.equal(rich.startLabel('2026-09-30T18:30:00Z', Date.parse('2026-09-29T09:00:00Z'), 'en-US', 'UTC'), 'Tomorrow 6:30 PM'));
+  test('startLabel: this week is a weekday', () => assert.equal(rich.startLabel('2026-10-02T18:30:00Z', Date.parse('2026-09-29T09:00:00Z'), 'en-US', 'UTC'), 'Fri 6:30 PM'));
+  test('startLabel: later is a date', () => assert.equal(rich.startLabel('2026-10-10T11:30:00Z', Date.parse('2026-09-29T09:00:00Z'), 'en-US', 'UTC'), 'Oct 10 11:30 AM'));
+  test('startLabel: in the reader\'s zone, not UTC', () => assert.equal(rich.startLabel('2026-09-29T20:00:00Z', Date.parse('2026-09-29T09:00:00Z'), 'en-US', 'Asia/Karachi'), 'Tomorrow 1:00 AM'));
 }
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

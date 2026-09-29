@@ -1,6 +1,6 @@
 /**
  * The rich answer blocks — places, images, products, video, news, draft,
- * weather, currency, files — as data: parsing, normalising, and the small
+ * weather, currency, files, sports — as data: parsing, normalising, and the small
  * pieces of arithmetic each one needs.
  *
  * No React and no DOM, so every rule here is tested in Node and the components
@@ -901,4 +901,166 @@ export function parseFiles(source: string): FilesSpec {
     };
   });
   return { title: isObj(root) ? str(root.title) : undefined, files };
+}
+
+// ── sports ──────────────────────────────────────────────────────────
+
+export type SportsStatus = 'scheduled' | 'live' | 'final' | 'postponed';
+
+export interface SportsSide {
+  name: string;
+  short?: string;
+  logo?: string;
+  score?: string;
+  record?: string;
+  winner: boolean;
+}
+
+export interface SportsGame {
+  id: string;
+  status: SportsStatus;
+  /** What the clock says: "67'", "Q3 4:12", "Top 7th"; for a final, "AET" or "Final/OT". */
+  clock?: string;
+  start?: string;
+  venue?: string;
+  home: SportsSide;
+  away: SportsSide;
+  note?: string;
+  url?: string;
+}
+
+export interface StandingsRow { team: string; logo?: string; values: string[] }
+export interface SportsStandings { columns: string[]; groups: Array<{ name?: string; rows: StandingsRow[] }> }
+
+export interface SportsSpec {
+  title?: string;
+  league?: string;
+  sport?: string;
+  date?: string;
+  games: SportsGame[];
+  standings?: SportsStandings;
+  source?: string;
+  updatedAt?: string;
+}
+
+const SPORTS_SHAPE = '{"league":"Premier League","games":[{"status":"final","home":{"name":"Arsenal","score":2},"away":{"name":"Chelsea","score":1}}]}';
+const STANDINGS_SHAPE = '{"columns":["P","W","D","L","Pts"],"groups":[{"name":"…","rows":[{"team":"…","values":[5,4,0,1,12]}]}]}';
+
+/** Whatever a feed calls a game's state → one of the card's four. */
+export function sportsStatus(v: unknown): SportsStatus {
+  const s = str(v)?.toLowerCase().replace(/[\s_-]+/g, '');
+  if (!s) return 'scheduled';
+  if (/^(status)?(postponed|cancel|suspended|delayed|abandoned|forfeit)/.test(s)) return 'postponed';
+  if (/^(status)?(live|inprogress|in|playing|halftime|ht|ongoing|underway)$/.test(s)) return 'live';
+  if (/^(status)?(final|ft|post|completed?|finished|ended|result|aet|fulltime)/.test(s)) return 'final';
+  return 'scheduled';
+}
+
+function sportsSide(v: unknown, where: string): SportsSide {
+  if (typeof v === 'string' && v.trim()) return { name: v.trim(), winner: false };
+  if (!isObj(v)) throw new Error(`${where} must be an object with a "name" — expected ${SPORTS_SHAPE}`);
+  const name = str(pick(v, 'name', 'team', 'displayName', 'shortName', 'abbreviation'));
+  if (!name) throw new Error(`${where} has no "name"`);
+  return {
+    name,
+    short: str(pick(v, 'short', 'abbreviation', 'abbr', 'code')),
+    logo: safeUrl(pick(v, 'logo', 'badge', 'crest', 'image'), { relative: true, data: true }),
+    score: str(pick(v, 'score', 'points', 'goals', 'runs')),
+    record: str(pick(v, 'record', 'detail', 'summary')),
+    winner: v.winner === true || v.winner === 'true',
+  };
+}
+
+function parseStandings(v: unknown): SportsStandings | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!isObj(v)) throw new Error(`"standings" must be an object — expected ${STANDINGS_SHAPE}`);
+  const columns = (Array.isArray(v.columns) ? v.columns : []).map(c => str(c) ?? '').filter(Boolean);
+  const rawGroups: unknown[] = Array.isArray(v.groups) ? v.groups : Array.isArray(v.rows) ? [{ rows: v.rows }] : [];
+  const groups = rawGroups.filter(isObj).map((g, gi) => ({
+    name: str(g.name),
+    rows: (Array.isArray(g.rows) ? g.rows : []).map((r, ri) => {
+      if (!isObj(r)) throw new Error(`standings.groups[${gi}].rows[${ri}] is not an object`);
+      const team = str(pick(r, 'team', 'name'));
+      if (!team) throw new Error(`standings.groups[${gi}].rows[${ri}] has no "team"`);
+      return {
+        team,
+        logo: safeUrl(pick(r, 'logo', 'badge', 'crest'), { relative: true, data: true }),
+        values: (Array.isArray(r.values) ? r.values : []).map(x => str(x) ?? '–'),
+      };
+    }),
+  })).filter(g => g.rows.length > 0);
+  if (groups.length === 0) throw new Error(`"standings" has no rows — expected ${STANDINGS_SHAPE}`);
+  if (columns.length === 0) throw new Error(`"standings" has no "columns" (the header labels) — expected ${STANDINGS_SHAPE}`);
+  return { columns, groups };
+}
+
+export function parseSports(source: string): SportsSpec {
+  const root = parseJson(source, 'sports', SPORTS_SHAPE);
+  if (!isObj(root) && !Array.isArray(root)) throw new Error(`the sports block must be a JSON object — expected ${SPORTS_SHAPE}`);
+  const obj: Json = Array.isArray(root) ? { games: root } : root;
+  const standings = parseStandings(pick(obj, 'standings', 'table'));
+  const rawGames = pick(obj, 'games', 'events', 'matches', 'fixtures', 'scores');
+  if (rawGames !== undefined && !Array.isArray(rawGames)) throw new Error(`"games" must be an array — expected ${SPORTS_SHAPE}`);
+  const games: SportsGame[] = ((rawGames as unknown[] | undefined) ?? []).map((g, i) => {
+    if (!isObj(g)) throw new Error(`games[${i}] is not an object`);
+    const status = sportsStatus(pick(g, 'status', 'state'));
+    const home = sportsSide(pick(g, 'home', 'homeTeam'), `games[${i}].home`);
+    const away = sportsSide(pick(g, 'away', 'awayTeam'), `games[${i}].away`);
+    if (status === 'scheduled') { home.score = undefined; away.score = undefined; }
+    if (status !== 'final') { home.winner = false; away.winner = false; }
+    // A final with plain numbers and nobody marked: the higher score won.
+    if (status === 'final' && !home.winner && !away.winner) {
+      const h = num(home.score), a = num(away.score);
+      if (h !== undefined && a !== undefined && h !== a) (h > a ? home : away).winner = true;
+    }
+    return {
+      id: str(g.id) ?? String(i),
+      status,
+      clock: str(pick(g, 'clock', 'minute', 'period')),
+      start: str(pick(g, 'start', 'date', 'kickoff', 'startTime')),
+      venue: str(g.venue),
+      home,
+      away,
+      note: str(pick(g, 'note', 'round', 'headline')),
+      url: safeUrl(pick(g, 'url', 'link')),
+    };
+  });
+  if (games.length === 0 && !standings) {
+    throw new Error(`the sports block has neither "games" nor "standings" — expected ${SPORTS_SHAPE}`);
+  }
+  return {
+    title: str(obj.title),
+    league: str(pick(obj, 'league', 'competition')),
+    sport: str(obj.sport)?.toLowerCase(),
+    date: str(obj.date),
+    games,
+    standings,
+    source: str(obj.source),
+    updatedAt: str(pick(obj, 'updatedAt', 'updated', 'asOf')),
+  };
+}
+
+/** Whether a sport lists the home side first (soccer, cricket, rugby) or the away side (the American way). */
+export function homeFirst(sport: string | undefined): boolean {
+  return !/^(basketball|football|american football|baseball|hockey|ice hockey|nba|wnba|nfl|mlb|nhl)$/i.test(sport ?? '');
+}
+
+/**
+ * A scheduled game's start in the reader's time: "7:30 PM" today, "Tomorrow
+ * 7:30 PM", "Tue 7:30 PM" within the week, "12 Oct 7:30 PM" beyond.
+ * `timeZone` is for tests; the card uses the reader's own.
+ */
+export function startLabel(start: string | undefined, now: number = Date.now(), locale?: string, timeZone?: string): string | undefined {
+  if (!start) return undefined;
+  const t = Date.parse(start);
+  if (Number.isNaN(t)) return start;
+  const tz = timeZone ? { timeZone } : {};
+  const time = new Date(t).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit', ...tz });
+  const dayKey = (ms: number): string => new Date(ms).toLocaleDateString('en-CA', tz);
+  const day = 86_400_000;
+  if (dayKey(t) === dayKey(now)) return time;
+  if (dayKey(t) === dayKey(now + day)) return `Tomorrow ${time}`;
+  if (dayKey(t) === dayKey(now - day)) return `Yesterday ${time}`;
+  if (Math.abs(t - now) < 6 * day) return `${new Date(t).toLocaleDateString(locale, { weekday: 'short', ...tz })} ${time}`;
+  return `${new Date(t).toLocaleDateString(locale, { day: 'numeric', month: 'short', ...tz })} ${time}`;
 }

@@ -36,3 +36,8 @@ export { ToolCallCard } from './ToolCallCard';
 export { formatResult } from './tool-result';
 export { MessageBubble } from './MessageBubble';
 export { setMediaUrlResolver, mediaUrl } from './media';
+// The canvas seam: each client registers how cards and editors reach the engine.
+export { setCanvasHost, getCanvasHost, emitCanvasEvent, onCanvasEvent } from './canvas/host';
+export type {
+  CanvasHost, CanvasDoc, CanvasSummary, CanvasRef, CanvasChange, CanvasWriteResult, CanvasCodeEditorProps, CanvasVersion,
+} from './canvas/host';

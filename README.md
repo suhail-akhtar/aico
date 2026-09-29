@@ -1,554 +1,431 @@
-# aico — open-source AI coding agent
+<div align="center">
 
-An **AI coding agent** for the terminal, a local web portal and a native
-**VS Code** panel, with a durable session log at its core. Self-hosted and MIT
-licensed: **bring your own API key** for OpenAI, Anthropic, OpenRouter, Google
-Gemini, Moonshot Kimi, Z.AI (GLM) or DeepSeek — or run it entirely offline against a local
-**Ollama** model.
+<img src="docs/assets/readme/hero.svg" alt="AICO — the open-source AI agent that runs on your computer" width="100%">
 
-A self-hosted, open-source alternative to **Claude Code**, **Codex**,
-**Devin**, **Replit Agent**, **Lovable** and **Bolt.new** — a real coding
-agent (terminal, web portal, VS Code) plus a template-or-custom-stack app
-builder in one, for people who want to keep their own key, their own git
-history and their own code rather than pay a platform's markup on top of the
-model.
+<br>
 
-It opens what it builds in a real browser before calling a turn done, keeps one
-supervised ledger of everything running in the background, speaks **MCP** so
-another AI can hand it work, turns your corrections into knowledge it keeps, and
-can measure its own skills against tasks with known answers.
+[![Release](https://img.shields.io/github/v/release/suhail-akhtar/aico?label=release&color=3B5BDB)](https://github.com/suhail-akhtar/aico/releases/latest)
+[![CI](https://github.com/suhail-akhtar/aico/actions/workflows/ci.yml/badge.svg)](https://github.com/suhail-akhtar/aico/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/github/downloads/suhail-akhtar/aico/total?color=7048E8)](https://github.com/suhail-akhtar/aico/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2f9e44)](LICENSE)
+![Platforms](https://img.shields.io/badge/desktop-Windows%20%C2%B7%20Linux-0B1020)
+![Node](https://img.shields.io/badge/node-22.5%2B-339933)
 
-```
-  ✻ aico  (AI Coder)
+**[⬇ Download the desktop app](#-download)** &nbsp;·&nbsp;
+**[Website](https://suhail-akhtar.github.io/aico/)** &nbsp;·&nbsp;
+**[Guide](GUIDE.md)** &nbsp;·&nbsp;
+**[How it compares](https://suhail-akhtar.github.io/aico/compare.html)** &nbsp;·&nbsp;
+**[Changelog](CHANGELOG.md)**
 
-  Provider: openai
-  Model:    gpt-5.6-terra
-  Session:  a3f19c
-  CWD:      my-project
-
-  Type a message, /help for commands, or exit to quit.
-
-❯ _
-```
-
-**Status:** `0.25.0`. Used daily, tested hard, not yet 1.0.
-
-**Website:** <https://suhail-akhtar.github.io/aico/> — install, providers, the web
-workspace, [VS Code](https://suhail-akhtar.github.io/aico/vscode.html),
-background supervision, visuals and Apps.
-
-**How does it compare to Claude Code, Codex, OpenCode, Aider or Cline — or to
-Devin, Replit Agent, Lovable and Bolt.new?**
-[There is an honest page for that](https://suhail-akhtar.github.io/aico/compare.html),
-including where those are clearly ahead — cost structure, ownership and
-model choice are where aico differs; hours of real-world use and
-independently-*audited* verification are where it does not, yet. It does
-have a real, self-run number: **73 of 80 (91%) real SWE-bench Lite
-instances resolved**, across two independent random samples, working
-blind — [methodology and full evidence in the
-repo](benchmarks/swebench-lite/README.md).
-
-New here? [**GUIDE.md**](GUIDE.md) walks through actually using it — the web
-client, planning before building, what the checks are doing when they push back,
-and what to do when something goes wrong.
+</div>
 
 ---
 
-### npx
+**AICO is an AI agent that works on your computer, for you, with your own key.**
+It writes and fixes real code, plans and builds whole apps and proves they work in
+a real browser, drives a browser of its own, runs long jobs without losing the
+thread — and answers everyday questions with maps, charts, forecasts, videos and
+documents you can edit. One engine, four ways in: a **native desktop app**,
+**VS Code**, a **local web portal** and the **terminal**.
 
-```sh
-npx github:suhail-akhtar/aico#v0.25.0 serve
-```
+It is built around one idea other agents skip: **every request is derived from an
+append-only event log.** That single decision is why its prompt cache hits
+**79–96%** of the time, why it can run for hours without forgetting what you asked,
+why you can steer it mid-run, and why every answer can show exactly what it read.
 
-## Why this one
+<div align="center">
+<img src="docs/assets/readme/numbers.svg" alt="By the numbers: 91% of 80 real GitHub issues resolved (SWE-bench Lite, self-run); 96% prompt-cache hit on a long run; a cached DeepSeek token costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 3,900+ automated checks" width="100%">
+</div>
 
-Most agent CLIs keep the conversation as a list of strings and re-send it each
-turn. aico keeps an **append-only event log** and derives every request from it.
-That one decision is what the rest of the design rests on:
-
-| Because requests derive from a log… | You get |
-|---|---|
-| Tool calls and results stay structured across turns | The model can reason about what a tool returned three turns ago |
-| The prompt prefix is append-only | Provider prompt caching actually hits — **79–91% measured** |
-| History is addressable by sequence number | Resume, fork, and non-destructive compaction |
-| Input can be queued against a step boundary | **Steer a run mid-flight** instead of cancelling it |
-| Every fact is an event | Replay, audit, and runtime invariants that catch corruption |
-
-A real session log looks like this:
-
-```
-  1 request/header     openai/gpt-5.6-terra tools=41
-  2 turn/start         {"turn":1}
-  3 user/message       "fix the failing test"        src=human
-  4 step/start         {"turn":1,"step":1}
-  5 assistant/message  calls=1  usage=5537/69
-  6 tool/call          Bash {"command":"node test.mjs"}
-  7 tool/result        Bash -> "AssertionError…"     <-seq6
-  8 step/end
-  …
- 27 turn/end           {"kind":"completed"}
-```
+<sub>Methods and raw evidence: [SWE-bench Lite probes](benchmarks/swebench-lite/README.md) ·
+[long-horizon runs](benchmarks/long-horizon/README.md) ·
+[custom-stack architecture probe](benchmarks/custom-app-architecture/README.md) ·
+[prompt caching](#-token-saving-by-design). Self-run, reproducible, and honest about
+their limits — none of these is an official leaderboard submission.</sub>
 
 ---
 
-## Install
+## ⬇ Download
 
-Run the latest release without installing anything:
+| | Get it | Notes |
+|---|---|---|
+| **Windows** (10/11, x64) | [**AICO-Setup-0.26.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.26.0/AICO-Setup-0.26.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
+| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.26.0/AICO-0.26.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.26.0/AICO-0.26.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
+| **VS Code** | [**aico-vscode-0.6.22.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.26.0/aico-vscode-0.6.22.vsix) | `code --install-extension aico-vscode-0.6.22.vsix` |
+| **Web portal + terminal** | `npx github:suhail-akhtar/aico#v0.26.0 serve` | Node 22.5+; nothing else to install |
 
-```sh
-npx github:suhail-akhtar/aico#v0.25.0 serve
+Every build: **[latest release](https://github.com/suhail-akhtar/aico/releases/latest)**.
+The desktop app needs no Node install — the engine runs inside it — and shares
+`~/.aico` (chats, keys, skills, settings) with every other way in.
+
+---
+
+## ✨ What makes it different
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 💸 Token-saving by design
+Requests are built from an append-only log, so the prompt prefix never changes
+behind the model's back and **provider prompt caches actually hit — 79–96%
+measured.** On DeepSeek a cached token costs **1/50** of a fresh one; on OpenAI
+and Anthropic, 1/10. Old tool output is masked in batches (so the cache breaks
+rarely), not re-sent forever. [How →](#-token-saving-by-design)
+
+</td>
+<td width="50%" valign="top">
+
+### 🧭 Long-horizon runs that stay correct
+Before every step the loop measures the next request and, cheapest first, masks
+stale tool output, condenses earlier steps into a handoff note that keeps **your
+words verbatim**, the plan, the todo list and every file touched — never a lossy
+summary of a summary. **140 of 140 values correct** across long runs on two
+models, with peak context **halved**. [How →](#-long-horizon-runs)
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🛠 Real software engineering, measured
+**73 of 80 real GitHub issues resolved (91%)** from SWE-bench Lite — django,
+sympy, scikit-learn, matplotlib, pytest, sphinx, requests, flask… — working
+blind, graded by each project's own hidden tests. Greenfield apps from ambiguous
+briefs: **4 of 5 clean (17/17 checks)**. A hidden 23-test suite: **23/23** on two
+models. [Evidence →](#-software-engineering-proof)
+
+</td>
+<td valign="top">
+
+### ✅ It checks its own work
+A turn that built a web page **cannot end** until the page was opened in a real
+browser and passed: no uncaught errors, the canvas actually drawn, and every
+control *you* named actually doing something. Reading the code it just wrote
+doesn't count. Plus `Read`-before-`Edit` enforced, a repeat-loop guard, and
+spend caps.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🗺 Answers you can use, not just read
+Maps of real places with an "Open now" filter, weather, currency, live sports
+scores, YouTube, products, news, **editable canvas documents**, generated
+images, 54 dashboard widgets, charts, diagrams, and maths that is **computed**,
+not written. Every answer shows its **sources** — the pages it actually read.
+
+</td>
+<td valign="top">
+
+### 🔑 Yours, all the way down
+**Your key** (OpenAI, Anthropic, Gemini, OpenRouter, DeepSeek, Kimi, Z.AI, or
+**offline with Ollama**), your git history, your files, your machine. MIT
+licensed. No platform markup on top of the model. Plugins for every piece, and
+an agent that can write them for you.
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🖥 The desktop app
+
+A ChatGPT-style chat in front, an IDE behind it, and a browser the agent drives —
+for **Windows and Linux**, updating itself.
+
+<p align="center"><img src="docs/assets/readme/canvas.jpg" alt="Canvas: the agent's email draft open beside the chat, updated live to version 3 after 'make it shorter'" width="100%"></p>
+<p align="center"><sub><b>Canvas</b> — the agent writes, you edit, side by side. "Make it shorter" updated the open document live to version 3, keeping the line you added; history shows who wrote what.</sub></p>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/readme/places.jpg" alt="A places answer: an interactive map of restaurants in Abbottabad with pins and place cards"></td>
+<td width="50%"><img src="docs/assets/readme/weather.png" alt="A weather answer: current conditions, a 24-hour strip and a 7-day forecast"></td>
+</tr>
+<tr>
+<td><sub><b>Places</b> — real OpenStreetMap data, pins and cards; <i>Expand</i> for a full map with a list, hours, phone and directions.</sub></td>
+<td><sub><b>Weather</b> — live Open-Meteo forecast, °C/°F. Currency converts both ways with the rate's date and source.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/assets/readme/video.jpg" alt="A YouTube video card playing inside the chat"></td>
+<td><img src="docs/assets/readme/sources.jpg" alt="The Sources panel beside an answer listing the pages the agent read"></td>
+</tr>
+<tr>
+<td><sub><b>Videos</b> play in the answer; the player loads only when you press play.</sub></td>
+<td><sub><b>Sources</b> — the pages the agent actually searched and read, derived from its own tool calls.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/assets/readme/sports.png" alt="A sports answer: NFL final scores with team crests"></td>
+<td><img src="docs/assets/readme/profile-menu.png" alt="The profile menu with Appearance, Your data, Engine and Help submenus"></td>
+</tr>
+<tr>
+<td><sub><b>Live sports</b> — scores, fixtures and standings (ESPN, TheSportsDB); the agent never invents a score.</sub></td>
+<td><sub><b>Profile menu</b> with submenus; tooltips, right-click menus and notifications throughout.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/assets/desktop/ide.png" alt="The built-in IDE: explorer, Monaco editor and terminal"></td>
+<td><img src="docs/assets/desktop/dashboard.png" alt="A dashboard drawn in a reply with stat tiles and a time series"></td>
+</tr>
+<tr>
+<td><sub><b>An IDE</b> — Monaco, real terminals, full source control, GitHub PRs, checks, issues and Actions.</sub></td>
+<td><sub><b>54 dashboard widgets</b> on a 12-column grid, plus plots, geometry and unit-aware calculations.</sub></td>
+</tr>
+</table>
+
+**Highlights**
+
+- **Chat that keeps up** — `/` actions and `@` mentions for files, folders and agents; steer a run while it works; jump to the start of a finished answer; branch any answer into a new chat; read aloud; 👍/👎 that the agent learns from.
+- **Canvas** — documents and code the agent writes and **you edit side by side**, with versions, restore, and *Ask AI* on a selection.
+- **An IDE behind the chat** — Monaco editor, real terminals, source control that never force-pushes, and GitHub through `gh`: review a PR, fix a failing check, diagnose an Action — with AI.
+- **A browser the agent drives** — Chromium with its own profile for web QA and automation; it reads the page as an accessibility snapshot and acts with trusted input, and hands it to you for sign-ins and CAPTCHAs.
+- **It can see** — screenshots, images it reads or fetches, and pictures from any MCP tool reach models that read images; which models do is *learned* with a one-click probe, not guessed.
+- **Skills and agents, made your way** — import Claude-format `.skill` files, `SKILL.md` or folders; export them; define your own agents with tools, skills, a model and their own knowledge and scripts — or ask the agent to build them.
+- **Plugins, all the way down** — every feature is a plugin you can switch off; add pages, commands, themes, widgets and standing instructions with a JSON manifest, or say *"make me a plugin that…"*.
+- **Looks after itself** — automatic updates that wait for running work, backup & restore to move machines, right-click menus, tooltips, notifications and a tray.
+
+---
+
+## 🧩 Rich answers — in every client
+
+Fenced blocks the model emits become interactive cards in the desktop, the web
+portal and VS Code alike — each with a published spec so the model stops
+guessing, a streaming placeholder, copy/download/expand, and a **Fix with AI**
+button that repairs a broken block in place.
+
+| Category | Blocks | Fed by |
+|---|---|---|
+| **World** | `places` (map + cards), `weather`, `currency`, `sports` (live scores, standings), `news`, `video` | `Places` (OpenStreetMap), `Weather` (Open-Meteo), `CurrencyRates`, `SportsScores`, web search |
+| **Work** | `canvas` (editable documents & code), `draft` (email/post/report), `files`, `products` (cards + comparison), `images` | `Canvas`, `GenerateImage` (your OpenAI or Gemini key), the agent's own files |
+| **Data** | `chart` (ECharts), Vega-Lite, tables, `widgets` (54-widget dashboard kit) | the conversation, your files |
+| **Maths & science** | `plot` (symbolic derivatives, integrals), `geometry` (measured figures), `calc` (units carried through every step), KaTeX + chemistry | computed by mathjs — not written by the model |
+| **Diagrams** | 26 software-engineering diagram types (Mermaid and more) | the model, repaired in place when it fails to parse |
+
+> Honest by construction: OpenStreetMap has no ratings, reviews or photos, so the
+> agent adds those only from a page it actually read — and says where from.
+
+---
+
+## 💸 Token-saving by design
+
+```mermaid
+flowchart LR
+  L[(Append-only<br/>event log)] --> D[Derive request]
+  D --> P["Stable prefix<br/>tools · system · history"]
+  P -->|cache hit 79–96%| M((Model))
+  D --> T["Volatile tail<br/>todo · notes"]
+  T --> M
+  M --> E[New events] --> L
+  subgraph Pressure[" When the window fills "]
+    K1[Mask old tool output<br/>in batches] --> K2[Condense earlier steps<br/>into a handoff note] --> K3[Stop with a reason]
+  end
+  D -.-> Pressure
 ```
 
-`#v0.25.0` is a tag, so it pins that release. `#release/v0.25` follows the 0.25
-line as it gets fixes, and `#main` is the development trunk.
+- **The prefix never moves.** Because a request is *derived* from an append-only log, everything before the newest step is byte-identical to the last request — exactly what provider caches reward. Volatile notes go at the end and stay where they were sent, so OpenAI's cache grows with the conversation (measured cached tokens per step: **14.1K → 16.6K → 19.1K → 21.7K**, where it used to sit flat at the 13.9K static prefix).
+- **Every provider's cache, used properly.** Explicit `cache_control` on Anthropic (tools and system for an hour, the conversation for five minutes); `prompt_cache_key` and sticky routing on OpenAI/OpenRouter; DeepSeek, Kimi and Z.AI implicit caching kept warm.
+- **Masking is batched.** Every mask breaks the cache once, so stale tool output is folded only past half the window, capped, and in batches — measured to be the difference between saving money and spending it.
+- **Zero-token scaffolding.** App templates copy in as files, skills load only when selected, the codebase index is queried and never pasted, and widget specs are fetched on demand — the model pays for what it uses.
+- **Spend you control.** Per-session cost and token ceilings (sub-agents count toward them), estimated vs billed cost kept apart, and a cost ceiling printed before any evaluation run.
 
-To have `aico` on your `PATH` — which the VS Code extension needs — install it
-globally from the same tag. aico is not on the npm registry; this builds from
-source and takes a minute the first time:
+## 🧭 Long-horizon runs
 
-```sh
-npm install -g github:suhail-akhtar/aico#v0.25.0
+Long jobs fail in two ways: they run out of window, or they quietly forget what
+you asked. AICO measures each next request from the provider's own token count
+and, cheapest first:
+
+1. **masks** older tool output behind a note of what was there and where the full text is saved — the newest results stay whole;
+2. **condenses** earlier steps of the running turn into a handoff note — your messages **word for word**, the plan and whether you approved it, the todo list and every file read or changed, taken from the record rather than trusted to a summary. An earlier note's sections are carried forward, not re-summarised, so the fifth condensation still has your original request;
+3. **stops with a reason** if a single step is larger than the window, instead of summarising in a loop.
+
+Plus: **steer a run mid-flight** (delivered at the next step boundary, nothing lost), durable queues that survive a crash, background agents and scheduled jobs under one supervised work ledger, and dev servers detected and backgrounded so nothing holds a turn hostage. Measured: **140/140 values correct, every turn `completed`, peak context 201K → 115K**. [Full results →](benchmarks/long-horizon/README.md)
+
+## 🛠 Software engineering proof
+
+| Probe | Result | What it shows |
+|---|---|---|
+| [**SWE-bench Lite**](benchmarks/swebench-lite/README.md) — real GitHub issues from 12 open-source repos, graded by each project's own tests | **73 / 80 resolved (91.25%)** — two disjoint random draws, 35/40 then 38/40 | Fixing real bugs in large, unfamiliar codebases from the issue text alone — django 29/31, sympy 17/19, scikit-learn 6/6, matplotlib 5/5, pytest 4/4, sphinx 3/3 … |
+| [**Custom-stack architecture**](benchmarks/custom-app-architecture/README.md) — ambiguous greenfield briefs, no template | **4 / 5 built clean (17/17 checks each)**; the fifth hit a real iteration cap at 60% | Deciding the data model, stack and boundaries — not just filling in a template |
+| **Hidden-test implementation** — a spec, 7 visible tests, graded by 23 it never saw | **23 / 23** on both gpt-5.6-luna and gpt-5.6-terra | Implementing to a spec, not to the visible tests |
+| **Nine app templates** — each built end to end by a real model | **9 / 9 proven live**, opened in a browser at two widths | The app platform works as a whole |
+
+Every one is reproducible from scripts in this repository, with per-instance
+evidence committed. SWE-bench was run blind — no dependency install, no local
+test runs — with `deepseek-v4-flash`, one of the cheapest capable models; it is a
+self-run probe, not a leaderboard entry, and the [caveats](benchmarks/swebench-lite/README.md)
+say exactly what that means.
+
+In the desktop app the same agent works on **your** GitHub: review a pull request,
+fix a failing check, diagnose a broken Action — through the `gh` CLI you already
+use, never with a force-push.
+
+---
+
+## 🏗 Architecture
+
+```mermaid
+flowchart TB
+  subgraph Clients
+    DT[Desktop app<br/>Electron · IDE · browser]
+    VS[VS Code panel]
+    WB[Web portal]
+    CLI[Terminal]
+  end
+  subgraph Engine["AICO engine (Node)"]
+    LOG[(Append-only<br/>session log)]
+    LOOP[Agent loop<br/>turn · step · steer]
+    PIPE[Tool pipeline<br/>plan · safety · sandbox · permission]
+    TOOLS[50+ tools<br/>code · web · apps · world data]
+    CTX[Context manager<br/>mask · condense]
+  end
+  PROV[8 providers<br/>or offline Ollama]
+  MCP[MCP servers<br/>in and out]
+  DT & VS & WB & CLI -->|HTTP + SSE, token-gated| LOOP
+  LOOP <--> LOG
+  LOOP --> CTX --> PROV
+  LOOP --> PIPE --> TOOLS
+  TOOLS <--> MCP
 ```
 
-From source:
+- **One engine, four clients.** The desktop, VS Code and the web portal share one state layer and one renderer; the desktop is a client, not a fork.
+- **Turn / step.** A step is one model request plus its tool calls; a turn is zero or more steps; both are durable events, and turns end with a structured reason (`completed | max-tokens | blocked | aborted | error`).
+- **Tool pipeline.** Policy runs as ordered stages — hooks, plan mode, bash safety, sandbox, permission — where guards can only *deny*. Parallel-safe calls run in a pool; results commit **in model order**, so a step replays identically.
+- **MCP both ways.** Connect any MCP server; AICO is itself an MCP server another AI can hand work to. The desktop exposes the whole IDE and its browser to the agent the same way (`ide_*`, `browser_*`).
+
+---
+
+## 🚀 Install & quick start
 
 ```sh
-git clone https://github.com/suhail-akhtar/aico.git
-cd aico && npm install && npm run build && npm run build:web
-npm link                 # makes `aico` available globally
+npx github:suhail-akhtar/aico#v0.26.0 serve     # web portal, nothing to install
+npm install -g github:suhail-akhtar/aico#v0.26.0 # `aico` on your PATH (VS Code needs this)
 ```
 
-Requires Node 22.5+ — aico uses Node's built-in SQLite, which arrived in 22.5.
-The web client ships with it, so `aico serve` works from a
-bare `npx` with nothing else installed.
-
-## Quick start
-
 ```sh
-aico provider add                      # interactive setup wizard
-aico                                   # interactive REPL
+aico provider add                      # interactive setup
+aico                                   # terminal chat
 aico -p "fix the failing tests"        # one-shot
 aico -c                                # continue the last session
 aico --agent review -p "review my diff"
 ```
 
----
+`#v0.26.0` pins a release, `#release/v0.26` follows its fixes, `#main` is the
+trunk. From source: `git clone … && npm install && npm run build && npm run build:web`.
+Requires **Node 22.5+** (built-in SQLite).
 
-## Providers & models
+### Providers
 
 | Provider | Key | Notes |
 |---|---|---|
-| **OpenAI** | `OPENAI_API_KEY` | Includes the `/v1/responses` transport — see below |
+| **OpenAI** | `OPENAI_API_KEY` | Responses API for gpt-5.6/gpt-6 (tools + reasoning together); image generation |
 | **Anthropic** | `ANTHROPIC_API_KEY` | Explicit `cache_control` for ~90% input savings |
-| **OpenRouter** | `OPENROUTER_API_KEY` | Routes any model; sticky session routing for cache warmth |
-| **Google Gemini** | `GEMINI_API_KEY` | Via the OpenAI-compatible endpoint |
-| **Moonshot Kimi** | `MOONSHOT_API_KEY` | Kimi K3, K2.7 Code, K2.6; reasoning replayed; automatic caching |
-| **DeepSeek** | `DEEPSEEK_API_KEY` | First-party V4; cache hits at ~1/50th of a miss |
-| **Z.AI (GLM)** | `ZAI_API_KEY` | Implicit caching; Coding Plan endpoint supported |
-| **Ollama** | *(none)* | Local, free, private |
+| **Google Gemini** | `GEMINI_API_KEY` | Widest input surface (image, audio, video) |
+| **OpenRouter** | `OPENROUTER_API_KEY` | Any model; sticky routing keeps caches warm |
+| **DeepSeek** | `DEEPSEEK_API_KEY` | V4; cache hits at 1/50 of a miss; the model behind the benchmarks |
+| **Moonshot Kimi** | `MOONSHOT_API_KEY` | K3, K2.7 Code, K2.6; reasoning replayed |
+| **Z.AI (GLM)** | `ZAI_API_KEY` | Implicit caching; Coding Plan endpoint |
+| **Ollama** | *(none)* | Local, free, private — fully offline |
 
-The **model name decides the provider**, overriding any configured default —
-`aico -m glm-4.6` goes to Z.AI even if your default is OpenRouter.
-
-### Where to put your key
-
-`aico provider add` writes to `~/.aico/settings.json`, which works from any
-directory. A `.env` file also works, but `dotenv` reads it from the *current*
-working directory — so a key in your project's `.env` will not be found when you
-run aico elsewhere. This is the single most common setup surprise.
-
-### gpt-5.6 needs the Responses API
-
-The gpt-5.6 family (`luna`, `terra`, `sol`) cannot be driven agentically through
-Chat Completions at all. It rejects `max_tokens`, and refuses function tools
-whenever any reasoning effort is set:
-
-> *Function tools with reasoning_effort are not supported … use /v1/responses or
-> set reasoning_effort to 'none'.*
-
-Setting `none` "works" but disables the reasoning you are paying for. aico
-detects these models and speaks `/v1/responses` instead, where tools and
-reasoning coexist. Nothing to configure — but you can tune it:
-
-```jsonc
-{
-  "model": "gpt-5.6-terra",
-  "providers": {
-    "openai": {
-      "reasoningEffort": "high",   // none | low | medium | high | xhigh
-      "maxOutputTokens": 32000     // reasoning shares this budget with output
-    }
-  }
-}
-```
-
-Older gpt-5.x models stay on Chat Completions, which is correct for them.
+The model name picks the provider (`aico -m glm-4.6` goes to Z.AI). Keys live in
+`~/.aico/settings.json` (`aico provider add` or Settings → Models, where each
+provider's models are a searchable list and *Test* checks which ones read images).
 
 ---
 
-## Measured: a real coding task
+## 🔍 Deep dive
 
-Not a vibe check. The agent was given a written spec, a **visible** 7-test suite
-it could run, and asked to implement a token-bucket rate limiter. It was then
-graded against a **hidden** 23-test suite it never saw, targeting the spec
-clauses the visible tests do not cover — fractional accrual, monotonic-clock
-clamping, `TypeError` contracts, `Infinity` semantics.
+<details>
+<summary><b>It checks its own work — <code>VerifyApp</code></b></summary>
 
-| | gpt-5.6-luna | gpt-5.6-terra |
-|---|---|---|
-| Wall clock | 488 s | **70 s** |
-| Steps / tool calls | 13 / 18 | 10 / 15 |
-| Input tokens | 110,409 | 82,921 |
-| Output tokens | 11,189 | 5,479 |
-| Prompt-cache hit | **91%** | 88% |
-| Visible tests | 7 / 7 | 7 / 7 |
-| **Hidden tests** | **23 / 23** | **23 / 23** |
+Three models were once asked for a single-file 3D planner and a keyword check
+scored two of them 12/12. Opened in a browser, one threw on load and the other
+was a shell. Nothing had ever *run* the artifact.
 
-Both at `reasoningEffort: high`. Two different implementations, both fully
-correct on tests neither model saw. Reproduce with `npm run test:live`.
-
----
-
-## It checks its own work
-
-The failure this exists for: three models were asked for a single-file 3D space
-planner, and a keyword check scored two of them twelve features out of twelve.
-Opened in a browser, one threw on load and rendered nothing, and the other was a
-shell — the toolbars were there, the app was not.
-
-Nothing in the loop had ever *run* the artifact. The agent wrote a file, read it
-back, saw its own text, and concluded it worked.
-
-**`VerifyApp` opens the page in a real browser** and reports what a person would
-hit: uncaught exceptions, console errors, failed and off-origin requests, what
-actually rendered — including whether a `<canvas>` was ever painted — and
-whether named controls do anything when clicked.
+`VerifyApp` opens the page in a real browser and reports what a person would hit:
+uncaught exceptions, console errors, failed requests, what rendered (including
+whether a `<canvas>` was ever painted) and whether named controls do anything.
 
 ```
 FAILED — file:///…/index.html has 3 problem(s). This artifact is not finished.
-
-Problems, worst first:
   - uncaught: THREE is not defined
   - 1 of 1 canvas element(s) were never drawn to
   - "brand colour picker" does not work: set a new colour, and nothing changed
-
-What rendered:
-  183 elements, 3 canvas, 0 svg, 12 interactive control(s)
-  canvas 300×240 — NEVER DRAWN TO
 ```
 
-**The verdict is not advisory.** A turn that produced a web page cannot end
-`completed` until a passing verdict exists for the file *as it stands now*.
-Four ways to fail, each with its own objection:
+The verdict is not advisory: a turn that produced a web page cannot end
+`completed` until a passing verdict exists for the file *as it stands now*. The
+requirements are read out of **your** words, not the model's — a model that
+writes its own acceptance criteria writes ones it has met. Flows (sign in, add a
+customer) are checks with steps and expectations; screenshots are shown back to
+models that read images.
 
-| State | What the turn is told |
+</details>
+
+<details>
+<summary><b>Steering, planning and running things</b></summary>
+
+- **Steer mid-run.** Type while it works; the message lands at the next step boundary and the turn is extended, not cancelled. Queues are durable across crashes.
+- **Plan first.** Plan mode removes the write tools entirely; the agent investigates and proposes a structured plan you can *Go ahead*, *Amend*, save for *Later* or *Decline*. Assumptions appear above the steps.
+- **Bash is one-shot; servers go to the background.** Dev servers, watchers and tails are detected and backgrounded with their pid and URL. Nothing runs forever — a backstop wraps every tool dispatch (this replaced a 139-minute hang).
+- **`Terminal` remembers** its directory and environment between calls. **`Read` before `Edit`** is enforced, not requested.
+
+</details>
+
+<details>
+<summary><b>Apps — build real applications, not snippets</b></summary>
+
+Nine templates — a records page over SQLite, a landing page, a Hono JSON API, a
+Next.js app with accounts, a metrics dashboard, a docs site, a CLI, an LLM agent
+service and an Expo mobile app — copy in as files (zero model tokens) with a worked
+feature, tests, notes for the agent, a backlog and a deploy script. Or a custom
+stack from a description. The turn cannot end until the app was opened in a real
+browser and its own checks are green; **Deploy** runs the script it ships with. A
+conversation bound to an app shows a live preview at desktop, tablet and phone
+widths, the backlog, decisions, files and logs.
+
+</details>
+
+<details>
+<summary><b>Skills, agents and learning</b></summary>
+
+- **Skills** are Claude-compatible folders (`SKILL.md` + scripts, references, templates) — import, export, write, or ask the agent to create or improve one. `aico skill eval` scores a skill against tasks with known answers; `aico skill optimize` proposes edits and keeps only what scores **strictly higher on validation tasks the optimiser never saw**.
+- **Agents** — 17 built in (review, security-audit, architect, qa, devops…) plus your own with their own tools, skills, model, knowledge and scripts. `Task` spawns sub-agents that **inherit every constraint** of their parent — plan mode, sandbox, spend caps.
+- **It learns, with you as the gate.** Ratings with notes, mid-turn corrections and repeated errors become *proposals* you keep or dismiss; kept ones become knowledge shown on later tasks whose wording matches.
+
+</details>
+
+<details>
+<summary><b>Safety — layered, and honest about what each layer enforces</b></summary>
+
+| Layer | What it does |
 |---|---|
-| Built it, never opened it | Reading the source you just wrote is not verification |
-| Verified, then edited | The last result no longer describes what is on disk |
-| Loads, but nothing was clicked | It has 21 controls and the check exercised none |
-| Checks miss the brief | Nothing verified: *"Export to PDF triggers a building-up animation"* |
-
-That last one reads the requirements out of **your own words**, not the model's
-— a model that writes its own acceptance criteria writes ones it has met. Only
-requirements naming an *action* are held to a check: a colour palette is a real
-requirement and no click proves it.
-
-It drives each control the way its type demands. Clicking a `<input type=color>`
-opens a native dialog headless Chrome does not have, so a click proves nothing —
-value controls get a value and the `input`/`change` events a real interaction
-raises. A requirement that is a flow — "add a customer" — is a check with
-`steps` (goto, fill, click, select, press, wait) and an `expect` of a selector,
-text, URL or absence; checks in one call share the page and its cookies, so a
-sign-in check first leaves the rest signed in, and `screenshot: true` keeps a
-PNG of what each check saw. When the session's model reads images, those
-screenshots are shown to it on the next step, so "does it look right" is a
-question the agent can answer itself.
-
-Uses `playwright-core` against a Chrome or Edge you already have.
-
----
-
-## Steering — redirect a run in flight
-
-Type while the agent is working and the message is delivered at its **next step
-boundary**, not queued behind the whole run. The turn is extended, not
-cancelled, so everything it has already learned is kept.
-
-```
-❯ refactor the auth module
-  ⋯ Read(src/auth.ts)
-  ⋯ Edit(src/auth.ts)
-actually keep the session cookie name unchanged
-  (steering — applies at the next step)
-  ⋯ Edit(src/auth.ts)
-```
-
-Queued input also **prevents the loop from finishing**: a model that was about
-to answer will continue instead. Both queues are durable, so anything typed
-before a crash is still owed when the session resumes.
-
----
-
-## Plan before you build
-
-Turn **Plan** on and the turn cannot change anything — the write tools are gone,
-not discouraged. The agent investigates, then finishes with a structured plan
-you can answer:
-
-```
-Plan   Create VERSION.txt with the version from package.json
-  1  Write VERSION.txt containing "0.4.1"
-     Create VERSION.txt in the repo root with the single line "0.4.1".
-     VERSION.txt
-  Risk: None.
-
-  [ Go ahead ]  Amend   Later                          Decline
-```
-
-**Go ahead** turns planning off and the agent starts work — the mode change is
-part of the answer, not something you have to remember. **Amend** puts the plan
-in the composer so a correction is a sentence rather than a re-brief, and keeps
-planning on. **Later** keeps it without starting it, and offers *Start it now*
-whenever you come back. **Decline** closes it.
-
-Assumptions appear *above* the steps, because an assumption you would have
-corrected costs a sentence now and a rewrite later — putting it beside the
-approve button is the same as not asking.
-
-A proposed plan ends the turn. Asked to "call it once and stop", a model
-proposed the same plan three times and then announced it would write a file in
-a mode with no write tools; the loop enforces it now.
-
----
-
-## Running things
-
-**`Bash`** is one-shot. Commands that are not supposed to exit — a dev server, a
-watcher, a log tail — are detected and **started in the background**: you get the
-pid and the URL it printed, and the turn carries on.
-
-```
-Started in the background — this looks like a dev server. It is still running as
-pid 41820 and printed http://localhost:8099. Nothing is waiting on it, so carry
-on — you can verify against http://localhost:8099 now. Stop it with `kill 41820`.
-```
-
-That replaced the worst hang this project has had: a server started in the
-foreground held one turn for **139 minutes**, 138 of them with no output, because
-the tool description recommended `timeout=0` for anything slow and `timeout=0`
-meant *forever*. Nothing runs forever now — 30 minutes is the ceiling, and a
-backstop wraps **every** tool dispatch, not just Bash. A browser that will not
-launch and an MCP server that goes quiet are the same bug as that dev server.
-
-**`Terminal`** is a shell that remembers. `cd` into a directory and stay there;
-export a variable and it is still set next call. Every result reports the
-working directory it ended in, because a `cd` that did not take looks exactly
-like one that did until something writes a file into the wrong place.
-
-**`Read` before `Edit` is enforced**, not requested. An edit to a file you have
-not read is refused, as is one to a file that has changed since you read it — a
-remembered `old_str` either fails to match or, worse, matches something that
-drifted and rewrites a line nobody has looked at.
-
----
-
-## Safety
-
-Layered, and each layer states what it actually enforces.
-
-**Permissions** — every mutating tool asks before running, with a diff preview
-for edits. `/permissions trust-all` for a session, or `-y` to auto-approve.
-
-**Bash safety classifier** — blocks `rm -rf /`, `mkfs`, `curl | bash`, writes to
-shell profiles, credential exfiltration, and ~40 other patterns outright.
-
-**Plan mode** (`/plan`) — read-only tools only. **Inherited by sub-agents**, so a
-plan-mode run cannot delegate a write to a child.
-
-**Sandbox** (opt-in) — confines file effects to the workspace:
-
-```jsonc
-{ "sandbox": { "mode": "workspace-write" } }   // or "read-only"
-```
-
-It reports honestly how much it enforces:
-
-| Surface | Enforcement |
-|---|---|
-| `Write`, `Edit`, `NotebookEdit`, `Read` | **full** — aico resolves every path itself |
-| `Bash` and anything it spawns | **partial** — needs Landlock/Seatbelt/a restricted token |
-
-This is defence in depth against a confused agent, not a jail. It stops a
-mistaken write; it does not stop deliberate evasion through a shell.
-
-**Repeat-tool guard** — detects a model looping on the same call with identical
-arguments and nudges it to change approach. Interleaved bookkeeping tools cannot
-launder the loop, and denied calls count.
-
-**Cost limits** — `safetyLimits.maxCostPerSession` / `maxTokensPerSession`, and
-sub-agent spend counts toward them.
-
----
-
-## Architecture
-
-```
-src/
-  agent.ts        the loop: turn/step, streaming, retries, cancellation
-  session/        append-only event log, derivation, inbox, compaction
-  tools/          40 tools + pipeline, scheduler, guards
-  providers/      6 providers behind one streaming interface
-  registry/       capability seams — swap a service without editing consumers
-  sandbox/        file-effect confinement with honest enforcement reporting
-  agents/         17 agent types + custom agent specs
-  studio/         autonomous SDLC pipeline
-  ui/App.tsx      Ink terminal UI
-  server/         loopback HTTP + SSE, token-authorised
-web/              browser client — session list, transcript, trajectory
-shared/ui/        presentational components used by the browser client
-```
-
-**Turn / step.** A step is one model request plus its tool calls; a turn is zero
-or more steps. Both are durable events. Turns end with a structured reason —
-`completed | max-tokens | blocked | aborted | error{code}` — so a transcript
-explains itself. `max-tokens` is sticky: a truncated reply is never reported as
-complete.
-
-**Tool pipeline.** Policy runs as ordered named stages — hooks, plan mode, bash
-safety, sandbox, permission — where guards can only *deny*, never grant. Adding
-a timeout, a metric, or an audit stage needs no change to the loop.
-
-**Tool scheduler.** Parallel-safe calls share a bounded rolling pool; exclusive
-tools (`Bash`, `Write`, `Edit`) are barriers. Dispatch overlaps, but results
-commit **in model order**, so a step replays identically. A cancelled step still
-records a result for every call it was asked to make.
-
-**Capability registry.** Services are resolved from a context, not imported. A
-plugin can register a tool with no edit to core, and a child scope can hold a
-different tool set than its parent in the same process.
-
-**Long runs keep their context focused, inside the turn.** Before every step
-the loop measures the next request from the provider's own token count and, in
-order of cost:
-
-1. *masks* older tool output — file bodies, logs, search hits — behind a short
-   note saying what was there and where the full text is saved, keeping the
-   most recent results whole; in batches, so the cached prefix breaks rarely;
-2. *condenses* earlier steps of the running turn into a handoff note if that is
-   not enough, cutting on a step boundary so no call loses its result. The
-   note carries your messages word for word, the plan and whether you approved
-   it, the todo list, and every file changed or read — taken from the record,
-   not trusted to a summary — plus the model's own account of where it stands.
-   An earlier note's sections are carried forward, not re-summarized, so a run
-   that condenses five times still has your original request;
-3. *stops with a reason* if a single step is larger than the model's window,
-   rather than summarizing in a loop.
-
-The open todo list is repeated at the end of every request while work remains.
-Between turns, whole turns fold the same way. Nothing is deleted: masks and
-summaries are log events that shadow the originals.
-
----
-
-## Agents
-
-17 built-in types, each with its own prompt and tool whitelist: `general`,
-`explore`, `plan`, `review`, `verification`, `security-audit`, `project`,
-`devops`, `devsecops`, `architect`, `backend`, `frontend`, `qa`, `tech-writer`,
-`product-owner`, `healer`, `studio-orchestrator`.
-
-```sh
-aico --agent devops -p "set up CI for this repo"
-```
-
-The `Task` tool spawns sub-agents three ways: a built-in `subagent_type`, a
-registered `agent_name`, or an inline `agent_spec` that synthesizes a specialist
-with exactly the tools it needs. Multiple `Task` calls in one step run in
-parallel. **Sub-agents inherit every constraint their parent is under** —
-settings, hooks, plan mode, sandbox policy, spend caps, and composed tool sets.
-
-**Apps** are real applications kept in the workspace and started from
-templates: a records page over SQLite, a static landing page, a Hono JSON API,
-a Next.js web app with accounts, a metrics dashboard, a documentation site, a
-command-line tool, an LLM agent service, and an Expo mobile app. Each template
-copies in as files (zero model tokens) with a worked feature, tests, notes for
-the agent (`AICO.md`), a backlog and a Dockerfile or deploy script. One agent
-builds from there following the `app-plan`, `app-architecture`, `app-design`,
-`app-ship` and `app-quality` skills; `Investigate` is the only fan-out. Whatever the stack, the
-turn cannot end until the app was opened in a real browser and its own checks
-are green; **Deploy** on the card runs the script the app ships with. `/app
-templates`, `/app new <template> "<name>" --brief "…"`, or the **Apps** screen
-in the web portal, where **Create app** starts from a description — the
-templates are ranked against it as you type, the best match named with the
-words that matched — and a conversation bound to an app shows the app beside
-the chat: a live preview at desktop, tablet and phone widths, the backlog with
-the next story one click from being built, decisions, files and logs. The
-agent's side is the `AppManage` tool and the `app-platform` skill, which
-describes the whole platform in one page.
-
-**It learns, with you as the gate.** After each turn the log is read — no model
-call — for a rating with a note, a mid-turn steer, a fix after a failing check
-or browser verdict, a repeated error, and each becomes a *proposal* in
-Settings → Memory → Suggested. Keep writes it as knowledge, a project fact or a
-line about you in `~/.aico/USER.md` (twelve bullets at most); Dismiss records
-the decision. Design choices go to `.aico/decisions.md`, which compaction keeps
-and names; the dropped turns are spilled in full to the session's reports.
-
----
-
-## Commands
-
-48 slash commands. The ones worth knowing:
-
-```
-/help  /status  /cost  /compact  /clear  /plan
-/model [name]           switch model mid-session
-/agents  /agent <n> <task>
-/app templates  /app new <template> "<name>" --brief "…"  /app list|start|stop
-/review  /security-audit
-/mcp  /mcp-add playwright   MCP servers
-/skills  /bg-agents  /cron  /worktrees
-/transcript [--all]     export the session (log-backed, includes tool calls)
-/doctor                 environment check
-```
-
-Commands that talk about "the conversation" act on what the **model** actually
-holds — `/clear` clears the model's context, `/compact` shrinks the real
-request, `/status` reports true context size and how much is hidden.
-
-### Measuring a skill
-
-A skill is a prompt, and whether it is a *good* prompt used to be a matter of
-opinion. Two subcommands make it a number:
-
-```
-aico skill eval security-review              # score it against tasks with known answers
-aico skill optimize review --steps 3         # propose bounded edits; keep only what scores higher
-```
-
-`eval` runs the skill on a corpus of planted tasks — a SQL injection in `db.js`,
-an off-by-one in a pager, a staged change that wants a conventional commit —
-and grades with regexes, files and tool-call counts. Never a model judging a
-model. `optimize` is SkillOpt's loop at personal scale: a separate optimiser
-model reads the failing runs and proposes at most four edits a step, a
-candidate is kept only if it scores **strictly higher on validation tasks the
-optimiser never saw**, and rejected proposals are shown back so they are not
-tried twice. Both print their cost ceiling before the first call and stop at it.
-
-`optimize` never touches the shipped skill. It writes a draft for you to diff
-and register — the corpus is a proxy, and only you can judge the task nobody
-wrote. Add your own tasks under `~/.aico/skill-evals/<skill>/*.json`.
-
-The same bench is in the web portal under **Settings → Skills → Measure**,
-with live per-task scores, each step's verdict, the candidate as a diff and an
-*Adopt it* button; VS Code reaches it through *Measure skills* in the panel's
-`⋯` menu. Several candidates a step can be scored on training with only the
-best validated, results for an unchanged skill are cached so a rejected step
-costs nothing to retry from, and three rejections in a row end the run.
-
----
-
-## Configuration
+| **Permissions** | Mutating tools ask first (with a diff preview), or auto / ask-before-edits / ask-every-time per message |
+| **Bash safety classifier** | Blocks `rm -rf /`, `mkfs`, `curl \| bash`, shell-profile writes, credential exfiltration and ~40 more patterns |
+| **Plan mode** | Read-only tools only — inherited by sub-agents |
+| **Sandbox** (opt-in) | `workspace-write` / `read-only`: **full** for AICO's own file tools, **partial** for spawned processes (says so) |
+| **Repeat guard** | Detects a model looping on identical calls and makes it change approach |
+| **Spend caps** | Per-session cost and token ceilings, sub-agents included |
+| **Network surfaces** | The server binds to `127.0.0.1` with a startup token; the desktop never hands the token to page code |
+
+Not a sandbox for untrusted code — review what it runs.
+
+</details>
+
+<details>
+<summary><b>VS Code</b></summary>
+
+A native panel in the Secondary Side Bar that shares the web client's state
+layer and renderers. Edits arrive as `WorkspaceEdit`s (so <kbd>Ctrl</kbd>+<kbd>Z</kbd>
+and Source Control work), it knows your active file, selection and Problems, and
+the editor is a tool: `VSCodeDiagnostics`, `VSCodeTasks`, `VSCodeReferences`,
+`VSCodeRename`, `VSCodeFormat`. Install the `.vsix` from the
+[release](https://github.com/suhail-akhtar/aico/releases/latest) and reload the window.
+
+</details>
+
+<details>
+<summary><b>Configuration</b></summary>
 
 `~/.aico/settings.json` (global) merged with `.aico/settings.json` (project):
 
@@ -556,260 +433,67 @@ costs nothing to retry from, and three rejections in a row end the run.
 {
   "model": "gpt-5.6-terra",
   "providers": { "openai": { "reasoningEffort": "high" } },
-
   "autoCompact": { "thresholdPercent": 75, "keepRecentTurns": 3 },
-  // Inside a running turn. All on by default; these are the defaults.
   "contextManagement": { "keepRecentToolResults": 6, "midTurnCompaction": true, "reciteTodos": true },
-  // Anthropic: tools + system prompt cached for an hour, the conversation for five minutes.
   "promptCaching": { "prefixTtl": "1h" },
-  "maxParallelToolCalls": 8,
   "sandbox": { "mode": "workspace-write" },
-  "repeatGuard": { "thresholds": [3, 5, 8] },
   "safetyLimits": { "maxCostPerSession": 5.00 },
-
-  "hooks": { "PreToolUse": ["./scripts/audit.sh"] },
+  "imageGeneration": { "provider": "openai", "model": "gpt-image-1", "quality": "low" },
   "mcpServers": { "playwright": { "command": "npx", "args": ["@playwright/mcp"] } }
 }
 ```
 
-Full reference: **[`GUIDE.md`](GUIDE.md)**.
+Everything outside a project lives under `~/.aico`; set `AICO_HOME` to move it.
+Full reference: **[GUIDE.md](GUIDE.md)**.
 
-### Where things are kept
+</details>
 
-Everything outside a project — settings, session logs, skills, memories, the
-work ledger — is under `~/.aico`. Set `AICO_HOME` to put it somewhere
-else: a portable install, a second profile, or a throwaway store for a test.
-Every test and live probe in this repository does exactly that, so none of
-them can reach your real one.
+<details>
+<summary><b>Testing</b></summary>
 
-### The context window
+```sh
+npm test                    # 3,200+ offline engine assertions, no key needed
+npm run test:web:unit       # web renderers and reducers
+npm --prefix desktop test   # desktop units
+npm run test:live           # live assertions against a real model — costs money
+node scripts/long-horizon-live.mjs deepseek-flash default 30
+```
 
-The meter under the composer shows how full the model's window is and where
-that figure came from: the provider, the built-in table, a figure you typed,
-or an assumption. Click it to set the real number (`1m`, `128k`) or hand it
-back to detection. A prompt the model accepts that is larger than an assumed
-window raises the figure on its own, and the model has a `ContextWindow` tool
-to read it and, when you tell it the real figure, record it — so "your window
-is a million tokens, stop compacting" is an instruction it can carry out.
+The live suite covers what a mock cannot: wire formats, streaming, tool round
+trips, prompt caching, truncation, cancellation, steering, compaction, sandbox
+confinement and sub-agent inheritance. Session logs carry runtime invariants
+(ordering, turn balance, call/result pairing) asserted by every test that
+produces one. Tests never touch your real `~/.aico`.
+
+</details>
+
+<details>
+<summary><b>Honest limitations</b></summary>
+
+- **`Bash` is not confined** by the sandbox — AICO's own file tools are; spawned processes are not.
+- **Verification covers the web.** A CLI, a library or a server has no browser gate; its checks are the tests the agent ran.
+- **Desktop builds are not code-signed yet**; there is no macOS build yet.
+- **Map data is OpenStreetMap** — real places, hours and phones, but no ratings or photos, and thin in some regions.
+- **The VS Code extension is a `.vsix`**, not a Marketplace listing yet.
+- **Benchmarks are self-run** with published evidence, not independently audited.
+
+</details>
 
 ---
 
-## Testing
-
-```sh
-npm test                 # 3,000+ offline assertions, no API key needed
-npm run test:live        # 93 live assertions per model — costs money
-npm run test:apps:build  # a real model builds an app from a template, end to end
-npm run test:skills:live # the five app skills scored against their tasks
-node scripts/long-horizon-live.mjs deepseek-flash default 30   # a long run, checked against ground truth
-npm run typecheck
-```
-
-The long-horizon probe reads dozens of files in one turn and checks every value
-it reports; `off` and `tight` modes give the baseline and a run under forced
-pressure. Results and what they do and do not show:
-[`benchmarks/long-horizon/`](benchmarks/long-horizon/README.md).
-
-The live suite exercises what a mock cannot: wire-format compatibility,
-streaming shapes, tool round trips, prompt caching, truncation, cancellation,
-steering, compaction, sandbox confinement, and sub-agent inheritance — each
-asserted against a real model. The Apps build probe goes further: template,
-plan, stories, a rating kept as a lesson, a steer, a deploy, then every screen
-of the result opened in a browser at two widths — and it never cuts a busy
-turn short. `scripts/fixtures/skill-eval-baseline-deepseek-v4-pro.json` holds
-the skill scores to compare a change against.
-
-Session logs carry **runtime invariants** (`checkSessionInvariants`) covering
-sequence ordering, turn balance, call/result pairing, and replace-range sanity.
-Every test that produces a log asserts them.
-
----
-
-## Browser client
-
-`aico serve` starts a loopback HTTP server and opens a browser client against
-it. The run is owned by the server, not by the page: close the tab mid-turn and
-the work carries on, reopen it and the session replays from its event log with
-real tool results and real sequence numbers.
-
-```sh
-aico serve            # prints a tokenised URL and opens it
-```
-
-It binds to `127.0.0.1` only, and every request carries a token minted at
-startup — reaching the port is not the same as being able to drive it, because
-this server can run commands and edit files.
-
-Chat and trajectory are two readings of one session. Tool calls render as cards
-with diffs and an outcome — a browser check reads *works* or *3 problems* with
-the worst one inline, a persistent shell reports the directory it left you in, a
-backgrounded command reads *running · pid 4321* rather than a misleading
-*exit 0*.
-
-A plan and a task list float beside the conversation when there is one, and know
-when to stop talking: both collapse to a single line once resolved, and *all
-done* is never shown for a list finished by cancelling half of it — that reads
-"0 done · 5 cancelled", because conflating the two is how a task list becomes a
-formality. Closing a panel records *what* was closed, so a genuinely new plan
-comes back on its own and the one you dismissed stays gone.
-
-Sessions are named automatically and can be pinned by renaming, transcripts
-export as Markdown or text, and settings — providers, permission mode, context
-and spend ceilings — are searchable across every pane.
-
-Two controls on the composer are per message, because the message you are about
-to send is what you know something about. **Approve** is `auto` (the default, and
-what every session has always done), `not edits` (file writes go through;
-commands, fetches and delegation are put to you) or `always`. `Terminal` is
-deliberately not in the middle mode's pass-through — a shell can do everything a
-file write can. **Think** offers what the *model* accepts, in each provider's own
-shape, and nothing when the model is unknown. `auto` means *send nothing*, and
-the button says what that turns into on a provider whose silent default is high.
-
-When the conversation outgrows the model, older turns fold into a summary at 75%
-of the window and the client says so — *Compacted the conversation: 1,309 → 754
-tokens*. A sent message can be edited and sent again, with arrows between
-versions.
-
-#### Keeping a correction
-
-Rate a reply **▼** and say why, and **Remember this** turns the note into a
-knowledge entry: a trigger built from what you *asked*, your note as the
-guidance, filed with the project. The agent is shown it on any later task whose
-wording matches. You see both fields before they are kept — nothing is adopted
-because the agent decided it should be.
-
-### In VS Code
-
-The extension in [`vscode-extension/`](vscode-extension/) gives aico a tab of its
-own in the Secondary Side Bar, beside Chat. It is drawn for the editor and styled
-from your theme — not the web portal in a frame — but it is not a second
-implementation either: the state layer, the reducer and every transcript
-component are the browser client's, imported unchanged.
-
-What it does that a browser cannot:
-
-- **Edits arrive through the front door.** A write is applied as a
-  `WorkspaceEdit`, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back and it shows in
-  Source Control. A file changed behind the editor's back can do neither.
-- **It knows what you are looking at.** Active file, selection with its line
-  range, and that file's Problems — shown as chips, so it is never a guess what a
-  message will carry. `#` points at another file or a symbol; `@` addresses a
-  specialist agent.
-- **Approvals are real dialogs.** Auto, ask-but-not-for-edits, or ask every time.
-- **The editor is a tool.** `VSCodeDiagnostics` reads your Problems panel, so
-  after an edit the agent asks the language server what it thinks instead of
-  grepping for the shape of an error. `VSCodeTasks` runs what is already in your
-  `tasks.json`. `VSCodeWorkspace` creates, adds and opens folders. Offered only
-  while an editor is attached — the same session in a browser tab has none.
-- **The shape of a run, on screen.** Task list, delegated sub-agents, a plan you
-  can accept or amend, the context meter, a session goal.
-- **Background work in the status bar**, without opening anything.
-
-On Windows, commands run on Git Bash when it is installed, then PowerShell, then
-`cmd` — because the tool a model sees is called `Bash`, and `ls` through
-`cmd.exe` used to burn turns rediscovering that it does not exist.
-
-There is no inline completion; that is a different product. The full workspace
-stays one click away for Apps, the trajectory view and the settings screens.
-The extension is not on the Marketplace yet; the `.vsix` is attached to each
-[release](https://github.com/suhail-akhtar/aico/releases), or build it:
-
-```sh
-cd vscode-extension && npm install
-npm --prefix webview install
-npm run package
-code --install-extension aico-vscode-*.vsix
-```
-
-Reload the window afterwards — VS Code does not load a newly installed extension
-into windows that are already open, and a keypress in one of those does nothing
-at all. `aico: Check the Setup` in the command palette reports whether the
-binary was found and where the server is.
-
-### Desktop app (Windows, Linux)
-
-[`desktop/`](desktop/) is AICO as a native app: a ChatGPT-style chat in front
-and an IDE behind it. Installers — `AICO-Setup-<version>-win-x64.exe`, an
-`.AppImage` and a `.deb` — are attached to each
-[release](https://github.com/suhail-akhtar/aico/releases). No Node install is
-needed: the engine runs in Electron's own Node, in a process of its own.
-
-- **Answers that compute.** Everything the web portal renders, plus a kit of 54
-  dashboard widgets on a 12-column grid (```` ```widgets ````), and three blocks
-  whose numbers are calculated rather than written: ```` ```plot ```` (functions,
-  symbolic derivatives, parametric and polar curves, integrals),
-  ```` ```geometry ```` (a figure to scale with its lengths, angles and areas
-  measured) and ```` ```calc ```` (a worked calculation with units and physical
-  constants). Answers copy as rich content; chats export as PDF, standalone
-  HTML, Markdown or text.
-- **An IDE.** Monaco editor and explorer with quick open and search, real
-  terminals (node-pty), source control (status, stage, commit, diff, branches,
-  stash, fetch, fast-forward pull, push — never forced), GitHub through the
-  `gh` CLI (pull requests, checks, issues, Actions), and an Activity monitor.
-- **A browser the agent drives.** Chromium with its own profile, beside the
-  chat. The agent reads it as a snapshot with element refs and drives it with
-  trusted input — for testing the app it just built — and hands it to you for
-  sign-ins and CAPTCHAs.
-- **Plugins, all the way down.** Every feature is a plugin you can switch off;
-  yours live in `~/.aico/desktop/plugins` as a JSON manifest (pages, commands,
-  themes, prompts, widgets, standing instructions). The agent drives the IDE
-  through its own MCP tools (`ide_*`, `browser_*`) and can write a plugin for
-  you: *"make me a plugin that…"*.
-
-It is a client, not a fork: the same engine as `aico serve`, the web portal's
-state layer and renderers, and the same `~/.aico`. Build it yourself:
+## 🤝 Contributing & development
 
 ```sh
 npm ci && npm --prefix web ci && npm --prefix desktop ci
-npm --prefix desktop start          # build and run
-npm --prefix desktop run package    # installer for this OS
-```
-
-The builds are not code-signed yet; Windows SmartScreen asks once.
-
----
-
-## Honest limitations
-
-- **`Bash` is not confined.** The sandbox governs aico's own file tools
-  completely and spawned processes not at all. Linux Landlock and macOS Seatbelt
-  backends would close this; they are not written.
-- **Reasoning continuity.** On the Responses API, reasoning items are not echoed
-  between steps, so each step reasons afresh from the conversation.
-- **Legacy sessions.** Transcripts recorded before the event log are seeded once
-  on resume; tool detail from before the migration was never stored.
-- **Verification covers the web.** `VerifyApp` opens HTML in a browser. A CLI
-  tool, a library or a server has no equivalent gate — the tests it runs are
-  whatever the agent chose to run.
-- **`Terminal` is a pipe, not a pseudo-terminal.** State persists; programs that
-  demand a TTY do not work, and it says so rather than hanging.
-- **A check can be shallow.** Requirements coverage forces a check *per
-  behaviour the brief named*; it cannot judge whether the behaviour is any good.
-  It closes "never built it" and "never looked", not "built it badly".
-- **The VS Code extension is a `.vsix`, not a Marketplace listing.** It uses no
-  proposed APIs, so a listing is possible; it needs a publisher account that
-  does not exist yet.
-- **`aico skill optimize` can only fix what its corpus can fail.** The shipped
-  skills already pass the shipped tasks, so the loop's first honest answer is
-  "nothing to fix here" — the value is in the tasks you add under
-  `~/.aico/skill-evals/`.
-- Not a sandbox for untrusted code. Review what it runs.
-
----
-
-## Development
-
-```sh
-npm run dev        # tsup --watch
-npm run build
+npm run dev                  # engine, watch mode
+npm --prefix desktop start   # build and run the desktop app
 npm test
 ```
 
-Design decisions and their rationale are documented in the module headers of
-`src/session/`, `src/registry/` and `src/sandbox/`, next to the code they
-govern rather than in a document that drifts from it.
+Design decisions live in the module headers next to the code they govern
+(`src/session/`, `src/registry/`, `src/sandbox/`, `desktop/DESIGN.md`) rather
+than in a document that drifts. Issues and pull requests are welcome.
 
 ## License
 
-MIT
+[MIT](LICENSE) © Suhail Akhtar

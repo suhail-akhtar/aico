@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="t d">
+  <title id="t">AICO by the numbers</title>
+  <desc id="d">91% of 80 real SWE-bench Lite GitHub issues resolved (self-run); up to 96% prompt-cache hit; a DeepSeek cache hit costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 3,900+ automated checks.</desc>
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F4F6FF"/>
+    </linearGradient>
+    <linearGradient id="num" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3B5BDB"/>
+      <stop offset="1" stop-color="#7048E8"/>
+    </linearGradient>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#1F2A6B" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="440" rx="28" fill="#EEF1FB"/>
+  <text x="48" y="58" font-family="Segoe UI, Inter, -apple-system, Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#141B3A">By the numbers — measured, not claimed</text>
+  <text x="48" y="86" font-family="Segoe UI, Inter, -apple-system, Helvetica, Arial, sans-serif" font-size="15" fill="#5B647D">Every figure below links to its method and raw evidence in this repository.</text>
+
+  <g font-family="Segoe UI, Inter, -apple-system, Helvetica, Arial, sans-serif">
+    <!-- row 1 -->
+    <g transform="translate(48 112)" filter="url(#sh)">
+      <rect width="380" height="146" rx="20" fill="url(#card)" stroke="#DDE3F7"/>
+      <text x="26" y="66" font-size="52" font-weight="800" fill="url(#num)">91%</text>
+      <text x="26" y="98" font-size="17" font-weight="700" fill="#141B3A">real GitHub issues resolved</text>
+      <text x="26" y="124" font-size="14" fill="#5B647D">SWE-bench Lite · 73 of 80 · self-run, 2 random draws</text>
+    </g>
+    <g transform="translate(450 112)" filter="url(#sh)">
+      <rect width="380" height="146" rx="20" fill="url(#card)" stroke="#DDE3F7"/>
+      <text x="26" y="66" font-size="52" font-weight="800" fill="url(#num)">96%</text>
+      <text x="26" y="98" font-size="17" font-weight="700" fill="#141B3A">prompt-cache hit on a long run</text>
+      <text x="26" y="124" font-size="14" fill="#5B647D">append-only log → a stable prefix · 79–96% measured</text>
+    </g>
+    <g transform="translate(852 112)" filter="url(#sh)">
+      <rect width="380" height="146" rx="20" fill="url(#card)" stroke="#DDE3F7"/>
+      <text x="26" y="66" font-size="52" font-weight="800" fill="url(#num)">1/50</text>
+      <text x="26" y="98" font-size="17" font-weight="700" fill="#141B3A">the price of a cached token</text>
+      <text x="26" y="124" font-size="14" fill="#5B647D">DeepSeek hit vs miss · 1/10 on OpenAI and Anthropic</text>
+    </g>
+    <!-- row 2 -->
+    <g transform="translate(48 274)" filter="url(#sh)">
+      <rect width="380" height="146" rx="20" fill="url(#card)" stroke="#DDE3F7"/>
+      <text x="26" y="66" font-size="52" font-weight="800" fill="url(#num)">140/140</text>
+      <text x="26" y="98" font-size="17" font-weight="700" fill="#141B3A">values right on long-horizon runs</text>
+      <text x="26" y="124" font-size="14" fill="#5B647D">6 runs · 2 models · checked against ground truth</text>
+    </g>
+    <g transform="translate(450 274)" filter="url(#sh)">
+      <rect width="380" height="146" rx="20" fill="url(#card)" stroke="#DDE3F7"/>
+      <text x="26" y="66" font-size="52" font-weight="800" fill="url(#num)">½</text>
+      <text x="26" y="98" font-size="17" font-weight="700" fill="#141B3A">peak context at default settings</text>
+      <text x="26" y="124" font-size="14" fill="#5B647D">201K → 115K tokens, nothing forgotten</text>
+    </g>
+    <g transform="translate(852 274)" filter="url(#sh)">
+      <rect width="380" height="146" rx="20" fill="url(#card)" stroke="#DDE3F7"/>
+      <text x="26" y="66" font-size="52" font-weight="800" fill="url(#num)">3,900+</text>
+      <text x="26" y="98" font-size="17" font-weight="700" fill="#141B3A">automated checks on every change</text>
+      <text x="26" y="124" font-size="14" fill="#5B647D">engine · web · desktop · live model probes</text>
+    </g>
+  </g>
+</svg>

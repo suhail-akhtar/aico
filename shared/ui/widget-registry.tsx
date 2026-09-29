@@ -62,6 +62,9 @@ const Draft = React.lazy(() => import('./rich/Draft').then(m => ({ default: m.Dr
 const Weather = React.lazy(() => import('./rich/Weather').then(m => ({ default: m.Weather })));
 const Currency = React.lazy(() => import('./rich/Currency').then(m => ({ default: m.Currency })));
 const Files = React.lazy(() => import('./rich/Files').then(m => ({ default: m.Files })));
+const Sports = React.lazy(() => import('./rich/Sports').then(m => ({ default: m.Sports })));
+// The canvas card brings its editor with it; a chat without a canvas pays for neither.
+const CanvasCard = React.lazy(() => import('./canvas/Canvas').then(m => ({ default: m.Canvas })));
 
 function Lazy({ children }: { children: React.ReactNode }): React.ReactElement {
   return <React.Suspense fallback={<p className="p-2 text-[11px] text-aico-muted">Loading…</p>}>{children}</React.Suspense>;
@@ -121,6 +124,8 @@ const RENDERERS: Record<WidgetId, React.ComponentType<WidgetRenderProps>> = {
   weather: ({ source, streaming }) => <Lazy><Weather source={source} streaming={streaming} /></Lazy>,
   currency: ({ source, streaming }) => <Lazy><Currency source={source} streaming={streaming} /></Lazy>,
   files: ({ source, streaming }) => <Lazy><Files source={source} streaming={streaming} /></Lazy>,
+  sports: ({ source, streaming }) => <Lazy><Sports source={source} streaming={streaming} /></Lazy>,
+  canvas: ({ source, streaming }) => <Lazy><CanvasCard source={source} streaming={streaming} /></Lazy>,
 };
 
 /** The component for a kind, or undefined if the fence is ordinary code. */

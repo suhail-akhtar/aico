@@ -30,6 +30,7 @@
 
 import { transportFetch } from './transport';
 import type { HostAnswer, HostCall, HostToolName } from '../../shared/host-tools';
+import type { CanvasDoc, CanvasSummary, CanvasWriteResult } from '../../shared/ui/canvas/host';
 
 const TOKEN_KEY = 'aico.token';
 
@@ -87,7 +88,8 @@ export function setTokenRejectedHandler(handler: () => void): void {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  /** `body`: the parsed error response, for the routes whose refusal carries data (a canvas conflict). */
+  constructor(message: string, readonly status: number, readonly body?: unknown) {
     super(message);
     this.name = 'ApiError';
   }
@@ -112,7 +114,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       onTokenRejected?.();
     }
     const message = (body as { error?: string }).error ?? `HTTP ${res.status}`;
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, body);
   }
   return body as T;
 }
@@ -597,7 +599,36 @@ export const api = {
   ackWork: (id: string[]) => post<{ acknowledged: number }>('work/ack', { id }),
   cronAction: (action: 'delete' | 'pause' | 'resume', jobId: string) =>
     post<Record<string, unknown>>(`cron/${action}`, { jobId }),
+
+  // ── canvas ─────────────────────────────────────────────────────────
+  canvasList: (sessionId: string) =>
+    get<{ canvases: CanvasSummary[] }>(`canvas/list?session=${encodeURIComponent(sessionId)}`),
+  canvasGet: (sessionId: string, id: string, light = false) =>
+    get<{ canvas: CanvasDoc }>(`canvas/get?session=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(id)}${light ? '&light=1' : ''}`),
+  /** A person's edit. A stale `baseVersion` answers 409 with the current document — see {@link canvasWrite}. */
+  canvasSave: (sessionId: string, id: string, content: string, baseVersion: number, note?: string) =>
+    canvasWrite('canvas/save', { session: sessionId, id, content, baseVersion, ...(note ? { note } : {}) }),
+  canvasRestore: (sessionId: string, id: string, version: number, baseVersion?: number) =>
+    canvasWrite('canvas/restore', { session: sessionId, id, version, ...(baseVersion !== undefined ? { baseVersion } : {}) }),
 };
+
+/**
+ * A canvas write, with a conflict as an answer rather than an error.
+ *
+ * A 409 here is the normal "the agent wrote while you typed" case and carries
+ * the current document; the editor needs that document to offer a choice, so
+ * it is returned, not thrown.
+ */
+async function canvasWrite(path: string, body: unknown): Promise<CanvasWriteResult> {
+  try {
+    const r = await post<{ ok: true; changed: boolean; canvas: CanvasDoc }>(path, body);
+    return { ok: true, canvas: r.canvas, changed: r.changed };
+  } catch (err) {
+    const canvas = (err as ApiError).body as { canvas?: CanvasDoc } | undefined;
+    if (err instanceof ApiError && err.status === 409 && canvas?.canvas) return { ok: false, conflict: true, canvas: canvas.canvas };
+    throw err;
+  }
+}
 
 export interface ProviderTestResult {
   ok: boolean;

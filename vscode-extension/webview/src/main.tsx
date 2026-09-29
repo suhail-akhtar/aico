@@ -12,11 +12,14 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { configureTransport } from '@web/transport';
+import { installCanvasHost } from '@web/canvas-host';
 import { tunnelFetch } from './tunnel';
 import { Panel } from './Panel';
 import './panel.css';
 
 configureTransport(tunnelFetch);
+// Canvas cards expand in place here — the panel is too narrow for a side slot.
+installCanvasHost();
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

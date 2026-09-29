@@ -26,7 +26,9 @@ import { webSearch, webSearchDefinition } from './websearch.js';
 import { places, placesDefinition } from './places.js';
 import { weather, weatherDefinition } from './weather.js';
 import { currencyRates, currencyRatesDefinition } from './currency.js';
+import { sportsScores, sportsScoresDefinition } from './sports.js';
 import { generateImage, generateImageDefinition } from './generate-image.js';
+import { canvasTool, canvasDefinition } from './canvas.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
 import { askUser, askUserDefinition } from './askuser.js';
@@ -221,6 +223,12 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...placesDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
   { ...weatherDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
   { ...currencyRatesDefinition, isConcurrencySafe: true, maxResultSizeChars: 15_000 },
+  { ...sportsScoresDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
+  // Writes the session's own canvas store, versioned and restorable — no
+  // permission prompt, but exclusive: a read-check-write must see one state.
+  // Sized for a `read` of a long document: truncating it would hand the model
+  // half a text to edit.
+  { ...canvasDefinition, isConcurrencySafe: false, maxResultSizeChars: 450_000 },
   // Spends the user's money and writes files: exclusive, and asks permission.
   { ...generateImageDefinition, isConcurrencySafe: false, maxResultSizeChars: 10_000 },
   { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
@@ -302,7 +310,7 @@ export function getToolsForAgent(agentType: SubAgentType = 'general'): ToolDefin
 }
 
 /** Readonly tool preset (same as the 'explore' agent set) */
-const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'WidgetSpec', 'Places', 'Weather', 'CurrencyRates']);
+const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'WidgetSpec', 'Places', 'Weather', 'CurrencyRates', 'SportsScores']);
 
 /**
  * Resolve a custom tool whitelist to actual ToolDefinitions.
@@ -590,8 +598,14 @@ export async function executeTool(
     case 'Weather':
       result = await weather(args as unknown as Parameters<typeof weather>[0]);
       break;
+    case 'Canvas':
+      result = await canvasTool(args as unknown as Parameters<typeof canvasTool>[0]);
+      break;
     case 'CurrencyRates':
       result = await currencyRates(args as unknown as Parameters<typeof currencyRates>[0]);
+      break;
+    case 'SportsScores':
+      result = await sportsScores(args as unknown as Parameters<typeof sportsScores>[0]);
       break;
     case 'GenerateImage':
       result = await generateImage(args as unknown as Parameters<typeof generateImage>[0]);

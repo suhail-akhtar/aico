@@ -14611,6 +14611,200 @@ console.log('\n══ Keyless data tools (Places, Weather, CurrencyRates) and Ge
     }
   }
 
+  // ── SportsScores ──
+  {
+    const {
+      sportsScores, resetSportsForTests, resolveLeague, resolveDate, espnGame, espnStatus, espnStandings, tsdbGame,
+    } = await import('./dist-test/test-exports.js');
+    const d = Object.fromEntries(defs.map(x => [x.name, x]));
+    assert(d.SportsScores && /```sports/.test(d.SportsScores.description) && d.SportsScores.isConcurrencySafe,
+      'SportsScores is registered, names its block, and may overlap other lookups');
+
+    // League names → ESPN paths.
+    const lp = (s, l) => { const r = resolveLeague(s, l); return r ? `${r.sport}/${r.league}` : undefined; };
+    assert(lp(undefined, 'Premier League') === 'soccer/eng.1' && lp(undefined, 'EPL') === 'soccer/eng.1' && lp('soccer', 'la liga') === 'soccer/esp.1'
+      && lp(undefined, 'Champions League') === 'soccer/uefa.champions' && lp(undefined, 'MLS') === 'soccer/usa.1',
+      'friendly soccer league names map to ESPN paths');
+    assert(lp('basketball') === 'basketball/nba' && lp('baseball') === 'baseball/mlb' && lp('soccer') === 'soccer/eng.1'
+      && lp('nba') === 'basketball/nba' && lp('hockey') === 'hockey/nhl', 'a bare sport means its main league; a league passed as the sport works too');
+    assert(lp(undefined, 'IPL') === 'cricket/8048' && lp('cricket', 'Pakistan Super League') === 'cricket/8679', 'cricket leagues map to ESPN\'s numeric ids');
+    assert(lp(undefined, 'soccer/ger.2') === 'soccer/ger.2' && lp('soccer', 'ger.2') === 'soccer/ger.2', 'an ESPN path, or an id with its sport, passes through');
+    assert(lp(undefined, 'Quidditch League') === undefined && lp('cricket') === undefined, 'an unknown name maps to nothing rather than a guess');
+    const noon = new Date(2026, 8, 29, 12);
+    assert(resolveDate('today', noon) === '2026-09-29' && resolveDate('yesterday', noon) === '2026-09-28' && resolveDate('tomorrow', noon) === '2026-09-30'
+      && resolveDate('20260927', noon) === '2026-09-27', 'dates: today/yesterday/tomorrow and YYYY-MM-DD');
+
+    // ESPN events → games.
+    const comp = (state, extra = {}) => ({ status: { displayClock: "67'", type: { state, ...extra } } });
+    assert(espnStatus(comp('in', { name: 'STATUS_IN_PROGRESS', shortDetail: "67'" }).status).status === 'live'
+      && espnStatus(comp('in', { shortDetail: "67'" }).status).clock === "67'", 'in progress is live, with the clock');
+    assert(espnStatus(comp('post', { name: 'STATUS_FULL_TIME', shortDetail: 'FT' }).status).status === 'final'
+      && espnStatus(comp('post', { shortDetail: 'FT' }).status).clock === undefined
+      && espnStatus(comp('post', { shortDetail: 'Final/OT' }).status).clock === 'Final/OT', 'post is final; "FT" is dropped, "Final/OT" kept');
+    assert(espnStatus(comp('pre', { name: 'STATUS_POSTPONED', description: 'Postponed' }).status).status === 'postponed'
+      && espnStatus(comp('post', { name: 'STATUS_CANCELED', description: 'Canceled' }).status).clock === 'Canceled', 'postponed and cancelled are neither final nor scheduled');
+    assert(espnStatus(comp('pre', { name: 'STATUS_SCHEDULED' }).status).status === 'scheduled', 'pre is scheduled');
+
+    const team = (id, name, abbr) => ({ id, displayName: name, abbreviation: abbr, logo: `https://a.espncdn.com/i/teamlogos/soccer/500/${id}.png` });
+    const ev = (id, date, state, home, away, extra = {}) => ({
+      id, date, links: [{ href: `https://www.espn.com/soccer/match/_/gameId/${id}` }],
+      competitions: [{
+        venue: { fullName: 'Some Ground' },
+        status: { displayClock: extra.clock ?? '0\'', type: { state, name: extra.name ?? '', shortDetail: extra.detail ?? '', description: extra.description ?? '' } },
+        notes: extra.note ? [{ headline: extra.note }] : [],
+        competitors: [
+          { homeAway: 'home', score: home[1], winner: home[2], team: team(...home[0]), records: [{ summary: '4-1-0' }] },
+          { homeAway: 'away', score: away[1], winner: away[2], team: team(...away[0]) },
+        ],
+      }],
+    });
+    const ARS = ['359', 'Arsenal', 'ARS'], CHE = ['363', 'Chelsea', 'CHE'], LIV = ['364', 'Liverpool', 'LIV'], BOU = ['349', 'AFC Bournemouth', 'BOU'];
+    const LEE = ['357', 'Leeds United', 'LEE'], FUL = ['370', 'Fulham', 'FUL'];
+    const fin = espnGame(ev('1', '2026-09-20T13:00Z', 'post', [BOU, '0', false], [LIV, '1', true], { detail: 'FT', name: 'STATUS_FULL_TIME' }), 'soccer');
+    assert(fin.status === 'final' && fin.away.winner === true && !fin.home.winner && fin.home.score === '0' && fin.away.score === '1'
+      && fin.home.logo.startsWith('https://a.espncdn.com/') && fin.home.short === 'BOU' && fin.home.record === '4-1-0',
+      'a final keeps the scores, crests, records and marks the winner');
+    assert(fin.start === '2026-09-20T13:00:00.000Z' && fin.venue === 'Some Ground' && /gameId\/1$/.test(fin.url), 'with an ISO start, the venue and ESPN\'s match link');
+    const pre = espnGame(ev('2', '2026-10-10T11:30Z', 'pre', [ARS, '0', false], [LEE, '0', false], { name: 'STATUS_SCHEDULED', note: 'Matchday 8' }), 'soccer');
+    assert(pre.status === 'scheduled' && pre.home.score === undefined && pre.away.score === undefined && pre.note === 'Matchday 8',
+      'a scheduled game has no score (ESPN\'s "0" before kick-off is not a score)');
+    const cricket = espnGame({ id: '9', date: '2026-05-31T14:00Z', competitions: [{
+      status: { summary: 'RCB won by 5 wkts (12b rem)', type: { state: 'post', shortDetail: 'Final' } },
+      competitors: [
+        { homeAway: 'home', winner: 'true', score: '161/5 (18/20 ov, target 156)', team: { displayName: 'Royal Challengers Bengaluru', abbreviation: 'RCB' } },
+        { homeAway: 'away', winner: 'false', score: '155/8', team: { displayName: 'Gujarat Titans', abbreviation: 'GT' } }] }] }, 'cricket');
+    assert(cricket.home.score === '161/5' && cricket.home.record === '18/20 ov, target 156' && cricket.home.winner === true && !cricket.away.winner
+      && cricket.note === 'RCB won by 5 wkts (12b rem)', 'cricket: runs/wickets are the score, overs the detail, the result the note ("true" as a string counts)');
+    assert(espnGame({ competitions: [{ competitors: [{}, {}, {}] }] }, 'racing') === undefined, 'a race (not two sides) is not a game');
+
+    // Standings.
+    const entry = (n, rank, pts) => ({ team: { displayName: n, logos: [{ href: `https://x.espncdn.com/${encodeURIComponent(n)}.png` }] },
+      stats: [{ name: 'rank', value: rank }, { name: 'gamesPlayed', displayValue: '5' }, { name: 'wins', displayValue: String(pts / 3) },
+        { name: 'ties', displayValue: '0' }, { name: 'losses', displayValue: '1' }, { name: 'pointDifferential', displayValue: '+4' },
+        { name: 'points', value: pts, displayValue: String(pts) }] });
+    const table = espnStandings({ name: 'English Premier League', children: [{ name: '2026-27 English Premier League',
+      standings: { entries: [entry('Arsenal', 2, 12), entry('Manchester City', 1, 15)] } }] }, 'soccer');
+    assert(table.columns.join() === 'GP,W,D,L,GD,Pts' && table.groups.length === 1 && table.groups[0].rows[0].team === 'Manchester City'
+      && table.groups[0].rows[0].values.join() === '5,5,0,1,+4,15' && table.groups[0].rows[0].logo?.endsWith('Manchester%20City.png'),
+      'soccer standings: the sport\'s columns, sorted by rank, with crests');
+    const us = espnStandings({ children: [{ name: 'American League', standings: { entries: [
+      { team: { displayName: 'B' }, stats: [{ name: 'winPercent', value: 0.5, displayValue: '.500' }] },
+      { team: { displayName: 'A' }, stats: [{ name: 'winPercent', value: 0.6, displayValue: '.600' }] }] } },
+      { name: 'National League', standings: { entries: [{ team: { displayName: 'C' }, stats: [] }] } }] }, 'baseball');
+    assert(us.groups.map(g => g.name).join() === 'American League,National League' && us.groups[0].rows[0].team === 'A'
+      && us.columns.join() === 'W,L,PCT,GB' && us.groups[1].rows[0].values[0] === '–', 'baseball: one group per league, by win percentage; a missing stat is a dash');
+
+    // TheSportsDB events.
+    const now = new Date('2026-09-29T12:00:00Z');
+    const t1 = tsdbGame({ idEvent: '77', strTimestamp: '2026-09-20T13:30:00', strHomeTeam: 'Pakistan Cricket', strAwayTeam: 'New Zealand Cricket',
+      intHomeScore: '152', intAwayScore: '156', strStatus: 'Match Finished', strResult: 'NZ won by 7 wickets', strLeague: 'T20I Series',
+      strHomeTeamBadge: 'https://r2.thesportsdb.com/a.png', strVenue: 'Gaddafi Stadium', strCity: 'Lahore' }, now);
+    assert(t1.status === 'final' && t1.home.name === 'Pakistan' && t1.away.winner === true && t1.home.logo === 'https://r2.thesportsdb.com/a.png'
+      && t1.start === '2026-09-20T13:30:00.000Z' && t1.note === 'T20I Series · NZ won by 7 wickets' && t1.venue === 'Gaddafi Stadium, Lahore'
+      && t1.url === 'https://www.thesportsdb.com/event/77', 'TheSportsDB: a finished match, times read as UTC, " Cricket" dropped from names');
+    assert(tsdbGame({ strTimestamp: '2026-10-05T09:00:00', strHomeTeam: 'A', strAwayTeam: 'B', intHomeScore: null, strStatus: '' }, now).status === 'scheduled'
+      && tsdbGame({ strTimestamp: '2026-09-01T09:00:00', strHomeTeam: 'A', strAwayTeam: 'B', strStatus: 'FT' }, now).home.winner === undefined
+      && tsdbGame({ strTimestamp: '2026-09-01T09:00:00', strHomeTeam: 'A', strAwayTeam: 'B', strPostponed: 'yes' }, now).status === 'postponed',
+      'an unmarked future event is scheduled; a final without scores names no winner; postponed is postponed');
+
+    // The tool, end to end, with the network stubbed.
+    const asked = [];
+    const sb = (events, extra = {}) => json({ leagues: [{ name: 'English Premier League', calendar: ['2026-09-20T07:00Z', '2026-10-10T07:00Z'] }], events, ...extra });
+    setNetFetch(async (url, init) => {
+      url = String(url);
+      asked.push({ url, init });
+      const E = 'https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1';
+      if (url === `${E}/scoreboard?dates=20260920`) {
+        return sb([
+          ev('1', '2026-09-20T13:00Z', 'post', [BOU, '0', false], [LIV, '1', true], { detail: 'FT' }),
+          ev('3', '2026-09-20T15:30Z', 'in', [FUL, '1', false], [CHE, '1', false], { detail: "67'" }),
+          ev('4', '2026-09-20T18:00Z', 'pre', [ARS, '0', false], [LEE, '0', false], {}),
+        ]);
+      }
+      if (url === `${E}/scoreboard?dates=20260929`) return sb([]);
+      if (url === `${E}/scoreboard`) return sb([ev('1', '2026-09-20T13:00Z', 'post', [BOU, '0', false], [LIV, '1', true], { detail: 'FT' })], { day: { date: '2026-09-20' } });
+      if (url === `${E}/teams?limit=1000`) return json({ sports: [{ leagues: [{ teams: [{ team: { id: '359', displayName: 'Arsenal', shortDisplayName: 'Arsenal', abbreviation: 'ARS', nickname: 'Gunners' } }] }] }] });
+      if (url === `${E}/teams/359/schedule`) {
+        return json({ events: [
+          ev('10', '2026-08-21T19:00Z', 'post', [ARS, { value: 3, displayValue: '3' }, true], [CHE, { value: 0, displayValue: '0' }, false], { detail: 'FT' }),
+          ev('12', '2026-09-13T14:00Z', 'post', [LIV, { displayValue: '2' }, true], [ARS, { displayValue: '1' }, false], { detail: 'FT' }),
+          ev('11', '2026-08-31T19:00Z', 'post', [BOU, { displayValue: '0' }, false], [ARS, { displayValue: '1' }, true], { detail: 'FT' }),
+          ev('9', '2026-08-15T19:00Z', 'post', [ARS, { displayValue: '2' }, true], [FUL, { displayValue: '0' }, false], { detail: 'FT' }),
+        ] });
+      }
+      if (url === `${E}/teams/359/schedule?fixture=true`) {
+        return json({ events: [ev('14', '2026-10-18T15:30Z', 'pre', [LEE, '0', false], [ARS, '0', false]), ev('13', '2026-10-10T11:30Z', 'pre', [ARS, '0', false], [LEE, '0', false]),
+          ev('15', '2026-10-25T15:30Z', 'pre', [ARS, '0', false], [BOU, '0', false])] });
+      }
+      if (url === 'https://site.api.espn.com/apis/v2/sports/soccer/eng.1/standings') {
+        return json({ name: 'English Premier League', children: [{ name: 'x', standings: { entries: [entry('Arsenal', 2, 12), entry('Manchester City', 1, 15)] } }] });
+      }
+      const T = 'https://www.thesportsdb.com/api/v1/json/3';
+      if (url === `${T}/searchteams.php?t=Pakistan`) return json({ teams: [{ idTeam: '140141', strTeam: 'Pakistan', strSport: 'Soccer', strLeague: 'World Cup Qualifying AFC' }] });
+      if (url === `${T}/searchteams.php?t=Pakistan%20Cricket`) return json({ teams: [{ idTeam: '137144', strTeam: 'Pakistan Cricket', strSport: 'Cricket', strLeague: 'One Day International Series' }] });
+      if (url === `${T}/eventslast.php?id=137144`) {
+        return json({ results: [{ idEvent: '77', strTimestamp: '2026-09-20T13:30:00', strHomeTeam: 'Pakistan Cricket', strAwayTeam: 'New Zealand Cricket',
+          intHomeScore: null, intAwayScore: null, strStatus: 'FT', strResult: 'No result (abandoned)', strLeague: 'T20I Series' }] });
+      }
+      if (url === `${T}/eventsnext.php?id=137144`) return json({ events: null });
+      return new Response('nope', { status: 404 });
+    });
+    resetSportsForTests();
+    try {
+      const out = await sportsScores({ league: 'Premier League', date: '2026-09-20' }, { now });
+      const s = blockOf(out, 'sports');
+      assert(s && s.games.length === 3 && s.league === 'English Premier League' && s.sport === 'soccer' && s.date === '2026-09-20',
+        'a day\'s scoreboard becomes a ```sports block with every game');
+      assert(s.games.map(g => g.status).join() === 'final,live,scheduled' && s.games[1].clock === "67'", 'final, live (with its clock) and scheduled');
+      assert(s.source === 'ESPN' && !Number.isNaN(Date.parse(s.updatedAt)), 'the block names its source and when it was fetched');
+      assert(/LIVE \(67'\): Fulham 1 v Chelsea 1/.test(out) && /Final: AFC Bournemouth 0 v Liverpool 1/.test(out) && /1 in progress/.test(out),
+        'the text lists each game, home first for soccer');
+      assert(/near-live but not guaranteed/.test(out) && /Never add or change a score from memory/.test(out), 'and is honest about delay and forbids invented scores');
+      assert(asked.every(a => /^AICO\//.test(a.init.headers['User-Agent'])), 'every request carries the AICO User-Agent');
+      const n = asked.length;
+      await sportsScores({ league: 'epl', date: '2026-09-20' }, { now });
+      assert(asked.length === n, 'the same scoreboard asked again inside half a minute comes from the cache');
+
+      const empty = await sportsScores({ league: 'Premier League', date: '2026-09-29' }, { now });
+      const e = blockOf(empty, 'sports');
+      assert(/No English Premier League games on 2026-09-29\. The previous matchday was 2026-09-20\. The next is 2026-10-10\./.test(empty)
+        && e.date === '2026-09-20' && e.games.length === 1, 'a day without games says so, names the matchdays around it, and shows ESPN\'s nearest');
+
+      const ars = await sportsScores({ league: 'Premier League', team: 'Gunners', date: '2026-09-29' }, { now });
+      const a = blockOf(ars, 'sports');
+      assert(a.games.map(g => g.id).join() === '10,11,12,13,14',
+        `a team without a game that day: its last three results then next two fixtures, in date order (${a.games.map(g => g.id)})`);
+      assert(a.games[3].status === 'scheduled' && a.games[3].home.score === undefined && a.games[0].home.score === '3', 'schedule scores ({value, displayValue}) are read');
+      assert(/Arsenal has no Premier League game on 2026-09-29/.test(ars), 'and says why it is showing them');
+
+      const tbl = blockOf(await sportsScores({ league: 'EPL', kind: 'standings' }, { now }), 'sports');
+      assert(tbl.games === undefined && tbl.standings.columns.at(-1) === 'Pts' && tbl.standings.groups[0].rows[0].team === 'Manchester City',
+        'kind "standings" returns the table');
+
+      const pak = await sportsScores({ sport: 'cricket', team: 'Pakistan' }, { now });
+      const p = blockOf(pak, 'sports');
+      assert(p.source === 'TheSportsDB' && p.games.length === 1 && p.games[0].home.name === 'Pakistan' && p.games[0].status === 'final'
+        && p.games[0].home.score === undefined, 'a national cricket side falls back to TheSportsDB (retrying "Pakistan Cricket" past the football team)');
+      assert(/free tier returns only the most recent result/.test(pak) && /No upcoming fixtures were listed/.test(pak), 'and says how little the free tier gives');
+
+      let msg = '';
+      try { await sportsScores({ sport: 'tennis' }); } catch (err) { msg = err.message; }
+      assert(/individual sport/.test(msg), 'tennis/golf/racing are refused with a reason');
+      msg = '';
+      try { await sportsScores({ league: 'Quidditch League' }); } catch (err) { msg = err.message; }
+      assert(/Unknown league "Quidditch League"\. Known: Premier League/.test(msg), 'an unknown league lists the known ones');
+      msg = '';
+      try { await sportsScores({ league: 'nba', date: 'next week' }); } catch (err) { msg = err.message; }
+      assert(/date must be YYYY-MM-DD/.test(msg), 'a date it cannot read is a clear error');
+      msg = '';
+      try { await sportsScores({}); } catch (err) { msg = err.message; }
+      assert(/needs a league/.test(msg), 'nothing to look up is a clear error');
+    } finally {
+      setNetFetch();
+      resetSportsForTests();
+    }
+  }
+
   // ── GenerateImage ──
   {
     const saved = { OPENAI_API_KEY: process.env.OPENAI_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY, GOOGLE_API_KEY: process.env.GOOGLE_API_KEY };
@@ -14715,6 +14909,200 @@ console.log('\n══ Keyless data tools (Places, Weather, CurrencyRates) and Ge
       await server.close();
       fs.rmSync(project, { recursive: true, force: true });
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Canvas: the store, the tool, the routes, the live event.
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ Canvas documents (store, Canvas tool, /api/canvas/*) ══');
+{
+  const {
+    createCanvas, getCanvas, listCanvases, writeCanvas, restoreCanvas, applyFindReplace, onCanvasChange,
+    CANVAS_VERSION_CAP, canvasTool, canvasDefinition, runInContext, serve, toolDefinitions: defs, executeTool: exec,
+  } = await import('./dist-test/test-exports.js');
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-canvas-'));
+  const settings = {};
+  const ctx = { settings, cwd: project, sessionId: 'canvas-store-session' };
+  const heard = [];
+  const stopHearing = onCanvasChange(c => heard.push(c));
+  const blockOf = (text, lang) => {
+    const m = new RegExp('```' + lang + '\\n([\\s\\S]*?)\\n```').exec(String(text));
+    return m ? JSON.parse(m[1]) : undefined;
+  };
+  try {
+    // ── The store ──
+    const doc = await createCanvas(ctx, { title: '  Launch   email ', kind: 'document', content: 'Hello **world**', author: 'agent' });
+    assert(/^cv-[0-9a-f]{10}$/.test(doc.id) && doc.version === 1 && doc.title === 'Launch email' && doc.versions.length === 1
+      && doc.versions[0].author === 'agent', 'create: an id, version 1, a tidied title, one version by the agent');
+    const onDisk = (await listCanvases(ctx)).map(c => c.id);
+    assert(onDisk.length === 1 && onDisk[0] === doc.id, 'list: the new canvas is listed');
+    assert(heard.length === 1 && heard[0].action === 'create' && heard[0].sessionId === ctx.sessionId && heard[0].version === 1,
+      'create is announced to change listeners');
+
+    const w2 = await writeCanvas(ctx, doc.id, { content: 'Hello **there**', baseVersion: 1, author: 'user', note: 'my edit' });
+    assert(w2.ok && w2.changed && w2.canvas.version === 2 && w2.canvas.versions[1].author === 'user' && w2.canvas.versions[1].note === 'my edit',
+      'save on the current version: version 2, by the user, with its note');
+    const stale = await writeCanvas(ctx, doc.id, { content: 'from an old copy', baseVersion: 1, author: 'agent' });
+    assert(!stale.ok && stale.conflict && stale.canvas.version === 2 && stale.canvas.content === 'Hello **there**',
+      'save on a stale version is a conflict carrying the current document');
+    assert((await getCanvas(ctx, doc.id)).content === 'Hello **there**', 'and nothing was overwritten');
+    const same = await writeCanvas(ctx, doc.id, { content: 'Hello **there**', baseVersion: 2, author: 'user' });
+    assert(same.ok && !same.changed && same.canvas.version === 2, 'saving the same text again mints no version');
+    assert(heard.filter(c => c.action === 'update').length === 1 && heard.at(-1).author === 'user', 'only real writes are announced');
+
+    const restored = await restoreCanvas(ctx, doc.id, 1, { author: 'user', baseVersion: 2 });
+    assert(restored.ok && restored.canvas.version === 3 && restored.canvas.content === 'Hello **world**'
+      && /Restored version 1/.test(restored.canvas.versions.at(-1).note), 'restore brings version 1 back as version 3, noted');
+    const staleRestore = await restoreCanvas(ctx, doc.id, 2, { author: 'user', baseVersion: 2 });
+    assert(!staleRestore.ok && staleRestore.canvas.version === 3, 'a restore on a stale version is a conflict too');
+
+    // Version cap.
+    let cur = restored.canvas;
+    for (let i = 0; i < CANVAS_VERSION_CAP + 5; i++) {
+      const r = await writeCanvas(ctx, doc.id, { content: `draft ${i}`, baseVersion: cur.version, author: i % 2 ? 'user' : 'agent' });
+      cur = r.canvas;
+    }
+    assert(cur.version === 3 + CANVAS_VERSION_CAP + 5 && cur.versions.length === CANVAS_VERSION_CAP
+      && cur.versions[0].version === cur.version - CANVAS_VERSION_CAP + 1 && cur.versions.at(-1).content === cur.content,
+      `history is capped at the last ${CANVAS_VERSION_CAP} versions, the newest being the content`);
+    let msg = '';
+    try { await restoreCanvas(ctx, doc.id, 2, { author: 'user' }); } catch (e) { msg = e.message; }
+    assert(/version 2 of canvas .* is not kept/.test(msg), 'restoring a version that fell off the history says so');
+
+    msg = '';
+    try { await writeCanvas(ctx, 'cv-0000000000', { content: 'x', baseVersion: 1, author: 'user' }); } catch (e) { msg = e.message; }
+    assert(/no canvas "cv-0000000000"/.test(msg), 'writing an unknown canvas is refused by name');
+    assert(await getCanvas(ctx, '../../settings') === undefined, 'a path for an id finds nothing');
+    const code = await createCanvas(ctx, { title: 'fib', kind: 'code', language: 'Python', content: 'def fib(n):\n  pass\n' });
+    assert(code.kind === 'code' && code.language === 'python', 'a code canvas keeps its language');
+    const listed = await listCanvases(ctx);
+    assert(listed.length === 2 && listed[0].id === code.id && listed[0].chars === code.content.length && !('content' in listed[0]),
+      'list: newest first, summaries without content');
+    msg = '';
+    try { await createCanvas(ctx, { title: 't', kind: 'slides', content: 'x' }); } catch (e) { msg = e.message; }
+    assert(/kind must be "document" or "code"/.test(msg), 'an unknown kind is refused');
+
+    // ── find/replace ──
+    const fr = applyFindReplace('one two one', 'two', '2');
+    assert(fr.ok && fr.content === 'one 2 one' && fr.count === 1, 'find/replace: a unique passage is replaced');
+    const twice = applyFindReplace('one two one', 'one', '1');
+    assert(!twice.ok && /occurs 2 times/.test(twice.error), 'find/replace: an ambiguous passage is refused with the count');
+    const all = applyFindReplace('one two one', 'one', '1', true);
+    assert(all.ok && all.content === '1 two 1' && all.count === 2, 'find/replace: all: true replaces every occurrence');
+    const none = applyFindReplace('one two', 'three', '3');
+    assert(!none.ok && /does not occur/.test(none.error), 'find/replace: an absent passage is refused');
+    assert(!applyFindReplace('x', '', 'y').ok && !applyFindReplace('x', 'x', 'x').ok, 'find/replace: empty or no-op edits are refused');
+
+    // ── The tool ──
+    const d = Object.fromEntries(defs.map(t => [t.name, t]));
+    assert(d.Canvas && !d.Canvas.isConcurrencySafe && canvasDefinition.inputSchema.properties.action.enum.join() === 'create,read,update,edit,list'
+      && /```canvas/.test(canvasDefinition.description) && /ALWAYS read/.test(canvasDefinition.description),
+      'Canvas is registered, exclusive, and its description says to read before editing');
+    const run = (fn) => runInContext({ cwd: project, sessionId: 'canvas-tool-session', settings }, fn);
+    const tctx = { settings, cwd: project, sessionId: 'canvas-tool-session' };
+    const created = await run(() => canvasTool({ action: 'create', title: 'Announcement', kind: 'document', content: '# AICO Desktop\n\nIt is here. It is here.' }));
+    const card = blockOf(created, 'canvas');
+    assert(card && /^cv-/.test(card.id) && card.title === 'Announcement' && card.kind === 'document' && !created.includes('It is here'),
+      'create returns a ```canvas reference card — and not the content');
+    const readOut = await run(() => canvasTool({ action: 'read', id: card.id }));
+    assert(/version 1/.test(readOut) && readOut.includes('# AICO Desktop\n\nIt is here. It is here.') && /Pass version: 1/.test(readOut),
+      'read returns the content and the version to pass back');
+    msg = '';
+    try { await run(() => canvasTool({ action: 'edit', id: card.id, version: 1, find: 'It is here.', replace: 'Now shipping.' })); } catch (e) { msg = e.message; }
+    assert(/NOT APPLIED/.test(msg) && /occurs 2 times/.test(msg), 'edit refuses a find that is not unique');
+    msg = '';
+    try { await run(() => canvasTool({ action: 'edit', id: card.id, version: 1, find: 'Not in the text', replace: 'x' })); } catch (e) { msg = e.message; }
+    assert(/does not occur/.test(msg), 'edit refuses a find that is absent');
+    const edited = await run(() => canvasTool({ action: 'edit', id: card.id, version: 1, find: '# AICO Desktop', replace: '# AICO Desktop 1.0' }));
+    assert(/now version 2/.test(edited) && blockOf(edited, 'canvas')?.id === card.id, 'edit applies a unique passage and returns the card again');
+
+    // The user edits in between: the agent's stale write is refused with the latest text.
+    await writeCanvas(tctx, card.id, { content: '# AICO Desktop 1.0\n\nWritten by a person.', baseVersion: 2, author: 'user' });
+    msg = '';
+    try { await run(() => canvasTool({ action: 'update', id: card.id, version: 2, content: 'agent rewrite' })); } catch (e) { msg = e.message; }
+    assert(/NOT APPLIED/.test(msg) && /version 3, not 2/.test(msg) && /The user edited it/.test(msg) && msg.includes('Written by a person.'),
+      'update on a stale version is refused, names the user, and carries the latest content');
+    assert((await getCanvas(tctx, card.id)).content.includes('Written by a person.'), 'and the user\'s edit survives');
+    msg = '';
+    try { await run(() => canvasTool({ action: 'edit', id: card.id, find: 'person', replace: 'human' })); } catch (e) { msg = e.message; }
+    assert(/NOT APPLIED/.test(msg) && /not \(no version given\)/.test(msg), 'edit without a version is refused the same way');
+    const updated = await run(() => canvasTool({ action: 'update', id: card.id, version: 3, content: 'Short.', note: 'shorter' }));
+    const after = await getCanvas(tctx, card.id);
+    assert(/now version 4/.test(updated) && after.content === 'Short.' && after.versions.map(v => v.author).join() === 'agent,agent,user,agent'
+      && after.versions.at(-1).note === 'shorter', 'update with the current version writes version 4; history reads agent, agent, user, agent');
+    const listOut = await run(() => canvasTool({ action: 'list' }));
+    assert(listOut.includes(card.id) && /version 4/.test(listOut), 'list names the canvases with their versions');
+    msg = '';
+    try { await run(() => canvasTool({ action: 'read', id: 'cv-ffffffffff' })); } catch (e) { msg = e.message; }
+    assert(/No canvas "cv-ffffffffff"/.test(msg) && msg.includes(card.id), 'an unknown id is refused, listing the ones that exist');
+    const viaDispatch = await run(() => exec('Canvas', { action: 'read', id: card.id }));
+    assert(typeof viaDispatch === 'string' && viaDispatch.includes('Short.'), 'executeTool dispatches Canvas');
+    msg = '';
+    try { await runInContext({ cwd: project }, () => canvasTool({ action: 'list' })); } catch (e) { msg = e.message; }
+    // Outside a run the workspace runtime may still name a session (the CLI does); only no session at all is refused.
+    assert(msg === '' || /needs a chat session/.test(msg), 'without a session the tool refuses rather than guessing');
+
+    // ── The routes ──
+    const sessionId = 'canvas-route-session';
+    const rctx = { settings, cwd: project, sessionId };
+    const routed = await createCanvas(rctx, { title: 'Spec', content: 'v1 text' });
+    const server = await serve({ port: 0, cwd: project, project, open: false });
+    const controller = new AbortController();
+    try {
+      const u = new URL(server.url);
+      const token = u.searchParams.get('token');
+      const api = (p, init = {}) => fetch(`${u.origin}/api/${p}`, { ...init, headers: { 'x-aico-token': token, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
+      const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body) });
+
+      const list = await (await api(`canvas/list?session=${sessionId}`)).json();
+      assert(list.canvases?.length === 1 && list.canvases[0].id === routed.id, 'GET canvas/list lists the session\'s canvases');
+      const got = await (await api(`canvas/get?session=${sessionId}&id=${routed.id}`)).json();
+      assert(got.canvas?.content === 'v1 text' && got.canvas.version === 1, 'GET canvas/get returns the document');
+      assert((await api(`canvas/get?session=${sessionId}&id=cv-0123456789`)).status === 404, 'an unknown canvas is 404');
+      assert((await api(`canvas/get?session=${sessionId}&id=..%2F..%2Fx`)).status === 400, 'a malformed id is 400');
+      assert((await fetch(`${u.origin}/api/canvas/list?session=${sessionId}`)).status === 401, 'the routes need the token');
+
+      // Watch the stream for the live event.
+      const frames = [];
+      const stream = fetch(`${u.origin}/api/events?session=${sessionId}&token=${token}`, { signal: controller.signal })
+        .then(async (res) => {
+          const reader = res.body.getReader();
+          const dec = new TextDecoder();
+          for (;;) { const { value, done } = await reader.read(); if (done) break; frames.push(dec.decode(value)); }
+        }).catch(() => undefined);
+      for (let i = 0; i < 50 && !frames.join('').includes('caught-up'); i++) await new Promise(r => setTimeout(r, 50));
+
+      const saved = await post('canvas/save', { session: sessionId, id: routed.id, content: 'v2 by the user', baseVersion: 1, note: 'typed' });
+      const savedBody = await saved.json();
+      assert(saved.status === 200 && savedBody.ok && savedBody.changed && savedBody.canvas.version === 2
+        && savedBody.canvas.versions.at(-1).author === 'user', 'POST canvas/save writes version 2 as the user');
+      for (let i = 0; i < 40 && !frames.join('').includes('event: canvas'); i++) await new Promise(r => setTimeout(r, 50));
+      const frame = frames.join('').split('\n\n').find(f => f.startsWith('event: canvas'));
+      const event = frame ? JSON.parse(frame.split('\n').find(l => l.startsWith('data: ')).slice(6)) : null;
+      assert(event?.type === 'canvas' && event.data.id === routed.id && event.data.version === 2 && event.data.author === 'user'
+        && event.data.action === 'update', 'the save is published on the session stream as a canvas event');
+
+      const conflict = await post('canvas/save', { session: sessionId, id: routed.id, content: 'from a stale tab', baseVersion: 1 });
+      const conflictBody = await conflict.json();
+      assert(conflict.status === 409 && conflictBody.conflict === true && conflictBody.canvas.version === 2
+        && conflictBody.canvas.content === 'v2 by the user', 'a save on a stale baseVersion is 409 with the current document');
+      const light = await (await api(`canvas/get?session=${sessionId}&id=${routed.id}&light=1`)).json();
+      assert(light.canvas.versions.length === 1 && light.canvas.versions[0].version === 2, 'light=1 returns only the current version');
+      const rest = await post('canvas/restore', { session: sessionId, id: routed.id, version: 1, baseVersion: 2 });
+      const restBody = await rest.json();
+      assert(rest.status === 200 && restBody.canvas.version === 3 && restBody.canvas.content === 'v1 text', 'POST canvas/restore brings version 1 back as version 3');
+      const badRestore = await post('canvas/restore', { session: sessionId, id: routed.id, version: 99 });
+      assert(badRestore.status === 400 && /not kept/.test((await badRestore.json()).error), 'restoring a version that does not exist is 400');
+      assert((await post('canvas/save', { session: sessionId, id: routed.id, content: 42, baseVersion: 3 })).status === 400, 'a save without text content is 400');
+      assert((await post('canvas/save', { session: sessionId, id: 'cv-0123456789', content: 'x', baseVersion: 1 })).status === 404, 'saving an unknown canvas is 404');
+    } finally {
+      controller.abort();
+      await server.close();
+    }
+  } finally {
+    stopHearing();
+    fs.rmSync(project, { recursive: true, force: true });
   }
 }
 

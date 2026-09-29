@@ -397,5 +397,11 @@ export { parseOpeningHours, isOpenAt, openNow } from './tools/opening-hours.js';
 export { places, resetPlacesForTests, classifyQuery, overpassQuery } from './tools/places.js';
 export { weather, resetWeatherForTests, describeWmo } from './tools/weather.js';
 export { currencyRates, resetCurrencyForTests } from './tools/currency.js';
+export { sportsScores, resetSportsForTests, resolveLeague, resolveDate, espnGame, espnStatus, espnStandings, tsdbGame } from './tools/sports.js';
 export { generateImage, pickImageBackend, openAiImageRequest, estimateImageCost } from './tools/generate-image.js';
 export { storeAttachment, readStoredAttachment } from './server/attachments.js';
+export {
+  createCanvas, getCanvas, listCanvases, writeCanvas, restoreCanvas, applyFindReplace, onCanvasChange,
+  CANVAS_VERSION_CAP, CANVAS_MAX_CHARS,
+} from './canvas/store.js';
+export { canvasTool, canvasDefinition } from './tools/canvas.js';

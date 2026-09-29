@@ -20,6 +20,8 @@ import { Composer, ProjectChip } from './Composer';
 import { Transcript } from './Transcript';
 import { Attention } from './Attention';
 import { SourcesPanel, useSourcesPanel } from './SourcesPanel';
+import { CanvasPanel, useCanvasPanel } from './CanvasPanel';
+import { onCanvasEvent } from '@aico/ui';
 import { openChat } from './actions';
 
 function greeting(name: string | undefined): string {
@@ -44,8 +46,20 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
   }, [params?.id, route.view]);
 
   useEffect(() => { if (!busy) markSeen(sessionId); }, [busy, sessionId, logged.size]);
-  // Sources belong to the chat they came from.
-  useEffect(() => { useSourcesPanel.getState().close(); }, [sessionId]);
+  // Sources and canvases belong to the chat they came from.
+  useEffect(() => { useSourcesPanel.getState().close(); useCanvasPanel.getState().close(); }, [sessionId]);
+  // One right panel at a time: showing Sources puts the canvas away.
+  useEffect(() => useSourcesPanel.subscribe((s, prev) => {
+    if (s.sources && !prev.sources) useCanvasPanel.getState().close();
+  }), []);
+  // A canvas the agent has just created in this chat opens beside it, the way
+  // ChatGPT's does — the card in the reply reopens it later.
+  useEffect(() => onCanvasEvent((c) => {
+    if (c.action !== 'create' || c.author !== 'agent') return;
+    if (c.sessionId && c.sessionId !== useStore.getState().sessionId) return;
+    useCanvasPanel.getState().show({ id: c.id, title: c.title, kind: c.kind });
+  }), []);
+  const canvasOpen = useCanvasPanel(s => s.open !== null);
 
   const empty = logged.size === 0 && !busy;
   if (empty) return <Home />;
@@ -62,7 +76,7 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
           <p className="mt-1.5 text-center text-[11px] text-aico-muted">AICO runs on this computer. The agent can make mistakes — check important work.</p>
         </div>
       </div>
-      <SourcesPanel />
+      {canvasOpen ? <CanvasPanel /> : <SourcesPanel />}
     </div>
   );
 }

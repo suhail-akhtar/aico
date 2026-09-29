@@ -64,6 +64,8 @@ const TIMEOUTS: Record<string, number> = {
   Places: 2 * 60 * 1000,
   Weather: 60 * 1000,
   CurrencyRates: 60 * 1000,
+  // Up to four requests in a row (TheSportsDB, then ESPN's team list and schedules).
+  SportsScores: 90 * 1000,
   // A high-quality picture takes a minute or more; Gemini draws one per request.
   GenerateImage: 6 * 60 * 1000,
 

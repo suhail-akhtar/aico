@@ -48,6 +48,8 @@ function readSelection(root: HTMLElement | null): Anchor | null {
   // nothing, and without this check every selection on the page offers to ask
   // about itself.
   if (!element || !root?.contains(element)) return null;
+  // A canvas opened in place has its own "Ask AI to edit" for its selections.
+  if (element.closest('.acv')) return null;
 
   const rect = range.getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return null;
