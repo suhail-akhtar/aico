@@ -23,8 +23,9 @@ import { useNavItems } from '@/plugins/registry';
 import { Icon } from '@/lib/icons';
 import { ago, basename, cls, initials } from '@/lib/util';
 import { isUnread, useLocal } from '@/lib/local';
-import { MenuButton, MenuItem, MenuSep } from './Popover';
+import { MenuButton, MenuItem, MenuSep, MenuSub } from './Popover';
 import { desktop } from '@/desktop';
+import type { UpdateState } from '@desk/updates';
 import { newChat, openChat, chatCommands } from '@/chat/actions';
 
 export function Sidebar(): React.ReactElement {
@@ -420,6 +421,8 @@ function ProfileRow(): React.ReactElement {
   const info = useDesk(s => s.info);
   const engine = useDesk(s => s.engine);
   const openSettings = useDesk(s => s.openSettings);
+  const prefs = useDesk(s => s.prefs);
+  const setPrefs = useDesk(s => s.setPrefs);
   const name = info?.user ?? 'You';
   return (
     <div className="border-t border-aico-border-subtle p-2">
@@ -445,29 +448,70 @@ function ProfileRow(): React.ReactElement {
       >
         {close => (
           <>
-            <div className="flex items-center gap-2.5 px-2.5 py-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-aico-accent-soft text-[12px] font-semibold text-aico-accent">{initials(name)}</span>
-              <div className="min-w-0">
-                <div className="truncate font-medium">{name}</div>
-                <div className="truncate text-[12px] text-aico-muted">{info?.hostname} · {info?.platform}</div>
-              </div>
-            </div>
+            <button className="mx-0.5 mb-1 flex w-[calc(100%-4px)] items-center gap-3 rounded-xl bg-aico-hover/60 px-3 py-2.5 text-left transition-colors hover:bg-aico-hover"
+              onClick={() => { close(); openSettings('personalization'); }} title="Personalization — how AICO talks to you">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-aico-accent-soft text-[12.5px] font-semibold text-aico-accent">{initials(name)}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13.5px] font-medium">{name}</span>
+                <span className="block truncate text-[12px] text-aico-muted">Local account · {info?.hostname}</span>
+              </span>
+              <Icon name="chevron-right" size={14} className="text-aico-muted" />
+            </button>
             <MenuSep />
-            <MenuItem icon="settings" label="Settings" hint="Ctrl ," onClick={() => { close(); openSettings('general'); }} />
             <MenuItem icon="sparkles" label="Personalization" onClick={() => { close(); openSettings('personalization'); }} />
-            <MenuItem icon="palette" label="Appearance" onClick={() => { close(); openSettings('appearance'); }} />
+            <MenuItem icon="settings" label="Settings" hint="Ctrl+," onClick={() => { close(); openSettings('general'); }} />
+            <MenuSub icon="palette" label="Appearance" width={220}>
+              <MenuItem icon="sun" label="Light" checked={prefs.theme === 'light'} onClick={() => { close(); void setPrefs({ theme: 'light' }); }} />
+              <MenuItem icon="moon" label="Dark" checked={prefs.theme === 'dark'} onClick={() => { close(); void setPrefs({ theme: 'dark' }); }} />
+              <MenuItem icon="monitor" label="Match system" checked={prefs.theme === 'system'} onClick={() => { close(); void setPrefs({ theme: 'system' }); }} />
+              <MenuSep />
+              <MenuItem icon="palette" label="Colours and fonts…" onClick={() => { close(); openSettings('appearance'); }} />
+            </MenuSub>
             <MenuItem icon="puzzle" label="Plugins" onClick={() => { close(); go('plugins'); }} />
-            <MenuItem icon="keyboard" label="Keyboard shortcuts" onClick={() => { close(); openSettings('shortcuts'); }} />
             <MenuSep />
-            <MenuItem icon="globe" label="Open in web browser" onClick={() => {
-              close();
-              void desktop.engine.webUrl().then(u => u ? desktop.shell.openExternal(u) : toast.warning('The engine is not running yet.'));
-            }} />
-            <MenuItem icon="refresh" label="Restart engine" onClick={() => { close(); void desktop.engine.restart(); toast.info('Restarting the engine…', 'Running chats keep their history; a running turn is stopped.'); }} />
-            <MenuItem icon="help" label="Help & docs" onClick={() => { close(); void desktop.shell.openExternal('https://suhail-akhtar.github.io/aico/'); }} />
-            <MenuItem icon="info" label="About AICO" onClick={() => { close(); openSettings('about'); }} />
+            <MenuSub icon="database" label="Your data" width={250}>
+              <MenuItem icon="download" label="Back up settings…" hint="to another machine" onClick={() => {
+                close();
+                void desktop.backup.export({}).then(r => { if (r) toast.success('Backup saved', r.file); }).catch(e => toast.error('Backup failed', (e as Error).message));
+              }} />
+              <MenuItem icon="upload" label="Restore from backup…" onClick={() => { close(); openSettings('application'); toast.info('Restore is under Backup & restore', 'It shows what will change before anything is replaced.'); }} />
+              <MenuItem icon="folder" label="Open the AICO folder" onClick={() => { close(); if (info?.home) void desktop.shell.openPath(info.home); }} />
+            </MenuSub>
+            <MenuSub icon="activity" label="Engine" width={240}>
+              <MenuItem icon="globe" label="Open in web browser" onClick={() => {
+                close();
+                void desktop.engine.webUrl().then(u => u ? desktop.shell.openExternal(u) : toast.warning('The engine is not running yet.'));
+              }} />
+              <MenuItem icon="refresh" label="Restart engine" onClick={() => { close(); void desktop.engine.restart(); toast.info('Restarting the engine…', 'Running chats keep their history; a running turn is stopped.'); }} />
+              <MenuItem icon="activity" label="Activity monitor" onClick={() => { close(); go('activity'); }} />
+            </MenuSub>
+            <MenuSub icon="help" label="Help" width={250}>
+              <MenuItem icon="book" label="Help and docs" onClick={() => { close(); void desktop.shell.openExternal('https://suhail-akhtar.github.io/aico/'); }} />
+              <MenuItem icon="keyboard" label="Keyboard shortcuts" onClick={() => { close(); openSettings('shortcuts'); }} />
+              <MenuItem icon="sparkles" label="What's new" onClick={() => { close(); void desktop.shell.openExternal('https://github.com/suhail-akhtar/aico/releases'); }} />
+              <MenuItem icon="bug" label="Report a problem" onClick={() => { close(); void desktop.shell.openExternal('https://github.com/suhail-akhtar/aico/issues/new'); }} />
+              <MenuSep />
+              <MenuItem icon="refresh" label="Check for updates" onClick={() => {
+                close();
+                // The check reports "checking" at once and the answer later, as a state event.
+                const report = (s: UpdateState): boolean => {
+                  if (s.status === 'checking' || s.status === 'idle') return false;
+                  if (s.status === 'unsupported') toast.info('Updates install from the release page in this build', s.message);
+                  else if (s.status === 'error') toast.error('Could not check for updates', s.message);
+                  else if (s.status === 'up-to-date') toast.success(`AICO ${s.current} is up to date`);
+                  else if (s.status === 'ready') toast.success(`AICO ${s.version} is ready`, 'Restart from Settings → Application, or it installs when you quit.');
+                  else toast.info(`AICO ${s.version} is available`, s.status === 'downloading' ? 'Downloading in the background.' : 'Download it from Settings → Application.');
+                  return true;
+                };
+                toast.info('Checking for updates…');
+                const off = desktop.updates.onState(s => { if (report(s)) off(); });
+                void desktop.updates.check().then(s => { if (report(s)) off(); }).catch(e => { off(); toast.error('Could not check for updates', (e as Error).message); });
+                window.setTimeout(off, 60_000);
+              }} />
+              <MenuItem icon="info" label="About AICO" onClick={() => { close(); openSettings('about'); }} />
+            </MenuSub>
             <MenuSep />
-            <MenuItem icon="logout" label="Quit AICO" onClick={() => { close(); void desktop.quit(); }} />
+            <MenuItem icon="logout" label="Quit AICO" hint="Ctrl+Q" onClick={() => { close(); void desktop.quit(); }} />
           </>
         )}
       </MenuButton>

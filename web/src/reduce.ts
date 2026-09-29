@@ -175,6 +175,7 @@ export function applyLogEvent(
         toolCallId: String(data.callId ?? ''),
         toolRunning: true,
         timestamp: now,
+        ...turn,
       });
       return next;
     }

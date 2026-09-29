@@ -94,8 +94,11 @@ const APP_CSP = [
   "img-src 'self' aico: data: blob: https: http:",
   "media-src 'self' aico: data: blob:",
   "connect-src 'self' aico:",
-  // Plugin views and HTML previews are sandboxed frames.
-  "frame-src 'self' aico: blob: data:",
+  // Plugin views and HTML previews are sandboxed frames. The ```video block
+  // embeds YouTube's no-cookie player, and only after the reader clicks play.
+  // (Remote images — map tiles, thumbnails, product photos — are already
+  // covered by img-src https:.)
+  "frame-src 'self' aico: blob: data: https://www.youtube-nocookie.com",
   "worker-src 'self' aico: blob:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -118,6 +121,31 @@ export interface ProtocolOptions {
   rendererDir: string;
   pluginDir: () => string;
   engine: EngineHost;
+}
+
+/**
+ * Third-party media the chat embeds that insists on knowing who embeds it.
+ *
+ * A page on `aico://` sends no Referer (it is not an http origin), and two
+ * services refuse such requests: YouTube's embedded player fails with "Error
+ * 153 — video player configuration error", and OpenStreetMap's tile policy
+ * asks every app to identify itself. So requests to exactly these hosts carry
+ * the project's public page as their Referer. Nothing else is touched, and the
+ * built-in browser (its own session partition) is not affected at all.
+ */
+const EMBED_REFERER = 'https://suhail-akhtar.github.io/aico/';
+export const EMBED_HOSTS = [
+  'https://www.youtube-nocookie.com/*',
+  'https://www.youtube.com/*',
+  'https://*.openstreetmap.org/*',
+];
+
+export function attachEmbedReferer(ses: Electron.Session): void {
+  ses.webRequest.onBeforeSendHeaders({ urls: EMBED_HOSTS }, (details, callback) => {
+    const headers = details.requestHeaders;
+    if (!headers.Referer && !headers.referer) headers.Referer = EMBED_REFERER;
+    callback({ requestHeaders: headers });
+  });
 }
 
 export function handleProtocol({ rendererDir, pluginDir, engine }: ProtocolOptions): void {

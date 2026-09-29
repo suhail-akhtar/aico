@@ -893,6 +893,41 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
+    /*
+      One stored attachment's bytes, by id — how a picture a tool produced (or
+      one the reader attached) is shown in the chat: `GenerateImage` hands the
+      model an ```images block whose url is this route.
+
+      Behind the same token as every other route. In the desktop the aico://
+      proxy adds it; a browser tab's <img> cannot send the header, so the web
+      client appends `token=` the way the export link already does. No path
+      input: the id is looked up in the session's own index, and an unknown id
+      is a 404 rather than a filesystem probe.
+    */
+    if (route === 'attachments/file' && req.method === 'GET') {
+      const sessionId = url.searchParams.get('session');
+      const id = url.searchParams.get('id');
+      if (!sessionId || !id || !/^[\w.-]+$/.test(sessionId)) { send(res, 400, { error: 'session and id required' }); return; }
+      const { readStoredAttachment } = await import('./attachments.js');
+      const found = await readStoredAttachment({
+        settings: await loadSettings(), cwd: await resolveCwd(sessionId, url.searchParams.get('project')), sessionId, id,
+      });
+      if (!found) { send(res, 404, { error: 'no such attachment' }); return; }
+      res.writeHead(200, {
+        'Content-Type': found.contentType,
+        'Content-Length': String(found.bytes.length),
+        'X-Content-Type-Options': 'nosniff',
+        // Immutable by construction — an id names one stored file for ever.
+        'Cache-Control': 'private, max-age=31536000, immutable',
+        // Pictures display in place; anything else downloads rather than
+        // rendering on the engine's own origin.
+        'Content-Disposition': `${found.image ? 'inline' : 'attachment'}; filename="${found.name.replace(/[^\w.() -]/g, '_')}"`,
+        'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+      });
+      res.end(found.bytes);
+      return;
+    }
+
     if (route === 'session/rename' && req.method === 'POST') {
       const { sessionId, title } = await readJson(req) as { sessionId?: string; title?: string };
       if (!sessionId || !title) { send(res, 400, { error: 'sessionId and title required' }); return; }

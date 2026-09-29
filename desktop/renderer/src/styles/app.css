@@ -167,3 +167,23 @@ html.dark .composer-shell:focus-within { box-shadow: 0 1px 2px rgba(0,0,0,.35), 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ── Tooltips (shell/Tooltips.tsx) ─────────────────────────────────── */
+.desk-tooltip {
+  position: fixed; z-index: 90; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 6px 11px; border-radius: 10px;
+  background: #0d0d0d; color: #fff;
+  font-size: 12.5px; font-weight: 600; line-height: 1.35; letter-spacing: .005em;
+  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  animation: desk-tip-in .12s ease-out;
+  white-space: pre-line;
+}
+.desk-tooltip kbd {
+  font-family: inherit; font-size: 11.5px; font-weight: 500;
+  color: rgba(255,255,255,.62); background: none; border: 0; padding: 0;
+}
+html.dark .desk-tooltip { background: #f3f3f3; color: #0d0d0d; box-shadow: 0 4px 16px rgba(0,0,0,.45); }
+html.dark .desk-tooltip kbd { color: rgba(0,0,0,.55); }
+@keyframes desk-tip-in { from { opacity: 0; } to { opacity: 1; } }

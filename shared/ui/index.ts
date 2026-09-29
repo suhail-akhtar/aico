@@ -35,3 +35,4 @@ export { FileDiff, changeFromArgs } from './FileDiff';
 export { ToolCallCard } from './ToolCallCard';
 export { formatResult } from './tool-result';
 export { MessageBubble } from './MessageBubble';
+export { setMediaUrlResolver, mediaUrl } from './media';

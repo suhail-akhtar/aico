@@ -14353,6 +14353,371 @@ console.log('\n══ TOOL-PRODUCED IMAGES AND LEARNED CAPABILITIES ══');
   fs.rmSync(workDir, { recursive: true, force: true });
 }
 
+// ═══════════════════════════════════════════════════════════
+// KEYLESS DATA TOOLS AND IMAGE GENERATION
+// Places / Weather / CurrencyRates / GenerateImage, network stubbed.
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ Keyless data tools (Places, Weather, CurrencyRates) and GenerateImage ══');
+{
+  const {
+    setNetFetch, userAgent, RequestSpacer, TtlCache,
+    parseOpeningHours, isOpenAt, openNow,
+    places, resetPlacesForTests, classifyQuery, overpassQuery,
+    weather, resetWeatherForTests, describeWmo,
+    currencyRates, resetCurrencyForTests,
+    generateImage, pickImageBackend, openAiImageRequest, estimateImageCost,
+    storeAttachment, readStoredAttachment, serve,
+    runInContext, createToolImageSink, solidPng, toolDefinitions: defs,
+  } = await import('./dist-test/test-exports.js');
+
+  /** Pull the JSON out of a ```lang block in a tool result. */
+  const blockOf = (text, lang) => {
+    const m = new RegExp('```' + lang + '\\n([\\s\\S]*?)\\n```').exec(text);
+    return m ? JSON.parse(m[1]) : undefined;
+  };
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  /** A fake clock for the spacer: sleeping advances time instantly. */
+  const fakeClock = () => { const c = { t: 0, now: () => c.t, sleep: async (ms) => { c.t += ms; } }; return c; };
+
+  // ── Registration ──
+  {
+    const names = defs.map(d => d.name);
+    assert(['Places', 'Weather', 'CurrencyRates', 'GenerateImage'].every(n => names.includes(n)), 'the four tools are registered');
+    const d = Object.fromEntries(defs.map(x => [x.name, x]));
+    assert(/```places/.test(d.Places.description) && /```weather/.test(d.Weather.description)
+      && /```currency/.test(d.CurrencyRates.description) && /```images/.test(d.GenerateImage.description),
+      'each description names the block it returns, so the model pairs tool and widget');
+    assert(d.Places.isConcurrencySafe && d.Weather.isConcurrencySafe && d.CurrencyRates.isConcurrencySafe && !d.GenerateImage.isConcurrencySafe,
+      'lookups may overlap; image generation is exclusive');
+    assert(/^AICO\/\S+ \(\+https:\/\/github\.com\/suhail-akhtar\/aico\)$/.test(userAgent()), `the User-Agent identifies the app (${userAgent()})`);
+  }
+
+  // ── opening_hours ──
+  {
+    // 2024-01-01 was a Monday. Offset +5 h (Pakistan).
+    const at = (dayOffset, hh, mm) => Date.UTC(2024, 0, 1 + dayOffset, hh - 5, mm);
+    const PK = 5 * 3600;
+    assert(openNow('Mo-Su 10:00-23:00', PK, at(0, 12, 0)) === true, 'Mo-Su 10:00-23:00 is open at noon local');
+    assert(openNow('Mo-Su 10:00-23:00', PK, at(0, 23, 30)) === false, 'and closed at 23:30');
+    assert(openNow('Mo-Su 10:00-23:00', 0, at(0, 12, 0)) === false, 'judged in the place\'s own time, not UTC (07:00 UTC is before opening)');
+    const late = 'Mo-Th 11:00-23:00; Fr-Su 11:00-01:00';
+    assert(openNow(late, PK, at(5, 0, 30)) === true, 'Friday\'s shift past midnight is still open at 00:30 Saturday');
+    assert(openNow(late, PK, at(4, 0, 30)) === false, 'Thursday closes at 23:00, so 00:30 Friday is closed');
+    const week = 'Mo-Fr 09:00-17:00; Sa 10:00-14:00';
+    assert(openNow(week, PK, at(6, 12, 0)) === false && openNow(week, PK, at(5, 11, 0)) === true, 'days not listed are closed; Saturday has its own hours');
+    assert(openNow('24/7', PK, at(2, 3, 0)) === true, '24/7 is always open');
+    assert(openNow('Mo-Fr 08:00-12:00,13:00-17:00', PK, at(1, 12, 30)) === false
+      && openNow('Mo-Fr 08:00-12:00,13:00-17:00', PK, at(1, 13, 30)) === true, 'split shifts: closed at lunch');
+    assert(openNow('Mo-Fr 09:00-17:00; PH off', PK, at(2, 10, 0)) === true, 'a public-holiday rule is skipped, not a parse failure');
+    assert(openNow('Mo-Su 09:00-22:00; Fr off', PK, at(4, 12, 0)) === false, 'a later rule overrides an earlier one for its days');
+    const wrap = parseOpeningHours('Sa-Mo 10:00-12:00');
+    assert(wrap && isOpenAt(wrap, 6, 11 * 60) && isOpenAt(wrap, 0, 11 * 60) && !isOpenAt(wrap, 2, 11 * 60), 'a day range may wrap the week');
+    assert(parseOpeningHours('Jan-Mar Mo 10:00-12:00') === null && parseOpeningHours('sunrise-sunset') === null
+      && parseOpeningHours('') === null && openNow(undefined, 0) === null,
+      'forms it does not understand are null, never a guess');
+  }
+
+  // ── RequestSpacer (Nominatim's one-per-second, no-parallel rule) ──
+  {
+    const clock = fakeClock();
+    const spacer = new RequestSpacer(1000, clock);
+    const starts = [];
+    let active = 0, most = 0;
+    const task = async () => { starts.push(clock.t); active++; most = Math.max(most, active); await new Promise(r => setImmediate(r)); active--; };
+    await Promise.all([spacer.run(task), spacer.run(task), spacer.run(task)]);
+    assert(starts.length === 3 && starts[1] - starts[0] >= 1000 && starts[2] - starts[1] >= 1000,
+      `three requests fired together start at least a second apart (${starts.join(', ')})`);
+    assert(most === 1, 'and never overlap');
+    const failing = spacer.run(async () => { throw new Error('boom'); });
+    await failing.catch(() => {});
+    assert(await spacer.run(async () => 'next') === 'next', 'a failed request does not jam the queue');
+    const cache = new TtlCache(1000, 2, () => clock.t);
+    cache.set('a', 1); clock.t += 1500;
+    assert(cache.get('a') === undefined, 'the cache forgets after its TTL');
+  }
+
+  // ── Places ──
+  {
+    assert(classifyQuery('Afghan restaurant').filter === '["amenity"="restaurant"]'
+      && classifyQuery('Afghan restaurant').qualifiers.join() === 'afghan', 'a query splits into a kind and its qualifiers');
+    assert(classifyQuery('best "] ; out; pizza place').qualifiers.every(q => /^[\p{L}\p{N}]+$/u.test(q)),
+      'qualifiers are letters only — nothing a model writes becomes Overpass syntax');
+    const q = overpassQuery('["amenity"="restaurant"]', ['afghan'], { lat: 34.1688, lng: 73.2215 }, 5000);
+    assert(q.includes('["cuisine"~"afghan",i](around:5000,34.1688,73.2215)') && q.includes('["name"~"afghan",i]'),
+      'Overpass is asked by cuisine and by name, within the radius');
+
+    const asked = [];
+    const route = (url, init) => {
+      asked.push({ url, init });
+      if (url.startsWith('https://nominatim.openstreetmap.org/search') && url.includes('q=Abbottabad%2C+Pakistan')) {
+        return json([{ lat: '34.1688', lon: '73.2215', display_name: 'Abbottabad, Khyber Pakhtunkhwa, Pakistan', boundingbox: ['34.12', '34.22', '73.17', '73.27'] }]);
+      }
+      if (url === 'https://overpass-api.de/api/interpreter') {
+        return json({ elements: [
+          { type: 'way', id: 22, center: { lat: 34.19, lon: 73.24 }, tags: { name: 'Far Kabuli Pulao', amenity: 'restaurant', cuisine: 'afghan' } },
+          { type: 'node', id: 11, lat: 34.170, lon: 73.222, tags: { name: 'Kabul Restaurant', amenity: 'restaurant', cuisine: 'afghan;pakistani',
+            opening_hours: '24/7', phone: '+92 992 000000', website: 'https://kabul.example', 'addr:street': 'Mansehra Road', 'addr:city': 'Abbottabad' } },
+          { type: 'node', id: 33, lat: 34.171, lon: 73.223, tags: { amenity: 'restaurant', cuisine: 'afghan' } },
+        ] });
+      }
+      if (url.startsWith('https://api.open-meteo.com/v1/forecast')) return json({ utc_offset_seconds: 18000, timezone: 'Asia/Karachi' });
+      return new Response('unexpected', { status: 404 });
+    };
+    setNetFetch(async (url, init) => route(String(url), init));
+    resetPlacesForTests(fakeClock());
+    try {
+      const out = await places({ query: 'Afghan restaurant', near: 'Abbottabad, Pakistan' });
+      const block = blockOf(out, 'places');
+      assert(block && block.places.length === 2, 'the ```places block is valid JSON with the named places only (unnamed skipped)');
+      assert(block.places[0].name === 'Kabul Restaurant' && block.places[1].name === 'Far Kabuli Pulao', 'nearest first');
+      const k = block.places[0];
+      assert(k.open === true && k.hours === '24/7' && k.phone && k.url === 'https://kabul.example' && k.source === 'OpenStreetMap'
+        && k.address === 'Mansehra Road, Abbottabad' && /afghan, pakistani/.test(k.note), 'a place carries hours, open-now, phone, website, address, cuisine');
+      assert(block.places[1].open === null, 'untagged hours are null, not "closed"');
+      assert(!('rating' in k) && !('reviews' in k) && !('image' in k), 'no rating, reviews or image is invented');
+      assert(Array.isArray(block.center) && block.center[0] === 34.1688 && typeof block.zoom === 'number', 'the map is centred on the searched town');
+      assert(/no ratings, reviews or photos/i.test(out) && /WebSearch\/WebFetch/.test(out), 'the model is told where ratings may come from');
+      assert(/osm: https:\/\/www\.openstreetmap\.org\/node\/11/.test(out) && /open now/.test(out) && /Asia\/Karachi/.test(out), 'the compact list has the OSM link and local open-now');
+      assert(asked.every(a => /^AICO\//.test(a.init.headers['User-Agent'])), 'every request carries the AICO User-Agent');
+      const ov = asked.find(a => a.url.includes('overpass'));
+      assert(ov.init.method === 'POST' && decodeURIComponent(ov.init.body).includes('"cuisine"~"afghan"'), 'Overpass was asked for Afghan cuisine near the point');
+      const count = asked.length;
+      await places({ query: 'Afghan restaurant', near: 'Abbottabad, Pakistan' });
+      assert(asked.length === count, 'the same search again is answered from the cache');
+
+      // Overpass down → a bounded Nominatim text search, and the model is told.
+      asked.length = 0;
+      resetPlacesForTests(fakeClock());
+      setNetFetch(async (url, init) => {
+        url = String(url);
+        if (url.includes('overpass')) {
+          asked.push({ url, init });
+          return new Response('<?xml version="1.0"?><!DOCTYPE html><html><head><title>504 Gateway Timeout</title></head><body><p>The server is probably too busy</p></body></html>', { status: 504 });
+        }
+        if (url.includes('bounded=1')) {
+          asked.push({ url, init });
+          return json([{ osm_type: 'node', osm_id: 5, lat: '34.17', lon: '73.22', name: 'Afghan Tikka House', type: 'restaurant', category: 'amenity',
+            address: { road: 'Jinnah Road', city: 'Abbottabad' }, extratags: { opening_hours: 'Mo-Su 12:00-23:00' } }]);
+        }
+        return route(url, init);
+      });
+      const fallback = await places({ query: 'Afghan restaurant', near: 'Abbottabad, Pakistan', limit: 5 });
+      const fb = blockOf(fallback, 'places');
+      assert(fb.places.length === 1 && fb.places[0].name === 'Afghan Tikka House' && fb.places[0].address === 'Jinnah Road, Abbottabad',
+        'with Overpass down, a text search inside the area is used');
+      assert(/Overpass\) failed/.test(fallback) && asked.some(a => /viewbox=/.test(a.url)), 'and the result says why');
+      assert(asked.filter(a => a.url.includes('overpass')).length === 2 && asked.some(a => a.url.includes('overpass.kumi.systems')),
+        'a busy Overpass is retried once on its mirror first');
+      assert(/504 Gateway Timeout/.test(fallback) && !/DOCTYPE|<\w/.test(fallback.split('```')[0]), 'an HTML error page is reduced to its words');
+
+      resetPlacesForTests(fakeClock());
+      setNetFetch(async () => json([]));
+      let msg = '';
+      try { await places({ query: 'cafe', near: 'Nowhereville Zzz' }); } catch (e) { msg = e.message; }
+      assert(/no place called "Nowhereville Zzz"/.test(msg), 'an unknown town is a clear error');
+    } finally {
+      setNetFetch();
+      resetPlacesForTests();
+    }
+  }
+
+  // ── Weather ──
+  {
+    const asked = [];
+    const hours = Array.from({ length: 48 }, (_, i) => `2026-09-${29 + Math.floor(i / 24)}T${String(i % 24).padStart(2, '0')}:00`);
+    setNetFetch(async (url) => {
+      url = String(url);
+      asked.push(url);
+      if (url.startsWith('https://geocoding-api.open-meteo.com')) {
+        if (url.includes('name=Abbottabad%2C+Pakistan')) return json({});
+        return json({ results: [
+          { name: 'Abbottabad', latitude: 40.1, longitude: -80.1, country: 'United States', admin1: 'Somewhere' },
+          { name: 'Abbottabad', latitude: 34.1463, longitude: 73.2117, country: 'Pakistan', country_code: 'PK', admin1: 'Khyber Pakhtunkhwa' },
+        ] });
+      }
+      if (url.startsWith('https://api.open-meteo.com/v1/forecast')) {
+        return json({
+          timezone: 'Asia/Karachi',
+          current: { time: '2026-09-29T14:15', temperature_2m: 24.34, apparent_temperature: 25.1, relative_humidity_2m: 61, wind_speed_10m: 7.2, weather_code: 61, is_day: 1 },
+          hourly: { time: hours, temperature_2m: hours.map((_, i) => 15 + i % 10), weather_code: hours.map((_, i) => (i === 14 ? 95 : 2)), precipitation_probability: hours.map(() => 30) },
+          daily: { time: ['2026-09-29', '2026-09-30', '2026-10-01'], temperature_2m_min: [14, 15, 13], temperature_2m_max: [26, 27, 25],
+            weather_code: [61, 3, 0], precipitation_probability_max: [70, 20, 0], sunrise: ['2026-09-29T06:02', '2026-09-30T06:03', '2026-10-01T06:03'],
+            sunset: ['2026-09-29T18:01', '2026-09-30T18:00', '2026-10-01T17:58'] },
+        });
+      }
+      return new Response('nope', { status: 404 });
+    });
+    resetWeatherForTests();
+    try {
+      const out = await weather({ location: 'Abbottabad, Pakistan', days: 3 });
+      const w = blockOf(out, 'weather');
+      assert(w && w.location === 'Abbottabad, Khyber Pakhtunkhwa, Pakistan' && w.lat === 34.1463, 'the geocoder\'s country match wins over the first hit');
+      assert(w.current.code === 61 && w.daily.map(d => d.code).join() === '61,3,0' && w.hourly[0].code === 95, 'WMO codes pass through untranslated');
+      assert(w.hourly.length === 24 && w.hourly[0].time === '2026-09-29T14:00', 'hourly is the next 24 hours from the current hour');
+      assert(w.units === 'metric' && w.current.temp === 24.3 && w.current.isDay === true && w.timezone === 'Asia/Karachi' && w.source === 'Open-Meteo',
+        'current conditions are shaped for the card');
+      assert(w.daily.length === 3 && w.daily[0].precip === 70 && w.daily[0].sunrise === '2026-09-29T06:02', 'daily carries min/max/precip/sun times');
+      assert(/light rain/.test(out) && describeWmo(95) === 'thunderstorm', 'the text summary names the conditions');
+      assert(asked.some(u => u.includes('timezone=auto')), 'the forecast is asked in the place\'s own time zone');
+      await weather({ location: 'Abbottabad, Pakistan', days: 3, units: 'imperial' });
+      assert(asked.some(u => u.includes('temperature_unit=fahrenheit') && u.includes('wind_speed_unit=mph')), 'imperial asks for °F and mph');
+      let msg = '';
+      try { await weather({}); } catch (e) { msg = e.message; }
+      assert(/needs a location/.test(msg), 'no location is a clear error');
+    } finally {
+      setNetFetch();
+      resetWeatherForTests();
+    }
+  }
+
+  // ── CurrencyRates ──
+  {
+    const asked = [];
+    let frankfurterDown = false;
+    setNetFetch(async (url) => {
+      url = String(url);
+      asked.push(url);
+      if (url === 'https://api.frankfurter.app/currencies') return json({ EUR: 'Euro', USD: 'US Dollar', GBP: 'Pound' });
+      if (url.startsWith('https://api.frankfurter.app/')) {
+        if (frankfurterDown) return new Response('down', { status: 503 });
+        return json({ amount: 1, base: 'USD', date: '2026-09-28', rates: { EUR: 0.912345678 } });
+      }
+      if (url === 'https://open.er-api.com/v6/latest/USD') {
+        return json({ result: 'success', time_last_update_utc: 'Tue, 29 Sep 2026 00:02:31 +0000', rates: { USD: 1, PKR: 278.4, EUR: 0.91 } });
+      }
+      return new Response('nope', { status: 404 });
+    });
+    resetCurrencyForTests();
+    try {
+      const out = await currencyRates({ base: 'usd', symbols: ['PKR', 'EUR'], amount: 100 });
+      const c = blockOf(out, 'currency');
+      assert(c.base === 'USD' && c.amount === 100 && c.rates.PKR === 278.4 && c.rates.EUR === 0.912346, 'rates per 1 unit, from both sources');
+      assert(asked.some(u => u.includes('frankfurter.app/latest') && u.includes('to=EUR') && !u.includes('PKR')),
+        'Frankfurter is asked only for what the ECB publishes');
+      assert(/Frankfurter \(ECB\): EUR/.test(c.source) && /open\.er-api\.com: PKR/.test(c.source), 'the block says which source each rate came from');
+      assert(/1 USD = 278\.4 PKR → 100 USD = 27,840 PKR \(open\.er-api\.com, 2026-09-29\)/.test(out), 'each line converts the amount and names its source');
+      assert(c.date === '2026-09-29', 'the date is the newest of the rates');
+
+      frankfurterDown = true;
+      resetCurrencyForTests();
+      const down = blockOf(await currencyRates({ base: 'USD', symbols: ['EUR'] }), 'currency');
+      assert(down.rates.EUR === 0.91 && /open\.er-api\.com/.test(down.source), 'with Frankfurter down, the fallback answers');
+      let msg = '';
+      try { await currencyRates({ base: 'dollars' }); } catch (e) { msg = e.message; }
+      assert(/three letters/.test(msg), 'a bad code is a clear error');
+    } finally {
+      setNetFetch();
+      resetCurrencyForTests();
+    }
+  }
+
+  // ── GenerateImage ──
+  {
+    const saved = { OPENAI_API_KEY: process.env.OPENAI_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY, GOOGLE_API_KEY: process.env.GOOGLE_API_KEY };
+    delete process.env.OPENAI_API_KEY; delete process.env.GEMINI_API_KEY; delete process.env.GOOGLE_API_KEY;
+    const imgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-genimg-'));
+    try {
+      const none = pickImageBackend({});
+      assert('error' in none && /OPENAI_API_KEY/.test(none.error) && /Gemini/.test(none.error), 'no key: the message names the providers and how to add one');
+      let msg = '';
+      try { await generateImage({ prompt: 'a fox' }, { settings: {} }); } catch (e) { msg = e.message; }
+      assert(/needs an OpenAI or Google Gemini API key/.test(msg), 'and the tool fails with it rather than guessing');
+
+      const settings = { providerInstances: [
+        { id: 'deepseek', type: 'deepseek', name: 'DeepSeek', apiKey: 'sk-ds' },
+        { id: 'openai', type: 'openai', name: 'OpenAI', apiKey: 'sk-test-secret', baseUrl: 'http://127.0.0.1:9/v1' },
+      ] };
+      const picked = pickImageBackend(settings);
+      assert(picked.kind === 'openai' && picked.model === 'gpt-image-1', 'OpenAI is chosen, with gpt-image-1 by default');
+      assert(pickImageBackend({ ...settings, imageGeneration: { provider: 'gemini' } }).error, 'a named provider that is not configured is an error, not a fallback');
+
+      assert(JSON.stringify(openAiImageRequest('gpt-image-1', 'p', 2, '1024x1024', 'low'))
+        === JSON.stringify({ model: 'gpt-image-1', prompt: 'p', n: 2, size: '1024x1024', quality: 'low' }), 'the OpenAI request body');
+      assert(openAiImageRequest('dall-e-3', 'p', 1, '1024x1024', 'low').response_format === 'b64_json'
+        && !('quality' in openAiImageRequest('dall-e-3', 'p', 1, '1024x1024', 'low')), 'DALL·E asks for base64 and gets no gpt-image quality');
+      assert(Math.abs(estimateImageCost('gpt-image-1', 'low', '1024x1024', 1, { input_tokens: 10, output_tokens: 272 }).usd - 0.01093) < 1e-6,
+        'cost from reported tokens at list price');
+      assert(estimateImageCost('gpt-image-1', 'medium', '1536x1024', 2).usd === 0.126 && estimateImageCost('mystery', 'low', '1024x1024', 1) === undefined,
+        'cost from the per-image table, or none when it would be a guess');
+
+      const PNG = solidPng([20, 120, 220], 8);
+      const calls = [];
+      setNetFetch(async (url, init) => {
+        calls.push({ url: String(url), init });
+        return json({ data: [{ b64_json: PNG.toString('base64') }, { b64_json: PNG.toString('base64') }], usage: { input_tokens: 12, output_tokens: 544 } });
+      });
+      const stored = [];
+      const uuid = '0b6f3c1e-8f7a-4c52-9d0e-1a2b3c4d5e6f';
+      const sink = createToolImageSink({ model: 'm', store: async (img) => { stored.push(img); return { id: uuid, mediaType: img.mediaType, name: img.name }; } });
+      const out = await runInContext({ cwd: imgDir, sessionId: 'sess-img', toolImages: sink },
+        () => generateImage({ prompt: 'A red fox in snow', n: 2, quality: 'low', style: 'watercolour' }, { settings }));
+      const call = calls[0];
+      const body = JSON.parse(call.init.body);
+      assert(call.url === 'http://127.0.0.1:9/v1/images/generations' && call.init.method === 'POST'
+        && call.init.headers.Authorization === 'Bearer sk-test-secret', 'POSTs to {baseUrl}/images/generations with the instance key');
+      assert(body.model === 'gpt-image-1' && body.n === 2 && body.size === '1024x1024' && body.quality === 'low' && /Style: watercolour/.test(body.prompt),
+        'the body carries model, n, size, quality and the style');
+      assert(!out.includes('sk-test-secret'), 'the key never appears in the result');
+      const files = blockOf(out, 'files').files;
+      assert(files.length === 2 && files.every(f => fs.existsSync(f.path) && f.path.startsWith(path.join(imgDir, 'generated-images')) && f.kind === 'image'),
+        'each picture is saved as a real file under generated-images/');
+      assert(fs.readFileSync(files[0].path).equals(PNG), 'with the bytes the provider returned');
+      const imgs = blockOf(out, 'images').images;
+      assert(imgs.length === 2 && imgs[0].url === `/api/attachments/file?session=sess-img&id=${uuid}` && stored.length === 2 && stored[0].mediaType === 'image/png',
+        'and stored as an attachment, with a same-origin URL in the ```images block');
+      assert(/Estimated cost: ~\$0\.022 \(from the 544 image tokens/.test(out), 'the result states the estimated cost and its basis');
+
+      // A terminal run: no store, so no URL — the file alone.
+      const cli = await runInContext({ cwd: imgDir, toolImages: createToolImageSink({ model: 'm' }) },
+        () => generateImage({ prompt: 'A red fox in snow', path: 'art/fox.png' }, { settings }));
+      assert(!blockOf(cli, 'images') && blockOf(cli, 'files').files[0].path === path.join(imgDir, 'art', 'fox-1.png'),
+        'without an attachment store there is no images block, and a named path is honoured');
+
+      setNetFetch(async () => json({ error: { message: 'Incorrect API key provided' } }, 401));
+      msg = '';
+      try { await runInContext({ cwd: imgDir }, () => generateImage({ prompt: 'x' }, { settings })); } catch (e) { msg = e.message; }
+      assert(/refused the request \(HTTP 401\)/.test(msg) && !msg.includes('sk-test-secret'), 'a rejected key is explained, and not echoed');
+    } finally {
+      setNetFetch();
+      for (const [k, v] of Object.entries(saved)) if (v !== undefined) process.env[k] = v;
+      fs.rmSync(imgDir, { recursive: true, force: true });
+    }
+  }
+
+  // ── The attachment route ──
+  {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-attroute-'));
+    const PNG = solidPng([200, 30, 30], 8);
+    const settings = {};
+    const sessionId = 'route-test-session';
+    const stored = await storeAttachment({ settings, cwd: project, sessionId, name: 'fox.png', mimeType: 'text/html', base64: PNG.toString('base64'), origin: 'tool' });
+    const direct = await readStoredAttachment({ settings, cwd: project, sessionId, id: stored.id });
+    assert(direct && direct.contentType === 'image/png' && direct.bytes.equals(PNG), 'the store serves an image with its real type, not the declared one');
+    assert(await readStoredAttachment({ settings, cwd: project, sessionId, id: '../../settings.json' }) === undefined
+      && await readStoredAttachment({ settings, cwd: project, sessionId, id: '00000000-0000-4000-8000-000000000000' }) === undefined,
+      'a path or an unknown id finds nothing');
+
+    const server = await serve({ port: 0, cwd: project, project, open: false });
+    try {
+      const u = new URL(server.url);
+      const token = u.searchParams.get('token');
+      const base = `${u.origin}/api/attachments/file?session=${sessionId}`;
+      const ok = await fetch(`${base}&id=${stored.id}&token=${token}`);
+      const bytes = Buffer.from(await ok.arrayBuffer());
+      assert(ok.status === 200 && ok.headers.get('content-type') === 'image/png' && bytes.equals(PNG)
+        && ok.headers.get('x-content-type-options') === 'nosniff', 'GET /api/attachments/file serves the bytes as image/png');
+      const header = await fetch(`${base}&id=${stored.id}`, { headers: { 'x-aico-token': token } });
+      assert(header.status === 200, 'the token may ride in the header too');
+      assert((await fetch(`${base}&id=${stored.id}`)).status === 401, 'without the token it is refused');
+      assert((await fetch(`${base}&id=00000000-0000-4000-8000-000000000000&token=${token}`)).status === 404, 'an unknown id is 404');
+      assert((await fetch(`${base}&id=..%2F..%2Findex.json&token=${token}`)).status === 404, 'a path for an id is 404');
+    } finally {
+      await server.close();
+      fs.rmSync(project, { recursive: true, force: true });
+    }
+  }
+}
+
 clearInterval(keepAliveForAbandonedTools);
 
 

@@ -59,6 +59,13 @@ const TIMEOUTS: Record<string, number> = {
   // Network, and someone else's server.
   WebFetch: 90 * 1000,
   WebSearch: 90 * 1000,
+  // Places may queue behind other Nominatim calls (one per second) and then
+  // run Overpass, which is allowed 30 s of its own.
+  Places: 2 * 60 * 1000,
+  Weather: 60 * 1000,
+  CurrencyRates: 60 * 1000,
+  // A high-quality picture takes a minute or more; Gemini draws one per request.
+  GenerateImage: 6 * 60 * 1000,
 
   // Local and fast. A minute here means something is wrong, not slow.
   Read: 60 * 1000,

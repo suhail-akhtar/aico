@@ -54,6 +54,7 @@ for (const s of steps) {
   try {
     if (s.click) await page.click(s.click, { timeout: 8000 });
     else if (s.dblclick) await page.dblclick(s.dblclick, { timeout: 8000 });
+    else if (s.hover) await page.hover(s.hover, { timeout: 8000 });
     else if (s.press) await page.keyboard.press(s.press);
     else if (s.type) await page.keyboard.type(s.type, { delay: 10 });
     else if (s.fill) await page.fill(s.fill[0], s.fill[1], { timeout: 8000 });

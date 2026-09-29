@@ -11,6 +11,10 @@ const TOOLS_REQUIRING_PERMISSION = new Set([
   'WorkspaceSetPath',
   'WorkspaceWrite',
   'AgentCreate',
+  // Spends money on the user's own key and writes files. Places, Weather and
+  // CurrencyRates are absent on purpose: read-only lookups, classified exactly
+  // as WebFetch and WebSearch are.
+  'GenerateImage',
 ]);
 
 const DANGEROUS_TOOLS = new Set([

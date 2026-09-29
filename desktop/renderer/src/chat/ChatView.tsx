@@ -19,6 +19,7 @@ import type { ViewProps } from '@/plugins/registry';
 import { Composer, ProjectChip } from './Composer';
 import { Transcript } from './Transcript';
 import { Attention } from './Attention';
+import { SourcesPanel, useSourcesPanel } from './SourcesPanel';
 import { openChat } from './actions';
 
 function greeting(name: string | undefined): string {
@@ -43,20 +44,25 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
   }, [params?.id, route.view]);
 
   useEffect(() => { if (!busy) markSeen(sessionId); }, [busy, sessionId, logged.size]);
+  // Sources belong to the chat they came from.
+  useEffect(() => { useSourcesPanel.getState().close(); }, [sessionId]);
 
   const empty = logged.size === 0 && !busy;
   if (empty) return <Home />;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        <Transcript scrollRef={scrollRef} />
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+          <Transcript scrollRef={scrollRef} />
+        </div>
+        <div className="shrink-0 px-6 pb-4 pt-1">
+          <Attention />
+          <Composer />
+          <p className="mt-1.5 text-center text-[11px] text-aico-muted">AICO runs on this computer. The agent can make mistakes — check important work.</p>
+        </div>
       </div>
-      <div className="shrink-0 px-6 pb-4 pt-1">
-        <Attention />
-        <Composer />
-        <p className="mt-1.5 text-center text-[11px] text-aico-muted">AICO runs on this computer. The agent can make mistakes — check important work.</p>
-      </div>
+      <SourcesPanel />
     </div>
   );
 }

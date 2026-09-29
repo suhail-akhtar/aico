@@ -59,6 +59,15 @@ export default defineConfig({
       `AICO_PANEL_SOURCEMAP=1 npm run build:panel` turns them on for those people.
     */
     sourcemap: process.env.AICO_PANEL_SOURCEMAP === '1',
+    /*
+      One stylesheet, not one per lazy chunk. The webview's HTML links exactly
+      `panel.css`, and Vite loads a lazy chunk's CSS from `"/" + name` — the
+      webview origin's root, not the media folder — so split CSS never arrives
+      (the widget kit's and the rich answer blocks' styles were silently lost),
+      and with several CSS assets the fixed `panel.css` name went to whichever
+      was emitted first, which need not be the app's own.
+    */
+    cssCodeSplit: false,
     // The panel runs in Electron's Chromium. Targeting it rather than the
     // browser matrix keeps async/await and optional chaining untranspiled.
     target: 'chrome114',

@@ -48,6 +48,21 @@ const Plot = React.lazy(() => import('../kit/math/Plot').then(m => ({ default: m
 const Geometry = React.lazy(() => import('../kit/math/Geometry').then(m => ({ default: m.Geometry })));
 const Calc = React.lazy(() => import('../kit/math/Calc').then(m => ({ default: m.Calc })));
 
+/*
+  The rich answer blocks, lazily for the same reason: the map brings Leaflet
+  and its stylesheet, the draft brings a second Markdown pass, and a reply
+  without them should carry neither.
+*/
+const Places = React.lazy(() => import('./rich/Places').then(m => ({ default: m.Places })));
+const Images = React.lazy(() => import('./rich/Images').then(m => ({ default: m.Images })));
+const Products = React.lazy(() => import('./rich/Products').then(m => ({ default: m.Products })));
+const Video = React.lazy(() => import('./rich/Video').then(m => ({ default: m.Video })));
+const News = React.lazy(() => import('./rich/News').then(m => ({ default: m.News })));
+const Draft = React.lazy(() => import('./rich/Draft').then(m => ({ default: m.Draft })));
+const Weather = React.lazy(() => import('./rich/Weather').then(m => ({ default: m.Weather })));
+const Currency = React.lazy(() => import('./rich/Currency').then(m => ({ default: m.Currency })));
+const Files = React.lazy(() => import('./rich/Files').then(m => ({ default: m.Files })));
+
 function Lazy({ children }: { children: React.ReactNode }): React.ReactElement {
   return <React.Suspense fallback={<p className="p-2 text-[11px] text-aico-muted">Loading…</p>}>{children}</React.Suspense>;
 }
@@ -97,6 +112,15 @@ const RENDERERS: Record<WidgetId, React.ComponentType<WidgetRenderProps>> = {
   plot: ({ source, streaming }) => <Lazy><Plot source={source} streaming={streaming} /></Lazy>,
   geometry: ({ source, streaming }) => <Lazy><Geometry source={source} streaming={streaming} /></Lazy>,
   calc: ({ source, streaming }) => <Lazy><Calc source={source} streaming={streaming} /></Lazy>,
+  places: ({ source, streaming }) => <Lazy><Places source={source} streaming={streaming} /></Lazy>,
+  images: ({ source, streaming }) => <Lazy><Images source={source} streaming={streaming} /></Lazy>,
+  products: ({ source, streaming }) => <Lazy><Products source={source} streaming={streaming} /></Lazy>,
+  video: ({ source, streaming }) => <Lazy><Video source={source} streaming={streaming} /></Lazy>,
+  news: ({ source, streaming }) => <Lazy><News source={source} streaming={streaming} /></Lazy>,
+  draft: ({ source, streaming, language }) => <Lazy><Draft source={source} streaming={streaming} language={language} /></Lazy>,
+  weather: ({ source, streaming }) => <Lazy><Weather source={source} streaming={streaming} /></Lazy>,
+  currency: ({ source, streaming }) => <Lazy><Currency source={source} streaming={streaming} /></Lazy>,
+  files: ({ source, streaming }) => <Lazy><Files source={source} streaming={streaming} /></Lazy>,
 };
 
 /** The component for a kind, or undefined if the fence is ordinary code. */

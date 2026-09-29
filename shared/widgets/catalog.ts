@@ -376,6 +376,218 @@ ft are units, and "3 m/s" after "m = 2" silently uses your m. Use mass, t1, len.
 Every result shown is computed here — write the formula, not the answer.`,
   },
   {
+    id: 'places',
+    languages: ['places', 'map', 'local'],
+    extension: 'json',
+    framed: true,
+    summary: 'local places on an interactive map with rating pins and cards (restaurants, shops, hotels, "near me") — '
+      + 'use for any answer that is a list of real places with coordinates',
+    spec: `Places on an OpenStreetMap map: a rating pill per place, a row of cards over
+the map, and an Expand button that opens a full-window map with a list, an
+"Open now" filter and zoom. JSON:
+
+{"title":"Coffee near Soho","places":[
+  {"name":"Bar Italia","lat":51.5136,"lng":-0.1318,"rating":4.5,"reviews":2310,
+   "category":"Café","address":"22 Frith St, London W1D 4RF","open":true,
+   "hours":"Open 24 hours","price":"££","phone":"+44 20 7437 4520",
+   "url":"https://baritaliasoho.co.uk","image":"https://…/photo.jpg",
+   "note":"Late-night espresso institution","source":"Google Maps"},
+  {"name":"Monmouth Coffee","lat":51.5143,"lng":-0.1266,"rating":4.7,"category":"Coffee shop","open":false,"price":"£"}]}
+
+Fields: name, lat and lng are required per place (decimal degrees). Everything
+else is optional — omit what you do not know rather than guessing:
+  rating    0–5 (one decimal); reviews = count
+  open      true / false / null (unknown). Only set it from real opening data.
+  price     as written locally ("$$", "££", "PKR 1,500–3,000")
+  url       the place's own site (http/https); without it the card links to
+            OpenStreetMap at the coordinates
+  image     an http(s) photo URL; a placeholder icon is drawn when absent
+"center":[lat,lng] and "zoom" (1–19) are optional — by default the map fits
+all places. Coordinates must be real (from a search or map lookup): a place
+with made-up coordinates is drawn in the wrong street. A place with no
+coordinates is listed but not pinned. Aliases: \`\`\`map, \`\`\`local.`,
+  },
+  {
+    id: 'images',
+    languages: ['images', 'gallery', 'carousel'],
+    extension: 'json',
+    framed: true,
+    summary: 'a carousel of pictures with captions and sources, opening into a lightbox — '
+      + 'use for "show me pictures/photos of …" and for generated images',
+    spec: `A horizontal image carousel; clicking opens a lightbox (←/→, Esc, "Open source").
+
+{"title":"Hunza Valley","images":[
+  {"url":"https://upload.wikimedia.org/…/Hunza.jpg","caption":"Karimabad at dusk",
+   "source":"Wikimedia Commons","link":"https://commons.wikimedia.org/wiki/File:Hunza.jpg",
+   "alt":"Terraced village below snow peaks"},
+  {"url":"/api/…/generated.png","caption":"Generated concept"}]}
+
+url      required — an http(s) URL of the image itself (not a web page), or a
+         same-origin path like /api/… for images the engine serves
+caption  one line under the image; source = the site's name (a chip);
+         link = the page the image came from (the chip and "Open source" go there)
+A bare array of URL strings also works. Images that fail to load are hidden,
+not shown broken — but use real image URLs you found, never invented ones.`,
+  },
+  {
+    id: 'products',
+    languages: ['products', 'shopping'],
+    extension: 'json',
+    framed: true,
+    summary: 'shopping results as product cards (image, price, rating, store, badge, link) plus a spec comparison table — '
+      + 'use for "best X to buy", price comparisons and product recommendations',
+    spec: `Product cards in a row, each linking to the store; with specs, a comparison table.
+
+{"title":"Noise-cancelling headphones under $400","compare":true,"products":[
+  {"name":"Sony WH-1000XM6","image":"https://…/xm6.jpg","price":399.99,"currency":"USD",
+   "rating":4.7,"reviews":1824,"store":"Best Buy","url":"https://www.bestbuy.com/…",
+   "badge":"Best overall","specs":{"Battery":"30 h","Weight":"254 g","ANC":"Adaptive"}},
+  {"name":"Bose QuietComfort Ultra","price":349,"currency":"USD","rating":4.5,
+   "store":"Amazon","url":"https://www.amazon.com/…","badge":"Most comfortable",
+   "specs":{"Battery":"24 h","Weight":"250 g","ANC":"Adaptive"}}]}
+
+name is required. price is a number (formatted with "currency", an ISO code
+like USD, EUR, PKR) or a string as written ("From £29"). rating is 0–5.
+badge is a short label ("Best value"). specs is a flat object of short values;
+use the SAME keys across products — each key becomes one table row.
+"compare": true shows the table; it also appears on its own when 2–5 products
+have specs; "compare": false hides it. Prices and ratings change — only give
+figures you looked up, and say when they were checked.`,
+  },
+  {
+    id: 'video',
+    languages: ['video', 'youtube', 'videos'],
+    extension: 'json',
+    framed: true,
+    summary: 'YouTube videos as thumbnail cards that play inline on click — use when recommending or citing videos',
+    spec: `YouTube videos: a thumbnail card each; the player loads (from
+youtube-nocookie.com) only when the reader clicks. Several videos form a row.
+
+{"title":"Learn sourdough","videos":[
+  {"url":"https://www.youtube.com/watch?v=2FVfJTGpXnU","title":"Sourdough for beginners",
+   "channel":"Joshua Weissman","duration":"18:42"},
+  {"url":"https://youtu.be/sTAiDki7OJ4?t=95","title":"Shaping a boule","channel":"King Arthur Baking"}]}
+
+url      required — any YouTube form works: watch?v=, youtu.be/, /shorts/, /embed/,
+         /live/, or the bare 11-character id; ?t=95 or t=1m35s starts there.
+         A non-YouTube http(s) link is shown as a link card, not embedded.
+title, channel, duration   shown on the card — give them; a card without a
+         title just says "YouTube video".
+A bare URL on its own line (or several) inside the fence also works. Only cite
+videos you actually found — a made-up id is a dead thumbnail.`,
+  },
+  {
+    id: 'news',
+    languages: ['news'],
+    extension: 'json',
+    framed: true,
+    summary: 'news headlines with source, favicon, age, picture and summary — use for current events and "latest on …"',
+    spec: `A list of articles: source (with its favicon), how long ago, headline,
+a line of summary and a thumbnail. The first five show; the rest behind "Show more".
+
+{"title":"Latest on the monsoon","items":[
+  {"title":"Record rainfall floods Karachi streets","source":"Dawn",
+   "url":"https://www.dawn.com/news/…","date":"2026-09-29T06:30:00Z",
+   "image":"https://…/photo.jpg","summary":"Parts of the city received 180 mm in 12 hours."}]}
+
+title and url are required per item (url = the article). date is ISO 8601 —
+shown as "3h ago", or the date when older than a week. source is the outlet's
+name (defaults to the site's domain). Only list articles you actually found,
+newest first, and give their real publication dates.`,
+  },
+  {
+    id: 'draft',
+    languages: ['draft', 'writing', 'email', 'post'],
+    extension: 'json',
+    framed: true,
+    summary: 'a piece of writing to use elsewhere — email, social post, message, report, script — with copy, edit, '
+      + 'open-in-mail and download; use whenever you write something the reader will send or paste',
+    spec: `A draft with its own actions: Copy (formatted and plain), Edit in place,
+"Open in mail app" for emails (mailto: with subject and body), download .md/.txt.
+
+{"kind":"email","to":"hr@acme.com","cc":"lead@acme.com",
+ "subject":"Leave request: 14–18 October",
+ "body":"Hi Sara,\\n\\nI'd like to request annual leave from **14 to 18 October**.\\n\\n- Handover notes are in the team drive\\n- Ali will cover on-call\\n\\nThanks,\\nSuhail"}
+
+kind     email | post | message | report | script | document (the badge)
+body     required — Markdown, as a JSON string (newlines as \\n)
+email    to, cc (strings; comma-separate several), subject
+others   title (a heading), platform ("LinkedIn", "X", "WhatsApp") — X, Threads,
+         Bluesky and LinkedIn also show a character count against their limit
+Write the finished text in the body — no "[Your name]" placeholders when you
+know the value. Plain Markdown inside the fence (optionally led by "To:" and
+"Subject:" lines) is also accepted. Aliases: \`\`\`writing, \`\`\`email, \`\`\`post.`,
+  },
+  {
+    id: 'weather',
+    languages: ['weather'],
+    extension: 'json',
+    framed: true,
+    summary: 'a weather card — current conditions, the next 24 hours and a 7-day forecast with icons and a °C/°F toggle',
+    spec: `A weather card from forecast data (the Weather tool returns exactly this; if you
+have it, pass its block through unchanged). Icons come from WMO weather codes.
+
+{"location":"Lahore, Pakistan","lat":31.55,"lng":74.34,"timezone":"Asia/Karachi","units":"metric",
+ "current":{"time":"2026-09-29T14:00","temp":33,"feels":36,"humidity":48,"wind":11,"code":1,"isDay":true},
+ "hourly":[{"time":"2026-09-29T14:00","temp":33,"code":1,"precip":0},
+           {"time":"2026-09-29T15:00","temp":34,"code":2,"precip":10}],
+ "daily":[{"date":"2026-09-29","min":24,"max":35,"code":1,"precip":5,"sunrise":"2026-09-29T06:02","sunset":"2026-09-29T17:58"},
+          {"date":"2026-09-30","min":25,"max":34,"code":61,"precip":60}],
+ "source":"Open-Meteo"}
+
+units    "metric" (°C, km/h) or "imperial" (°F, mph) — what the numbers ARE in;
+         the reader can switch the display
+code     WMO code: 0 clear, 1 mainly clear, 2 partly cloudy, 3 overcast, 45/48 fog,
+         51–57 drizzle, 61–67 rain, 71–77 snow, 80–82 showers, 85/86 snow showers,
+         95–99 thunderstorm
+precip   chance of precipitation, in %
+times    local wall time as "YYYY-MM-DDTHH:MM" (no offset); hourly starts at the
+         current hour; up to 7 daily entries are shown
+Needs "location" and either "current" (with "temp") or "daily". Never invent a
+forecast: use the Weather tool, or say you could not get one.`,
+  },
+  {
+    id: 'currency',
+    languages: ['currency', 'fx', 'convert'],
+    extension: 'json',
+    framed: true,
+    summary: 'an interactive currency converter over given exchange rates — both amounts editable, swap, other currencies listed',
+    spec: `A converter: both amounts are editable and drive each other, a swap
+button flips the pair, and any other currency in "rates" is one click away.
+
+{"base":"USD","amount":250,"rates":{"PKR":278.4,"EUR":0.92,"GBP":0.78,"AED":3.6725},
+ "date":"2026-09-29","source":"European Central Bank"}
+
+base     the ISO code the rates are quoted against
+rates    units of each currency per ONE base unit; the first is the default target
+amount   the starting amount in the base currency (default 1)
+date, source   always give them — rates move, and the reader must see how fresh
+         these are. Use rates you looked up, never remembered ones.
+One-pair shorthand: {"base":"USD","to":"PKR","rate":278.4,"amount":100}.
+For physical units (km to miles, °C to °F, kg to lb) use \`\`\`calc — it converts
+units exactly. Aliases: \`\`\`fx, \`\`\`convert.`,
+  },
+  {
+    id: 'files',
+    languages: ['files', 'downloads'],
+    extension: 'json',
+    framed: true,
+    summary: 'cards for files you created or changed (reports, spreadsheets, decks, exports) — with Open and Show in folder in the desktop app',
+    spec: `Cards for files: an icon by type (pdf, xlsx, docx, pptx, csv, md, image,
+code, zip…), name, size and path. In the desktop app each card has Open (the
+default app) and Show in folder; elsewhere the path can be copied.
+
+{"title":"Your report","files":[
+  {"path":"E:/work/q3/Q3-report.pdf","size":482133},
+  {"path":"E:/work/q3/q3-figures.xlsx","name":"Q3 figures.xlsx","size":91200}]}
+
+path     required — the ABSOLUTE path of a file that exists (relative paths do not
+         open from the desktop app)
+name     shown instead of the file name from the path; size is bytes;
+         kind overrides the type detected from the extension
+List only files you actually wrote in this conversation. Alias: \`\`\`downloads.`,
+  },
+  {
     id: 'html',
     languages: ['html', 'htm', 'svg', 'preview'],
     extension: 'html',

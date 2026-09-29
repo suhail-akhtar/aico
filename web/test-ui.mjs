@@ -22,6 +22,7 @@ import { dropAction } from './dist-test/sidebar-drop.mjs';
 import { parseBacklog, nextStory } from './dist-test/backlog.mjs';
 import { setPathRoots, shortenPath } from './dist-test/paths.mjs';
 import { protectCurrency } from './dist-test/currency.mjs';
+import * as rich from './dist-test/rich-specs.mjs';
 import {
   PANES, SECRET_ROOTS, allFields, assertNoSecrets, changedPaths,
   patchFor, readPath, searchFields,
@@ -2158,6 +2159,146 @@ console.log('\n-- Money is not maths --');
   test('a price range is still money', () => assert.equal(protectCurrency('between $5-$10 a month'), 'between \\$5-\\$10 a month'));
   test('words between dollars are prose, not a formula', () => assert.equal(protectCurrency('costs $5 for adults and 3$ extra'), 'costs \\$5 for adults and 3$ extra'));
   test('a price beside a formula', () => assert.equal(protectCurrency('It costs $12. The area is $3 \\times 4$.'), 'It costs \\$12. The area is $3 \\times 4$.'));
+}
+
+console.log('\n-- Rich answer blocks: parsing, links, arithmetic --');
+{
+  const throwsLike = (fn, re) => { try { fn(); } catch (err) { assert.match(err.message, re); return; } assert.fail('did not throw'); };
+
+  // YouTube ids from every URL form a model writes.
+  const id = 'dQw4w9WgXcQ';
+  for (const u of [
+    `https://www.youtube.com/watch?v=${id}`, `https://youtube.com/watch?feature=share&v=${id}`,
+    `https://m.youtube.com/watch?v=${id}`, `https://youtu.be/${id}`, `https://youtu.be/${id}?t=42`,
+    `https://www.youtube.com/shorts/${id}`, `https://www.youtube.com/embed/${id}`, `https://www.youtube-nocookie.com/embed/${id}`,
+    `https://www.youtube.com/live/${id}`, `youtube.com/watch?v=${id}`, id,
+  ]) test(`youtube id from ${u}`, () => assert.equal(rich.youtubeId(u), id));
+  test('a non-YouTube URL has no id', () => assert.equal(rich.youtubeId('https://vimeo.com/123456789'), undefined));
+  test('a malformed id is refused', () => assert.equal(rich.youtubeId('https://youtu.be/short'), undefined));
+  test('start time: t=90', () => assert.equal(rich.youtubeStart(`https://youtu.be/${id}?t=90`), 90));
+  test('start time: t=1m30s', () => assert.equal(rich.youtubeStart(`https://www.youtube.com/watch?v=${id}&t=1m30s`), 90));
+  test('embed is the no-cookie host with autoplay', () => assert.match(rich.youtubeEmbed(id, 5), /^https:\/\/www\.youtube-nocookie\.com\/embed\/dQw4w9WgXcQ\?.*autoplay=1.*start=5/));
+  test('video block: bare URLs, one per line', () => {
+    const v = rich.parseVideo(`https://youtu.be/${id}\nhttps://vimeo.com/1`);
+    assert.equal(v.videos.length, 2); assert.equal(v.videos[0].youtube, id); assert.equal(v.videos[1].youtube, undefined);
+  });
+  test('video block: no usable URL names the problem', () => throwsLike(() => rich.parseVideo('{"videos":[{"url":"javascript:alert(1)"}]}'), /usable "url"/));
+
+  // URLs: web, same-origin engine paths for images, never script.
+  test('safeUrl keeps https', () => assert.equal(rich.safeUrl('https://a.com/x'), 'https://a.com/x'));
+  test('safeUrl refuses javascript:', () => assert.equal(rich.safeUrl('javascript:alert(1)'), undefined));
+  test('safeUrl refuses protocol-relative', () => assert.equal(rich.safeUrl('//evil.com/x.png', { relative: true }), undefined));
+  test('safeUrl allows /api/ only when relative is on', () => {
+    assert.equal(rich.safeUrl('/api/attachments/file?id=1', { relative: true }), '/api/attachments/file?id=1');
+    assert.equal(rich.safeUrl('/api/attachments/file?id=1'), undefined);
+  });
+
+  // places
+  const places = rich.parsePlaces(JSON.stringify({ title: 'Cafés', places: [
+    { name: 'A', lat: '51.5', lon: -0.12, rating: '4.6', reviews: '1,204', open: 'closed', price: 2 },
+    { name: 'B', location: { latitude: 51.51, longitude: -0.13 }, open: null },
+    { name: 'C', lat: 200, lng: 0 },
+  ] }));
+  test('places: lon and string numbers are read', () => { const a = places.places[0]; assert.equal(a.lat, 51.5); assert.equal(a.lng, -0.12); assert.equal(a.rating, 4.6); assert.equal(a.reviews, 1204); });
+  test('places: "closed" is false, null is unknown', () => { assert.equal(places.places[0].open, false); assert.equal(places.places[1].open, undefined); });
+  test('places: a numeric price level becomes $$', () => assert.equal(places.places[0].price, '$$'));
+  test('places: nested location objects work', () => assert.equal(places.places[1].lng, -0.13));
+  test('places: impossible coordinates are dropped, the place kept', () => { assert.equal(places.places[2].lat, undefined); assert.equal(places.places.length, 3); });
+  test('places: a bare array is accepted', () => assert.equal(rich.parsePlaces('[{"name":"X","lat":1,"lng":2}]').places.length, 1));
+  test('places: a nameless place names the index', () => throwsLike(() => rich.parsePlaces('{"places":[{"lat":1,"lng":2}]}'), /places\[0\] has no "name"/));
+  test('places: empty list says so', () => throwsLike(() => rich.parsePlaces('{"places":[]}'), /empty/));
+  test('places: bad JSON says what is expected', () => throwsLike(() => rich.parsePlaces('{"places":['), /not valid JSON.*"places"/));
+  test('places: link falls back to OpenStreetMap', () => assert.equal(rich.placeLink({ name: 'x', lat: 1, lng: 2 }), 'https://www.openstreetmap.org/?mlat=1&mlon=2#map=18/1/2'));
+  test('places: a website wins over the map link', () => assert.equal(rich.placeLink({ name: 'x', lat: 1, lng: 2, url: 'https://x.com' }), 'https://x.com'));
+  test('places: javascript: URLs never become links', () => assert.equal(rich.parsePlaces('[{"name":"X","url":"javascript:alert(1)"}]').places[0].url, undefined));
+
+  // images
+  test('images: a list of strings works, bad entries are skipped', () => {
+    const s = rich.parseImages('{"images":["https://a.com/1.jpg","nope",{"url":"/api/attachments/file?id=2","caption":"gen"}]}');
+    assert.equal(s.images.length, 2); assert.equal(s.images[1].url, '/api/attachments/file?id=2');
+  });
+  test('images: source defaults to the host', () => assert.equal(rich.parseImages('["https://www.example.com/a.png"]').images[0].source, 'example.com'));
+  test('images: nothing usable is an error that says why', () => throwsLike(() => rich.parseImages('{"images":["ftp://x"]}'), /usable "url"/));
+
+  // products
+  const products = rich.parseProducts(JSON.stringify({ products: [
+    { name: 'P1', price: 399.99, currency: 'usd', rating: 4.7, specs: { Battery: '30 h', ANC: true } },
+    { name: 'P2', price: 'From $449', url: 'https://www.bestbuy.com/p2', specs: { Battery: '24 h', Weight: '250 g' } },
+  ] }));
+  test('products: currency code is upper-cased', () => assert.equal(products.products[0].currency, 'USD'));
+  test('products: store defaults to the link host', () => assert.equal(products.products[1].store, 'bestbuy.com'));
+  test('products: two with specs compare automatically', () => assert.equal(products.compare, true));
+  test('products: "compare": false wins', () => assert.equal(rich.parseProducts('{"compare":false,"products":[{"name":"a","specs":{"x":1}},{"name":"b","specs":{"x":2}}]}').compare, false));
+  test('products: spec rows are the union, first-seen order', () => assert.deepEqual(rich.specKeys(products.products), ['Battery', 'ANC', 'Weight']));
+  test('products: booleans read Yes/No', () => assert.equal(products.products[0].specs.find(([k]) => k === 'ANC')[1], 'Yes'));
+  test('formatPrice: an ISO currency is formatted', () => assert.equal(rich.formatPrice(1299.5, 'USD', 'en-US'), '$1,299.50'));
+  test('formatPrice: a string is shown as written', () => assert.equal(rich.formatPrice('From £29', 'GBP'), 'From £29'));
+
+  // news
+  const now = Date.parse('2026-09-29T12:00:00Z');
+  test('relativeDate: minutes', () => assert.equal(rich.relativeDate('2026-09-29T11:48:00Z', now), '12m ago'));
+  test('relativeDate: hours', () => assert.equal(rich.relativeDate('2026-09-29T07:00:00Z', now), '5h ago'));
+  test('relativeDate: days', () => assert.equal(rich.relativeDate('2026-09-26T12:00:00Z', now), '3d ago'));
+  test('relativeDate: older is a date', () => assert.match(rich.relativeDate('2026-08-01T00:00:00Z', now, 'en-US'), /Aug/));
+  test('relativeDate: unparseable is shown as given', () => assert.equal(rich.relativeDate('yesterday', now), 'yesterday'));
+  test('news: source defaults to the host', () => assert.equal(rich.parseNews('{"items":[{"title":"T","url":"https://www.dawn.com/x"}]}').items[0].source, 'dawn.com'));
+  test('news: an untitled item names the index', () => throwsLike(() => rich.parseNews('{"items":[{"url":"https://x.com"}]}'), /items\[0\] has no "title"/));
+
+  // draft
+  test('draft: JSON email', () => { const d = rich.parseDraft('{"kind":"email","to":["a@x.com","b@x.com"],"subject":"Hi","body":"Hello"}'); assert.equal(d.kind, 'email'); assert.equal(d.to, 'a@x.com, b@x.com'); });
+  test('draft: plain text with header lines is an email', () => { const d = rich.parseDraft('To: a@x.com\nSubject: Hello\n\nBody here', 'writing'); assert.equal(d.kind, 'email'); assert.equal(d.subject, 'Hello'); assert.equal(d.body, 'Body here'); });
+  test('draft: plain text in ```post is a post', () => assert.equal(rich.parseDraft('Big news!', 'post').kind, 'post'));
+  test('draft: "tweet" is a post', () => assert.equal(rich.parseDraft('{"kind":"tweet","body":"x"}').kind, 'post'));
+  test('draft: no body is an error', () => throwsLike(() => rich.parseDraft('{"kind":"email"}'), /no "body"/));
+  test('mailto: subject, cc and a plain body', () => assert.equal(
+    rich.mailtoLink({ to: 'a@x.com, b@x.com', cc: 'c@x.com', subject: 'Leave: 14–18', body: '**Hi**\n\n- one' }),
+    'mailto:a%40x.com,b%40x.com?subject=Leave%3A%2014%E2%80%9318&cc=c%40x.com&body=Hi%0A%0A%E2%80%A2%20one'));
+  test('markdownToPlain strips emphasis and keeps link targets', () => assert.equal(rich.markdownToPlain('**Bold** and [docs](https://x.com)'), 'Bold and docs (https://x.com)'));
+  test('keepLineBreaks makes single newlines hard breaks, not in code', () => assert.equal(rich.keepLineBreaks('Thanks,\nSuhail\n\n```\na\nb\n```'), 'Thanks,  \nSuhail\n\n```\na\nb\n```'));
+  test('platform limits', () => { assert.equal(rich.platformLimit('X'), 280); assert.equal(rich.platformLimit('LinkedIn'), 3000); assert.equal(rich.platformLimit('Email'), undefined); });
+
+  // weather
+  test('wmo: 0 is clear', () => assert.deepEqual(rich.wmo(0), { label: 'Clear sky', icon: 'clear' }));
+  test('wmo: 63 is rain', () => assert.equal(rich.wmo(63).icon, 'rain'));
+  test('wmo: 75 is heavy snow', () => assert.equal(rich.wmo(75).label, 'Heavy snow'));
+  test('wmo: 95 is a thunderstorm', () => assert.equal(rich.wmo(95).icon, 'thunder'));
+  test('wmo: 82 is violent showers', () => assert.equal(rich.wmo(82).icon, 'heavy-rain'));
+  test('wmo: an unknown code is labelled so', () => assert.equal(rich.wmo(42).icon, 'unknown'));
+  test('°C to °F and back', () => { assert.equal(rich.convertTemp(100, 'metric', 'imperial'), 212); assert.equal(rich.convertTemp(32, 'imperial', 'metric'), 0); });
+  test('km/h to mph', () => assert.ok(Math.abs(rich.convertWind(100, 'metric', 'imperial') - 62.137) < 0.01));
+  test('wallTime reads the time as written, never re-zoned', () => assert.equal(rich.wallTime('2026-09-29T06:02'), '06:02'));
+  test('weekday reads a calendar date', () => assert.equal(rich.weekday('2026-09-29', 'en-US'), 'Tue'));
+  test('upcomingHours starts at the current hour', () => assert.equal(rich.upcomingHours([{ time: '2026-09-29T13:00' }, { time: '2026-09-29T14:00' }, { time: '2026-09-29T15:00' }], '2026-09-29T14:20', 2)[0].time, '2026-09-29T14:00'));
+  test('weather: Open-Meteo field names are accepted', () => {
+    const w = rich.parseWeather('{"location":"X","current":{"temperature_2m":20,"weather_code":3,"is_day":0},"daily":[{"time":"2026-09-29","temperature_2m_min":10,"temperature_2m_max":21}]}');
+    assert.equal(w.current.temp, 20); assert.equal(w.current.isDay, false); assert.equal(w.daily[0].max, 21); assert.equal(w.units, 'metric');
+  });
+  test('weather: nothing to show is an error', () => throwsLike(() => rich.parseWeather('{"location":"X"}'), /neither "current"/));
+
+  // currency
+  const fx = rich.parseCurrency('{"base":"usd","amount":100,"rates":{"PKR":278.4,"EUR":"0.92","BAD":-1}}');
+  test('currency: base is upper-cased and set to 1', () => { assert.equal(fx.base, 'USD'); assert.equal(fx.rates.USD, 1); });
+  test('currency: non-positive rates are dropped', () => assert.equal(fx.rates.BAD, undefined));
+  test('currency: first target is the default', () => assert.equal(fx.target, 'PKR'));
+  test('currency: base → target', () => assert.ok(Math.abs(rich.convertCurrency(100, 'USD', 'PKR', fx.rates) - 27840) < 1e-9));
+  test('currency: target → base', () => assert.ok(Math.abs(rich.convertCurrency(27840, 'PKR', 'USD', fx.rates) - 100) < 1e-9));
+  test('currency: cross rate through the base', () => assert.ok(Math.abs(rich.convertCurrency(1, 'EUR', 'PKR', fx.rates) - 278.4 / 0.92) < 1e-9));
+  test('currency: an unknown code is NaN, not a wrong number', () => assert.ok(Number.isNaN(rich.convertCurrency(1, 'USD', 'XYZ', fx.rates))));
+  test('currency: one-pair shorthand', () => { const s = rich.parseCurrency('{"base":"USD","to":"PKR","rate":278.4}'); assert.equal(s.target, 'PKR'); assert.equal(s.amount, 1); });
+  test('currency: no rates is an error', () => throwsLike(() => rich.parseCurrency('{"base":"USD","rates":{}}'), /no positive numeric rate/));
+  test('formatAmount: tiny values keep significant digits', () => assert.equal(rich.formatAmount(0.003592, 'en-US'), '0.003592'));
+  test('formatAmount: ordinary values have two decimals', () => assert.equal(rich.formatAmount(27840, 'en-US'), '27,840.00'));
+
+  // files
+  test('fileKind by extension', () => {
+    assert.equal(rich.fileKind('a.PDF'), 'pdf'); assert.equal(rich.fileKind('b.xlsx'), 'sheet'); assert.equal(rich.fileKind('c.docx'), 'doc');
+    assert.equal(rich.fileKind('d.pptx'), 'slides'); assert.equal(rich.fileKind('e.csv'), 'csv'); assert.equal(rich.fileKind('f.md'), 'markdown');
+    assert.equal(rich.fileKind('g.png'), 'image'); assert.equal(rich.fileKind('h.ts'), 'code'); assert.equal(rich.fileKind('i.zip'), 'archive');
+    assert.equal(rich.fileKind('noext'), 'file');
+  });
+  test('files: name from a Windows path', () => assert.equal(rich.parseFiles('{"files":["C:\\\\work\\\\q3\\\\report.pdf"]}').files[0].name, 'report.pdf'));
+  test('formatBytes', () => { assert.equal(rich.formatBytes(512), '512 B'); assert.equal(rich.formatBytes(482133), '471 KB'); assert.equal(rich.formatBytes(5_302_112), '5.1 MB'); });
+  test('files: a pathless file names the index', () => throwsLike(() => rich.parseFiles('{"files":[{"name":"x"}]}'), /files\[0\] has no "path"/));
 }
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

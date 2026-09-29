@@ -77,6 +77,8 @@ export function Popover({
     const down = (e: MouseEvent): void => {
       const t = e.target as Node;
       if (ref.current?.contains(t) || anchor?.contains(t)) return;
+      // A click inside one of this menu's submenus (portalled elsewhere) is not outside it.
+      if ((t as Element).closest?.('[data-submenu]')) return;
       onClose();
     };
     const key = (e: KeyboardEvent): void => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
@@ -121,6 +123,46 @@ export function MenuItem({
 }
 
 export function MenuSep(): React.ReactElement { return <div className="menu-sep" />; }
+
+/**
+ * A menu item that opens a menu beside it — hover or click, → and ← from the
+ * keyboard. It closes a moment after the pointer leaves both it and its menu,
+ * so a diagonal move towards the submenu across a neighbouring item does not
+ * snap it shut.
+ */
+export function MenuSub({ icon, label, hint, children, width = 240 }: {
+  icon?: string; label: React.ReactNode; hint?: string; width?: number;
+  children: React.ReactNode;
+}): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const later = (fn: () => void, ms: number): void => { window.clearTimeout(timer.current); timer.current = window.setTimeout(fn, ms); };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return (
+    <div onMouseEnter={() => later(() => setOpen(true), 90)} onMouseLeave={() => later(() => setOpen(false), 260)}>
+      <button ref={setAnchor} role="menuitem" aria-haspopup="menu" aria-expanded={open}
+        className={cls('menu-item', open && 'bg-aico-hover')}
+        onClick={() => setOpen(o => !o)}
+        onKeyDown={e => {
+          if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); setOpen(true); requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-submenu] [role=menuitem]')?.focus()); }
+        }}>
+        {icon !== undefined && <Icon name={icon} size={16} className="text-aico-secondary" />}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {hint && <span className="text-[11.5px] text-aico-muted">{hint}</span>}
+        <Icon name="chevron-right" size={14} className="text-aico-muted" />
+      </button>
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="right-start" width={width} offset={4}>
+        <div data-submenu
+          onMouseEnter={() => window.clearTimeout(timer.current)}
+          onMouseLeave={() => later(() => setOpen(false), 260)}
+          onKeyDown={e => { if (e.key === 'ArrowLeft') { e.preventDefault(); setOpen(false); anchor?.focus(); } }}>
+          {children}
+        </div>
+      </Popover>
+    </div>
+  );
+}
 
 /** A button that owns its popover — the common case. */
 export function MenuButton({

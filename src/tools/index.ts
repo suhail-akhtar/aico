@@ -23,6 +23,10 @@ import { checkpointTool, checkpointDefinition } from './checkpoint.js';
 import { useSkill, skillDefinition } from './skill.js';
 import { noteSourceChanged } from '../checks.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
+import { places, placesDefinition } from './places.js';
+import { weather, weatherDefinition } from './weather.js';
+import { currencyRates, currencyRatesDefinition } from './currency.js';
+import { generateImage, generateImageDefinition } from './generate-image.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
 import { askUser, askUserDefinition } from './askuser.js';
@@ -211,6 +215,14 @@ export const toolDefinitions: ToolDefinition[] = [
   // A restore rewrites files. Nothing else may be running while it does.
   { ...checkpointDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...webSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
+  // Keyless public data, read-only like WebSearch. Safe to overlap: Places
+  // serialises its own Nominatim requests (one per second, the service's rule),
+  // so parallel calls queue there rather than breaking the policy.
+  { ...placesDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
+  { ...weatherDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
+  { ...currencyRatesDefinition, isConcurrencySafe: true, maxResultSizeChars: 15_000 },
+  // Spends the user's money and writes files: exclusive, and asks permission.
+  { ...generateImageDefinition, isConcurrencySafe: false, maxResultSizeChars: 10_000 },
   { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...todoReadDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
   { ...todoWriteDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
@@ -290,7 +302,7 @@ export function getToolsForAgent(agentType: SubAgentType = 'general'): ToolDefin
 }
 
 /** Readonly tool preset (same as the 'explore' agent set) */
-const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'WidgetSpec']);
+const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'WidgetSpec', 'Places', 'Weather', 'CurrencyRates']);
 
 /**
  * Resolve a custom tool whitelist to actual ToolDefinitions.
@@ -371,6 +383,7 @@ const WRITE_TOOLS = new Set([
   'WorkspaceSetPath',
   'WorkspaceWrite',
   'AgentCreate',
+  'GenerateImage',
 ]);
 
 // ── Concurrency control ─────────────────────────────────────────────
@@ -570,6 +583,18 @@ export async function executeTool(
       break;
     case 'WebSearch':
       result = await webSearch(args as unknown as Parameters<typeof webSearch>[0]);
+      break;
+    case 'Places':
+      result = await places(args as unknown as Parameters<typeof places>[0]);
+      break;
+    case 'Weather':
+      result = await weather(args as unknown as Parameters<typeof weather>[0]);
+      break;
+    case 'CurrencyRates':
+      result = await currencyRates(args as unknown as Parameters<typeof currencyRates>[0]);
+      break;
+    case 'GenerateImage':
+      result = await generateImage(args as unknown as Parameters<typeof generateImage>[0]);
       break;
     case 'NotebookEdit':
       result = await notebookEdit(args as unknown as Parameters<typeof notebookEdit>[0]);

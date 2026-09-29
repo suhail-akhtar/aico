@@ -3,6 +3,61 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.25.0 — 2026-09-29
+
+Answers about the world, drawn like it: maps of real places, weather, currency,
+videos, products, news, editable drafts, generated images and file cards — each
+fed by a tool that fetches real data. And in the desktop app: tooltips that look
+like the app, a profile menu with submenus, and the sources behind every answer.
+
+### Added — rich answers (every client: desktop, web portal, VS Code)
+
+- Nine widget blocks in the shared renderer, each with a catalog spec the model
+  reads, a streaming placeholder and a named error for the Fix flow:
+  `places` (Leaflet map on OpenStreetMap tiles, rating pins, card row, expanded
+  full-window map with list, Open-now / Top-rated filters, hours, phone,
+  directions), `images` (carousel + lightbox), `products` (cards + spec
+  comparison), `video` (YouTube, player created only on play), `news`, `draft`
+  (email/post/report, editable, copy, mailto, download), `weather` (now, 24 h,
+  7 days, °C/°F), `currency` (two-way converter with date and source), `files`
+  (Open / Show in folder in the desktop).
+- Engine tools that return ready-to-paste blocks: **Places** (Nominatim +
+  Overpass, 1 request/s, "open now" from `opening_hours`; says plainly that OSM
+  has no ratings, reviews or photos, which may be added only from a page the
+  agent read, with `source`), **Weather** (Open-Meteo), **CurrencyRates**
+  (Frankfurter, falling back to open.er-api for currencies it lacks, e.g. PKR —
+  each rate names its source), **GenerateImage** (OpenAI `gpt-image-1` or Gemini
+  with your key; asks first; saves a PNG in the project and shows it; states the
+  estimated cost). Generated images are served by `GET /api/attachments/file`
+  (session-scoped UUIDs only, nosniff, restrictive CSP; the web client adds its
+  token at display time, never into copied text). New setting `imageGeneration`.
+- Tool messages now carry their `turn`.
+
+### Added — desktop
+
+- **Tooltips** in the app's own style (dark pill, key hints, keyboard focus,
+  kept on screen) for every control, without losing accessible names.
+- **Profile menu** with an account card and submenus: Appearance (light / dark /
+  system), Your data (back up, restore, open the AICO folder), Engine (web
+  browser, restart, activity), Help (docs, shortcuts, what's new, report a
+  problem, check for updates, about). Menus now support submenus (hover, click,
+  ←/→).
+- **Under every answer:** copy, 👍, 👎 with reasons and a note, retry, share
+  (copy, PDF, HTML, Markdown), a **Sources** pill with site icons, and "…" with
+  View sources, Branch in new chat and **Read aloud**. The **Sources panel**
+  lists the pages the agent actually read (first) and the search results it saw,
+  derived from its own tool calls.
+
+### Fixed
+
+- 👎 never recorded a note in the desktop: it used `window.prompt`, which
+  Electron does not support. It is now an inline popover.
+- YouTube embeds failed with "Error 153" and OpenStreetMap asks apps to identify
+  themselves: requests to exactly those hosts from the desktop's `aico://` pages
+  now carry the project's page as Referer (the built-in browser is unaffected).
+- VS Code panel: split CSS chunks never loaded in the webview, so the widget
+  kit's styles were missing; the panel now builds one stylesheet.
+
 ## 0.24.1 — 2026-09-29
 
 ### Fixed (desktop)

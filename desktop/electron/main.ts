@@ -10,11 +10,12 @@
  */
 
 import { app, BrowserWindow, Menu, nativeTheme, screen, shell, Tray, nativeImage } from 'electron';
+import { session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { EngineHost } from './engine-host';
-import { handleProtocol, registerSchemePrivileges, APP_ORIGIN } from './protocol';
+import { attachEmbedReferer, handleProtocol, registerSchemePrivileges, APP_ORIGIN } from './protocol';
 import { PrefsStore } from './prefs';
 import { makeHandle, type DesktopContext } from './context';
 import { applyPowerPrefs, registerCoreIpc } from './core-ipc';
@@ -216,6 +217,7 @@ app.on('second-instance', () => ctx.reveal());
 app.whenReady().then(async () => {
   nativeTheme.themeSource = prefs.get().theme;
   handleProtocol({ rendererDir: path.join(distDir, 'renderer'), pluginDir: () => pluginsDir, engine });
+  attachEmbedReferer(session.defaultSession);
   registerCoreIpc(ctx);
   registerFeatures(ctx);
   applyPowerPrefs(ctx);

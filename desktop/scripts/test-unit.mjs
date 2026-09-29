@@ -386,6 +386,31 @@ const busy = await load(path.join(desktop, 'electron/engine-busy.ts'), 'engine-b
   ok(merged.autoUpdate.enabled === false && merged.autoUpdate.channel === 'latest' && merged.autoUpdate.lastCheckedAt === 0 && merged.developerMenus === false, 'prefs: autoUpdate merges over its defaults', merged.autoUpdate);
 }
 
+// ── Sources behind an answer ──
+const src = await load(path.join(desktop, 'renderer/src/chat/sources.ts'), 'sources');
+{
+  const msgs = [
+    { type: 'tool', toolName: 'WebSearch', toolArgs: { query: 'kabli pulao abbottabad' }, toolResult: JSON.stringify({ results: [
+      { title: 'Afghan Chopan menu', url: 'https://www.foodpanda.pk/a', snippet: 'Kabuli pulao…' },
+      { title: 'Yum Foody', url: 'https://yumfoody.com/ikr', snippet: 'Inam Khan Tikka' },
+      { title: 'Bad', url: 'javascript:alert(1)' },
+    ] }) },
+    { type: 'tool', toolName: 'WebFetch', toolArgs: { url: 'https://yumfoody.com/ikr' }, toolResult: 'Title: Yum Foody | Inam Khan Tikka\n\nMenu…' },
+    { type: 'tool', toolName: 'mcp__aico-desktop__browser_open', toolArgs: { url: 'https://maps.example.org/x' }, toolResult: 'ok' },
+    { type: 'assistant', content: 'done' },
+  ];
+  const s = src.extractSources(msgs);
+  ok(s.length === 3, 'sources: each URL once, non-web URLs dropped', s.map(x => x.url));
+  ok(s[0].url === 'https://yumfoody.com/ikr' && s[0].via === 'read' && s[0].snippet === 'Inam Khan Tikka', 'sources: pages the agent opened come first, keeping the search snippet', s[0]);
+  ok(s[0].title === 'Yum Foody | Inam Khan Tikka', 'sources: a fetched page keeps the title it read', s[0].title);
+  ok(s.some(x => x.host === 'maps.example.org' && x.via === 'read'), 'sources: the built-in browser counts as reading');
+  ok(s[s.length - 1].via === 'search' && s[s.length - 1].host === 'foodpanda.pk', 'sources: results seen but not opened are listed after, as search');
+  ok(src.readableTitle('https://www.youtube.com/results?search_query=kabuli+pulao+recipe') === 'Search: kabuli pulao recipe', 'sources: a search page reads as what was searched', src.readableTitle('https://www.youtube.com/results?search_query=kabuli+pulao+recipe'));
+  ok(src.readableTitle('https://example.com/menus/afghan-chopan_abbottabad.html') === 'afghan chopan abbottabad', 'sources: an untitled page reads as its path, not a raw URL');
+  ok(src.extractSources([{ type: 'tool', toolName: 'WebFetch', toolArgs: { url: 'https://lite.duckduckgo.com/lite/?q=kabuli%20pulao' }, toolResult: 'no title here' }])[0].title === 'Search: kabuli pulao', 'sources: every listed source has a readable title');
+  ok(src.siteName('foodpanda.pk') === 'Foodpanda' && src.siteName('www.news.bbc.co.uk') === 'Bbc', 'sources: a site name reads as a name', [src.siteName('foodpanda.pk'), src.siteName('www.news.bbc.co.uk')]);
+}
+
 fs.rmSync(out, { recursive: true, force: true });
 console.log(`\n  DESKTOP UNIT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

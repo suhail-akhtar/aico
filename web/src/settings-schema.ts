@@ -150,6 +150,41 @@ export const PANES: Pane[] = [
           },
         ],
       },
+      {
+        title: 'Images',
+        hint: 'How the agent draws pictures when you ask for one. It uses a provider you have already set up — no separate key.',
+        fields: [
+          {
+            path: 'imageGeneration.provider',
+            label: 'Image provider',
+            hint: '“openai”, “gemini”, or a provider id from Models. Blank tries OpenAI first, then Gemini.',
+            kind: 'text',
+            placeholder: 'automatic',
+            keywords: 'image generation picture draw dall-e gpt-image gemini imagen',
+          },
+          {
+            path: 'imageGeneration.model',
+            label: 'Image model',
+            hint: 'Blank uses gpt-image-1 on OpenAI, gemini-2.5-flash-image on Gemini.',
+            kind: 'text',
+            placeholder: 'gpt-image-1',
+            keywords: 'image generation picture model gpt-image-1-mini imagen',
+          },
+          {
+            path: 'imageGeneration.quality',
+            label: 'Image quality',
+            hint: 'OpenAI gpt-image models only. Higher costs more per image.',
+            kind: 'segmented',
+            fallback: 'medium',
+            keywords: 'image generation picture quality cost',
+            options: [
+              { value: 'low', label: 'Low' },
+              { value: 'medium', label: 'Medium' },
+              { value: 'high', label: 'High' },
+            ],
+          },
+        ],
+      },
     ],
   },
 

@@ -16,6 +16,7 @@ import { TopBar } from '@/shell/TopBar';
 import { EngineGate } from '@/shell/EngineGate';
 import { CommandPalette } from '@/shell/CommandPalette';
 import { SearchDialog } from '@/shell/SearchDialog';
+import { Tooltips } from './shell/Tooltips';
 import { Toasts } from '@/shell/Toasts';
 import { SettingsModal } from '@/settings/SettingsModal';
 import { BottomPanel } from '@/shell/BottomPanel';
@@ -50,6 +51,7 @@ export function App({ engineReady }: { engineReady: boolean }): React.ReactEleme
       <CommandPalette />
       <SearchDialog />
       <Toasts />
+      <Tooltips />
       <EngineGate ready={engineReady} />
     </div>
   );

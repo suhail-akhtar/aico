@@ -513,6 +513,26 @@ export interface AicoSettings {
    */
   disabledTools?: string[];
   /**
+   * How `GenerateImage` makes pictures.
+   *
+   * Everything is optional. With nothing set, the first usable OpenAI
+   * instance is used (model `gpt-image-1`), then Google Gemini
+   * (`gemini-2.5-flash-image`). The key is the provider instance's own — no
+   * separate credential lives here.
+   *
+   * `provider` names a provider instance id, or a family: `openai`, `gemini`.
+   * `model` overrides the model id (e.g. `gpt-image-1-mini`, an `imagen-…`
+   * model). `quality` applies to OpenAI's gpt-image models; the default is
+   * `medium`, about $0.04 for a square image.
+   *
+   * Example: { "imageGeneration": { "provider": "openai", "model": "gpt-image-1", "quality": "low" } }
+   */
+  imageGeneration?: {
+    provider?: string;
+    model?: string;
+    quality?: 'low' | 'medium' | 'high' | 'auto';
+  };
+  /**
    * Repeat-tool loop breaker. Advisory: it never blocks a call, it injects an
    * escalating reminder when the model repeats one verbatim. The completion
    * gate cannot catch this case — a looping model never tries to stop.
@@ -569,7 +589,7 @@ const MERGED_SECTIONS = [
   'modelCapabilities',
   'modelPricing',
   'agentModels',
-  'completionGate', 'safetyLimits', 'repeatGuard', 'sandbox', 'sessionTitles',
+  'completionGate', 'safetyLimits', 'repeatGuard', 'sandbox', 'sessionTitles', 'imageGeneration',
 ] as const satisfies ReadonlyArray<keyof AicoSettings>;
 
 /**

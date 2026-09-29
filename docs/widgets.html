@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.24.1</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.25.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -92,6 +92,28 @@
       Copy the source, download it, expand it to fill the page, and — on diagrams — zoom
       and pan. Escape shrinks it back. Icons with tooltips rather than a row of words,
       because a figure should be mostly figure.
+    </p>
+
+    <h2>Answers about the world, drawn like it</h2>
+    <p>
+      Nine more blocks for the things people ask about that are not code or charts — each
+      fed by a tool that fetches real data, so the numbers on the card are the numbers the
+      source gave:
+    </p>
+    <ul>
+      <li><code>places</code> — an interactive map with rating pins and place cards, expanding to a full map with a list, an "Open now" filter, hours, phone and directions (OpenStreetMap, through the <code>Places</code> tool).</li>
+      <li><code>weather</code> — now, the next 24 hours and the week, °C or °F (Open-Meteo, through <code>Weather</code>).</li>
+      <li><code>currency</code> — a live converter both ways, with the rate's date and source (<code>CurrencyRates</code>).</li>
+      <li><code>images</code> — a carousel with a lightbox, including pictures the agent generates (<code>GenerateImage</code>, with your OpenAI or Gemini key).</li>
+      <li><code>video</code> — YouTube cards that only load the player when you press play.</li>
+      <li><code>products</code> — product cards and a side-by-side comparison of their specs.</li>
+      <li><code>news</code> — headlines with source, date and summary.</li>
+      <li><code>draft</code> — an email, post or report you can edit in place, copy, download or open in your mail app.</li>
+      <li><code>files</code> — the files the agent made, with Open and Show in folder in the desktop app.</li>
+    </ul>
+    <p>
+      Map data comes from OpenStreetMap, which has no ratings, reviews or photos: the agent adds
+      those only from a page it actually read, and says where they came from.
     </p>
 
     <h2>When a diagram will not parse</h2>

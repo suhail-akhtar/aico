@@ -26,6 +26,10 @@ import { copyRich, snapshotNode, standaloneHtml } from '@/lib/rich';
 import { desktop } from '@/desktop';
 import { groupTurns, currentActivity, type Turn } from './turns';
 import { ChangesCard } from './ChangesCard';
+import { extractSources } from './sources';
+import { Favicon, useSourcesPanel } from './SourcesPanel';
+import { MenuButton, MenuItem } from '@/shell/Popover';
+import { create } from 'zustand';
 
 const FOLLOW_PX = 140;
 
@@ -379,53 +383,128 @@ function AnswerActions({ turn, text, node }: { turn: Turn; text: string; node: R
   const rating = seq !== null ? feedback[seq]?.rating : undefined;
   const [copied, setCopied] = useState(false);
   const mode = useDesk(s => s.mode);
+  const sources = useMemo(() => extractSources([...turn.work, ...turn.answer]), [turn.work, turn.answer]);
+  const showSources = useSourcesPanel(s => s.show);
+  const reading = useReadAloud(s => s.id !== null && s.id === (last?.id ?? ''));
 
   const copy = async (): Promise<void> => {
     await copyRich(node.current, text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-  const exportAs = async (kind: 'html' | 'pdf'): Promise<void> => {
+  const exportAs = async (kind: 'html' | 'pdf' | 'md'): Promise<void> => {
+    const name = (title || 'answer').replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60);
+    if (kind === 'md') {
+      const out = await desktop.dialog.saveFile({ defaultName: `${name}.md`, content: text, filters: [{ name: 'Markdown', extensions: ['md'] }] });
+      if (out) toast.success('Saved Markdown', out);
+      return;
+    }
     if (!node.current) return;
     const html = standaloneHtml(title || 'AICO answer', `<div class="transcript markdown-host">${snapshotNode(node.current).innerHTML}</div>`, { dark: mode === 'dark' && kind === 'html' });
     if (kind === 'pdf') {
-      const out = await desktop.exportPdf(html, `${(title || 'answer').slice(0, 60)}.pdf`);
+      const out = await desktop.exportPdf(html, `${name}.pdf`);
       if (out) toast.success('Saved PDF', out);
     } else {
-      const out = await desktop.dialog.saveFile({ defaultName: `${(title || 'answer').slice(0, 60)}.html`, content: html, filters: [{ name: 'HTML', extensions: ['html'] }] });
+      const out = await desktop.dialog.saveFile({ defaultName: `${name}.html`, content: html, filters: [{ name: 'HTML', extensions: ['html'] }] });
       if (out) toast.success('Saved HTML', out);
     }
   };
+  const openSources = (): void => showSources(sources, turn.user ? stripEditMarker(turn.user.content).slice(0, 60) : '');
 
   return (
     <div className="mt-2 flex items-center gap-0.5 text-aico-muted" data-no-export>
-      <button className="icon-btn-sm" title={copied ? 'Copied' : 'Copy (Markdown + rich text)'} aria-label="Copy answer" onClick={() => void copy()}>
+      <button className="icon-btn-sm" title={copied ? 'Copied' : 'Copy response'} aria-label="Copy answer" onClick={() => void copy()}>
         <Icon name={copied ? 'check' : 'copy'} size={15} />
       </button>
       {seq !== null && (
         <>
-          <button className={cls('icon-btn-sm', rating === 'up' && 'text-aico-accent')} title="Good answer" aria-label="Good answer" aria-pressed={rating === 'up'}
-            onClick={() => void rate(seq, rating === 'up' ? 'none' : 'up')}><Icon name="thumbs-up" size={15} /></button>
-          <button className={cls('icon-btn-sm', rating === 'down' && 'text-aico-danger')} title="Bad answer" aria-label="Bad answer" aria-pressed={rating === 'down'}
-            onClick={() => {
-              const note = window.prompt('What was wrong? (optional — it helps the agent learn)') ?? undefined;
-              void rate(seq, rating === 'down' ? 'none' : 'down', note || undefined);
-            }}><Icon name="thumbs-down" size={15} /></button>
+          <button className={cls('icon-btn-sm', rating === 'up' && 'text-aico-accent')} title="Good response" aria-label="Good answer" aria-pressed={rating === 'up'}
+            onClick={() => { void rate(seq, rating === 'up' ? 'none' : 'up'); if (rating !== 'up') toast.success('Thanks — noted'); }}><Icon name="thumbs-up" size={15} /></button>
+          <BadAnswer rating={rating} onRate={(note) => void rate(seq, rating === 'down' ? 'none' : 'down', note)} />
         </>
       )}
       {turn.user && (
-        <button className="icon-btn-sm" title="Ask again" aria-label="Retry" disabled={busy}
+        <button className="icon-btn-sm" title="Try again" aria-label="Retry" disabled={busy}
           onClick={() => { const s = seqOf(turn.user!.id); void submit(s !== null ? `${stripEditMarker(turn.user!.content)}\n${editMarker(s)}` : stripEditMarker(turn.user!.content)); }}>
           <Icon name="refresh" size={15} />
         </button>
       )}
-      {last?.turn !== undefined && (
-        <button className="icon-btn-sm" title="Continue from here in a new branch" aria-label="Branch" disabled={busy}
-          onClick={() => void forkSession(sessionId, last.turn!)}><Icon name="git-branch" size={15} /></button>
+      <MenuButton className="icon-btn-sm" title="Share and save" ariaLabel="Share" placement="bottom-start" width={230} button={<Icon name="share" size={15} />}>
+        {close => (
+          <>
+            <MenuItem icon="copy" label="Copy response" onClick={() => { close(); void copy(); }} />
+            <MenuItem icon="download" label="Save as PDF" hint="with every visual" onClick={() => { close(); void exportAs('pdf'); }} />
+            <MenuItem icon="globe" label="Save as HTML" onClick={() => { close(); void exportAs('html'); }} />
+            <MenuItem icon="file-text" label="Save as Markdown" onClick={() => { close(); void exportAs('md'); }} />
+          </>
+        )}
+      </MenuButton>
+      {sources.length > 0 && (
+        <button className="ml-1 flex h-7 items-center gap-1.5 rounded-full border border-aico-border-subtle px-2 text-[12px] text-aico-secondary transition-colors hover:bg-aico-hover hover:text-aico-primary"
+          onClick={openSources} title={`${sources.length} source${sources.length === 1 ? '' : 's'} the agent searched and read`}>
+          <span className="flex -space-x-1.5">
+            {[...new Map(sources.map(s => [s.host, s])).values()].slice(0, 3).map(s => (
+              <span key={s.host} className="rounded-full ring-2 ring-aico-bg"><Favicon host={s.host} size={14} /></span>
+            ))}
+          </span>
+          Sources
+        </button>
       )}
-      <button className="icon-btn-sm" title="Save as PDF" aria-label="Save as PDF" onClick={() => void exportAs('pdf')}><Icon name="download" size={15} /></button>
-      <button className="icon-btn-sm" title="Save as HTML" aria-label="Save as HTML" onClick={() => void exportAs('html')}><Icon name="share" size={15} /></button>
-
+      <MenuButton className="icon-btn-sm" title="More actions" ariaLabel="More actions" placement="bottom-start" width={240} button={<Icon name="more" size={15} />}>
+        {close => (
+          <>
+            <MenuItem icon="book" label="View sources" hint={sources.length ? String(sources.length) : 'none'} disabled={!sources.length} onClick={() => { close(); openSources(); }} />
+            {last?.turn !== undefined && (
+              <MenuItem icon="git-branch" label="Branch in new chat" disabled={busy} title="Continue from here in a new chat" onClick={() => { close(); void forkSession(sessionId, last.turn!); }} />
+            )}
+            <MenuItem icon={reading ? 'stop' : 'volume'} label={reading ? 'Stop reading' : 'Read aloud'} onClick={() => { close(); readAloud(last?.id ?? '', node.current?.innerText ?? text); }} />
+          </>
+        )}
+      </MenuButton>
     </div>
   );
+}
+
+/** Thumbs-down with an optional note, in a popover — `window.prompt` does not exist in Electron, so the old note never worked. */
+function BadAnswer({ rating, onRate }: { rating?: string; onRate: (note?: string) => void }): React.ReactElement {
+  const [note, setNote] = useState('');
+  if (rating === 'down') {
+    return <button className="icon-btn-sm text-aico-danger" title="Bad response — click to undo" aria-label="Bad answer" aria-pressed onClick={() => onRate()}><Icon name="thumbs-down" size={15} /></button>;
+  }
+  return (
+    <MenuButton className="icon-btn-sm" title="Bad response" ariaLabel="Bad answer" placement="bottom-start" width={320} button={<Icon name="thumbs-down" size={15} />}>
+      {close => (
+        <div className="p-2">
+          <div className="mb-1.5 text-[13px] font-medium">What was wrong?</div>
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {['Wrong or made up', 'Did not follow instructions', 'Too long', 'Too short', 'Bad formatting'].map(r => (
+              <button key={r} className="chip" onClick={() => { close(); onRate(r); toast.success('Thanks — the agent learns from this'); }}>{r}</button>
+            ))}
+          </div>
+          <textarea className="input min-h-[60px] text-[13px]" placeholder="Anything else (optional)" value={note} onChange={e => setNote(e.target.value)} autoFocus />
+          <div className="mt-2 flex justify-end">
+            <button className="btn-primary btn-sm" onClick={() => { close(); onRate(note.trim() || undefined); toast.success('Thanks — the agent learns from this'); }}>Send</button>
+          </div>
+        </div>
+      )}
+    </MenuButton>
+  );
+}
+
+/** One answer read aloud at a time, with the system's voices. */
+const useReadAloud = create<{ id: string | null }>(() => ({ id: null }));
+function readAloud(id: string, text: string): void {
+  const synth = window.speechSynthesis;
+  if (!synth) { toast.warning('Read aloud is not available on this system'); return; }
+  const stop = useReadAloud.getState().id === id;
+  synth.cancel();
+  useReadAloud.setState({ id: null });
+  if (stop) return;
+  // Prose only: code blocks and markup are left to the eye.
+  const clean = text.replace(/```[\s\S]*?```/g, ' ').replace(/[#*_`>|]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 20000);
+  const u = new SpeechSynthesisUtterance(clean);
+  u.onend = () => { if (useReadAloud.getState().id === id) useReadAloud.setState({ id: null }); };
+  u.onerror = () => { if (useReadAloud.getState().id === id) useReadAloud.setState({ id: null }); };
+  useReadAloud.setState({ id });
+  synth.speak(u);
 }

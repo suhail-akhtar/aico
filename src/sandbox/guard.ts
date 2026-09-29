@@ -96,6 +96,18 @@ export function installSandboxGuard(
         : { kind: 'deny', reason: `sandbox: ${decision.reason ?? 'write denied'}` };
     }
 
+    // Writes a file whose path is optional: checked against where it will
+    // actually land, so a read-only sandbox refuses it before any money is spent.
+    if (ctx.name === 'GenerateImage') {
+      const raw = typeof ctx.arguments.path === 'string' && ctx.arguments.path.trim()
+        ? ctx.arguments.path.trim()
+        : 'generated-images/image.png';
+      const decision = sandbox.check(raw, 'write', policy);
+      return decision.allowed
+        ? { kind: 'abstain' }
+        : { kind: 'deny', reason: `sandbox: ${decision.reason ?? 'write denied'}` };
+    }
+
     const readArg = READ_PATH_ARGUMENTS[ctx.name];
     if (readArg !== undefined) {
       const raw = ctx.arguments[readArg];

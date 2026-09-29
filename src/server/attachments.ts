@@ -196,6 +196,49 @@ export async function resolveAttachment(input: {
   return entry!;
 }
 
+/**
+ * One stored file's bytes, for serving by URL — or `undefined` when there is no
+ * such attachment.
+ *
+ * What makes `GET /api/attachments/file` safe to expose:
+ *
+ *   - lookup is by id in the session's own index, never by a path, so nothing
+ *     the caller writes can name a file outside the store;
+ *   - the id must look like the UUIDs this store mints, so the query string is
+ *     rejected before it reaches the filesystem at all;
+ *   - the content type is decided here from the stored extension, and images
+ *     were signature-checked on the way in — never the type a browser or a
+ *     tool declared when uploading.
+ *
+ * Read-only. Unlike {@link resolveAttachments} it does not mark anything
+ * submitted: looking at a picture is not sending it.
+ */
+export async function readStoredAttachment(input: {
+  settings: AicoSettings; cwd: string; sessionId: string; id: string;
+}): Promise<{ bytes: Buffer; contentType: string; name: string; image: boolean } | undefined> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.id)) return undefined;
+  const dir = directory(input.settings, input.cwd, input.sessionId);
+  const entry = (await load(dir)).attachments.find(item => item.id === input.id);
+  if (!entry) return undefined;
+  const file = path.resolve(dir, entry.file);
+  if (!file.startsWith(`${path.resolve(dir)}${path.sep}`)) return undefined;
+  let bytes: Buffer;
+  try { bytes = await readFile(file); } catch { return undefined; }
+  const image = IMAGE_MEDIA_TYPES[entry.extension];
+  const contentType = image ?? SERVED_TYPES[entry.extension] ?? 'application/octet-stream';
+  return { bytes, contentType, name: entry.name, image: Boolean(image) };
+}
+
+/** Types for the non-image attachments, which are served as downloads. */
+const SERVED_TYPES: Record<string, string> = {
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.csv': 'text/csv; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+};
+
 export async function removeAttachment(input: { settings: AicoSettings; cwd: string; sessionId: string; id: string }): Promise<boolean> {
   const dir = directory(input.settings, input.cwd, input.sessionId);
   const index = await load(dir);

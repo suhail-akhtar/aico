@@ -789,6 +789,8 @@ export function resolveToolSet(opts: {
 /** Tools a plan-mode run may use. Read-only by construction. */
 const PLAN_MODE_TOOLS = new Set([
   'Read', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead',
+  // Read-only lookups of public data, the same kind of thing as WebSearch.
+  'Places', 'Weather', 'CurrencyRates',
   // Read-only, and orientation is most of what a planning turn does. Leaving
   // it out would make planning the one mode that still has to Glob its way
   // around a project it could have asked about once.

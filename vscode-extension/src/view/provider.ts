@@ -372,6 +372,12 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
    * something in the bundle tried to, which is what makes tunnelling everything
    * through the host a security property rather than only a plumbing decision.
    *
+   * Two narrow exceptions, both display-only: `img-src https:` so the rich
+   * answer blocks (map tiles, product and news pictures, video thumbnails)
+   * can draw — an image load cannot read anything back — and `frame-src` for
+   * YouTube's no-cookie player, created only when the reader clicks play. No
+   * `connect-src`: scripts still cannot reach any host.
+   *
    * `'strict-dynamic'` sits beside the nonce because the bundle is code-split:
    * the heavy renderers (mermaid, echarts, katex, vega) are behind dynamic
    * `import()` so a text reply never pays for them. Those chunks cannot carry a
@@ -391,7 +397,8 @@ export class AicoViewProvider implements vscode.WebviewViewProvider {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'none';
-  img-src ${webview.cspSource} data: blob:;
+  img-src ${webview.cspSource} data: blob: https:;
+  frame-src https://www.youtube-nocookie.com;
   font-src ${webview.cspSource};
   style-src ${webview.cspSource} 'unsafe-inline';
   script-src 'nonce-${nonce}' 'strict-dynamic';">

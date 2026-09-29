@@ -391,3 +391,11 @@ export { OpenAIResponsesProvider } from './providers/openai-responses.js';
 export { patchUserSettingPath } from './settings.js';
 export { showCommit, listBranches, switchBranch, createBranch, revertCommit, isValidBranchName, gitStatus, fileDiff, stage, unstage, discard, commit as gitCommit, push as gitPush, stashList, stashPush, stashPop, deleteBranch } from './server/git-ops.js';
 export { parseHostMcp } from './bootstrap.js';
+// -- Keyless data tools and image generation --
+export { setNetFetch, userAgent, RequestSpacer, TtlCache } from './tools/net.js';
+export { parseOpeningHours, isOpenAt, openNow } from './tools/opening-hours.js';
+export { places, resetPlacesForTests, classifyQuery, overpassQuery } from './tools/places.js';
+export { weather, resetWeatherForTests, describeWmo } from './tools/weather.js';
+export { currencyRates, resetCurrencyForTests } from './tools/currency.js';
+export { generateImage, pickImageBackend, openAiImageRequest, estimateImageCost } from './tools/generate-image.js';
+export { storeAttachment, readStoredAttachment } from './server/attachments.js';

@@ -99,6 +99,13 @@ export interface ToolImageSink {
   /** Keep the bytes somewhere `resolveImages` will find them. */
   store: (image: ToolImageBytes) => Promise<ImageRef | undefined>;
   /**
+   * Whether `store` is the session's attachment store (the web server and the
+   * desktop) rather than this run's memory. Only a persistent reference can be
+   * served back by URL — `GenerateImage` reads this to decide whether it can
+   * offer an ```images block at all.
+   */
+  persistent: boolean;
+  /**
    * Images held by the run itself, when no store was injected. The agent's
    * resolver answers from here first.
    */
@@ -139,6 +146,7 @@ export function createToolImageSink(opts: {
     model: opts.model,
     ...(opts.settings ? { settings: opts.settings } : {}),
     store: opts.store ?? keepLocally,
+    persistent: Boolean(opts.store),
     local,
     pending: [],
     seen: new Map(),
