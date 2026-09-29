@@ -211,7 +211,7 @@ function cleanLanguage(language: unknown): string | undefined {
 }
 
 function withVersion(doc: CanvasDoc, content: string, author: CanvasAuthor, note?: string): CanvasDoc {
-  const at = Math.max(Date.now(), doc.updatedAt + 1);
+  const at = Math.max(stamp(), doc.updatedAt + 1);
   const version = doc.version + 1;
   const entry: CanvasVersion = { version, content, author, at, ...(note ? { note: note.slice(0, 200) } : {}) };
   return {
@@ -221,6 +221,18 @@ function withVersion(doc: CanvasDoc, content: string, author: CanvasAuthor, note
     updatedAt: at,
     versions: [...doc.versions, entry].slice(-CANVAS_VERSION_CAP),
   };
+}
+
+/**
+ * A clock that never repeats within this process. Two canvases made in the same
+ * millisecond (a fast machine, a script) had equal times, so "newest first" was
+ * a coin toss — CI on Linux lost it.
+ */
+let lastStamp = 0;
+function stamp(): number {
+  const t = Date.now();
+  lastStamp = t > lastStamp ? t : lastStamp + 1;
+  return lastStamp;
 }
 
 // ── The API ──────────────────────────────────────────────────────────
@@ -261,7 +273,7 @@ export async function createCanvas(ctx: CanvasContext, input: {
   const kind: CanvasKind = input.kind === 'code' ? 'code' : 'document';
   const language = kind === 'code' ? cleanLanguage(input.language) : undefined;
   const author = input.author ?? 'agent';
-  const now = Date.now();
+  const now = stamp();
   let id = newId();
   // Ten hex characters make a collision in one session vanishingly rare; the
   // check makes it impossible.
