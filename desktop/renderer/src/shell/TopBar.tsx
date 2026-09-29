@@ -9,6 +9,7 @@
 
 import React from 'react';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import { useDesk, toast } from '@/state/desk';
 import { resolveView } from '@/plugins/registry';
 import { Icon } from '@/lib/icons';
@@ -65,7 +66,7 @@ function Breadcrumb(): React.ReactElement {
   const route = useDesk(s => s.route);
   const title = useStore(s => s.title);
   const project = useStore(s => s.project);
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const logged = useStore(s => s.logged);
   const groups = useStore(s => s.groups);
   const [editing, setEditing] = React.useState(false);
@@ -118,6 +119,7 @@ function ChatMenu(): React.ReactElement | null {
   const forkSession = useStore(s => s.forkSession);
   const deleteSessions = useStore(s => s.deleteSessions);
   const mode = useDesk(s => s.mode);
+  const jump = useDesk(s => s.prefs.jumpToAnswer);
   if (logged.size === 0) return null;
   const archived = sessions.find(s => s.id === sessionId)?.archived;
 
@@ -160,6 +162,14 @@ function ChatMenu(): React.ReactElement | null {
             <MenuItem icon="git-branch" label="Branch into a new chat" onClick={() => { close(); void forkSession(sessionId); }} />
             <MenuItem icon="file-text" label="Review changes" onClick={() => { close(); useDesk.getState().navigate({ view: 'changes', params: { id: sessionId } }); }} />
             <MenuItem icon="activity" label="Trajectory" onClick={() => { close(); useDesk.getState().navigate({ view: 'trajectory', params: { id: sessionId } }); }} />
+            <MenuSep />
+            <MenuItem icon="arrow-up" label="Jump to the answer when it finishes" checked={jump}
+              title="When a reply finishes, scroll up to where it starts"
+              onClick={() => {
+                close();
+                void useDesk.getState().setPrefs({ jumpToAnswer: !jump });
+                toast.info(jump ? 'Will stay at the end of replies' : 'Will jump to the start of each reply');
+              }} />
             <MenuSep />
             <MenuItem icon="archive" label={archived ? 'Restore' : 'Archive'} onClick={() => { close(); void archiveSession(sessionId, !archived); }} />
             <MenuItem icon="trash" danger label="Delete…" onClick={() => {

@@ -16,6 +16,7 @@
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import type { Project, SessionSummary } from '@web/api';
 import { useDesk, go, toast } from '@/state/desk';
 import { useNavItems } from '@/plugins/registry';
@@ -157,7 +158,7 @@ function Destinations(): React.ReactElement {
 /** Chats in a folder, newest first, archived hidden unless asked for. */
 function useSessionsBy(): { byProject: Map<string, SessionSummary[]>; loose: SessionSummary[]; byGroup: Map<string, SessionSummary[]> } {
   const sessions = useStore(s => s.sessions);
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const showArchived = useStore(s => s.showArchived);
   return useMemo(() => {
     const workspace = new Set(projects.filter(p => p.isWorkspace).map(p => norm(p.path)));
@@ -189,7 +190,7 @@ function useSessionsBy(): { byProject: Map<string, SessionSummary[]>; loose: Ses
 function norm(p: string): string { return p.replace(/[\\/]+$/, '').toLowerCase(); }
 
 function ProjectsSection(): React.ReactElement | null {
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const addProject = useStore(s => s.addProject);
   const { byProject } = useSessionsBy();
   const [sort, setSort] = useLocal<'recent' | 'name'>('desk.projectSort', 'recent');

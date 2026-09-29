@@ -95,19 +95,66 @@ export function Transcript({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
   // Follow the stream unless the reader scrolled up.
   const [following, setFollowing] = useState(true);
   const wasFollowing = useRef(true);
+  /** Following is paused until then, while a finished reply is being shown from its start. */
+  const holdUntil = useRef(0);
+  /** When the reader last scrolled, clicked or pressed a key in the transcript. */
+  const touchedAt = useRef(0);
   useLayoutEffect(() => { wasFollowing.current = following; });
   const last = messages[messages.length - 1];
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && wasFollowing.current) el.scrollTop = el.scrollHeight;
+    if (el && wasFollowing.current && Date.now() > holdUntil.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, last?.content, last?.toolRunning, busy, scrollRef]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const onScroll = (): void => setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_PX);
+    const onScroll = (): void => {
+      setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_PX);
+      setAnswerAbove(answerStartAbove(el));
+    };
+    const touched = (): void => { touchedAt.current = Date.now(); };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
+    el.addEventListener('wheel', touched, { passive: true });
+    el.addEventListener('pointerdown', touched, { passive: true });
+    el.addEventListener('keydown', touched);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', touched);
+      el.removeEventListener('pointerdown', touched);
+      el.removeEventListener('keydown', touched);
+    };
   }, [scrollRef]);
+
+  /*
+    A reply that finishes while you were watching it stream leaves you at its
+    last line, and a long answer then has to be scrolled back up by hand to be
+    read from the top. So, when it finishes, go to where it starts: the question
+    if the question and the answer's opening fit on screen together, otherwise
+    the answer's first line. Only when you were following — if you had scrolled
+    away to read something else, the transcript leaves you there.
+  */
+  const jump = useDesk(s => s.prefs.jumpToAnswer);
+  const [answerAbove, setAnswerAbove] = useState(false);
+  const wasBusy = useRef(busy);
+  useEffect(() => {
+    const finished = wasBusy.current && !busy;
+    wasBusy.current = busy;
+    if (!finished || !jump || !wasFollowing.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    // Stop following first: the turn's final log lands just after it ends, and
+    // following would carry the view straight back down to the bottom.
+    wasFollowing.current = false;
+    setFollowing(false);
+    holdUntil.current = Date.now() + 2000;
+    const started = Date.now();
+    const place = (): void => { if (touchedAt.current < started) scrollToAnswerStart(el, 'auto'); };
+    // Once the last chunk has painted, and again when late widgets have settled
+    // — unless the reader has moved in between.
+    let raf = requestAnimationFrame(() => { raf = requestAnimationFrame(place); });
+    const again = setTimeout(place, 500);
+    return () => { cancelAnimationFrame(raf); clearTimeout(again); };
+  }, [busy, jump, scrollRef]);
 
   return (
     <div className="transcript mx-auto w-full max-w-column px-6 pb-10 pt-6">
@@ -115,18 +162,62 @@ export function Transcript({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
         <TurnView key={t.key} turn={t} last={i === turns.length - 1} verbose={verbose}
           onFix={onFix} widgetFixes={widgetFixes} versions={versions} setVersion={setVersion} />
       ))}
-      {!following && (
-        <button
-          className="fixed bottom-[150px] left-1/2 z-20 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-aico-border bg-aico-bg shadow-[var(--desk-shadow)] hover:bg-aico-hover"
-          style={{ marginLeft: 'calc(var(--desk-sidebar-w, 0px) / 2)' }}
-          onClick={() => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); setFollowing(true); }}
-          aria-label="Jump to latest"
-        >
-          <Icon name="arrow-down" size={16} />
-        </button>
+      {(!following || (answerAbove && !busy)) && (
+        <div className="fixed bottom-[150px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border border-aico-border bg-aico-bg p-0.5 shadow-[var(--desk-shadow)]"
+          style={{ marginLeft: 'calc(var(--desk-sidebar-w, 0px) / 2)' }}>
+          {answerAbove && !busy && (
+            <button className="flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] text-aico-secondary hover:bg-aico-hover hover:text-aico-primary"
+              onClick={() => { const el = scrollRef.current; if (el) scrollToAnswerStart(el, 'smooth'); }}
+              title="Scroll to where the last answer starts" aria-label="Jump to the start of the answer">
+              <Icon name="arrow-up" size={14} /> Start of answer
+            </button>
+          )}
+          {!following && (
+            <button className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-aico-hover"
+              onClick={() => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); setFollowing(true); }}
+              title="Jump to latest" aria-label="Jump to latest">
+              <Icon name="arrow-down" size={16} />
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
+}
+
+/** The last turn's question and answer, as scroll targets inside `el`. */
+function lastTurnNodes(el: HTMLElement): { turn: HTMLElement; answer: HTMLElement | null } | null {
+  const turn = el.querySelector<HTMLElement>('section[data-turn="last"]');
+  if (!turn) return null;
+  return { turn, answer: turn.querySelector<HTMLElement>('[data-answer]') };
+}
+
+/** Offset of `node` from the top of the scrolling `el`'s content. */
+function offsetIn(el: HTMLElement, node: HTMLElement): number {
+  return node.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+}
+
+/**
+ * Where the last answer starts: the question above it when both fit in the top
+ * part of the view together, otherwise the answer itself.
+ */
+export function scrollToAnswerStart(el: HTMLElement, behavior: ScrollBehavior = 'smooth'): number {
+  const nodes = lastTurnNodes(el);
+  if (!nodes) return -1;
+  const turnTop = offsetIn(el, nodes.turn);
+  const answerTop = nodes.answer && nodes.answer.offsetHeight > 0 ? offsetIn(el, nodes.answer) : turnTop;
+  const target = answerTop - turnTop < el.clientHeight * 0.4 ? turnTop : answerTop;
+  const top = Math.max(0, Math.min(target - 16, el.scrollHeight - el.clientHeight));
+  el.scrollTo({ top, behavior });
+  return top;
+}
+
+/** True when the last answer's first line is above the top of the view. */
+function answerStartAbove(el: HTMLElement): boolean {
+  const nodes = lastTurnNodes(el);
+  const node = nodes?.answer ?? nodes?.turn;
+  if (!node || node.offsetHeight < el.clientHeight * 0.6) return false;
+  return offsetIn(el, node) < el.scrollTop - 40;
 }
 
 function TurnView({ turn, last, verbose, onFix, widgetFixes, versions, setVersion }: {
@@ -143,7 +234,7 @@ function TurnView({ turn, last, verbose, onFix, widgetFixes, versions, setVersio
   const hasWork = turn.work.length > 0;
 
   return (
-    <section className="mb-8" aria-label="Turn">
+    <section className="mb-8" aria-label="Turn" data-turn={last ? 'last' : undefined}>
       {turn.user && <UserMessage message={turn.user} version={versions.get(turn.user.id)} setVersion={setVersion} />}
 
       {(hasWork || turn.running) && (
@@ -156,7 +247,7 @@ function TurnView({ turn, last, verbose, onFix, widgetFixes, versions, setVersio
         </WorkFold>
       )}
 
-      <div ref={answerRef} className="space-y-4">
+      <div ref={answerRef} className="space-y-4" data-answer>
         {turn.answer.map(m => (
           <div key={m.id} className={cls(m.type === 'error' && 'rounded-xl border border-aico-danger/30 bg-aico-danger/5 px-4 py-3')}>
             <MessageBubble message={m} onFix={onFix} widgetFixes={widgetFixes} />

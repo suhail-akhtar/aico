@@ -132,6 +132,9 @@ const P: Record<string, React.ReactNode> = {
   zap: <path d="M13 2 3 14h9l-1 8 10-12h-9z" />,
   keyboard: <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10" /></>,
   command: <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />,
+  at: <><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></>,
+  bot: <><rect x="4" y="8" width="16" height="12" rx="2" /><path d="M12 8V4H8" /><path d="M2 14h2M20 14h2M9 13v2M15 13v2" /></>,
+  'file-plus': <><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" /><path d="M14 2v6h6" /><path d="M12 12v6M9 15h6" /></>,
   dot: <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />,
 };
 

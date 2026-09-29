@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.23.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.23.1</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -61,7 +61,7 @@
     <p>
       Download the installer for your system from the
       <a href="https://github.com/suhail-akhtar/aico/releases/latest">latest release</a>:
-      <code>AICO-Setup-0.23.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
+      <code>AICO-Setup-0.23.1-win-x64.exe</code> for Windows, <code>.AppImage</code> or
       <code>.deb</code> for Linux. The builds are not code-signed yet, so Windows SmartScreen
       asks once ("More info → Run anyway"). Your chats, providers and settings are the same
       ones the CLI, the web portal and VS Code use — everything lives in <code>~/.aico</code>.
@@ -72,6 +72,16 @@
     <img class="crop" src="assets/desktop/home.png" alt="AICO Desktop's home screen: a sidebar with New chat, Search, Library, Scheduled, Plugins, Projects, Files and Browser, and a centred composer under the heading Where should we begin?" loading="lazy">
     <figcaption>Home: the folder the chat will work in above the composer, model, approval and project below it, and starter prompts that plugins contribute.</figcaption>
   </figure>
+
+  <div class="prose">
+    <h2>A composer that keeps up with you</h2>
+    <ul>
+      <li><strong><code>/</code> for actions</strong> — plan first, how hard to think, how much to ask before acting, attach, mention, change model, branch, export, and every plugin command and prompt. Type to filter, <kbd>↑</kbd> <kbd>↓</kbd> to move, <kbd>Enter</kbd> to pick; each one confirms what it did.</li>
+      <li><strong><code>@</code> for files, folders and agents</strong> — the project's files are searched as you type, and a mention is highlighted in the box. Anything outside the project is one "Pick files…" away, and <kbd>Alt</kbd>+drop mentions a file instead of attaching it.</li>
+      <li><strong>Back to the start of the answer</strong> — when a long reply finishes, the chat jumps to where it began instead of leaving you at its last line (switch it off in the chat's <kbd>…</kbd> menu), and a "Start of answer" button takes you there from the bottom.</li>
+      <li>Paste a screenshot to attach it, <kbd>↑</kbd> in an empty box to bring back your last message, and a draft that stays with its own chat.</li>
+    </ul>
+  </div>
 
   <div class="prose">
     <h2>Answers that draw themselves — and compute</h2>

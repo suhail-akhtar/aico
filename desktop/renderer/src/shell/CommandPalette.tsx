@@ -8,6 +8,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import { useDesk } from '@/state/desk';
 import { useCommands } from '@/plugins/registry';
 import { Icon } from '@/lib/icons';
@@ -40,7 +41,7 @@ export function CommandPalette(): React.ReactElement | null {
   const setOpen = useDesk(s => s.setPalette);
   const commands = useCommands();
   const sessions = useStore(s => s.sessions);
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const input = useRef<HTMLInputElement>(null);

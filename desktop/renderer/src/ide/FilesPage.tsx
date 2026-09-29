@@ -14,6 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownRenderer } from '@aico/ui';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import { invoke, on, desktop } from '@/desktop';
 import { useDesk, toast } from '@/state/desk';
 import { Icon } from '@/lib/icons';
@@ -30,7 +31,7 @@ const IMAGE = /\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i;
 
 export function FilesPage({ params }: ViewProps): React.ReactElement {
   const project = useStore(s => s.project);
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const fallback = params?.root || project || projects.find(p => !p.isWorkspace)?.path || '';
   const [root, setRoot] = useState(fallback);
   useEffect(() => { if (params?.root) setRoot(params.root); }, [params?.root]);
@@ -39,7 +40,7 @@ export function FilesPage({ params }: ViewProps): React.ReactElement {
 }
 
 function Workbench({ root, setRoot, openPath, openLine }: { root: string; setRoot: (r: string) => void; openPath?: string; openLine?: number }): React.ReactElement {
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const [files, setFiles] = useState<OpenFile[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [side, setSide] = useState<'tree' | 'search'>('tree');

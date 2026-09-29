@@ -2150,6 +2150,14 @@ console.log('\n-- Money is not maths --');
   test('a shell positional in a code span stays', () => assert.equal(protectCurrency('run `echo $1` then pay $1'), 'run `echo $1` then pay \\$1'));
   test('a fence is never rewritten', () => assert.equal(protectCurrency('```sh\ncost=$5\n```\ncost $5'), '```sh\ncost=$5\n```\ncost \\$5'));
   test('text without dollars is returned as is', () => { const s = 'plain'; assert.equal(protectCurrency(s), s); });
+  // A maths lesson: formulas that start with a digit are formulas. Escaping
+  // their openers paired the leftovers into a red " and \" formula.
+  const lesson = 'For adding, $3 + 2$ and $2 + 3$ give 5. For $4 + 3$: count on.';
+  test('arithmetic that starts with a digit stays maths', () => assert.equal(protectCurrency(lesson), lesson));
+  test('display maths on one line is untouched', () => assert.equal(protectCurrency('$$4 + 3 = \\ ?$$'), '$$4 + 3 = \\ ?$$'));
+  test('a price range is still money', () => assert.equal(protectCurrency('between $5-$10 a month'), 'between \\$5-\\$10 a month'));
+  test('words between dollars are prose, not a formula', () => assert.equal(protectCurrency('costs $5 for adults and 3$ extra'), 'costs \\$5 for adults and 3$ extra'));
+  test('a price beside a formula', () => assert.equal(protectCurrency('It costs $12. The area is $3 \\times 4$.'), 'It costs \\$12. The area is $3 \\times 4$.'));
 }
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

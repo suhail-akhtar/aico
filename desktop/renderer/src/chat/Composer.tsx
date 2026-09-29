@@ -15,6 +15,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import { api } from '@web/api';
 import { useDesk, go, toast } from '@/state/desk';
 import { Icon } from '@/lib/icons';
@@ -22,7 +23,26 @@ import { basename, bytes, cls } from '@/lib/util';
 import { MenuButton, MenuItem, MenuSep, Popover } from '@/shell/Popover';
 import { desktop, isDesktop } from '@/desktop';
 import { setSendOptions, useSendOptions, type SendOptions } from './actions';
-import { useCommands } from '@/plugins/registry';
+import { SuggestMenu, groupRanked, rankItems, triggerAt, type SuggestItem, type Trigger } from './Suggest';
+import { highlightMentions, mentionPath, useMentionItems, useSlashItems } from './composer-menus';
+
+/** Drafts are kept per chat. The key prefix changed with the fix below, and the old keys — polluted by that bug — are dropped once. */
+const DRAFT_PREFIX = 'desk.draft2.';
+try {
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (k?.startsWith('desk.draft.')) localStorage.removeItem(k);
+  }
+} catch { /* fine */ }
+function readDraft(key: string): string { try { return localStorage.getItem(key) ?? ''; } catch { return ''; } }
+
+/**
+ * A prefill (a home-screen prompt, "Ask AI about this file") is delivered once.
+ * The store keeps the last one and the composer remounts when a chat starts;
+ * without this the new box was filled with the same text again, which is how a
+ * starter prompt seemed impossible to clear.
+ */
+let consumedPrefill = 0;
 
 export function Composer({ home }: { home?: boolean }): React.ReactElement {
   const busy = useStore(s => s.busy);
@@ -35,28 +55,42 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
   const attachFiles = useStore(s => s.attachFiles);
   const detachFile = useStore(s => s.detachFile);
   const sessionId = useStore(s => s.sessionId);
+  const project = useStore(s => s.project);
+  const logged = useStore(s => s.logged);
   const opts = useSendOptions();
   const sendKey = useDesk(s => s.prefs.sendKey);
-  const [text, setText] = useState('');
   const [uploading, setUploading] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
-  const [slashAnchor, setSlashAnchor] = useState<HTMLElement | null>(null);
+  const mirror = useRef<HTMLDivElement>(null);
 
-  // Drafts survive switching chats.
-  const draftKey = `desk.draft.${sessionId}`;
-  useEffect(() => {
-    try { setText(localStorage.getItem(draftKey) ?? ''); } catch { setText(''); }
+  /*
+    The text and the chat it belongs to travel together. Held apart, switching
+    chats saved the old chat's text under the new chat's key in the same render
+    that loaded the new one — so whatever was in the box followed you into every
+    new chat, and came back after clearing it and after a reload.
+  */
+  const draftKey = `${DRAFT_PREFIX}${sessionId}`;
+  const [draft, setDraft] = useState(() => ({ key: draftKey, text: readDraft(draftKey) }));
+  if (draft.key !== draftKey) setDraft({ key: draftKey, text: readDraft(draftKey) });
+  const text = draft.key === draftKey ? draft.text : readDraft(draftKey);
+  const setText = useCallback((next: string | ((prev: string) => string)) => {
+    setDraft(d => {
+      const prev = d.key === draftKey ? d.text : readDraft(draftKey);
+      return { key: draftKey, text: typeof next === 'function' ? next(prev) : next };
+    });
   }, [draftKey]);
   useEffect(() => {
-    try { if (text) localStorage.setItem(draftKey, text); else localStorage.removeItem(draftKey); } catch { /* fine */ }
-  }, [text, draftKey]);
+    if (draft.key !== draftKey) return;
+    try { if (draft.text) localStorage.setItem(draftKey, draft.text); else localStorage.removeItem(draftKey); } catch { /* fine */ }
+  }, [draft, draftKey]);
 
   useEffect(() => {
-    if (!prefill) return;
+    if (!prefill || prefill.at <= consumedPrefill) return;
+    consumedPrefill = prefill.at;
     setText(prefill.text);
     requestAnimationFrame(() => { ta.current?.focus(); ta.current?.setSelectionRange(prefill.text.length, prefill.text.length); });
-  }, [prefill]);
+  }, [prefill, setText]);
 
   // Grow with the text, up to a third of the window.
   useEffect(() => {
@@ -64,6 +98,7 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.36))}px`;
+    if (mirror.current) mirror.current.scrollTop = el.scrollTop;
   }, [text]);
 
   useEffect(() => {
@@ -72,6 +107,17 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
     return () => window.removeEventListener('desk:focus-composer', focus);
   }, []);
 
+  // ── "/" and "@" ─────────────────────────────────────────────────────
+  const [trigger, setTrigger] = useState<Trigger | null>(null);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+  const sync = (value: string, caret: number): void => {
+    const t = triggerAt(value, caret);
+    setTrigger(t);
+    if (!t || `${t.kind}:${t.from}` !== dismissed) setDismissed(null);
+  };
+  const open = trigger && `${trigger.kind}:${trigger.from}` !== dismissed ? trigger : null;
+
   const send = useCallback(async (mode: 'send' | 'steer' | 'followup') => {
     const content = text.trim();
     if (!content && attachments.length === 0) return;
@@ -79,6 +125,7 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
     // for the transcript's, which would otherwise read the stale draft back.
     try { localStorage.removeItem(draftKey); } catch { /* fine */ }
     setText('');
+    setTrigger(null);
     try {
       if (mode === 'send') {
         go('chat', { id: useStore.getState().sessionId });
@@ -89,7 +136,7 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
       setText(content);
       toast.error('Not sent', (err as Error).message);
     }
-  }, [text, attachments.length, submit, steer, followup, opts, draftKey]);
+  }, [text, attachments.length, submit, steer, followup, opts, draftKey, setText]);
 
   const upload = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -99,7 +146,7 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
     finally { setUploading(n => Math.max(0, n - files.length)); }
   }, [attachFiles]);
 
-  const pickFiles = async (images?: boolean): Promise<void> => {
+  const pickFiles = useCallback(async (images?: boolean): Promise<void> => {
     if (!isDesktop) return;
     const picked = await desktop.dialog.pickFiles(images
       ? { title: 'Attach images', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }] }
@@ -113,15 +160,112 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
       } catch (err) { toast.error(`Could not read ${p.name}`, (err as Error).message); }
     }
     await upload(files);
+    ta.current?.focus();
+  }, [upload]);
+
+  /** Puts `token` at the caret (or over `range`), spaced from what is before it, and keeps typing after it. */
+  const insertAt = useCallback((token: string, range?: { from: number; to: number }) => {
+    const el = ta.current;
+    const current = el?.value ?? '';
+    const from = range?.from ?? el?.selectionStart ?? current.length;
+    const to = range?.to ?? el?.selectionEnd ?? current.length;
+    const before = current.slice(0, from);
+    const pad = before && !/\s$/.test(before) ? ' ' : '';
+    setText(`${before}${pad}${token}${current.slice(to)}`);
+    const caret = before.length + pad.length + token.length;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(caret, caret); });
+  }, [setText]);
+
+  const mentionFolder = useCallback(async (range?: { from: number; to: number }): Promise<void> => {
+    const dir = await desktop.dialog.pickFolder('Mention a folder');
+    if (dir) insertAt(`@${mentionPath(dir, project)} `, range);
+    else ta.current?.focus();
+  }, [insertAt, project]);
+
+  const mentionFile = useCallback(async (range?: { from: number; to: number }): Promise<void> => {
+    const picked = await desktop.dialog.pickFiles({ title: 'Mention files' });
+    if (picked.length) insertAt(`${picked.map(p => `@${mentionPath(p.path, project)}`).join(' ')} `, range);
+    else ta.current?.focus();
+  }, [insertAt, project]);
+
+  const slashItems = useSlashItems({
+    busy, hasChat: logged.size > 0, pickFiles,
+    mentionFile: useCallback(() => mentionFile(), [mentionFile]),
+    mentionFolder: useCallback(() => mentionFolder(), [mentionFolder]),
+    insertText: insertAt,
+  });
+  const mention = useMentionItems(open?.kind === 'mention' ? open.query : null, project);
+  const shown = useMemo(() => {
+    if (!open) return [];
+    return open.kind === 'slash' ? groupRanked(rankItems(slashItems, open.query)) : mention.items;
+  }, [open, slashItems, mention.items]);
+  useEffect(() => { setActive(0); }, [open?.kind, open?.query]);
+
+  const pick = async (item: SuggestItem): Promise<void> => {
+    const at = open;
+    setTrigger(null);
+    if (!at) return;
+    try {
+      let done: void | string;
+      if (at.kind === 'slash') {
+        // The "/query" goes; anything typed after it stays.
+        const rest = text.slice(at.to).replace(/^\s+/, '');
+        setText(rest);
+        // An action that inserts text reads the box before React has re-rendered it.
+        if (ta.current) { ta.current.value = rest; ta.current.setSelectionRange(0, 0); }
+        done = await item.run();
+      } else {
+        done = await runMention(item, at);
+      }
+      if (typeof done === 'string' && done) toast.success(done);
+    } catch (err) {
+      toast.error(`${item.title} failed`, (err as Error).message);
+    }
   };
 
-  const mentionFolder = async (): Promise<void> => {
-    const dir = await desktop.dialog.pickFolder('Mention a folder');
-    if (dir) setText(t => `${t}${t && !t.endsWith(' ') ? ' ' : ''}@${dir} `);
+  const runMention = async (item: SuggestItem, at: Trigger): Promise<string | void> => {
+    const range = { from: at.from, to: at.to };
+    const cut = item.id.indexOf(':');
+    const kind = item.id.slice(0, cut);
+    const value = item.id.slice(cut + 1);
+    if (kind === 'file' || kind === 'dir') { insertAt(`@${mentionPath(value, project)} `, range); return; }
+    if (kind === 'browse-file') return mentionFile(range);
+    if (kind === 'browse-dir') return mentionFolder(range);
+    if (kind === 'agent') {
+      // Talking to an agent is a mode of the chat, not words in the message.
+      setText(t => (t.slice(0, at.from) + t.slice(at.to)).replace(/^\s+/, ''));
+      await useStore.getState().setSessionAgent(value);
+      return `Talking to @${value}`;
+    }
   };
+
+  // ↑ in an empty box brings back what you last sent in this chat.
+  const lastSent = useMemo(() => {
+    let found = '';
+    for (const m of logged.values()) {
+      const e = m as { type?: string; content?: unknown };
+      if (e.type === 'user' && typeof e.content === 'string') found = e.content;
+    }
+    return found.replace(/\n?<!--[\s\S]*?-->\s*$/, '').trim();
+  }, [logged]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === '/' && text === '') { setSlashAnchor(e.currentTarget); }
+    if (open && !e.nativeEvent.isComposing) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => (shown.length ? (i + 1) % shown.length : 0)); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => (shown.length ? (i - 1 + shown.length) % shown.length : 0)); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setDismissed(`${open.kind}:${open.from}`); return; }
+      if ((e.key === 'Enter' || e.key === 'Tab') && shown.length > 0) {
+        e.preventDefault();
+        void pick(shown[Math.min(active, shown.length - 1)]!);
+        return;
+      }
+    }
+    if (e.key === 'ArrowUp' && !text && lastSent && !busy) {
+      e.preventDefault();
+      setText(lastSent);
+      requestAnimationFrame(() => ta.current?.setSelectionRange(lastSent.length, lastSent.length));
+      return;
+    }
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
     const ctrl = e.ctrlKey || e.metaKey;
     if (busy) {
@@ -137,14 +281,21 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
 
   const onPaste = (e: React.ClipboardEvent): void => {
     const files = [...e.clipboardData.files];
-    if (files.length) { e.preventDefault(); void upload(files); }
+    if (!files.length) return;
+    e.preventDefault();
+    // A pasted screenshot arrives as "image.png" every time; the time tells them apart.
+    void upload(files.map(f => (f.name && f.name !== 'image.png') ? f
+      : new File([f], `pasted-${new Date().toTimeString().slice(0, 8).replace(/:/g, '')}.${f.type.split('/')[1] || 'png'}`, { type: f.type })));
   };
 
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault();
     setDragOver(false);
     const files = [...e.dataTransfer.files];
-    if (files.length) void upload(files);
+    if (!files.length) return;
+    // Alt+drop mentions the files instead of attaching them: the agent reads them where they are.
+    if (e.altKey && isDesktop) { insertAt(`${files.map(f => `@${mentionPath(desktop.pathForFile(f), project)}`).join(' ')} `); return; }
+    void upload(files);
   };
 
   const canSend = (text.trim().length > 0 || attachments.length > 0) && uploading === 0;
@@ -152,11 +303,22 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
   return (
     <div className={cls('mx-auto w-full', home ? 'max-w-[760px]' : 'max-w-column')}>
       <div
-        className={cls('composer-shell relative rounded-[28px] border border-aico-border-subtle transition-colors', dragOver && 'border-aico-accent ring-2 ring-aico-accent/30')}
+        className={cls('composer-shell relative rounded-[28px] border border-aico-border-subtle', dragOver && 'border-aico-accent ring-2 ring-aico-accent/30')}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false); }}
         onDrop={onDrop}
       >
+        {open && (
+          <SuggestMenu
+            title={open.kind === 'slash' ? 'Actions' : 'Mention'}
+            items={shown}
+            active={active}
+            onHover={setActive}
+            onPick={item => void pick(item)}
+            loading={open.kind === 'mention' && mention.loading}
+            empty={open.kind === 'slash' ? `No action matches “${open.query}”` : 'Nothing matches'}
+          />
+        )}
         {(attachments.length > 0 || uploading > 0) && (
           <div className="flex flex-wrap gap-2 px-4 pt-3">
             {attachments.map(a => (
@@ -171,31 +333,44 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
           </div>
         )}
         <div className="flex items-end gap-1.5 px-2.5 py-2.5">
-          <MenuButton className="icon-btn h-9 w-9 shrink-0 rounded-full" title="Add files and more" placement="top-start" width={260} button={<Icon name="plus" size={20} />}>
+          <MenuButton className="icon-btn h-9 w-9 shrink-0 rounded-full" title="Add files and more" placement="top-start" width={280} button={<Icon name="plus" size={20} />}>
             {close => (
               <>
-                <MenuItem icon="paperclip" label="Add files" onClick={() => { close(); void pickFiles(); }} />
-                <MenuItem icon="image" label="Add images" onClick={() => { close(); void pickFiles(true); }} />
+                <MenuItem icon="paperclip" label="Attach files" hint="sent with the message" onClick={() => { close(); void pickFiles(); }} />
+                <MenuItem icon="image" label="Attach images" onClick={() => { close(); void pickFiles(true); }} />
+                <MenuItem icon="at" label="Mention files" hint="the agent reads them" onClick={() => { close(); void mentionFile(); }} />
                 <MenuItem icon="folder" label="Mention a folder" onClick={() => { close(); void mentionFolder(); }} />
                 <MenuSep />
                 <MenuItem icon="list" label="Plan first" hint="the agent proposes, you approve" checked={opts.planMode}
-                  onClick={() => { close(); setSendOptions({ planMode: !opts.planMode }); }} />
-                <MenuItem icon="globe" label="Use the built-in browser" onClick={() => { close(); setText(t => `${t}${t ? '\n' : ''}Use the built-in browser (browser_* tools) for this. `); }} />
-                <MenuItem icon="chart" label="Answer with visuals" onClick={() => { close(); setText(t => `${t}${t ? '\n' : ''}Show the answer with charts, tables and widgets where they help. `); }} />
+                  onClick={() => { close(); setSendOptions({ planMode: !opts.planMode }); toast.success(opts.planMode ? 'Plan first is off' : 'Plan first is on'); }} />
+                <MenuItem icon="globe" label="Use the built-in browser" onClick={() => { close(); insertAt('Use the built-in browser (browser_* tools) for this. '); }} />
+                <MenuItem icon="chart" label="Answer with visuals" onClick={() => { close(); insertAt('Show the answer with charts, tables and widgets where they help. '); }} />
               </>
             )}
           </MenuButton>
-          <textarea
-            ref={ta}
-            value={text}
-            onChange={e => setText(e.target.value)}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            rows={1}
-            placeholder={busy ? 'Steer the agent — Enter sends now, Ctrl+Enter queues' : home ? 'Ask anything' : 'Ask anything, @ to mention, / for actions'}
-            aria-label="Message"
-            className="max-h-[36vh] min-h-[40px] flex-1 resize-none bg-transparent px-1.5 py-2 text-[15px] leading-6 text-aico-primary outline-none placeholder:text-aico-muted"
-          />
+          <div className="relative min-w-0 flex-1">
+            {/* Paints the @mentions behind the text; the textarea stays the only thing you type in. */}
+            <div ref={mirror} aria-hidden className="composer-mirror pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1.5 py-2 text-[15px] leading-6 text-transparent">
+              {highlightMentions(text)}
+            </div>
+            <textarea
+              ref={ta}
+              value={text}
+              onChange={e => { setText(e.target.value); sync(e.target.value, e.target.selectionStart ?? e.target.value.length); }}
+              onSelect={e => { const el = e.currentTarget; sync(el.value, el.selectionStart ?? 0); }}
+              onScroll={e => { if (mirror.current) mirror.current.scrollTop = e.currentTarget.scrollTop; }}
+              onBlur={() => setTrigger(null)}
+              onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              rows={1}
+              spellCheck
+              placeholder={busy ? 'Steer the agent — Enter sends now, Ctrl+Enter queues' : 'Ask anything, @ to mention, / for actions'}
+              aria-label="Message"
+              aria-autocomplete="list"
+              aria-expanded={Boolean(open)}
+              className="composer-textarea relative block max-h-[36vh] min-h-[40px] w-full resize-none break-words bg-transparent px-1.5 py-2 text-[15px] leading-6 text-aico-primary placeholder:text-aico-muted"
+            />
+          </div>
           <ThinkToggle opts={opts} />
           {busy && !text.trim() ? (
             <button className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-aico-primary text-aico-bg transition-opacity hover:opacity-85"
@@ -217,7 +392,6 @@ export function Composer({ home }: { home?: boolean }): React.ReactElement {
         </div>
       </div>
       <ComposerChips />
-      <SlashMenu anchor={slashAnchor} onClose={() => setSlashAnchor(null)} onPick={(t) => { setSlashAnchor(null); setText(''); t(); }} />
     </div>
   );
 }
@@ -276,6 +450,11 @@ export function ModelChip(): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const shown = model ?? fallback ?? 'default model';
+  useEffect(() => {
+    const show = (): void => setOpen(true);
+    window.addEventListener('desk:open-model-picker', show);
+    return () => window.removeEventListener('desk:open-model-picker', show);
+  }, []);
 
   useEffect(() => {
     if (!open || models) return;
@@ -330,7 +509,7 @@ function ApprovalChip({ opts }: { opts: SendOptions }): React.ReactElement {
 
 export function ProjectChip({ large }: { large?: boolean }): React.ReactElement {
   const project = useStore(s => s.project);
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const logged = useStore(s => s.logged);
   const retargetDraft = useStore(s => s.retargetDraft);
   const addProject = useStore(s => s.addProject);
@@ -392,25 +571,5 @@ function ContextMeter(): React.ReactElement | null {
       <span className="tabular-nums">{pct}%</span>
       {usage.costUsd > 0 && <span className="tabular-nums">· ${usage.costUsd < 0.01 ? usage.costUsd.toFixed(4) : usage.costUsd.toFixed(2)}</span>}
     </span>
-  );
-}
-
-/** "/" at the start of an empty composer: chat and palette commands. */
-function SlashMenu({ anchor, onClose, onPick }: {
-  anchor: HTMLElement | null; onClose: () => void; onPick: (run: () => void) => void;
-}): React.ReactElement {
-  const commands = useCommands();
-  const opts = useSendOptions();
-  const items: Array<{ id: string; title: string; icon: string; run: () => void }> = [
-    { id: 'plan', title: opts.planMode ? 'Turn off plan-first' : 'Plan first', icon: 'list', run: () => setSendOptions({ planMode: !opts.planMode }) },
-    { id: 'new', title: 'New chat', icon: 'new-chat', run: () => useStore.getState().newSession() },
-    { id: 'model', title: 'Change model…', icon: 'sparkles', run: () => useDesk.getState().openSettings('models') },
-    ...commands.filter(c => c.category === 'Chat' || c.category === 'Agent').slice(0, 12).map(c => ({ id: c.id, title: c.title, icon: c.icon ?? 'zap', run: () => void c.run() })),
-  ];
-  return (
-    <Popover anchor={anchor} open={Boolean(anchor)} onClose={onClose} placement="top-start" width={300}>
-      <div className="px-2.5 pb-1 pt-1.5 text-[12px] text-aico-muted">Actions</div>
-      {items.map(i => <MenuItem key={i.id} icon={i.icon} label={i.title} onClick={() => onPick(i.run)} />)}
-    </Popover>
   );
 }

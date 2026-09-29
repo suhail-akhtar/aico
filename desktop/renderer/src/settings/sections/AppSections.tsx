@@ -34,6 +34,9 @@ export function GeneralSection(): React.ReactElement {
         <Row title="Show the agent's steps" desc="Expand reasoning and tool calls under every answer instead of folding them.">
           <Switch checked={prefs.verboseAgent} onChange={v => void set({ verboseAgent: v })} label="Show the agent's steps" />
         </Row>
+        <Row title="Jump to the start of each reply" desc="When a reply finishes, scroll up to where it begins instead of leaving you at its last line. Not if you had scrolled away.">
+          <Switch checked={prefs.jumpToAnswer} onChange={v => void set({ jumpToAnswer: v })} label="Jump to the start of each reply" />
+        </Row>
       </div>
       <h3 className="set-heading">Notifications</h3>
       <div className="set-group">

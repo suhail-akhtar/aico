@@ -31,6 +31,8 @@ export interface DesktopPrefs {
   conversationWidth: 'default' | 'wide' | 'full';
   /** Show the agent's intermediate steps and reasoning expanded. */
   verboseAgent: boolean;
+  /** When a reply finishes, scroll up to where it starts instead of leaving you at its last line. */
+  jumpToAnswer: boolean;
   /** Send with Enter (Shift+Enter for a newline), or Ctrl+Enter. */
   sendKey: 'enter' | 'ctrl-enter';
   preventSleep: boolean;
@@ -72,6 +74,7 @@ export const DEFAULT_PREFS: DesktopPrefs = {
   codeFont: '"JetBrains Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace',
   conversationWidth: 'default',
   verboseAgent: false,
+  jumpToAnswer: true,
   sendKey: 'enter',
   preventSleep: false,
   keepInTray: false,

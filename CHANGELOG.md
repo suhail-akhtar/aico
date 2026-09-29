@@ -3,6 +3,54 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.23.1 — 2026-09-29
+
+AICO Desktop's composer, fixed and finished: `/` and `@` work the way every
+editor's do, a long reply opens at its start, and a starter prompt no longer
+follows you into every new chat. Plus a maths-rendering fix for every client.
+
+### Fixed
+
+- **A draft followed you everywhere.** Switching chats saved the old chat's
+  text under the new chat's key in the same render that loaded the new one, and
+  a starter prompt was re-applied each time the composer remounted — so "Build
+  me an app that" came back in every new chat, after clearing it, and after a
+  reload. The text and the chat it belongs to now travel together, a prefill is
+  delivered once, and drafts polluted by the old bug are dropped on upgrade.
+- **`$3 + 2$ and $2 + 3$` rendered as `$3 + 2 and \2 + 3$` in red** (all
+  clients). The price guard escaped any dollar before a digit, so formulas that
+  start with a number lost their opening dollar and the leftovers paired into a
+  broken formula. A dollar is now a price only when it does not open inline
+  maths by Pandoc's rule (a closing dollar on the same line, no space inside it,
+  no digit after it, around something formula-like); `$$…$$` is never touched.
+  Prices — "$240.00 (subtotal $200.00)", "$5-$10" — are still money.
+- **The same folder listed twice** in the sidebar and pickers when the engine
+  held it as both `E:\repo` and `e:\repo` (VS Code lower-cases the drive). The
+  desktop treats Windows paths that differ only in case as one project, shown as
+  Explorer spells it; chats of both spellings appear under it.
+- **"25 files changed" under an answer that changed nothing.** The end-of-turn
+  card counted every uncommitted change in the repository; it now counts only
+  the files this chat wrote.
+- The composer's blue focus ring is gone; the box lifts instead.
+
+### Added (desktop)
+
+- **`/` actions you can type into**: filtered as you type (ranked, grouped),
+  ↑/↓ to move, Enter or Tab to pick, Esc to close, and a confirmation for what
+  each did ("Thinking: High", "Plan first is on"). Plan first, reasoning effort,
+  approval mode, attach, mention, model, new chat, branch, export, review, plus
+  every plugin command and prompt — each listed once.
+- **`@` mentions**: the project's files and folders searched as you type (the
+  listing is cached briefly in main, so large repositories keep up), agents to
+  talk to directly, and "Pick files… / Pick a folder…" for anything else. A
+  mention is highlighted in the box; Alt+drop mentions a file instead of
+  attaching it.
+- **Jump to the start of the reply** when a turn finishes (only if you were
+  following it), switchable in the chat's "…" menu and in Settings; a "Start of
+  answer" button beside "Jump to latest".
+- ↑ in an empty box recalls your last message; pasted screenshots get a
+  distinguishable name.
+
 ## 0.23.0 — 2026-09-29
 
 AICO Desktop: the agent as a native app for Windows and Linux, with its own IDE,

@@ -17,6 +17,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type GitStatus, type GitStatusEntry, type BranchList, type GitRunAction } from '@web/api';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import { GitPanel } from '@web/components/GitPanel';
 import { useDesk, go, toast } from '@/state/desk';
 import { on } from '@/desktop';
@@ -36,7 +37,7 @@ const LETTER: Record<string, { label: string; cls: string }> = {
 
 export function GitPage({ params }: ViewProps): React.ReactElement {
   const project = useStore(s => s.project);
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const [chosen, setChosen] = useState<string | null>(() => { try { return localStorage.getItem('desk.gitProject'); } catch { return null; } });
   const known = projects.filter(p => p.exists && !p.isWorkspace);
   const path = params?.path ?? (chosen && projects.some(p => p.path === chosen) ? chosen : null) ?? project ?? known[0]?.path ?? '';
@@ -57,7 +58,7 @@ export function GitPage({ params }: ViewProps): React.ReactElement {
 }
 
 export function SourceControl({ path, embedded }: { path: string; embedded?: boolean }): React.ReactElement {
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [branches, setBranches] = useState<BranchList | null>(null);
   const [selected, setSelected] = useState<{ file: string; staged: boolean } | null>(null);

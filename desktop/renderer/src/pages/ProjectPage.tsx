@@ -7,6 +7,7 @@
 
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useStore } from '@web/store';
+import { samePath } from '@/lib/projects';
 import { api, type ProjectStats, type SessionSummary } from '@web/api';
 import { useDesk, go, toast } from '@/state/desk';
 import { desktop } from '@/desktop';
@@ -28,7 +29,7 @@ export function ProjectPage({ params }: ViewProps): React.ReactElement {
   const newSessionIn = useStore(s => s.newSessionIn);
   const [tab, setTab] = useState<'chats' | 'files' | 'git'>((params?.tab as 'chats') ?? 'chats');
   const [stats, setStats] = useState<ProjectStats | null>(null);
-  const chats = useMemo(() => sessions.filter(s => s.project === path).sort((a, b) => b.updatedAt - a.updatedAt), [sessions, path]);
+  const chats = useMemo(() => sessions.filter(s => samePath(s.project, path)).sort((a, b) => b.updatedAt - a.updatedAt), [sessions, path]);
 
   useEffect(() => { setStats(null); if (path) api.projectStats(path).then(setStats).catch(() => {}); }, [path]);
 

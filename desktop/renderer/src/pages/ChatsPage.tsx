@@ -7,6 +7,8 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '@web/store';
+import { samePath } from '@/lib/projects';
+import { useProjects } from '@/lib/projects';
 import { toast } from '@/state/desk';
 import { Icon } from '@/lib/icons';
 import { ago, basename, cls, dayBucket } from '@/lib/util';
@@ -15,7 +17,7 @@ import { desktop } from '@/desktop';
 
 export function ChatsPage(): React.ReactElement {
   const sessions = useStore(s => s.sessions);
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const archiveSession = useStore(s => s.archiveSession);
   const deleteSessions = useStore(s => s.deleteSessions);
   const [q, setQ] = useState('');
@@ -27,7 +29,7 @@ export function ChatsPage(): React.ReactElement {
     const needle = q.trim().toLowerCase();
     return [...sessions]
       .filter(s => Boolean(s.archived) === archived)
-      .filter(s => !folder || s.project === folder)
+      .filter(s => !folder || samePath(s.project, folder))
       .filter(s => !needle || (s.title ?? '').toLowerCase().includes(needle))
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }, [sessions, q, archived, folder]);

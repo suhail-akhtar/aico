@@ -408,3 +408,6 @@ td code, th code { white-space: nowrap; }
   margin-top: 3.5rem; padding-top: 1.5rem;
   border-top: 1px solid var(--border-subtle);
 }
+
+/* Keys named in the prose. */
+kbd { font-family: var(--mono); font-size: .82em; padding: .05em .4em; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; white-space: nowrap; }

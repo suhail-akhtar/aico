@@ -130,6 +130,43 @@ const theme = await load(path.join(desktop, 'renderer/src/theme.ts'), 'theme');
   ok(theme.isDarkColors({ background: '#0b1020' }) && !theme.isDarkColors({ background: '#ffffff' }), 'theme: light/dark is read from the background');
 }
 
+// ── Composer menus ──
+const sug = await load(path.join(desktop, 'renderer/src/chat/suggest-core.ts'), 'suggest');
+{
+  ok(sug.triggerAt('/pl', 3)?.kind === 'slash' && sug.triggerAt('/pl', 3).query === 'pl', 'composer: "/" at the start opens actions, filtered by what follows');
+  ok(sug.triggerAt('half 1/2', 8) === null, 'composer: a "/" mid-sentence is not a command');
+  ok(sug.triggerAt('/plan now', 9) === null, 'composer: typing past the command closes the menu');
+  const m = sug.triggerAt('look at @src/ap', 15);
+  ok(m?.kind === 'mention' && m.query === 'src/ap' && m.from === 8, 'composer: "@" after a space mentions, and the query can be a path', m);
+  ok(sug.triggerAt('mail me@host', 12) === null, 'composer: name@host is not a mention');
+  const items = [{ title: 'New chat' }, { title: 'Plan first' }, { title: 'Change model…' }, { title: 'Think: high', keywords: 'reasoning effort' }];
+  ok(sug.rankItems(items, 'pl')[0].title === 'Plan first', 'composer: what starts with the typed text ranks first');
+  ok(sug.rankItems(items, 'model')[0].title === 'Change model…', 'composer: a word inside the title matches');
+  ok(sug.rankItems(items, 'effort')[0].title === 'Think: high', 'composer: hidden keywords match');
+  ok(sug.rankItems(items, 'nwc')[0]?.title === 'New chat', 'composer: letters in order match ("nwc" finds New chat)');
+  ok(sug.rankItems(items, 'zzz').length === 0, 'composer: nothing matching shows nothing');
+  ok(sug.rankItems([{ title: 'Restart the engine', keywords: 'Application' }, { title: 'Open in the web client' }], 'pl').length === 0, 'composer: two letters do not match scattered letters ("pl" is not in "Restart the engine")');
+  const d = sug.dedupe([{ title: 'New chat' }, { title: 'Plan first' }, { title: 'New chat' }, { title: 'Plan first (toggle)' }]);
+  const g = sug.groupRanked([{ group: 'A', title: '1' }, { group: 'B', title: '2' }, { group: 'A', title: '3' }]);
+  ok(g.map(x => x.title).join() === '1,3,2', 'composer: a filtered menu keeps each group together (no repeated headings)', g);
+  ok(d.length === 2, 'composer: the same action is listed once ("Plan first (toggle)" is Plan first)', d.map(x => x.title));
+  ok(sug.mentionPath('E:\\repo\\src\\app.ts', 'e:\\repo') === 'src/app.ts', 'composer: a file in the project is mentioned relative to it, whatever the drive case');
+  ok(sug.mentionPath('C:\\Other Place\\a.ts', 'E:\\repo') === '"C:/Other Place/a.ts"', 'composer: a path with spaces outside the project is quoted');
+}
+
+// ── Projects ──
+const pp = await load(path.join(desktop, 'renderer/src/lib/project-paths.ts'), 'project-paths');
+{
+  const list = pp.uniqueProjects([
+    { path: 'e:\\github\\aetnic-ai', exists: true },
+    { path: 'E:\\github\\aetnic-ai', exists: true },
+    { path: 'E:\\github\\other', exists: true },
+  ]);
+  ok(list.length === 2 && list[0].path === 'E:\\github\\aetnic-ai', 'projects: one Windows folder under two drive spellings is one project, shown as Explorer spells it', list.map(p => p.path));
+  ok(pp.uniqueProjects([{ path: '/home/a/Repo' }, { path: '/home/a/repo' }]).length === 2, 'projects: on Linux, case is significant');
+  ok(pp.samePath('E:\\repo\\', 'e:/repo') && !pp.samePath('/a/B', '/a/b'), 'projects: path identity ignores separators and Windows case only');
+}
+
 fs.rmSync(out, { recursive: true, force: true });
 console.log(`\n  DESKTOP UNIT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -26,6 +26,26 @@ function looksBinary(buf: Buffer): boolean {
   return false;
 }
 
+/*
+  Quick open and @-mentions ask on every keystroke. Walking a large repository
+  each time made the menu lag behind the typing, so the listing is kept for a
+  few seconds per root; a new file shows up on the next walk.
+*/
+const LIST_TTL_MS = 8000;
+const listings = new Map<string, { at: number; files: Promise<string[]> }>();
+function listFiles(root: string): Promise<string[]> {
+  const hit = listings.get(root);
+  if (hit && Date.now() - hit.at < LIST_TTL_MS) return hit.files;
+  const files = fg(['**/*'], {
+    cwd: root, dot: false, onlyFiles: true, suppressErrors: true, followSymbolicLinks: false,
+    ignore: [...HIDDEN_DIRS].map(d => `**/${d}/**`),
+  });
+  listings.set(root, { at: Date.now(), files });
+  files.catch(() => listings.delete(root));
+  if (listings.size > 16) listings.delete(listings.keys().next().value!);
+  return files;
+}
+
 export function registerFiles(ctx: DesktopContext): void {
   ctx.handle('fs:list', (dir: string, opts?: { showHidden?: boolean }) => {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -90,10 +110,7 @@ export function registerFiles(ctx: DesktopContext): void {
 
   /** Quick-open and @-mentions: files under a root matching a query. */
   ctx.handle('fs:find', async (root: string, query: string, limit?: number) => {
-    const files = await fg(['**/*'], {
-      cwd: root, dot: false, onlyFiles: true, suppressErrors: true, followSymbolicLinks: false,
-      ignore: [...HIDDEN_DIRS].map(d => `**/${d}/**`),
-    });
+    const files = await listFiles(root);
     const q = query.toLowerCase().replace(/\\/g, '/');
     const scored: Array<[number, string]> = [];
     for (const f of files) {

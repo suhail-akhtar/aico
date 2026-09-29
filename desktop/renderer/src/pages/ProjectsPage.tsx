@@ -7,6 +7,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import { go, toast } from '@/state/desk';
 import { desktop } from '@/desktop';
 import { Icon } from '@/lib/icons';
@@ -14,7 +15,7 @@ import { ago, cls } from '@/lib/util';
 import { MenuButton, MenuItem } from '@/shell/Popover';
 
 export function ProjectsPage(): React.ReactElement {
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const groups = useStore(s => s.groups);
   const sessions = useStore(s => s.sessions);
   const addProject = useStore(s => s.addProject);

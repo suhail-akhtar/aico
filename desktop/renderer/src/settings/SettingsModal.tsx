@@ -9,6 +9,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import { useDesk } from '@/state/desk';
 import { useSettingsSections } from '@/plugins/registry';
 import { Icon } from '@/lib/icons';
@@ -23,7 +24,7 @@ export function SettingsModal(): React.ReactElement | null {
   const open = useDesk(s => s.openSettings);
   const close = useDesk(s => s.closeSettings);
   const sections = useSettingsSections();
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const info = useDesk(s => s.info);
   const [q, setQ] = useState('');
 

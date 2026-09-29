@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { MarkdownRenderer } from '@aico/ui';
 import { useStore } from '@web/store';
+import { useProjects } from '@/lib/projects';
 import { invoke, desktop } from '@/desktop';
 import { useDesk, toast } from '@/state/desk';
 import { Icon } from '@/lib/icons';
@@ -27,7 +28,7 @@ interface Run { databaseId: number; displayTitle: string; workflowName: string; 
 
 export function GitHubPage({ params }: ViewProps): React.ReactElement {
   const project = useStore(s => s.project);
-  const projects = useStore(s => s.projects);
+  const projects = useProjects();
   const [path, setPath] = useState(params?.path ?? (project && !projects.find(p => p.path === project)?.isWorkspace ? project : projects.find(p => !p.isWorkspace)?.path) ?? '');
   const [status, setStatus] = useState<GhStatus | null>(null);
   const [repo, setRepo] = useState<{ nameWithOwner: string; url: string; description?: string; stargazerCount: number; forkCount: number; isPrivate: boolean; defaultBranchRef?: { name: string } } | null>(null);
