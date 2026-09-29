@@ -31,6 +31,14 @@ export interface DesktopServices {
     write(id: string, data: string): void;
   };
   browser?: import('./browser').BrowserService;
+  /** The import centre (browser-import.ts): the agent can only open its wizard and read counts. */
+  browserImport?: import('./browser-import').ImportService;
+  /** Browsing intelligence (browser-learn.ts): what was learned, for the agent's browser_profile / tabs tools. */
+  browserLearn?: import('./browser-learn').LearnService;
+  /** The floating copilot's view over the page (browser-overlay.ts): kept above tabs as they are attached, and moved with the browser. */
+  browserOverlay?: { raise(): void; rehost(): void };
+  /** The browser's own window (browser-window.ts): null while the browser is in the AICO window. */
+  browserWindow?: { window(): BrowserWindow | null; popOut(): void; popIn(opts?: { show?: boolean }): void };
   renderer?: {
     /** Ask the interface something and wait for the answer (see renderer-bridge.ts). */
     call<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
@@ -40,6 +48,12 @@ export interface DesktopServices {
 export interface DesktopContext {
   services: DesktopServices;
   window(): BrowserWindow | null;
+  /**
+   * The window the built-in browser is in: its own window while it is popped
+   * out (browser-window.ts), otherwise the AICO window. Its tabs, prompts,
+   * menus, dialogs and full screen belong to this window.
+   */
+  browserWindow(): BrowserWindow | null;
   prefs: PrefsStore;
   engine: EngineHost;
   paths: DesktopPaths;
@@ -49,6 +63,8 @@ export interface DesktopContext {
   handle<A extends unknown[], R>(channel: string, fn: (...args: A) => R | Promise<R>): void;
   /** Focus and show the main window. */
   reveal(): void;
+  /** Focus and show the window the browser is in (a prompt that needs the person). */
+  revealBrowser(): void;
 }
 
 export function makeHandle(): DesktopContext['handle'] {

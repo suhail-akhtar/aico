@@ -18,6 +18,7 @@ import { desktop } from '@/desktop';
 import { newChat } from '@/chat/actions';
 import { newTab, showInternal } from '@/browser/store';
 import { toggleCopilot, useCopilotUi } from '@/browser/copilot-ui';
+import { browserElsewhere, popInBrowser, popOutBrowser, showBrowser } from '@/browser/host';
 import { ChatView } from '@/chat/ChatView';
 import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection, BrowserSection, AboutSection } from '@/settings/sections/AppSections';
 import { ModelsSection, SkillsSection, McpSection, AgentsSection, enginePaneSection } from '@/settings/sections/AgentSections';
@@ -149,14 +150,20 @@ export const BUILTINS: BuiltinPlugin[] = [
     } }),
     views: [{ id: 'browser', title: 'Browser', icon: 'globe', component: BrowserView }],
     commands: [
-      { id: 'browser.open', title: 'Open the browser', category: 'Browser', icon: 'globe', run: () => go('browser') },
+      { id: 'browser.open', title: 'Open the browser', category: 'Browser', icon: 'globe', run: () => showBrowser() },
       { id: 'browser.copilot', title: 'Ask AICO about this page', category: 'Browser', icon: 'sparkles', keybinding: 'Ctrl+Shift+A', run: () => {
+        if (browserElsewhere()) { toggleCopilot(true); return; }
         if (useDesk.getState().route.view !== 'browser') { go('browser'); toggleCopilot(true); return; }
         const u = useCopilotUi.getState(); toggleCopilot(!(u.open && !u.minimized));
       } },
-      { id: 'browser.newTab', title: 'New browser tab', category: 'Browser', icon: 'plus', run: () => { go('browser'); newTab(); } },
-      { id: 'browser.history', title: 'Browser history', category: 'Browser', icon: 'history', run: () => { go('browser'); showInternal('history'); } },
-      { id: 'browser.bookmarks', title: 'Browser bookmarks', category: 'Browser', icon: 'star', run: () => { go('browser'); showInternal('bookmarks'); } },
+      { id: 'browser.popOut', title: 'Open the browser in its own window', category: 'Browser', icon: 'pop-out', run: () => { if (browserElsewhere()) showBrowser(); else popOutBrowser(); } },
+      { id: 'browser.popIn', title: 'Move the browser back into this window', category: 'Browser', icon: 'pop-in', run: () => popInBrowser() },
+      // Wherever the browser is: this window's Browser page, or its own window (brought forward; its own pages are opened there).
+      { id: 'browser.newTab', title: 'New browser tab', category: 'Browser', icon: 'plus', run: () => { showBrowser(); newTab(); } },
+      { id: 'browser.history', title: 'Browser history', category: 'Browser', icon: 'history', run: () => { showBrowser(); if (!browserElsewhere()) showInternal('history'); } },
+      { id: 'browser.bookmarks', title: 'Browser bookmarks', category: 'Browser', icon: 'star', run: () => { showBrowser(); if (!browserElsewhere()) showInternal('bookmarks'); } },
+      { id: 'browser.insights', title: 'Browsing insights', category: 'Browser', icon: 'chart', run: () => { showBrowser(); if (!browserElsewhere()) showInternal('insights'); } },
+      { id: 'browser.privacy', title: 'Browser privacy & security', category: 'Browser', icon: 'shield-check', run: () => { showBrowser(); if (!browserElsewhere()) showInternal('privacy'); } },
     ],
     settings: [{ id: 'browser', title: 'Browser', icon: 'globe', group: 'integrations', order: 22, component: BrowserSection }],
   },

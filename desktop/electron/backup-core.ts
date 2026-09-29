@@ -151,13 +151,21 @@ function expand(home: string, spec: string): string[] {
   try { return fs.statSync(abs).isFile() ? [spec] : []; } catch { return []; }
 }
 
+/**
+ * Never in a backup, whatever a category says: the browser's saved passwords
+ * (desktop/browser/vault.bin). It is sealed with this machine's OS keychain, so
+ * it would not open anywhere else — and a backup file is exactly what should
+ * not carry passwords around. Move them with the Passwords page's CSV export.
+ */
+export const NEVER_BACKED_UP = /^desktop\/browser\/vault\.bin(\.tmp)?$/i;
+
 /** The files a backup with these options would hold, by category. */
 export function collect(home: string, opts: BackupOptions = {}): Map<BackupCategory, string[]> {
   const out = new Map<BackupCategory, string[]>();
   for (const c of CATEGORIES) {
     if (c.id === 'chats' && !opts.includeChats) continue;
     if (opts.only && !opts.only.includes(c.id)) continue;
-    const files = [...new Set(c.paths.flatMap(p => expand(home, p)))];
+    const files = [...new Set(c.paths.flatMap(p => expand(home, p)))].filter(f => !NEVER_BACKED_UP.test(f.replace(/\\/g, '/')));
     if (files.length) out.set(c.id, files);
   }
   return out;
@@ -166,6 +174,7 @@ export function collect(home: string, opts: BackupOptions = {}): Map<BackupCateg
 /** Which category a home-relative path belongs to, or null when it is none of a backup's business. */
 export function categoryOf(rel: string): BackupCategory | null {
   const r = rel.replace(/\\/g, '/');
+  if (NEVER_BACKED_UP.test(r)) return null;
   for (const c of CATEGORIES) {
     for (const p of c.paths) {
       if (p.includes('*')) {

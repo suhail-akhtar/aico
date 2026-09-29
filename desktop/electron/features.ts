@@ -12,6 +12,8 @@ import { registerPlugins } from './plugins';
 import { registerTerminal } from './terminal';
 import { registerFiles } from './files';
 import { registerBrowser } from './browser';
+import { registerBrowserOverlay } from './browser-overlay';
+import { registerBrowserWindow } from './browser-window';
 import { registerGitHub } from './github';
 import { registerRendererBridge } from './renderer-bridge';
 import { registerUpdater } from './updater';
@@ -24,6 +26,8 @@ export function registerFeatures(ctx: DesktopContext): void {
   registerTerminal(ctx);
   registerFiles(ctx);
   registerBrowser(ctx);
+  registerBrowserOverlay(ctx);
+  registerBrowserWindow(ctx);
   registerGitHub(ctx);
   registerUpdater(ctx);
   registerBackup(ctx);

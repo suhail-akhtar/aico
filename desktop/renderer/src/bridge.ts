@@ -17,6 +17,7 @@ import { newChat, openChat } from '@/chat/actions';
 import { applyContributedTheme } from '@/plugins/run-action';
 import { THEME_PRESETS } from '@desk/prefs';
 import { FRAME_METHODS } from '@/plugins/frame-rpc';
+import { browserElsewhere } from '@/browser/host';
 
 void useNavItems;
 
@@ -108,6 +109,8 @@ const HANDLERS: Record<string, Handler> = {
   },
   /** The agent is about to use the browser: make sure the page is on screen so it lays out. */
   ensureBrowserVisible: async () => {
+    // In its own window, the browser is always on screen — unless that window is minimised.
+    if (browserElsewhere()) { await invoke('browser:window:ensureShown').catch(() => {}); return { visible: true, window: 'its own' }; }
     const d = useDesk.getState();
     if (d.route.view === 'browser' || d.dock.open) return { visible: true };
     d.setDock({ open: true });

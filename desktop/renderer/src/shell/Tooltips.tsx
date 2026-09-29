@@ -25,7 +25,7 @@ const SHOW_DELAY = 450;
 /** Moving from one tooltip'd control to the next within this long shows at once. */
 const WARM_MS = 600;
 
-interface Tip { text: string; kbd?: string; x: number; y: number; below: boolean }
+interface Tip { text: string; kbd?: string; x: number; top: number; bottom: number; below: boolean }
 
 function tipTarget(node: EventTarget | null): HTMLElement | null {
   let el = node instanceof Element ? node as HTMLElement : null;
@@ -74,7 +74,7 @@ export function Tooltips(): React.ReactElement | null {
       const r = el.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) return;
       const below = r.top < 44;
-      setTip({ ...splitShortcut(raw), x: r.left + r.width / 2, y: below ? r.bottom + 8 : r.top - 8, below });
+      setTip({ ...splitShortcut(raw), x: r.left + r.width / 2, top: r.top, bottom: r.bottom, below });
     };
     const enter = (target: EventTarget | null, immediate: boolean): void => {
       const el = tipTarget(target);
@@ -112,17 +112,27 @@ export function Tooltips(): React.ReactElement | null {
     };
   }, []);
 
-  // Kept on screen: measured after render, then nudged inside the window.
+  // Kept on screen: measured after render, then moved clear of the window's
+  // edges, the native window controls (which are drawn over the title bar and
+  // would cover it) and the built-in browser's page (a native view drawn above
+  // the interface, which would hide it) — flipping to the other side first,
+  // then sliding sideways.
   const ref = useRef<HTMLDivElement>(null);
-  const [dx, setDx] = useState(0);
+  const [fit, setFit] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || !tip) { setDx(0); return; }
-    const r = el.getBoundingClientRect();
-    const left = r.left - dx; const right = r.right - dx;
-    const margin = 8;
-    setDx(left < margin ? margin - left : right > window.innerWidth - margin ? window.innerWidth - margin - right : 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!el || !tip) { setFit(null); return; }
+    const w = el.offsetWidth; const h = el.offsetHeight; const gap = 8; const margin = 8;
+    const at = (below: boolean): DOMRect => new DOMRect(tip.x - w / 2, below ? tip.bottom + gap : tip.top - gap - h, w, h);
+    const blockers = keepOut();
+    const bad = (r: DOMRect): boolean => r.top < 2 || r.bottom > window.innerHeight - 2 || blockers.some(b => overlaps(r, b));
+    let r = at(tip.below);
+    if (bad(r) && !bad(at(!tip.below))) r = at(!tip.below);
+    let left = Math.min(Math.max(r.left, margin), window.innerWidth - margin - w);
+    for (const b of blockers) {
+      if (overlaps(new DOMRect(left, r.top, w, h), b)) left = Math.max(margin, b.left - margin - w);
+    }
+    setFit({ left, top: r.top });
   }, [tip]);
 
   if (!tip) return null;
@@ -131,15 +141,34 @@ export function Tooltips(): React.ReactElement | null {
       ref={ref}
       role="tooltip"
       className="desk-tooltip"
-      style={{
-        left: tip.x + dx,
-        top: tip.y,
-        transform: `translate(-50%, ${tip.below ? '0' : '-100%'})`,
-      }}
+      style={fit ? { left: fit.left, top: fit.top } : { left: 0, top: 0, visibility: 'hidden' }}
     >
       <span>{tip.text}</span>
       {tip.kbd && <kbd>{tip.kbd}</kbd>}
     </div>,
     document.body,
   );
+}
+
+/** Where a tooltip must not go: the native window controls and a live browser page. */
+function keepOut(): DOMRect[] {
+  const out: DOMRect[] = [];
+  const wco = (navigator as Navigator & { windowControlsOverlay?: { visible: boolean; getTitlebarAreaRect(): DOMRect } }).windowControlsOverlay;
+  if (wco?.visible) {
+    const t = wco.getTitlebarAreaRect();
+    // The title bar area excludes the controls; they sit to its right (or left, on macOS).
+    if (t.width > 0 && t.right < window.innerWidth) out.push(new DOMRect(t.right, 0, window.innerWidth - t.right, t.height));
+    if (t.width > 0 && t.left > 0) out.push(new DOMRect(0, 0, t.left, t.height));
+  }
+  for (const page of document.querySelectorAll<HTMLElement>('.bx-page-frame > [data-no-tip]')) {
+    // A still or one of the browser's own pages is ordinary interface; only the live native page hides things.
+    if (page.childElementCount > 0) continue;
+    const r = page.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) out.push(r);
+  }
+  return out;
+}
+
+function overlaps(a: DOMRect, b: DOMRect): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }

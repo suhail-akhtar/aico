@@ -49,6 +49,9 @@ export default defineConfig({
     chunkSizeWarningLimit: 6000,
     minify: process.env.AICO_NO_MINIFY ? false : 'esbuild',
     target: 'chrome140',
+    // Three pages: the interface, the floating copilot's own view over the browser page, and the
+    // browser's own window when it is popped out (browser-main.tsx).
+    rollupOptions: { input: { main: path.join(here, 'index.html'), copilot: path.join(here, 'copilot.html'), browser: path.join(here, 'browser.html') } },
   },
   worker: { format: 'es' },
 });

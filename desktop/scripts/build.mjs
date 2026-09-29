@@ -9,7 +9,9 @@
  *   dist/preload.cjs     the renderer's only bridge to main
  *   dist/engine/         the AICO engine (serve()), with its built-in skills and
  *                        app templates beside it where the loaders look
- *   dist/renderer/       the interface
+ *   dist/renderer/       the interface (index.html), the floating copilot's
+ *                        own view over the browser page (copilot.html), and
+ *                        the browser's own window when popped out (browser.html)
  *
  * @module desktop/scripts/build
  */

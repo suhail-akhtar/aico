@@ -146,6 +146,9 @@ const P: Record<string, React.ReactNode> = {
   pip: <><path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4" /><rect x="12" y="13" width="10" height="7" rx="2" /></>,
   'zoom-in': <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /><path d="M11 8v6M8 11h6" /></>,
   cookie: <><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5" /><path d="M8.5 8.5v.01M16 15.5v.01M12 12v.01M11 17v.01M7 14v.01" /></>,
+  // The browser in a window of its own: out to it, and back.
+  'pop-out': <><path d="M11 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" /><path d="M3 8h8" /><path d="M15 3h6v6" /><path d="m21 3-8 8" /></>,
+  'pop-in': <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 8h18" /><path d="m17 12-6 6" /><path d="M11 13v5h5" /></>,
 };
 
 export type Icon = keyof typeof P;

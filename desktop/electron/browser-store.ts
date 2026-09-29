@@ -11,7 +11,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Bookmark, BookmarkInput, HistoryEntry, PermissionSetting } from '../shared/browser-types';
+import type { BookmarkBarMode, BookmarkInput, BookmarkNode, BookmarkTree, HistoryEntry, PermissionSetting } from '../shared/browser-types';
+import { BAR_ID, checkUrl, createBookmark, ensureFolderPath, findByUrl, getNode, updateNode } from '../shared/bookmark-tree';
 
 export const HISTORY_CAP = 5000;
 
@@ -97,22 +98,28 @@ export function removeHistory(list: HistoryEntry[], url: string): HistoryEntry[]
 
 // ── Bookmarks ──
 
-export function addBookmark(list: Bookmark[], b: BookmarkInput, now: number): Bookmark[] {
-  if (!b || typeof b.url !== 'string' || !b.url.trim()) throw new Error('A bookmark needs a URL.');
-  const url = b.url.trim();
-  const prev = list.find(x => x.url === url);
-  const entry: Bookmark = {
-    url,
-    title: (b.title ?? '').trim() || prev?.title || url,
-    ...(b.favicon || prev?.favicon ? { favicon: b.favicon || prev?.favicon } : {}),
-    addedAt: prev?.addedAt ?? now,
-    ...(b.folder?.trim() || prev?.folder ? { folder: b.folder?.trim() || prev?.folder } : {}),
-  };
-  return prev ? list.map(x => (x.url === url ? entry : x)) : [...list, entry];
-}
+/**
+ * The bookmark tree's operations live in shared/bookmark-tree.ts (the chrome
+ * reads the tree with the same helpers); this is the one main adds for the
+ * earlier flat interface: bookmark a URL, or update the bookmark it already has.
+ */
+export * from '../shared/bookmark-tree';
 
-export function removeBookmark(list: Bookmark[], url: string): Bookmark[] {
-  return list.filter(b => b.url !== url);
+export function upsertBookmark(tree: BookmarkTree, b: BookmarkInput, now: number): { tree: BookmarkTree; node: BookmarkNode } {
+  if (!b || typeof b !== 'object') throw new Error('A bookmark needs a URL.');
+  const url = checkUrl(b.url);
+  const prev = b.parentId ? undefined : findByUrl(tree, url);
+  if (prev) {
+    const next = updateNode(tree, prev.id, { ...(b.title?.trim() ? { title: b.title } : {}), ...(b.favicon ? { favicon: b.favicon } : {}) });
+    return { tree: next, node: getNode(next, prev.id)! };
+  }
+  let parentId = b.parentId || BAR_ID;
+  let next = tree;
+  if (!b.parentId && b.folder?.trim()) {
+    const r = ensureFolderPath(tree, BAR_ID, b.folder.split('/'), now);
+    next = r.tree; parentId = r.folderId;
+  }
+  return createBookmark(next, { parentId, index: b.index, url, title: b.title, favicon: b.favicon }, now);
 }
 
 // ── Settings ──
@@ -123,6 +130,8 @@ export interface BrowserSettings {
   zoom: Record<string, number>;
   /** Remembered permission answers: origin → permission → allow/deny. */
   permissions: Record<string, Record<string, Exclude<PermissionSetting, 'ask'>>>;
+  /** When the bookmarks bar shows (absent: always). */
+  bookmarksBar?: BookmarkBarMode;
 }
 
 export const DEFAULT_SETTINGS: BrowserSettings = { blocking: { enabled: true, allowOrigins: [] }, zoom: {}, permissions: {} };
@@ -146,6 +155,7 @@ export function normaliseSettings(raw: unknown): BrowserSettings {
     },
     zoom,
     permissions,
+    ...(r.bookmarksBar === 'always' || r.bookmarksBar === 'newtab' || r.bookmarksBar === 'never' ? { bookmarksBar: r.bookmarksBar } : {}),
   };
 }
 

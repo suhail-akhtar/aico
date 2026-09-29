@@ -11,24 +11,31 @@ import { Icon } from '@/lib/icons';
 import { bytes, cls } from '@/lib/util';
 import { desktop } from '@/desktop';
 import { toast, useDesk } from '@/state/desk';
-import { MenuItem, MenuSep, Popover } from '@/shell/Popover';
+import { MenuItem, MenuSep, MenuSub, Popover } from '@/shell/Popover';
 import { call, fire, useAvailable, wasMissing } from './ipc';
 import { hostOf, isBlankUrl } from './urls';
 import { Favicon, Omnibox } from './Omnibox';
 import {
-  closeTab, newTab, openFind, refreshDownloads, showInternal, toggleBookmark, toggleReader, useActiveTab, useBrowser,
+  closeTab, newTab, openFind, refreshDownloads, showInternal, toggleReader, useActiveTab, useBrowser,
 } from './store';
 import { useCopilotUi, toggleCopilot } from './copilot-ui';
+import { BookmarkStar } from './BookmarkEditor';
+import { BookmarksSubmenu } from './BookmarksBar';
+import { startPageDrag } from './bookmarks';
+import { AutofillButton, FullViewButton, PageKindChip } from './BrowserExtras';
+import { toggleFullscreen, toggleFullView, useFullView } from './fullview';
+import { inBrowserWindow, openAicoWindow, toggleBrowserWindow } from './host';
+import { ShieldButton } from './Shields';
+import { PasswordKey } from './PasswordsBar';
+import { openImportWizard } from './ImportWizard';
 import type { DownloadItem, PermissionValue, SiteInfo, TabState } from './types';
 
 export function Toolbar({ compact }: { compact?: boolean }): React.ReactElement {
   const tab = useActiveTab();
   const blank = !tab || isBlankUrl(tab.url);
-  const bookmarked = useBrowser(s => Boolean(tab && s.bookmarks.some(b => b.url === tab.url)));
   const reader = useBrowser(s => s.reader !== null);
   const copilotOpen = useCopilotUi(s => s.open && !s.minimized);
   const canRead = useAvailable('browser:read');
-  const canMark = useAvailable('browser:bookmarks:add');
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-1 border-b border-aico-border-subtle bg-aico-bg px-2">
@@ -39,18 +46,17 @@ export function Toolbar({ compact }: { compact?: boolean }): React.ReactElement 
       </button>
       {!compact && <button className="icon-btn-sm" onClick={() => newTab()} title="New tab page"><Icon name="home" size={15} /></button>}
       <div className="mx-1 flex min-w-0 flex-1">
-        <Omnibox url={tab?.url ?? ''} prefix={<SiteButton tab={tab} />} />
+        <Omnibox url={tab?.url ?? ''} prefix={<SiteButton tab={tab} />} suffix={<PasswordKey />} />
       </div>
+      <ShieldButton tab={tab} />
+      {!compact && <PageKindChip />}
+      {!compact && <AutofillButton />}
       {tab && tab.zoom !== 1 && (
         <button className="chip h-7 py-0 tabular-nums" onClick={() => fire('browser:zoom', 0)} title="Reset zoom (Ctrl+0)">{Math.round(tab.zoom * 100)}%</button>
       )}
       {!compact && (
         <>
-          <button className={cls('icon-btn-sm', bookmarked && 'text-aico-warning hover:text-aico-warning')} disabled={blank || !canMark}
-            onClick={() => void toggleBookmark().then(r => { if (r !== undefined) toast.success(r ? 'Bookmarked' : 'Bookmark removed', tab?.title); })}
-            title={canMark ? (bookmarked ? 'Edit bookmark — remove (Ctrl+D)' : 'Bookmark this tab (Ctrl+D)') : 'Bookmarks are not available in this version'}>
-            <Icon name="star" size={16} style={bookmarked ? { fill: 'currentColor' } : undefined} />
-          </button>
+          <BookmarkStar tab={tab} />
           <button className={cls('icon-btn-sm', reader && 'bg-aico-accent-soft text-aico-accent hover:text-aico-accent')} disabled={blank || !canRead}
             onClick={() => void toggleReader()} aria-pressed={reader}
             title={canRead ? (reader ? 'Leave reader mode' : 'Reader mode') : 'Reader mode is not available in this version'}>
@@ -64,8 +70,21 @@ export function Toolbar({ compact }: { compact?: boolean }): React.ReactElement 
         <span className={cls('bx-orb', copilotOpen ? 'h-[15px] w-[15px] opacity-95' : 'h-[15px] w-[15px]')} />
         {compact ? null : 'Ask AICO'}
       </button>
+      {!compact && !inBrowserWindow() && <FullViewButton />}
+      {!compact && <WindowButton />}
       <BrowserMenu compact={compact} tab={tab} />
     </div>
+  );
+}
+
+/** Out to a window of its own — or, there, back into the AICO window. */
+function WindowButton(): React.ReactElement {
+  const own = inBrowserWindow();
+  return (
+    <button className="icon-btn-sm" onClick={toggleBrowserWindow}
+      title={own ? 'Move the browser back into the AICO window (Ctrl+Shift+N)' : 'Open the browser in its own window (Ctrl+Shift+N)'}>
+      <Icon name={own ? 'pop-in' : 'pop-out'} size={15} />
+    </button>
   );
 }
 
@@ -74,6 +93,7 @@ export function Toolbar({ compact }: { compact?: boolean }): React.ReactElement 
 const PERMISSION_LABELS: Record<string, [string, string]> = {
   geolocation: ['Location', 'map'], media: ['Camera and microphone', 'camera'], camera: ['Camera', 'camera'], microphone: ['Microphone', 'mic'],
   notifications: ['Notifications', 'bell'], 'clipboard-read': ['Clipboard', 'copy'], 'clipboard-sanitized-write': ['Clipboard (write)', 'copy'],
+  popups: ['Pop-ups and redirects', 'external'], downloads: ['Automatic downloads', 'download'],
   midi: ['MIDI devices', 'keyboard'], fullscreen: ['Full screen', 'expand'], pointerLock: ['Mouse lock', 'cursor'], openExternal: ['Open other apps', 'external'],
   'window-management': ['Window management', 'monitor'], 'idle-detection': ['Idle detection', 'clock'], hid: ['HID devices', 'plug'], serial: ['Serial ports', 'plug'], usb: ['USB devices', 'plug'],
 };
@@ -98,10 +118,10 @@ function SiteButton({ tab }: { tab: TabState | undefined }): React.ReactElement 
   return (
     <>
       <button ref={setAnchor} className={cls('bx-site shrink-0', sec.tone)} onClick={() => setOpen(o => !o)}
+        draggable onDragStart={e => startPageDrag(e, tab!)}
         title={tab!.security === 'secure' ? 'View site information — connection is secure' : 'View site information'} aria-label="Site information">
         <Icon name={sec.icon} size={13} />
         {sec.label && <span>{sec.label}</span>}
-        {tab!.trackersBlocked > 0 && <span className="rounded-full bg-aico-hover px-1.5 text-[10.5px] tabular-nums text-aico-secondary">{tab!.trackersBlocked}</span>}
       </button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} width={360}>
         {open && <SiteInfoPanel tab={tab!} close={() => setOpen(false)} />}
@@ -334,6 +354,9 @@ function BrowserMenu({ compact, tab }: { compact?: boolean; tab: TabState | unde
   const blocking = useBrowser(s => s.state.blocking.enabled);
   const modern = useBrowser(s => s.modern);
   const blank = !tab || isBlankUrl(tab.url);
+  const fullView = useFullView(s => s.on);
+  const windowFs = useFullView(s => s.windowFs);
+  const own = inBrowserWindow();
   const close = (): void => setOpen(false);
   const run = (fn: () => void) => () => { close(); fn(); };
   return (
@@ -344,10 +367,18 @@ function BrowserMenu({ compact, tab }: { compact?: boolean; tab: TabState | unde
       <Popover anchor={anchor} open={open} onClose={close} placement="bottom-end" width={272}>
         <MenuItem icon="plus" label="New tab" hint="Ctrl+T" onClick={run(() => newTab())} />
         <MenuItem icon="x" label="Close tab" hint="Ctrl+W" disabled={!tab} onClick={run(() => closeTab())} />
+        <MenuItem icon="history" label="Reopen closed tab" hint="Ctrl+Shift+T" onClick={run(() => fire('browser:reopenClosed'))} />
+        {!compact && !own && <MenuItem icon="expand" label="Full view" hint="Shift+F11" checked={fullView} onClick={run(toggleFullView)} />}
+        {!compact && <MenuItem icon="monitor" label="Full screen" hint="F11" checked={windowFs} onClick={run(toggleFullscreen)} />}
+        <MenuItem icon={own ? 'pop-in' : 'pop-out'} label={own ? 'Move back to the AICO window' : 'Open in its own window'} hint="Ctrl+Shift+N" onClick={run(toggleBrowserWindow)} />
+        {own && <MenuItem icon="chat" label="Open AICO" onClick={run(openAicoWindow)} />}
         <MenuSep />
         <MenuItem icon="history" label="History" hint="Ctrl+H" onClick={run(() => showInternal('history'))} />
-        <MenuItem icon="star" label="Bookmarks" onClick={run(() => showInternal('bookmarks'))} />
+        <MenuSub icon="star" label="Bookmarks" width={264}><BookmarksSubmenu close={close} /></MenuSub>
         <MenuItem icon="download" label="Downloads" hint="Ctrl+J" onClick={run(() => showInternal('downloads'))} />
+        <MenuItem icon="chart" label="Insights" onClick={run(() => showInternal('insights'))} />
+        <MenuItem icon="key" label="Passwords" onClick={run(() => showInternal('passwords'))} />
+        <MenuItem icon="download" label="Import browser data…" onClick={run(() => openImportWizard())} />
         <MenuSep />
         <div className="flex items-center gap-2 px-2.5 py-1 text-[13.5px]">
           <Icon name="zoom-in" size={16} className="text-aico-secondary" />
@@ -366,6 +397,7 @@ function BrowserMenu({ compact, tab }: { compact?: boolean; tab: TabState | unde
         <MenuItem icon={blocking ? 'shield-check' : 'shield-off'} label="Block trackers" checked={blocking} disabled={!modern}
           title={modern ? undefined : 'Tracker blocking is not available in this version'}
           onClick={run(() => { void call('browser:blocking:set', { enabled: !blocking }).then(() => toast.info(blocking ? 'Tracker blocking is off' : 'Tracker blocking is on')).catch((e: Error) => toast.error('Could not change', e.message)); })} />
+        <MenuItem icon="shield-check" label="Privacy & security" onClick={run(() => showInternal('privacy'))} />
         <MenuItem icon="cookie" label="Clear browsing data…" onClick={run(() => void clearBrowsingData())} />
         <MenuSep />
         <MenuItem icon="code" label="Developer tools" hint="F12" disabled={!tab} onClick={run(() => fire('browser:devtools'))} />

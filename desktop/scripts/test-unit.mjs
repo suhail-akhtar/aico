@@ -352,15 +352,15 @@ const cm = await load(path.join(desktop, 'electron/context-menu-template.ts'), '
   ok(labels(link) === 'Open link,Open in built-in browser,Copy link address', 'menu: a link in the app opens outside or in the built-in browser', labels(link));
   ok(cm.buildContextMenuTemplate({ ...base, linkURL: 'aico://app/#x' }, app).length === 0, 'menu: an internal app link gets nothing');
   const blink = cm.buildContextMenuTemplate({ ...base, linkURL: 'https://example.com' }, { surface: 'browser', inspect: false });
-  ok(labels(blink) === 'Open link in new tab,Open link in your browser,Copy link address', 'menu: a link in the built-in browser opens a new tab', labels(blink));
+  ok(labels(blink) === 'Open link in new tab,Open link in new background tab,Open link in your browser,|,Save link as…,Copy link address,|,Ask AICO about this link,|,Inspect', 'menu: a link in the built-in browser opens a new tab (as in Chrome, with AICO)', labels(blink));
   const img = cm.buildContextMenuTemplate({ ...base, mediaType: 'image', srcURL: 'https://x/y.png', hasImageContents: true, linkURL: 'https://x' }, app);
   ok(labels(img) === 'Open link,Open in built-in browser,Copy link address,|,Copy image,Copy image address,Save image as…' && noEdgeSeps(img), 'menu: a linked image gets link and image groups, one separator between', labels(img));
   const page = cm.buildContextMenuTemplate(base, { surface: 'browser', inspect: false, canGoBack: true, canGoForward: false });
-  ok(labels(page) === 'Back,Forward,Reload' && page[1].enabled === false, 'menu: a plain browser page gets Back / Forward / Reload', labels(page));
+  ok(labels(page).startsWith('Back,Forward,Reload,|,Save page as…,Print…') && page[1].enabled === false, 'menu: a plain browser page gets Back / Forward / Reload, then save and print', labels(page));
   const dev = cm.buildContextMenuTemplate(base, { surface: 'app', inspect: true });
   ok(labels(dev) === 'Inspect element', 'menu: in development, Inspect element is always there');
   const devEdit = cm.buildContextMenuTemplate({ ...base, isEditable: true }, { surface: 'browser', inspect: true });
-  ok(devEdit[devEdit.length - 1].label === 'Inspect element' && devEdit[devEdit.length - 2].type === 'separator' && noEdgeSeps(devEdit) && !devEdit.some(x => x.label === 'Back'), 'menu: Inspect goes last after a separator; editing a field hides page navigation');
+  ok(devEdit[devEdit.length - 1].label === 'Inspect' && devEdit[devEdit.length - 2].type === 'separator' && noEdgeSeps(devEdit) && !devEdit.some(x => x.label === 'Back'), 'menu: Inspect goes last after a separator; editing a field hides page navigation');
 }
 
 // ── Update safety ──
@@ -636,12 +636,9 @@ const bstore = await load(path.join(desktop, 'electron/browser-store.ts'), 'brow
   ok(bstore.clearHistory([{ url: 'x', lastVisit: 10 }, { url: 'y', lastVisit: 20 }], 15).length === 1 && bstore.clearHistory(q).length === 0, 'browser/history: clear since a time, or everything');
   ok(bstore.removeHistory(q, 'https://news.test/').length === 2, 'browser/history: remove one URL');
 
-  let b = bstore.addBookmark([], { url: 'https://a.test', title: 'A' }, 1);
-  b = bstore.addBookmark(b, { url: 'https://a.test', title: 'A renamed', folder: 'Work' }, 2);
-  b = bstore.addBookmark(b, { url: 'https://b.test', title: '' }, 3);
-  ok(b.length === 2 && b[0].title === 'A renamed' && b[0].addedAt === 1 && b[0].folder === 'Work' && b[1].title === 'https://b.test', 'browser/bookmarks: add is de-duplicated per URL; untitled falls back to the URL', b);
-  ok(bstore.removeBookmark(b, 'https://a.test').length === 1, 'browser/bookmarks: remove');
-  throws(() => bstore.addBookmark([], { url: ' ', title: 'x' }, 1), /URL/, 'browser/bookmarks: a bookmark needs a URL');
+  // The bookmark tree has its own suite: scripts/test-browser-bookmarks.mjs (run by `npm test`).
+  const up = bstore.upsertBookmark(bstore.emptyTree(), { url: 'https://a.test', title: 'A' }, 1);
+  ok(bstore.flattenBookmarks(up.tree)[0].url === 'https://a.test', 'browser/bookmarks: the flat add still works (see test-browser-bookmarks.mjs)');
   const s = bstore.normaliseSettings({ blocking: { enabled: 'yes', allowOrigins: ['https://a.test', 5, 'https://a.test'] }, zoom: { 'https://a.test': 1.5, 'https://b.test': 1, 'https://c.test': 99 }, permissions: { 'https://a.test': { notifications: 'allow', camera: 'maybe' } } });
   ok(s.blocking.enabled === true && s.blocking.allowOrigins.length === 1, 'browser/settings: blocking defaults on; allow list cleaned');
   ok(Object.keys(s.zoom).join() === 'https://a.test' && s.permissions['https://a.test'].notifications === 'allow' && !('camera' in s.permissions['https://a.test']), 'browser/settings: zoom and permissions keep only valid values');

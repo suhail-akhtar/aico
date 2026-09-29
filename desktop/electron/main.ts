@@ -21,6 +21,7 @@ import { makeHandle, type DesktopContext } from './context';
 import { applyPowerPrefs, registerCoreIpc } from './core-ipc';
 import { registerFeatures } from './features';
 import { startMcp, MCP_NAME } from './mcp';
+import { eventRoute } from './browser-window-core';
 
 const distDir = __dirname;
 const aicoHome = process.env.AICO_HOME || path.join(os.homedir(), '.aico');
@@ -56,21 +57,34 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 
+const show = (w: BrowserWindow): void => {
+  if (w.isMinimized()) w.restore();
+  w.show();
+  w.focus();
+};
+
 const ctx: DesktopContext = {
   services: {},
   window: () => mainWindow,
+  browserWindow: () => ctx.services.browserWindow?.window() ?? mainWindow,
   prefs,
   engine,
   paths: { aicoHome, desktopDir, pluginsDir, distDir },
   emit(channel, payload) {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+    // While the browser has a window of its own, what it says goes there (browser-window-core.ts).
+    const own = ctx.services.browserWindow?.window() ?? null;
+    const to = eventRoute(channel, own !== null);
+    if (to.main && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+    if (to.browser && own && !own.isDestroyed()) own.webContents.send(channel, payload);
   },
   handle: makeHandle(),
   reveal() {
     if (!mainWindow) { createWindow(); return; }
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    show(mainWindow);
+  },
+  revealBrowser() {
+    const own = ctx.services.browserWindow?.window();
+    if (own) show(own); else ctx.reveal();
   },
 };
 

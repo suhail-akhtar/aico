@@ -19,35 +19,40 @@ import { SearchDialog } from '@/shell/SearchDialog';
 import { Tooltips } from './shell/Tooltips';
 import { Toasts } from '@/shell/Toasts';
 import { SettingsModal } from '@/settings/SettingsModal';
+import { ImportWizard } from '@/browser/ImportWizard';
 import { BottomPanel } from '@/shell/BottomPanel';
 import { Dock } from '@/shell/Dock';
 import { StatusBar } from '@/shell/StatusBar';
 import { matchesKey } from '@/lib/util';
 import { Icon } from '@/lib/icons';
+import { useFullView } from '@/browser/fullview';
 
 export function App({ engineReady }: { engineReady: boolean }): React.ReactElement {
   const collapsed = useDesk(s => s.prefs.sidebar.collapsed);
   const panel = useDesk(s => s.panel);
   const dock = useDesk(s => s.dock);
   const onBrowserPage = useDesk(s => s.route.view === 'browser');
+  // The browser's full view: the page and its tabs fill the window (browser/fullview.ts).
+  const fullView = useFullView(s => s.on) && onBrowserPage;
 
   useKeybindings();
 
   return (
     <div className="flex h-full w-full">
-      {!collapsed && <Sidebar />}
+      {!collapsed && !fullView && <Sidebar />}
       <main className="flex min-w-0 flex-1 flex-col bg-aico-bg">
-        <TopBar />
+        {!fullView && <TopBar />}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             <ViewHost />
           </div>
           {dock.open && !onBrowserPage && <Dock />}
         </div>
-        {panel.open && <BottomPanel />}
-        <StatusBar />
+        {panel.open && !fullView && <BottomPanel />}
+        {!fullView && <StatusBar />}
       </main>
       <SettingsModal />
+      <ImportWizard />
       <CommandPalette />
       <SearchDialog />
       <Toasts />

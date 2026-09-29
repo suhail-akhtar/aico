@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.27.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.28.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -61,7 +61,7 @@
     <p>
       Download the installer for your system from the
       <a href="https://github.com/suhail-akhtar/aico/releases/latest">latest release</a>:
-      <code>AICO-Setup-0.27.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
+      <code>AICO-Setup-0.28.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
       <code>.deb</code> for Linux. The builds are not code-signed yet, so Windows SmartScreen
       asks once ("More info → Run anyway"). Your chats, providers and settings are the same
       ones the CLI, the web portal and VS Code use — everything lives in <code>~/.aico</code>.
@@ -138,26 +138,64 @@
   <div class="prose">
     <h2>An AI browser</h2>
     <p>
-      A full browser — tabs, an omnibox with suggestions, bookmarks, history, downloads, find,
-      zoom, print, reader mode, site info with certificates and permissions, and tracker
-      blocking on by default — with an <strong>AICO copilot</strong> docked beside the page or
-      floating over it. Ask about the page you are on (<em>Summarize</em>, <em>Key points</em>,
-      <em>Extract tables</em>, <em>Find prices</em>, <em>Compare tabs</em>, <em>Translate</em>), or
-      let the agent do the work: it reads pages as clean Markdown, understands and fills forms,
-      answers dialogs, uploads files once you approve, and reports what changed after every
-      action. The element it is about to touch is highlighted, the page glows while it drives,
-      and <strong>Stop</strong> / <strong>Take over</strong> are one click away.
-    </p>
-    <p>
-      It never solves CAPTCHAs or "I'm human" checks, never types passwords, card numbers or
-      one-time codes, and asks before anything that buys, books, sends or deletes — it hands the
-      page to you and carries on when you press Done. Dialogs, sign-in prompts, permissions and
-      certificate errors come to you; a bad certificate is never waved through.
+      A real browser — tabs you drag, pin, mute and reopen (Ctrl+Shift+T), a bookmarks bar with
+      folders and sub-folders you drag things between, a bookmark manager, history, downloads,
+      find, zoom, print, reader mode, <strong>full view</strong>, full screen, picture-in-picture
+      — and <strong>its own window</strong> when you want one: Ctrl+Shift+N moves every tab out
+      without reloading anything, and closing it brings them home. Sign-ins, cookies and site
+      storage live in AICO's own folder, so they survive updates and even an uninstall and
+      reinstall; your tabs come back where you left them.
     </p>
     <figure>
-      <img src="assets/readme/browser.jpg" alt="The AICO browser: a Wikipedia page with the AICO copilot docked beside it showing a summary" loading="lazy">
-      <figcaption>The copilot summarising the page you are on — in its own conversation, beside the page.</figcaption>
+      <img src="assets/readme/browser-float.jpg" alt="The AICO copilot floating over a live Wikipedia page" loading="lazy">
+      <figcaption>The copilot floats over the live page — or docks beside it — and suggests what fits the page you are on.</figcaption>
     </figure>
+    <p>
+      <strong>Private and protected by default.</strong> Shields block trackers (grouped by
+      company) and third-party cookies, connections are upgraded to HTTPS, Global Privacy
+      Control is sent, and the browser presents a standard Chrome identity. Look-alike and
+      phishing pages are stopped before they load — and <strong>AICO checks them for you
+      automatically</strong>, explaining what it found without touching the page. Risky
+      downloads are flagged and marked as coming from the internet. Insights show where your
+      time went and what was blocked, counted only on your computer.
+    </p>
+    <figure>
+      <img src="assets/readme/browser-protect.jpg" alt="Deceptive site ahead: a fake PayPal address blocked while the copilot explains why" loading="lazy">
+      <figcaption>A fake PayPal sign-in stopped before it loaded, with AICO's own check beside it.</figcaption>
+    </figure>
+    <p>
+      <strong>It learns you — on this device.</strong> From your browsing it learns your
+      interests, routines ("reddit.com on weekday nights"), the site you usually open next,
+      research threads, and what you left unfinished — a cart, a half-read article, a form you
+      started. The new-tab page turns that into <em>Priorities now</em>, <em>Continue where you
+      left off</em>, <em>Research threads</em> and <em>Tidy idle tabs</em>, each saying why it is
+      there; <em>Not interested</em> teaches it, and you can view, pause or forget all of it. Ask
+      the copilot "what was I researching last week?" or "clean up my idle tabs" — it uses what
+      the browser learned, and asks before it closes anything.
+    </p>
+    <figure>
+      <img src="assets/readme/browser-foryou.jpg" alt="For you cards on the new-tab page" loading="lazy">
+      <figcaption>"For you" — priorities, unfinished things and research threads, learned locally.</figcaption>
+    </figure>
+    <p>
+      <strong>Ask about any page, or let it do the work.</strong> The copilot suggests what fits
+      the page: <em>Compare prices</em> and <em>Is this a good deal?</em> on a product,
+      <em>Fact-check</em> an article, <em>Scale to 2 servings</em> on a recipe, <em>Draft a
+      reply</em> in your mail, <em>Review this order before I pay</em> at a checkout. Right-click
+      any link, image or selection to ask about it. The agent reads pages as clean Markdown,
+      fills whole forms — with your saved autofill profile when you ask — answers dialogs and
+      reports what changed after every action, with <strong>Stop</strong> /
+      <strong>Take over</strong> one click away.
+    </p>
+    <p>
+      <strong>Bring everything over.</strong> Import bookmarks, history and addresses straight
+      from Chrome, Edge, Brave, Vivaldi, Opera and Firefox (their files are only read), and
+      passwords from the export file your browser or password manager makes. Passwords live in
+      an encrypted vault that fills a sign-in form only when you click — the agent, the copilot
+      and the model never see them. It never solves CAPTCHAs or "I'm human" checks, never types
+      passwords, card numbers or one-time codes, and asks before anything that buys, books,
+      sends or deletes.
+    </p>
     <p>
       <strong>And it can see what it looks at.</strong> On a model that reads images, a
       screenshot of the page, an image file it reads, a picture it fetches from the web, or an
@@ -244,7 +282,7 @@
 
 <footer class="site-footer">
   <div class="inner">
-    <span>aico — by Suhail Akhtar · MIT</span>
+    <span>aico — by Suhail Akhtar · <a href="https://github.com/suhail-akhtar/aico/blob/main/LICENSE">PolyForm Noncommercial</a></span>
     <span class="spacer"></span>
     <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
     <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>

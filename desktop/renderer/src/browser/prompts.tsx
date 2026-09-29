@@ -217,12 +217,12 @@ function ConfirmDialog({ p }: { p: ConfirmPrompt }): React.ReactElement {
     fire('browser:confirmAnswer', p.id, allow);
     useBrowser.setState(s => ({ confirms: s.confirms.filter(d => d.id !== p.id) }));
   };
-  const risky = p.kind === 'download' && (p.files ?? [p.title]).some(f => /\.(exe|msi|bat|cmd|ps1|vbs|js|jar|scr|com|appimage|deb|rpm|sh|dmg|pkg)$/i.test(f));
+  const risky = Boolean(p.danger) || (p.kind === 'download' && (p.files ?? [p.title]).some(f => /\.(exe|msi|bat|cmd|ps1|vbs|js|jar|scr|com|appimage|deb|rpm|sh|dmg|pkg)$/i.test(f)));
   return (
     <div className="bx-modal" role="alertdialog" aria-label={p.title} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); answer(false); } }}>
       <div className="flex items-start gap-3">
         <span className={cls('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', risky ? 'bg-aico-warning/15 text-aico-warning' : 'bg-aico-accent-soft text-aico-accent')}>
-          <Icon name={p.kind === 'upload' ? 'upload' : risky ? 'alert' : 'download'} size={17} />
+          <Icon name={p.kind === 'upload' ? 'upload' : p.kind === 'tabs' ? 'layers' : risky ? 'alert' : 'download'} size={17} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-semibold">{p.title}</div>
@@ -237,8 +237,8 @@ function ConfirmDialog({ p }: { p: ConfirmPrompt }): React.ReactElement {
         </div>
       </div>
       <div className="mt-4 flex justify-end gap-2">
-        <button className="btn-outline" onClick={() => answer(false)} autoFocus>{p.kind === 'upload' ? 'Don’t send' : 'Cancel'}</button>
-        <button className={risky ? 'btn-danger' : 'btn-primary'} onClick={() => answer(true)}>{p.kind === 'upload' ? 'Send files' : 'Download'}</button>
+        <button className="btn-outline" onClick={() => answer(false)} autoFocus>{p.cancelLabel ?? (p.kind === 'upload' ? 'Don’t send' : 'Cancel')}</button>
+        <button className={risky ? 'btn-danger' : 'btn-primary'} onClick={() => answer(true)}>{p.okLabel ?? (p.kind === 'upload' ? 'Send files' : 'Download')}</button>
       </div>
     </div>
   );

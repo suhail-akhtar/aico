@@ -7,7 +7,9 @@
 export type BrowserAction =
   | 'newTab' | 'closeTab' | 'nextTab' | 'prevTab' | 'focusAddress' | 'reload' | 'hardReload' | 'find'
   | 'bookmark' | 'history' | 'downloads' | 'zoomIn' | 'zoomOut' | 'zoomReset' | 'back' | 'forward'
-  | 'escape' | 'print' | 'devtools' | 'copilot';
+  | 'escape' | 'print' | 'devtools' | 'copilot' | 'bookmarksBar' | 'bookmarkAll' | 'bookmarkManager'
+  | 'reopenTab' | 'fullView' | 'fullscreen' | 'savePage' | 'viewSource' | 'moveTabLeft' | 'moveTabRight' | 'popOut'
+  | 'tab1' | 'tab2' | 'tab3' | 'tab4' | 'tab5' | 'tab6' | 'tab7' | 'tab8' | 'tab9';
 
 export interface KeyLike { key: string; code?: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
 
@@ -22,13 +24,21 @@ export function browserShortcut(e: KeyLike, mac = false): BrowserAction | null {
   if (!mod && !e.altKey) {
     if (k === 'F5') return e.shiftKey ? 'hardReload' : 'reload';
     if (k === 'F12') return 'devtools';
+    if (k === 'F11') return e.shiftKey ? 'fullView' : 'fullscreen';
     if (k === 'Escape' && !e.shiftKey) return 'escape';
     return null;
   }
   if (!mod || e.altKey) return null;
   if (e.shiftKey) {
     if (k === 'Tab') return 'prevTab';
+    if (k === 'PageUp') return 'moveTabLeft';
+    if (k === 'PageDown') return 'moveTabRight';
+    if (k === 't') return 'reopenTab';
     if (k === 'a') return 'copilot';
+    if (k === 'b') return 'bookmarksBar';
+    if (k === 'd') return 'bookmarkAll';
+    if (k === 'o') return 'bookmarkManager';
+    if (k === 'n') return 'popOut';
     if (k === 'r') return 'hardReload';
     if (k === '+' || k === '=') return 'zoomIn';
     return null;
@@ -36,7 +46,11 @@ export function browserShortcut(e: KeyLike, mac = false): BrowserAction | null {
   switch (k) {
     case 't': return 'newTab';
     case 'w': return 'closeTab';
-    case 'Tab': return 'nextTab';
+    case 'Tab': case 'PageDown': return 'nextTab';
+    case 'PageUp': return 'prevTab';
+    case 's': return 'savePage';
+    case 'u': return 'viewSource';
+    case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': return `tab${k}` as BrowserAction;
     case 'l': return 'focusAddress';
     case 'r': return 'reload';
     case 'f': return 'find';

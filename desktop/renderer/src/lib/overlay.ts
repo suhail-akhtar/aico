@@ -3,7 +3,9 @@
  *
  * The built-in browser is a native view drawn *above* the interface, so a menu
  * opened over it would be hidden underneath. While anything is open, the
- * browser pane steps aside and shows a still of the page instead.
+ * browser pane steps aside and shows a still of the page instead — captured by
+ * main in the moment before it hides the page, so it is the page as it was —
+ * and the floating copilot (a native view too) steps aside the same way.
  *
  * @module desktop/renderer/lib/overlay
  */

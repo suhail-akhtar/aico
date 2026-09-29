@@ -46,6 +46,8 @@ export interface DesktopPrefs {
   browserHome: string;
   /** Agent may drive the built-in browser without asking each time. */
   browserAgentAccess: 'ask' | 'allow' | 'deny';
+  /** On startup the browser continues where you left off (its tabs and signed-in sessions), or opens a new tab. */
+  browserStartup: 'restore' | 'newTab';
   shortcuts: Record<string, string>;
   /**
    * Updates from GitHub releases. `lastCheckedAt` is kept here (not only in
@@ -92,6 +94,7 @@ export const DEFAULT_PREFS: DesktopPrefs = {
   window: { width: 1360, height: 880, maximized: false },
   browserHome: 'https://duckduckgo.com',
   browserAgentAccess: 'allow',
+  browserStartup: 'restore',
   shortcuts: {},
   autoUpdate: { enabled: true, channel: 'latest', lastCheckedAt: 0 },
   developerMenus: false,

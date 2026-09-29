@@ -24,6 +24,7 @@ import { protocol } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { EngineHost } from './engine-host';
+import { onRequestHeaders } from './web-request';
 
 export const SCHEME = 'aico';
 export const APP_ORIGIN = `${SCHEME}://app`;
@@ -141,11 +142,8 @@ export const EMBED_HOSTS = [
 ];
 
 export function attachEmbedReferer(ses: Electron.Session): void {
-  ses.webRequest.onBeforeSendHeaders({ urls: EMBED_HOSTS }, (details, callback) => {
-    const headers = details.requestHeaders;
-    if (!headers.Referer && !headers.referer) headers.Referer = EMBED_REFERER;
-    callback({ requestHeaders: headers });
-  });
+  // Through the shared dispatcher: a session has one onBeforeSendHeaders listener (web-request.ts).
+  onRequestHeaders(ses, EMBED_HOSTS, (_details, headers) => (headers.Referer || headers.referer ? undefined : { ...headers, Referer: EMBED_REFERER }));
 }
 
 export function handleProtocol({ rendererDir, pluginDir, engine }: ProtocolOptions): void {

@@ -1,13 +1,14 @@
 /**
  * Links the agent writes in the main chat: a normal click keeps doing what it
  * always did (the system browser); Ctrl+click (⌘+click) opens the link in
- * AICO's own browser, in a new tab, and shows it.
+ * AICO's own browser, in a new tab, and shows it — in the browser's own
+ * window, brought forward, when it has one.
  *
  * @module desktop/renderer/browser/links
  */
 
-import { go } from '@/state/desk';
 import { openUrl } from './store';
+import { showBrowser } from './host';
 
 export function installBrowserLinks(): () => void {
   const onClick = (e: MouseEvent): void => {
@@ -21,7 +22,7 @@ export function installBrowserLinks(): () => void {
     if (!a.closest('.transcript, .markdown-body, [data-links-browser]')) return;
     e.preventDefault();
     e.stopPropagation();
-    go('browser');
+    showBrowser();
     openUrl(href, true);
   };
   document.addEventListener('click', onClick, true);

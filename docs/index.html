@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aico — open-source AI coding agent for the terminal and browser</title>
+<title>aico — AI coding agent for the terminal, browser and desktop</title>
 <meta name="description" content="A free, self-hosted AI coding agent. Bring your own key for Claude, GPT, Gemini, DeepSeek or a local Ollama model. Append-only session log, in-browser verification of what it builds, and supervision for background work.">
 <!-- seo:start -->
 <link rel="canonical" href="https://suhail-akhtar.github.io/aico/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="aico">
 <meta property="og:url" content="https://suhail-akhtar.github.io/aico/">
-<meta property="og:title" content="aico — open-source AI coding agent for the terminal and browser">
+<meta property="og:title" content="aico — AI coding agent for the terminal, browser and desktop">
 <meta property="og:description" content="A free, self-hosted AI coding agent. Bring your own key for Claude, GPT, Gemini, DeepSeek or a local Ollama model. Append-only session log, in-browser verification of what it builds, and supervision for background work.">
 <meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="aico — open-source AI coding agent for the terminal and browser">
+<meta name="twitter:title" content="aico — AI coding agent for the terminal, browser and desktop">
 <meta name="twitter:description" content="A free, self-hosted AI coding agent. Bring your own key for Claude, GPT, Gemini, DeepSeek or a local Ollama model. Append-only session log, in-browser verification of what it builds, and supervision for background work.">
 <meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <meta name="google-site-verification" content="gpRc3scUpPI39z-lj7Nzrw1MfbZGQKTOK8gErO6jtxQ">
@@ -28,13 +28,13 @@
   "name": "aico",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
-  "softwareVersion": "0.27.0",
+  "softwareVersion": "0.28.0",
   "url": "https://suhail-akhtar.github.io/aico/",
   "downloadUrl": "https://github.com/suhail-akhtar/aico",
   "codeRepository": "https://github.com/suhail-akhtar/aico",
   "programmingLanguage": "TypeScript",
-  "license": "https://opensource.org/licenses/MIT",
-  "description": "An open-source multi-provider AI coding agent for the terminal and a local web portal. Keeps an append-only session log, verifies web work in a real browser, supervises background work, and runs as an MCP server.",
+  "license": "https://polyformproject.org/licenses/noncommercial/1.0.0",
+  "description": "A source-available multi-provider AI coding agent for the terminal and a local web portal. Keeps an append-only session log, verifies web work in a real browser, supervises background work, and runs as an MCP server.",
   "author": {
     "@type": "Person",
     "name": "Suhail Akhtar"
@@ -53,10 +53,10 @@
   "mainEntity": [
     {
       "@type": "Question",
-      "name": "Is aico free and open source?",
+      "name": "Is aico free, and can I see the source?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes — MIT licensed, and there is no account, no telemetry and no hosted service in the middle. You pay whichever model provider you choose, directly, at their prices. Running it against a local Ollama model costs nothing at all."
+        "text": "It is free for personal and noncommercial use and the full source is public (PolyForm Noncommercial licence; commercial use needs a licence from the author). There is no account, no telemetry and no hosted service in the middle. You pay whichever model provider you choose, directly, at their prices. Running it against a local Ollama model costs nothing at all."
       }
     },
     {
@@ -72,7 +72,7 @@
       "name": "Is aico an alternative to Devin, Replit Agent, Lovable or Bolt.new?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It occupies the same space but is a different shape: those are hosted products with credit-based or per-task billing on top of the model's own cost, and Lovable/Bolt.new lock you into one bundled stack with no bring-your-own-key. aico is self-hosted and MIT licensed — you pick a template or leave the stack to the agent, you pay whichever provider you choose directly with no markup, and every app gets its own git history from the first commit. It does have a real, self-run number now — 73 of 80 (91%) real SWE-bench Lite instances resolved across two independent random samples — but what it does not have, honestly, is their scale of real-world use or Devin's independently-audited track record — the comparison page says so plainly rather than pretending otherwise."
+        "text": "It occupies the same space but is a different shape: those are hosted products with credit-based or per-task billing on top of the model's own cost, and Lovable/Bolt.new lock you into one bundled stack with no bring-your-own-key. aico is self-hosted and free for personal use — you pick a template or leave the stack to the agent, you pay whichever provider you choose directly with no markup, and every app gets its own git history from the first commit. It does have a real, self-run number now — 73 of 80 (91%) real SWE-bench Lite instances resolved across two independent random samples — but what it does not have, honestly, is their scale of real-world use or Devin's independently-audited track record — the comparison page says so plainly rather than pretending otherwise."
       }
     },
     {
@@ -135,7 +135,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.27.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.28.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -155,7 +155,7 @@
 <main>
 
   <section class="hero">
-    <span class="eyebrow">MIT · self-hosted · bring your own model</span>
+    <span class="eyebrow">Free for personal use · self-hosted · bring your own model</span>
     <h1>The AI coding agent that opens what it builds.</h1>
     <p class="lede">
       aico works in your terminal, a local web portal, VS Code, or its own desktop app
@@ -165,7 +165,7 @@
     </p>
 
     <div class="install">
-      <code>$ npx github:suhail-akhtar/aico#v0.27.0 serve</code>
+      <code>$ npx github:suhail-akhtar/aico#v0.28.0 serve</code>
       <button type="button">Copy</button>
     </div>
 
@@ -421,8 +421,8 @@ What rendered:
       </a>
       <a class="card" href="desktop.html">
         <span class="kicker">Desktop · new</span>
-        <h3>A desktop app with an IDE and a browser</h3>
-        <p>Windows and Linux. Chat with dashboards and maths that are computed, Monaco and real terminals, Git and GitHub, a browser the agent drives — and plugins it can write for you.</p>
+        <h3>A desktop app with an IDE and an AI browser</h3>
+        <p>Windows and Linux. Chat with dashboards and maths that are computed, Monaco and real terminals, Git and GitHub, and a private, protected browser that learns you on-device and that the agent drives — pop it into its own window, import from Chrome, Edge or Firefox. Plus plugins it can write for you.</p>
         <span class="more">See the desktop app →</span>
       </a>
       <a class="card" href="vscode.html">
@@ -445,11 +445,13 @@ What rendered:
     <div class="prose">
       <h2>Questions</h2>
 
-      <h3>Is aico free and open source?</h3>
+      <h3>Is aico free, and can I see the source?</h3>
       <div class="a">
         <p>
-          Yes — MIT licensed, and there is no account, no telemetry and no hosted
-          service in the middle. You pay whichever model provider you choose,
+          It is free for personal and noncommercial use, and the full source is
+          public (PolyForm Noncommercial licence — commercial use needs a
+          licence from the author). There is no account, no telemetry and no
+          hosted service in the middle. You pay whichever model provider you choose,
           directly, at their prices. Running it against a local
           <a href="providers.html">Ollama</a> model costs nothing at all.
         </p>
@@ -475,7 +477,7 @@ What rendered:
           It occupies the same space but is a different shape: those are hosted
           products with credit-based or per-task billing on top of the model's
           own cost, and Lovable/Bolt.new lock you into one bundled stack with no
-          bring-your-own-key. aico is self-hosted and MIT licensed — you pick a
+          bring-your-own-key. aico is self-hosted and free for personal use — you pick a
           template or leave the stack to the agent, you pay whichever provider
           you choose directly with no markup, and every app gets its own git
           history from the first commit. It does have a real, self-run
@@ -574,7 +576,7 @@ What rendered:
     <div class="prose">
       <h2>Try it</h2>
       <div class="install">
-        <code>$ npx github:suhail-akhtar/aico#v0.27.0 serve</code>
+        <code>$ npx github:suhail-akhtar/aico#v0.28.0 serve</code>
         <button type="button">Copy</button>
       </div>
       <p style="margin-top:1rem">
@@ -589,7 +591,7 @@ What rendered:
 
 <footer class="site-footer">
   <div class="inner">
-    <span>aico — by Suhail Akhtar · MIT</span>
+    <span>aico — by Suhail Akhtar · <a href="https://github.com/suhail-akhtar/aico/blob/main/LICENSE">PolyForm Noncommercial</a></span>
     <span class="spacer"></span>
     <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
     <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>

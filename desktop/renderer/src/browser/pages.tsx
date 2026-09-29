@@ -1,6 +1,6 @@
 /**
  * Pages the chrome draws itself, in place of the web page: the new tab page,
- * history, bookmarks, downloads, reader mode, and the two error pages
+ * history, bookmarks (the manager, BookmarkManager.tsx), downloads, reader mode, and the two error pages
  * (a network error, and "Your connection is not private").
  *
  * @module desktop/renderer/browser/pages
@@ -19,7 +19,13 @@ import { openUrl, refreshBookmarks, showInternal, useBrowser, type InternalPage 
 import { QUICK_STARTS } from './context';
 import { prefillCopilot } from './copilot-ui';
 import { DownloadsPanel } from './Toolbar';
-import type { Bookmark, HistoryEntry, TabError, TabState } from './types';
+import { BookmarkManager } from './BookmarkManager';
+import { InsightsPage } from './Insights';
+import { ForYouCards } from './ForYou';
+import { PrivacyPage } from './PrivacyPage';
+import { PasswordsPage } from './PasswordsPage';
+import { openImportWizard } from './ImportWizard';
+import type { HistoryEntry, TabError, TabState } from './types';
 
 // ── New tab ──
 
@@ -42,6 +48,9 @@ export function NewTabPage(): React.ReactElement {
         <div className="w-full">
           <Omnibox url="" big autoFocus placeholder="Search Google or type a URL" />
         </div>
+        <button className="mt-3 flex items-center gap-1.5 text-[12px] text-aico-muted hover:text-aico-accent" onClick={() => openImportWizard()}>
+          <Icon name="download" size={13} />Import bookmarks, history and passwords from another browser
+        </button>
 
         {tiles.length > 0 && (
           <div className="mt-9 flex w-full flex-wrap justify-center gap-1">
@@ -53,6 +62,8 @@ export function NewTabPage(): React.ReactElement {
             ))}
           </div>
         )}
+
+        <ForYouCards place="ntp" />
 
         <div className="mt-10 w-full">
           <div className="mb-3 flex items-center gap-2 text-[12.5px] font-medium text-aico-muted">
@@ -139,7 +150,10 @@ function PageFrame({ title, icon, children, actions, query, setQuery }: {
 
 export function InternalPageView({ page }: { page: InternalPage }): React.ReactElement {
   if (page === 'history') return <HistoryPage />;
-  if (page === 'bookmarks') return <BookmarksPage />;
+  if (page === 'bookmarks') return <BookmarkManager />;
+  if (page === 'insights') return <InsightsPage />;
+  if (page === 'privacy') return <PrivacyPage />;
+  if (page === 'passwords') return <PasswordsPage />;
   return (
     <PageFrame title="Downloads" icon="download" actions={<button className="btn-outline btn-sm" onClick={() => { void call('browser:downloads:clear').catch(() => {}); }}>Clear finished</button>}>
       <DownloadsPanel full />
@@ -180,37 +194,6 @@ function HistoryPage(): React.ReactElement {
               <Row key={h.url} url={h.url} title={h.title} favicon={h.favicon}
                 meta={new Date(h.lastVisit).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                 onRemove={() => { void call('browser:history:remove', h.url).then(load).catch(() => {}); }} />
-            ))}
-          </div>
-        </div>
-      ))}
-    </PageFrame>
-  );
-}
-
-function BookmarksPage(): React.ReactElement {
-  const [query, setQuery] = useState('');
-  const bookmarks = useBrowser(s => s.bookmarks);
-  const available = useAvailable('browser:bookmarks:list');
-  useEffect(() => { void refreshBookmarks(); }, []);
-  const q = query.trim().toLowerCase();
-  const shown = bookmarks.filter(b => !q || b.title.toLowerCase().includes(q) || b.url.toLowerCase().includes(q));
-  const folders = useMemo(() => {
-    const m = new Map<string, Bookmark[]>();
-    for (const b of [...shown].sort((a, b) => b.addedAt - a.addedAt)) m.set(b.folder || '', [...(m.get(b.folder || '') ?? []), b]);
-    return [...m.entries()].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)));
-  }, [shown]);
-  return (
-    <PageFrame title="Bookmarks" icon="star" query={query} setQuery={setQuery}>
-      {!available && <Empty icon="star" text="Bookmarks are not available in this version." />}
-      {available && shown.length === 0 && <Empty icon="star" text={q ? 'No bookmarks match.' : 'Press the star in the address bar (Ctrl+D) to bookmark a page.'} />}
-      {folders.map(([folder, list]) => (
-        <div key={folder || '_'} className="mb-5">
-          {folder && <div className="mb-1 flex items-center gap-1.5 px-3 text-[12px] font-medium text-aico-muted"><Icon name="folder" size={13} />{folder}</div>}
-          <div className="card overflow-hidden p-1">
-            {list.map(b => (
-              <Row key={b.url} url={b.url} title={b.title} favicon={b.favicon}
-                onRemove={() => { void call('browser:bookmarks:remove', b.url).then(() => refreshBookmarks()).catch(() => {}); }} />
             ))}
           </div>
         </div>

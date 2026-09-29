@@ -1,13 +1,21 @@
 /**
  * Where the copilot is and how it looks: open or minimised to its launcher,
  * docked beside the page or floating over it, and its size and place.
- * Remembered per window (localStorage), so it comes back as it was left.
+ * Remembered in localStorage, so it comes back as it was left.
+ *
+ * Two documents share this record: the main window (the docked copilot, the
+ * launcher, the toolbar button) and the floating copilot's own view laid over
+ * the page (copilot-main.tsx). Each applies what the other writes (`storage`
+ * events), so closing, docking or moving the copilot in one is seen by the
+ * other. A prefill is not part of the record; it is relayed (copilot-float.ts).
  *
  * @module desktop/renderer/browser/copilot-ui
  */
 
 import { create } from 'zustand';
 import { useDesk } from '@/state/desk';
+import { remoteUiPatch } from '@desk/copilot-float';
+import { browserElsewhere, focusBrowserWindow } from './host';
 
 export interface CopilotUi {
   open: boolean;
@@ -35,14 +43,36 @@ function load(): CopilotUi {
 
 export const useCopilotUi = create<CopilotUi>(() => load());
 
+/** Which document this is: the main window, or the floating copilot's own view. */
+export type CopilotSurface = 'window' | 'overlay';
+let surface: CopilotSurface = 'window';
+export function setCopilotSurface(s: CopilotSurface): void { surface = s; }
+export function copilotSurface(): CopilotSurface { return surface; }
+
+let applyingRemote = false;
+
 useCopilotUi.subscribe((s) => {
+  // Writing back what the other document just wrote would race its next write (a drag writes many).
+  if (applyingRemote) return;
   const { prefill: _p, ...keep } = s;
   void _p;
   try { localStorage.setItem(KEY, JSON.stringify(keep)); } catch { /* a per-window convenience */ }
 });
 
-/** The copilot lives in the full-size browser; asking for it from the side dock goes there. */
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== KEY) return;
+    const patch = remoteUiPatch(useCopilotUi.getState(), e.newValue);
+    if (!patch) return;
+    applyingRemote = true;
+    try { useCopilotUi.setState(patch); } finally { applyingRemote = false; }
+  });
+}
+
+/** The copilot lives in the full-size browser; asking for it from the side dock goes there (or to the browser's own window). */
 function toFullBrowser(): void {
+  if (surface === 'overlay') return;
+  if (browserElsewhere()) { focusBrowserWindow(); return; }
   const d = useDesk.getState();
   if (d.route.view === 'browser') return;
   if (d.dock.open) d.setDock({ open: false });
@@ -51,7 +81,7 @@ function toFullBrowser(): void {
 
 export function toggleCopilot(force?: boolean): void {
   const s = useCopilotUi.getState();
-  if (force !== false && useDesk.getState().route.view !== 'browser') { toFullBrowser(); force = true; }
+  if (surface === 'window' && force !== false && useDesk.getState().route.view !== 'browser') { toFullBrowser(); force = true; }
   const visible = s.open && !s.minimized;
   const next = force ?? !visible;
   useCopilotUi.setState({ open: next, minimized: false });

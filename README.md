@@ -1,13 +1,13 @@
 <div align="center">
 
-<img src="docs/assets/readme/hero.svg" alt="AICO — the open-source AI agent that runs on your computer" width="100%">
+<img src="docs/assets/readme/hero.svg" alt="AICO — the private AI agent that runs on your computer" width="100%">
 
 <br>
 
 [![Release](https://img.shields.io/github/v/release/suhail-akhtar/aico?label=release&color=3B5BDB)](https://github.com/suhail-akhtar/aico/releases/latest)
 [![CI](https://github.com/suhail-akhtar/aico/actions/workflows/ci.yml/badge.svg)](https://github.com/suhail-akhtar/aico/actions/workflows/ci.yml)
 [![Downloads](https://img.shields.io/github/downloads/suhail-akhtar/aico/total?color=7048E8)](https://github.com/suhail-akhtar/aico/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-2f9e44)](LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-2f9e44)](LICENSE)
 ![Platforms](https://img.shields.io/badge/desktop-Windows%20%C2%B7%20Linux-0B1020)
 ![Node](https://img.shields.io/badge/node-22.5%2B-339933)
 
@@ -49,10 +49,10 @@ their limits — none of these is an official leaderboard submission.</sub>
 
 | | Get it | Notes |
 |---|---|---|
-| **Windows** (10/11, x64) | [**AICO-Setup-0.27.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.27.0/AICO-Setup-0.27.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
-| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.27.0/AICO-0.27.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.27.0/AICO-0.27.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
-| **VS Code** | [**aico-vscode-0.6.22.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.27.0/aico-vscode-0.6.22.vsix) | `code --install-extension aico-vscode-0.6.22.vsix` |
-| **Web portal + terminal** | `npx github:suhail-akhtar/aico#v0.27.0 serve` | Node 22.5+; nothing else to install |
+| **Windows** (10/11, x64) | [**AICO-Setup-0.28.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.28.0/AICO-Setup-0.28.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
+| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.28.0/AICO-0.28.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.28.0/AICO-0.28.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
+| **VS Code** | [**aico-vscode-0.6.23.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.28.0/aico-vscode-0.6.23.vsix) | `code --install-extension aico-vscode-0.6.23.vsix` |
+| **Web portal + terminal** | `npx github:suhail-akhtar/aico#v0.28.0 serve` | Node 22.5+; nothing else to install |
 
 Every build: **[latest release](https://github.com/suhail-akhtar/aico/releases/latest)**.
 The desktop app needs no Node install — the engine runs inside it — and shares
@@ -121,8 +121,8 @@ not written. Every answer shows its **sources** — the pages it actually read.
 
 ### 🔑 Yours, all the way down
 **Your key** (OpenAI, Anthropic, Gemini, OpenRouter, DeepSeek, Kimi, Z.AI, or
-**offline with Ollama**), your git history, your files, your machine. MIT
-licensed. No platform markup on top of the model. Plugins for every piece, and
+**offline with Ollama**), your git history, your files, your machine. Free
+for personal use. No platform markup on top of the model. Plugins for every piece, and
 an agent that can write them for you.
 
 </td>
@@ -179,7 +179,7 @@ for **Windows and Linux**, updating itself.
 - **Chat that keeps up** — `/` actions and `@` mentions for files, folders and agents; steer a run while it works; jump to the start of a finished answer; branch any answer into a new chat; read aloud; 👍/👎 that the agent learns from.
 - **Canvas** — documents and code the agent writes and **you edit side by side**, with versions, restore, and *Ask AI* on a selection.
 - **An IDE behind the chat** — Monaco editor, real terminals, source control that never force-pushes, and GitHub through `gh`: review a PR, fix a failing check, diagnose an Action — with AI.
-- **An AI browser** — see below.
+- **An AI browser** — private, protected, learning and agent-driven; see below.
 - **It can see** — screenshots, images it reads or fetches, and pictures from any MCP tool reach models that read images; which models do is *learned* with a one-click probe, not guessed.
 - **Skills and agents, made your way** — import Claude-format `.skill` files, `SKILL.md` or folders; export them; define your own agents with tools, skills, a model and their own knowledge and scripts — or ask the agent to build them.
 - **Plugins, all the way down** — every feature is a plugin you can switch off; add pages, commands, themes, widgets and standing instructions with a JSON manifest, or say *"make me a plugin that…"*.
@@ -187,15 +187,45 @@ for **Windows and Linux**, updating itself.
 
 ### 🌐 The AI browser
 
-<p align="center"><img src="docs/assets/readme/browser.jpg" alt="The AICO browser: a Wikipedia page with the AICO copilot docked beside it showing a summary with key takeaways" width="100%"></p>
+<p align="center"><img src="docs/assets/readme/browser-float.jpg" alt="The AICO browser: a live Wikipedia page with the AICO copilot floating over it, page-aware quick actions ready" width="100%"></p>
 
-A full browser — tabs, an omnibox with suggestions, bookmarks, history, downloads,
-find, zoom, print, reader mode, site info with certificates and permissions, and
-**tracker blocking on by default** — with **AICO riding along**:
+A real browser — tabs you drag, pin, mute and reopen, a bookmarks bar with folders,
+history, downloads, reader mode, full view, full screen and **its own window when
+you want one** — built private-first, with **AICO riding along**. It remembers your
+sign-ins across updates and reinstalls, and brings your tabs back where you left them.
 
-- **Ask AICO about any page.** A copilot docked beside the page (or floating) knows what you are looking at: *Summarize*, *Key points*, *Explain simply*, *Extract tables*, *Find prices*, *Compare tabs*, *Translate* — answered with the full renderer, charts and maps included. It is its own conversation, so browsing never takes over your chat.
-- **Let it do the clicking.** The agent reads pages as clean Markdown, understands forms, fills them in one go, answers dialogs, uploads (after you approve), waits for pages, and reports what changed after every action. You watch it happen: the element it is about to touch is highlighted, the page glows while it drives, and **Stop** / **Take over** are one click away.
-- **Safe by design.** It never solves CAPTCHAs or "I'm human" checks, never types passwords, card numbers or one-time codes, and asks before anything that buys, books, sends or deletes — it hands the page to you, then carries on. JavaScript dialogs, sign-in prompts, permissions and certificate errors all come to you; a bad certificate is never waved through.
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/readme/browser-foryou.jpg" alt="The new-tab page with For you cards: priorities now, continue where you left off, research threads, tidy idle tabs"></td>
+<td width="50%"><img src="docs/assets/readme/browser-shields.jpg" alt="AICO Shields on CNN: 29 trackers and 10 third-party cookies blocked, grouped by company, with per-site switches"></td>
+</tr>
+<tr>
+<td><sub><b>It learns you — on this device.</b> Priorities, routines, unfinished carts and forms, research threads and idle tabs, each with the reason it is shown. <i>Not interested</i> teaches it; view, pause or forget everything.</sub></td>
+<td><sub><b>Shields</b> — trackers blocked by company, third-party cookies, HTTPS-first, Global Privacy Control; per-site switches.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/assets/readme/browser-protect.jpg" alt="Deceptive site ahead: a fake PayPal address blocked before it loaded while the AICO copilot explains why"></td>
+<td><img src="docs/assets/readme/browser-insights.jpg" alt="Insights: trackers blocked this week, time browsing, top sites and tracker companies"></td>
+</tr>
+<tr>
+<td><sub><b>Protected browsing</b> — look-alike and phishing pages are stopped before they load, and <b>AICO checks them for you automatically</b>. Risky downloads are flagged and marked as from the internet.</sub></td>
+<td><sub><b>Insights</b> — where your time goes and what was blocked, counted only on your computer.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/assets/readme/browser-bookmarks.jpg" alt="The bookmarks bar with a folder menu and a cascading sub-folder"></td>
+<td><img src="docs/assets/readme/browser-import.jpg" alt="Import browser data: Chrome, Edge and Firefox profiles found, with bookmarks, history and addresses to tick"></td>
+</tr>
+<tr>
+<td><sub><b>Bookmarks like a real browser</b> — bar, folders and sub-folders, drag and drop, a manager, import and export.</sub></td>
+<td><sub><b>Bring everything over</b> — bookmarks, history and addresses from Chrome, Edge, Brave, Vivaldi, Opera and Firefox; passwords from your browser's own export, into an encrypted vault.</sub></td>
+</tr>
+</table>
+
+- **Ask AICO about any page.** The copilot, docked or floating over the live page, knows what you are looking at and suggests what fits it — *Compare prices* on a product, *Summarize reviews*, *Fact-check* an article, *Scale this recipe*, *Match this job to my skills*, *Draft a reply* in your mail, *Review this order before I pay* at a checkout. Right-click any link, image or selection to ask about it.
+- **Let it do the work.** The agent reads pages as clean Markdown, fills whole forms (with your saved profile when you ask), answers dialogs, compares tabs, and reports what changed after every action — the element it is about to touch is highlighted and **Stop** / **Take over** are one click away. Ask *"what was I researching last week?"* or *"clean up my idle tabs"* and it uses what the browser learned — and asks before closing anything.
+- **Private by default.** Trackers and third-party cookies blocked, HTTPS-first, Global Privacy Control sent, a Chrome-standard identity with no "Electron" fingerprint, and **everything it learns stays on this computer** — no telemetry, no account.
+- **Safe by design.** It never solves CAPTCHAs or "I'm human" checks, never types passwords, card numbers or one-time codes, and asks before anything that buys, books, sends or deletes. Your passwords live in an encrypted vault that fills only when *you* click — the agent, the copilot and the model never see them.
+- **Pop it out.** One click (Ctrl+Shift+N) moves every tab into its own window without reloading a thing; close it and they come home.
 
 ---
 
@@ -310,8 +340,8 @@ flowchart TB
 ## 🚀 Install & quick start
 
 ```sh
-npx github:suhail-akhtar/aico#v0.27.0 serve     # web portal, nothing to install
-npm install -g github:suhail-akhtar/aico#v0.27.0 # `aico` on your PATH (VS Code needs this)
+npx github:suhail-akhtar/aico#v0.28.0 serve     # web portal, nothing to install
+npm install -g github:suhail-akhtar/aico#v0.28.0 # `aico` on your PATH (VS Code needs this)
 ```
 
 ```sh
@@ -322,7 +352,7 @@ aico -c                                # continue the last session
 aico --agent review -p "review my diff"
 ```
 
-`#v0.27.0` pins a release, `#release/v0.27` follows its fixes, `#main` is the
+`#v0.28.0` pins a release, `#release/v0.28` follows its fixes, `#main` is the
 trunk. From source: `git clone … && npm install && npm run build && npm run build:web`.
 Requires **Node 22.5+** (built-in SQLite).
 
@@ -508,4 +538,16 @@ than in a document that drifts. Issues and pull requests are welcome.
 
 ## License
 
-[MIT](LICENSE) © Suhail Akhtar
+AICO is **source-available** under the
+[PolyForm Noncommercial License 1.0.0](LICENSE) © Suhail Akhtar.
+
+- ✅ **Free for personal, study, research and hobby use**, and for charities,
+  schools, public research and government bodies.
+- ❌ **No commercial use** — selling it, selling access to it, hosting it as a
+  paid service or building it into a commercial product needs a separate
+  licence from the author ([open an issue](https://github.com/suhail-akhtar/aico/issues)).
+- 🔗 **Forks and copies must credit the original**: keep the `LICENSE` file and
+  its `Required Notice:` lines, and say *"Based on AICO by Suhail Akhtar —
+  https://github.com/suhail-akhtar/aico"* in your README or about screen.
+
+Releases before 0.28.0 were published under the MIT License.

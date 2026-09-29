@@ -1,0 +1,11 @@
+/*
+ * The floating copilot's own view (copilot.html). The view is a little larger
+ * than the panel and transparent round it, so the page shows through the
+ * margin its shadow is drawn in — a shadow that has to fit in that margin.
+ */
+html.aico-overlay, html.aico-overlay body, html.aico-overlay #root { background: transparent; }
+.cp-overlay {
+  position: fixed; animation: none;
+  box-shadow: 0 2px 7px rgba(0,0,0,.16), 0 0 1px rgba(0,0,0,.22);
+}
+html.dark .cp-overlay { box-shadow: 0 2px 8px rgba(0,0,0,.55), 0 0 1px rgba(0,0,0,.7); }

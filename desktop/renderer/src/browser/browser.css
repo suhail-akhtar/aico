@@ -121,12 +121,6 @@
 
 /* The still that stands in for the page while something covers it. */
 .bx-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: left top; }
-.bx-still-veil { position: absolute; inset: 0; background: rgba(0,0,0,.14); backdrop-filter: saturate(.7); cursor: pointer; }
-.bx-still-hint {
-  border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 500;
-  background: #0d0d0d; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.18);
-}
-html.dark .bx-still-hint { background: #f3f3f3; color: #0d0d0d; }
 
 /* ── Chrome pages (new tab, history, bookmarks, reader, errors) ──── */
 .bx-chrome-page { position: absolute; inset: 0; overflow-y: auto; background: var(--aico-bg); }
@@ -221,3 +215,84 @@ html.dark .cp-input-shell { background: var(--desk-pill); }
   transition: box-shadow .12s ease, transform .12s ease;
 }
 .cp-launcher:hover { box-shadow: 0 2px 10px color-mix(in srgb, #7c3aed 25%, transparent); transform: translateY(-1px); }
+
+/* ── Bookmarks: the bar, its drop-downs, the manager ─────────────── */
+.bx-bmbar {
+  display: flex; align-items: center; height: 30px; flex-shrink: 0; padding: 0 8px 2px;
+  background: var(--aico-bg); border-bottom: 1px solid var(--aico-border-subtle);
+}
+.bx-bm-item {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  height: 24px; max-width: 180px; padding: 0 8px; border-radius: 999px;
+  font-size: 12px; color: var(--aico-text-secondary); white-space: nowrap;
+  transition: background-color .1s ease, color .1s ease;
+}
+.bx-bm-item:hover, .bx-bm-item.bx-bm-open { background: var(--aico-hover); color: var(--aico-text-primary); }
+.bx-bm-item.bx-bm-icononly { padding: 0 5px; }
+.bx-bm-more { padding: 0 6px; }
+/* Drop markers: a line before / after, a tint for "into". */
+.bx-bm-before::before, .bx-bm-after::after {
+  content: ''; position: absolute; pointer-events: none; background: var(--aico-accent); border-radius: 2px;
+}
+.bx-bm-item.bx-bm-before::before { left: -2px; top: 3px; bottom: 3px; width: 2px; }
+.bx-bm-item.bx-bm-after::after { right: -2px; top: 3px; bottom: 3px; width: 2px; }
+.bx-bm-into { background: var(--aico-accent-soft) !important; color: var(--aico-accent) !important; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aico-accent) 45%, transparent); }
+.bx-bm-endmark { width: 2px; height: 18px; margin-left: 2px; border-radius: 2px; background: var(--aico-accent); flex-shrink: 0; }
+
+.bx-bm-menu { min-width: 220px; max-width: 340px; padding: 5px; }
+.bx-bm-row {
+  position: relative; display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 9px;
+  border-radius: 8px; font-size: 13px; color: var(--aico-text-primary); cursor: default; user-select: none;
+}
+.bx-bm-row.bx-bm-active, .bx-bm-row.bx-bm-open { background: var(--aico-hover); }
+.bx-bm-row.bx-bm-before::before, .bx-bmm-row.bx-bm-before::before { left: 6px; right: 6px; top: -1px; height: 2px; }
+.bx-bm-row.bx-bm-after::after, .bx-bmm-row.bx-bm-after::after { left: 6px; right: 6px; bottom: -1px; height: 2px; }
+
+.bx-bmm-folder {
+  display: flex; align-items: center; gap: 6px; height: 30px; padding-right: 8px; border-radius: 8px;
+  font-size: 13px; color: var(--aico-text-secondary); cursor: default; user-select: none;
+}
+.bx-bmm-folder:hover { background: var(--aico-hover); color: var(--aico-text-primary); }
+.bx-bmm-folder.bx-bmm-current { background: var(--aico-accent-soft); color: var(--aico-accent); }
+.bx-bmm-row {
+  position: relative; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 8px 0 12px;
+  border-radius: 10px; cursor: default; user-select: none;
+}
+.bx-bmm-row:hover { background: var(--aico-hover); }
+.bx-bmm-row.bx-bmm-selected { background: var(--aico-accent-soft); }
+.bx-bmm-row.bx-bmm-selected .bx-bmm-more { opacity: 1; }
+.bx-bmm-endmark { height: 2px; margin: 2px 6px; border-radius: 2px; background: var(--aico-accent); }
+/* The selection shows where the keyboard is; the app-wide focus ring would box the whole list. */
+.bx-bmm-list:focus-visible { outline: none; }
+
+/* ── Tabs: pinned, dragging, full view (TabStrip.tsx) ─────────────── */
+.bx-tab.bx-tab-pinned { flex: 0 0 40px; min-width: 40px; max-width: 40px; padding: 0; justify-content: center; }
+.bx-tab .bx-pin-audio {
+  position: absolute; right: -6px; top: -5px; display: flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; border-radius: 999px; background: var(--aico-bg); color: var(--aico-text-secondary);
+}
+.bx-dragging .bx-tab { transition: transform .16s cubic-bezier(.2, .8, .2, 1); }
+.bx-dragging .bx-tab.bx-tab-dragging {
+  transition: none; z-index: 2; background: var(--aico-bg); color: var(--aico-text-primary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18); border-radius: 10px;
+}
+.bx-dragging .bx-tab.bx-tab-dragging::before, .bx-dragging .bx-tab.bx-tab-dragging::after { display: none; }
+.bx-drop-line {
+  position: absolute; bottom: 4px; width: 2px; height: 24px; margin-left: -1px; border-radius: 2px;
+  background: var(--aico-accent); pointer-events: none; z-index: 3;
+}
+.bx-tabstrip-full { height: 40px; }
+.bx-kind-chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; max-width: 220px; padding: 0 9px; border-radius: 999px;
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--aico-accent); background: var(--aico-accent-soft);
+  transition: filter .12s ease;
+}
+.bx-kind-chip:hover { filter: brightness(1.08); }
+
+/* AICO Shields: the count on the toolbar shield (Shields.tsx). */
+.bx-shield-badge {
+  position: absolute; right: -2px; bottom: -1px; min-width: 15px; height: 14px; padding: 0 3px;
+  border-radius: 7px; background: var(--aico-bg); border: 1px solid var(--aico-border-subtle);
+  color: var(--aico-text-secondary); font-size: 9.5px; line-height: 12px; font-weight: 600; text-align: center; pointer-events: none;
+}

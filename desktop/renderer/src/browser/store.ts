@@ -17,6 +17,8 @@ import { useDesk, go } from '@/state/desk';
 import { call, fire, useMissing } from './ipc';
 import { isBlankUrl } from './urls';
 import { agentBusy, fromLegacy, isCertError, tabError } from './tabs';
+import { installProtect } from './protect';
+import { installLearnReporter } from './ForYouLearn';
 
 export { agentBusy, fromLegacy, isCertError, tabError };
 import type {
@@ -24,7 +26,7 @@ import type {
   HandoffPrompt, LegacyTab, PermissionPrompt, ReadResult, TabError, TabState,
 } from './types';
 
-export type InternalPage = 'history' | 'bookmarks' | 'downloads';
+export type InternalPage = 'history' | 'bookmarks' | 'downloads' | 'insights' | 'privacy' | 'passwords';
 
 interface BrowserStore {
   state: BrowserState;
@@ -203,6 +205,8 @@ export function installBrowserStore(): void {
     useBrowser.setState(s => ({ find: { ...s.find, matches: f.matches, active: f.active } }));
   });
   on<{ id: string; url: string; message: string }>('browser:error', (e) => {
+    // A main that speaks the full contract reports errors on the tab (and clears them); this map would outlive a successful reload.
+    if (useBrowser.getState().modern) return;
     const code = Number(e.message.match(/\((-?\d+)\)\s*$/)?.[1] ?? -2);
     const description = e.message.replace(/\s*\(-?\d+\)\s*$/, '');
     useBrowser.setState(s => ({ legacyErrors: { ...s.legacyErrors, [e.id]: { code, description, url: e.url } } }));
@@ -211,6 +215,8 @@ export function installBrowserStore(): void {
   void refreshState();
   void refreshBookmarks();
   void refreshDownloads();
+  installProtect();
+  installLearnReporter();
 }
 
 // ── Verbs used from the chrome, the menus and the keyboard ──

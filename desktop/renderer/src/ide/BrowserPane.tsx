@@ -5,14 +5,21 @@
  * laid over the placeholder here on every layout change. Anything drawn over
  * the page area must therefore either sit outside the view's bounds (the bars
  * above it, the docked copilot beside it, the status line under it) or make
- * the view step aside: menus, dialogs and the floating copilot hide it and a
- * still of the page stands in; the chrome's own pages (new tab, history,
- * bookmarks, reader, error pages) replace it outright.
+ * the view step aside: menus, dialogs and the palette hide it, and a still of
+ * the page — captured by main in the moment before it hid it — stands in; the
+ * chrome's own pages (new tab, history, bookmarks, reader, error pages)
+ * replace it outright. The floating copilot is neither: it is a native view of
+ * its own above the page (browser/copilot-overlay.ts), so the page stays live
+ * round it.
  *
  * While the agent drives the page, a glow runs round it and the status line
  * says what it is doing, with Stop and Take over. When it needs you — a human
  * check, a sign-in, a payment it must not make — it hands over, and a banner
  * you cannot miss says so, with a one-click Done.
+ *
+ * The browser can also live in a window of its own (browser/host.ts,
+ * electron/browser-window.ts). This pane is then what that window shows, and
+ * the AICO window's Browser page and side dock show where it went instead.
  *
  * @module desktop/renderer/ide/BrowserPane
  */
@@ -26,7 +33,7 @@ import { Icon } from '@/lib/icons';
 import { cls } from '@/lib/util';
 import type { ViewProps } from '@/plugins/registry';
 import {
-  installBrowserStore, useAgentBusy, isCertError, letAgentContinue, noteStill, tabError, takeOver, agentStop, useActiveTab, useBrowser, openUrl,
+  installBrowserStore, useAgentBusy, isCertError, letAgentContinue, tabError, takeOver, agentStop, useActiveTab, useBrowser, openUrl,
 } from '@/browser/store';
 import { isBlankUrl } from '@/browser/urls';
 import { describeAgentAction } from '@/browser/context';
@@ -34,10 +41,17 @@ import { TabStrip } from '@/browser/TabStrip';
 import { Toolbar } from '@/browser/Toolbar';
 import { CertErrorPage, ErrorPage, InternalPageView, NewTabPage, ReaderView } from '@/browser/pages';
 import { FindBar, HandoffBanner, HumanCheckBar, PageModal, PermissionBar, usePendingModal } from '@/browser/prompts';
+import { SavePasswordBar } from '@/browser/PasswordsBar';
+import { ProtectPage, ThreatBar, protectPageFor } from '@/browser/Interstitials';
 import { CopilotPanel } from '@/browser/Copilot';
 import { minimizeCopilot, toggleCopilot, useCopilotUi } from '@/browser/copilot-ui';
 import { cancelCopilot, useCopilot } from '@/browser/copilot-session';
+import { useFloatingCopilot } from '@/browser/copilot-overlay';
+import { call } from '@/browser/ipc';
+import type { PageStill } from '@desk/browser-types';
 import { useBrowserKeys } from '@/browser/keys';
+import { browserElsewhere, focusBrowserWindow, popInBrowser, refreshBrowserHost, useBrowserElsewhere } from '@/browser/host';
+import { BookmarksBar } from '@/browser/BookmarksBar';
 
 export function BrowserView({ params }: ViewProps): React.ReactElement {
   return <BrowserPane initialUrl={params?.url} />;
@@ -45,6 +59,40 @@ export function BrowserView({ params }: ViewProps): React.ReactElement {
 
 export function BrowserPane({ docked, initialUrl }: { docked?: boolean; initialUrl?: string }): React.ReactElement {
   useEffect(installBrowserStore, []);
+  const elsewhere = useBrowserElsewhere();
+  // A page asked for (a view opened with a URL) opens in the browser wherever it is.
+  useEffect(() => {
+    if (!initialUrl) return;
+    openUrl(initialUrl);
+    if (browserElsewhere()) focusBrowserWindow();
+  }, [initialUrl]);
+  return elsewhere ? <BrowserElsewhere docked={docked} /> : <BrowserHere docked={docked} />;
+}
+
+/** The AICO window's Browser page (or side dock) while the browser is in its own window. */
+function BrowserElsewhere({ docked }: { docked?: boolean }): React.ReactElement {
+  const count = useBrowser(s => s.state.tabs.length);
+  const tab = useActiveTab();
+  const title = tab && !isBlankUrl(tab.url) ? tab.title || tab.url : '';
+  return (
+    <div className={cls('flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center', docked ? 'py-8' : 'py-12')}>
+      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-aico-accent-soft text-aico-accent"><Icon name="pop-out" size={22} /></span>
+      <div className="max-w-sm space-y-1">
+        <div className="text-[15px] font-semibold text-aico-primary">The browser is open in its own window</div>
+        <div className="text-[12.5px] text-aico-muted">
+          {count > 0 && <>{count} tab{count === 1 ? '' : 's'}{title && <> · <span className="text-aico-secondary">{title}</span></>}. </>}
+          AICO can still use it while you chat here.
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <button className="btn-accent" onClick={focusBrowserWindow}><Icon name="pop-out" size={14} />Focus it</button>
+        <button className="btn-outline" onClick={popInBrowser} title="Move the browser and its tabs back into this window"><Icon name="pop-in" size={14} />Bring it back here</button>
+      </div>
+    </div>
+  );
+}
+
+function BrowserHere({ docked }: { docked?: boolean }): React.ReactElement {
   useBrowserKeys(!docked);
 
   const tab = useActiveTab();
@@ -63,12 +111,7 @@ export function BrowserPane({ docked, initialUrl }: { docked?: boolean; initialU
 
   const host = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLDivElement>(null);
-  const [areaSize, setAreaSize] = useState({ width: 800, height: 600 });
-  const [still, setStill] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (initialUrl) openUrl(initialUrl);
-  }, [initialUrl]);
+  const [still, setStill] = useState<PageStill | null>(null);
 
   // The side dock's "Open full size".
   useEffect(() => {
@@ -89,6 +132,7 @@ export function BrowserPane({ docked, initialUrl }: { docked?: boolean; initialU
   const cert = isCertError(error) ? error : undefined;
   const blank = Boolean(tab && isBlankUrl(tab.url));
   const replaced: React.ReactNode = !tab ? null
+    : protectPageFor(tab) && !(internal && !docked) ? <ProtectPage tab={tab} />
     : cert ? <CertErrorPage tab={tab} error={cert} />
       : internal && !docked ? <InternalPageView page={internal.page} />
         : reader ? <ReaderView />
@@ -96,8 +140,12 @@ export function BrowserPane({ docked, initialUrl }: { docked?: boolean; initialU
             : blank ? <NewTabPage />
               : null;
   const floating = !docked && ui.open && !ui.minimized && ui.mode === 'float';
-  const covered = overlays > 0 || settingsOpen || paletteOpen || Boolean(modal) || floating || replaced !== null;
+  const appCovered = overlays > 0 || settingsOpen || paletteOpen || Boolean(modal);
+  const covered = appCovered || replaced !== null;
   const needsStill = covered && replaced === null;
+  const floatStill = useFloatingCopilot(area, { enabled: !docked, active: floating, show: !appCovered && !handoff });
+  const stillWanted = useRef(needsStill);
+  stillWanted.current = needsStill;
 
   // Keep the native view exactly over the placeholder (or out of the way).
   useLayoutEffect(() => {
@@ -108,7 +156,12 @@ export function BrowserPane({ docked, initialUrl }: { docked?: boolean; initialU
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const r = el.getBoundingClientRect();
-        void invoke('browser:setBounds', { x: r.left, y: r.top, width: r.width, height: r.height }, !covered && r.width > 0 && r.height > 0).catch(() => {});
+        void invoke<{ still?: PageStill; elsewhere?: boolean }>('browser:setBounds', { x: r.left, y: r.top, width: r.width, height: r.height }, !covered && r.width > 0 && r.height > 0)
+          .then((res) => {
+            if (res?.elsewhere) refreshBrowserHost();
+            else if (res?.still && stillWanted.current) setStill(res.still);
+          })
+          .catch(() => {});
       });
     };
     push();
@@ -123,28 +176,19 @@ export function BrowserPane({ docked, initialUrl }: { docked?: boolean; initialU
   }, [covered, docked]);
   useEffect(() => () => { void invoke('browser:setBounds', null, false).catch(() => {}); }, []);
 
-  useLayoutEffect(() => {
-    const el = area.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setAreaSize({ width: el.clientWidth, height: el.clientHeight }));
-    ro.observe(el);
-    setAreaSize({ width: el.clientWidth, height: el.clientHeight });
-    return () => ro.disconnect();
-  }, []);
-
-  // A still of the page while something covers it; kept fresh while the copilot floats over a page that changes.
-  const agentAt = useBrowser(s => s.agent.at);
-  const lastShot = useRef(0);
+  // The still main captured as it hid the page belongs to the tab it was taken of; a tab switched to
+  // while covered shows its own last still, if it has one (asked once the capture has had its time).
+  const tabId = tab?.id;
   useEffect(() => {
     if (!needsStill) { setStill(null); return; }
-    const wait = floating && lastShot.current ? Math.max(0, 1200 - (Date.now() - lastShot.current)) : 0;
+    if (!tabId || still?.tabId === tabId) return;
+    let live = true;
     const t = setTimeout(() => {
-      lastShot.current = Date.now();
-      noteStill();
-      void invoke<{ dataUrl: string }>('browser:screenshot').then(s => setStill(s.dataUrl)).catch(() => {});
-    }, wait + (floating ? 250 : 0));
-    return () => clearTimeout(t);
-  }, [needsStill, floating, tab?.url, tab?.loading, floating ? agentAt : 0]); // eslint-disable-line react-hooks/exhaustive-deps
+      void call<PageStill | null>('browser:still').then((s) => { if (live && s?.tabId === tabId) setStill(s); }).catch(() => {});
+    }, 700);
+    return () => { live = false; clearTimeout(t); };
+  }, [needsStill, tabId, still?.tabId]);
+  const pageStill = needsStill && still && still.tabId === tabId ? still.dataUrl : null;
 
   const driving = useAgentBusy() && !handoff && !takenOver;
 
@@ -152,28 +196,19 @@ export function BrowserPane({ docked, initialUrl }: { docked?: boolean; initialU
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {!docked && <TabStrip />}
       <Toolbar compact={docked} />
+      {!docked && <BookmarksBar />}
       <HandoffBanner />
       <PermissionBar />
+      <SavePasswordBar />
       <HumanCheckBar />
+      <ThreatBar />
       <FindBar />
       <div ref={area} className="relative flex min-h-0 flex-1">
         <div className={cls('bx-page-frame flex min-h-0 min-w-0 flex-1', driving && 'bx-driving', handoff && 'bx-handoff')}>
           <div ref={host} className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-aico-bg" data-no-tip>
-            {still && needsStill && (
-              <>
-                <img src={still} alt="" className="bx-still" draggable={false} />
-                {floating && (
-                  <button className="bx-still-veil flex items-end justify-start p-4" onClick={() => minimizeCopilot()}
-                    title="Minimise the copilot to use the page">
-                    <span className="bx-still-hint">
-                      Page paused while the copilot floats — click here to use it, or dock the copilot beside it
-                    </span>
-                  </button>
-                )}
-              </>
-            )}
+            {pageStill && <img src={pageStill} alt="" className="bx-still" draggable={false} />}
             {replaced}
-            {(!loaded || tabs.length === 0) && !replaced && !still && (
+            {(!loaded || tabs.length === 0) && !replaced && !pageStill && (
               <div className="absolute inset-0 flex items-center justify-center bg-aico-bg text-[13px] text-aico-muted">
                 <span className="spinner mr-2 h-4 w-4" />Opening…
               </div>
@@ -181,7 +216,11 @@ export function BrowserPane({ docked, initialUrl }: { docked?: boolean; initialU
             <PageModal />
           </div>
         </div>
-        {!docked && <CopilotPanel area={areaSize} />}
+        {!docked && <CopilotPanel />}
+        {floatStill && (
+          <img src={floatStill.dataUrl} alt="" draggable={false} className="pointer-events-none absolute z-[45]"
+            style={{ left: floatStill.x, top: floatStill.y, width: floatStill.width, height: floatStill.height }} />
+        )}
       </div>
       <StatusLine docked={docked} />
     </div>

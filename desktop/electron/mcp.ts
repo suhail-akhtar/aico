@@ -22,6 +22,7 @@ import path from 'node:path';
 import type { DesktopContext } from './context';
 import { listUserPlugins, readPluginFile, removePlugin, savePlugin, setPluginEnabled } from './plugins';
 import type { Target } from './browser';
+import { presetFor } from './browser-import-core';
 import { PLUGIN_API_VERSION, ICON_NAMES } from '../shared/plugin-types';
 
 export const MCP_NAME = 'aico-desktop';
@@ -62,8 +63,8 @@ export function manual(ctx: DesktopContext): string {
     '',
     'IDE: call ide_describe first when asked about the IDE — it returns the live state (current view, projects, plugins and their pages/commands, theme). ide_navigate opens any view by id (chat, chats, library, scheduled, plugins, projects, project {path}, group {id}, files {root, open}, git {path}, github {path}, browser {url}, apps, activity, changes {id}, trajectory {id}, or a plugin page "<pluginId>:<viewId>"). ide_run_command runs any palette command. ide_set_appearance changes theme/colours/font size/width; ide_set_layout shows or hides the sidebar, bottom panel and side browser. ide_open_file opens a file in the editor. ide_notify shows the user a notification. ide_terminal_run starts a command in a visible terminal tab (use it for dev servers the user should watch; use your own shell tool for quick commands).',
     '',
-    'BROWSER: a real Chromium browser inside the IDE (own profile). The user watches — your actions are highlighted on the page — and may press Stop / Take over: then every browser tool refuses; stop and ask. Work READ → ACT → VERIFY. Read: browser_open, then browser_read (the page as Markdown), browser_insights (page kind; login wall, paywall, cookie banner, human check), browser_extract (links, tables, prices, contacts, outline, metadata), browser_find. Act: browser_snapshot gives refs like [e7] for browser_click / browser_type / browser_select / browser_press; browser_forms then browser_fill fill a whole form. Refs change when the page changes — snapshot again. Verify: every action reports the URL now and what changed (navigation, validation errors, messages, dialogs, downloads); browser_wait (text, gone, url, urlChange, networkIdle); browser_screenshot shows you the page. browser_dialog answers JavaScript dialogs; browser_downloads; browser_upload (the user approves); browser_tabs. Local apps: http://localhost:<port>; browser_console / browser_network for errors.',
-    'BROWSER RULES: never solve, bypass or work around a CAPTCHA, "verify you are human" or bot check — call browser_handoff so the user does it, then poll browser_handoff_wait. Never type passwords, card numbers, CVVs or one-time codes (refused) — hand those over too. Fill forms, but ask the user before submitting anything that buys, pays, books, sends, posts or deletes. On cookie banners prefer "Reject" / "Necessary only".',
+    'BROWSER: a real Chromium browser inside the IDE (own profile). The user watches — your actions are highlighted on the page — and may press Stop / Take over: then every browser tool refuses; stop and ask. Work READ → ACT → VERIFY. Read: browser_open, then browser_read (the page as Markdown), browser_insights (page kind; login wall, paywall, cookie banner, human check), browser_extract (links, tables, prices, contacts, outline, metadata), browser_find. Act: browser_snapshot gives refs like [e7] for browser_click / browser_type / browser_select / browser_press; browser_forms then browser_fill fill a whole form; browser_autofill fills the user\'s own saved details (name, email, phone, address) when they ask to "fill it with my profile". Refs change when the page changes — snapshot again. Verify: every action reports the URL now and what changed (navigation, validation errors, messages, dialogs, downloads); browser_wait (text, gone, url, urlChange, networkIdle); browser_screenshot shows you the page. browser_dialog answers JavaScript dialogs; browser_downloads; browser_upload (the user approves); browser_tabs; browser_profile (their own browsing). Local apps: http://localhost:<port>; browser_console / browser_network for errors.',
+    'BROWSER RULES: never solve, bypass or work around a CAPTCHA, "verify you are human" or bot check — call browser_handoff so the user does it, then poll browser_handoff_wait. Never type passwords, card numbers, CVVs or one-time codes (refused) — hand those over too. Fill forms, but ask the user before submitting anything that buys, pays, books, sends, posts or deletes. On cookie banners prefer "Reject" / "Necessary only". Saved passwords are the user\'s alone — no tool reads or fills them.',
     '',
     `PLUGINS: the IDE is customised with plugins, never by editing its code. To add or change a feature, write a plugin with ide_plugin_save. A manifest is JSON: { "id": "lower.case-id", "name": "Name", "version": "0.1.0", "description": "...", "icon": one of [${ICON_NAMES.join(', ')}], "category": "...", "contributes": { ... } }. Contribution kinds:`,
     '- navItems: [{ id, title, icon, view, placement: "primary"|"more", order }] — sidebar entries; view is a page id of this plugin (or any view id).',
@@ -92,6 +93,10 @@ export function createTools(ctx: DesktopContext): Tool[] {
     return b;
   };
   const json = (v: unknown): string => JSON.stringify(v, null, 2);
+  const learning = (): NonNullable<DesktopContext['services']['browserLearn']> => {
+    if (!ctx.services.browserLearn) throw new Error('Browsing intelligence is not available.');
+    return ctx.services.browserLearn;
+  };
 
   const tools: Tool[] = [
     {
@@ -272,6 +277,36 @@ export function createTools(ctx: DesktopContext): Tool[] {
           ...(typeof f.ref === 'string' ? { ref: f.ref } : {}), ...(typeof f.label === 'string' ? { label: f.label } : {}), ...(typeof f.name === 'string' ? { name: f.name } : {}),
           value: typeof f.value === 'boolean' ? f.value : String(f.value ?? ''),
         })));
+      },
+    },
+    {
+      name: 'browser_autofill',
+      description: 'Fill the form in focus (or the page\'s forms) from the USER\'S OWN saved autofill profile (Settings → Browser → Autofill): name, email, phone, company, job title, address and delivery-instruction fields, matched by their autocomplete attributes and labels. Use it when the user asks to fill a form "with my details / my profile / my address". It never fills passwords, card numbers, expiry dates, CVVs or one-time codes, never touches fields that already hold something, and never submits. addressId picks one of the saved addresses (default: the shipping address for shipping fields, else the default one). Reports which fields were filled (not the values); fill anything else with browser_fill, and ask before submitting.',
+      inputSchema: { type: 'object', properties: { addressId: { type: 'string' } } },
+      run: async (a) => (await browser()).autofill({ ...(typeof a.addressId === 'string' ? { addressId: a.addressId } : {}) }),
+    },
+    {
+      name: 'browser_import',
+      description: 'Help the user bring their data over from another browser. It only OPENS AICO\'s import wizard, pre-selected (e.g. browser "chrome", parts ["bookmarks","history"]) — the user reviews the counts and confirms there; nothing is imported by this call. passwords: true opens the step for a passwords CSV the user exports from their browser themselves (you never see, read or handle passwords). action "status" instead lists the browser profiles found, with how many bookmarks / history entries / addresses each holds, and the imports done so far (counts only).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['open', 'status'], description: 'Default "open".' },
+          browser: { type: 'string', description: 'Chrome, Edge, Brave, Vivaldi, Opera, Opera GX, Chromium or Firefox.' },
+          parts: { type: 'array', items: { type: 'string', enum: ['bookmarks', 'history', 'addresses'] } },
+          passwords: { type: 'boolean' },
+        },
+      },
+      run: async (a) => {
+        const imp = ctx.services.browserImport;
+        if (!imp) throw new Error('Importing is not available in this version.');
+        if (a.action === 'status') {
+          const [profiles, recent] = [await imp.profiles(), imp.recent()];
+          return json({ profiles: profiles.map(p => ({ browser: p.browser, profile: p.profile, ...p.counts })), imported: recent });
+        }
+        const preset = presetFor(a.browser, a.parts, a.passwords);
+        imp.open(preset);
+        return `The import wizard is open for the user${preset.browser ? ` with ${preset.browser}` : ''}${preset.parts ? ` (${preset.parts.join(', ')})` : ''}${preset.passwords ? ' at the passwords step' : ''}. They review and confirm it themselves; call browser_import with action "status" afterwards for the counts.`;
       },
     },
     {
@@ -482,6 +517,48 @@ export function createTools(ctx: DesktopContext): Tool[] {
         }
         return 'Still waiting for the user. Call browser_handoff_wait again, or tell the user what you are waiting for.';
       },
+    },
+
+    // ── What AICO has learned about the user's browsing (browser-learn.ts) — on this device, read only when asked ──
+    {
+      name: 'browser_profile',
+      description: 'What AICO has learned from the user’s own browsing, kept on this device: interests (topics, top sites), routines (sites opened at certain times), research threads (a topic looked into across pages and searches), unfinished things (articles barely read, carts and checkouts left, forms started, searches with no result opened), priorities now and likely next sites. Use it for questions about their browsing — "what was I researching last week?", "what should I read next?", "what did I leave unfinished?". section narrows it; days sets how far back threads look (default 14; 7 for "last week"); include_urls adds page addresses (only when the user needs them).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          section: { type: 'string', enum: ['all', 'interests', 'routines', 'threads', 'unfinished', 'priorities', 'next', 'tabs'] },
+          days: { type: 'number' },
+          include_urls: { type: 'boolean' },
+        },
+      },
+      run: async (a) => learning().profile({ section: typeof a.section === 'string' ? a.section : undefined, days: typeof a.days === 'number' ? a.days : undefined, includeUrls: a.include_urls === true }),
+    },
+    {
+      name: 'browser_tabs_overview',
+      description: 'The open tabs ranked by how much each matters now (priority 0–100, from when the user last looked at it, time spent on it, how much they use the site, and unfinished forms), with page kinds and the idle ones (not looked at for 3+ days). Call it before tidying tabs or when asked which tabs matter.',
+      inputSchema: { type: 'object', properties: {} },
+      run: async () => learning().tabsOverview(),
+    },
+    {
+      name: 'browser_organize_tabs',
+      description: 'Tidy tabs for the user: action bookmark (save into a new bookmarks folder), close, or bookmark_close (the default — nothing is lost). tabIds from browser_tabs_overview, or idle: true for every idle tab. Closing more than one tab shows the user a confirmation listing them; if they have not answered within ~20 s you get a confirmId — call again with only confirmId to wait. Only tidy when the user asked.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['bookmark', 'close', 'bookmark_close'] },
+          tabIds: { type: 'array', items: { type: 'string' } },
+          idle: { type: 'boolean' },
+          folder: { type: 'string', description: 'Bookmarks folder name (default "Saved tabs — <date>").' },
+          confirmId: { type: 'string' },
+        },
+      },
+      run: async (a) => learning().organize({
+        ...(typeof a.action === 'string' ? { action: a.action as 'bookmark' | 'close' | 'bookmark_close' } : {}),
+        ...(Array.isArray(a.tabIds) ? { tabIds: a.tabIds.map(String) } : {}),
+        ...(typeof a.idle === 'boolean' ? { idle: a.idle } : {}),
+        ...(typeof a.folder === 'string' ? { folder: a.folder } : {}),
+        ...(typeof a.confirmId === 'string' ? { confirmId: a.confirmId } : {}),
+      }),
     },
   ];
   return tools;

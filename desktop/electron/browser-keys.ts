@@ -13,8 +13,8 @@
 
 export interface KeyInput { type: string; key: string; control: boolean; meta: boolean; shift: boolean; alt: boolean }
 
-const WITH_MOD = new Set(['t', 'w', 'Tab', 'l', 'r', 'f', 'd', 'h', 'j', 'p', '=', '+', '-', '_', '0']);
-const WITH_MOD_SHIFT = new Set(['Tab', 'a', 'r', '+', '=']);
+const WITH_MOD = new Set(['t', 'w', 'Tab', 'l', 'r', 'f', 'd', 'h', 'j', 'p', '=', '+', '-', '_', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'PageUp', 'PageDown']);
+const WITH_MOD_SHIFT = new Set(['Tab', 'a', 'r', 't', '+', '=', 'PageUp', 'PageDown', 'b', 'd', 'o', 'n']);
 
 /** The shortcut spec to forward ("Ctrl+F"), or null when the key belongs to the page. */
 export function browserShortcutSpec(input: KeyInput, mac = process.platform === 'darwin'): string | null {
@@ -24,7 +24,8 @@ export function browserShortcutSpec(input: KeyInput, mac = process.platform === 
   // Always spelled Ctrl: the interface reads forwarded shortcuts platform-neutrally.
   const modName = 'Ctrl';
   if (input.alt && !mod && !input.shift && (key === 'ArrowLeft' || key === 'ArrowRight')) return `Alt+${key}`;
-  if (!mod && !input.alt && !input.shift && (key === 'F5' || key === 'F12')) return key;
+  if (!mod && !input.alt && !input.shift && (key === 'F5' || key === 'F11' || key === 'F12')) return key;
+  if (!mod && !input.alt && input.shift && key === 'F11') return 'Shift+F11';
   if (!mod || input.alt) return null;
   if (input.shift) return WITH_MOD_SHIFT.has(key) ? `${modName}+Shift+${key}` : null;
   return WITH_MOD.has(key) ? `${modName}+${key}` : null;

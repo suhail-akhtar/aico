@@ -13,6 +13,14 @@
  * What it does not do that the main store does: attachments, plan mode, edit
  * hand-offs, host tools, sub-agent panels. A browsing chat needs none of them.
  *
+ * Two documents can show it: the main window (docked, or minimised to the
+ * launcher) and the floating copilot's own view over the page. Only the one on
+ * screen holds the stream — `attachCopilot` when it takes over, `detachCopilot`
+ * when it hands over — and the conversation it attaches to is the one in
+ * localStorage, which both share, so a new chat started in one is the chat the
+ * other picks up. Attaching replays the session, so a turn that is running
+ * carries on where it is.
+ *
  * @module desktop/renderer/browser/copilot-session
  */
 
@@ -123,6 +131,22 @@ export function newCopilotChat(): void {
 export function disconnectCopilot(): void {
   handle?.close();
   handle = null;
+}
+
+/** Take the stream: the conversation the other document may have switched to, replayed from the start. */
+export function attachCopilot(): void {
+  const stored = load(SESSION_KEY);
+  const s = useCopilot.getState();
+  if (handle && s.sessionId && s.sessionId === stored) return;
+  // Keep the folder the other document started it in.
+  if (stored && stored !== s.sessionId) useCopilot.setState({ sessionId: stored, project: load(PROJECT_KEY) });
+  connectCopilot(stored ?? s.sessionId ?? freshSessionId());
+}
+
+/** Hand the stream to the other document; what is shown stays until it attaches again. */
+export function detachCopilot(): void {
+  disconnectCopilot();
+  useCopilot.setState({ status: 'idle' });
 }
 
 export async function sendCopilot(task: string, opts: { title?: string; approval?: SubmitOptions['approval']; effort?: SubmitOptions['effort'] } = {}): Promise<boolean> {

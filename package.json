@@ -1,6 +1,6 @@
 {
   "name": "@suhail-akhtar/aico",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "AI Coder — multi-provider coding assistant CLI (Claude Code compatible). Supports OpenRouter, Anthropic, OpenAI, Gemini, Moonshot Kimi, DeepSeek, Z.AI (GLM), Ollama.",
   "keywords": [
     "ai",
@@ -21,7 +21,7 @@
     "type": "git",
     "url": "git+https://github.com/suhail-akhtar/aico.git"
   },
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Suhail Akhtar",
   "type": "module",
   "bin": {

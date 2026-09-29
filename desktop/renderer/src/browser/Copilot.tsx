@@ -8,6 +8,11 @@
  * well; answers render with the same renderers as the main chat, and links in
  * them open in the browser.
  *
+ * Docked, it is part of the browser pane. Floating, it is drawn by its own
+ * view over the page (copilot-main.tsx, placed by electron/browser-overlay.ts),
+ * so the page stays live round it: `FloatingCopilot` is that view's content,
+ * and its drag and resize move the view itself.
+ *
  * @module desktop/renderer/browser/Copilot
  */
 
@@ -20,15 +25,20 @@ import { copyRich } from '@/lib/rich';
 import { useDesk, toast } from '@/state/desk';
 import { getSendOptions, openChat } from '@/chat/actions';
 import { groupTurns, currentActivity, type Turn } from '@/chat/turns';
-import { callWithin } from './ipc';
+import { callWithin, fire } from './ipc';
 import { contextPageOf, QUICK_ACTIONS, stripContextHeader, withContext, type PageContext, type QuickAction } from './context';
 import { hostOf, isBlankUrl } from './urls';
+import { ALL_SUGGESTIONS, mergeActions } from './suggest';
+import { usePageSuggestions } from './useSuggestions';
 import { Favicon } from './Omnibox';
 import { activeTab, agentStop, letAgentContinue, openUrl, useActiveTab, useBrowser } from './store';
 import {
-  answerCopilot, cancelCopilot, ensureCopilot, newCopilotChat, permitCopilot, sendCopilot, useCopilot,
+  answerCopilot, cancelCopilot, newCopilotChat, permitCopilot, sendCopilot, useCopilot,
 } from './copilot-session';
-import { clampFloat, minimizeCopilot, toggleCopilot, useCopilotUi } from './copilot-ui';
+import { clampFloat, copilotSurface, minimizeCopilot, toggleCopilot, useCopilotUi } from './copilot-ui';
+import { dragFloat, resizeFloat } from './geometry';
+import { inBrowserWindow } from './host';
+import type { OverlayMessage } from '@desk/copilot-float';
 import type { Insights } from './types';
 
 /** Ask the page what the header should say, briefly — sending must not wait on a slow page. */
@@ -63,25 +73,64 @@ export async function askCopilot(text: string, quick?: QuickAction): Promise<voi
   await sendCopilot(withContext(text, ctx), { title, approval: getSendOptions().approval, effort: getSendOptions().effort });
 }
 
-export function CopilotPanel({ area }: { area: { width: number; height: number } }): React.ReactElement | null {
+/** The docked copilot, in the browser pane. Floating, it is its own view (see FloatingCopilot). */
+export function CopilotPanel(): React.ReactElement | null {
   const ui = useCopilotUi();
-  useEffect(() => { if (ui.open) ensureCopilot(); }, [ui.open]);
-  if (!ui.open || ui.minimized) return null;
-  if (ui.mode === 'dock') {
-    return (
-      <aside className="cp-panel cp-dock relative shrink-0" style={{ width: ui.dockWidth }} aria-label="AICO copilot">
-        <DockResize />
-        <CopilotBody />
-      </aside>
-    );
-  }
+  if (!ui.open || ui.minimized || ui.mode !== 'dock') return null;
+  return (
+    <aside className="cp-panel cp-dock relative shrink-0" style={{ width: ui.dockWidth }} aria-label="AICO copilot">
+      <DockResize />
+      <CopilotBody />
+    </aside>
+  );
+}
+
+/**
+ * The floating copilot, filling its own view: `panel` is where main placed it
+ * inside the view, `area` the browser area it floats over (for keeping a drag
+ * inside it).
+ */
+export function FloatingCopilot({ panel, area }: {
+  panel: { x: number; y: number; width: number; height: number }; area: { width: number; height: number };
+}): React.ReactElement {
+  const ui = useCopilotUi();
   const box = clampFloat(ui, area);
   return (
-    <aside className="cp-panel cp-float" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} aria-label="AICO copilot">
+    <aside className="cp-panel cp-float cp-overlay" style={{ left: panel.x, top: panel.y, width: panel.width, height: panel.height }} aria-label="AICO copilot">
       <CopilotBody floating box={box} area={area} />
       <FloatResize box={box} area={area} />
     </aside>
   );
+}
+
+/** Asks of the main window, from the floating copilot's own view. */
+function toWindow(m: OverlayMessage): void { fire('browser:overlay:relay', m); }
+
+/**
+ * Follow a drag in screen coordinates: the floating copilot's view moves under
+ * the pointer, so positions within it do not hold still, but the screen does.
+ */
+function trackPointer(e: React.PointerEvent, onMove: (dx: number, dy: number) => void): void {
+  e.preventDefault();
+  const el = e.currentTarget as HTMLElement;
+  const x0 = e.screenX; const y0 = e.screenY;
+  try { el.setPointerCapture(e.pointerId); } catch { /* the window listeners still follow it */ }
+  let frame = 0; let last: PointerEvent | null = null;
+  const move = (ev: PointerEvent): void => {
+    last = ev;
+    if (frame) return;
+    frame = requestAnimationFrame(() => { frame = 0; if (last) onMove(last.screenX - x0, last.screenY - y0); });
+  };
+  const up = (): void => {
+    cancelAnimationFrame(frame);
+    if (last) onMove(last.screenX - x0, last.screenY - y0);
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 function DockResize(): React.ReactElement {
@@ -99,17 +148,8 @@ function DockResize(): React.ReactElement {
 
 function FloatResize({ box, area }: { box: { x: number; y: number; w: number; h: number }; area: { width: number; height: number } }): React.ReactElement {
   const start = (e: React.PointerEvent): void => {
-    e.preventDefault();
-    const x0 = e.clientX; const y0 = e.clientY;
-    const right = box.x + box.w;
-    const move = (ev: PointerEvent): void => {
-      const w = Math.max(320, Math.min(right - 8, box.w - (ev.clientX - x0)));
-      const h = Math.max(300, Math.min(area.height - box.y - 8, box.h + (ev.clientY - y0)));
-      useCopilotUi.setState({ w, h, x: right - w, y: box.y });
-    };
-    const up = (): void => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    const b0 = box;
+    trackPointer(e, (dx, dy) => useCopilotUi.setState(resizeFloat(b0, dx, dy, area)));
   };
   return (
     <div className="cp-resize bottom-0 left-0 h-4 w-4 cursor-nesw-resize" onPointerDown={start} aria-label="Resize copilot">
@@ -140,13 +180,9 @@ function CopilotBody({ floating, box, area }: {
   }, [messages, busy]);
 
   const drag = (e: React.PointerEvent): void => {
-    if (!floating || !box || !area || (e.target as HTMLElement).closest('button')) return;
-    e.preventDefault();
-    const x0 = e.clientX - box.x; const y0 = e.clientY - box.y;
-    const move = (ev: PointerEvent): void => useCopilotUi.setState(clampFloat({ x: ev.clientX - x0, y: ev.clientY - y0, w: box.w, h: box.h }, area));
-    const up = (): void => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    if (!floating || !box || !area || e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+    const b0 = box;
+    trackPointer(e, (dx, dy) => useCopilotUi.setState(dragFloat(b0, dx, dy, area)));
   };
 
   // Links in answers open in the browser, not in another window.
@@ -171,7 +207,8 @@ function CopilotBody({ floating, box, area }: {
         </div>
         <button className="icon-btn-sm" onClick={() => newCopilotChat()} disabled={busy} title="New copilot chat"><Icon name="new-chat" size={15} /></button>
         <button className="icon-btn-sm" disabled={!sessionId || turns.length === 0}
-          onClick={() => { if (sessionId) void openChat(sessionId); }} title="Open in main chat — continue this conversation in the full chat view">
+          onClick={() => { if (!sessionId) return; if (copilotSurface() === 'overlay' || inBrowserWindow()) toWindow({ type: 'openChat', sessionId }); else void openChat(sessionId); }}
+          title="Open in main chat — continue this conversation in the full chat view">
           <Icon name="chat" size={15} />
         </button>
         <button className="icon-btn-sm" onClick={() => useCopilotUi.setState({ mode: ui.mode === 'dock' ? 'float' : 'dock' })}
@@ -202,6 +239,7 @@ function StartScreen(): React.ReactElement {
   const tab = useActiveTab();
   const onPage = Boolean(tab && !isBlankUrl(tab.url));
   const busy = useCopilot(s => s.busy);
+  const { chips } = usePageSuggestions();
   return (
     <div className="flex flex-col items-center px-1 pt-6 text-center">
       <span className="bx-orb mb-3 h-10 w-10" />
@@ -211,7 +249,7 @@ function StartScreen(): React.ReactElement {
           : 'Open a page, or ask AICO to research, compare or fill things in for you.'}
       </div>
       <div className="mt-5 grid w-full grid-cols-1 gap-1.5">
-        {QUICK_ACTIONS.slice(0, onPage ? 9 : 0).map(q => (
+        {mergeActions(chips, QUICK_ACTIONS, onPage ? 9 : 0).map(q => (
           <button key={q.id} className="cp-action" disabled={busy} onClick={() => void askCopilot(q.prompt, q)}>
             <Icon name={q.icon} size={15} className="shrink-0 text-aico-secondary" />
             <span className="min-w-0 flex-1 truncate">{q.label}</span>
@@ -280,7 +318,7 @@ function CopilotTurn({ turn, last }: { turn: Turn; last: boolean }): React.React
 function UserLine({ message }: { message: ChatMessage }): React.ReactElement {
   const text = stripContextHeader(message.content);
   const page = contextPageOf(message.content);
-  const quick = QUICK_ACTIONS.find(q => q.prompt === text.trim());
+  const quick = [...QUICK_ACTIONS, ...ALL_SUGGESTIONS].find(q => q.prompt === text.trim());
   return (
     <div className="mb-3 flex flex-col items-end gap-1">
       <div className="cp-user whitespace-pre-wrap break-words selectable">{quick ? quick.label : text}</div>
@@ -337,6 +375,7 @@ function CopilotInput(): React.ReactElement {
   const sendKey = useDesk(s => s.prefs.sendKey);
   const tab = useActiveTab();
   const onPage = Boolean(tab && !isBlankUrl(tab.url));
+  const { chips } = usePageSuggestions();
   const box = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -361,7 +400,11 @@ function CopilotInput(): React.ReactElement {
     const t = text.trim();
     if (!t || busy) return;
     setText('');
-    void askCopilot(t).catch((e: Error) => toast.error('Could not send', e.message));
+    void askCopilot(t).catch((e: Error) => {
+      // The floating copilot's view has no toasts of its own; it says so in the conversation.
+      if (copilotSurface() === 'overlay') useCopilot.setState({ error: `Could not send: ${e.message}` });
+      else toast.error('Could not send', e.message);
+    });
   }, [text, busy]);
   const stop = (): void => { void cancelCopilot(); agentStop(); };
 
@@ -369,7 +412,7 @@ function CopilotInput(): React.ReactElement {
     <div className="shrink-0 px-3 pb-3">
       {hasTurns && onPage && (
         <div className="cp-chipbar">
-          {QUICK_ACTIONS.map(q => (
+          {mergeActions(chips, QUICK_ACTIONS).map(q => (
             <button key={q.id} className="cp-chip" disabled={busy} onClick={() => void askCopilot(q.prompt, q)} title={q.label}>
               <Icon name={q.icon} size={12} />{q.label}
             </button>

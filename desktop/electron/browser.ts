@@ -31,13 +31,13 @@
  * @module desktop/electron/browser
  */
 
-import { app, dialog, ipcMain, shell, WebContentsView, session as electronSession, type WebContents, type Session } from 'electron';
+import { app, dialog, ipcMain, shell, WebContentsView, session as electronSession, type BrowserWindow, type WebContents, type Session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DesktopContext } from './context';
 import type {
-  AgentEvent, Bookmark, BookmarkInput, BrowserState, ConfirmRequest, DialogRequest, DownloadItem, ExtractKind, FindRequest,
-  FindResult, FormModel, HistoryEntry, HistoryListOptions, PageInsights, PageRead, PermissionSetting, SecurityState, SiteInfo, TabState,
+  AgentEvent, BrowserState, ConfirmRequest, DialogRequest, DownloadItem, ExtractKind, FindRequest,
+  FindResult, FormModel, HistoryEntry, HistoryListOptions, PageInsights, PageRead, PageStill, PermissionSetting, SecurityState, SiteInfo, TabState,
 } from '../shared/browser-types';
 import { aicoPage } from './browser-page';
 import { originOf, shouldBlock } from './browser-trackers';
@@ -46,7 +46,7 @@ import {
   type FieldDescriptor, type HumanCheck, type HumanCheckSignals, type PageProbe,
 } from './browser-safety';
 import {
-  addBookmark, asArray, clearHistory, DEFAULT_SETTINGS, JsonFile, normaliseSettings, recordVisit, removeBookmark, removeHistory,
+  asArray, clearHistory, DEFAULT_SETTINGS, flattenBookmarks, JsonFile, normaliseSettings, recordVisit, removeHistory,
   searchHistory, touchVisit, type BrowserSettings,
 } from './browser-store';
 import {
@@ -54,9 +54,17 @@ import {
   type InsightSignals, type SnapshotRaw,
 } from './browser-extract';
 import { createDownloads } from './browser-downloads';
+import { createPrivacy } from './browser-privacy';
+import { createLearning } from './browser-learn';
+import { registerBookmarks } from './browser-bookmarks';
 import { browserShortcutSpec } from './browser-keys';
 import { DIALOG_CHANNEL, installDialogPreload } from './browser-preload';
+import { openBrowserSession, registerTabSession, type TabSession } from './browser-session';
+import { registerAutofill, type AutofillService } from './browser-autofill-store';
+import { registerVault } from './browser-vault';
+import { registerImport } from './browser-import';
 
+/** The profile's older home (Electron's partition); it now lives in <AICO_HOME>/desktop/browser/profile — see browser-session.ts. */
 export const BROWSER_PARTITION = 'persist:aico-browser';
 
 /** The earlier tab shape (`browser:tabs`), kept for the interface that still reads it. */
@@ -97,6 +105,11 @@ interface Tab {
   /** Redo the last navigation the page's beforeunload blocked. */
   lastNav?: () => void;
   allowUnload: boolean;
+  // Tabs like a real browser (browser-session.ts).
+  pinned?: boolean;
+  openerId?: string;
+  deferred?: import('./browser-session-core').SavedTab;
+  throttled?: boolean;
 }
 
 export type Target = { ref?: string; selector?: string; text?: string };
@@ -107,8 +120,12 @@ export interface BrowserService {
   tabs(): TabInfo[];
   state(): BrowserState;
   open(url: string, opts?: { newTab?: boolean }): Promise<TabInfo>;
-  /** Open a tab because the person asked (a context-menu link) — not the agent, so no access check. */
-  openForUser(url: string): Promise<TabInfo>;
+  /** Open a tab because the person asked (a context-menu link) — not the agent, so no access check. `opener` is the page's web contents id. */
+  openForUser(url: string, opts?: { background?: boolean; opener?: number }): Promise<TabInfo>;
+  /** Fill the form from the user's saved autofill profile (never passwords, cards, CVVs or codes; never submits). */
+  autofill(opts?: { addressId?: string }): Promise<string>;
+  /** The tab in front, for the interface's own page actions (save page, view source); null when there is none. */
+  activeWebContents(): WebContents | null;
   snapshot(opts?: { full?: boolean }): Promise<string>;
   click(target: Target, opts?: { button?: 'left' | 'right'; double?: boolean }): Promise<string>;
   type(target: Target, text: string, opts?: { clear?: boolean; submit?: boolean }): Promise<string>;
@@ -143,6 +160,8 @@ export interface BrowserService {
   upload(target: Target, files: string[]): Promise<string>;
   uploadWait(id: string, seconds?: number): Promise<string>;
   agentStopped(): boolean;
+  /** The browser moved to another window (browser-window.ts): its tabs leave the old one now; the new one's page area places them. */
+  rehost(): void;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
@@ -156,6 +175,26 @@ async function boundedCapture<T extends { data: string }>(p: Promise<T>, what: s
   const r = await Promise.race([p, sleep(10_000).then(() => { throw new Error(`${what} timed out — is the page on screen?`); })]);
   if (r.data.length > 30_000_000) throw new Error(`${what} was too large to use (${Math.round(r.data.length / 1e6)} MB).`);
   return r;
+}
+
+/**
+ * The still that stands in for a page while something covers it: captured
+ * from the compositor (fast, for a view on screen), within half a second, at
+ * device pixels so it is drawn sharp, as a JPEG so it stays small. Never
+ * throws — no still is better than a page that will not hide.
+ */
+async function captureStill(t: { id: string; view: WebContentsView; lastStill?: { dataUrl: string; width: number; height: number } }): Promise<PageStill | undefined> {
+  try {
+    if (t.view.webContents.isDestroyed()) return undefined;
+    const img = await Promise.race([t.view.webContents.capturePage(), sleep(500).then(() => null)]);
+    if (!img || img.isEmpty()) return undefined;
+    const { width, height } = img.getSize();
+    if (width * height > 40_000_000) return undefined;
+    const jpeg = img.toJPEG(88);
+    if (jpeg.length > 15_000_000) return undefined;
+    t.lastStill = { dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}`, width, height };
+    return { tabId: t.id, ...t.lastStill };
+  } catch { return undefined; }
 }
 
 const PAGE_SRC = aicoPage.toString();
@@ -212,7 +251,7 @@ function permissionName(permission: string, mediaTypes?: string[]): string {
   return v && a ? 'camera-microphone' : v ? 'camera' : a ? 'microphone' : 'media';
 }
 
-const PERMISSIONS_SHOWN = ['notifications', 'geolocation', 'camera', 'microphone', 'clipboard-read', 'midi', 'display-capture', 'openExternal'];
+const PERMISSIONS_SHOWN = ['notifications', 'geolocation', 'camera', 'microphone', 'clipboard-read', 'popups', 'downloads', 'midi', 'display-capture', 'openExternal'];
 
 export function registerBrowser(ctx: DesktopContext): void {
   const tabs = new Map<string, Tab>();
@@ -221,16 +260,28 @@ export function registerBrowser(ctx: DesktopContext): void {
   let seq = 0;
   let bounds: { x: number; y: number; width: number; height: number } | null = null;
   let visible = false;
+  /** The window the tab views are attached to — the browser's window (ctx.browserWindow) once laid out there. */
+  let placedIn: BrowserWindow | null = null;
   let ses: Session | null = null;
   let agentStopped = false;
+  /** Session restore, tab order, full screen (browser-session.ts) and autofill — set at the end of this function. */
+  let tabSession: TabSession | null = null;
+  let autofillService: AutofillService | null = null;
   const handoffs = new Map<string, (answer: string) => void>();
   const shotsDir = path.join(ctx.paths.desktopDir, 'browser', 'screenshots');
   const dataDir = path.join(ctx.paths.desktopDir, 'browser');
 
   // ── Records ──
   const history = new JsonFile<HistoryEntry[]>(path.join(dataDir, 'history.json'), [], raw => asArray<HistoryEntry>(raw));
-  const bookmarks = new JsonFile<Bookmark[]>(path.join(dataDir, 'bookmarks.json'), [], raw => asArray<Bookmark>(raw));
   const settings = new JsonFile<BrowserSettings>(path.join(dataDir, 'settings.json'), DEFAULT_SETTINGS, normaliseSettings);
+  const bookmarks = registerBookmarks(ctx, { dataDir, settings });
+  // Saved passwords (browser-vault.ts): walled off from the agent, the copilot and everything else.
+  const vault = registerVault(ctx, {
+    dataDir,
+    tabOf: (wcId) => byWc.get(wcId),
+    front: () => { const t = activeId ? tabs.get(activeId) : undefined; return t && !t.view.webContents.isDestroyed() ? { id: t.id, wc: t.view.webContents } : null; },
+    agentDriving: (wcId) => agentDriving(byWc.get(wcId)),
+  });
   const certs = new Map<string, { issuer: string; subject: string; validTo: number }>();
   app.on('before-quit', () => { history.flush(); bookmarks.flush(); settings.flush(); downloads.flush(); });
 
@@ -253,7 +304,7 @@ export function registerBrowser(ctx: DesktopContext): void {
       pendingConfirm.set(id, { resolve, timer });
     });
     ctx.emit('browser:confirm', { id, ...req } satisfies ConfirmRequest);
-    ctx.reveal();
+    ctx.revealBrowser();
     return { id, done };
   };
 
@@ -270,6 +321,32 @@ export function registerBrowser(ctx: DesktopContext): void {
     setTimeout(pushState, 2100);
   };
 
+  // Shields, protected browsing, insights (browser-privacy.ts).
+  const privacy = createPrivacy(ctx, {
+    tabOf: (id) => { const t = id !== undefined ? byWc.get(id) : undefined; return t && !t.view.webContents.isDestroyed() ? { id: t.id, url: t.view.webContents.getURL() } : null; },
+    frontTab: () => { const t = visible && activeId ? tabs.get(activeId) : undefined; return t && !t.view.webContents.isDestroyed() ? { id: t.id, url: t.view.webContents.getURL() } : null; },
+    activeTabId: () => activeId,
+    lastInput: (id) => tabs.get(id)?.lastGestureAt ?? 0,
+    counts: (id) => { const t = tabs.get(id); return { trackersBlocked: t?.trackersBlocked ?? 0, popupsBlocked: t?.popupsBlocked ?? 0 }; },
+    trackers: () => settings.get().blocking,
+    pushState: () => pushState(),
+    clearHistory: () => { history.set([]); history.flush(); learn.clear(); },
+  });
+
+  // Browsing intelligence: what AICO learns from your browsing, on this device (browser-learn.ts).
+  const learn = createLearning(ctx, {
+    state: () => state(),
+    frontTab: () => { const t = visible && activeId ? tabs.get(activeId) : undefined; return t && !t.view.webContents.isDestroyed() ? { id: t.id, url: t.view.webContents.getURL() } : null; },
+    lastInput: (id) => tabs.get(id)?.lastGestureAt ?? 0,
+    byAgent: (id) => agentDriving(tabs.get(id)) || (id === activeId && Date.now() - agentOpen.at < 15_000),
+    flagged: (id) => privacy.flagged(id),
+    closeTab: (id) => service.closeTab(id),
+    bookmarkFolder: (title, items) => bookmarks.addTabs({ title, items }),
+    bookmarkedUrls: () => flattenBookmarks(bookmarks.tree()).map(b => b.url),
+    confirm: (req) => confirm(req),
+    history: () => history.get(),
+  });
+
   const downloads = createDownloads(ctx, {
     byAgent: (wc) => agentDriving(wc ? byWc.get(wc.id) : undefined) || (wc !== undefined && Date.now() - agentOpen.at < 15_000),
     confirm: (req) => confirm(req).done,
@@ -277,13 +354,17 @@ export function registerBrowser(ctx: DesktopContext): void {
       const t = wc ? byWc.get(wc.id) : undefined;
       if (capture && (!t || capture.tab === t)) capture.download = item.filename;
       if (wc && Date.now() - agentOpen.at < 15_000) agentOpen.download = item.filename;
+      privacy.noteDownload();
     },
+    flagged: (wc) => privacy.flagged(wc ? byWc.get(wc.id)?.id : undefined),
+    blocked: (wc) => Boolean(wc && !wc.isDestroyed() && settings.get().permissions[originOf(wc.getURL())]?.downloads === 'deny'),
   });
 
   // ── Session ──
   const getSession = (): Session => {
     if (ses) return ses;
-    ses = electronSession.fromPartition(BROWSER_PARTITION);
+    // The profile in <AICO_HOME>, migrated once from the old partition; UA, spell-check, kept cookies.
+    ses = openBrowserSession(ctx);
     // Nothing is granted by default; a page asks, the user answers (and may have it remembered).
     ses.setPermissionRequestHandler((wc, permission, cb, details) => {
       if (permission === 'clipboard-sanitized-write' || permission === 'fullscreen') { cb(true); return; }
@@ -293,6 +374,8 @@ export function registerBrowser(ctx: DesktopContext): void {
       const name = permissionName(permission, (details as { mediaTypes?: string[] }).mediaTypes);
       const remembered = settings.get().permissions[origin]?.[name];
       if (remembered) { cb(remembered === 'allow'); return; }
+      // Notification prompts are refused quietly unless the user lets sites ask (Privacy & security).
+      if (name === 'notifications' && privacy.quietNotifications(t.id)) { cb(false); return; }
       const id = askId('p');
       const timer = setTimeout(() => { pendingPerms.delete(id); cb(false); }, 120_000);
       pendingPerms.set(id, { cb, origin, name, timer });
@@ -315,8 +398,15 @@ export function registerBrowser(ctx: DesktopContext): void {
     });
     downloads.attach(ses);
     installDialogPreload(ses, dataDir);
+    vault.attach(ses);
+    privacy.attach(ses);
     ses.webRequest.onBeforeRequest((d, cb) => {
       const t = d.webContentsId !== undefined ? byWc.get(d.webContentsId) : undefined;
+      if (t && d.resourceType === 'mainFrame') {
+        // HTTPS-first and protected browsing decide before the page is fetched.
+        const verdict = privacy.onMainFrame(t.id, d.url);
+        if (verdict) { cb(verdict); return; }
+      }
       if (t && d.resourceType !== 'mainFrame') {
         const s = settings.get().blocking;
         const pageUrl = t.view.webContents.getURL();
@@ -325,6 +415,7 @@ export function registerBrowser(ctx: DesktopContext): void {
           if (dec.block) {
             t.trackersBlocked++;
             if (t.trackers.size < 500 && dec.tracker) t.trackers.add(dec.tracker);
+            if (dec.tracker) privacy.noteTracker(t.id, dec.tracker, pageUrl);
             pushState();
             cb({ cancel: true });
             return;
@@ -360,12 +451,14 @@ export function registerBrowser(ctx: DesktopContext): void {
   const tabState = (t: Tab): TabState => {
     const wc = t.view.webContents;
     return {
-      id: t.id, url: t.error?.url && /^chrome-error:/.test(wc.getURL()) ? t.error.url : wc.getURL(),
-      title: wc.getTitle() || wc.getURL() || 'New tab', ...(t.favicon ? { favicon: t.favicon } : {}),
+      id: t.id, url: t.deferred?.url ?? (t.error?.url && /^chrome-error:/.test(wc.getURL()) ? t.error.url : wc.getURL()),
+      title: t.deferred?.title || wc.getTitle() || wc.getURL() || 'New tab', ...(t.favicon ?? t.deferred?.favicon ? { favicon: t.favicon ?? t.deferred?.favicon } : {}),
+      ...(t.pinned ? { pinned: true } : {}),
       loading: wc.isLoading(), canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward(),
       audible: wc.isCurrentlyAudible(), muted: wc.isAudioMuted(), zoom: wc.getZoomFactor(), security: securityOf(t),
       trackersBlocked: t.trackersBlocked, agentActive: Date.now() < t.agentUntil, humanCheck: t.humanCheck,
       ...(t.error ? { error: t.error } : {}), ...(t.popupsBlocked ? { popupsBlocked: t.popupsBlocked } : {}),
+      ...privacy.tabExtras(t.id),
     };
   };
   const state = (): BrowserState => ({
@@ -392,15 +485,34 @@ export function registerBrowser(ctx: DesktopContext): void {
   }
   const announce = pushState;
 
-  const layout = (): void => {
-    const win = ctx.window();
-    if (!win) return;
+  /** Take every tab out of the window it was in (the browser is moving, or that window is closing). */
+  const detachAll = (): void => {
+    const from = placedIn;
+    placedIn = null;
     for (const t of tabs.values()) {
-      const show = visible && t.id === activeId && bounds !== null;
-      if (show && !t.attached) { win.contentView.addChildView(t.view); t.attached = true; }
-      if (show) { t.view.setBounds(bounds!); t.view.setVisible(true); }
-      else if (t.attached) { t.view.setVisible(false); }
+      if (!t.attached) continue;
+      t.attached = false;
+      try { if (from && !from.isDestroyed()) from.contentView.removeChildView(t.view); } catch { /* the window is going */ }
     }
+  };
+
+  const layout = (): void => {
+    const win = ctx.browserWindow();
+    // The browser moved window: nothing stays behind in the old one.
+    if (placedIn && placedIn !== win) detachAll();
+    if (!win || win.isDestroyed()) return;
+    for (const t of tabs.values()) {
+      // A page in HTML full screen (a video) fills the window, whatever the interface is doing.
+      const full = tabSession?.boundsFor(t) ?? null;
+      const show = t.id === activeId && (full !== null || (visible && bounds !== null));
+      if (show && !t.attached) { win.contentView.addChildView(t.view); t.attached = true; placedIn = win; }
+      if (show) { t.view.setBounds(full ?? bounds!); t.view.setVisible(true); }
+      else if (t.attached) { t.view.setVisible(false); }
+      // Background tabs are throttled as in any browser; the one in front (which the agent drives, even unseen) is not.
+      const throttle = t.id !== activeId;
+      if (t.throttled !== throttle && !t.view.webContents.isDestroyed()) { t.view.webContents.setBackgroundThrottling(throttle); t.throttled = throttle; }
+    }
+    ctx.services.browserOverlay?.raise();
   };
 
   // ── DevTools protocol ──
@@ -460,10 +572,13 @@ export function registerBrowser(ctx: DesktopContext): void {
     };
     const wc = view.webContents;
     byWc.set(wc.id, tab);
+    privacy.attachTab(id, wc);
+    learn.attachTab(id, wc);
 
     wc.setWindowOpenHandler((d) => {
       const gesture = Date.now() - tab.lastGestureAt < 5000;
-      if (!gesture) {
+      // Site permissions: "Pop-ups: Allow" lets a site open windows without a click.
+      if (!gesture && settings.get().permissions[originOf(wc.getURL())]?.popups !== 'allow') {
         tab.popupsBlocked++;
         pushState();
         return { action: 'deny' };
@@ -475,6 +590,7 @@ export function registerBrowser(ctx: DesktopContext): void {
         createWindow: (options) => {
           const adoptWc = (options as { webContents?: WebContents }).webContents;
           const t = create(adoptWc ? undefined : d.url, adoptWc);
+          tabSession?.placeNew(t, tab.id);
           layout();
           return t.view.webContents;
         },
@@ -532,7 +648,7 @@ export function registerBrowser(ctx: DesktopContext): void {
       pendingAuth.set(reqId, { cb, timer });
       if (capture?.tab === tab) capture.auth = authInfo.host;
       ctx.emit('browser:auth', { id: reqId, tabId: tab.id, host: authInfo.host, ...(authInfo.realm ? { realm: authInfo.realm } : {}) });
-      ctx.reveal();
+      ctx.revealBrowser();
     });
     wc.on('will-prevent-unload', (e) => {
       if (tab.allowUnload) { tab.allowUnload = false; e.preventDefault(); return; }
@@ -567,6 +683,8 @@ export function registerBrowser(ctx: DesktopContext): void {
       if (pendingFind && r.requestId === pendingFind.requestId && r.finalUpdate) { pendingFind.resolve(res); pendingFind = null; }
     });
     wc.on('destroyed', () => { byWc.delete(wc.id); });
+    wc.on('enter-html-full-screen', () => tabSession?.htmlFullscreen(tab, true));
+    wc.on('leave-html-full-screen', () => tabSession?.htmlFullscreen(tab, false));
 
     // The DevTools protocol from the start, so JavaScript dialogs reach the interface.
     try { ensureDebugger(tab); } catch { /* retried on first use */ }
@@ -603,7 +721,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     dialogs.set(d.id, { tab, req: d, ...(opts.reply ? { reply: opts.reply } : {}) });
     if (opts.emit !== false) ctx.emit('browser:dialog', d);
     for (const w of dialogWaiters.get(tab.id) ?? []) w(d);
-    if (!d.byAgent) ctx.reveal();
+    if (!d.byAgent) ctx.revealBrowser();
   }
 
   const waitDialog = (t: Tab): { promise: Promise<DialogRequest>; cancel: () => void } => {
@@ -631,13 +749,15 @@ export function registerBrowser(ctx: DesktopContext): void {
 
   const active = (): Tab => {
     let t = activeId ? tabs.get(activeId) : undefined;
+    // First use this run: the last session's tabs come back before anything new is made.
+    if ((!t || t.view.webContents.isDestroyed()) && tabSession?.restore()) t = activeId ? tabs.get(activeId) : undefined;
     if (!t || t.view.webContents.isDestroyed()) t = create();
     return t;
   };
 
   function normalise(u: string): string {
     const s = u.trim();
-    if (/^(https?|file|about|data):/i.test(s)) return s;
+    if (/^(https?|file|about|data):/i.test(s) || /^view-source:https?:/i.test(s)) return s;
     if (/^localhost(:\d+)?(\/|$)|^127\.0\.0\.1|^\[::1\]/.test(s)) return `http://${s}`;
     if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(s)) return `https://${s}`;
     return `https://duckduckgo.com/?q=${encodeURIComponent(s)}`;
@@ -716,6 +836,9 @@ export function registerBrowser(ctx: DesktopContext): void {
     const watch = waitDialog(t);
     try {
       if (t.dialog && action !== 'dialog') throw new Error(dialogOpenMessage(t.dialog));
+      // A page protected browsing flagged is look-only for the agent (browser-privacy.ts).
+      const flagged = opts.gate ? privacy.agentRefusal(t.id) : null;
+      if (flagged) throw new Error(flagged);
       if (opts.gate) {
         const h = await humanCheck(t);
         if (h.detected) {
@@ -752,7 +875,9 @@ export function registerBrowser(ctx: DesktopContext): void {
   }
 
   async function openUrl(url: string, opts?: { newTab?: boolean }): Promise<TabInfo> {
-    const t = opts?.newTab || !activeId ? create() : active();
+    // Restored tabs are the user's pages: something opened now gets a tab of its own.
+    const restored = !activeId && Boolean(tabSession?.restore());
+    const t = opts?.newTab || restored || !activeId ? create() : active();
     activeId = t.id;
     const target = normalise(url);
     t.lastNav = () => { void t.view.webContents.loadURL(target).catch(() => {}); };
@@ -761,6 +886,9 @@ export function registerBrowser(ctx: DesktopContext): void {
     // it. The page keeps loading; the state events still report it.
     try { await Promise.race([t.view.webContents.loadURL(target), sleep(30_000)]); } catch (err) {
       const msg = (err as Error).message;
+      // Blocked as deceptive, or https failed (ERR_BLOCKED_BY_CLIENT): say why, not a network error.
+      const blocked = /ERR_BLOCKED_BY_CLIENT/.test(msg) ? privacy.blockedNote(t.id) : null;
+      if (blocked) throw new Error(blocked);
       if (!/ERR_ABORTED/.test(msg)) {
         // The failure is on the tab's state (error / certificate) too, for the interface.
         throw new Error(`Could not open ${target}: ${msg}`);
@@ -835,7 +963,28 @@ export function registerBrowser(ctx: DesktopContext): void {
         ...(err ? { error: err.trim() } : {}),
       } as TabInfo;
     },
-    openForUser(url) { return openUrl(url, { newTab: true }); },
+    openForUser(url, opts) {
+      const prev = activeId;
+      const opener = opts?.opener !== undefined ? byWc.get(opts.opener) : undefined;
+      const p = openUrl(url, { newTab: true });
+      // openUrl made the tab (and put it in front) before its first await.
+      const t = activeId ? tabs.get(activeId) : undefined;
+      if (t && t.id !== prev) {
+        tabSession?.placeNew(t, opener?.id ?? prev ?? undefined);
+        if (opts?.background && prev && tabs.has(prev)) { activeId = prev; layout(); pushState(); }
+      }
+      return p;
+    },
+    activeWebContents() {
+      const t = activeId ? tabs.get(activeId) : undefined;
+      return t && !t.view.webContents.isDestroyed() ? t.view.webContents : null;
+    },
+    autofill(opts) {
+      return act('fill', { gate: true, diff: true, label: 'Filling from your profile' }, async (t) => {
+        if (!autofillService) throw new Error('Autofill is not available.');
+        return autofillService.describe(await autofillService.fill(t.view.webContents, opts));
+      });
+    },
     async snapshot(opts) {
       checkAccess();
       const t = active();
@@ -969,7 +1118,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     },
     async evaluate(expression) {
       let out: unknown;
-      await act('evaluate', { gate: true }, async (t) => { out = await evaluate(t.view.webContents, expression); return ''; });
+      await act('evaluate', { gate: true }, async (t) => { vault.guardAgent(t.view.webContents); out = await evaluate(t.view.webContents, expression); return ''; });
       return out;
     },
     async screenshot(opts) {
@@ -991,9 +1140,8 @@ export function registerBrowser(ctx: DesktopContext): void {
           model = { data: j.data, mimeType: 'image/jpeg' };
         }
       } else {
-        // The interface asks for a still exactly when the view is being hidden
-        // (under a menu, behind the floating copilot). Capturing a hidden view
-        // hangs, so it gets the last capture instead.
+        // A still for a hidden view (under a menu) is the one browser:setBounds
+        // captured as it hid it. Capturing a hidden view hangs, so it never is.
         if (!opts?.forModel && !visible) {
           if (t.lastStill) return { path: '', ...t.lastStill };
           throw new Error('The page is not on screen, so there is nothing to capture.');
@@ -1055,15 +1203,24 @@ export function registerBrowser(ctx: DesktopContext): void {
     closeTab(id) {
       const t = tabs.get(id ?? activeId ?? '');
       if (!t) return;
-      const win = ctx.window();
-      if (t.attached && win) win.contentView.removeChildView(t.view);
+      // Remembered for Ctrl+Shift+T; the tab to its right comes forward.
+      const next = tabSession?.closing(t);
+      if (t.attached && placedIn && !placedIn.isDestroyed()) placedIn.contentView.removeChildView(t.view);
       for (const [k, d] of dialogs) if (d.tab === t) { d.reply?.(false); dialogs.delete(k); }
       if (!t.view.webContents.isDestroyed()) t.view.webContents.close();
       tabs.delete(t.id);
-      if (activeId === t.id) activeId = [...tabs.keys()].pop() ?? null;
+      if (activeId === t.id) activeId = next !== undefined && (next === null || tabs.has(next)) ? next : [...tabs.keys()].pop() ?? null;
+      const front = activeId ? tabs.get(activeId) : undefined;
+      if (front?.deferred) tabSession?.wake(front);
       layout(); pushState();
     },
-    selectTab(id) { if (tabs.has(id)) { activeId = id; layout(); pushState(); } },
+    selectTab(id) {
+      const t = tabs.get(id);
+      if (!t) return;
+      activeId = id;
+      if (t.deferred) tabSession?.wake(t);
+      layout(); pushState();
+    },
     async newTab(url) {
       return openUrl(url || ctx.prefs.get().browserHome || 'about:blank', { newTab: true });
     },
@@ -1072,7 +1229,7 @@ export function registerBrowser(ctx: DesktopContext): void {
       ctx.emit('browser:handoff', { id, message });
       const t = activeId ? tabs.get(activeId) : undefined;
       if (t) ctx.emit('browser:agent', { tabId: t.id, action: 'handoff', status: 'blocked', label: message.slice(0, 120) } satisfies AgentEvent);
-      ctx.reveal();
+      ctx.revealBrowser();
       return new Promise<string>((resolve) => {
         const timer = setTimeout(() => { handoffs.delete(id); resolve('The user did not respond in time.'); }, timeoutMs);
         handoffs.set(id, (answer) => { clearTimeout(timer); resolve(answer); });
@@ -1272,6 +1429,13 @@ export function registerBrowser(ctx: DesktopContext): void {
       checkAccess();
       return waitUpload(id, Math.min(25, seconds ?? 20));
     },
+    rehost() {
+      // Hidden until the new window's page area reports where the page goes (browser:setBounds).
+      bounds = null;
+      visible = false;
+      layout();
+      pushState();
+    },
   };
   ctx.services.browser = service;
 
@@ -1332,7 +1496,7 @@ export function registerBrowser(ctx: DesktopContext): void {
   // ── Interface: the earlier channels ──
   ctx.handle('browser:tabs', () => list());
   ctx.handle('browser:open', (url: string, newTab?: boolean) => openUrl(url, { newTab }));
-  ctx.handle('browser:newTab', (url?: string) => { const t = create(url || ctx.prefs.get().browserHome); return info(t); });
+  ctx.handle('browser:newTab', (url?: string) => { tabSession?.restore(); const t = create(url || ctx.prefs.get().browserHome); return info(t); });
   ctx.handle('browser:close', (id: string) => service.closeTab(id));
   ctx.handle('browser:select', (id: string) => service.selectTab(id));
   ctx.handle('browser:back', () => service.back());
@@ -1355,11 +1519,38 @@ export function registerBrowser(ctx: DesktopContext): void {
   });
   ctx.handle('browser:devtools', () => active().view.webContents.toggleDevTools());
   ctx.handle('browser:external', () => { const u = active().view.webContents.getURL(); if (/^https?:/.test(u)) void shell.openExternal(u); });
-  ctx.handle('browser:setBounds', (b: { x: number; y: number; width: number; height: number } | null, show: boolean) => {
-    bounds = b ? { x: Math.round(b.x), y: Math.round(b.y), width: Math.max(1, Math.round(b.width)), height: Math.max(1, Math.round(b.height)) } : null;
-    visible = show && b !== null;
-    if (visible && tabs.size === 0) create(ctx.prefs.get().browserHome);
+  // The interface lays the page over its placeholder, in CSS pixels; a zoomed interface needs them scaled to the window's.
+  // Covering the page (a menu, a dialog) hides it: while it is still on screen it is captured, so the reply
+  // carries a still for the interface to draw in its place. Capturing a *hidden* view can hang, so it never is.
+  // Only the window the browser is in lays it out: the other one's pane is a placeholder, and its
+  // last word (hiding the page as it unmounts) must not hide the page in the window that has it.
+  let boundsGen = 0;
+  ipcMain.removeHandler('browser:setBounds');
+  ipcMain.handle('browser:setBounds', async (e, b: { x: number; y: number; width: number; height: number } | null, show: boolean): Promise<{ still?: PageStill; elsewhere?: boolean }> => {
+    const win = ctx.browserWindow();
+    // Said back, so a pane that missed the move (a window still loading when it happened) shows where the browser went.
+    if (!win || win.isDestroyed() || e.sender !== win.webContents) return { elsewhere: true };
+    const gen = ++boundsGen;
+    const z = win.webContents.getZoomFactor();
+    const next = b ? { x: Math.round(b.x * z), y: Math.round(b.y * z), width: Math.max(1, Math.round(b.width * z)), height: Math.max(1, Math.round(b.height * z)) } : null;
+    const willShow = show && next !== null;
+    const t = activeId ? tabs.get(activeId) : undefined;
+    let still: PageStill | undefined;
+    if (visible && !willShow && next !== null && t?.attached) {
+      still = await captureStill(t);
+      // A newer call has already laid the page out; this one only hands back its still.
+      if (gen !== boundsGen) return still ? { still } : {};
+    }
+    bounds = next;
+    visible = willShow;
+    // First time on screen this run: "Continue where you left off", or the home page.
+    if (visible && tabs.size === 0 && !tabSession?.restore()) create(ctx.prefs.get().browserHome);
     layout();
+    return still ? { still } : {};
+  });
+  ctx.handle('browser:still', (): PageStill | null => {
+    const t = activeId ? tabs.get(activeId) : undefined;
+    return t?.lastStill ? { tabId: t.id, ...t.lastStill } : null;
   });
   ctx.handle('browser:screenshot', () => service.screenshot());
   ctx.handle('browser:handoffDone', (id: string, answer?: string) => {
@@ -1379,16 +1570,8 @@ export function registerBrowser(ctx: DesktopContext): void {
   ctx.handle('browser:state', () => state());
 
   ctx.handle('browser:history:list', (opts?: HistoryListOptions) => searchHistory(history.get(), opts?.query, opts?.limit ?? 200));
-  ctx.handle('browser:history:remove', (url: string) => { history.set(removeHistory(history.get(), String(url))); return true; });
-  ctx.handle('browser:history:clear', (sinceMs?: number) => { history.set(clearHistory(history.get(), sinceMs)); history.flush(); return true; });
-
-  ctx.handle('browser:bookmarks:list', () => bookmarks.get());
-  ctx.handle('browser:bookmarks:add', (b: BookmarkInput) => {
-    const next = addBookmark(bookmarks.get(), b, Date.now());
-    bookmarks.set(next);
-    return next.find(x => x.url === b.url.trim());
-  });
-  ctx.handle('browser:bookmarks:remove', (url: string) => { bookmarks.set(removeBookmark(bookmarks.get(), String(url))); return true; });
+  ctx.handle('browser:history:remove', (url: string) => { history.set(removeHistory(history.get(), String(url))); learn.forgetUrl(String(url)); return true; });
+  ctx.handle('browser:history:clear', (sinceMs?: number) => { history.set(clearHistory(history.get(), sinceMs)); history.flush(); privacy.clearInsights(sinceMs); learn.clear(sinceMs); return true; });
 
   ctx.handle('browser:downloads:list', () => downloads.list());
   ctx.handle('browser:downloads:open', (id: string) => downloads.open(id));
@@ -1416,7 +1599,7 @@ export function registerBrowser(ctx: DesktopContext): void {
   }));
   ctx.handle('browser:savePdf', async () => {
     const wc = active().view.webContents;
-    const w = ctx.window();
+    const w = ctx.browserWindow();
     const name = `${(wc.getTitle() || 'page').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 100).trim() || 'page'}.pdf`;
     const opts = { defaultPath: path.join(app.getPath('downloads'), name), filters: [{ name: 'PDF', extensions: ['pdf'] }] };
     const r = w ? await dialog.showSaveDialog(w, opts) : await dialog.showSaveDialog(opts);
@@ -1463,6 +1646,14 @@ export function registerBrowser(ctx: DesktopContext): void {
     settings.set({ ...s, permissions: perms });
     return true;
   });
+  // Every site's remembered permissions, for Privacy & security; reset one site (or all).
+  ctx.handle('browser:permissions:list', () => Object.entries(settings.get().permissions).map(([origin, permissions]) => ({ origin, permissions })).sort((a, b) => a.origin.localeCompare(b.origin)));
+  ctx.handle('browser:permissions:reset', (origin?: string) => {
+    const s = settings.get();
+    const perms = origin ? Object.fromEntries(Object.entries(s.permissions).filter(([o]) => o !== origin)) : {};
+    settings.set({ ...s, permissions: perms });
+    return true;
+  });
   ctx.handle('browser:mute', (tabId: string, muted: boolean) => {
     const t = tabs.get(tabId) ?? active();
     t.view.webContents.setAudioMuted(Boolean(muted));
@@ -1474,6 +1665,8 @@ export function registerBrowser(ctx: DesktopContext): void {
   ctx.handle('browser:selection', async () => {
     const t = activeId ? tabs.get(activeId) : undefined;
     if (!t || t.dialog || t.view.webContents.isDestroyed()) return '';
+    // Only the copilot asks for this, as it sends a message about the page: a use of the copilot on this site.
+    learn.noteCopilot(t.view.webContents.getURL());
     return evaluate<string>(t.view.webContents, `(() => { const s = String(getSelection() || ''); if (s) return s; const a = document.activeElement; return a && typeof a.value === 'string' && typeof a.selectionStart === 'number' && a.type !== 'password' ? a.value.slice(a.selectionStart, a.selectionEnd) : ''; })()`, 1500).then(s => (s ?? '').slice(0, 20_000)).catch(() => '');
   });
   ctx.handle('browser:insights', () => insightsOf(active()));
@@ -1524,5 +1717,23 @@ export function registerBrowser(ctx: DesktopContext): void {
     if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack(); else void wc.loadURL('about:blank');
     pushState();
     return true;
+  });
+
+  // ── Tabs like a real browser: session restore, order, pin, reopen, full screen (browser-session.ts) ──
+  tabSession = registerTabSession(ctx, {
+    tabs, active: () => activeId, setActive: (id) => { activeId = id; },
+    create: (url) => create(url), close: (id) => service.closeTab(id), layout, pushState,
+    home: () => ctx.prefs.get().browserHome,
+  });
+  autofillService = registerAutofill(ctx, () => {
+    const t = activeId ? tabs.get(activeId) : undefined;
+    return t && !t.view.webContents.isDestroyed() && !t.dialog ? t.view.webContents : null;
+  });
+  // The import centre (browser-import.ts): other browsers' bookmarks, history and addresses; passwords from a CSV.
+  ctx.services.browserImport = registerImport(ctx, {
+    history: { get: () => history.get(), set: (list) => history.set(list), flush: () => history.flush() },
+    bookmarks,
+    addresses: () => autofillService,
+    vault,
   });
 }

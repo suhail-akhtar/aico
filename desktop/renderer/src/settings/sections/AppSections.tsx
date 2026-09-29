@@ -17,6 +17,9 @@ import { applyContributedTheme } from '@/plugins/run-action';
 import { Icon } from '@/lib/icons';
 import { ago, bytes, cls, prettyKey } from '@/lib/util';
 import { EnginePane, Row, Switch } from '../fields';
+import { AutofillSettings } from '@/browser/AutofillSettings';
+import { openImportWizard } from '@/browser/ImportWizard';
+import { openPasswords } from '@/browser/PasswordsBar';
 
 export function GeneralSection(): React.ReactElement {
   const prefs = useDesk(s => s.prefs);
@@ -425,6 +428,12 @@ export function BrowserSection(): React.ReactElement {
       <p className="-mt-2 mb-4 text-[13px] text-aico-muted">The built-in browser has its own profile: its sign-ins are not your everyday browser's and not the app's.</p>
       <div className="set-group">
         <Row title="Home page" stack><input className="input" defaultValue={prefs.browserHome} onBlur={e => e.target.value.trim() && void set({ browserHome: e.target.value.trim() })} /></Row>
+        <Row title="On startup" desc="Continue where you left off: your tabs, and sites you were signed in to for the session, come back after a restart or an update.">
+          <div className="segmented">
+            <button aria-pressed={prefs.browserStartup !== 'newTab'} onClick={() => void set({ browserStartup: 'restore' })}>Continue where I left off</button>
+            <button aria-pressed={prefs.browserStartup === 'newTab'} onClick={() => void set({ browserStartup: 'newTab' })}>Open a new tab</button>
+          </div>
+        </Row>
         <Row title="Agent access" desc="Whether the agent may drive the built-in browser (browse, click, type, screenshot) for testing and automation.">
           <div className="segmented">
             <button aria-pressed={prefs.browserAgentAccess === 'allow'} onClick={() => void set({ browserAgentAccess: 'allow' })}>Allow</button>
@@ -435,7 +444,14 @@ export function BrowserSection(): React.ReactElement {
           <button className="btn-danger btn-sm" onClick={() => void desktop.dialog.confirm({ title: 'Clear browsing data', message: 'Sign out of every site in the built-in browser?', ok: 'Clear', danger: true })
             .then(ok => { if (ok) void invoke('browser:clearData').then(() => toast.success('Browsing data cleared')); })}>Clear</button>
         </Row>
+        <Row title="Passwords" desc="Saved passwords for the built-in browser: encrypted on this computer, never shown to the agent, never in backups.">
+          <button className="btn-outline btn-sm" onClick={openPasswords}><Icon name="key" size={14} />Manage passwords</button>
+        </Row>
+        <Row title="Import browser data" desc="Bookmarks, history and addresses from Chrome, Edge, Brave, Vivaldi, Opera or Firefox — and passwords from a file you export yourself.">
+          <button className="btn-outline btn-sm" onClick={() => openImportWizard()}><Icon name="download" size={14} />Import…</button>
+        </Row>
       </div>
+      <AutofillSettings />
     </div>
   );
 }
@@ -451,7 +467,7 @@ export function AboutSection(): React.ReactElement {
         <button className="btn-outline btn-sm" onClick={() => void desktop.shell.openExternal('https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md')}>Release notes</button>
         <button className="btn-outline btn-sm" onClick={() => void desktop.shell.openExternal('https://github.com/suhail-akhtar/aico/issues/new')}>Report an issue</button>
       </div>
-      <p className="text-[12px] text-aico-muted">MIT licensed. Electron {info?.electron}, Chromium {info?.chrome}, Node {info?.node}, {info?.platform}/{info?.arch}.</p>
+      <p className="text-[12px] text-aico-muted">Free for personal use (PolyForm Noncommercial 1.0.0) — © Suhail Akhtar. Electron {info?.electron}, Chromium {info?.chrome}, Node {info?.node}, {info?.platform}/{info?.arch}.</p>
     </div>
   );
 }

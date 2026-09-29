@@ -3,13 +3,13 @@
   "productName": "AICO",
   "private": true,
   "type": "module",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "AICO Desktop — the AICO coding agent as a native app for Windows and Linux.",
   "author": {
     "name": "Suhail Akhtar",
     "email": "suhailakhtar@live.com"
   },
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "homepage": "https://suhail-akhtar.github.io/aico/",
   "main": "dist/main.cjs",
   "scripts": {
@@ -17,7 +17,7 @@
     "start": "node scripts/build.mjs && electron .",
     "dev": "electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p renderer/tsconfig.json",
-    "test": "node scripts/test-unit.mjs",
+    "test": "node scripts/test-unit.mjs && node scripts/test-browser-bookmarks.mjs && node scripts/test-browser-overlay.mjs && node scripts/test-browser-shield.mjs && node scripts/test-browser-tabs.mjs && node scripts/test-browser-import.mjs && node scripts/test-browser-window.mjs && node scripts/test-browser-learn.mjs",
     "test:live": "node scripts/build.mjs && node scripts/desktop-live.mjs",
     "package": "node scripts/build.mjs && node scripts/icons.mjs && electron-builder --publish never",
     "package:win": "node scripts/build.mjs && node scripts/icons.mjs && electron-builder --win --publish never",
@@ -80,7 +80,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AICO"
+      "shortcutName": "AICO",
+      "deleteAppDataOnUninstall": false
     },
     "linux": {
       "target": [

@@ -25,6 +25,8 @@ import { installCanvasHost } from '@web/canvas-host';
 import { CanvasCode, useCanvasPanel } from './chat/CanvasPanel';
 import { installBrowserStore } from './browser/store';
 import { installBrowserLinks } from './browser/links';
+import { installBrowserHost } from './browser/host';
+import { installCopilotRelay } from './browser/copilot-overlay';
 
 document.documentElement.dataset.platform = String(platform);
 
@@ -102,6 +104,8 @@ async function boot(): Promise<void> {
   installChatRouteSync();
   // The browser's prompts (permissions, dialogs, hand-overs) are heard even while it is not on screen.
   if (isDesktop) installBrowserStore();
+  // Where the browser is (here, or popped out into its own window), and "open in main chat" from it.
+  if (isDesktop) { installBrowserHost(); installCopilotRelay(); }
   installBrowserLinks();
   // Canvases open beside the chat here, and code canvases get Monaco.
   installCanvasHost({ openPanel: ref => useCanvasPanel.getState().show(ref), CodeEditor: CanvasCode });

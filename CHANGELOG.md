@@ -3,6 +3,86 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.28.0 — 2026-09-30
+
+The browser grows up: a real browser that is private and protected by default,
+learns you on this device, pops out into its own window, and brings your data
+over from other browsers. AICO is now source-available under the PolyForm
+Noncommercial licence.
+
+### Changed
+
+- **Licence: PolyForm Noncommercial 1.0.0** (was MIT). Free for personal,
+  study, research, hobby and noncommercial use; commercial use needs a licence
+  from the author; forks and copies must keep the `Required Notice:` lines and
+  credit "AICO by Suhail Akhtar" with a link to the original repository.
+  Releases before 0.28.0 remain under MIT.
+- Commit history no longer carries AI co-author trailers (history rewritten;
+  trees unchanged).
+
+### Added (desktop browser)
+
+- **The page stays visible.** Menus, dialogs and the palette show a still of the
+  page behind them instead of a blank area (captured just before the page steps
+  aside). The **floating copilot is its own native layer** above the page, so the
+  page stays live and clickable around it; dock ↔ float keeps the conversation,
+  even mid-answer.
+- **Pop out.** Ctrl+Shift+N (toolbar, ⋮ menu, tab menu) moves every tab into a
+  dedicated browser window without reloading anything; closing it brings them
+  back. Remembered across restarts; the agent's tools follow the browser.
+- **Tabs like a real browser:** drag to reorder, pin, mute, duplicate, close
+  others / to the right, reopen closed tabs (Ctrl+Shift+T, survives restarts),
+  tab search, Ctrl+Tab / Ctrl+1–9. **Full view** (Shift+F11) hides the app around
+  the browser; F11 full screen; video full screen and picture-in-picture.
+- **Chrome-style right-click menus** for links, images, video, selections,
+  editable fields (with spell-check) and pages, with *Ask AICO*, *Summarize* and
+  *Translate*.
+- **Bookmarks:** folders and sub-folders, a bookmarks bar (Ctrl+Shift+B) with
+  cascading folder menus, drag and drop, an edit bubble on the star, a bookmark
+  manager, Bookmark all tabs, Netscape HTML import/export.
+- **Persistence:** the browser profile (cookies, local storage, IndexedDB,
+  cache) lives under AICO's own folder and survives updates, uninstall and
+  reinstall; session cookies are kept encrypted across restarts; tabs, pins,
+  back/forward history and scroll come back ("On startup: continue where you
+  left off").
+- **Privacy and protection:** Shields per site (trackers by company, third-party
+  cookies blocked by default, HTTPS-first with a fallback page, Global Privacy
+  Control and DNT), a standard Chrome user agent, **protected browsing** that
+  stops look-alike / brand-in-subdomain / credential-over-http pages before they
+  load and **has the copilot check them automatically**, dangerous-download
+  warnings with the Windows Mark-of-the-Web, a site permissions manager, clear
+  data on exit, and **Insights** (time, trackers, companies, upgrades — local only).
+- **It learns you, on this device:** interests, routines, next-site prediction,
+  research threads, unfinished carts/articles/forms and tab priorities drive
+  "For you" cards on the new-tab page and predictions in the address bar, each
+  with its reason; *Not interested* teaches it; view, pause, exclude or forget
+  everything. New agent tools `browser_profile`, `browser_tabs_overview` and
+  `browser_organize_tabs` (asks before closing more than one tab).
+- **Page-aware suggestions:** a local classifier (schema.org, OpenGraph) spots
+  products, articles, recipes, jobs, events, videos, carts, checkouts, forms,
+  mail and chat apps and offers fitting actions — a checkout only ever gets
+  "Review this order before I pay".
+- **Autofill profile** (name, contact, addresses; encrypted) for forms, via a key
+  button or the agent's `browser_autofill`; sensitive fields are refused twice.
+- **Import centre:** bookmarks, history and addresses from Chrome, Edge, Brave,
+  Vivaldi, Opera and Firefox (read-only, locked databases copied first), and
+  passwords from the CSV your browser or password manager exports.
+  `browser_import` lets the agent open the wizard pre-selected.
+- **Password vault:** encrypted with the OS keychain (refuses to store without
+  it), offers to save after sign-in, fills only on your click, same-origin and
+  https only; Passwords page with reveal-after-confirm, weak/reused report and
+  CSV export. Never reaches the engine, the copilot, the model, agent tools,
+  logs, insights or backups.
+
+### Fixed (desktop)
+
+- The page went blank whenever a menu opened or the copilot floated — the still
+  was requested after the page had already been hidden.
+- Tooltips wrapped word-by-word near the window edge and could sit under the
+  window controls or behind the page; they now fit on one line and move clear.
+- A stale error page could stay up after the same address later loaded fine.
+- The page view was misplaced when the app was zoomed.
+
 ## 0.27.0 — 2026-09-29
 
 An AI browser: a full browser with an AICO copilot beside every page, and an
