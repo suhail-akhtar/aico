@@ -26,6 +26,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import path from 'path';
 import type { AicoSettings } from './settings.js';
 import type { FileWriter } from './tools/file-writer.js';
+import type { ToolImageSink } from './tools/tool-images.js';
 import type { HostAnswer, HostCall, HostToolName } from '../shared/host-tools.js';
 import { effortToSend, type EffortChoice, type EffortLevel } from '../shared/reasoning.js';
 
@@ -95,6 +96,15 @@ export interface RunContext {
     kind: string;
     url?: string;
   };
+  /**
+   * Where an image a tool produced goes so the model can be shown it.
+   *
+   * Per run, like everything here: the bytes belong in *this* session's
+   * attachment store, gated on *this* run's model. A mutable object on an
+   * otherwise immutable context, because the loop drains what tools put in it
+   * at every step boundary. See `tools/tool-images`.
+   */
+  toolImages?: ToolImageSink;
 }
 
 const storage = new AsyncLocalStorage<RunContext>();

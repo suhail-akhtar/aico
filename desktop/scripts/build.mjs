@@ -40,7 +40,8 @@ await build({
   entryPoints: [path.join(desktop, 'electron/main.ts')],
   outfile: path.join(dist, 'main.cjs'),
   bundle: true, platform: 'node', format: 'cjs', target: 'node24',
-  external: ['electron', '@lydell/node-pty', 'playwright-core'], define, sourcemap: 'linked', logLevel: 'warning',
+  // electron-updater stays a real dependency (loaded only in a packaged build).
+  external: ['electron', '@lydell/node-pty', 'playwright-core', 'electron-updater'], define, sourcemap: 'linked', logLevel: 'warning',
 });
 await build({
   entryPoints: [path.join(desktop, 'electron/preload.ts')],

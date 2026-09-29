@@ -24,6 +24,9 @@ import { estimateTokens } from './tokens.js';
 import type { SdkAttachment } from './attachments.js';
 import type { AicoMessage, ImagePart, ImageRef } from './providers/types.js';
 import { modelAccepts, explainRefusal } from './model-capabilities.js';
+import {
+  createToolImageSink, drainToolImages, toolImagesMessage, withToolCall, type ToolImageBytes,
+} from './tools/tool-images.js';
 import type { AicoSettings } from './settings.js';
 import { selectProvider } from './providers/index.js';
 import { detectProviderType } from './providers/index.js';
@@ -415,12 +418,17 @@ export interface AgentOptions {
    */
   resolveImages?: (refs: ImageRef[]) => Promise<Array<ImagePart | undefined>>;
   /**
-   * Keep an image file the run produced — a verifier screenshot — so it can be
-   * shown to the model on the next step. Returns the reference `resolveImages`
-   * will answer for, or nothing when the store declines. Absent on the CLI,
-   * where there is no attachment store and the pictures stay on disk.
+   * Keep an image the run produced — a verifier screenshot on disk, or the
+   * bytes a tool returned (Read on a PNG, WebFetch of an image URL, an MCP
+   * screenshot) — so it can be shown to the model on the next step. Returns
+   * the reference `resolveImages` will answer for, or nothing when the store
+   * declines.
+   *
+   * Absent on the CLI and for sub-agents, where there is no attachment store:
+   * tool images are then held in memory for the run and gone afterwards (see
+   * `tools/tool-images`), and verifier screenshots stay on disk.
    */
-  storeImage?: (file: string) => Promise<ImageRef | undefined>;
+  storeImage?: (source: string | ToolImageBytes) => Promise<ImageRef | undefined>;
   /** Sub-agent type — restricts available tools */
   agentType?: SubAgentType;
   /**
@@ -1069,6 +1077,9 @@ export async function projectImages(
   const wanted = messages
     .flatMap(m => (m.role === 'user' ? m.imageRefs ?? [] : []))
     .filter(ref => !cache.has(ref.id));
+  // References the store answered for and said "not here" — as opposed to a
+  // store that failed, which says nothing about whether the image exists.
+  const unresolved = new Set<string>();
   if (wanted.length > 0) {
     try {
       // Answered positionally, so a resolver that cannot find one image says
@@ -1078,6 +1089,7 @@ export async function projectImages(
       wanted.forEach((ref, index) => {
         const part = parts[index];
         if (part) cache.set(ref.id, part);
+        else unresolved.add(ref.id);
       });
     } catch {
       // An unreadable attachment is not worth losing the turn over. The
@@ -1090,7 +1102,21 @@ export async function projectImages(
     const images = message.imageRefs
       .map(ref => cache.get(ref.id))
       .filter((part): part is ImagePart => part !== undefined);
-    return images.length > 0 ? { ...message, images } : message;
+    /*
+      A reference nothing could resolve says so.
+
+      Most often an image a tool produced in an earlier run that had no store
+      to keep it — the CLI, a sub-agent — so the bytes lived in memory and are
+      gone. The line beside it still reads "[Image from Read …]", and without
+      this a model would take the label for the picture and describe an image
+      it was not shown.
+    */
+    const lost = message.imageRefs.filter(ref => unresolved.has(ref.id));
+    const content = lost.length > 0
+      ? `${message.content}\n\n${lost.map(ref => `[${ref.name ?? 'image'} is no longer available to show]`).join('\n')}`
+      : message.content;
+    if (images.length === 0) return content === message.content ? message : { ...message, content };
+    return { ...message, content, images };
   }));
 }
 
@@ -1195,6 +1221,16 @@ export async function runAgent(opts: AgentOptions): Promise<string> {
         sent `reasoning_effort: high`. On the run context it now reaches both.
       */
       ...(isEffortChoice(opts.effort) ? { effort: opts.effort } : {}),
+      /*
+        Where images a tool produces go. Created per run so a sub-agent's Read
+        of a diagram lands in the sub-agent's own requests, and gated on this
+        run's model — the one that will be asked to look.
+      */
+      toolImages: createToolImageSink({
+        model: opts.model,
+        ...(opts.settings ? { settings: opts.settings } : {}),
+        ...(opts.storeImage ? { store: (image: ToolImageBytes) => opts.storeImage!(image) } : {}),
+      }),
     },
     () => runAgentInContext(opts),
   );
@@ -1641,6 +1677,24 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
    */
   const imageCache = new Map<string, ImagePart>();
 
+  /*
+    The resolver every request uses: images this run holds itself first, then
+    the injected store.
+
+    A run with no store of its own — the CLI, a sub-agent — keeps what its tools
+    produced in memory (see `tools/tool-images`), and those references resolve
+    here. Everything else goes to the store that took it, as before.
+  */
+  const toolImageSink = currentRunContext()?.toolImages;
+  const resolveImages = async (refs: ImageRef[]): Promise<Array<ImagePart | undefined>> => {
+    const local = refs.map(ref => toolImageSink?.local.get(ref.id));
+    const missing = refs.filter((_, index) => local[index] === undefined);
+    if (missing.length === 0 || !opts.resolveImages) return local;
+    const fetched = await opts.resolveImages(missing);
+    let next = 0;
+    return local.map(part => part ?? fetched[next++]);
+  };
+
   let userMessage = task;
 
   if (showPlan && toolProfile !== 'browser-qa') {
@@ -1975,7 +2029,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       */
       summarize: async () => {
         const history = await projectImages(
-          transcript.messages(), model, settings, opts.resolveImages, imageCache,
+          transcript.messages(), model, settings, resolveImages, imageCache,
         );
         let text = '';
         for await (const event of provider.chat({
@@ -2164,7 +2218,7 @@ const GOAL_REMINDER_EVERY = 6;
         // references, and they become bytes — or a sentence saying why not —
         // here, where the model for this request is finally known.
         const requestMessages = await projectImages(
-          transcript.messages(), model, settings, opts.resolveImages, imageCache,
+          transcript.messages(), model, settings, resolveImages, imageCache,
         );
         contextManager?.noteRequest();
 
@@ -2457,7 +2511,9 @@ const GOAL_REMINDER_EVERY = 6;
               if (!silent) showError(`Unknown tool requested: ${call.name}`);
             } else {
               try {
-                const invocation = await handler(call.input, call.id);
+                // The call id rides along so an image this call produces
+                // reaches the model in the order the calls were asked for.
+                const invocation = await withToolCall(call.id, () => handler(call.input, call.id));
                 result = invocation.result;
                 contexts = invocation.additionalContexts;
               } catch (err) {
@@ -2505,6 +2561,26 @@ const GOAL_REMINDER_EVERY = 6;
         // an advisory insertion.
         for (const context of scheduled.additionalContexts) {
           transcript.recordUserMessage(context.content, context.source);
+        }
+
+        /*
+          Images this step's tools produced — a PNG that was Read, an image URL
+          that was fetched, an MCP screenshot — shown to the model now.
+
+          One user message after every result, carrying references: the shape
+          an upload has, replayed by the same code, so a reopened session still
+          shows them and a model switch still gates them. Each tool already said
+          in its own result whether its picture was attached or why not; only
+          the attached ones are here, and only a model that reads images ever
+          gets one attached.
+        */
+        const produced = drainToolImages(toolImageSink, toolCalls.map(call => call.id));
+        if (produced.length > 0) {
+          transcript.recordUserMessage(
+            toolImagesMessage(produced),
+            { kind: 'plugin', plugin: 'tool-images' },
+            produced.map(image => image.ref),
+          );
         }
 
         /*

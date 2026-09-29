@@ -1,6 +1,6 @@
 /**
- * The desktop's own settings: General, Application, Appearance, Shortcuts,
- * Browser and About.
+ * The desktop's own settings: General, Application (with Updates and
+ * Backup & restore), Appearance, Shortcuts, Browser and About.
  *
  * @module desktop/renderer/settings/sections/AppSections
  */
@@ -10,11 +10,12 @@ import { THEME_PRESETS, type ThemeColors } from '@desk/prefs';
 import { PANES } from '@web/settings-schema';
 import { MarkdownRenderer } from '@aico/ui';
 import { useDesk, toast } from '@/state/desk';
-import { desktop, invoke } from '@/desktop';
+import { desktop, invoke, type BackupPreview, type UpdateState } from '@/desktop';
+import { useUpdates } from '@/updates';
 import { useThemes, useCommands } from '@/plugins/registry';
 import { applyContributedTheme } from '@/plugins/run-action';
 import { Icon } from '@/lib/icons';
-import { cls, prettyKey } from '@/lib/util';
+import { ago, bytes, cls, prettyKey } from '@/lib/util';
 import { EnginePane, Row, Switch } from '../fields';
 
 export function GeneralSection(): React.ReactElement {
@@ -76,7 +77,11 @@ export function ApplicationSection(): React.ReactElement {
         <Row title="Start at login">
           <Switch checked={prefs.launchAtLogin} onChange={v => void set({ launchAtLogin: v })} label="Start at login" />
         </Row>
+        <Row title="Inspect element in right-click menus" desc="For plugin authors: adds the developer tools' inspector to the context menu.">
+          <Switch checked={prefs.developerMenus} onChange={v => void set({ developerMenus: v })} label="Inspect element in right-click menus" />
+        </Row>
       </div>
+      <UpdatesGroup />
       <h3 className="set-heading">Engine</h3>
       <div className="set-group">
         <Row title={<span className="flex items-center gap-2"><span className={cls('h-2 w-2 rounded-full', engine.status === 'ready' ? 'bg-aico-success' : engine.status === 'crashed' ? 'bg-aico-danger' : 'bg-aico-warning')} />
@@ -97,6 +102,7 @@ export function ApplicationSection(): React.ReactElement {
           <button className="btn-outline btn-sm" onClick={() => info && void desktop.shell.openPath(info.pluginsDir)}>Reveal</button>
         </Row>
       </div>
+      <BackupGroup />
       <h3 className="set-heading">Version</h3>
       <div className="set-group">
         <Row title="App version"><span className="font-mono text-[12.5px] text-aico-muted">{info?.app}</span></Row>
@@ -104,6 +110,150 @@ export function ApplicationSection(): React.ReactElement {
         <Row title="Runtime"><span className="font-mono text-[12.5px] text-aico-muted">Electron {info?.electron} · Chromium {info?.chrome} · Node {info?.node}</span></Row>
       </div>
     </div>
+  );
+}
+
+/** What the updater is doing, in one sentence. */
+function updateStatusText(u: UpdateState): string {
+  switch (u.status) {
+    case 'unsupported': return u.message ?? 'Automatic updates are not available for this copy.';
+    case 'idle': return 'Not checked yet.';
+    case 'checking': return 'Checking for updates…';
+    case 'up-to-date': return 'You have the latest version.';
+    case 'available': return `AICO ${u.version} is available.`;
+    case 'downloading': return `Downloading AICO ${u.version ?? ''}… ${u.percent ?? 0}%`;
+    case 'ready': return u.message ?? `AICO ${u.version} is ready — restart to install. It also installs the next time you quit.`;
+    case 'waiting': return `Restarts to install AICO ${u.version} when this finishes: ${(u.busy ?? []).join('; ')}.`;
+    case 'error': return u.message ?? 'The update check failed.';
+  }
+}
+
+function UpdatesGroup(): React.ReactElement {
+  const prefs = useDesk(s => s.prefs);
+  const set = useDesk(s => s.setPrefs);
+  const u = useUpdates(s => s.state);
+  const [busy, setBusy] = useState(false);
+  const act = (fn: () => Promise<unknown>): void => {
+    setBusy(true);
+    void fn().catch((e: Error) => toast.error('Updates', e.message)).finally(() => setBusy(false));
+  };
+  const age = u?.lastCheckedAt ? ago(u.lastCheckedAt) : '';
+  const last = age ? `Last checked ${age === 'now' ? 'just now' : `${age} ago`}.` : '';
+  const releasePage = u && <button className="btn-outline btn-sm" onClick={() => void desktop.shell.openExternal(u.releaseUrl)}>Release page</button>;
+  return (
+    <>
+      <h3 className="set-heading">Updates</h3>
+      <div className="set-group">
+        <Row title="Update automatically" desc="Check GitHub releases at start and every 6 hours, and download new versions in the background. Nothing restarts without you.">
+          <Switch checked={prefs.autoUpdate.enabled} onChange={v => void set({ autoUpdate: { ...prefs.autoUpdate, enabled: v } })} label="Update automatically"
+            disabled={u?.status === 'unsupported'} />
+        </Row>
+        <Row title={<span>AICO <span className="font-mono text-[12.5px]">{u?.current ?? '…'}</span></span>}
+          desc={<span data-testid="update-status">{u ? updateStatusText(u) : 'Loading…'}{last && u?.status !== 'unsupported' ? ` ${last}` : ''}</span>}>
+          <div className="flex items-center gap-2">
+            {u?.status === 'unsupported' && releasePage}
+            {(u?.status === 'idle' || u?.status === 'up-to-date' || u?.status === 'error' || u?.status === 'checking') && (
+              <button className="btn-outline btn-sm" disabled={busy || u.status === 'checking'} onClick={() => act(() => desktop.updates.check())}>
+                {u.status === 'checking' ? 'Checking…' : 'Check now'}
+              </button>
+            )}
+            {u?.status === 'error' && releasePage}
+            {u?.status === 'available' && <button className="btn-primary btn-sm" disabled={busy} onClick={() => act(() => desktop.updates.download())}>Download</button>}
+            {u?.status === 'ready' && <button className="btn-primary btn-sm" disabled={busy} onClick={() => act(() => desktop.updates.install())}>Restart</button>}
+            {u?.status === 'waiting' && (
+              <>
+                <button className="btn-outline btn-sm" onClick={() => act(() => desktop.updates.cancelWait())}>Cancel</button>
+                <button className="btn-danger btn-sm" onClick={() => act(() => desktop.updates.install('now'))}>Restart now</button>
+              </>
+            )}
+          </div>
+        </Row>
+        {u?.status === 'downloading' && (
+          <div className="px-4 pb-3">
+            <div className="h-1.5 overflow-hidden rounded-full bg-aico-hover" role="progressbar" aria-valuenow={u.percent ?? 0} aria-valuemin={0} aria-valuemax={100}>
+              <div className="h-full rounded-full bg-aico-accent transition-[width]" style={{ width: `${u.percent ?? 0}%` }} />
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function BackupGroup(): React.ReactElement {
+  const [keys, setKeys] = useState(false);
+  const [chats, setChats] = useState(false);
+  const [working, setWorking] = useState<null | 'export' | 'pick' | 'restore'>(null);
+  const [preview, setPreview] = useState<BackupPreview | null>(null);
+  const [restored, setRestored] = useState<string | null>(null);
+
+  const exportNow = (): void => {
+    setWorking('export');
+    void desktop.backup.export({ includeApiKeys: keys, includeChats: chats })
+      .then((r) => { if (r) toast.success('Backup saved', `${r.files} files, ${bytes(r.bytes)} — ${r.file}`); })
+      .catch((e: Error) => toast.error('Could not export the backup', e.message))
+      .finally(() => setWorking(null));
+  };
+  const pick = (): void => {
+    setWorking('pick');
+    void desktop.backup.pick()
+      .then(p => setPreview(p))
+      .catch((e: Error) => toast.error('Could not read the backup', e.message))
+      .finally(() => setWorking(null));
+  };
+  const restore = (): void => {
+    if (!preview) return;
+    setWorking('restore');
+    void desktop.backup.import(preview.file)
+      .then((r) => {
+        setPreview(null);
+        setRestored(`Restored ${r.restored} files${r.keptKeys ? `, kept ${r.keptKeys === 1 ? 'the API key' : `${r.keptKeys} API keys`} already on this computer` : ''}. The files it replaced are saved in ${r.safetyCopy}. Reloading…`);
+      })
+      .catch((e: Error) => toast.error('Could not restore the backup', e.message))
+      .finally(() => setWorking(null));
+  };
+
+  const m = preview?.manifest;
+  const os = (p: string): string => (p === 'win32' ? 'Windows' : p === 'linux' ? 'Linux' : p === 'darwin' ? 'macOS' : p);
+  return (
+    <>
+      <h3 className="set-heading">Backup &amp; restore</h3>
+      <div className="set-group">
+        <Row title="Export a backup" desc="Settings (with your projects and groups), desktop preferences and plugins, skills, agents, memory and knowledge, scheduled jobs — one .zip to move AICO to another computer.">
+          <button className="btn-outline btn-sm" disabled={working !== null} onClick={exportNow}>{working === 'export' ? 'Exporting…' : 'Export…'}</button>
+        </Row>
+        <Row title="Include API keys" desc="Off by default: a backup file tends to travel (USB sticks, cloud folders). Restoring a backup without keys keeps the ones already on that computer.">
+          <Switch checked={keys} onChange={setKeys} label="Include API keys" />
+        </Row>
+        <Row title="Include chats" desc="Every conversation with its attachments. Can be large.">
+          <Switch checked={chats} onChange={setChats} label="Include chats" />
+        </Row>
+        <Row title="Restore from a backup" desc="Merges into this computer's AICO folder: files in the backup replace the ones here, everything else stays. What gets replaced is saved to backups/ first. The engine restarts.">
+          <button className="btn-outline btn-sm" disabled={working !== null} onClick={pick}>{working === 'pick' ? 'Reading…' : 'Restore…'}</button>
+        </Row>
+      </div>
+      {restored && <p className="mt-2 text-[12.5px] text-aico-success" role="status">{restored}</p>}
+      {preview && m && (
+        <div className="mt-3 rounded-xl border border-aico-border p-4" role="dialog" aria-label="Restore this backup?">
+          <div className="text-[13.5px] font-medium text-aico-primary">Restore this backup?</div>
+          <div className="mt-1 text-[12.5px] text-aico-muted">
+            Made {new Date(m.createdAt).toLocaleString()} by AICO {m.app} on {os(m.platform)} · API keys {m.apiKeys ? 'included' : 'not included (the keys on this computer are kept)'}
+          </div>
+          <ul className="mt-3 space-y-1 text-[13px]">
+            {preview.summary.map(s => (
+              <li key={s.id} className="flex justify-between gap-4"><span>{s.label}</span><span className="font-mono text-[12px] text-aico-muted">{s.files} {s.files === 1 ? 'file' : 'files'}</span></li>
+            ))}
+            {preview.summary.length === 0 && <li className="text-aico-muted">Nothing to restore.</li>}
+          </ul>
+          {preview.ignored > 0 && <p className="mt-2 text-[12px] text-aico-muted">{preview.ignored} other entries are not part of a backup and will be skipped.</p>}
+          {preview.busy.length > 0 && <p className="mt-2 text-[12.5px] text-aico-warning">Restoring restarts the engine and stops: {preview.busy.join('; ')}.</p>}
+          <div className="mt-3 flex justify-end gap-2">
+            <button className="btn-outline btn-sm" disabled={working === 'restore'} onClick={() => setPreview(null)}>Cancel</button>
+            <button className="btn-primary btn-sm" disabled={working === 'restore' || preview.summary.length === 0} onClick={restore}>{working === 'restore' ? 'Restoring…' : 'Restore'}</button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

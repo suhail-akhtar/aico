@@ -319,8 +319,21 @@ const CACHE_MAX = 50;
 const _resultCache = new Map<string, { result: unknown; timestamp: number }>();
 const CACHEABLE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'Pwd', 'WorkspaceInfo', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead', 'AgentPrompt']);
 
+/**
+ * Whether this call's result is more than its text.
+ *
+ * Read on a picture attaches the picture to the run that asked (see
+ * `tools/tool-images`). A cached answer would replay the words "attached for
+ * viewing" without attaching anything — to a later step, or to another run
+ * whose model may not even see images. So those calls always execute.
+ */
+function producesAttachment(toolName: string, args: Record<string, unknown>): boolean {
+  return toolName === 'Read'
+    && /\.(png|jpe?g|gif|webp)$/i.test(String(args.file_path ?? ''));
+}
+
 function getCachedResult(toolName: string, args: Record<string, unknown>): unknown | undefined {
-  if (!CACHEABLE_TOOLS.has(toolName)) return undefined;
+  if (!CACHEABLE_TOOLS.has(toolName) || producesAttachment(toolName, args)) return undefined;
   const key = toolName + '\0' + JSON.stringify(args);
   const entry = _resultCache.get(key);
   if (!entry) return undefined;
@@ -332,7 +345,7 @@ function getCachedResult(toolName: string, args: Record<string, unknown>): unkno
 }
 
 function setCachedResult(toolName: string, args: Record<string, unknown>, result: unknown): void {
-  if (!CACHEABLE_TOOLS.has(toolName)) return;
+  if (!CACHEABLE_TOOLS.has(toolName) || producesAttachment(toolName, args)) return;
   const key = toolName + '\0' + JSON.stringify(args);
   _resultCache.set(key, { result, timestamp: Date.now() });
   // Evict oldest entries if over limit

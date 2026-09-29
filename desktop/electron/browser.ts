@@ -52,6 +52,8 @@ interface Tab {
 export interface BrowserService {
   tabs(): TabInfo[];
   open(url: string, opts?: { newTab?: boolean }): Promise<TabInfo>;
+  /** Open a tab because the person asked (a context-menu link) — not the agent, so no access check. */
+  openForUser(url: string): Promise<TabInfo>;
   snapshot(opts?: { full?: boolean }): Promise<string>;
   click(target: Target, opts?: { button?: 'left' | 'right'; double?: boolean }): Promise<string>;
   type(target: Target, text: string, opts?: { clear?: boolean; submit?: boolean }): Promise<string>;
@@ -374,6 +376,7 @@ export function registerBrowser(ctx: DesktopContext): void {
   const service: BrowserService = {
     tabs: list,
     async open(url, opts) { checkAccess(); return openUrl(url, opts); },
+    openForUser(url) { return openUrl(url, { newTab: true }); },
     async snapshot(opts) {
       checkAccess();
       const wc = active().view.webContents;

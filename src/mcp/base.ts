@@ -1,3 +1,5 @@
+import { offerToolImage } from '../tools/tool-images.js';
+
 /** Backward-compatible MCP server config (V2 adds http/sse support) */
 export interface McpServerConfigV2 {
   /** Process command — required for stdio */
@@ -36,6 +38,38 @@ export interface McpResourceContent {
 }
 
 export type McpHealthStatus = 'healthy' | 'degraded' | 'disconnected';
+
+/** One item of an MCP tool result's `content`. Only the fields AICO reads. */
+export interface McpContentItem {
+  type: string;
+  text?: string;
+  /** Base64, for `image`. */
+  data?: string;
+  mimeType?: string;
+  /** For `resource`: an embedded resource, which may itself be an image blob. */
+  resource?: { uri?: string; mimeType?: string; blob?: string; text?: string };
+}
+
+/**
+ * The pictures in an MCP result, as bytes.
+ *
+ * Two places an image can be: an `image` item, and an embedded `resource`
+ * whose blob is an image. The declared MIME type only chooses what to look at —
+ * the format itself is read from the bytes later, because a server's label is
+ * not something a provider should be told on trust.
+ */
+export function mcpImages(content: readonly McpContentItem[]): Array<{ bytes: Buffer }> {
+  const out: Array<{ bytes: Buffer }> = [];
+  for (const item of content) {
+    const data = item.type === 'image'
+      ? item.data
+      : item.type === 'resource' && /^image\//i.test(item.resource?.mimeType ?? '') ? item.resource?.blob : undefined;
+    if (typeof data !== 'string' || !data) continue;
+    const bytes = Buffer.from(data, 'base64');
+    if (bytes.length > 0) out.push({ bytes });
+  }
+  return out;
+}
 
 /** A server's instructions are capped: they ride in every request's prompt. */
 const MAX_INSTRUCTIONS = 6000;
@@ -117,10 +151,35 @@ export abstract class McpBaseClient {
 
   async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
     const result = (await this.send('tools/call', { name, arguments: args })) as {
-      content?: Array<{ type: string; text?: string }>;
+      content?: McpContentItem[];
     };
     const content = result?.content ?? [];
     const text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n');
+
+    /*
+      Image content, which used to vanish.
+
+      A browser tool's screenshot came back as `{ type: 'image', data }` beside
+      a line of text; only the text survived, so the model was told a
+      screenshot was taken and never shown it. Worse, a result that was *only*
+      an image fell through to the raw object, and the model was handed the
+      base64 as a wall of characters. Each image is now offered to the model
+      the way a Read of a PNG is (see `tools/tool-images`), and the result says
+      what became of it.
+    */
+    const images = mcpImages(content);
+    if (images.length > 0) {
+      const notes: string[] = [];
+      for (const [index, image] of images.entries()) {
+        const note = await offerToolImage({
+          bytes: image.bytes,
+          name: `${name}${images.length > 1 ? `-${index + 1}` : ''}`,
+          origin: `MCP tool ${name}`,
+        });
+        notes.push(`[Image ${images.length > 1 ? `${index + 1} ` : ''}from ${name}] ${note}`);
+      }
+      return [text, ...notes].filter(Boolean).join('\n');
+    }
     return text || result;
   }
 

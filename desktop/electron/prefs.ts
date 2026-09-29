@@ -37,6 +37,18 @@ export class PrefsStore extends EventEmitter {
     this.write();
   }
 
+  /**
+   * Read the file again — after a restore replaced it underneath us. Without
+   * this the next write (a window move, the flush on quit) would put the old
+   * prefs straight back.
+   */
+  reload(): DesktopPrefs {
+    if (this.writeTimer) { clearTimeout(this.writeTimer); this.writeTimer = null; }
+    this.value = this.load();
+    this.emit('change', this.value);
+    return this.value;
+  }
+
   private load(): DesktopPrefs {
     try {
       const raw = fs.readFileSync(this.file, 'utf8');

@@ -64,6 +64,8 @@ jobs:
             desktop/release/*.exe
             desktop/release/*.AppImage
             desktop/release/*.deb
+            desktop/release/latest*.yml
+            desktop/release/*.blockmap
           if-no-files-found: error
 
       - name: Attach to the release
@@ -77,4 +79,6 @@ jobs:
           TAG="${{ inputs.release }}"
           [ -n "$TAG" ] || TAG="$GITHUB_REF_NAME"
           for i in $(seq 1 30); do gh release view "$TAG" >/dev/null 2>&1 && break; sleep 20; done
-          gh release upload "$TAG" $(ls desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb 2>/dev/null) --clobber
+          # latest*.yml and the blockmaps are what installed copies read to
+          # find, verify and (differentially) download an update.
+          gh release upload "$TAG" $(ls desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb desktop/release/latest*.yml desktop/release/*.blockmap 2>/dev/null) --clobber

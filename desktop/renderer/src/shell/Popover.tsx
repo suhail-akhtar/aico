@@ -90,7 +90,7 @@ export function Popover({
     <div
       ref={ref}
       role="menu"
-      className={cls('menu fixed overflow-y-auto thin-scroll', className)}
+      className={cls('menu fixed z-[70] overflow-y-auto thin-scroll', className)}
       style={{
         top: pos?.top ?? -9999, left: pos?.left ?? -9999,
         maxHeight: pos?.maxHeight, width,

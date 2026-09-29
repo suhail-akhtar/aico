@@ -6,6 +6,9 @@
  */
 
 import type { DesktopPrefs } from '@desk/prefs';
+import type { UpdateState } from '@desk/updates';
+
+export type { UpdateState };
 
 interface RawBridge {
   platform: NodeJS.Platform | string;
@@ -56,6 +59,20 @@ export interface AppInfo {
 }
 
 export interface PickedFile { path: string; name: string; size: number }
+
+export interface BackupManifest {
+  format: string; version: number; createdAt: string; app: string; engine: string; platform: string;
+  includes: string[]; apiKeys: boolean; chats: boolean; files: number; counts: Record<string, number>;
+}
+export interface BackupExportResult { file: string; files: number; bytes: number; manifest: BackupManifest }
+export interface BackupPreview {
+  file: string;
+  manifest: BackupManifest;
+  summary: Array<{ id: string; label: string; files: number }>;
+  ignored: number;
+  /** Work in flight that a restore (which restarts the engine) would stop. */
+  busy: string[];
+}
 
 export const desktop = {
   info: () => invoke<AppInfo>('app:info'),
@@ -115,6 +132,28 @@ export const desktop = {
   },
 
   exportPdf: (html: string, defaultName: string) => invoke<string | null>('export:pdf', { html, defaultName }),
+
+  updates: {
+    state: () => invoke<UpdateState>('updates:state'),
+    check: () => invoke<UpdateState>('updates:check'),
+    download: () => invoke<UpdateState>('updates:download'),
+    /** 'ask' (default) restarts if idle and otherwise asks; 'when-idle' waits for running work. */
+    install: (mode?: 'ask' | 'now' | 'when-idle') => invoke<UpdateState>('updates:install', mode),
+    cancelWait: () => invoke<UpdateState>('updates:cancelWait'),
+    onState: (fn: (s: UpdateState) => void) => on('updates:state', fn),
+  },
+
+  backup: {
+    /** Asks where to save; resolves null when cancelled. */
+    export: (o: { includeApiKeys?: boolean; includeChats?: boolean }) => invoke<BackupExportResult | null>('backup:export', o),
+    /** Asks for a backup and describes it; nothing changes until `import`. */
+    pick: () => invoke<BackupPreview | null>('backup:pick'),
+    import: (file: string) => invoke<{ restored: number; safetyCopy: string; keptKeys: number }>('backup:import', file),
+  },
+
+  /** Zip a folder; with `rootName` everything sits under that one top-level folder (the `.skill` layout). */
+  zipDir: (srcDir: string, destFile: string, rootName?: string) =>
+    invoke<{ file: string; entries: number; bytes: number }>('fs:zipDir', srcDir, destFile, rootName),
 
   onCommand: (fn: (cmd: { id: string; args?: unknown }) => void) => on('command:run', fn),
   pathForFile: (f: File) => raw.pathForFile(f),

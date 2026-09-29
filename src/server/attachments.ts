@@ -9,6 +9,21 @@ import { imageDimensions, describeOversize } from './image-dimensions.js';
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SESSION_BYTES = 50 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
+
+/**
+ * The allowance for images the agent's own tools stored, kept apart from the
+ * reader's.
+ *
+ * Both live in one store because they are one kind of thing to everything
+ * downstream — a reference the log records and `resolveImages` answers for.
+ * They do not share a quota, because they are not the same decision. Twenty
+ * files is a limit on what a person may attach; an agent that reads a folder
+ * of diagrams or takes a screenshot per verification step would otherwise
+ * spend that allowance on the reader's behalf, and the reader's next upload
+ * would be refused for something they never did.
+ */
+const MAX_TOOL_IMAGES = 200;
+const MAX_TOOL_BYTES = 200 * 1024 * 1024;
 const EXTENSIONS = new Set([
   '.pdf', '.docx', '.xlsx', '.csv', '.txt', '.md',
   '.png', '.jpg', '.jpeg', '.webp', '.gif',
@@ -43,7 +58,12 @@ export interface AttachmentDescriptor {
   bytes: number;
 }
 
-interface StoredAttachment extends AttachmentDescriptor { file: string; submitted: boolean }
+interface StoredAttachment extends AttachmentDescriptor {
+  file: string;
+  submitted: boolean;
+  /** Who stored it. Absent on entries written before tools could, which were all uploads. */
+  origin?: 'upload' | 'tool';
+}
 interface AttachmentIndex { attachments: StoredAttachment[] }
 
 function directory(settings: AicoSettings, cwd: string, sessionId: string): string {
@@ -105,7 +125,14 @@ function validateImage(ext: string, bytes: Buffer): void {
 
 export async function storeAttachment(input: {
   settings: AicoSettings; cwd: string; sessionId: string; name: string; mimeType?: string; base64: string;
+  /**
+   * `tool` for an image the agent produced rather than one a person attached:
+   * counted against its own allowance, and retained from the moment it is
+   * stored because the log refers to it at once.
+   */
+  origin?: 'upload' | 'tool';
 }): Promise<AttachmentDescriptor> {
+  const origin = input.origin ?? 'upload';
   const name = safeName(input.name);
   const ext = extension(name);
   if (!EXTENSIONS.has(ext)) throw new Error('Attachments must be .pdf, .docx, .xlsx, .csv, .txt, or .md files');
@@ -118,14 +145,26 @@ export async function storeAttachment(input: {
   const dir = directory(input.settings, input.cwd, input.sessionId);
   await mkdir(dir, { recursive: true });
   const index = await load(dir);
-  if (index.attachments.length >= MAX_ATTACHMENTS) throw new Error('session attachment limit (20 files) reached');
-  if (index.attachments.reduce((sum, item) => sum + item.bytes, 0) + bytes.length > MAX_SESSION_BYTES) throw new Error('session attachment limit (50 MB) exceeded');
+  const same = index.attachments.filter(item => (item.origin ?? 'upload') === origin);
+  if (origin === 'tool') {
+    if (same.length >= MAX_TOOL_IMAGES) throw new Error(`this session already holds ${MAX_TOOL_IMAGES} images its tools produced`);
+    if (same.reduce((sum, item) => sum + item.bytes, 0) + bytes.length > MAX_TOOL_BYTES) throw new Error('the session store for tool-produced images (200 MB) is full');
+  } else {
+    if (same.length >= MAX_ATTACHMENTS) throw new Error('session attachment limit (20 files) reached');
+    if (same.reduce((sum, item) => sum + item.bytes, 0) + bytes.length > MAX_SESSION_BYTES) throw new Error('session attachment limit (50 MB) exceeded');
+  }
   const id = crypto.randomUUID();
   const file = `${id}${ext}`;
   const temporary = path.join(dir, `${file}.tmp`);
   await writeFile(temporary, bytes, { flag: 'wx' });
   await rename(temporary, path.join(dir, file));
-  const item: StoredAttachment = { id, name, extension: ext, mimeType: input.mimeType?.slice(0, 120) || 'application/octet-stream', bytes: bytes.length, file, submitted: false };
+  const item: StoredAttachment = {
+    id, name, extension: ext, mimeType: input.mimeType?.slice(0, 120) || 'application/octet-stream', bytes: bytes.length, file,
+    // A tool's image is in the log the moment it is stored, so it is already
+    // "submitted" in the only sense that matters: it must not be removable.
+    submitted: origin === 'tool',
+    ...(origin === 'tool' ? { origin } : {}),
+  };
   index.attachments.push(item);
   await save(dir, index);
   return descriptor(item);

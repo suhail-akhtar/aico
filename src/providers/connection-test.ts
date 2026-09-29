@@ -17,6 +17,8 @@
  * @module providers/connection-test
  */
 
+import { MODALITIES, type Modality } from '../model-capabilities.js';
+
 export interface ProviderTestResult {
   ok: boolean;
   error?: string;
@@ -28,6 +30,17 @@ export interface ProviderTestResult {
    * this is usually sparse or absent — which is the honest shape for it.
    */
   contextWindows?: Record<string, number>;
+  /**
+   * Input modalities the endpoint volunteered, by model id.
+   *
+   * Sparse for the same reason as `contextWindows`: most catalogues are a list
+   * of ids. OpenRouter states `architecture.input_modalities`; Kimi states
+   * `supports_image_in`. Those are recorded as learned capabilities by the
+   * caller (see `model-capabilities`), so the picker can badge a model as
+   * reading images because its provider said so rather than because a prefix
+   * table guessed.
+   */
+  inputModalities?: Record<string, Modality[]>;
   /** How long the round trip took — surfaced so a slow endpoint is visible. */
   latencyMs?: number;
   /**
@@ -208,8 +221,10 @@ async function probeOnce(
 
     const catalogue = extractCatalogue(parsed);
     const contextWindows: Record<string, number> = {};
+    const inputModalities: Record<string, Modality[]> = {};
     for (const entry of catalogue) {
       if (entry.contextWindow !== undefined) contextWindows[entry.id] = entry.contextWindow;
+      if (entry.input !== undefined) inputModalities[entry.id] = entry.input;
     }
     return {
       rank: SPOKE_API,
@@ -218,6 +233,7 @@ async function probeOnce(
         latencyMs,
         models: catalogue.map(entry => entry.id),
         ...Object.keys(contextWindows).length > 0 ? { contextWindows } : {},
+        ...Object.keys(inputModalities).length > 0 ? { inputModalities } : {},
       },
     };
   } catch (err) {
@@ -273,6 +289,30 @@ interface CatalogueEntry {
   id: string;
   /** Context length, when the endpoint says. Most do not. */
   contextWindow?: number;
+  /** Input modalities, when the endpoint says. Fewer still. */
+  input?: Modality[];
+}
+
+/**
+ * What a catalogue entry says the model takes, if it says anything.
+ *
+ * Only the modalities AICO can carry are kept — OpenRouter also lists `file`,
+ * which is not one — and text is always included, since every model reached
+ * here is sent a prompt. Nothing stated means nothing recorded: silence is not
+ * evidence of text-only.
+ */
+export function readInputModalities(model: Record<string, unknown>): Modality[] | undefined {
+  const architecture = model.architecture as { input_modalities?: unknown; modality?: unknown } | undefined;
+  const listed = architecture?.input_modalities ?? model.input_modalities;
+  if (Array.isArray(listed)) {
+    const known = listed.filter((m): m is Modality => typeof m === 'string' && (MODALITIES as string[]).includes(m));
+    return [...new Set<Modality>(['text', ...known])];
+  }
+  // Moonshot's catalogue answers the one question directly.
+  if (typeof model.supports_image_in === 'boolean') {
+    return model.supports_image_in ? ['text', 'image'] : ['text'];
+  }
+  return undefined;
 }
 
 /**
@@ -316,7 +356,12 @@ function extractCatalogue(data: unknown): CatalogueEntry[] {
         // Gemini returns "models/gemini-2.0-flash"; the bare id is what callers use.
         .replace(/^models\//, '');
       const contextWindow = readContextWindow(model);
-      return { id, ...contextWindow === undefined ? {} : { contextWindow } };
+      const input = readInputModalities(model);
+      return {
+        id,
+        ...contextWindow === undefined ? {} : { contextWindow },
+        ...input === undefined ? {} : { input },
+      };
     })
     .filter(entry => entry.id)
     .sort((a, b) => a.id.localeCompare(b.id));

@@ -17,15 +17,30 @@
  * endpoint rejects, and the rejection arrives with the offending bytes already
  * written into the session log.
  *
- * Resolution follows {@link module:context-window} exactly — runtime cache,
- * then a settings override, then a built-in table matched longest-prefix-first.
- * That is not incidental: context window and modality are the same kind of
- * fact, learned the same ways, and a second mechanism for the second fact
- * would be one more thing to keep in step.
+ * Resolution, strongest first:
+ *
+ *   1. a settings override — somebody looked and decided;
+ *   2. what was *learned* about the model and cached on disk: a live probe
+ *      (an image was sent and the model named its colour, or the endpoint
+ *      refused it as unsupported), then a provider catalogue that states
+ *      modalities (OpenRouter's `architecture.input_modalities`, Kimi's
+ *      `supports_image_in`);
+ *   3. the built-in table, matched longest-prefix-first;
+ *   4. text-only, marked unknown.
+ *
+ * The same ladder {@link module:context-window} climbs, for the same reason:
+ * context window and modality are the same kind of fact, learned the same
+ * ways. Learned facts are only ever written by an explicit test or probe, or
+ * by a catalogue listing the picker already fetched — never by sending
+ * something to a model mid-turn to see whether it breaks.
  *
  * @module model-capabilities
  */
 
+import fs from 'fs';
+import path from 'path';
+import { mkdir, rename, writeFile } from 'fs/promises';
+import { aicoHome } from './home.js';
 import type { AicoSettings } from './settings.js';
 
 /**
@@ -70,7 +85,25 @@ export interface ModelCapabilities {
    * the other is an invitation to set an override.
    */
   known: boolean;
+  /**
+   * Which rung of the ladder answered. Optional so a value built elsewhere
+   * still type-checks; everything this module returns sets it.
+   */
+  source?: CapabilitySource;
+  /** When a learned answer was established (ms since epoch). Only for `probe` and `catalogue`. */
+  checkedAt?: number;
 }
+
+/**
+ * Where a capability answer came from.
+ *
+ * `probe` is the strongest learned evidence: a picture was actually sent and
+ * the model either named what was in it or the endpoint refused it.
+ * `catalogue` is the provider saying so in its model list, which is good but
+ * second-hand — a gateway's listing describes the model, not necessarily what
+ * the gateway passes through.
+ */
+export type CapabilitySource = 'user' | 'probe' | 'catalogue' | 'table' | 'assumed';
 
 /** Text in, text out: what every model can do, and all an unknown one is assumed to. */
 const CONSERVATIVE: ModelCapabilities = Object.freeze({
@@ -82,6 +115,7 @@ const CONSERVATIVE: ModelCapabilities = Object.freeze({
   // silently removes the right answer.
   chat: true,
   known: false,
+  source: 'assumed',
 });
 
 interface CapabilityEntry {
@@ -221,8 +255,176 @@ const BUILTIN_CAPABILITIES: CapabilityEntry[] = [
   { match: 'text-moderation', input: ['text'], output: ['text'], chat: false },
 ];
 
-/** Resolved answers, so a per-request check is not a table scan. */
+/** Resolved table answers, so a per-request check is not a table scan. */
 const cache = new Map<string, ModelCapabilities>();
+
+// ── Learned capabilities: probes and catalogues, cached on disk ──────
+
+/** One learned fact about one model, as the cache file holds it. */
+export interface LearnedCapability {
+  /** The provider instance (or family) it was learned through. */
+  provider: string;
+  model: string;
+  /** Input modalities, text included. */
+  input: Modality[];
+  source: 'probe' | 'catalogue';
+  /** When (ms since epoch). */
+  at: number;
+}
+
+interface CapabilityCacheFile {
+  version: 1;
+  entries: LearnedCapability[];
+}
+
+/**
+ * Learned facts, keyed by model id exactly as the provider receives it.
+ *
+ * Not by provider and model together, because resolution is asked by model
+ * alone — every caller that gates a request knows the model and not which
+ * instance will serve it. The provider is kept in the entry so a reader can see
+ * where a fact came from; the rare id served by two endpoints that disagree
+ * gets whichever was checked last, which is also what a person re-running the
+ * probe would expect.
+ */
+const learned = new Map<string, LearnedCapability>();
+let learnedLoaded = false;
+
+/** Where learned capabilities live: beside the other caches, under the AICO home. */
+export function capabilityCachePath(): string {
+  return path.join(aicoHome(), 'cache', 'model-capabilities.json');
+}
+
+/**
+ * Read the cache file once, synchronously, the first time anything asks.
+ *
+ * Lazy rather than at import, because `AICO_HOME` is read at call time (see
+ * `home.ts`) and a module imported early must not freeze the answer. Sync,
+ * because resolution is sync and runs before every request — it cannot await.
+ * A missing or damaged file is an empty cache, never an error: the table
+ * still answers.
+ */
+function ensureLearnedLoaded(): void {
+  if (learnedLoaded) return;
+  learnedLoaded = true;
+  let parsed: Partial<CapabilityCacheFile>;
+  try {
+    parsed = JSON.parse(fs.readFileSync(capabilityCachePath(), 'utf8')) as Partial<CapabilityCacheFile>;
+  } catch {
+    return;
+  }
+  for (const raw of Array.isArray(parsed.entries) ? parsed.entries : []) {
+    const entry = readLearned(raw);
+    if (entry) learned.set(entry.model, entry);
+  }
+}
+
+/** Validate one entry from disk; anything malformed is dropped rather than trusted. */
+function readLearned(raw: unknown): LearnedCapability | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const input = readModalities(r.input);
+  if (typeof r.model !== 'string' || !r.model || !input) return undefined;
+  if (r.source !== 'probe' && r.source !== 'catalogue') return undefined;
+  return {
+    provider: typeof r.provider === 'string' ? r.provider : '',
+    model: r.model,
+    input: [...new Set<Modality>(['text', ...input])],
+    source: r.source,
+    at: typeof r.at === 'number' ? r.at : 0,
+  };
+}
+
+/**
+ * Writes go one at a time, for the reason `context-window` gives: each is a
+ * whole-file write, and two in flight would each start from the same "before".
+ * The file is replaced by rename so a reader never sees half of one.
+ */
+let persistQueue: Promise<void> = Promise.resolve();
+
+function persistLearned(): Promise<void> {
+  const next = persistQueue.then(async () => {
+    const file = capabilityCachePath();
+    await mkdir(path.dirname(file), { recursive: true });
+    const body: CapabilityCacheFile = {
+      version: 1,
+      entries: [...learned.values()].sort((a, b) => a.model.localeCompare(b.model)),
+    };
+    const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temporary, JSON.stringify(body, null, 2));
+    await rename(temporary, file);
+  });
+  persistQueue = next.catch(() => undefined);
+  return next;
+}
+
+/** Wait for any pending cache write. For tests and for a caller about to exit. */
+export function flushCapabilityCache(): Promise<void> {
+  return persistQueue;
+}
+
+/**
+ * Record what was learned about a model, and persist it.
+ *
+ * A probe always replaces what was there: it is the most direct evidence
+ * available, and re-running one is how a person says "check again". A
+ * catalogue never replaces a probe — a listing that says "image" does not
+ * outrank having sent an image and watched it be refused — but does replace an
+ * older catalogue answer, since listings change when models do.
+ *
+ * @returns whether anything changed (and so whether a write was queued).
+ */
+export function recordModelCapabilities(fact: {
+  provider: string;
+  model: string;
+  input: readonly Modality[];
+  source: 'probe' | 'catalogue';
+  at?: number;
+}): boolean {
+  ensureLearnedLoaded();
+  const input = readModalities([...fact.input]);
+  if (!fact.model || !input) return false;
+  const entry: LearnedCapability = {
+    provider: fact.provider,
+    model: fact.model,
+    input: [...new Set<Modality>(['text', ...input])],
+    source: fact.source,
+    at: fact.at ?? Date.now(),
+  };
+  const existing = learned.get(fact.model);
+  if (existing?.source === 'probe' && entry.source === 'catalogue') return false;
+  if (existing && existing.source === entry.source && existing.provider === entry.provider
+    && existing.input.length === entry.input.length && existing.input.every(m => entry.input.includes(m))) {
+    // Unchanged. A catalogue re-listed on every picker open would otherwise
+    // rewrite the file each time for nothing.
+    if (entry.source === 'catalogue') return false;
+  }
+  learned.set(fact.model, entry);
+  void persistLearned().catch(() => { /* the in-memory answer still holds */ });
+  return true;
+}
+
+/**
+ * Record every modality a catalogue listing stated.
+ *
+ * @returns how many models' entries changed.
+ */
+export function recordCatalogueModalities(
+  provider: string,
+  modalities: Record<string, readonly Modality[]> | undefined,
+): number {
+  let changed = 0;
+  for (const [model, input] of Object.entries(modalities ?? {})) {
+    if (recordModelCapabilities({ provider, model, input, source: 'catalogue' })) changed++;
+  }
+  return changed;
+}
+
+/** What was learned about this model, if anything. */
+export function learnedCapabilities(model: string): LearnedCapability | undefined {
+  ensureLearnedLoaded();
+  return learned.get(model);
+}
 
 /**
  * A gateway id reduced to the vendor's own.
@@ -280,10 +482,38 @@ export function getModelCapabilities(
         // writing one is describing a model they intend to use.
         chat: true,
         known: true,
+        source: 'user',
       };
     }
   }
 
+  const fromTable = tableCapabilities(model);
+
+  /*
+    Learned facts outrank the table and nothing else.
+
+    They replace only the *input* side — which is all a probe or a catalogue's
+    modality list speaks to. Output and whether it is a chat model at all stay
+    with the table, because an image probe that succeeded says nothing about
+    either.
+  */
+  ensureLearnedLoaded();
+  const fact = learned.get(model);
+  if (fact) {
+    return {
+      input: fact.input,
+      output: fromTable.output,
+      chat: fromTable.chat,
+      known: true,
+      source: fact.source,
+      checkedAt: fact.at,
+    };
+  }
+  return fromTable;
+}
+
+/** The built-in table's answer, memoised. */
+function tableCapabilities(model: string): ModelCapabilities {
   const cached = cache.get(model);
   if (cached) return cached;
 
@@ -301,6 +531,7 @@ export function getModelCapabilities(
       output: Object.freeze([...(best.entry.output ?? ['text'])]),
       chat: best.entry.chat ?? true,
       known: true,
+      source: 'table' as const,
     })
     : CONSERVATIVE;
   cache.set(model, resolved);
@@ -356,7 +587,15 @@ export function modelCanChat(model: string, settings?: AicoSettings): boolean {
   return getModelCapabilities(model, settings).chat;
 }
 
-/** Forget resolved answers. For tests, and for a settings change mid-process. */
+/**
+ * Forget resolved answers. For tests, and for a settings change mid-process.
+ *
+ * Learned facts are forgotten too, but only from memory: the next question
+ * reads them back from the cache file, which is the point — a reset proves the
+ * file, not the process, is what holds them.
+ */
 export function resetCapabilityCache(): void {
   cache.clear();
+  learned.clear();
+  learnedLoaded = false;
 }

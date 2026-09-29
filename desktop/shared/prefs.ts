@@ -47,6 +47,13 @@ export interface DesktopPrefs {
   /** Agent may drive the built-in browser without asking each time. */
   browserAgentAccess: 'ask' | 'allow' | 'deny';
   shortcuts: Record<string, string>;
+  /**
+   * Updates from GitHub releases. `lastCheckedAt` is kept here (not only in
+   * the updater's memory) so "last checked" survives a restart.
+   */
+  autoUpdate: { enabled: boolean; channel: 'latest'; lastCheckedAt: number };
+  /** Show "Inspect element" in right-click menus of a packaged build. */
+  developerMenus: boolean;
 }
 
 export const THEME_PRESETS: Record<'light' | 'dark', Record<string, Omit<ThemeColors, 'preset'>>> = {
@@ -86,6 +93,8 @@ export const DEFAULT_PREFS: DesktopPrefs = {
   browserHome: 'https://duckduckgo.com',
   browserAgentAccess: 'allow',
   shortcuts: {},
+  autoUpdate: { enabled: true, channel: 'latest', lastCheckedAt: 0 },
+  developerMenus: false,
 };
 
 /** Deep-merge a partial prefs object over the defaults, dropping unknown keys' wrong types. */

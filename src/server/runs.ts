@@ -690,16 +690,32 @@ export class RunManager {
             return fresh ? [fresh] : [];
           },
         } : {}),
-        // A verifier screenshot becomes an attachment of this session, so the
-        // next request can show it to a model that reads images.
-        storeImage: async (file: string) => {
+        // A verifier screenshot, or an image a tool returned (Read on a PNG,
+        // WebFetch of an image URL, an MCP screenshot), becomes an attachment
+        // of this session, so the next request can show it to a model that
+        // reads images — and a reopened session still can. Stored as a tool's
+        // image, so it neither spends nor is refused by the reader's own
+        // upload allowance.
+        storeImage: async (source) => {
           const { storeAttachment, IMAGE_MEDIA_TYPES } = await import('./attachments.js');
+          if (typeof source !== 'string') {
+            const { extensionFor } = await import('../tools/tool-images.js');
+            const ext = extensionFor(source.mediaType);
+            const base = source.name.replace(/^.*[\\/]/, '').replace(/\.[^.]*$/, '') || 'image';
+            const stored = await storeAttachment({
+              settings, cwd: run.cwd, sessionId, name: `${base}${ext}`, mimeType: source.mediaType,
+              base64: source.bytes.toString('base64'), origin: 'tool',
+            });
+            return { id: stored.id, mediaType: source.mediaType, name: stored.name };
+          }
+          const file = source;
           const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
           const mediaType = IMAGE_MEDIA_TYPES[ext];
           if (!mediaType) return undefined;
           const bytes = await readFile(file);
           const stored = await storeAttachment({
-            settings, cwd: run.cwd, sessionId, name: file.replace(/^.*[\\/]/, ''), mimeType: mediaType, base64: bytes.toString('base64'),
+            settings, cwd: run.cwd, sessionId, name: file.replace(/^.*[\\/]/, ''), mimeType: mediaType,
+            base64: bytes.toString('base64'), origin: 'tool',
           });
           return { id: stored.id, mediaType, name: stored.name };
         },

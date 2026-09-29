@@ -3,6 +3,66 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.24.0 — 2026-09-29
+
+The agent can see what it looks at; skills and agents can be made, imported and
+exported from Settings; and the desktop app updates itself, backs itself up and
+has right-click menus.
+
+### Fixed
+
+- **A vision model could not see a single image the agent found itself.** Only
+  pictures the user attached reached the model: `Read` refused image files,
+  `WebFetch` returned text, and image content from MCP tools (including the
+  desktop's `browser_screenshot`) was dropped — so a vision model reported, truthfully,
+  that it could not see the PNGs it was asked about. Tool-produced images (Read
+  of png/jpg/webp/gif, WebFetch of `image/*`, MCP image content and image
+  resources) now go to the attachment store and reach the model as a user
+  message after the step's tool results, on models that read images; on
+  text-only models the tool result says so plainly. The log holds references,
+  never bytes; images have their own allowance and the 8000px edge limit. An
+  image `Read` skips the 30-second tool cache, which would have claimed an
+  attachment it did not make.
+
+### Added
+
+- **Capabilities are learned and remembered.** `models/probe` (and
+  `providers/test` with a model) shows a model a small solid-colour picture and
+  records whether it named the colour, in `~/.aico/cache/model-capabilities.json`;
+  catalogue modalities (OpenRouter, Kimi) are recorded when models are listed.
+  Resolution: your override, then a probe, then the catalogue, then the built-in
+  table, then text-only. Probes run only when asked. (Found live:
+  `deepseek-flash` reads images though the table said nothing about it.)
+- **Desktop Settings → Models**: the default model is a searchable dropdown of
+  what the provider serves, with an eye on models that read images, a "Check
+  whether it reads images" action, and free typing for unlisted ids; "Test"
+  also probes the default model. The composer's model menu shows the same badge.
+- **Desktop Settings → Skills**: import a `.skill`/`.zip`, a `SKILL.md` or a
+  folder (asks before replacing; nothing is run); export one or all as Claude-
+  compatible `.skill` archives; write a skill with bundled scripts, references
+  and templates, or create/improve one with the agent; remove, open, reveal.
+- **Desktop Settings → Agents**: create and edit agents — instructions, goals,
+  model (searchable), tools (built-in, MCP servers, or typed), skills, delegation,
+  and their own knowledge files, folders and scripts, kept as a companion
+  `<name>-kit` skill; duplicate, delete, enable, talk to it, import/export JSON,
+  or create one with the agent.
+- **Desktop: automatic updates** (Windows installer and AppImage) via
+  electron-updater from GitHub releases — on by default, switchable; downloads in
+  the background, notifies when ready, and restarts now or once running work has
+  finished; installs on quit otherwise. Releases now carry `latest*.yml` and
+  blockmaps. 0.24.0 is the first release with update information, so a 0.23.x
+  install has to be updated by hand once; from 0.24.0 on it updates itself.
+  (deb: best effort through `pkexec`, with a link to the release page if that fails.)
+- **Desktop: backup and restore** — one archive of settings (API keys stripped
+  unless you include them), preferences, plugins, skills, agents, memory,
+  scheduled jobs and projects (chats optional); restoring saves the current state
+  first, then restarts the engine.
+- **Desktop: right-click menus** — spelling suggestions and add-to-dictionary,
+  cut/copy/paste/paste as plain text/select all, links (open, open in the
+  built-in browser, copy), images (copy, copy address, save), and back/forward/
+  reload in the built-in browser.
+- Desktop Settings: the Projects list folds (remembered) and shows its count.
+
 ## 0.23.1 — 2026-09-29
 
 AICO Desktop's composer, fixed and finished: `/` and `@` work the way every

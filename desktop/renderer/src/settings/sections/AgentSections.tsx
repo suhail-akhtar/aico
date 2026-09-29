@@ -7,7 +7,8 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, type ProviderInstance, type ProviderTypeInfo, type SkillSummary, type AgentSpec } from '@web/api';
+import { api, type ProviderInstance, type ProviderTypeInfo } from '@web/api';
+import { ModelCombobox } from '@/shell/ModelCombobox';
 import { useStore } from '@web/store';
 import { PANES } from '@web/settings-schema';
 import { toast } from '@/state/desk';
@@ -36,12 +37,23 @@ export function ModelsSection(): React.ReactElement {
     try { await api.activateProvider(id); await load(); await refreshProviders(); toast.success('Provider activated'); }
     catch (e) { toast.error('Could not activate', (e as Error).message); }
   };
-  const test = async (id: string): Promise<void> => {
-    setTesting(id);
+  /**
+   * Connects, lists the models, and shows the default model a tiny picture to
+   * learn whether it reads images. The answer is remembered on this computer
+   * (the engine's capability cache), so every picker and the agent itself know
+   * it from then on — one small request, only when asked.
+   */
+  const test = async (p: ProviderInstance): Promise<void> => {
+    setTesting(p.id);
     try {
-      const r = await api.testProvider(id);
-      if (r.ok) toast.success('Connected', `${r.models?.length ?? 0} models · ${r.latencyMs ?? '?'} ms`);
-      else toast.error('Connection failed', r.error);
+      const model = p.defaultModel ?? typeOf(p.type)?.defaultModel ?? undefined;
+      const r = await api.testProvider(p.id, model);
+      if (!r.ok) { toast.error('Connection failed', r.error); return; }
+      const probe = r.imageProbe;
+      const vision = !probe ? '' : 'verdict' in probe
+        ? probe.verdict === 'image' ? ` · ${model} reads images` : probe.verdict === 'text-only' ? ` · ${model} is text-only` : ` · image support unknown (${probe.reason})`
+        : ` · image check failed: ${probe.error}`;
+      toast.success('Connected', `${r.models?.length ?? 0} models · ${r.latencyMs ?? '?'} ms${vision}`);
     } catch (e) { toast.error('Test failed', (e as Error).message); }
     finally { setTesting(null); }
   };
@@ -68,7 +80,7 @@ export function ModelsSection(): React.ReactElement {
             title={<span className="flex items-center gap-2">{p.name}{data.active === p.id && <span className="badge bg-aico-accent-soft text-aico-accent">Active</span>}</span>}
             desc={<>{typeOf(p.type)?.label ?? p.type} · {p.defaultModel ?? typeOf(p.type)?.defaultModel ?? 'default model'} · key {p.keySource === 'none' ? <span className="text-aico-warning">missing</span> : p.keySource === 'environment' ? 'from environment' : p.keySource === 'not-required' ? 'not needed' : 'saved'}</>}>
             <div className="flex items-center gap-1.5">
-              <button className="btn-outline btn-sm" onClick={() => void test(p.id)} disabled={testing === p.id}>{testing === p.id ? <span className="spinner h-3 w-3" /> : null}Test</button>
+              <button className="btn-outline btn-sm" onClick={() => void test(p)} disabled={testing === p.id} title="Connect, list models, and check whether the default model reads images">{testing === p.id ? <span className="spinner h-3 w-3" /> : null}Test</button>
               {data.active !== p.id && <button className="btn-outline btn-sm" onClick={() => void activate(p.id)}>Use</button>}
               {!p.derived && <button className="icon-btn-sm" onClick={() => setEditing({ ...p, apiKey: '' })} aria-label={`Edit ${p.name}`}><Icon name="edit" size={14} /></button>}
               {!p.derived && data.active !== p.id && <button className="icon-btn-sm" onClick={() => void remove(p.id)} aria-label={`Remove ${p.name}`}><Icon name="trash" size={14} /></button>}
@@ -96,9 +108,28 @@ export function ModelsSection(): React.ReactElement {
             <label className="space-y-1"><span className="label">Base URL</span>
               <input className="input font-mono" value={editing.baseUrl ?? ''} onChange={e => setEditing({ ...editing, baseUrl: e.target.value })} placeholder={typeOf(editing.type ?? '')?.defaultBaseUrl} />
             </label>
-            <label className="space-y-1"><span className="label">Default model</span>
-              <input className="input font-mono" value={editing.defaultModel ?? ''} onChange={e => setEditing({ ...editing, defaultModel: e.target.value })} placeholder={typeOf(editing.type ?? '')?.defaultModel} />
-            </label>
+            <div className="space-y-1"><span className="label">Default model</span>
+              <ModelCombobox
+                key={`${editing.id ?? 'new'}:${editing.type}`}
+                value={editing.defaultModel ?? ''}
+                onChange={v => setEditing(e => e && { ...e, defaultModel: v })}
+                placeholder={typeOf(editing.type ?? '')?.defaultModel ?? 'search models'}
+                probe={editing.id ? (m => api.probeModel(m, editing.id)) : undefined}
+                load={async () => {
+                  // A saved provider answers from its catalogue (with capabilities);
+                  // one being typed is asked with the key and URL as they stand.
+                  if (editing.id && !editing.apiKey && !editing.baseUrl) {
+                    const r = await api.providerModels(editing.id);
+                    return { models: r.models.map(id => ({ id, ...(r.capabilities?.[id] ?? {}) })), error: r.error };
+                  }
+                  const r = editing.id
+                    ? await api.testProvider(editing.id)
+                    : await api.testProviderDraft({ type: editing.type ?? '', apiKey: editing.apiKey || undefined, baseUrl: editing.baseUrl || undefined });
+                  if (!r.ok) return { models: [], error: `${r.error ?? 'Could not list models'} — enter the key first, or type a model id.` };
+                  return { models: (r.models ?? []).map(id => ({ id })) };
+                }}
+              />
+            </div>
           </div>
           {typeOf(editing.type ?? '')?.hint && <p className="mt-2 text-[12px] text-aico-muted">{typeOf(editing.type ?? '')!.hint}</p>}
           <div className="mt-3 flex justify-end gap-2">
@@ -107,35 +138,6 @@ export function ModelsSection(): React.ReactElement {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-export function SkillsSection(): React.ReactElement {
-  const [skills, setSkills] = useState<SkillSummary[] | null>(null);
-  const [q, setQ] = useState('');
-  const load = useCallback(async () => { try { setSkills((await api.skills()).skills); } catch (e) { toast.error('Could not load skills', (e as Error).message); setSkills([]); } }, []);
-  useEffect(() => { void load(); }, [load]);
-  const toggle = async (s: SkillSummary): Promise<void> => {
-    try { await api.manage('skills', { action: s.enabled ? 'disable' : 'enable', name: s.name }); await load(); }
-    catch (e) { toast.error('Could not change the skill', (e as Error).message); }
-  };
-  const shown = (skills ?? []).filter(s => !q || s.name.includes(q.toLowerCase()) || s.description.toLowerCase().includes(q.toLowerCase()));
-  const pane = PANES.find(p => p.id === 'skills');
-  return (
-    <div>
-      <div className="flex items-center gap-2">
-        <input className="input flex-1" placeholder={`Search ${skills?.length ?? ''} skills`} value={q} onChange={e => setQ(e.target.value)} />
-      </div>
-      <div className="set-group mt-3">
-        {skills === null && <div className="p-4"><div className="skeleton h-10" /></div>}
-        {shown.map(s => (
-          <Row key={s.name} title={<span className="flex items-center gap-2">{s.name}{s.builtin && <span className="badge bg-aico-hover text-aico-muted">built in</span>}</span>} desc={<span className="line-clamp-2">{s.description}</span>}>
-            <Switch checked={s.enabled} onChange={() => void toggle(s)} label={`Enable ${s.name}`} />
-          </Row>
-        ))}
-      </div>
-      {pane && <div className="mt-6"><EnginePane pane={pane} /></div>}
     </div>
   );
 }
@@ -204,22 +206,4 @@ export function McpSection(): React.ReactElement {
   );
 }
 
-export function AgentsSection(): React.ReactElement {
-  const [agents, setAgents] = useState<AgentSpec[] | null>(null);
-  useEffect(() => { void api.agents().then(r => setAgents(r.agents)).catch(() => setAgents([])); }, []);
-  const pane = PANES.find(p => p.id === 'agents');
-  return (
-    <div>
-      <p className="-mt-2 mb-3 text-[13px] text-aico-muted">Specialists the orchestrator can hand work to. Mention one with @ in the composer.</p>
-      <div className="set-group">
-        {agents === null && <div className="p-4"><div className="skeleton h-10" /></div>}
-        {agents?.map(a => (
-          <Row key={a.name} title={<span className="flex items-center gap-2">{a.name}<span className="badge bg-aico-hover text-aico-muted">{a.source}</span></span>} desc={<span className="line-clamp-2">{a.description}</span>}>
-            <span className={cls('text-[12px]', a.enabled ? 'text-aico-success' : 'text-aico-muted')}>{a.enabled ? 'On' : 'Off'}</span>
-          </Row>
-        ))}
-      </div>
-      {pane && <div className="mt-6"><EnginePane pane={pane} /></div>}
-    </div>
-  );
-}
+export { SkillsSection, AgentsSection } from './SkillsAgents';

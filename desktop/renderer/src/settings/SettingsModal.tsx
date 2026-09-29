@@ -15,6 +15,7 @@ import { useSettingsSections } from '@/plugins/registry';
 import { Icon } from '@/lib/icons';
 import { cls, initials } from '@/lib/util';
 import { Modal } from '@/shell/Modal';
+import { useLocal } from '@/lib/local';
 import { ProjectSettingsSection } from './sections/ProjectSettings';
 
 const GROUP_LABEL: Record<string, string> = { app: 'Settings', agent: 'Agent', integrations: 'Integrations' };
@@ -27,6 +28,8 @@ export function SettingsModal(): React.ReactElement | null {
   const projects = useProjects();
   const info = useDesk(s => s.info);
   const [q, setQ] = useState('');
+  // Many projects pushed everything else off the list; folded by default, remembered.
+  const [projectsOpen, setProjectsOpen] = useLocal('desk.settings.projectsOpen', false);
 
   const grouped = useMemo(() => {
     const g: Record<string, typeof sections> = { app: [], agent: [], integrations: [] };
@@ -58,10 +61,14 @@ export function SettingsModal(): React.ReactElement | null {
               </div>
             );
           })}
-          {!needle && projects.some(p => !p.isWorkspace) && (
+          {projects.some(p => !p.isWorkspace && (!needle || p.name.toLowerCase().includes(needle))) && (
             <div className="mb-2">
-              <div className="px-2.5 pb-1 pt-2 text-[12px] text-aico-muted">Projects</div>
-              {projects.filter(p => !p.isWorkspace).map(p => (
+              <button className="flex w-full items-center gap-1 rounded-md px-2.5 pb-1 pt-2 text-left text-[12px] text-aico-muted hover:text-aico-primary"
+                onClick={() => setProjectsOpen(o => !o)} aria-expanded={projectsOpen || Boolean(needle)}>
+                <span className="flex-1">Projects <span className="tabular-nums">· {projects.filter(p => !p.isWorkspace).length}</span></span>
+                <Icon name={projectsOpen || needle ? 'chevron-down' : 'chevron-right'} size={13} />
+              </button>
+              {(projectsOpen || Boolean(needle) || Boolean(projectPath)) && projects.filter(p => !p.isWorkspace && (!needle || p.name.toLowerCase().includes(needle)) && (projectsOpen || needle || p.path === projectPath)).map(p => (
                 <button key={p.path} className={cls('nav-item py-1.5 text-[13.5px]', projectPath === p.path && 'nav-item-active')} onClick={() => open(`project:${p.path}`)} title={p.path}>
                   <Icon name="folder" size={15} className="text-aico-secondary" /><span className="truncate">{p.name}</span>
                 </button>

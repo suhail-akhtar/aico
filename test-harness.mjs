@@ -352,10 +352,19 @@ fs.unlinkSync(tmpF);
   ]);
   fs.writeFileSync(png, header);
   const described = await executeTool('Read', { file_path: png });
-  assert(/binary file \(PNG image, 2 KB, 1440×900\)/.test(described) && !/IHDR/.test(described.slice(0, 40)),
+  // Outside a run there is no model to show it to — so it is described, and the
+  // result says why it was not shown. (Inside one it is attached: see the
+  // TOOL-PRODUCED IMAGES section.)
+  assert(/is an image\. \(PNG, 1440×900, 2 KB\.\)/.test(described) && !/IHDR/.test(described),
     `Read describes a PNG rather than dumping it (${String(described).slice(0, 90)})`);
-  assert(/attachment/.test(described), 'and says how an image reaches a model that can see one');
+  assert(/Nothing in this context can carry an image/.test(described), 'and says why it was not shown');
   fs.unlinkSync(png);
+  const bmp = path.resolve('./test-read-binary.bmp');
+  fs.writeFileSync(bmp, Buffer.from([0x42, 0x4d, 0, 0, 0, 1]));
+  assert(/binary file \(bitmap image/.test(await executeTool('Read', { file_path: bmp }))
+    && /Only PNG, JPEG, WebP and GIF/.test(await executeTool('Read', { file_path: bmp })),
+    'a format no model is shown is still described, with the formats that can be');
+  fs.unlinkSync(bmp);
   const nul = path.resolve('./test-read-binary.bin');
   fs.writeFileSync(nul, Buffer.from([1, 2, 0, 3, 4]));
   assert(/binary file \(unknown type/.test(await executeTool('Read', { file_path: nul })), 'a file with NUL bytes and no known extension is still called binary');
@@ -14057,6 +14066,291 @@ console.log('\n══ LONG-HORIZON CONTEXT: MASK, CONDENSE, RESUME ══');
       `a configured base URL is honoured, with or without a trailing /v1 (${paths.join(', ')})`);
     server.close();
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// TOOL-PRODUCED IMAGES AND LEARNED CAPABILITIES
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ TOOL-PRODUCED IMAGES AND LEARNED CAPABILITIES ══');
+{
+  const {
+    offerToolImage, sniffImageType, drainToolImages, createToolImageSink, MAX_TOOL_IMAGE_BYTES,
+    classifyImageProbe, runImageProbe, probeModelImageInput, solidPng, probeImage,
+    recordModelCapabilities, recordCatalogueModalities, learnedCapabilities, flushCapabilityCache,
+    capabilityCachePath, readInputModalities, McpBaseClient, webFetch, toAnthropicMessages,
+    toDeepSeekMessages, toResponsesInput,
+  } = await import('./dist-test/test-exports.js');
+  const http = await import('http');
+
+  const RED = solidPng([220, 20, 20], 16);
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-toolimg-'));
+  fs.writeFileSync(path.join(workDir, 'diagram.png'), RED);
+  fs.writeFileSync(path.join(workDir, 'copy.png'), RED);
+
+  /** A scripted provider that keeps every request's messages, images and all. */
+  const recordingProvider = (steps) => {
+    let i = 0;
+    return {
+      id: 'mock', displayName: 'Mock', requests: [],
+      async *chat(opts) {
+        this.requests.push(opts.messages.map(m => ({ ...m })));
+        for (const ev of steps[Math.min(i++, steps.length - 1)]) yield ev;
+      },
+    };
+  };
+  const readThenAnswer = (...files) => [
+    [
+      ...files.map((file, n) => ({ type: 'tool_call', id: `r${n}`, name: 'Read', input: { file_path: file } })),
+      { type: 'finish', reason: 'tool_calls' },
+    ],
+    [{ type: 'text', content: 'It is red.' }, { type: 'finish', reason: 'stop' }],
+  ];
+  const runWith = (provider, session, model, extra = {}) => runAgent({
+    task: 'what colour is diagram.png?', model, showPlan: false, autoApprove: true,
+    verbose: false, silent: true, conversationHistory: [], sessionId: session.header.id,
+    cwd: workDir,
+    settings: {
+      completionGate: { enabled: false }, cron: { enabled: false },
+      modelCapabilities: { 'mock-vision-toolimg': { input: ['text', 'image'] } },
+    },
+    provider, session, ...extra,
+  });
+  const toolResultOf = (session) => session.events.filter(e => e.type === 'tool/result').map(e => e.data.content);
+
+  // The reported bug: a vision model Reads a PNG and is never shown it.
+  {
+    const session = mkSession('toolimg-vision');
+    const provider = recordingProvider(readThenAnswer('diagram.png'));
+    await runWith(provider, session, 'mock-vision-toolimg');
+    const [result] = toolResultOf(session);
+    assert(/Attached for viewing \(PNG, 16×16/.test(result ?? ''),
+      `Read on a PNG says the image was attached, with its size (${String(result).slice(0, 90)})`);
+    const second = provider.requests[1] ?? [];
+    const toolIndex = second.findIndex(m => m.role === 'tool');
+    const imageIndex = second.findIndex(m => m.role === 'user' && m.images?.length);
+    assert(imageIndex > toolIndex && toolIndex !== -1,
+      'the next request carries the picture in a user message after the tool result');
+    assert(second[imageIndex]?.images?.[0]?.data === RED.toString('base64'),
+      'with the file\'s actual bytes');
+    assert(/\[Image from Read diagram\.png — PNG, 16×16/.test(second[imageIndex]?.content ?? ''),
+      'and a line naming where it came from');
+    const logged = JSON.stringify(session.events);
+    assert(!logged.includes(RED.toString('base64')), 'the session log holds a reference, never the bytes');
+    const userWithRefs = session.events.find(e => e.type === 'user/message' && e.data.images?.length);
+    assert(userWithRefs?.data.source?.plugin === 'tool-images', 'recorded as the tool-images plugin, not as the reader');
+  }
+
+  // A model that cannot see is told so, in words that name the fix.
+  {
+    const session = mkSession('toolimg-text');
+    const provider = recordingProvider(readThenAnswer('diagram.png'));
+    await runWith(provider, session, 'gpt-3.5-turbo');
+    const [result] = toolResultOf(session);
+    assert(/does not take image input — switch to a vision model to look at it/.test(result ?? ''),
+      `a text-only model's Read says so plainly (${String(result).slice(0, 110)})`);
+    assert(!(provider.requests[1] ?? []).some(m => m.images?.length), 'and nothing is sent to it');
+    assert(!session.events.some(e => e.type === 'user/message' && e.data.images?.length),
+      'and no image message is recorded');
+  }
+  {
+    const session = mkSession('toolimg-unknown');
+    const provider = recordingProvider(readThenAnswer('diagram.png'));
+    await runWith(provider, session, 'never-described-model-xyz');
+    const [result] = toolResultOf(session);
+    assert(/not known to take image input/.test(result ?? '') && /modelCapabilities/.test(result ?? ''),
+      'an undescribed model stays text-only and the result says how to change that');
+  }
+
+  // With an attachment store, the bytes go there and come back through resolveImages.
+  {
+    const session = mkSession('toolimg-store');
+    const provider = recordingProvider(readThenAnswer('diagram.png'));
+    const stored = new Map();
+    let storedArg;
+    await runWith(provider, session, 'mock-vision-toolimg', {
+      storeImage: async (source) => {
+        storedArg = source;
+        const id = `att-${stored.size + 1}`;
+        stored.set(id, source.bytes.toString('base64'));
+        return { id, mediaType: source.mediaType, name: source.name };
+      },
+      resolveImages: async (refs) => refs.map(ref => (stored.has(ref.id)
+        ? { data: stored.get(ref.id), mediaType: ref.mediaType, name: ref.name } : undefined)),
+    });
+    assert(typeof storedArg === 'object' && storedArg.mediaType === 'image/png' && storedArg.name === 'diagram.png',
+      'the injected store receives the bytes, their sniffed type and a name');
+    const image = (provider.requests[1] ?? []).find(m => m.images?.length);
+    assert(image?.images?.[0]?.data === RED.toString('base64'), 'and the request is served from the store');
+  }
+
+  // Two Reads of the same picture attach it once.
+  {
+    const session = mkSession('toolimg-dedupe');
+    const provider = recordingProvider(readThenAnswer('diagram.png', 'copy.png'));
+    await runWith(provider, session, 'mock-vision-toolimg');
+    const results = toolResultOf(session);
+    assert(results.some(r => /already attached earlier/.test(r)), 'the second identical image says it is already attached');
+    const image = (provider.requests[1] ?? []).find(m => m.images?.length);
+    assert(image?.images?.length === 1, 'and only one copy is sent');
+  }
+
+  // Formats and admission limits, with a sink but no loop.
+  {
+    const sink = createToolImageSink({ model: 'claude-opus-5' });
+    assert(sniffImageType(RED) === 'image/png', 'a PNG is recognised by its signature');
+    assert(sniffImageType(Buffer.from('<svg/>')) === undefined, 'text is not an image');
+    const huge = Buffer.from(RED);
+    huge.writeUInt32BE(9000, 16);
+    const inRun = (fn) => runInContext({ cwd: workDir, toolImages: sink }, fn);
+    const oversize = await inRun(() => offerToolImage({ bytes: huge, name: 'huge.png', origin: 'test' }));
+    assert(/not attached/.test(oversize) && /8000/.test(oversize), `an image past the 8000px edge is refused (${oversize.slice(0, 80)})`);
+    const heavy = Buffer.concat([RED, Buffer.alloc(MAX_TOOL_IMAGE_BYTES)]);
+    const tooBig = await inRun(() => offerToolImage({ bytes: heavy, name: 'heavy.png', origin: 'test' }));
+    assert(/not attached/.test(tooBig) && /MB/.test(tooBig), 'an image over the per-image byte cap is refused');
+    const none = await offerToolImage({ bytes: RED, name: 'x.png', origin: 'test' });
+    assert(/Nothing in this context can carry an image/.test(none), 'outside a run it says nothing can carry it');
+    assert(drainToolImages(sink, []).length === 0, 'refused images leave nothing pending');
+  }
+
+  // MCP image content, which used to be dropped.
+  {
+    class FakeMcp extends McpBaseClient {
+      constructor(content) { super(); this.content = content; }
+      async send() { return { content: this.content }; }
+      isAlive() { return true; }
+      stop() {}
+      getHealth() { return 'healthy'; }
+    }
+    const b64 = RED.toString('base64');
+    const sink = createToolImageSink({ model: 'claude-opus-5' });
+    const mixed = await runInContext({ cwd: workDir, toolImages: sink },
+      () => new FakeMcp([{ type: 'text', text: 'screenshot taken' }, { type: 'image', data: b64, mimeType: 'image/png' }])
+        .callTool('browser_screenshot', {}));
+    assert(typeof mixed === 'string' && mixed.startsWith('screenshot taken') && /Attached for viewing/.test(mixed),
+      `an MCP image beside text is attached and the text kept (${String(mixed).slice(0, 80)})`);
+    const pending = drainToolImages(sink, []);
+    assert(pending.length === 1 && /MCP tool browser_screenshot/.test(pending[0].label),
+      'and it is queued for the next request, labelled with the tool');
+
+    const onlyImage = await runInContext({ cwd: workDir, toolImages: createToolImageSink({ model: 'gpt-3.5-turbo' }) },
+      () => new FakeMcp([{ type: 'image', data: b64, mimeType: 'image/png' }]).callTool('shot', {}));
+    assert(typeof onlyImage === 'string' && !onlyImage.includes(b64) && /does not take image input/.test(onlyImage),
+      'an image-only result no longer hands a text model the base64; it says the model cannot look');
+  }
+
+  // WebFetch of an image URL.
+  {
+    const server = http.createServer((req, res) => {
+      if (req.url === '/pic.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end(RED); return; }
+      res.writeHead(200, { 'content-type': 'image/svg+xml' }); res.end('<svg xmlns="http://www.w3.org/2000/svg"/>');
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const sink = createToolImageSink({ model: 'claude-opus-5' });
+    const seen = await runInContext({ cwd: workDir, toolImages: sink }, () => webFetch({ url: `${base}/pic.png` }));
+    assert(/is an image \(image\/png\)/.test(seen) && /Attached for viewing/.test(seen),
+      `WebFetch of an image URL attaches it for a vision model (${seen.slice(0, 90)})`);
+    assert(drainToolImages(sink, [])[0]?.label.includes('WebFetch'), 'queued with its URL as the origin');
+    const blind = await runInContext({ cwd: workDir, toolImages: createToolImageSink({ model: 'gpt-3.5-turbo' }) },
+      () => webFetch({ url: `${base}/pic.png` }));
+    assert(/does not take image input/.test(blind), 'and tells a text-only model it cannot look');
+    const svg = await webFetch({ url: `${base}/logo.svg` });
+    assert(svg.includes('<svg'), 'an SVG is still returned as text');
+    server.close();
+  }
+
+  // Every wire format accepts the picture after the tool results.
+  {
+    const messages = [
+      { role: 'user', content: 'look' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 't1', name: 'Read', input: { file_path: 'a.png' } }] },
+      { role: 'tool', toolCallId: 't1', toolName: 'Read', content: 'Attached for viewing' },
+      { role: 'user', content: '[Image from Read a.png]', images: [{ data: RED.toString('base64'), mediaType: 'image/png' }] },
+    ];
+    const anthropic = toAnthropicMessages(messages);
+    const results = anthropic.findIndex(m => Array.isArray(m.content) && m.content.some(b => b.type === 'tool_result'));
+    const pictureAt = anthropic.findIndex(m => Array.isArray(m.content) && m.content.some(b => b.type === 'image'));
+    assert(results !== -1 && pictureAt === results + 1 && anthropic[pictureAt].role === 'user',
+      'Anthropic: the image follows the tool_result turn as user content (the API folds consecutive user turns)');
+    const deepseek = toDeepSeekMessages(messages, 'sys');
+    const last = deepseek.at(-1);
+    assert(deepseek.at(-2)?.role === 'tool' && last.role === 'user'
+      && last.content.some(p => p.type === 'image_url' && p.image_url.url.startsWith('data:image/png;base64,')),
+      'DeepSeek/OpenAI chat: a user message with an image_url part right after the tool message');
+    const responses = JSON.stringify(toResponsesInput(messages));
+    assert(responses.includes('input_image'), 'Responses API: the picture becomes an input_image item');
+  }
+
+  // ── Learned capabilities: cached on disk, read before the table ──
+  {
+    const model = 'deepseek-chat-probe-cache-test';
+    assert(getModelCapabilities(model).input.join() === 'text' && getModelCapabilities(model).source === 'table',
+      'the table says this family is text-only');
+    recordModelCapabilities({ provider: 'deepseek', model, input: ['text', 'image'], source: 'probe' });
+    const learnedNow = getModelCapabilities(model);
+    assert(learnedNow.input.includes('image') && learnedNow.source === 'probe' && typeof learnedNow.checkedAt === 'number',
+      'a probe result outranks the table at once');
+    await flushCapabilityCache();
+    const file = capabilityCachePath();
+    assert(file.startsWith(process.env.AICO_HOME), 'the cache lives under AICO_HOME, never the real ~/.aico');
+    const onDisk = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const entry = onDisk.entries.find(e => e.model === model);
+    assert(entry?.provider === 'deepseek' && entry.source === 'probe' && typeof entry.at === 'number',
+      'persisted with provider, source and timestamp');
+    resetCapabilityCache();
+    assert(getModelCapabilities(model).input.includes('image'), 'and read back from disk after the process forgets it');
+    assert(!recordModelCapabilities({ provider: 'x', model, input: ['text'], source: 'catalogue' })
+      && getModelCapabilities(model).input.includes('image'), 'a catalogue listing does not overwrite a probe');
+    const overridden = getModelCapabilities(model, { modelCapabilities: { [model]: { input: ['text'] } } });
+    assert(!overridden.input.includes('image') && overridden.source === 'user', 'a settings override still outranks what was learned');
+    recordModelCapabilities({ provider: 'deepseek', model, input: ['text'], source: 'probe' });
+    assert(!getModelCapabilities(model).input.includes('image'), 'a later probe that says text-only replaces the earlier one');
+
+    assert(readInputModalities({ id: 'a/b', architecture: { input_modalities: ['text', 'image', 'file'] } }).join() === 'text,image',
+      'OpenRouter modalities are read, keeping only what AICO can carry');
+    assert(readInputModalities({ id: 'kimi-x', supports_image_in: false }).join() === 'text', 'Kimi\'s supports_image_in is read');
+    assert(readInputModalities({ id: 'plain' }) === undefined, 'silence records nothing');
+    const changed = recordCatalogueModalities('openrouter', { 'vendor/cat-probe-model': ['text', 'image'] });
+    assert(changed === 1 && learnedCapabilities('vendor/cat-probe-model')?.source === 'catalogue'
+      && getModelCapabilities('vendor/cat-probe-model').input.includes('image'),
+      'catalogue modalities are recorded and used for an otherwise unknown model');
+    assert(recordCatalogueModalities('openrouter', { 'vendor/cat-probe-model': ['text', 'image'] }) === 0,
+      'an unchanged listing writes nothing');
+  }
+
+  // ── The probe ──
+  {
+    const png = probeImage('blue');
+    assert(sniffImageType(png) === 'image/png' && png.readUInt32BE(16) === 64 && png.readUInt32BE(20) === 64,
+      'the probe image is a real 64×64 PNG');
+    const c = (outcome, colour = 'red') => classifyImageProbe(outcome, colour).verdict;
+    assert(c({ answer: 'Red.' }) === 'image', 'naming the colour means it reads images');
+    assert(c({ answer: 'NONE' }) === 'text-only', 'saying it sees nothing means the picture never reached it');
+    assert(c({ answer: 'Blue' }) === 'unknown', 'a wrong colour records nothing');
+    assert(c({ answer: '' }) === 'unknown', 'an empty answer records nothing');
+    assert(c({ error: 'API error 400: unknown variant `image_url`, expected `text`' }) === 'text-only',
+      'an endpoint refusing the image part means text-only');
+    assert(c({ error: 'This model does not support image input' }) === 'text-only', 'as does a plain "no image input"');
+    assert(c({ error: 'API error 401: invalid api key' }) === 'unknown', 'a key failure says nothing about images');
+    assert(c({ error: 'Image is too small: minimum dimension 28 pixels' }) === 'unknown',
+      'an image-size complaint is not mistaken for "no vision"');
+
+    let sent;
+    const sees = { id: 'mock', displayName: 'Mock', async *chat(opts) { sent = opts; yield { type: 'text', content: 'Green' }; } };
+    const probed = await runImageProbe({ provider: sees, model: 'm', colour: 'green' });
+    assert(probed.verdict === 'image' && sent.messages[0].images[0].mediaType === 'image/png' && sent.tools.length === 0,
+      'the probe sends one PNG, no tools, and reads the answer');
+    const refuses = { id: 'mock', displayName: 'Mock', async *chat() { throw new Error('[DeepSeek] API error 400: unknown variant `image_url`'); } };
+    const res = await probeModelImageInput({ settings: {}, model: 'probe-route-model-t', providerApi: refuses, colour: 'red' });
+    assert(res.verdict === 'text-only' && res.recorded && learnedCapabilities('probe-route-model-t')?.source === 'probe',
+      'a definite probe answer is recorded as learned');
+    const flaky = { id: 'mock', displayName: 'Mock', async *chat() { throw new Error('socket hang up'); } };
+    const res2 = await probeModelImageInput({ settings: {}, model: 'probe-route-model-u', providerApi: flaky, colour: 'red' });
+    assert(res2.verdict === 'unknown' && !res2.recorded && learnedCapabilities('probe-route-model-u') === undefined,
+      'an ambiguous one records nothing');
+  }
+
+  fs.rmSync(workDir, { recursive: true, force: true });
 }
 
 clearInterval(keepAliveForAbandonedTools);

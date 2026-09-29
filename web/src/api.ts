@@ -545,12 +545,32 @@ export const api = {
       /** Per-model input/output modalities, keyed by id. Absent on older servers. */
       capabilities?: Record<string, {
         input: string[]; output: string[]; chat: boolean; known: boolean;
+        /**
+         * Which answer this is: a person's override, a live probe, the
+         * provider's catalogue, the built-in table, or the text-only default.
+         * Absent on older servers.
+         */
+        source?: 'user' | 'probe' | 'catalogue' | 'table' | 'assumed';
+        /** When a probe or catalogue answer was established (ms). */
+        checkedAt?: number;
       }>;
       provider?: string; defaultModel?: string | null; error?: string;
     }>('providers/models', id ? { id } : {}),
 
-  /** Test an instance that already exists, by id. */
-  testProvider: (id: string) => post<ProviderTestResult>('providers/test', { id }),
+  /**
+   * Test an instance that already exists, by id. Naming a model also probes
+   * whether it reads images — one small real request.
+   */
+  testProvider: (id: string, model?: string) =>
+    post<ProviderTestResult>('providers/test', model ? { id, model } : { id }),
+
+  /**
+   * Find out whether a model reads images by sending it a tiny picture, and
+   * remember the answer. Costs one small request; never run automatically.
+   */
+  probeModel: (model: string, provider?: string) =>
+    post<ModelImageProbe & { model: string; provider: string; recorded: boolean }>(
+      'models/probe', provider ? { model, provider } : { model }),
 
   /** Test what is being typed, before it is saved. */
   testProviderDraft: (draft: { type: string; apiKey?: string; baseUrl?: string }) =>
@@ -586,6 +606,21 @@ export interface ProviderTestResult {
   latencyMs?: number;
   /** The root that answered, when the probe had to correct the one supplied. */
   baseUrl?: string;
+  /** Input modalities the catalogue stated, by model id. Sparse; absent on older servers. */
+  inputModalities?: Record<string, string[]>;
+  /** Present when the test named a model: whether it read the probe image. */
+  imageProbe?: ModelImageProbe | { error: string };
+}
+
+/** What showing a model a tiny solid-colour picture found out. */
+export interface ModelImageProbe {
+  /** `unknown` records nothing — a failed or ambiguous probe is not evidence. */
+  verdict: 'image' | 'text-only' | 'unknown';
+  reason: string;
+  colour: string;
+  answer?: string;
+  error?: string;
+  latencyMs?: number;
 }
 
 /** One configured provider, as the server reports it — never with a key. */

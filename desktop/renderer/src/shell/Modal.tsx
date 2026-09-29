@@ -33,7 +33,12 @@ export function Modal({
       first?.focus();
     }, 20);
     const key = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+      if (e.key === 'Escape') {
+        // A menu or list open inside the dialog takes Escape first: one press
+        // closes the menu, not the whole dialog behind it.
+        if (document.querySelector('[role="menu"], [role="listbox"]') || e.defaultPrevented) return;
+        e.stopPropagation(); onClose();
+      }
       if (e.key === 'Tab' && ref.current) {
         const f = [...ref.current.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
           .filter(el => !el.hasAttribute('disabled') && el.offsetParent !== null);

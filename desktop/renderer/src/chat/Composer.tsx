@@ -445,6 +445,7 @@ export function ModelChip(): React.ReactElement {
   const fallback = useStore(s => s.defaultModel);
   const setModel = useStore(s => s.setModel);
   const [models, setModels] = useState<string[] | null>(null);
+  const [caps, setCaps] = useState<Record<string, { input: string[]; chat: boolean }>>({});
   const [filter, setFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -458,7 +459,7 @@ export function ModelChip(): React.ReactElement {
 
   useEffect(() => {
     if (!open || models) return;
-    api.providerModels().then(r => { setModels(r.models); if (r.error) setError(r.error); }).catch(e => { setError((e as Error).message); setModels([]); });
+    api.providerModels().then(r => { setModels(r.models); setCaps(r.capabilities ?? {}); if (r.error) setError(r.error); }).catch(e => { setError((e as Error).message); setModels([]); });
   }, [open, models]);
 
   const list = useMemo(() => (models ?? []).filter(m => !filter || m.toLowerCase().includes(filter.toLowerCase())).slice(0, 300), [models, filter]);
@@ -481,7 +482,10 @@ export function ModelChip(): React.ReactElement {
         {models === null && <div className="flex items-center gap-2 px-3 py-2 text-aico-muted"><span className="spinner h-3.5 w-3.5" /> Loading models…</div>}
         {error && <div className="px-3 py-1.5 text-[12px] text-aico-warning">{error}</div>}
         {list.map(m => (
-          <MenuItem key={m} label={<span className="font-mono text-[12.5px]">{m}</span>} checked={model === m} onClick={() => { setModel(m); setOpen(false); }} />
+          <MenuItem key={m} label={<span className={cls('font-mono text-[12.5px]', caps[m]?.chat === false && 'opacity-60')}>{m}</span>}
+            trailing={caps[m]?.input.includes('image') ? <span title="Reads images" className="text-aico-accent"><Icon name="eye" size={13} /></span> : undefined}
+            title={caps[m]?.chat === false ? 'Listed by the provider, but cannot run the agent' : undefined}
+            checked={model === m} onClick={() => { setModel(m); setOpen(false); }} />
         ))}
         {models !== null && list.length === 0 && !error && <div className="px-3 py-2 text-aico-muted">No models match.</div>}
         <MenuSep />

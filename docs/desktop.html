@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.23.1</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.24.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -61,7 +61,7 @@
     <p>
       Download the installer for your system from the
       <a href="https://github.com/suhail-akhtar/aico/releases/latest">latest release</a>:
-      <code>AICO-Setup-0.23.1-win-x64.exe</code> for Windows, <code>.AppImage</code> or
+      <code>AICO-Setup-0.24.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
       <code>.deb</code> for Linux. The builds are not code-signed yet, so Windows SmartScreen
       asks once ("More info → Run anyway"). Your chats, providers and settings are the same
       ones the CLI, the web portal and VS Code use — everything lives in <code>~/.aico</code>.
@@ -145,6 +145,26 @@
       end. It will not solve a CAPTCHA or type a password it was not given: it hands the
       browser to you with a message, and carries on when you press Done.
     </p>
+    <p>
+      <strong>And it can see what it looks at.</strong> On a model that reads images, a
+      screenshot of the page, an image file it reads, a picture it fetches from the web, or an
+      image any MCP tool returns is shown to the model — not just the caption beside it. Which
+      models read images is learned, not guessed: "Test" on a provider shows its default model
+      a tiny picture and remembers the answer on this computer.
+    </p>
+
+    <h2>Skills and agents, made your way</h2>
+    <ul>
+      <li><strong>Skills in Claude's format</strong> — import a <code>.skill</code> or <code>.zip</code>, a bare <code>SKILL.md</code>, or a folder with its scripts, references and templates; export any skill as a <code>.skill</code> that installs in Claude too. Write one yourself, or ask the agent to create or improve one.</li>
+      <li><strong>Your own agents</strong> — instructions and role, goals, the tools it may use (built-in or any MCP server), the skills it reaches for, its own model, and its own knowledge and scripts (kept as a companion skill). Talk to one with <code>@name</code>, or let the orchestrator hand it work.</li>
+    </ul>
+
+    <h2>Looks after itself</h2>
+    <ul>
+      <li><strong>Automatic updates</strong> — downloaded in the background, with a notification when one is ready. It restarts when you say so, or waits until running work has finished, and reopens where you were; switch it off in Settings.</li>
+      <li><strong>Backup and restore</strong> — settings, preferences, plugins, skills, agents, memory and scheduled jobs (chats and API keys only if you choose) in one file, to move to another machine.</li>
+      <li><strong>Right-click menus</strong> everywhere you expect them: spelling suggestions, cut, copy and paste, links and images, and back, forward and reload in the built-in browser.</li>
+    </ul>
 
     <h2>Every piece is a plugin — and the agent can write them</h2>
     <p>

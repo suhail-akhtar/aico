@@ -16,7 +16,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const PREFIXES = [
   'app:', 'engine:', 'prefs:', 'win:', 'shell:', 'dialog:', 'notify:', 'clipboard:', 'export:',
-  'fs:', 'term:', 'gh:', 'git:', 'browser:', 'plugins:', 'mcp:', 'activity:', 'command:',
+  'fs:', 'term:', 'gh:', 'git:', 'browser:', 'plugins:', 'mcp:', 'activity:', 'command:', 'updates:', 'backup:',
 ];
 
 function allowed(channel: string): boolean {

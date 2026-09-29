@@ -14,6 +14,7 @@ import path from 'node:path';
 import { shell } from 'electron';
 import fg from 'fast-glob';
 import type { DesktopContext } from './context';
+import { zipDirectory } from './zip';
 
 const MAX_READ = 8 * 1024 * 1024;
 const HIDDEN_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.turbo', '.cache', 'coverage', '__pycache__', '.venv', 'venv', 'target', '.idea', '.vscode-test']);
@@ -102,6 +103,12 @@ export function registerFiles(ctx: DesktopContext): void {
 
   /** To the recycle bin / trash — recoverable, on purpose. */
   ctx.handle('fs:trash', async (target: string) => { await shell.trashItem(target); return true; });
+
+  /**
+   * Zip a folder to a file. With `rootName` every entry sits under that one
+   * top-level folder — the `.skill` layout (`<skill-name>/SKILL.md` + files).
+   */
+  ctx.handle('fs:zipDir', (srcDir: string, destFile: string, rootName?: string) => zipDirectory(srcDir, destFile, rootName));
 
   ctx.handle('fs:stat', (p: string) => {
     try { const st = fs.statSync(p); return { exists: true, dir: st.isDirectory(), size: st.size, mtime: st.mtimeMs }; }

@@ -14,6 +14,9 @@ import { registerFiles } from './files';
 import { registerBrowser } from './browser';
 import { registerGitHub } from './github';
 import { registerRendererBridge } from './renderer-bridge';
+import { registerUpdater } from './updater';
+import { registerBackup } from './backup';
+import { registerContextMenus } from './context-menu';
 
 export function registerFeatures(ctx: DesktopContext): void {
   registerRendererBridge(ctx);
@@ -22,4 +25,7 @@ export function registerFeatures(ctx: DesktopContext): void {
   registerFiles(ctx);
   registerBrowser(ctx);
   registerGitHub(ctx);
+  registerUpdater(ctx);
+  registerBackup(ctx);
+  registerContextMenus(ctx);
 }

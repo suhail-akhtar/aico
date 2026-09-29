@@ -3,7 +3,7 @@
   "productName": "AICO",
   "private": true,
   "type": "module",
-  "version": "0.23.1",
+  "version": "0.24.0",
   "description": "AICO Desktop — the AICO coding agent as a native app for Windows and Linux.",
   "author": {
     "name": "Suhail Akhtar",
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.15",
+    "electron-updater": "^6.8.9",
     "playwright-core": "^1.63.0"
   },
   "devDependencies": {
@@ -102,6 +103,14 @@
       "artifactName": "AICO-${version}-linux-x64.${ext}",
       "icon": "build/icons"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "suhail-akhtar",
+        "repo": "aico",
+        "releaseType": "release"
+      }
+    ],
     "npmRebuild": false,
     "extraMetadata": {
       "main": "dist/main.cjs"

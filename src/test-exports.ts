@@ -19,7 +19,19 @@ export { getOpenTodoCount, todoWrite, todoRead, retireTodos } from './tools/todo
 export {
   getModelCapabilities, modelAccepts, modelProduces, modelCanChat, explainRefusal,
   resetCapabilityCache, MODALITIES,
+  recordModelCapabilities, recordCatalogueModalities, learnedCapabilities, flushCapabilityCache,
+  capabilityCachePath,
 } from './model-capabilities.js';
+export {
+  offerToolImage, sniffImageType, drainToolImages, toolImagesMessage, createToolImageSink,
+  MAX_TOOL_IMAGE_BYTES,
+} from './tools/tool-images.js';
+export {
+  classifyImageProbe, runImageProbe, probeModelImageInput, solidPng, probeImage,
+} from './providers/capability-probe.js';
+export { readInputModalities } from './providers/connection-test.js';
+export { McpBaseClient, mcpImages } from './mcp/base.js';
+export { webFetch } from './tools/webfetch.js';
 export { maybeAutoCompactConversation, getCompactionThreshold } from './compact.js';
 export {
   getContextWindow, getEffectiveContextBudget, resetContextWindowCache,

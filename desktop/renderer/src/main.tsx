@@ -19,6 +19,7 @@ import { watchUserPlugins, runCommand } from './plugins/registry';
 import { installActionRunner } from './plugins/run-action';
 import { installNotifications } from './notifications';
 import { installRendererBridge } from './bridge';
+import { installUpdateListener } from './updates';
 
 document.documentElement.dataset.platform = String(platform);
 
@@ -92,6 +93,7 @@ async function boot(): Promise<void> {
   watchUserPlugins();
   installNotifications();
   installRendererBridge();
+  installUpdateListener();
   desktop.onCommand((cmd) => { if (!runCommand(cmd.id, cmd.args)) console.warn('Unknown command', cmd.id); });
   // Buttons inside widgets (the kit's action row) ask through window events.
   window.addEventListener('aico:ask', (e) => {

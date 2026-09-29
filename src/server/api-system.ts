@@ -36,7 +36,7 @@ import {
 import type { ProviderInstance } from '../providers/instances.js';
 import { loadSettings, patchUserProviderTuning, patchUserSettingPath, saveUserSetting } from '../settings.js';
 import { FAMILY_REASONING, tuningChoice, tuningPatch, type FamilyDefault } from '../../shared/reasoning.js';
-import { getModelCapabilities } from '../model-capabilities.js';
+import { getModelCapabilities, recordCatalogueModalities } from '../model-capabilities.js';
 import type { ModelCapabilities } from '../model-capabilities.js';
 import { getWorkspaceInfo } from '../workspace.js';
 import type { AicoSettings } from '../settings.js';
@@ -798,6 +798,9 @@ ${content || 'Describe the procedure here.'}
         apiKey: resolveApiKey(instance),
         baseUrl: instance.baseUrl || undefined,
       });
+      // A catalogue that says what each model takes is believed over the
+      // prefix table, and kept on disk — free, since it was fetched anyway.
+      recordCatalogueModalities(instance.id, probe.inputModalities);
       // Remembered, so the next open is instant and the settings screen shows
       // the same catalogue this picker just discovered.
       if (probe.models?.length) {
@@ -1004,15 +1007,26 @@ ${content || 'Describe the procedure here.'}
       if (id) {
         const instance = listInstances(settings).find(i => i.id === id);
         if (!instance) return { status: 404, body: { error: `No provider "${id}"` } };
-        const { resolveApiKey, resolveBaseUrl } = await import('../providers/instances.js');
-        return {
-          status: 200,
-          body: await testInstance({
-            type: instance.type,
-            apiKey: resolveApiKey(instance),
-            baseUrl: instance.baseUrl || undefined,
-          }),
-        };
+        const { resolveApiKey } = await import('../providers/instances.js');
+        const tested = await testInstance({
+          type: instance.type,
+          apiKey: resolveApiKey(instance),
+          baseUrl: instance.baseUrl || undefined,
+        });
+        recordCatalogueModalities(instance.id, tested.inputModalities);
+        /*
+          Naming a model extends the test from "does the key work" to "does
+          this model read images" — one real request with a tiny picture. Only
+          when asked: it is the one part of a connection test that costs money.
+        */
+        const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : undefined;
+        if (model && tested.ok) {
+          const { probeModelImageInput } = await import('../providers/capability-probe.js');
+          const imageProbe = await probeModelImageInput({ settings, model, provider: instance.id })
+            .catch((err: unknown) => ({ error: err instanceof Error ? err.message : String(err) }));
+          return { status: 200, body: { ...tested, imageProbe } };
+        }
+        return { status: 200, body: tested };
       }
 
       const type = String(body.type ?? body.provider ?? '');
@@ -1028,7 +1042,36 @@ ${content || 'Describe the procedure here.'}
         }
       }
       const baseUrl = typeof body.baseUrl === 'string' && body.baseUrl ? body.baseUrl : undefined;
-      return { status: 200, body: await testProvider(type, apiKey, baseUrl) };
+      const tested = await testProvider(type, apiKey, baseUrl);
+      // What the models take is a fact about the models, true whether or not
+      // this draft is saved.
+      if (tested.ok) recordCatalogueModalities(type, tested.inputModalities);
+      return { status: 200, body: tested };
+    }
+
+    /*
+      Does this model read images? Found out by showing it one.
+
+      A real request — a small solid-colour PNG and "what colour is this?" —
+      classified into reads images / does not / could not tell, and the first
+      two remembered on disk so the capability gate, the picker and every
+      later run use the answer. Only ever run on request: see
+      `providers/capability-probe` for why the ambiguous cases record nothing.
+    */
+    case 'models/probe': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const model = typeof body.model === 'string' ? body.model.trim() : '';
+      if (!model) return { status: 400, body: { error: 'model required' } };
+      const provider = typeof body.provider === 'string' && body.provider ? body.provider : undefined;
+      const { probeModelImageInput } = await import('../providers/capability-probe.js');
+      try {
+        const result = await probeModelImageInput({
+          settings: await loadSettings(), model, ...(provider ? { provider } : {}),
+        });
+        return { status: 200, body: result };
+      } catch (err) {
+        return { status: 400, body: { error: err instanceof Error ? err.message : String(err) } };
+      }
     }
 
     case 'settings': {
