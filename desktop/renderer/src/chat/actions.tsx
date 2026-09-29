@@ -29,11 +29,44 @@ export function newChat(opts?: { workspace?: boolean; project?: string; prompt?:
   }
 }
 
+/**
+ * Show a chat. The route moves first and the session follows it (see
+ * {@link installChatRouteSync}); the old order — switch the session, await,
+ * then move the route — left a moment where the two disagreed, and the view
+ * "corrected" it by reopening the previous chat, which corrected back: chats
+ * flickered between two ids until the app was killed.
+ */
 export async function openChat(id: string): Promise<void> {
+  go('chat', { id });
   const st = useStore.getState();
   if (st.sessionId !== id) await st.openSession(id);
   markSeen(id);
-  go('chat', { id });
+}
+
+/**
+ * Keeps "which chat is on screen" in one place without a tug of war.
+ *
+ * Two things name the open chat: the route (`chat/<id>`, what back/forward,
+ * links and notifications move) and the store's `sessionId` (what the stream is
+ * connected to). Each direction is synced only on *its own* change — a route
+ * change opens that session; a session change the store made by itself
+ * (branching, a new chat) moves the route to it — and each side checks the other
+ * already agrees before acting, so neither can undo the other.
+ */
+export function installChatRouteSync(): () => void {
+  const offRoute = useDesk.subscribe((s, prev) => {
+    if (s.route === prev.route || s.route.view !== 'chat') return;
+    const id = s.route.params?.id;
+    const st = useStore.getState();
+    if (id && id !== st.sessionId) void st.openSession(id);
+  });
+  const offStore = useStore.subscribe((s, prev) => {
+    if (s.sessionId === prev.sessionId) return;
+    const { route, navigate } = useDesk.getState();
+    if (route.view !== 'chat' || route.params?.id === s.sessionId) return;
+    navigate({ view: 'chat', params: { id: s.sessionId } }, { replace: true });
+  });
+  return () => { offRoute(); offStore(); };
 }
 
 /** Send in the current chat (switching the view to it). */

@@ -3,6 +3,23 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.24.1 — 2026-09-29
+
+### Fixed (desktop)
+
+- **Chats flickered back and forth after "Continue from here".** Two things
+  named the open chat — the route and the store's session — and each corrected
+  the other. Branching switched the session but left the route on the original,
+  so the view pulled you back to it; the next chat you opened then switched the
+  session first and moved the route only after an `await`, and in that gap the
+  view reopened the previous chat, which reopened the next, and so on, each time
+  reconnecting the stream (measured: 9 switches in 5 seconds, until the app was
+  closed). The route now moves first and the session follows it, and each side
+  syncs only on its own change after checking the other already agrees; a
+  session the store switches by itself (a branch, a new chat) moves the route
+  to it. The same script now measures 0 extra switches, and the branch opens and
+  stays open.
+
 ## 0.24.0 — 2026-09-29
 
 The agent can see what it looks at; skills and agents can be made, imported and

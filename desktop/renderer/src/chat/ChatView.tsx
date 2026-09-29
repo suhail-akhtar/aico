@@ -34,11 +34,13 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
   const route = useDesk(s => s.route);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Arriving at chat/<id> (back/forward, a notification, a link) opens that chat.
+  // Arriving at chat/<id> (back/forward, a link) opens that chat. Only when the
+  // route changes — never because the session did, which is the other half of
+  // installChatRouteSync and reacting here too is what made chats flicker.
   useEffect(() => {
     const id = params?.id;
-    if (route.view === 'chat' && id && id !== sessionId) void openChat(id);
-  }, [params?.id, route.view, sessionId]);
+    if (route.view === 'chat' && id && id !== useStore.getState().sessionId) void useStore.getState().openSession(id);
+  }, [params?.id, route.view]);
 
   useEffect(() => { if (!busy) markSeen(sessionId); }, [busy, sessionId, logged.size]);
 
