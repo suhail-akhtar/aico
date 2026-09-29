@@ -411,6 +411,483 @@ const src = await load(path.join(desktop, 'renderer/src/chat/sources.ts'), 'sour
   ok(src.siteName('foodpanda.pk') === 'Foodpanda' && src.siteName('www.news.bbc.co.uk') === 'Bbc', 'sources: a site name reads as a name', [src.siteName('foodpanda.pk'), src.siteName('www.news.bbc.co.uk')]);
 }
 
+// ── Browser chrome: the address bar ──
+const urls = await load(path.join(desktop, 'renderer/src/browser/urls.ts'), 'browser-urls');
+{
+  const p = (s) => urls.parseOmnibox(s);
+  ok(p('example.com').kind === 'url' && p('example.com').url === 'https://example.com', 'omnibox: a bare domain is an address (https)', p('example.com'));
+  ok(p('news.ycombinator.com/item?id=1').url === 'https://news.ycombinator.com/item?id=1', 'omnibox: a domain with a path and query is an address');
+  ok(p('localhost:3000/app').url === 'http://localhost:3000/app', 'omnibox: localhost is http', p('localhost:3000/app'));
+  ok(p('192.168.1.10:8080').url === 'http://192.168.1.10:8080', 'omnibox: an IP address is http');
+  ok(p('999.1.1.1').kind === 'search', 'omnibox: not-an-IP is a search', p('999.1.1.1'));
+  ok(p('https://en.wikipedia.org/wiki/Abbottabad').url === 'https://en.wikipedia.org/wiki/Abbottabad', 'omnibox: a full URL is kept as typed');
+  ok(p('what is rust').kind === 'search' && p('what is rust').url === 'https://www.google.com/search?q=what%20is%20rust', 'omnibox: words are a Google search', p('what is rust'));
+  ok(p('rust').kind === 'search', 'omnibox: one word without a dot is a search');
+  ok(p('rust-lang.org').kind === 'url', 'omnibox: a hyphenated domain is an address');
+  ok(p('?example.com').kind === 'search' && p('?example.com').text === 'example.com', 'omnibox: a leading ? forces a search');
+  ok(p('about:blank').kind === 'url' && p('about rust').kind === 'search', 'omnibox: about: is a scheme, "about rust" is a search');
+  ok(p('file:///C:/My Files/a.html').kind === 'url' && p('file:///C:/My Files/a.html').url.includes('%20'), 'omnibox: a pasted file URL with a space stays an address');
+  ok(p('   ') === null, 'omnibox: blank input does nothing');
+  ok(p('version 1.2.3').kind === 'search' && p('3.14').kind === 'search', 'omnibox: numbers with dots are not domains', [p('version 1.2.3').kind, p('3.14').kind]);
+  ok(urls.displayUrl('https://example.com/') === 'example.com' && urls.displayUrl('http://example.com/a') === 'http://example.com/a' && urls.displayUrl('about:blank') === '', 'omnibox: display hides https:// and a bare trailing slash, keeps http://');
+  ok(urls.isBlankUrl('about:blank') && urls.isBlankUrl('') && !urls.isBlankUrl('https://x.com'), 'omnibox: the new tab page is about:blank');
+
+  const now = Date.UTC(2026, 8, 29);
+  const history = [
+    { url: 'https://news.ycombinator.com/', title: 'Hacker News', visits: 40, lastVisit: now - 3600e3 },
+    { url: 'https://www.nature.com/news', title: 'Latest science news', visits: 2, lastVisit: now - 20 * 86400e3 },
+    { url: 'https://example.com/newsletter', title: 'Newsletter', visits: 1, lastVisit: now - 86400e3 },
+    { url: 'https://github.com/', title: 'GitHub', visits: 90, lastVisit: now },
+  ];
+  const marks = [{ url: 'https://www.nature.com/news', title: 'Nature — News', addedAt: now - 100 * 86400e3 }];
+  const s = urls.rankSuggestions('news', history, marks, { now });
+  ok(s[0].kind === 'search' && /Search Google for/.test(s[0].detail), 'suggest: a word puts "Search Google for …" first', s[0]);
+  ok(s[1].url === 'https://news.ycombinator.com/', 'suggest: a host that starts with the text, visited often, ranks first', s.map(x => x.url));
+  ok(s.filter(x => x.url.includes('nature.com')).length === 1 && s.find(x => x.url.includes('nature.com')).kind === 'bookmark', 'suggest: a bookmarked page appears once, as the bookmark');
+  ok(!s.some(x => x.url === 'https://github.com/'), 'suggest: pages that do not match are left out');
+  const d = urls.rankSuggestions('github.com', history, marks, { now });
+  ok(d[0].kind === 'go' && d[0].url === 'https://github.com' && d[d.length - 1].kind === 'search', 'suggest: an address offers "go" first and the search last', d.map(x => x.kind));
+  ok(!d.slice(1).some(x => x.kind === 'history' && x.url === 'https://github.com/'), 'suggest: the page Enter would open is not listed twice', d.map(x => x.url));
+  ok(urls.rankSuggestions('', history, marks).length === 0, 'suggest: nothing typed, nothing suggested');
+  ok(urls.rankSuggestions('hacker news', history, [], { now }).some(x => x.url === 'https://news.ycombinator.com/'), 'suggest: every word must match somewhere (title words count)');
+  ok(urls.rankSuggestions('n', history, marks, { now, limit: 3 }).length === 3, 'suggest: the limit holds');
+  ok(urls.searchTermsOf('https://www.google.com/search?q=kabuli+pulao') === 'kabuli pulao' && urls.searchTermsOf('https://example.com/?q=x') === null, 'omnibox: search terms are read back from a results page');
+}
+
+// ── Browser chrome: what the copilot tells the agent ──
+const bctx = await load(path.join(desktop, 'renderer/src/browser/context.ts'), 'browser-context');
+{
+  const h = bctx.buildContextHeader({ url: 'https://en.wikipedia.org/wiki/Abbottabad', title: 'Abbottabad - Wikipedia', selection: '  a   city in\nKhyber Pakhtunkhwa ', humanCheck: false });
+  ok(h.startsWith(bctx.CONTEXT_OPEN) && h.endsWith(bctx.CONTEXT_CLOSE), 'context: the header is fenced', h);
+  ok(/^URL: https:\/\/en\.wikipedia\.org\/wiki\/Abbottabad$/m.test(h) && /^Title: Abbottabad - Wikipedia$/m.test(h), 'context: it names the URL and title');
+  ok(/Selected text: "a city in Khyber Pakhtunkhwa"/.test(h), 'context: the selection is included, whitespace collapsed', h);
+  ok(/browser_read/.test(h) && /not the page content/.test(h), 'context: it tells the agent to read the page with its tools rather than guess');
+  ok(!/human check/i.test(h), 'context: no human-check line when there is none');
+  const long = bctx.buildContextHeader({ url: 'https://x.com', title: 'T', selection: 'x'.repeat(5000) });
+  ok(long.length < 1500, 'context: a long selection is clipped — the header stays short', long.length);
+  const hc = bctx.buildContextHeader({ url: 'https://x.com', title: 'T', humanCheck: true, loginWall: true });
+  ok(/Do not try to solve it/.test(hc) && /browser_handoff/.test(hc) && /Never type passwords/.test(hc), 'context: a human check or sign-in wall tells the agent to hand over', hc);
+  const msg = bctx.withContext('Summarize this', { url: 'https://x.com/a', title: 'A page' });
+  ok(bctx.stripContextHeader(msg) === 'Summarize this', 'context: the header is stripped for display', bctx.stripContextHeader(msg));
+  ok(bctx.stripContextHeader('no header here') === 'no header here', 'context: a message without a header is unchanged');
+  ok(bctx.contextPageOf(msg)?.url === 'https://x.com/a' && bctx.contextPageOf(msg)?.title === 'A page', 'context: the page a message was about is read back');
+  ok(bctx.withContext('hi', null) === 'hi', 'context: a detached page sends the message alone');
+  const tabsHdr = bctx.buildContextHeader({ url: 'https://a.com', title: 'A', otherTabs: [{ title: 'B', url: 'https://b.com' }] });
+  ok(/Other open tabs: B <https:\/\/b\.com>/.test(tabsHdr), 'context: other tabs are listed for comparisons', tabsHdr);
+
+  const byId = Object.fromEntries(bctx.QUICK_ACTIONS.map(q => [q.id, q]));
+  ok(['summarize', 'keypoints', 'explain', 'tables', 'prices', 'form', 'compare', 'translate', 'whatcan'].every(id => byId[id]), 'quick actions: all nine are there', Object.keys(byId));
+  ok(/browser_read/.test(byId.summarize.prompt) && /reader/.test(byId.summarize.prompt) && /Source:/.test(byId.summarize.prompt), 'quick actions: summarize reads in reader mode and names its source');
+  ok(/browser_forms/.test(byId.form.prompt) && /browser_fill/.test(byId.form.prompt) && /Do NOT submit/.test(byId.form.prompt), 'quick actions: fill form reads the form, fills, and does not submit');
+  ok(/passwords/.test(byId.form.prompt) && /one-time codes/.test(byId.form.prompt) && /CAPTCHA/.test(byId.form.prompt) && /browser_handoff/.test(byId.form.prompt), 'quick actions: fill form never types secrets and hands over instead');
+  ok(/Do not add anything to a cart or buy/.test(byId.prices.prompt), 'quick actions: finding prices never buys');
+  ok(bctx.QUICK_STARTS.length === 4 && bctx.QUICK_STARTS.every(q => q.prompt.endsWith(': ') || q.prompt.endsWith(' ')), 'quick starts: four, each ready for the person to finish');
+  ok(!bctx.QUICK_ACTIONS.some(q => /solve the captcha|enter (your|the) password/i.test(q.prompt)), 'quick actions: nothing promises to solve a check or type a password');
+
+  const d = bctx.describeAgentAction;
+  ok(d({ action: 'click', label: 'Add to cart', status: 'start' }) === 'Clicking “Add to cart”…', 'agent line: clicking a labelled element', d({ action: 'click', label: 'Add to cart', status: 'start' }));
+  ok(d({ action: 'browser_open', label: 'news.ycombinator.com', status: 'start' }) === 'Opening news.ycombinator.com…', 'agent line: opening a site (tool-name prefix dropped)', d({ action: 'browser_open', label: 'news.ycombinator.com', status: 'start' }));
+  ok(d({ action: 'read', status: 'start' }) === 'Reading the page…', 'agent line: reading with no label reads "the page"');
+  ok(d({ action: 'type', label: 'Search', status: 'done' }) === 'Typed into “Search”', 'agent line: done is past tense');
+  ok(d({ action: 'click', label: 'Pay now', status: 'blocked', detail: 'payment' }).startsWith('Stopped before clicking “Pay now”'), 'agent line: a blocked action says it stopped', d({ action: 'click', label: 'Pay now', status: 'blocked', detail: 'payment' }));
+  ok(d({ action: 'type', label: 'Email', status: 'error', detail: 'not found' }) === 'Couldn\u2019t type into “Email” — not found'.replace('\u2019', "'"), 'agent line: an error says what failed', d({ action: 'type', label: 'Email', status: 'error', detail: 'not found' }));
+  ok(d({ action: 'teleport', status: 'start' }) === 'Teleport…', 'agent line: an unknown action still reads');
+}
+
+// ── Browser chrome: shortcuts, tabs, the floating copilot ──
+const bkeys = await load(path.join(desktop, 'renderer/src/browser/shortcuts.ts'), 'browser-keys');
+{
+  const k = (key, mods = {}) => bkeys.browserShortcut({ key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
+  ok(k('t', { ctrlKey: true }) === 'newTab' && k('w', { ctrlKey: true }) === 'closeTab' && k('l', { ctrlKey: true }) === 'focusAddress', 'keys: Ctrl+T / Ctrl+W / Ctrl+L');
+  ok(k('Tab', { ctrlKey: true }) === 'nextTab' && k('Tab', { ctrlKey: true, shiftKey: true }) === 'prevTab', 'keys: Ctrl+Tab and Ctrl+Shift+Tab cycle tabs');
+  ok(k('A', { ctrlKey: true, shiftKey: true }) === 'copilot', 'keys: Ctrl+Shift+A toggles the copilot');
+  ok(k('f', { ctrlKey: true }) === 'find' && k('d', { ctrlKey: true }) === 'bookmark' && k('h', { ctrlKey: true }) === 'history' && k('j', { ctrlKey: true }) === 'downloads', 'keys: Ctrl+F / D / H / J');
+  ok(k('=', { ctrlKey: true }) === 'zoomIn' && k('+', { ctrlKey: true, shiftKey: true }) === 'zoomIn' && k('-', { ctrlKey: true }) === 'zoomOut' && k('0', { ctrlKey: true }) === 'zoomReset', 'keys: zoom');
+  ok(k('ArrowLeft', { altKey: true }) === 'back' && k('ArrowRight', { altKey: true }) === 'forward', 'keys: Alt+← / Alt+→');
+  ok(k('F5') === 'reload' && k('r', { ctrlKey: true }) === 'reload' && k('Escape') === 'escape', 'keys: F5, Ctrl+R, Esc');
+  ok(k('t') === null && k('ArrowLeft') === null && k('t', { ctrlKey: true, altKey: true }) === null, 'keys: plain typing is never a shortcut');
+  ok(bkeys.browserShortcut({ key: 't', ctrlKey: false, shiftKey: false, altKey: false, metaKey: true }, true) === 'newTab', 'keys: ⌘ is the modifier on macOS');
+  const ps = bkeys.parseShortcut('Ctrl+Shift+Tab');
+  ok(bkeys.browserShortcut(ps) === 'prevTab', 'keys: a forwarded "Ctrl+Shift+Tab" parses', ps);
+  ok(bkeys.browserShortcut(bkeys.parseShortcut('Ctrl++')) === 'zoomIn' && bkeys.browserShortcut(bkeys.parseShortcut('Ctrl+Shift++')) === 'zoomIn', 'keys: a forwarded "Ctrl++" is the plus key', bkeys.parseShortcut('Ctrl++'));
+  ok(bkeys.browserShortcut(bkeys.parseShortcut('Alt+ArrowLeft')) === 'back' && bkeys.browserShortcut(bkeys.parseShortcut('F5')) === 'reload' && bkeys.browserShortcut(bkeys.parseShortcut('Ctrl+-')) === 'zoomOut', 'keys: forwarded Alt+←, F5 and Ctrl+- parse');
+}
+const btabs = await load(path.join(desktop, 'renderer/src/browser/tabs.ts'), 'browser-tabs');
+{
+  const st = btabs.fromLegacy([
+    { id: 'b1', url: 'https://a.com/', title: 'A', loading: false, canGoBack: false, canGoForward: false, active: false, zoom: 1 },
+    { id: 'b2', url: 'http://b.com/', title: 'B', loading: true, canGoBack: true, canGoForward: false, active: true, zoom: 1.1 },
+  ]);
+  ok(st.activeId === 'b2' && st.tabs[0].security === 'secure' && st.tabs[1].security === 'insecure' && st.tabs[1].zoom === 1.1, 'tabs: an older main\'s tab list is read as state', st);
+  const tab = { ...st.tabs[0], loading: false };
+  ok(btabs.tabError(tab, { b1: { code: -105, description: 'ERR_NAME_NOT_RESOLVED', url: 'https://a.com/' } })?.code === -105, 'tabs: a load error for the page on screen shows');
+  ok(btabs.tabError(tab, { b1: { code: -105, description: 'x', url: 'https://old.com/' } }) === undefined, 'tabs: an error for a page since left does not');
+  ok(btabs.isCertError({ code: -202, description: 'ERR_CERT_AUTHORITY_INVALID', url: '' }) && !btabs.isCertError({ code: -105, description: '', url: '' }), 'tabs: -200…-299 is a certificate error');
+  const now = 1_000_000;
+  const busy = (event, at, legacyAgentAt = 0, active = false) => btabs.agentBusy({ agent: { event, at }, state: { activeId: null, tabs: active ? [{ ...tab, agentActive: true }] : [tab], blocking: { enabled: true } }, legacyAgentAt }, now);
+  ok(busy(null, 0, 0, true), 'agent: busy while main flags a tab');
+  ok(busy({ tabId: 'b1', action: 'click', status: 'start' }, now - 5000) && !busy({ tabId: 'b1', action: 'click', status: 'done' }, now - 5000), 'agent: a started action counts for longer than a finished one');
+  ok(!busy(null, 0) && busy(null, 0, now - 2000), 'agent: an older main\'s "agent active" ping counts for a few seconds');
+}
+const bgeo = await load(path.join(desktop, 'renderer/src/browser/geometry.ts'), 'browser-geo');
+{
+  const area = { width: 1000, height: 700 };
+  const first = bgeo.clampFloat({ x: -1, y: 16, w: 400, h: 560 }, area);
+  ok(first.x === 1000 - 400 - 16 && first.y === 16, 'copilot: first placement is top-right', first);
+  const off = bgeo.clampFloat({ x: 5000, y: -50, w: 400, h: 560 }, area);
+  ok(off.x === 1000 - 400 - 8 && off.y === 8, 'copilot: dragged off-screen, it is kept inside', off);
+  const small = bgeo.clampFloat({ x: 10, y: 10, w: 900, h: 900 }, { width: 500, height: 400 });
+  ok(small.w === 484 && small.h === 384, 'copilot: never larger than the area it floats over', small);
+}
+
+// ── Built-in browser: tracker blocking ──
+const trk = await load(path.join(desktop, 'electron/browser-trackers.ts'), 'browser-trackers');
+{
+  const n = trk.trackerCount();
+  ok(n >= 200 && n <= 500, 'browser/trackers: a compact curated list (200–500 domains)', n);
+  ok(trk.trackerDomainFor('www.google-analytics.com') === 'google-analytics.com', 'browser/trackers: a subdomain matches its listed domain');
+  ok(trk.trackerDomainFor('stats.g.doubleclick.net') === 'doubleclick.net' || trk.trackerDomainFor('stats.g.doubleclick.net') === 'stats.g.doubleclick.net', 'browser/trackers: deep subdomains match');
+  ok(trk.trackerDomainFor('example.com') === null && trk.trackerDomainFor('notdoubleclick.net') === null, 'browser/trackers: look-alike and ordinary hosts do not match');
+  ok(trk.registrableDomain('news.bbc.co.uk') === 'bbc.co.uk' && trk.registrableDomain('a.b.example.com') === 'example.com' && trk.registrableDomain('127.0.0.1') === '127.0.0.1', 'browser/trackers: registrable domain handles co.uk and IPs');
+  const page = 'https://www.nytimes.com/2026/09/29/world/story.html';
+  ok(trk.shouldBlock('https://www.google-analytics.com/g/collect?v=2', page, 'xhr').block === true, 'browser/trackers: third-party analytics on a news page is blocked');
+  ok(trk.shouldBlock('https://securepubads.g.doubleclick.net/tag/js/gpt.js', page, 'script').tracker === 'securepubads.g.doubleclick.net', 'browser/trackers: the blocked host is reported');
+  ok(trk.shouldBlock('https://www.doubleclick.net/', 'about:blank', 'mainFrame').block === false, 'browser/trackers: a main-frame navigation is never blocked');
+  ok(trk.shouldBlock('https://analytics.twitter.com/i/adsct', 'https://twitter.com/home', 'script').block === false, 'browser/trackers: first party (same registrable domain) is exempt');
+  ok(trk.shouldBlock('https://static.hotjar.com/c/hotjar-1.js', 'https://www.hotjar.com/pricing', 'script').block === false, 'browser/trackers: a tracker company\'s own site works');
+  for (const u of ['https://www.google.com/recaptcha/api.js', 'https://www.gstatic.com/recaptcha/releases/x/recaptcha__en.js', 'https://js.hcaptcha.com/1/api.js', 'https://challenges.cloudflare.com/turnstile/v0/api.js', 'https://cdn.jsdelivr.net/npm/x', 'https://fonts.googleapis.com/css2']) {
+    ok(trk.shouldBlock(u, page, 'script').block === false, `browser/trackers: not blocked (sign-ins and CDNs keep working): ${new URL(u).hostname}`);
+  }
+  ok(trk.originOf('https://a.example.com:8443/x?y') === 'https://a.example.com:8443' && trk.originOf('about:blank') === '', 'browser/trackers: origins');
+}
+
+// ── Built-in browser: safety verdicts ──
+const safety = await load(path.join(desktop, 'electron/browser-safety.ts'), 'browser-safety');
+{
+  const k = (f) => safety.classifySensitiveField(f)?.kind ?? null;
+  ok(k({ type: 'password', name: 'pw' }) === 'password', 'browser/safety: type=password is a password');
+  ok(k({ type: 'text', autocomplete: 'current-password' }) === 'password', 'browser/safety: autocomplete current-password (a show-password text field) is a password');
+  ok(k({ type: 'text', autocomplete: 'cc-number' }) === 'card' && k({ type: 'tel', name: 'cardNumber' }) === 'card' && k({ type: 'text', label: 'Credit card number' }) === 'card', 'browser/safety: card numbers by autocomplete, name and label');
+  ok(k({ type: 'text', autocomplete: 'cc-exp' }) === 'card' && k({ type: 'text', label: 'Expiry date (MM/YY)', name: 'card_expiry' }) === 'card', 'browser/safety: card expiry');
+  ok(k({ type: 'text', name: 'cvc' }) === 'cvv' && k({ type: 'text', label: 'Security code' }) === 'cvv' && k({ type: 'text', autocomplete: 'cc-csc' }) === 'cvv', 'browser/safety: CVV / CVC / security code');
+  ok(k({ type: 'text', autocomplete: 'one-time-code' }) === 'otp' && k({ type: 'text', name: 'otp' }) === 'otp' && k({ type: 'text', label: 'Enter the verification code we sent' }) === 'otp' && k({ type: 'number', name: 'mfaCode' }) === 'otp', 'browser/safety: one-time codes');
+  ok(k({ type: 'password', name: 'pin' }) === 'password' && k({ type: 'text', label: 'PIN' }) === 'password', 'browser/safety: a PIN is a password');
+  ok(k({ type: 'text', name: 'pincode', label: 'Pin code' }) === null && k({ type: 'text', name: 'postal_code' }) === null, 'browser/safety: a postal PIN code is not a password');
+  ok(k({ type: 'email', name: 'email', label: 'Email' }) === null && k({ type: 'text', name: 'username' }) === null && k({ type: 'search', name: 'q' }) === null && k({ type: 'text', name: 'custname', label: 'Customer name' }) === null, 'browser/safety: ordinary fields are fine');
+  ok(k({ type: 'checkbox', name: 'remember_password' }) === null, 'browser/safety: a "remember password" checkbox is not a password field');
+  ok(/browser_handoff/.test(safety.sensitiveRefusal('password', 'Password')), 'browser/safety: a refusal says to hand over');
+
+  const base = { url: 'https://example.com/login', title: 'Sign in', frames: [], widgets: [], text: 'Welcome back' };
+  const anchor = 'https://www.google.com/recaptcha/api2/anchor?ar=1&k=6Le-wvkS&co=aHR0cHM6&hl=en&v=abc&size=normal&cb=x';
+  ok(safety.detectHumanCheck({ ...base, frames: [{ src: anchor, title: 'reCAPTCHA', width: 304, height: 78, visible: true }] }).kind === 'reCAPTCHA', 'browser/safety: a visible reCAPTCHA checkbox is a human check');
+  ok(!safety.detectHumanCheck({ ...base, frames: [{ src: anchor.replace('size=normal', 'size=invisible'), title: 'reCAPTCHA', width: 256, height: 60, visible: true }] }).detected, 'browser/safety: invisible reCAPTCHA (v3 / badge) is not flagged — it asks nothing of anyone');
+  ok(!safety.detectHumanCheck({ ...base, widgets: ['.grecaptcha-badge'] }).detected, 'browser/safety: the reCAPTCHA badge alone is not flagged');
+  ok(safety.detectHumanCheck({ ...base, frames: [{ src: 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/x', width: 300, height: 65, visible: true }] }).kind === 'Cloudflare Turnstile', 'browser/safety: a Turnstile frame is a human check');
+  ok(safety.detectHumanCheck({ ...base, frames: [{ src: 'https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html#frame=checkbox&id=0', width: 303, height: 78, visible: true }] }).kind === 'hCaptcha', 'browser/safety: an hCaptcha checkbox is a human check');
+  ok(!safety.detectHumanCheck({ ...base, frames: [{ src: anchor, width: 0, height: 0, visible: false }] }).detected, 'browser/safety: a hidden frame is not flagged');
+  ok(safety.detectHumanCheck({ ...base, title: 'Just a moment...' }).detected, 'browser/safety: the Cloudflare interstitial title');
+  ok(safety.detectHumanCheck({ ...base, text: 'Please verify you are human by completing the action below.' }).detected, 'browser/safety: "verify you are human" wording');
+  ok(safety.detectHumanCheck({ ...base, url: 'https://www.google.com/sorry/index?continue=x' }).detected, 'browser/safety: Google\'s unusual-traffic page');
+  ok(safety.detectHumanCheck({ ...base, widgets: ['.cf-turnstile'] }).kind === 'Cloudflare Turnstile', 'browser/safety: a visible widget element');
+  ok(!safety.detectHumanCheck({ ...base, text: 'Our robots.txt policy. We are not robots. Sign in to continue.' }).detected, 'browser/safety: an ordinary page is not flagged');
+  ok(/browser_handoff/.test(safety.humanCheckRefusal({ detected: true, kind: 'reCAPTCHA' })) && /never solves/.test(safety.humanCheckRefusal({ detected: true })), 'browser/safety: the refusal explains and hands over');
+
+  ok(['setup.exe', 'Tool.MSI', 'run.ps1', 'x.AppImage', 'pkg.deb', 'a.dmg', 'app.apk', 'install.sh', 'go.bat'].every(safety.isExecutableName), 'browser/safety: executables need the user');
+  ok(!['report.pdf', 'data.csv', 'a.tar.gz', 'photo.jpeg', 'notes.txt', 'exe.pdf'].some(safety.isExecutableName), 'browser/safety: documents and archives do not');
+  const taken = new Set(['report.pdf', 'report (1).pdf', 'archive.tar.gz']);
+  ok(safety.uniqueName('report.pdf', n => taken.has(n)) === 'report (2).pdf', 'browser/safety: unique download names never overwrite', safety.uniqueName('report.pdf', n => taken.has(n)));
+  ok(safety.uniqueName('archive.tar.gz', n => taken.has(n)) === 'archive (1).tar.gz' && safety.uniqueName('new.txt', () => false) === 'new.txt', 'browser/safety: a double extension stays together');
+  ok(safety.uniqueName('a/b:c?.txt', () => false) === 'a_b_c_.txt' && safety.uniqueName('...', () => false) === 'download', 'browser/safety: unsafe file-name characters are replaced');
+
+  const before = { url: 'https://x.test/form', title: 'Form', alerts: [], invalid: [], modals: [] };
+  ok(/navigated from https:\/\/x\.test\/form/.test(safety.describeChange(before, { ...before, url: 'https://x.test/done', title: 'Thanks' })), 'browser/safety: an action result reports the navigation');
+  const inv = safety.describeChange(before, { ...before, invalid: [{ label: 'Email', message: 'Please include an "@"' }], alerts: ['Fix the errors below'] });
+  ok(/validation errors: Email: Please include/.test(inv) && /message shown: "Fix the errors below"/.test(inv), 'browser/safety: validation errors and messages are reported', inv);
+  ok(/JavaScript confirm dialog is open/.test(safety.describeChange(before, null, { jsDialog: { type: 'confirm', message: 'Delete?' } })), 'browser/safety: a JS dialog is reported');
+  ok(/No visible change/.test(safety.describeChange(before, before)), 'browser/safety: no change is said plainly');
+}
+
+// ── Built-in browser: history, bookmarks, settings ──
+const bstore = await load(path.join(desktop, 'electron/browser-store.ts'), 'browser-store');
+{
+  let h = [];
+  h = bstore.recordVisit(h, { url: 'https://a.test/page#top', title: 'A' }, 1000);
+  h = bstore.recordVisit(h, { url: 'https://a.test/page#bottom', title: '' }, 2000);
+  h = bstore.recordVisit(h, { url: 'https://b.test/', title: 'B site' }, 3000);
+  h = bstore.recordVisit(h, { url: 'about:blank' }, 4000);
+  h = bstore.recordVisit(h, { url: 'data:text/html,hi' }, 4000);
+  h = bstore.recordVisit(h, { url: 'aico://app/' }, 4000);
+  ok(h.length === 2 && h[0].url === 'https://b.test/', 'browser/history: newest first; about:, data: and aico: are not history', h.map(e => e.url));
+  const a = h.find(e => e.url === 'https://a.test/page');
+  ok(a && a.visits === 2 && a.lastVisit === 2000 && a.title === 'A', 'browser/history: one entry per URL (fragment ignored) with visit count, last visit, and the title kept', a);
+  h = bstore.touchVisit(h, 'https://b.test/', { title: 'B — home' });
+  ok(h[0].title === 'B — home' && h[0].visits === 1, 'browser/history: a late title updates without counting a visit');
+  let big = [];
+  for (let i = 0; i < 60; i++) big = bstore.recordVisit(big, { url: `https://s.test/${i}` }, i, 50);
+  ok(big.length === 50 && !big.some(e => e.url === 'https://s.test/0') && big[0].url === 'https://s.test/59', 'browser/history: capped, oldest dropped');
+  const q = [
+    { url: 'https://docs.python.org/3/library/json.html', title: 'json — JSON encoder', visits: 9, lastVisit: 5e9 },
+    { url: 'https://example.com/python-json-tips', title: 'Tips', visits: 1, lastVisit: 5e9 },
+    { url: 'https://news.test/', title: 'News', visits: 50, lastVisit: 5e9 },
+  ];
+  const r = bstore.searchHistory(q, 'python json', 10);
+  ok(r.length === 2 && r[0].url.startsWith('https://docs.python.org'), 'browser/history: search needs every word; host and visits rank', r.map(x => x.url));
+  ok(bstore.searchHistory(q, '', 2).length === 2, 'browser/history: limit applies');
+  ok(bstore.clearHistory([{ url: 'x', lastVisit: 10 }, { url: 'y', lastVisit: 20 }], 15).length === 1 && bstore.clearHistory(q).length === 0, 'browser/history: clear since a time, or everything');
+  ok(bstore.removeHistory(q, 'https://news.test/').length === 2, 'browser/history: remove one URL');
+
+  let b = bstore.addBookmark([], { url: 'https://a.test', title: 'A' }, 1);
+  b = bstore.addBookmark(b, { url: 'https://a.test', title: 'A renamed', folder: 'Work' }, 2);
+  b = bstore.addBookmark(b, { url: 'https://b.test', title: '' }, 3);
+  ok(b.length === 2 && b[0].title === 'A renamed' && b[0].addedAt === 1 && b[0].folder === 'Work' && b[1].title === 'https://b.test', 'browser/bookmarks: add is de-duplicated per URL; untitled falls back to the URL', b);
+  ok(bstore.removeBookmark(b, 'https://a.test').length === 1, 'browser/bookmarks: remove');
+  throws(() => bstore.addBookmark([], { url: ' ', title: 'x' }, 1), /URL/, 'browser/bookmarks: a bookmark needs a URL');
+  const s = bstore.normaliseSettings({ blocking: { enabled: 'yes', allowOrigins: ['https://a.test', 5, 'https://a.test'] }, zoom: { 'https://a.test': 1.5, 'https://b.test': 1, 'https://c.test': 99 }, permissions: { 'https://a.test': { notifications: 'allow', camera: 'maybe' } } });
+  ok(s.blocking.enabled === true && s.blocking.allowOrigins.length === 1, 'browser/settings: blocking defaults on; allow list cleaned');
+  ok(Object.keys(s.zoom).join() === 'https://a.test' && s.permissions['https://a.test'].notifications === 'allow' && !('camera' in s.permissions['https://a.test']), 'browser/settings: zoom and permissions keep only valid values');
+  ok(bstore.normaliseSettings(null).blocking.enabled === true, 'browser/settings: a missing file means blocking on');
+}
+
+// ── Built-in browser: extraction and insights ──
+const bx = await load(path.join(desktop, 'electron/browser-extract.ts'), 'browser-extract');
+{
+  ok(bx.parseAmount('1,299.99') === 1299.99 && bx.parseAmount('1.299,99') === 1299.99 && bx.parseAmount('12,50') === 12.5 && bx.parseAmount('1.299') === 1299 && bx.parseAmount('2,500') === 2500 && bx.parseAmount('1 299') === 1299 && bx.parseAmount('45') === 45, 'browser/extract: amounts in either decimal convention');
+  const p = bx.findPrices([
+    { text: 'Now $1,299.99 (was $1,499.00)', context: 'Laptop Pro 14' },
+    { text: '€ 12,50 per month' }, { text: 'Rs. 2,500' }, { text: 'Total: 1.299 €' }, { text: 'USD 45' }, { text: 'Chapter 12 of 300' },
+  ], [{ amount: '19.99', currency: 'GBP', context: 'Mug', source: 'json-ld' }]);
+  const has = (cur, amt) => p.some(x => x.currency === cur && Math.abs(x.amount - amt) < 1e-9);
+  ok(has('USD', 1299.99) && has('USD', 1499) && has('EUR', 12.5) && has('PKR', 2500) && has('EUR', 1299) && has('USD', 45) && has('GBP', 19.99), 'browser/extract: prices with currencies from symbols, codes and structured data', p.map(x => `${x.currency} ${x.amount}`));
+  ok(p.length === 7 && p.find(x => x.amount === 1299.99).context === 'Laptop Pro 14', 'browser/extract: plain numbers are not prices; the product is the context', p.length);
+  const c = bx.findContacts('Write to Sales@Example.com or call +44 20 7946 0958. Office hours 2026-09-29. Order 123456789012. logo@2x.png', [{ href: 'mailto:help@example.com?subject=Hi', text: 'Email us' }, { href: 'tel:+1-555-010-9999', text: 'Call' }]);
+  ok(c.emails.includes('sales@example.com') && c.emails.includes('help@example.com') && !c.emails.some(e => e.endsWith('.png')), 'browser/extract: emails from text and mailto links', c.emails);
+  ok(c.phones.includes('+442079460958') && c.phones.includes('+15550109999') && !c.phones.some(x => x.includes('2026')) && !c.phones.includes('123456789012'), 'browser/extract: phone numbers, not dates or bare ids', c.phones);
+  ok(bx.tableToMarkdown({ caption: 'Scores', rows: [['Team', 'Pts'], ['A|B', '3'], ['C']] }) === '**Scores**\n\n| Team | Pts |\n| --- | --- |\n| A\\|B | 3 |\n| C |  |', 'browser/extract: tables as Markdown (pipes escaped, ragged rows padded)', bx.tableToMarkdown({ caption: 'Scores', rows: [['Team', 'Pts'], ['A|B', '3'], ['C']] }));
+  const forms = bx.finishForms([{ index: 0, action: 'x', method: 'post', submit: [], fields: [
+    { ref: 'e1', label: 'Email', name: 'email', type: 'email', required: true, value: 'a@b.c', raw: { type: 'email', name: 'email', label: 'Email' } },
+    { ref: 'e2', label: 'Password', name: 'pw', type: 'password', required: true, value: '(filled)', raw: { type: 'password', name: 'pw' } },
+    { ref: 'e3', label: 'Card number', name: 'cc', type: 'text', required: false, value: '4111 1111 1111 1111', raw: { type: 'text', name: 'cc', label: 'Card number', autocomplete: 'cc-number' } },
+  ] }]);
+  ok(!('raw' in forms[0].fields[0]) && forms[0].fields[0].value === 'a@b.c' && !forms[0].fields[0].sensitive, 'browser/forms: ordinary fields pass through');
+  ok(forms[0].fields[1].sensitive === 'password' && forms[0].fields[2].sensitive === 'card' && forms[0].fields[2].value === '(filled)', 'browser/forms: sensitive fields are marked and their values never leave the page');
+  ok(bx.matchField(forms, { label: 'email' })?.ref === 'e1' && bx.matchField(forms, { name: 'pw' })?.ref === 'e2' && bx.matchField(forms, { ref: 'e3' })?.ref === 'e3' && bx.matchField(forms, { label: 'nope' }) === null, 'browser/forms: fields are found by label, name or ref');
+  const snap = bx.formatSnapshot({ title: 'Login', url: 'https://x.test', scroll: { y: 0, height: 900, viewport: 800 }, headings: [], total: 2, crossOriginFrames: [{ src: 'https://pay.test/frame', title: 'Payment' }], dialogs: [], text: 'hi', truncated: false,
+    elements: [{ ref: 'e1', role: 'textbox', name: 'Email', value: 'me@x.test', field: { type: 'email' } }, { ref: 'e2', role: 'password', name: 'Password', value: 'secret', field: { type: 'password' } }] });
+  ok(/\[e2\] password \[password — user only\] "Password" \(filled\)/.test(snap) && !snap.includes('secret') && /value="me@x\.test"/.test(snap), 'browser/snapshot: sensitive fields are marked "user only" and their values hidden', snap);
+  ok(/Cross-origin frames .*Payment/.test(snap), 'browser/snapshot: cross-origin frames are reported');
+  const sig = { url: 'https://news.test/2026/story', title: 'Big story', contentType: 'text/html', words: 1400, textStart: 'Big story. By A. Writer...', counts: { forms: 1, passwords: 0, inputs: 1, search: 1, links: 80, images: 5, videos: 0, tables: 0, articles: 1 }, h1: ['Big story'], ogType: 'article', jsonLdTypes: ['NewsArticle'], isAccessibleForFree: null, cartButton: '', cookieBanner: true, paywallElement: false, buttons: [{ label: 'Subscribe', area: 4000, top: 10, cls: 'btn-primary', tag: 'a' }], human: { url: 'https://news.test/2026/story', title: 'Big story', frames: [], widgets: [], text: '' } };
+  const ins = bx.buildInsights(sig, { security: 'secure', trackersBlocked: 12 });
+  ok(ins.kind === 'article' && ins.cookieBanner && !ins.humanCheck && ins.mainAction === 'Subscribe' && ins.trackersBlocked === 12, 'browser/insights: an article with a cookie banner and its main action', ins);
+  ok(ins.summaryHints.some(h => /Reject/.test(h)) && ins.summaryHints.some(h => /12 tracker/.test(h)), 'browser/insights: hints say what to do');
+  const pay = bx.buildInsights({ ...sig, textStart: 'Subscribe to continue reading. Already a subscriber? Sign in', isAccessibleForFree: false }, { security: 'secure', trackersBlocked: 0 });
+  ok(pay.paywall, 'browser/insights: a paywall');
+  const login = bx.buildInsights({ ...sig, url: 'https://x.test/login', words: 40, ogType: '', jsonLdTypes: [], counts: { ...sig.counts, passwords: 1, inputs: 2, articles: 0 }, textStart: 'Sign in to continue', cookieBanner: false }, { security: 'secure', trackersBlocked: 0 });
+  ok(login.kind === 'login' && login.loginWall && login.summaryHints.some(h => /never type a password/.test(h)), 'browser/insights: a login page', login);
+  const cap = bx.buildInsights({ ...sig, human: { url: 'https://x.test', title: 'Just a moment...', frames: [], widgets: [], text: '' } }, { security: 'secure', trackersBlocked: 0 });
+  ok(cap.humanCheck && cap.kind === 'challenge' && /browser_handoff/.test(cap.summaryHints[0]), 'browser/insights: a human check leads the hints');
+}
+
+// ── Built-in browser: the in-page script, against real HTML (parsed by parse5) ──
+{
+  let parse5 = null;
+  try { parse5 = await import('parse5'); } catch { /* optional: skipped where the engine's dependencies are not installed */ }
+  const bpage = await load(path.join(desktop, 'electron/browser-page.ts'), 'browser-page');
+  const src = bpage.aicoPage.toString();
+  ok(!/\brequire\(|\bimport\(/.test(src) && src.startsWith('function aicoPage'), 'browser/page: the page script is self-contained (serialised with toString)');
+  if (!parse5) {
+    console.log('  skip  browser/page: parse5 not installed — DOM fixture tests skipped');
+  } else {
+    const dom = makeFakeDom(parse5);
+    const article = `<!doctype html><html lang="en"><head><title>Story — Site</title><meta name="author" content="Ada Writer"><meta property="og:title" content="The Story"></head><body>
+      <nav class="site-nav"><a href="/">Home</a> <a href="/news">News</a> <a href="/sport">Sport</a></nav>
+      <header class="masthead"><a href="/">Site</a></header>
+      <article class="post-content"><h1>The Story</h1><p>This is the <strong>first</strong> paragraph, with a <a href="/more">link to more</a>, and some commas, lots, of, them.</p>
+      <h2>Details</h2><p>Second paragraph with <em>emphasis</em> and <code>code()</code>. It goes on long enough to be the main content of this page, clearly, for sure.</p>
+      <ul><li>One</li><li>Two<ul><li>Two point one</li></ul></li></ul>
+      <table><tr><th>Name</th><th>Score</th></tr><tr><td>Ann</td><td>9</td></tr><tr><td>Bo|b</td><td>7</td></tr></table>
+      <pre><code class="language-js">const x = 1;\nconsole.log(x);</code></pre>
+      <img src="/img/a.png" alt="A chart" width="400" height="300"><img src="/pixel.gif" width="1" height="1">
+      <div class="share-tools"><a href="https://twitter.com/share">Tweet</a> <a href="https://facebook.com/share">Share</a></div>
+      <p style="display:none">Hidden text should not appear.</p>
+      </article>
+      <aside class="sidebar"><h3>Related</h3><a href="/r1">Related one</a></aside>
+      <footer><p>Copyright</p></footer></body></html>`;
+    const env = dom(article, 'https://site.test/news/story');
+    const r = bpage.aicoPage('read', { mode: 'reader' }, env);
+    const md = r.markdown;
+    ok(md.startsWith('# The Story') && /\n## Details\n/.test(md), 'browser/read: title and headings become Markdown headings', md.slice(0, 200));
+    ok(/\*\*first\*\*/.test(md) && /_emphasis_/.test(md) && /`code\(\)`/.test(md) && /\[link to more\]\(https:\/\/site\.test\/more\)/.test(md), 'browser/read: bold, emphasis, code and absolute links');
+    ok(/- One\n- Two\n {2}- Two point one/.test(md), 'browser/read: nested lists', md);
+    ok(/\| Name \| Score \|\n\| --- \| --- \|\n\| Ann \| 9 \|\n\| Bo\\\|b \| 7 \|/.test(md), 'browser/read: tables as Markdown tables', md);
+    ok(/```js\nconst x = 1;\nconsole\.log\(x\);\n```/.test(md), 'browser/read: code blocks keep their language and lines');
+    ok(/!\[A chart\]\(https:\/\/site\.test\/img\/a\.png\)/.test(md) && !md.includes('pixel.gif'), 'browser/read: images kept, tracking pixels dropped');
+    ok(!/Home|Related one|Copyright|Tweet|Hidden text/.test(md), 'browser/read: reader mode drops navigation, sidebars, footers, share bars and hidden text', md);
+    ok(r.byline === 'Ada Writer' && r.words > 40 && r.headings.length === 2 && r.links.some(l => l.href === 'https://site.test/more'), 'browser/read: byline, word count, headings and links', { byline: r.byline, words: r.words, headings: r.headings });
+    const full = bpage.aicoPage('read', { mode: 'full' }, dom(article, 'https://site.test/news/story'));
+    ok(/Related one/.test(full.markdown) && /Copyright/.test(full.markdown) && !/Hidden text/.test(full.markdown), 'browser/read: full mode keeps the whole page (still not hidden text)');
+    const cut = bpage.aicoPage('read', { mode: 'full', maxChars: 500 }, dom(article, 'https://site.test/news/story'));
+    ok(cut.truncated && cut.markdown.length < 700, 'browser/read: maxChars cuts long pages');
+
+    const form = `<html><head><title>Order</title></head><body><form action="/post" method="post">
+      <p><label>Customer name: <input name="custname" required></label></p>
+      <p><label for="tel">Telephone</label><input id="tel" type="tel" name="custtel"></p>
+      <input type="email" name="custemail" placeholder="you@example.com">
+      <input type="password" name="pw" autocomplete="current-password" value="hunter2">
+      <fieldset><legend>Pizza Size</legend><label><input type="radio" name="size" value="small"> Small</label><label><input type="radio" name="size" value="large" checked> Large</label></fieldset>
+      <select name="topping"><option value="">Choose</option><option value="ham">Ham</option><option value="cheese" selected>Cheese</option></select>
+      <label><input type="checkbox" name="bacon" value="bacon"> Bacon</label>
+      <textarea name="comments">Ring twice</textarea>
+      <input type="hidden" name="csrf" value="x">
+      <button>Submit order</button></form>
+      <input name="loose" aria-label="Newsletter email"></body></html>`;
+    const fm = bx.finishForms(bpage.aicoPage('forms', {}, dom(form, 'https://shop.test/order')));
+    const f0 = fm[0];
+    const byName = (n) => f0.fields.find(f => f.name === n);
+    ok(fm.length === 2 && f0.method === 'post' && f0.action === 'https://shop.test/post' && f0.submit[0]?.label === 'Submit order', 'browser/forms: action, method and submit button; loose fields are their own group', fm.map(f => f.action));
+    ok(byName('custname').label === 'Customer name:' && byName('custname').required && byName('custtel').label === 'Telephone' && byName('custemail').label === 'you@example.com', 'browser/forms: labels from wrapping label, label[for] and placeholder', f0.fields.map(f => f.label));
+    ok(byName('pw').sensitive === 'password' && byName('pw').value === '(filled)', 'browser/forms: the password is marked and its value is never read out');
+    const size = byName('size');
+    ok(size.type === 'radio-group' && size.label === 'Pizza Size' && size.options.length === 2 && size.value === 'large' && size.options.every(o => /^e\d+$/.test(o.ref)), 'browser/forms: radios become one group with labelled options and refs', size);
+    ok(byName('topping').value === 'cheese' && byName('topping').options.length === 3 && byName('bacon').checked === false && byName('comments').value === 'Ring twice' && !byName('csrf'), 'browser/forms: select, checkbox, textarea; hidden inputs skipped');
+    ok(fm[1].fields[0].label === 'Newsletter email', 'browser/forms: aria-label');
+
+    const cap = `<html><head><title>reCAPTCHA demo</title></head><body><form><div class="g-recaptcha" data-sitekey="6Le"><iframe title="reCAPTCHA" src="https://www.google.com/recaptcha/api2/anchor?k=6Le&size=normal" width="304" height="78"></iframe></div><input type="submit"></form></body></html>`;
+    const sigs = bpage.aicoPage('humanCheck', { humanSelectors: safety.HUMAN_CHECK_SELECTORS }, dom(cap, 'https://www.google.com/recaptcha/api2/demo'));
+    ok(safety.detectHumanCheck(sigs).detected && sigs.frames.length === 1, 'browser/page: the reCAPTCHA demo page is detected from the page\'s own signals', sigs);
+    const plain = bpage.aicoPage('humanCheck', { humanSelectors: safety.HUMAN_CHECK_SELECTORS }, dom(article, 'https://site.test/news/story'));
+    ok(!safety.detectHumanCheck(plain).detected, 'browser/page: an ordinary article is not a human check');
+
+    const outline = bpage.aicoPage('extract', { kind: 'outline' }, dom(article, 'https://site.test/'));
+    ok(outline.outline.map(h => `${h.level}:${h.text}`).join('|') === '1:The Story|2:Details|3:Related', 'browser/extract: the heading outline', outline.outline);
+    const tables = bpage.aicoPage('extract', { kind: 'tables' }, dom(article, 'https://site.test/'));
+    ok(tables.tables.length === 1 && tables.tables[0].rows[2][0] === 'Bo|b', 'browser/extract: data tables as rows');
+    const meta = bpage.aicoPage('extract', { kind: 'metadata' }, dom(article.replace('</head>', '<link rel="canonical" href="/news/story"><script type="application/ld+json">{"@type":"NewsArticle","headline":"The Story"}</script></head>'), 'https://site.test/news/story?utm=1'));
+    ok(meta.lang === 'en' && meta.canonical === 'https://site.test/news/story' && meta.openGraph.title === 'The Story' && meta.jsonLd[0]['@type'] === 'NewsArticle' && meta.meta.author === 'Ada Writer', 'browser/extract: metadata, OpenGraph and JSON-LD', meta);
+    const found = bpage.aicoPage('find', { text: 'second paragraph' }, dom(article, 'https://site.test/'));
+    ok(found.count === 1 && /^e\d+$/.test(found.matches[0].ref) && /Second paragraph with/.test(found.matches[0].context), 'browser/find: matches with a ref and context', found);
+    const sn = bpage.aicoPage('snapshot', {}, dom(form, 'https://shop.test/order'));
+    ok(sn.elements.some(e => e.role === 'password' && e.value === '(filled)') && !JSON.stringify(sn).includes('hunter2') && sn.elements.some(e => e.name === 'Submit order'), 'browser/snapshot: the page script never reports a password value');
+    const same = dom(form, 'https://shop.test/order');
+    const fRefs = bpage.aicoPage('forms', {}, same)[0].fields.find(f => f.name === 'custemail').ref;
+    const sRefs = bpage.aicoPage('snapshot', {}, same).elements.find(e => e.name === 'you@example.com')?.ref;
+    const again = bpage.aicoPage('snapshot', {}, same).elements.find(e => e.name === 'you@example.com')?.ref;
+    ok(fRefs === sRefs && sRefs === again, 'browser/snapshot: refs stay stable across browser_forms and repeated snapshots of one page', [fRefs, sRefs, again]);
+  }
+}
+
+// ── The agent's manual and tools ──
+const mcpMod = await load(path.join(desktop, 'electron/mcp.ts'), 'mcp');
+{
+  const stubCtx = { paths: { pluginsDir: 'C:\\Users\\Someone With A Long Name\\.aico\\desktop\\plugins', desktopDir: os.tmpdir() }, prefs: { get: () => ({ plugins: {} }) }, services: {} };
+  const m = mcpMod.manual(stubCtx);
+  ok(m.length < 5600, 'mcp: the manual fits the engine\'s 6000-character instruction cap with room for plugin instructions', m.length);
+  ok(/never solve, bypass or work around a CAPTCHA/.test(m) && m.indexOf('BROWSER RULES') < 3000, 'mcp: the browser rules are in the manual, early (never cut)');
+  const names = mcpMod.createTools(stubCtx).map(t => t.name);
+  const want = ['browser_read', 'browser_forms', 'browser_fill', 'browser_extract', 'browser_insights', 'browser_dialog', 'browser_find', 'browser_scroll_to', 'browser_select_tab', 'browser_new_tab', 'browser_close_tab', 'browser_downloads', 'browser_upload', 'browser_upload_wait', 'browser_wait', 'browser_screenshot', 'browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_handoff', 'browser_handoff_wait', 'browser_tabs', 'browser_navigate', 'browser_evaluate', 'browser_console', 'browser_network', 'browser_text', 'browser_select', 'browser_press', 'browser_hover', 'browser_scroll'];
+  ok(want.every(n => names.includes(n)), 'mcp: every browser tool is offered (old and new)', want.filter(n => !names.includes(n)));
+  ok(new Set(names).size === names.length, 'mcp: tool names are unique');
+}
+
+// ── Built-in browser: shortcuts pressed inside a page ──
+const bkeysMain = await load(path.join(desktop, 'electron/browser-keys.ts'), 'browser-keys-main');
+{
+  const k = (key, m = {}) => bkeysMain.browserShortcutSpec({ type: 'keyDown', key, control: false, meta: false, shift: false, alt: false, ...m }, false);
+  ok(k('f', { control: true }) === 'Ctrl+f' && k('T', { control: true }) === 'Ctrl+t' && k('Tab', { control: true, shift: true }) === 'Ctrl+Shift+Tab', 'browser/keys: browser shortcuts are forwarded from the page');
+  ok(k('ArrowLeft', { alt: true }) === 'Alt+ArrowLeft' && k('F5') === 'F5', 'browser/keys: Alt+← and F5');
+  ok(k('a', { control: true }) === null && k('c', { control: true }) === null && k('v', { control: true }) === null && k('Escape') === null && k('x') === null, 'browser/keys: copy, paste, select-all, Escape and typing stay with the page');
+  ok(bkeysMain.browserShortcutSpec({ type: 'keyDown', key: 'f', control: false, meta: true, shift: false, alt: false }, true) === 'Ctrl+f', 'browser/keys: Cmd on macOS is forwarded as Ctrl (the interface reads it platform-neutrally)');
+  ok(bkeysMain.browserShortcutSpec({ type: 'keyUp', key: 'f', control: true, meta: false, shift: false, alt: false }, false) === null, 'browser/keys: only key-down');
+}
+
+/** A small DOM over parse5's tree — enough of the DOM API for the page script's walkers and selectors. */
+function makeFakeDom(p5) {
+  const splitTop = (s, ch) => { const out = []; let depth = 0; let cur = ''; let q = null; for (const c of s) { if (q) { if (c === q) q = null; cur += c; continue; } if (c === '"' || c === '\'') { q = c; cur += c; continue; } if (c === '(' || c === '[') depth++; if (c === ')' || c === ']') depth--; if (c === ch && depth === 0) { out.push(cur); cur = ''; } else cur += c; } out.push(cur); return out.map(x => x.trim()).filter(Boolean); };
+  const compound = (el, sel) => {
+    let s = sel;
+    const m = /^([a-zA-Z][\w-]*|\*)?/.exec(s);
+    if (m[1] && m[1] !== '*' && el.tagName !== m[1].toUpperCase()) return false;
+    s = s.slice(m[0].length);
+    while (s) {
+      let mm;
+      if ((mm = /^#([\w-]+)/.exec(s))) { if (el.getAttribute('id') !== mm[1]) return false; }
+      else if ((mm = /^\.([\w-]+)/.exec(s))) { if (!(el.getAttribute('class') || '').split(/\s+/).includes(mm[1])) return false; }
+      else if ((mm = /^\[([\w-]+)(?:([*^$|~]?=)["']?([^\]"']*)["']?)?\]/.exec(s))) {
+        const v = el.getAttribute(mm[1]);
+        if (v === null) return false;
+        const want = mm[3];
+        if (mm[2] === '=' && v !== want) return false;
+        if (mm[2] === '*=' && !v.includes(want)) return false;
+        if (mm[2] === '^=' && !v.startsWith(want)) return false;
+      } else if ((mm = /^:not\((.*?)\)(?![^(]*\))/.exec(s))) { if (compound(el, mm[1])) return false; }
+      else if ((mm = /^:[\w-]+(\([^)]*\))?/.exec(s))) { return false; }
+      else return false;
+      s = s.slice(mm[0].length);
+    }
+    return true;
+  };
+  const matchOne = (el, sel) => {
+    const parts = sel.split(/\s+/).filter(Boolean);
+    if (!compound(el, parts[parts.length - 1])) return false;
+    let node = el.parentNode; let i = parts.length - 2;
+    while (i >= 0 && node && node.nodeType === 1) { if (compound(node, parts[i])) i--; node = node.parentNode; }
+    return i < 0;
+  };
+  class Node {
+    constructor(raw, doc, parent) {
+      this.raw = raw; this.ownerDocument = doc; this.parentNode = parent;
+      const n = raw.nodeName;
+      this.nodeType = n === '#text' ? 3 : n === '#comment' ? 8 : n === '#document' ? 9 : n === '#documentType' ? 10 : 1;
+      this.nodeValue = this.nodeType === 3 ? raw.value : null;
+      if (this.nodeType === 1) this.tagName = raw.tagName.toUpperCase();
+      this.childNodes = [];
+    }
+    get children() { return this.childNodes.filter(c => c.nodeType === 1); }
+    get parentElement() { return this.parentNode && this.parentNode.nodeType === 1 ? this.parentNode : null; }
+    get previousElementSibling() { const sib = this.parentNode ? this.parentNode.children : []; const i = sib.indexOf(this); return i > 0 ? sib[i - 1] : null; }
+    get textContent() { return this.nodeType === 3 ? this.nodeValue : this.childNodes.map(c => (c.nodeType === 8 ? '' : c.textContent)).join(''); }
+    get id() { return this.getAttribute('id') || ''; }
+    get className() { return this.getAttribute('class') || ''; }
+    getAttribute(name) { const a = (this.raw.attrs || []).find(x => x.name === name.toLowerCase()); return a ? a.value : null; }
+    hasAttribute(name) { return this.getAttribute(name) !== null; }
+    setAttribute(name, value) { const a = (this.raw.attrs || []).find(x => x.name === name); if (a) a.value = String(value); else (this.raw.attrs ||= []).push({ name, value: String(value) }); }
+    removeAttribute(name) { this.raw.attrs = (this.raw.attrs || []).filter(x => x.name !== name); }
+    matches(sel) { return splitTop(sel, ',').some(s => matchOne(this, s)); }
+    closest(sel) { let n = this; while (n && n.nodeType === 1) { if (n.matches(sel)) return n; n = n.parentNode; } return null; }
+    contains(o) { let n = o; while (n) { if (n === this) return true; n = n.parentNode; } return false; }
+    querySelectorAll(sel) { const out = []; const walk = (n) => { for (const c of n.childNodes) { if (c.nodeType === 1) { if (c.matches(sel)) out.push(c); walk(c); } } }; walk(this); return out; }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+    get value() {
+      if (this.tagName === 'TEXTAREA') return this.textContent;
+      if (this.tagName === 'SELECT') { const o = this.options.find(x => x.selected) || this.options[0]; return o ? o.value : ''; }
+      if (this.tagName === 'OPTION') return this.getAttribute('value') ?? this.textContent.trim();
+      const v = this.getAttribute('value'); return v === null ? (this.tagName === 'INPUT' ? '' : undefined) : v;
+    }
+    get options() { return this.tagName === 'SELECT' ? this.querySelectorAll('option') : undefined; }
+    get selectedIndex() { return this.options ? this.options.findIndex(o => o.selected) : -1; }
+    get selected() { return this.hasAttribute('selected'); }
+    get text() { return this.textContent.trim(); }
+    get checked() { return this.hasAttribute('checked'); }
+    get required() { return this.hasAttribute('required'); }
+    get disabled() { return this.hasAttribute('disabled'); }
+    get multiple() { return this.hasAttribute('multiple'); }
+  }
+  return (html, url) => {
+    const raw = p5.parse(html);
+    const doc = new Node(raw, null, null);
+    const build = (r, parent) => { const n = new Node(r, doc, parent); n.childNodes = (r.childNodes || []).map(c => build(c, n)); if (r.content) n.childNodes = []; return n; };
+    doc.childNodes = raw.childNodes.map(c => build(c, doc));
+    doc.documentElement = doc.childNodes.find(c => c.nodeType === 1);
+    doc.body = doc.documentElement.querySelector('body');
+    doc.head = doc.documentElement.querySelector('head');
+    const t = doc.documentElement.querySelector('title');
+    doc.title = t ? t.textContent.trim() : '';
+    doc.contentType = 'text/html';
+    doc.URL = url; doc.baseURI = url; doc.location = { href: url };
+    doc.activeElement = doc.body;
+    return { document: doc, window: {} };
+  };
+}
+
 fs.rmSync(out, { recursive: true, force: true });
 console.log(`\n  DESKTOP UNIT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -16,6 +16,8 @@ import { useRegistry, type BuiltinPlugin } from './registry';
 import { useDesk, go, toast } from '@/state/desk';
 import { desktop } from '@/desktop';
 import { newChat } from '@/chat/actions';
+import { newTab, showInternal } from '@/browser/store';
+import { toggleCopilot, useCopilotUi } from '@/browser/copilot-ui';
 import { ChatView } from '@/chat/ChatView';
 import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection, BrowserSection, AboutSection } from '@/settings/sections/AppSections';
 import { ModelsSection, SkillsSection, McpSection, AgentsSection, enginePaneSection } from '@/settings/sections/AgentSections';
@@ -146,7 +148,16 @@ export const BUILTINS: BuiltinPlugin[] = [
       navItems: [{ id: 'browser', title: 'Browser', icon: 'globe', view: 'browser', order: 63 }],
     } }),
     views: [{ id: 'browser', title: 'Browser', icon: 'globe', component: BrowserView }],
-    commands: [{ id: 'browser.open', title: 'Open the browser', category: 'Browser', icon: 'globe', run: () => go('browser') }],
+    commands: [
+      { id: 'browser.open', title: 'Open the browser', category: 'Browser', icon: 'globe', run: () => go('browser') },
+      { id: 'browser.copilot', title: 'Ask AICO about this page', category: 'Browser', icon: 'sparkles', keybinding: 'Ctrl+Shift+A', run: () => {
+        if (useDesk.getState().route.view !== 'browser') { go('browser'); toggleCopilot(true); return; }
+        const u = useCopilotUi.getState(); toggleCopilot(!(u.open && !u.minimized));
+      } },
+      { id: 'browser.newTab', title: 'New browser tab', category: 'Browser', icon: 'plus', run: () => { go('browser'); newTab(); } },
+      { id: 'browser.history', title: 'Browser history', category: 'Browser', icon: 'history', run: () => { go('browser'); showInternal('history'); } },
+      { id: 'browser.bookmarks', title: 'Browser bookmarks', category: 'Browser', icon: 'star', run: () => { go('browser'); showInternal('bookmarks'); } },
+    ],
     settings: [{ id: 'browser', title: 'Browser', icon: 'globe', group: 'integrations', order: 22, component: BrowserSection }],
   },
   {

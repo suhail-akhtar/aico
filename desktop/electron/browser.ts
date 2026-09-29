@@ -12,22 +12,54 @@
  * from a person — which is what makes real sign-in forms and React widgets
  * work where a synthetic `el.click()` does not. Elements are addressed by
  * `ref`s handed out by `snapshot()`, so the model never has to guess a CSS
- * selector.
+ * selector. Page understanding (reader Markdown, forms, extraction, insights)
+ * is browser-page.ts, run in the page; its verdicts are made here.
  *
- * WHAT IT WILL NOT DO. Solve a CAPTCHA, or type a password it was not given.
- * `handoff()` shows you what the agent needs (a sign-in, an MFA code, a
- * CAPTCHA) and waits for you to press Done.
+ * WHAT IT WILL NOT DO (browser-safety.ts decides, in main):
+ *   - act on a page with a CAPTCHA / "verify you are human" check — every
+ *     action there is refused with a hand-over hint;
+ *   - type into password, card-number, CVV or one-time-code fields;
+ *   - upload a file, or download a program, without the user confirming;
+ *   - answer an HTTP sign-in prompt or accept a bad certificate.
+ * `handoff()` shows you what the agent needs and waits for you to press Done.
+ * Stop / Take over (`browser:agentStop`) makes every agent tool refuse until
+ * `browser:agentResume`.
+ *
+ * Everything the interface shows comes from one pushed `browser:state`
+ * (see shared/browser-types.ts for the whole IPC contract).
  *
  * @module desktop/electron/browser
  */
 
-import { WebContentsView, session as electronSession, shell, type WebContents, type Session } from 'electron';
+import { app, dialog, ipcMain, shell, WebContentsView, session as electronSession, type WebContents, type Session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DesktopContext } from './context';
+import type {
+  AgentEvent, Bookmark, BookmarkInput, BrowserState, ConfirmRequest, DialogRequest, DownloadItem, ExtractKind, FindRequest,
+  FindResult, FormModel, HistoryEntry, HistoryListOptions, PageInsights, PageRead, PermissionSetting, SecurityState, SiteInfo, TabState,
+} from '../shared/browser-types';
+import { aicoPage } from './browser-page';
+import { originOf, shouldBlock } from './browser-trackers';
+import {
+  classifySensitiveField, describeChange, detectHumanCheck, HUMAN_CHECK_SELECTORS, humanCheckRefusal, sensitiveRefusal,
+  type FieldDescriptor, type HumanCheck, type HumanCheckSignals, type PageProbe,
+} from './browser-safety';
+import {
+  addBookmark, asArray, clearHistory, DEFAULT_SETTINGS, JsonFile, normaliseSettings, recordVisit, removeBookmark, removeHistory,
+  searchHistory, touchVisit, type BrowserSettings,
+} from './browser-store';
+import {
+  buildInsights, findContacts, findPrices, finishForms, formatSnapshot, matchField, tableToMarkdown,
+  type InsightSignals, type SnapshotRaw,
+} from './browser-extract';
+import { createDownloads } from './browser-downloads';
+import { browserShortcutSpec } from './browser-keys';
+import { DIALOG_CHANNEL, installDialogPreload } from './browser-preload';
 
 export const BROWSER_PARTITION = 'persist:aico-browser';
 
+/** The earlier tab shape (`browser:tabs`), kept for the interface that still reads it. */
 export interface TabInfo {
   id: string;
   url: string;
@@ -43,14 +75,37 @@ export interface TabInfo {
 interface Tab {
   id: string;
   view: WebContentsView;
+  /** The last viewport capture, served as the still while the view is hidden. */
+  lastStill?: { dataUrl: string; width: number; height: number };
   favicon?: string;
   console: Array<{ level: string; text: string; source?: string; line?: number; at: number }>;
   network: Array<{ method: string; url: string; status: number; type: string; at: number; ms?: number }>;
   attached: boolean;
+  trackers: Set<string>;
+  trackersBlocked: number;
+  popupsBlocked: number;
+  agentUntil: number;
+  humanCheck: boolean;
+  error?: { code: number; description: string; url: string };
+  certError?: { url: string; error: string; issuer: string };
+  httpStatus?: number;
+  lastGestureAt: number;
+  inflight: Set<number>;
+  lastNetAt: number;
+  pageEnabled: boolean;
+  dialog?: DialogRequest;
+  /** Redo the last navigation the page's beforeunload blocked. */
+  lastNav?: () => void;
+  allowUnload: boolean;
 }
+
+export type Target = { ref?: string; selector?: string; text?: string };
+
+export interface FillSpec { ref?: string; label?: string; name?: string; value: string | boolean }
 
 export interface BrowserService {
   tabs(): TabInfo[];
+  state(): BrowserState;
   open(url: string, opts?: { newTab?: boolean }): Promise<TabInfo>;
   /** Open a tab because the person asked (a context-menu link) — not the agent, so no access check. */
   openForUser(url: string): Promise<TabInfo>;
@@ -60,11 +115,12 @@ export interface BrowserService {
   press(key: string): Promise<string>;
   select(target: Target, value: string): Promise<string>;
   scroll(opts: { direction?: 'up' | 'down' | 'left' | 'right'; amount?: number; target?: Target }): Promise<string>;
+  scrollTo(target: Target): Promise<string>;
   hover(target: Target): Promise<string>;
-  waitFor(opts: { text?: string; selector?: string; ms?: number; timeoutMs?: number }): Promise<string>;
+  waitFor(opts: { text?: string; gone?: string; selector?: string; url?: string; urlChange?: boolean; networkIdle?: boolean; ms?: number; timeoutMs?: number }): Promise<string>;
   text(target?: Target): Promise<string>;
   evaluate(expression: string): Promise<unknown>;
-  screenshot(opts?: { fullPage?: boolean }): Promise<{ path: string; dataUrl: string; width: number; height: number }>;
+  screenshot(opts?: { fullPage?: boolean; forModel?: boolean }): Promise<{ path: string; dataUrl: string; width: number; height: number; model?: { data: string; mimeType: string } }>;
   consoleLog(clear?: boolean): string;
   networkLog(clear?: boolean): string;
   back(): Promise<string>;
@@ -72,95 +128,39 @@ export interface BrowserService {
   reload(): Promise<string>;
   closeTab(id?: string): void;
   selectTab(id: string): void;
+  newTab(url?: string): Promise<TabInfo>;
   handoff(message: string, timeoutMs?: number): Promise<string>;
+  // Page understanding and forms (agent-facing: access-checked, visible to the user).
+  read(opts: { mode?: 'reader' | 'full'; maxChars?: number }): Promise<PageRead>;
+  forms(): Promise<FormModel[]>;
+  fill(fields: FillSpec[]): Promise<string>;
+  extract(kind: ExtractKind, opts?: { maxItems?: number }): Promise<string>;
+  insights(): Promise<PageInsights>;
+  find(text: string, limit?: number): Promise<string>;
+  dialogs(): DialogRequest[];
+  answerDialog(opts: { id?: string; accept: boolean; text?: string }): Promise<string>;
+  downloads(): DownloadItem[];
+  upload(target: Target, files: string[]): Promise<string>;
+  uploadWait(id: string, seconds?: number): Promise<string>;
+  agentStopped(): boolean;
 }
-
-export type Target = { ref?: string; selector?: string; text?: string };
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
 
-/** The in-page half of `snapshot()`: tags interactive elements with refs and describes the page. */
-const SNAPSHOT_JS = String.raw`(() => {
-  const MAX = window.__aicoFull ? 600 : 250;
-  let n = 0;
-  document.querySelectorAll('[data-aico-ref]').forEach(e => e.removeAttribute('data-aico-ref'));
-  const vis = (el) => {
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) return false;
-    const s = getComputedStyle(el);
-    return s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05;
-  };
-  const name = (el) => {
-    const a = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('alt') || el.getAttribute('placeholder');
-    if (a) return a.trim();
-    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) return l.innerText.trim(); }
-    const lab = el.closest('label'); if (lab && lab !== el) return lab.innerText.trim();
-    return (el.innerText || el.value || '').trim();
-  };
-  const role = (el) => {
-    const r = el.getAttribute('role'); if (r) return r;
-    const t = el.tagName.toLowerCase();
-    if (t === 'a') return 'link';
-    if (t === 'button' || t === 'summary') return 'button';
-    if (t === 'select') return 'combobox';
-    if (t === 'textarea') return 'textbox';
-    if (t === 'input') {
-      const ty = (el.getAttribute('type') || 'text').toLowerCase();
-      if (['checkbox', 'radio'].includes(ty)) return ty;
-      if (['submit', 'button', 'reset', 'image'].includes(ty)) return 'button';
-      return ty === 'password' ? 'password' : 'textbox';
-    }
-    if (el.isContentEditable) return 'textbox';
-    return 'clickable';
-  };
-  const sel = 'a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=link], [role=tab], [role=menuitem], [role=checkbox], [role=switch], [role=option], [role=combobox], [contenteditable=true], [onclick], [tabindex]:not([tabindex="-1"])';
-  const lines = [];
-  for (const el of document.querySelectorAll(sel)) {
-    if (n >= MAX) break;
-    if (!vis(el)) continue;
-    const ref = 'e' + (++n);
-    el.setAttribute('data-aico-ref', ref);
-    const r = role(el);
-    let line = '[' + ref + '] ' + r + ' "' + name(el).replace(/\s+/g, ' ').slice(0, 80) + '"';
-    if (r === 'textbox' || r === 'combobox') line += ' value="' + String(el.value ?? el.innerText ?? '').slice(0, 60) + '"';
-    if (r === 'password') line += el.value ? ' (filled)' : ' (empty)';
-    if (r === 'checkbox' || r === 'radio') line += el.checked ? ' checked' : ' unchecked';
-    if (el.disabled) line += ' disabled';
-    if (r === 'link') { const h = el.getAttribute('href') || ''; if (h && !h.startsWith('javascript')) line += ' -> ' + h.slice(0, 80); }
-    const rect = el.getBoundingClientRect();
-    if (rect.bottom < 0 || rect.top > innerHeight) line += ' (offscreen)';
-    lines.push(line);
-  }
-  const heads = [...document.querySelectorAll('h1,h2,h3')].filter(vis).slice(0, 20).map(h => h.tagName.toLowerCase() + ': ' + h.innerText.trim().replace(/\s+/g, ' ').slice(0, 100));
-  const main = (document.querySelector('main') || document.body);
-  const text = (main ? main.innerText : '').replace(/\n{3,}/g, '\n\n').trim();
-  const dialogs = [...document.querySelectorAll('dialog[open], [role=dialog], [role=alertdialog]')].filter(vis).map(d => (d.getAttribute('aria-label') || d.innerText || '').trim().slice(0, 160));
-  return {
-    title: document.title, url: location.href,
-    scroll: { y: Math.round(scrollY), height: document.documentElement.scrollHeight, viewport: innerHeight },
-    headings: heads, elements: lines, dialogs,
-    text: text.slice(0, window.__aicoFull ? 12000 : 3500), truncated: text.length > (window.__aicoFull ? 12000 : 3500),
-  };
-})()`;
-
-/** Find an element's centre for a trusted click, scrolling it into view first. */
-function locateJs(t: Target): string {
-  return `(() => {
-    const t = ${JSON.stringify(t)};
-    let el = null;
-    if (t.ref) el = document.querySelector('[data-aico-ref="' + t.ref + '"]');
-    if (!el && t.selector) { try { el = document.querySelector(t.selector); } catch (e) { return { error: 'Bad selector: ' + e.message }; } }
-    if (!el && t.text) {
-      const want = t.text.toLowerCase();
-      const cands = [...document.querySelectorAll('a,button,[role=button],[role=link],[role=tab],[role=menuitem],label,summary,input[type=submit],input[type=button],li,span,div')];
-      el = cands.find(c => (c.innerText || c.value || '').trim().toLowerCase() === want) || cands.find(c => (c.innerText || c.value || '').trim().toLowerCase().includes(want) && c.children.length < 4);
-    }
-    if (!el) return { error: 'No element matches ' + JSON.stringify(t) + '. Take a new snapshot — refs change when the page changes.' };
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-    const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, tag: el.tagName.toLowerCase(), label: (el.getAttribute('aria-label') || el.innerText || el.value || '').trim().slice(0, 60) };
-  })()`;
+/**
+ * A capture that cannot hang or flood. Capturing a hidden view could wait
+ * forever — and once came back so large that handing it to the window crashed
+ * the window — so every capture has a deadline and a size cap.
+ */
+async function boundedCapture<T extends { data: string }>(p: Promise<T>, what: string): Promise<T> {
+  const r = await Promise.race([p, sleep(10_000).then(() => { throw new Error(`${what} timed out — is the page on screen?`); })]);
+  if (r.data.length > 30_000_000) throw new Error(`${what} was too large to use (${Math.round(r.data.length / 1e6)} MB).`);
+  return r;
 }
+
+const PAGE_SRC = aicoPage.toString();
+/** The expression that runs one page-script operation. */
+export const pageJs = (op: string, args?: unknown): string => `(${PAGE_SRC})(${JSON.stringify(op)}, ${JSON.stringify(args ?? {})})`;
 
 interface KeyDef { key: string; code: string; keyCode: number; text?: string }
 const KEYS: Record<string, KeyDef> = {
@@ -195,33 +195,153 @@ function parseKey(spec: string): { def: KeyDef; modifiers: number; commands: str
   if ((modifiers & 2 || modifiers & 4) && chord[last]) commands.push(chord[last]!);
   const def = KEYS[last] ?? (/^f([1-9]|1[0-2])$/.test(last)
     ? { key: last.toUpperCase(), code: last.toUpperCase(), keyCode: 111 + Number(last.slice(1)) }
-    : { key: last.length === 1 ? last : last, code: last.length === 1 ? `Key${last.toUpperCase()}` : last, keyCode: last.toUpperCase().charCodeAt(0), text: modifiers & 6 ? undefined : last });
+    : { key: last, code: last.length === 1 ? `Key${last.toUpperCase()}` : last, keyCode: last.toUpperCase().charCodeAt(0), text: modifiers & 6 ? undefined : last });
   return { def, modifiers, commands };
 }
 
+/** Does this key put text into the focused field (a character, or paste)? */
+function keyWritesText(spec: string): boolean {
+  const { def, modifiers, commands } = parseKey(spec);
+  return commands.includes('paste') || (Boolean(def.text) && def.key !== 'Enter' && !(modifiers & 6));
+}
+
+/** A permission as the user reads it: media is split into camera / microphone. */
+function permissionName(permission: string, mediaTypes?: string[]): string {
+  if (permission !== 'media') return permission;
+  const v = mediaTypes?.includes('video'); const a = mediaTypes?.includes('audio');
+  return v && a ? 'camera-microphone' : v ? 'camera' : a ? 'microphone' : 'media';
+}
+
+const PERMISSIONS_SHOWN = ['notifications', 'geolocation', 'camera', 'microphone', 'clipboard-read', 'midi', 'display-capture', 'openExternal'];
+
 export function registerBrowser(ctx: DesktopContext): void {
   const tabs = new Map<string, Tab>();
+  const byWc = new Map<number, Tab>();
   let activeId: string | null = null;
   let seq = 0;
   let bounds: { x: number; y: number; width: number; height: number } | null = null;
   let visible = false;
   let ses: Session | null = null;
+  let agentStopped = false;
   const handoffs = new Map<string, (answer: string) => void>();
   const shotsDir = path.join(ctx.paths.desktopDir, 'browser', 'screenshots');
+  const dataDir = path.join(ctx.paths.desktopDir, 'browser');
 
+  // ── Records ──
+  const history = new JsonFile<HistoryEntry[]>(path.join(dataDir, 'history.json'), [], raw => asArray<HistoryEntry>(raw));
+  const bookmarks = new JsonFile<Bookmark[]>(path.join(dataDir, 'bookmarks.json'), [], raw => asArray<Bookmark>(raw));
+  const settings = new JsonFile<BrowserSettings>(path.join(dataDir, 'settings.json'), DEFAULT_SETTINGS, normaliseSettings);
+  const certs = new Map<string, { issuer: string; subject: string; validTo: number }>();
+  app.on('before-quit', () => { history.flush(); bookmarks.flush(); settings.flush(); downloads.flush(); });
+
+  // ── Questions for the user (permissions, JS dialogs, HTTP auth, confirmations) ──
+  const pendingPerms = new Map<string, { cb: (ok: boolean) => void; origin: string; name: string; timer: NodeJS.Timeout }>();
+  const pendingAuth = new Map<string, { cb: (u?: string, p?: string) => void; timer: NodeJS.Timeout }>();
+  const pendingConfirm = new Map<string, { resolve: (ok: boolean) => void; timer: NodeJS.Timeout }>();
+  /** Open JS dialogs. `reply` answers one raised by the page's dialog preload; without it, the DevTools protocol answers. */
+  const dialogs = new Map<string, { tab: Tab; req: DialogRequest; reply?: (accept: boolean, text?: string) => void }>();
+  const dialogBursts = new Map<string, number[]>();
+  const dialogWaiters = new Map<string, Set<(d: DialogRequest) => void>>();
+  const uploads = new Map<string, { state: 'pending' | 'allowed' | 'denied' | 'done' | 'failed'; result?: string; tabId: string; ref: string; files: string[] }>();
+  let askSeq = 0;
+  const askId = (p: string): string => `${p}${Date.now().toString(36)}${++askSeq}`;
+
+  const confirm = (req: Omit<ConfirmRequest, 'id'>, timeoutMs = 10 * 60_000): { id: string; done: Promise<boolean> } => {
+    const id = askId('c');
+    const done = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => { pendingConfirm.delete(id); resolve(false); }, timeoutMs);
+      pendingConfirm.set(id, { resolve, timer });
+    });
+    ctx.emit('browser:confirm', { id, ...req } satisfies ConfirmRequest);
+    ctx.reveal();
+    return { id, done };
+  };
+
+  // ── What the agent is doing (for the interface and for results) ──
+  let capture: { tab: Tab; download?: string; newTab?: string; auth?: string } | null = null;
+  /** When the agent last navigated (browser_open): a download that follows is the agent's. */
+  let agentOpen: { at: number; download?: string } = { at: 0 };
+  const agentDriving = (t: Tab | undefined): boolean => Boolean(t && (Date.now() < t.agentUntil + 3000 || capture?.tab === t));
+  const agentEvent = (t: Tab, action: string, status: AgentEvent['status'], label?: string, detail?: string): void => {
+    if (status === 'start') t.agentUntil = Date.now() + 2000;
+    else t.agentUntil = Math.max(t.agentUntil, Date.now() + 2000);
+    ctx.emit('browser:agent', { tabId: t.id, action, status, ...(label ? { label } : {}), ...(detail ? { detail: detail.slice(0, 300) } : {}) } satisfies AgentEvent);
+    pushState();
+    setTimeout(pushState, 2100);
+  };
+
+  const downloads = createDownloads(ctx, {
+    byAgent: (wc) => agentDriving(wc ? byWc.get(wc.id) : undefined) || (wc !== undefined && Date.now() - agentOpen.at < 15_000),
+    confirm: (req) => confirm(req).done,
+    started: (item, wc) => {
+      const t = wc ? byWc.get(wc.id) : undefined;
+      if (capture && (!t || capture.tab === t)) capture.download = item.filename;
+      if (wc && Date.now() - agentOpen.at < 15_000) agentOpen.download = item.filename;
+    },
+  });
+
+  // ── Session ──
   const getSession = (): Session => {
     if (ses) return ses;
     ses = electronSession.fromPartition(BROWSER_PARTITION);
-    // Nothing is granted by default: no camera, mic, location or notifications for the agent's profile.
-    ses.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'clipboard-sanitized-write' || permission === 'fullscreen'));
-    ses.on('will-download', (_e, item) => {
-      const dir = path.join(ctx.paths.desktopDir, 'browser', 'downloads');
-      fs.mkdirSync(dir, { recursive: true });
-      item.setSavePath(path.join(dir, item.getFilename()));
-      item.once('done', (_ev, state) => ctx.emit('browser:download', { file: item.getSavePath(), state }));
+    // Nothing is granted by default; a page asks, the user answers (and may have it remembered).
+    ses.setPermissionRequestHandler((wc, permission, cb, details) => {
+      if (permission === 'clipboard-sanitized-write' || permission === 'fullscreen') { cb(true); return; }
+      const t = byWc.get(wc.id);
+      const origin = originOf((details as { requestingUrl?: string }).requestingUrl || wc.getURL());
+      if (!t || !origin) { cb(false); return; }
+      const name = permissionName(permission, (details as { mediaTypes?: string[] }).mediaTypes);
+      const remembered = settings.get().permissions[origin]?.[name];
+      if (remembered) { cb(remembered === 'allow'); return; }
+      const id = askId('p');
+      const timer = setTimeout(() => { pendingPerms.delete(id); cb(false); }, 120_000);
+      pendingPerms.set(id, { cb, origin, name, timer });
+      ctx.emit('browser:permission', { id, tabId: t.id, origin, permission: name });
     });
+    ses.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
+      if (permission === 'clipboard-sanitized-write' || permission === 'fullscreen') return true;
+      const origin = originOf(requestingOrigin);
+      const perms = settings.get().permissions[origin];
+      if (!perms) return false;
+      const name = permissionName(permission, details.mediaType ? [details.mediaType] : undefined);
+      return perms[name] === 'allow' || (permission === 'media' && perms['camera-microphone'] === 'allow');
+    });
+    // Observe (never change) certificate verification, for the site-info panel.
+    ses.setCertificateVerifyProc((req, cb) => {
+      try {
+        certs.set(req.hostname, { issuer: req.certificate.issuerName, subject: req.certificate.subjectName, validTo: req.certificate.validExpiry * 1000 });
+      } catch { /* observation only */ }
+      cb(-3);
+    });
+    downloads.attach(ses);
+    installDialogPreload(ses, dataDir);
+    ses.webRequest.onBeforeRequest((d, cb) => {
+      const t = d.webContentsId !== undefined ? byWc.get(d.webContentsId) : undefined;
+      if (t && d.resourceType !== 'mainFrame') {
+        const s = settings.get().blocking;
+        const pageUrl = t.view.webContents.getURL();
+        if (s.enabled && !s.allowOrigins.includes(originOf(pageUrl))) {
+          const dec = shouldBlock(d.url, pageUrl, d.resourceType);
+          if (dec.block) {
+            t.trackersBlocked++;
+            if (t.trackers.size < 500 && dec.tracker) t.trackers.add(dec.tracker);
+            pushState();
+            cb({ cancel: true });
+            return;
+          }
+        }
+      }
+      if (t) { t.inflight.add(d.id); t.lastNetAt = Date.now(); }
+      cb({});
+    });
+    const settled = (d: { id: number; webContentsId?: number }): void => {
+      const t = d.webContentsId !== undefined ? byWc.get(d.webContentsId) : undefined;
+      if (t) { t.inflight.delete(d.id); t.lastNetAt = Date.now(); }
+    };
+    ses.webRequest.onErrorOccurred(settled);
     ses.webRequest.onCompleted((d) => {
-      const tab = [...tabs.values()].find(t => t.view.webContents.id === d.webContentsId);
+      settled(d);
+      const tab = d.webContentsId !== undefined ? byWc.get(d.webContentsId) : undefined;
       if (!tab) return;
       tab.network.push({ method: d.method, url: d.url, status: d.statusCode, type: d.resourceType, at: Date.now() });
       if (tab.network.length > 400) tab.network.shift();
@@ -229,6 +349,29 @@ export function registerBrowser(ctx: DesktopContext): void {
     return ses;
   };
 
+  // ── State ──
+  const securityOf = (t: Tab): SecurityState => {
+    const u = t.view.webContents.getURL();
+    if (t.certError || (t.error && t.error.code <= -200 && t.error.code > -300)) return 'error';
+    if (/^https:/i.test(u)) return 'secure';
+    if (/^http:/i.test(u)) return 'insecure';
+    return 'internal';
+  };
+  const tabState = (t: Tab): TabState => {
+    const wc = t.view.webContents;
+    return {
+      id: t.id, url: t.error?.url && /^chrome-error:/.test(wc.getURL()) ? t.error.url : wc.getURL(),
+      title: wc.getTitle() || wc.getURL() || 'New tab', ...(t.favicon ? { favicon: t.favicon } : {}),
+      loading: wc.isLoading(), canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward(),
+      audible: wc.isCurrentlyAudible(), muted: wc.isAudioMuted(), zoom: wc.getZoomFactor(), security: securityOf(t),
+      trackersBlocked: t.trackersBlocked, agentActive: Date.now() < t.agentUntil, humanCheck: t.humanCheck,
+      ...(t.error ? { error: t.error } : {}), ...(t.popupsBlocked ? { popupsBlocked: t.popupsBlocked } : {}),
+    };
+  };
+  const state = (): BrowserState => ({
+    activeId, tabs: [...tabs.values()].filter(t => !t.view.webContents.isDestroyed()).map(tabState),
+    blocking: { enabled: settings.get().blocking.enabled }, agentStopped,
+  });
   const info = (t: Tab): TabInfo => {
     const wc = t.view.webContents;
     return {
@@ -237,8 +380,17 @@ export function registerBrowser(ctx: DesktopContext): void {
       active: t.id === activeId, zoom: wc.getZoomFactor(),
     };
   };
-  const list = (): TabInfo[] => [...tabs.values()].map(info);
-  const announce = (): void => ctx.emit('browser:tabs', list());
+  const list = (): TabInfo[] => [...tabs.values()].filter(t => !t.view.webContents.isDestroyed()).map(info);
+  let stateTimer: NodeJS.Timeout | null = null;
+  function pushState(): void {
+    if (stateTimer) return;
+    stateTimer = setTimeout(() => {
+      stateTimer = null;
+      ctx.emit('browser:state', state());
+      ctx.emit('browser:tabs', list());
+    }, 60);
+  }
+  const announce = pushState;
 
   const layout = (): void => {
     const win = ctx.window();
@@ -251,44 +403,235 @@ export function registerBrowser(ctx: DesktopContext): void {
     }
   };
 
-  const create = (url?: string): Tab => {
-    const view = new WebContentsView({
-      webPreferences: {
-        session: getSession(), sandbox: true, contextIsolation: true, nodeIntegration: false,
-        backgroundThrottling: false, spellcheck: true,
-      },
-    });
-    const id = `b${++seq}`;
-    const tab: Tab = { id, view, console: [], network: [], attached: false };
-    const wc = view.webContents;
-    wc.setWindowOpenHandler(({ url: u }) => { void openUrl(u, { newTab: true }); return { action: 'deny' }; });
-    wc.on('page-favicon-updated', (_e, icons) => { tab.favicon = icons[0]; announce(); });
-    for (const ev of ['did-start-loading', 'did-stop-loading', 'page-title-updated', 'did-navigate', 'did-navigate-in-page'] as const) {
-      wc.on(ev as 'did-start-loading', () => announce());
+  // ── DevTools protocol ──
+  function ensureDebugger(t: Tab): void {
+    const dbg = t.view.webContents.debugger;
+    if (!dbg.isAttached()) {
+      try { dbg.attach('1.3'); } catch (err) { throw new Error(`Cannot control this tab: ${(err as Error).message}`); }
+      t.pageEnabled = false;
     }
+    if (!t.pageEnabled) {
+      t.pageEnabled = true;
+      void dbg.sendCommand('Page.enable').catch(() => { t.pageEnabled = false; });
+    }
+  }
+
+  async function cdp<T = unknown>(wc: WebContents, method: string, params?: Record<string, unknown>): Promise<T> {
+    const t = byWc.get(wc.id);
+    if (t) ensureDebugger(t);
+    else if (!wc.debugger.isAttached()) {
+      try { wc.debugger.attach('1.3'); } catch (err) { throw new Error(`Cannot control this tab: ${(err as Error).message}`); }
+    }
+    return wc.debugger.sendCommand(method, params) as Promise<T>;
+  }
+
+  const dialogOpenMessage = (d: DialogRequest): string => `A JavaScript ${d.type} dialog is open on this page ("${d.message.slice(0, 200)}"). The page is paused until it is answered: call browser_dialog with accept true/false${d.type === 'prompt' ? ' (and text)' : ''}.`;
+
+  async function evaluate<T = unknown>(wc: WebContents, expression: string, timeoutMs = 15_000): Promise<T> {
+    const t = byWc.get(wc.id);
+    if (t?.dialog) throw new Error(dialogOpenMessage(t.dialog));
+    const r = await Promise.race([
+      cdp<{ result: { value?: T; description?: string }; exceptionDetails?: { text: string; exception?: { description?: string } } }>(
+        wc, 'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true },
+      ),
+      sleep(timeoutMs).then(() => { throw new Error(t?.dialog ? dialogOpenMessage(t.dialog) : 'The page did not answer in time (it may be busy or navigating). Try again.'); }),
+    ]);
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+    return r.result.value as T;
+  }
+  const page = <T>(t: Tab, op: string, args?: unknown, timeoutMs?: number): Promise<T> => evaluate<T>(t.view.webContents, pageJs(op, args), timeoutMs);
+
+  // ── Tabs ──
+  const create = (url?: string, adopt?: WebContents): Tab => {
+    const view = adopt
+      ? new WebContentsView({ webContents: adopt })
+      : new WebContentsView({
+        webPreferences: {
+          session: getSession(), sandbox: true, contextIsolation: true, nodeIntegration: false,
+          backgroundThrottling: false, spellcheck: true,
+          // The dialog preload (browser-preload.ts) must reach iframes too; with sandbox on this grants nothing else.
+          nodeIntegrationInSubFrames: true,
+        },
+      });
+    const id = `b${++seq}`;
+    const tab: Tab = {
+      id, view, console: [], network: [], attached: false, trackers: new Set(), trackersBlocked: 0, popupsBlocked: 0,
+      agentUntil: 0, humanCheck: false, lastGestureAt: 0, inflight: new Set(), lastNetAt: 0, pageEnabled: false, allowUnload: false,
+    };
+    const wc = view.webContents;
+    byWc.set(wc.id, tab);
+
+    wc.setWindowOpenHandler((d) => {
+      const gesture = Date.now() - tab.lastGestureAt < 5000;
+      if (!gesture) {
+        tab.popupsBlocked++;
+        pushState();
+        return { action: 'deny' };
+      }
+      if (capture?.tab === tab) capture.newTab = d.url;
+      // Opened as a tab of this browser, keeping window.opener (sign-in pop-ups need it).
+      return {
+        action: 'allow',
+        createWindow: (options) => {
+          const adoptWc = (options as { webContents?: WebContents }).webContents;
+          const t = create(adoptWc ? undefined : d.url, adoptWc);
+          layout();
+          return t.view.webContents;
+        },
+      };
+    });
+    wc.on('page-favicon-updated', (_e, icons) => {
+      tab.favicon = icons[0];
+      history.set(touchVisit(history.get(), wc.getURL(), { favicon: icons[0] }));
+      pushState();
+    });
+    for (const ev of ['did-start-loading', 'did-stop-loading', 'media-started-playing', 'media-paused'] as const) {
+      wc.on(ev as 'did-start-loading', () => pushState());
+    }
+    wc.on('audio-state-changed', () => pushState());
+    wc.on('page-title-updated', (_e, title) => {
+      history.set(touchVisit(history.get(), wc.getURL(), { title }));
+      pushState();
+    });
+    wc.on('did-start-navigation', (d) => {
+      if (!d.isMainFrame || d.isSameDocument) return;
+      tab.error = undefined; tab.certError = undefined; tab.humanCheck = false; tab.favicon = undefined;
+      tab.trackersBlocked = 0; tab.trackers.clear(); tab.popupsBlocked = 0;
+      pushState();
+    });
+    wc.on('did-navigate', (_e, url, code) => {
+      tab.httpStatus = code;
+      history.set(recordVisit(history.get(), { url, title: wc.getTitle(), favicon: tab.favicon }, Date.now()));
+      const z = settings.get().zoom[originOf(url)] ?? 1;
+      if (Math.abs(wc.getZoomFactor() - z) > 0.001) wc.setZoomFactor(z);
+      pushState();
+    });
+    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (!isMainFrame) return;
+      history.set(recordVisit(history.get(), { url, title: wc.getTitle(), favicon: tab.favicon }, Date.now()));
+      pushState();
+      scheduleHumanCheck(tab);
+    });
+    wc.on('did-stop-loading', () => scheduleHumanCheck(tab));
     wc.on('did-fail-load', (_e, code, desc, u, isMain) => {
-      if (isMain && code !== -3) ctx.emit('browser:error', { id, url: u, message: `${desc} (${code})` });
+      if (!isMain || code === -3) return;
+      tab.error = { code, description: desc, url: u };
+      ctx.emit('browser:error', { id, url: u, message: `${desc} (${code})` });
+      pushState();
+    });
+    wc.on('certificate-error', (e, url, error, certificate, cb, isMainFrame) => {
+      // Never accepted — not by the agent, not by a click-through.
+      e.preventDefault();
+      cb(false);
+      if (isMainFrame) { tab.certError = { url, error, issuer: certificate.issuerName }; pushState(); }
+    });
+    wc.on('login', (e, _details, authInfo, cb) => {
+      e.preventDefault();
+      const reqId = askId('a');
+      const timer = setTimeout(() => { pendingAuth.delete(reqId); cb(); }, 5 * 60_000);
+      pendingAuth.set(reqId, { cb, timer });
+      if (capture?.tab === tab) capture.auth = authInfo.host;
+      ctx.emit('browser:auth', { id: reqId, tabId: tab.id, host: authInfo.host, ...(authInfo.realm ? { realm: authInfo.realm } : {}) });
+      ctx.reveal();
+    });
+    wc.on('will-prevent-unload', (e) => {
+      if (tab.allowUnload) { tab.allowUnload = false; e.preventDefault(); return; }
+      const d: DialogRequest = { id: askId('j'), tabId: tab.id, type: 'beforeunload', message: 'This page asks whether you want to leave — changes you made may not be saved.', byAgent: agentDriving(tab) };
+      raiseDialog(tab, d, { blocking: false });
+    });
+    wc.on('render-process-gone', (_e, details) => {
+      tab.error = { code: -1, description: `The page stopped (${details.reason})`, url: wc.getURL() };
+      pushState();
     });
     wc.on('console-message', (e) => {
       const d = e as unknown as { level: string | number; message: string; sourceId?: string; lineNumber?: number };
       const level = typeof d.level === 'number' ? ['verbose', 'info', 'warning', 'error'][d.level] ?? 'info' : d.level;
+      // Electron's own development-build warnings (the dialog preload runs in the page) are not the page's.
+      if (/^%?c?Electron (Security|Deprecation) Warning/.test(d.message)) return;
       tab.console.push({ level, text: d.message, source: d.sourceId, line: d.lineNumber, at: Date.now() });
       if (tab.console.length > 400) tab.console.shift();
     });
-    wc.on('before-input-event', (_e, input) => {
-      if (input.type === 'keyDown' && (input.control || input.meta) && input.key.toLowerCase() === 'l') ctx.emit('browser:focus-address');
+    wc.on('input-event', (_e, input) => {
+      if (['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'char', 'touchStart', 'gestureTap', 'pointerDown'].includes(input.type)) tab.lastGestureAt = Date.now();
     });
+    wc.on('before-input-event', (e, input) => {
+      if (input.type === 'keyDown') tab.lastGestureAt = Date.now();
+      if (input.type === 'keyDown' && (input.control || input.meta) && input.key.toLowerCase() === 'l') ctx.emit('browser:focus-address');
+      // Browser shortcuts belong to the browser, even while the page has focus.
+      const spec = browserShortcutSpec(input);
+      if (spec) { e.preventDefault(); ctx.emit('browser:shortcut', { key: spec }); }
+    });
+    wc.on('found-in-page', (_e, r) => {
+      const res: FindResult = { matches: r.matches, active: r.activeMatchOrdinal };
+      ctx.emit('browser:found', res);
+      if (pendingFind && r.requestId === pendingFind.requestId && r.finalUpdate) { pendingFind.resolve(res); pendingFind = null; }
+    });
+    wc.on('destroyed', () => { byWc.delete(wc.id); });
+
+    // The DevTools protocol from the start, so JavaScript dialogs reach the interface.
+    try { ensureDebugger(tab); } catch { /* retried on first use */ }
+    wc.debugger.on('detach', () => { tab.pageEnabled = false; });
+    wc.debugger.on('message', (_e, method, params: Record<string, unknown>) => {
+      if (method === 'Page.javascriptDialogOpening') {
+        const type = String(params.type) as DialogRequest['type'];
+        if (type === 'beforeunload') return; // handled by will-prevent-unload
+        // Normally the dialog preload raised it already (and no native box is shown). A frame the preload
+        // did not reach falls back to Electron's native box, which the user answers; this only records it
+        // so the agent's tools do not wait on a paused page.
+        if (tab.dialog) return;
+        const d: DialogRequest = {
+          id: askId('j'), tabId: tab.id, type, message: String(params.message ?? ''),
+          ...(type === 'prompt' ? { defaultPrompt: String(params.defaultPrompt ?? '') } : {}), byAgent: agentDriving(tab),
+        };
+        raiseDialog(tab, d, { emit: false });
+      } else if (method === 'Page.javascriptDialogClosed') {
+        const cur = tab.dialog ? dialogs.get(tab.dialog.id) : undefined;
+        if (tab.dialog && !cur?.reply) { dialogs.delete(tab.dialog.id); tab.dialog = undefined; pushState(); }
+      }
+    });
+
     tabs.set(id, tab);
     activeId = id;
-    if (url) void wc.loadURL(normalise(url)).catch(() => {});
+    if (url && !adopt) void wc.loadURL(normalise(url)).catch(() => {});
     layout();
-    announce();
+    pushState();
     return tab;
   };
 
+  function raiseDialog(tab: Tab, d: DialogRequest, opts: { emit?: boolean; blocking?: boolean; reply?: (accept: boolean, text?: string) => void } = {}): void {
+    if (opts.blocking !== false) tab.dialog = d;
+    dialogs.set(d.id, { tab, req: d, ...(opts.reply ? { reply: opts.reply } : {}) });
+    if (opts.emit !== false) ctx.emit('browser:dialog', d);
+    for (const w of dialogWaiters.get(tab.id) ?? []) w(d);
+    if (!d.byAgent) ctx.reveal();
+  }
+
+  const waitDialog = (t: Tab): { promise: Promise<DialogRequest>; cancel: () => void } => {
+    let fn: (d: DialogRequest) => void = () => {};
+    const promise = new Promise<DialogRequest>((resolve) => { fn = resolve; });
+    const set = dialogWaiters.get(t.id) ?? new Set();
+    set.add(fn);
+    dialogWaiters.set(t.id, set);
+    return { promise, cancel: () => { set.delete(fn); } };
+  };
+
+  const humanTimers = new Map<string, NodeJS.Timeout>();
+  function scheduleHumanCheck(t: Tab): void {
+    clearTimeout(humanTimers.get(t.id));
+    humanTimers.set(t.id, setTimeout(() => { humanTimers.delete(t.id); void humanCheck(t).catch(() => {}); }, 600));
+  }
+  async function humanCheck(t: Tab): Promise<HumanCheck> {
+    if (t.view.webContents.isDestroyed() || t.dialog) return { detected: t.humanCheck };
+    const sig = await page<HumanCheckSignals>(t, 'humanCheck', { humanSelectors: HUMAN_CHECK_SELECTORS }, 5000).catch(() => null);
+    if (!sig) return { detected: false };
+    const h = detectHumanCheck(sig);
+    if (t.humanCheck !== h.detected) { t.humanCheck = h.detected; pushState(); }
+    return h;
+  }
+
   const active = (): Tab => {
     let t = activeId ? tabs.get(activeId) : undefined;
-    if (!t) t = create();
+    if (!t || t.view.webContents.isDestroyed()) t = create();
     return t;
   };
 
@@ -309,35 +652,31 @@ export function registerBrowser(ctx: DesktopContext): void {
     await sleep(250);
   }
 
-  async function cdp<T = unknown>(wc: WebContents, method: string, params?: Record<string, unknown>): Promise<T> {
-    if (!wc.debugger.isAttached()) {
-      try { wc.debugger.attach('1.3'); } catch (err) { throw new Error(`Cannot control this tab: ${(err as Error).message}`); }
-    }
-    return wc.debugger.sendCommand(method, params) as Promise<T>;
-  }
-
-  async function evaluate<T = unknown>(wc: WebContents, expression: string): Promise<T> {
-    const r = await cdp<{ result: { value?: T; description?: string }; exceptionDetails?: { text: string; exception?: { description?: string } } }>(
-      wc, 'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true },
-    );
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
-    return r.result.value as T;
-  }
-
   function checkAccess(): void {
     if (ctx.prefs.get().browserAgentAccess === 'deny') throw new Error('The user has not allowed the agent to use the built-in browser (Settings → Browser).');
+    if (agentStopped) {
+      const t = activeId ? tabs.get(activeId) : undefined;
+      if (t) ctx.emit('browser:agent', { tabId: t.id, action: 'refused', status: 'blocked', detail: 'The user has taken control' } satisfies AgentEvent);
+      throw new Error('The user has taken control of the browser (Stop / Take over). Do not use the browser tools now — tell the user what you were about to do and ask before continuing; they will resume you when ready.');
+    }
     ctx.emit('browser:agent-active', { at: Date.now() });
   }
 
-  async function locate(wc: WebContents, t: Target): Promise<{ x: number; y: number; label: string; tag: string }> {
-    if (!t.ref && !t.selector && !t.text) throw new Error('Name an element: ref (from browser_snapshot), selector, or text.');
-    const r = await evaluate<{ x: number; y: number; label: string; tag: string; error?: string }>(wc, locateJs(t));
+  interface Located {
+    x: number; y: number; rect: { x: number; y: number; w: number; h: number }; label: string; tag: string; role: string; ref: string;
+    field: FieldDescriptor; isField: boolean; isSelect: boolean; isFile: boolean; checked?: boolean; inFrame: boolean; disabled: boolean; coveredBy?: string;
+  }
+  async function locate(t: Tab, target: Target, highlight?: string): Promise<Located> {
+    if (!target.ref && !target.selector && !target.text) throw new Error('Name an element: ref (from browser_snapshot), selector, or text.');
+    const r = await page<Located & { error?: string }>(t, 'locate', { target, highlight });
     if (!r || r.error) throw new Error(r?.error ?? 'Element not found.');
     await sleep(60);
     return r;
   }
 
-  async function mouseClick(wc: WebContents, x: number, y: number, button: 'left' | 'right' = 'left', clickCount = 1): Promise<void> {
+  async function mouseClick(t: Tab, x: number, y: number, button: 'left' | 'right' = 'left', clickCount = 1): Promise<void> {
+    const wc = t.view.webContents;
+    t.lastGestureAt = Date.now();
     await cdp(wc, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
     for (let i = 1; i <= clickCount; i++) {
       await cdp(wc, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: i });
@@ -345,7 +684,9 @@ export function registerBrowser(ctx: DesktopContext): void {
     }
   }
 
-  async function pressKey(wc: WebContents, spec: string): Promise<void> {
+  async function pressKey(t: Tab, spec: string): Promise<void> {
+    const wc = t.view.webContents;
+    t.lastGestureAt = Date.now();
     const { def, modifiers, commands } = parseKey(spec);
     await cdp(wc, 'Input.dispatchKeyEvent', {
       type: def.text ? 'keyDown' : 'rawKeyDown', key: def.key, code: def.code, windowsVirtualKeyCode: def.keyCode,
@@ -359,158 +700,328 @@ export function registerBrowser(ctx: DesktopContext): void {
     if (wc.isLoading()) await waitLoad(wc, 10000);
   }
 
+  const probe = (t: Tab): Promise<PageProbe | null> => (t.dialog ? Promise.resolve(null) : page<PageProbe>(t, 'probe', {}, 4000).catch(() => null));
+
+  /**
+   * One agent action: access check, the human-check gate, the user-visible
+   * "agent is doing X" event, a JS-dialog watch (a dialog pauses the page, so
+   * the action returns as soon as one opens), and a compact account of what
+   * changed.
+   */
+  async function act(action: string, opts: { gate?: boolean; diff?: boolean; label?: string }, fn: (t: Tab) => Promise<string>): Promise<string> {
+    checkAccess();
+    const t = active();
+    agentEvent(t, action, 'start', opts.label);
+    capture = { tab: t };
+    const watch = waitDialog(t);
+    try {
+      if (t.dialog && action !== 'dialog') throw new Error(dialogOpenMessage(t.dialog));
+      if (opts.gate) {
+        const h = await humanCheck(t);
+        if (h.detected) {
+          agentEvent(t, action, 'blocked', opts.label, `Human check: ${h.kind}`);
+          throw new Error(humanCheckRefusal(h));
+        }
+      }
+      const before = opts.diff ? await probe(t) : null;
+      const run = fn(t);
+      run.catch(() => { /* reported below, or superseded by a dialog */ });
+      const won = await Promise.race([run.then(r => ({ r })), watch.promise.then(d => ({ d }))]);
+      let text = 'r' in won ? won.r : `The ${action} made the page open a JavaScript ${won.d.type} dialog: "${won.d.message.slice(0, 300)}". The page is paused until it is answered — call browser_dialog (accept true/false${won.d.type === 'prompt' ? ', text' : ''}).`;
+      if (opts.diff && !('d' in won)) {
+        const after = await probe(t);
+        const extra = {
+          ...(t.dialog ? { jsDialog: { type: t.dialog.type, message: t.dialog.message } } : {}),
+          ...(capture?.download ? { download: capture.download } : {}),
+          ...(capture?.newTab ? { newTab: capture.newTab } : {}),
+        };
+        const change = describeChange(before, after ?? (t.dialog ? null : { url: t.view.webContents.getURL(), title: t.view.webContents.getTitle(), alerts: [], invalid: [], modals: [] }), extra);
+        if (change) text += `\n${change}`;
+        if (capture?.auth) text += `\nThe site asked for an HTTP sign-in (${capture.auth}); the user has been asked to answer it — wait, then take a snapshot.`;
+      }
+      agentEvent(t, action, 'done', opts.label);
+      return text;
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (!/^Human check detected/.test(msg)) agentEvent(t, action, /^Refused/.test(msg) ? 'blocked' : 'error', opts.label, msg);
+      throw err;
+    } finally {
+      watch.cancel();
+      capture = null;
+    }
+  }
+
   async function openUrl(url: string, opts?: { newTab?: boolean }): Promise<TabInfo> {
     const t = opts?.newTab || !activeId ? create() : active();
     activeId = t.id;
     const target = normalise(url);
-    try { await t.view.webContents.loadURL(target); } catch (err) {
+    t.lastNav = () => { void t.view.webContents.loadURL(target).catch(() => {}); };
+    // Capped: a view that is not on screen can stall its load promise, and an
+    // open that never returns hangs the agent's tool call and the caller with
+    // it. The page keeps loading; the state events still report it.
+    try { await Promise.race([t.view.webContents.loadURL(target), sleep(30_000)]); } catch (err) {
       const msg = (err as Error).message;
-      if (!/ERR_ABORTED/.test(msg)) throw new Error(`Could not open ${target}: ${msg}`);
+      if (!/ERR_ABORTED/.test(msg)) {
+        // The failure is on the tab's state (error / certificate) too, for the interface.
+        throw new Error(`Could not open ${target}: ${msg}`);
+      }
     }
     await waitLoad(t.view.webContents);
     layout();
-    announce();
+    pushState();
     return info(t);
   }
 
+  // ── Page understanding ──
+  async function readPage(t: Tab, opts: { mode?: 'reader' | 'full'; maxChars?: number }): Promise<PageRead> {
+    await waitLoad(t.view.webContents, 8000);
+    return page<PageRead>(t, 'read', { mode: opts.mode === 'full' ? 'full' : 'reader', maxChars: opts.maxChars }, 20_000);
+  }
+  async function formsOf(t: Tab): Promise<FormModel[]> {
+    await waitLoad(t.view.webContents, 8000);
+    return finishForms(await page(t, 'forms', {}, 15_000));
+  }
+  async function insightsOf(t: Tab): Promise<PageInsights> {
+    await waitLoad(t.view.webContents, 8000);
+    const sig = await page<InsightSignals>(t, 'insights', { humanSelectors: HUMAN_CHECK_SELECTORS }, 15_000);
+    const ins = buildInsights(sig, { security: securityOf(t), trackersBlocked: t.trackersBlocked, httpStatus: t.httpStatus });
+    if (t.humanCheck !== ins.humanCheck) { t.humanCheck = ins.humanCheck; pushState(); }
+    return ins;
+  }
+
+  async function snapshotText(t: Tab, full: boolean): Promise<string> {
+    const wc = t.view.webContents;
+    await waitLoad(wc, 8000);
+    if (t.dialog) return `${dialogOpenMessage(t.dialog)}\n\nPage: ${wc.getTitle()}\nURL: ${wc.getURL()}`;
+    const s = await page<SnapshotRaw>(t, 'snapshot', { full });
+    const h = await humanCheck(t);
+    return formatSnapshot(s, {
+      ...(h.detected ? { humanCheck: `Human check on this page (${h.kind}). You must not attempt it: call browser_handoff so the user completes it.` } : {}),
+    });
+  }
+
+  let pendingFind: { requestId: number; resolve: (r: FindResult) => void } | null = null;
+  let lastFindText = '';
+
   const service: BrowserService = {
     tabs: list,
-    async open(url, opts) { checkAccess(); return openUrl(url, opts); },
+    state,
+    agentStopped: () => agentStopped,
+    async open(url, opts) {
+      checkAccess();
+      const t0 = activeId ? tabs.get(activeId) : undefined;
+      if (t0?.dialog && !opts?.newTab) throw new Error(dialogOpenMessage(t0.dialog));
+      agentOpen = { at: Date.now() };
+      if (t0) agentEvent(t0, 'open', 'start', url);
+      let r: TabInfo;
+      try {
+        r = await openUrl(url, opts);
+      } catch (err) {
+        // A URL that is a file, not a page: Chromium cancels the navigation and downloads it instead.
+        await sleep(400);
+        if (agentOpen.download) {
+          const d = downloads.list().find(x => x.filename === agentOpen.download);
+          return { ...(t0 ? info(t0) : {}), download: { file: agentOpen.download, path: d?.path, state: d?.state, note: 'This URL is a file: it was downloaded instead of opened. See browser_downloads.' } } as unknown as TabInfo;
+        }
+        throw err;
+      }
+      const t = tabs.get(r.id)!;
+      agentEvent(t, 'open', 'done', r.url);
+      const h = await humanCheck(t);
+      const err = t.certError ? `\nCertificate error (${t.certError.error}) — the page is blocked and will not be accepted. Tell the user.` : t.error ? `\nThe page failed to load: ${t.error.description} (${t.error.code}).` : '';
+      return {
+        ...r,
+        ...(h.detected ? { humanCheck: `Human check on this page (${h.kind}) — call browser_handoff; do not attempt it.` } : {}),
+        ...(err ? { error: err.trim() } : {}),
+      } as TabInfo;
+    },
     openForUser(url) { return openUrl(url, { newTab: true }); },
     async snapshot(opts) {
       checkAccess();
-      const wc = active().view.webContents;
-      await waitLoad(wc, 8000);
-      if (opts?.full) await evaluate(wc, 'window.__aicoFull = true');
-      const s = await evaluate<{ title: string; url: string; scroll: { y: number; height: number; viewport: number }; headings: string[]; elements: string[]; dialogs: string[]; text: string; truncated: boolean }>(wc, SNAPSHOT_JS);
-      await evaluate(wc, 'window.__aicoFull = false').catch(() => {});
-      return [
-        `Page: ${s.title || '(untitled)'}`,
-        `URL: ${s.url}`,
-        `Scroll: ${s.scroll.y}/${Math.max(0, s.scroll.height - s.scroll.viewport)}px`,
-        s.dialogs.length ? `Open dialogs: ${s.dialogs.join(' | ')}` : '',
-        s.headings.length ? `Headings:\n${s.headings.join('\n')}` : '',
-        `Interactive elements (use the [ref] with browser_click / browser_type):\n${s.elements.join('\n') || '(none visible)'}`,
-        `Visible text${s.truncated ? ' (truncated — use browser_text or scroll)' : ''}:\n${s.text}`,
-      ].filter(Boolean).join('\n\n');
+      const t = active();
+      agentEvent(t, 'snapshot', 'start');
+      try { return await snapshotText(t, Boolean(opts?.full)); } finally { agentEvent(t, 'snapshot', 'done'); }
     },
-    async click(target, opts) {
-      checkAccess();
-      const wc = active().view.webContents;
-      const at = await locate(wc, target);
-      await mouseClick(wc, at.x, at.y, opts?.button ?? 'left', opts?.double ? 2 : 1);
-      await settle(wc);
-      return `Clicked ${at.tag} "${at.label}". Now at ${wc.getURL()} — take a snapshot to see the result.`;
+    click(target, opts) {
+      return act('click', { gate: true, diff: true }, async (t) => {
+        const wc = t.view.webContents;
+        const pre = await locate(t, target);
+        const at = await locate(t, target, `AICO: clicking "${pre.label || pre.tag}"`);
+        if (at.disabled) return `The ${at.tag} "${at.label}" is disabled — it cannot be clicked yet (a required field may be missing).`;
+        if (at.isFile) return 'That is a file-upload control. Use browser_upload with this ref and the file paths — the user will be asked to confirm.';
+        await mouseClick(t, at.x, at.y, opts?.button ?? 'left', opts?.double ? 2 : 1);
+        await settle(wc);
+        return `Clicked ${at.tag} "${at.label}".${at.coveredBy ? ` Note: it looked covered by ${at.coveredBy} — the click may have hit that instead.` : ''}`;
+      });
     },
-    async type(target, text, opts) {
-      checkAccess();
-      const wc = active().view.webContents;
-      const at = await locate(wc, target);
-      await mouseClick(wc, at.x, at.y);
-      if (opts?.clear !== false) {
-        await pressKey(wc, process.platform === 'darwin' ? 'Meta+a' : 'Ctrl+a');
-        await pressKey(wc, 'Backspace');
-      }
-      await cdp(wc, 'Input.insertText', { text });
-      if (opts?.submit) { await pressKey(wc, 'Enter'); await settle(wc); }
-      return `Typed ${text.length} character(s) into ${at.tag} "${at.label}"${opts?.submit ? ' and pressed Enter' : ''}.`;
+    type(target, text, opts) {
+      return act('type', { gate: true, diff: true }, async (t) => {
+        const wc = t.view.webContents;
+        const at = await locate(t, target);
+        const s = classifySensitiveField(at.field);
+        if (s) throw new Error(sensitiveRefusal(s.kind, at.label));
+        await page(t, 'highlight', { target: { ref: at.ref }, label: `AICO: typing into "${at.label || at.tag}"` }).catch(() => {});
+        await mouseClick(t, at.x, at.y);
+        if (opts?.clear !== false) {
+          await pressKey(t, process.platform === 'darwin' ? 'Meta+a' : 'Ctrl+a');
+          await pressKey(t, 'Backspace');
+        }
+        await cdp(wc, 'Input.insertText', { text });
+        if (opts?.submit) { await pressKey(t, 'Enter'); await settle(wc); }
+        return `Typed ${text.length} character(s) into ${at.tag} "${at.label}"${opts?.submit ? ' and pressed Enter' : ''}.`;
+      });
     },
-    async press(key) {
-      checkAccess();
-      const wc = active().view.webContents;
-      await pressKey(wc, key);
-      await settle(wc);
-      return `Pressed ${key}.`;
+    press(key) {
+      return act('press', { gate: true, diff: true, label: key }, async (t) => {
+        if (keyWritesText(key)) {
+          const f = await page<{ none?: boolean; field?: FieldDescriptor; label?: string }>(t, 'focused', {});
+          const s = f.field ? classifySensitiveField(f.field) : null;
+          if (s) throw new Error(sensitiveRefusal(s.kind, f.label ?? ''));
+        }
+        await pressKey(t, key);
+        await settle(t.view.webContents);
+        return `Pressed ${key}.`;
+      });
     },
-    async select(target, value) {
-      checkAccess();
-      const wc = active().view.webContents;
-      await locate(wc, target);
-      const r = await evaluate<string>(wc, `(() => {
-        const t = ${JSON.stringify(target)};
-        const el = t.ref ? document.querySelector('[data-aico-ref="' + t.ref + '"]') : document.querySelector(t.selector || 'select');
-        if (!el || el.tagName !== 'SELECT') return 'That element is not a <select>; click it and choose an option instead.';
-        const want = ${JSON.stringify(value)}.toLowerCase();
-        const opt = [...el.options].find(o => o.value.toLowerCase() === want || o.text.trim().toLowerCase() === want) || [...el.options].find(o => o.text.toLowerCase().includes(want));
-        if (!opt) return 'No option matches. Options: ' + [...el.options].map(o => o.text.trim()).join(', ');
-        el.value = opt.value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return 'Selected "' + opt.text.trim() + '".';
-      })()`);
-      await settle(wc);
-      return r;
+    select(target, value) {
+      return act('select', { gate: true, diff: true }, async (t) => {
+        const at = await locate(t, target, `AICO: choosing "${value}"`);
+        if (!at.isSelect) return 'That element is not a <select>; click it and choose an option instead.';
+        const r = await page<{ ok?: string; error?: string }>(t, 'setValue', { target: { ref: at.ref }, value });
+        if (r.error) throw new Error(r.error);
+        await settle(t.view.webContents);
+        return `${r.ok} in "${at.label}".`;
+      });
     },
-    async scroll(opts) {
-      checkAccess();
-      const wc = active().view.webContents;
-      if (opts.target) { const at = await locate(wc, opts.target); return `Scrolled ${at.tag} "${at.label}" into view.`; }
-      const amount = opts.amount ?? 600;
-      const dx = opts.direction === 'left' ? -amount : opts.direction === 'right' ? amount : 0;
-      const dy = opts.direction === 'up' ? -amount : opts.direction === 'down' || !opts.direction ? amount : 0;
-      const b = active().view.getBounds();
-      await cdp(wc, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.max(10, b.width / 2), y: Math.max(10, b.height / 2), deltaX: dx, deltaY: dy });
-      await sleep(250);
-      const y = await evaluate<number>(wc, 'Math.round(scrollY)');
-      return `Scrolled ${opts.direction ?? 'down'} ${amount}px (now at ${y}px).`;
+    scroll(opts) {
+      return act('scroll', {}, async (t) => {
+        const wc = t.view.webContents;
+        if (opts.target) { const at = await locate(t, opts.target); return `Scrolled ${at.tag} "${at.label}" into view.`; }
+        const amount = opts.amount ?? 600;
+        const dx = opts.direction === 'left' ? -amount : opts.direction === 'right' ? amount : 0;
+        const dy = opts.direction === 'up' ? -amount : opts.direction === 'down' || !opts.direction ? amount : 0;
+        const b = t.view.getBounds();
+        await cdp(wc, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.max(10, b.width / 2), y: Math.max(10, b.height / 2), deltaX: dx, deltaY: dy });
+        await sleep(250);
+        const y = await evaluate<number>(wc, 'Math.round(scrollY)');
+        return `Scrolled ${opts.direction ?? 'down'} ${amount}px (now at ${y}px).`;
+      });
     },
-    async hover(target) {
-      checkAccess();
-      const wc = active().view.webContents;
-      const at = await locate(wc, target);
-      await cdp(wc, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
-      await sleep(300);
-      return `Hovering over ${at.tag} "${at.label}".`;
+    scrollTo(target) {
+      return act('scroll', {}, async (t) => {
+        let tgt = target;
+        if (!target.ref && !target.selector && target.text) {
+          const f = await page<{ count: number; matches: Array<{ ref: string }> }>(t, 'find', { text: target.text, limit: 1 });
+          if (!f.matches.length) throw new Error(`"${target.text}" is not on the page.`);
+          tgt = { ref: f.matches[0]!.ref };
+        }
+        const at = await locate(t, tgt, 'AICO: here');
+        return `Scrolled ${at.tag} "${at.label}" into view.`;
+      });
     },
-    async waitFor(opts) {
-      checkAccess();
-      const wc = active().view.webContents;
-      if (opts.ms && !opts.text && !opts.selector) { await sleep(Math.min(opts.ms, 20000)); return `Waited ${opts.ms}ms.`; }
-      const deadline = Date.now() + Math.min(opts.timeoutMs ?? 10000, 25000);
-      while (Date.now() < deadline) {
-        const ok = await evaluate<boolean>(wc, `(() => {
-          ${opts.selector ? `if (document.querySelector(${JSON.stringify(opts.selector)})) return true;` : ''}
-          ${opts.text ? `if (document.body && document.body.innerText.toLowerCase().includes(${JSON.stringify(opts.text.toLowerCase())})) return true;` : ''}
-          return false;
-        })()`).catch(() => false);
-        if (ok) return `Found ${opts.text ? `"${opts.text}"` : opts.selector}.`;
+    hover(target) {
+      return act('hover', { gate: true }, async (t) => {
+        const at = await locate(t, target, `AICO: pointing at "${target.text ?? ''}"`);
+        await cdp(t.view.webContents, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
         await sleep(300);
-      }
-      throw new Error(`Timed out waiting for ${opts.text ? `"${opts.text}"` : opts.selector}.`);
+        return `Hovering over ${at.tag} "${at.label}".`;
+      });
+    },
+    waitFor(opts) {
+      return act('wait', {}, async (t) => {
+        const wc = t.view.webContents;
+        const cond = opts.text || opts.gone || opts.selector || opts.url || opts.urlChange || opts.networkIdle;
+        if (opts.ms && !cond) { await sleep(Math.min(opts.ms, 20000)); return `Waited ${opts.ms}ms.`; }
+        const deadline = Date.now() + Math.min(opts.timeoutMs ?? 10000, 25000);
+        const startUrl = wc.getURL();
+        const what = opts.text ? `"${opts.text}"` : opts.gone ? `"${opts.gone}" to disappear` : opts.selector ? opts.selector : opts.url ? `URL containing "${opts.url}"` : opts.urlChange ? 'the URL to change' : 'the network to go idle';
+        while (Date.now() < deadline) {
+          if (t.dialog) return dialogOpenMessage(t.dialog);
+          const url = wc.getURL();
+          let ok = true;
+          if (opts.url && !url.includes(opts.url)) ok = false;
+          if (opts.urlChange && url === startUrl) ok = false;
+          if (opts.networkIdle && !(Date.now() - t.lastNetAt >= 500 && t.inflight.size <= (Date.now() - t.lastNetAt > 2000 ? 2 : 0))) ok = false;
+          if (ok && (opts.text || opts.gone || opts.selector)) {
+            ok = await evaluate<boolean>(wc, `(() => {
+              const body = document.body ? document.body.innerText.toLowerCase() : '';
+              ${opts.selector ? `if (!document.querySelector(${JSON.stringify(opts.selector)})) return false;` : ''}
+              ${opts.text ? `if (!body.includes(${JSON.stringify(opts.text.toLowerCase())})) return false;` : ''}
+              ${opts.gone ? `if (body.includes(${JSON.stringify(opts.gone.toLowerCase())})) return false;` : ''}
+              return true;
+            })()`, 5000).catch(() => false);
+          }
+          if (ok) return `Found ${what}. Now at ${wc.getURL()}.`;
+          await sleep(300);
+        }
+        throw new Error(`Timed out waiting for ${what}. Now at ${wc.getURL()}.`);
+      });
     },
     async text(target) {
       checkAccess();
-      const wc = active().view.webContents;
-      const t = await evaluate<string>(wc, target ? `(() => {
+      const t = active();
+      const s = await evaluate<string>(t.view.webContents, target ? `(() => {
         const t = ${JSON.stringify(target)};
         const el = t.ref ? document.querySelector('[data-aico-ref="' + t.ref + '"]') : t.selector ? document.querySelector(t.selector) : null;
         return el ? el.innerText : 'No such element.';
       })()` : 'document.body ? document.body.innerText : ""');
-      return (t ?? '').slice(0, 40000);
+      return (s ?? '').slice(0, 40000);
     },
     async evaluate(expression) {
-      checkAccess();
-      return evaluate(active().view.webContents, expression);
+      let out: unknown;
+      await act('evaluate', { gate: true }, async (t) => { out = await evaluate(t.view.webContents, expression); return ''; });
+      return out;
     },
     async screenshot(opts) {
-      checkAccess();
+      if (opts?.forModel) checkAccess();
       const t = active();
       const wc = t.view.webContents;
+      if (t.dialog) throw new Error(dialogOpenMessage(t.dialog));
       let dataUrl: string; let width: number; let height: number;
+      let model: { data: string; mimeType: string } | undefined;
       if (opts?.fullPage) {
         const m = await cdp<{ contentSize: { width: number; height: number } }>(wc, 'Page.getLayoutMetrics');
         const w = Math.min(4000, Math.ceil(m.contentSize.width)); const h = Math.min(12000, Math.ceil(m.contentSize.height));
-        const r = await cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: w, height: h, scale: 1 } });
+        const r = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: w, height: h, scale: 1 } }), 'The full-page screenshot');
         dataUrl = `data:image/png;base64,${r.data}`; width = w; height = h;
+        if (opts.forModel) {
+          const mh = Math.min(h, 6000);
+          const scale = Math.min(1, 1280 / Math.max(1, w));
+          const j = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'jpeg', quality: 70, captureBeyondViewport: true, clip: { x: 0, y: 0, width: w, height: mh, scale } }), 'The full-page screenshot');
+          model = { data: j.data, mimeType: 'image/jpeg' };
+        }
       } else {
-        const r = await cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'png' });
+        // The interface asks for a still exactly when the view is being hidden
+        // (under a menu, behind the floating copilot). Capturing a hidden view
+        // hangs, so it gets the last capture instead.
+        if (!opts?.forModel && !visible) {
+          if (t.lastStill) return { path: '', ...t.lastStill };
+          throw new Error('The page is not on screen, so there is nothing to capture.');
+        }
+        const r = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'png' }), 'The screenshot');
         dataUrl = `data:image/png;base64,${r.data}`;
         const b = t.view.getBounds(); width = b.width; height = b.height;
+        if (opts?.forModel) {
+          const j = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'jpeg', quality: 70 }), 'The screenshot');
+          model = { data: j.data, mimeType: 'image/jpeg' };
+        }
       }
-      fs.mkdirSync(shotsDir, { recursive: true });
-      const file = path.join(shotsDir, `shot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
-      fs.writeFileSync(file, Buffer.from(dataUrl.split(',')[1]!, 'base64'));
-      return { path: file, dataUrl, width, height };
+      // The image's own size, from its PNG header: the view's bounds differ from
+      // what the page captured whenever the view is hidden or being resized, and
+      // the interface drew the still stretched.
+      const png = Buffer.from(dataUrl.split(',')[1]!, 'base64');
+      if (png.length > 24 && png.toString('ascii', 12, 16) === 'IHDR') { width = png.readUInt32BE(16); height = png.readUInt32BE(20); }
+      if (!opts?.fullPage) t.lastStill = { dataUrl, width, height };
+      // Only the agent's screenshots are kept as files; the interface's stills
+      // under menus and the floating copilot are taken often and need none.
+      let file = '';
+      if (opts?.forModel) {
+        fs.mkdirSync(shotsDir, { recursive: true });
+        file = path.join(shotsDir, `shot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
+        fs.writeFileSync(file, png);
+        agentEvent(t, 'screenshot', 'done');
+      }
+      return { path: file, dataUrl, width, height, ...(model ? { model } : {}) };
     },
     consoleLog(clear) {
       const t = active();
@@ -524,33 +1035,301 @@ export function registerBrowser(ctx: DesktopContext): void {
       if (clear) t.network = [];
       return out || '(no requests recorded)';
     },
-    async back() { const wc = active().view.webContents; if (wc.navigationHistory.canGoBack()) { wc.navigationHistory.goBack(); await settle(wc); } return wc.getURL(); },
-    async forward() { const wc = active().view.webContents; if (wc.navigationHistory.canGoForward()) { wc.navigationHistory.goForward(); await settle(wc); } return wc.getURL(); },
-    async reload() { const wc = active().view.webContents; wc.reload(); await waitLoad(wc); return wc.getURL(); },
+    async back() {
+      const t = active(); const wc = t.view.webContents;
+      t.lastNav = () => { if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack(); };
+      if (wc.navigationHistory.canGoBack()) { wc.navigationHistory.goBack(); await settle(wc); }
+      return wc.getURL();
+    },
+    async forward() {
+      const t = active(); const wc = t.view.webContents;
+      t.lastNav = () => { if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward(); };
+      if (wc.navigationHistory.canGoForward()) { wc.navigationHistory.goForward(); await settle(wc); }
+      return wc.getURL();
+    },
+    async reload() {
+      const t = active(); const wc = t.view.webContents;
+      t.lastNav = () => wc.reload();
+      wc.reload(); await waitLoad(wc); return wc.getURL();
+    },
     closeTab(id) {
       const t = tabs.get(id ?? activeId ?? '');
       if (!t) return;
       const win = ctx.window();
       if (t.attached && win) win.contentView.removeChildView(t.view);
-      t.view.webContents.close();
+      for (const [k, d] of dialogs) if (d.tab === t) { d.reply?.(false); dialogs.delete(k); }
+      if (!t.view.webContents.isDestroyed()) t.view.webContents.close();
       tabs.delete(t.id);
       if (activeId === t.id) activeId = [...tabs.keys()].pop() ?? null;
-      layout(); announce();
+      layout(); pushState();
     },
-    selectTab(id) { if (tabs.has(id)) { activeId = id; layout(); announce(); } },
+    selectTab(id) { if (tabs.has(id)) { activeId = id; layout(); pushState(); } },
+    async newTab(url) {
+      return openUrl(url || ctx.prefs.get().browserHome || 'about:blank', { newTab: true });
+    },
     handoff(message, timeoutMs = 10 * 60_000) {
       const id = `h${Date.now()}`;
       ctx.emit('browser:handoff', { id, message });
+      const t = activeId ? tabs.get(activeId) : undefined;
+      if (t) ctx.emit('browser:agent', { tabId: t.id, action: 'handoff', status: 'blocked', label: message.slice(0, 120) } satisfies AgentEvent);
       ctx.reveal();
       return new Promise<string>((resolve) => {
         const timer = setTimeout(() => { handoffs.delete(id); resolve('The user did not respond in time.'); }, timeoutMs);
         handoffs.set(id, (answer) => { clearTimeout(timer); resolve(answer); });
       });
     },
+
+    async read(opts) {
+      checkAccess();
+      const t = active();
+      agentEvent(t, 'read', 'start', opts.mode === 'full' ? 'Reading the whole page' : 'Reading the page');
+      try { return await readPage(t, opts); } finally { agentEvent(t, 'read', 'done'); }
+    },
+    async forms() {
+      checkAccess();
+      const t = active();
+      agentEvent(t, 'forms', 'start', 'Reading the forms');
+      try { return await formsOf(t); } finally { agentEvent(t, 'forms', 'done'); }
+    },
+    fill(fields) {
+      return act('fill', { gate: true, diff: true, label: `Filling ${fields.length} field(s)` }, async (t) => {
+        const wc = t.view.webContents;
+        const model = await formsOf(t);
+        const lines: string[] = [];
+        let filled = 0;
+        for (const spec of fields) {
+          const want = spec.ref ?? spec.label ?? spec.name ?? '?';
+          const f = matchField(model, spec);
+          if (!f) { lines.push(`- "${want}": not found (see browser_forms for the fields)`); continue; }
+          const name = f.label || f.name || f.ref;
+          if (f.sensitive) { lines.push(`- "${name}": REFUSED — ${f.sensitive} field; the user must enter it (browser_handoff)`); continue; }
+          if (f.disabled) { lines.push(`- "${name}": disabled, skipped`); continue; }
+          const value = spec.value;
+          try {
+            if (f.type === 'radio-group') {
+              const want2 = String(value).toLowerCase();
+              const opt = (f.options ?? []).find(o => o.value.toLowerCase() === want2 || o.label.toLowerCase() === want2)
+                ?? (f.options ?? []).find(o => o.label.toLowerCase().includes(want2));
+              const ref = (opt as { ref?: string } | undefined)?.ref;
+              if (!opt || !ref) { lines.push(`- "${name}": no option "${value}" (options: ${(f.options ?? []).map(o => o.label || o.value).join(', ')})`); continue; }
+              const at = await locate(t, { ref }, `AICO: choosing "${opt.label}"`);
+              if (!at.checked) await mouseClick(t, at.x, at.y);
+              lines.push(`- "${name}": chose "${opt.label || opt.value}"`);
+            } else if (f.type === 'checkbox') {
+              const on = typeof value === 'boolean' ? value : /^(true|yes|on|1|checked)$/i.test(String(value));
+              const at = await locate(t, { ref: f.ref }, `AICO: ${on ? 'ticking' : 'unticking'} "${name}"`);
+              if (Boolean(at.checked) !== on) await mouseClick(t, at.x, at.y);
+              lines.push(`- "${name}": ${on ? 'checked' : 'unchecked'}`);
+            } else if (f.type === 'select' || f.type === 'select-multiple' || ['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range'].includes(f.type)) {
+              await page(t, 'highlight', { target: { ref: f.ref }, label: `AICO: setting "${name}"` }).catch(() => {});
+              const r = await page<{ ok?: string; error?: string }>(t, 'setValue', { target: { ref: f.ref }, value: String(value) });
+              if (r.error) { lines.push(`- "${name}": ${r.error}`); continue; }
+              lines.push(`- "${name}": ${r.ok}`);
+            } else if (f.type === 'file') {
+              lines.push(`- "${name}": file field — use browser_upload`); continue;
+            } else {
+              const at = await locate(t, { ref: f.ref }, `AICO: typing into "${name}"`);
+              // Re-check on the live element: the model may be stale.
+              const s = classifySensitiveField(at.field);
+              if (s) { lines.push(`- "${name}": REFUSED — ${s.kind} field; the user must enter it (browser_handoff)`); continue; }
+              await mouseClick(t, at.x, at.y);
+              await pressKey(t, process.platform === 'darwin' ? 'Meta+a' : 'Ctrl+a');
+              await pressKey(t, 'Backspace');
+              await cdp(wc, 'Input.insertText', { text: String(value) });
+              lines.push(`- "${name}": typed "${String(value).slice(0, 60)}"`);
+            }
+            filled++;
+          } catch (err) {
+            lines.push(`- "${name}": failed — ${(err as Error).message.slice(0, 200)}`);
+          }
+          await sleep(80);
+        }
+        // Blur the last field so on-blur validation runs.
+        await pressKey(t, 'Tab').catch(() => {});
+        await sleep(200);
+        return `Filled ${filled} of ${fields.length} field(s). Nothing was submitted.\n${lines.join('\n')}`;
+      });
+    },
+    async extract(kind, opts) {
+      checkAccess();
+      const t = active();
+      agentEvent(t, 'extract', 'start', `Extracting ${kind}`);
+      try {
+        await waitLoad(t.view.webContents, 8000);
+        const max = Math.max(1, Math.min(opts?.maxItems ?? 200, 1000));
+        const raw = await page<Record<string, unknown>>(t, 'extract', { kind }, 20_000);
+        if (raw.error) throw new Error(String(raw.error));
+        const url = t.view.webContents.getURL();
+        if (kind === 'links') {
+          const host = (() => { try { return new URL(url).hostname; } catch { return ''; } })();
+          const links = (raw.links as Array<{ text: string; href: string; rel?: string; ref: string }>).slice(0, max)
+            .map(l => { let internal = false; try { internal = new URL(l.href).hostname === host; } catch { /* keep */ } return { ...l, internal }; });
+          return JSON.stringify({ url, count: (raw.links as unknown[]).length, links }, null, 1);
+        }
+        if (kind === 'tables') {
+          const tables = raw.tables as Array<{ caption: string; rows: string[][] }>;
+          if (!tables.length) return 'No data tables on this page.';
+          return tables.slice(0, 20).map((tb, i) => `Table ${i + 1}${tb.caption ? ` — ${tb.caption}` : ''} (${tb.rows.length} rows)\n${tableToMarkdown({ rows: tb.rows })}`).join('\n\n');
+        }
+        if (kind === 'prices') {
+          const prices = findPrices(raw.blocks as Array<{ text: string; context?: string }>, raw.structured as Array<{ amount: string; currency: string; context?: string; source: string }>);
+          return JSON.stringify({ url, count: prices.length, prices: prices.slice(0, max) }, null, 1);
+        }
+        if (kind === 'contacts') {
+          return JSON.stringify({ url, ...findContacts(String(raw.text ?? ''), raw.links as Array<{ href: string; text: string }>) }, null, 1);
+        }
+        return JSON.stringify(raw, null, 1).slice(0, 60_000);
+      } finally { agentEvent(t, 'extract', 'done'); }
+    },
+    async insights() {
+      checkAccess();
+      const t = active();
+      agentEvent(t, 'insights', 'start', 'Looking at the page');
+      try { return await insightsOf(t); } finally { agentEvent(t, 'insights', 'done'); }
+    },
+    async find(text, limit) {
+      checkAccess();
+      const t = active();
+      agentEvent(t, 'find', 'start', `Finding "${text}"`);
+      try {
+        const r = await page<{ count: number; matches: Array<{ ref: string; tag: string; context: string }> }>(t, 'find', { text, limit: limit ?? 20 });
+        if (!r.count) return `"${text}" is not on the page (${t.view.webContents.getURL()}).`;
+        return [`${r.count} match(es) for "${text}"${r.count > r.matches.length ? ` (first ${r.matches.length})` : ''}:`, ...r.matches.map(m => `[${m.ref}] ${m.tag}: …${m.context}…`)].join('\n');
+      } finally { agentEvent(t, 'find', 'done'); }
+    },
+    dialogs() {
+      return [...dialogs.values()].map(d => d.req);
+    },
+    async answerDialog(opts) {
+      checkAccess();
+      const t = active();
+      const entry = opts.id ? dialogs.get(opts.id) : [...dialogs.values()].find(d => d.tab === t) ?? [...dialogs.values()][0];
+      if (!entry) return 'No JavaScript dialog is open.';
+      agentEvent(entry.tab, 'dialog', 'start', `${opts.accept ? 'Accepting' : 'Dismissing'} "${entry.req.message.slice(0, 60)}"`);
+      await answerDialogImpl(entry.req.id, opts.accept, opts.text);
+      await settle(entry.tab.view.webContents);
+      agentEvent(entry.tab, 'dialog', 'done');
+      return `${opts.accept ? 'Accepted' : 'Dismissed'} the ${entry.req.type} dialog. Now at ${entry.tab.view.webContents.getURL()} — take a snapshot to continue.`;
+    },
+    downloads: () => downloads.list(),
+    upload(target, files) {
+      return act('upload', { gate: true, diff: false, label: `Uploading ${files.length} file(s)` }, async (t) => {
+        if (!files.length) throw new Error('Give at least one file path.');
+        const abs = files.map(f => path.resolve(f));
+        for (const f of abs) {
+          let st: fs.Stats;
+          try { st = fs.statSync(f); } catch { throw new Error(`No such file: ${f}`); }
+          if (!st.isFile()) throw new Error(`Not a file: ${f}`);
+        }
+        const at = await locate(t, target, 'AICO: upload here');
+        let ref = at.ref;
+        if (!at.isFile) {
+          // A styled button often stands in for a hidden <input type=file>: find the real one.
+          const found = await evaluate<string | null>(t.view.webContents, `(() => {
+            const el = document.querySelector('[data-aico-ref="${at.ref}"]');
+            if (!el) return null;
+            const pick = (x) => { if (!x) return null; if (!x.getAttribute('data-aico-ref')) x.setAttribute('data-aico-ref', 'f' + Math.random().toString(36).slice(2, 8)); return x.getAttribute('data-aico-ref'); };
+            const inner = el.querySelector && el.querySelector('input[type=file]'); if (inner) return pick(inner);
+            if (el.tagName === 'LABEL' && el.control && el.control.type === 'file') return pick(el.control);
+            const lab = el.closest && el.closest('label'); if (lab && lab.control && lab.control.type === 'file') return pick(lab.control);
+            const form = el.closest && el.closest('form'); const inForm = form ? form.querySelectorAll('input[type=file]') : [];
+            if (inForm.length === 1) return pick(inForm[0]);
+            const all = document.querySelectorAll('input[type=file]'); if (all.length === 1) return pick(all[0]);
+            return null;
+          })()`);
+          if (!found) throw new Error('That is not a file-upload field, and no single file input belongs to it. Take a snapshot: file inputs show with role "file".');
+          ref = found;
+        }
+        const origin = originOf(t.view.webContents.getURL()) || t.view.webContents.getURL();
+        const names = abs.map(f => path.basename(f));
+        const c = confirm({
+          kind: 'upload', origin, files: abs,
+          title: `Let the agent upload ${names.length === 1 ? names[0] : `${names.length} files`} to ${origin}?`,
+          detail: `The agent wants to attach ${names.join(', ')} to a form on ${origin}. The file${names.length > 1 ? 's' : ''} will be sent to that site when the form is submitted.`,
+        });
+        const u = { state: 'pending' as 'pending' | 'allowed' | 'denied' | 'done' | 'failed', result: undefined as string | undefined, tabId: t.id, ref, files: abs };
+        uploads.set(c.id, u);
+        void c.done.then(async (ok) => {
+          if (!ok) { u.state = 'denied'; u.result = 'The user declined the upload. Do not retry; ask the user how to proceed.'; return; }
+          u.state = 'allowed';
+          try {
+            const tab = tabs.get(u.tabId);
+            if (!tab) throw new Error('The tab was closed.');
+            const obj = await cdp<{ result: { objectId?: string } }>(tab.view.webContents, 'Runtime.evaluate', { expression: pageJs('element', { target: { ref: u.ref } }), returnByValue: false });
+            if (!obj.result.objectId) throw new Error('The file field is gone (the page changed).');
+            await cdp(tab.view.webContents, 'DOM.setFileInputFiles', { files: u.files, objectId: obj.result.objectId });
+            u.state = 'done';
+            u.result = `The user approved. Attached ${names.join(', ')} to the file field. Nothing was submitted — submit the form when ready.`;
+          } catch (err) {
+            u.state = 'failed';
+            u.result = `The user approved, but attaching failed: ${(err as Error).message}`;
+          }
+        });
+        return waitUpload(c.id, 20);
+      });
+    },
+    uploadWait(id, seconds) {
+      checkAccess();
+      return waitUpload(id, Math.min(25, seconds ?? 20));
+    },
   };
   ctx.services.browser = service;
 
-  // ── Interface ──
+  async function waitUpload(id: string, seconds: number): Promise<string> {
+    const deadline = Date.now() + seconds * 1000;
+    while (Date.now() < deadline) {
+      const u = uploads.get(id);
+      if (!u) throw new Error('Unknown upload id.');
+      if (u.state === 'done' || u.state === 'denied' || u.state === 'failed') { uploads.delete(id); return u.result ?? u.state; }
+      await sleep(400);
+    }
+    return `Waiting for the user to approve the upload in AICO. Call browser_upload_wait with uploadId "${id}" to keep waiting.`;
+  }
+
+  async function answerDialogImpl(id: string, accept: boolean, text?: string): Promise<void> {
+    const entry = dialogs.get(id);
+    if (!entry) return;
+    dialogs.delete(id);
+    const t = entry.tab;
+    if (entry.req.type === 'beforeunload') {
+      if (accept && t.lastNav) { t.allowUnload = true; t.lastNav(); setTimeout(() => { t.allowUnload = false; }, 3000); }
+      pushState();
+      return;
+    }
+    if (t.dialog?.id === id) t.dialog = undefined;
+    if (entry.reply) { entry.reply(accept, text); pushState(); return; }
+    await cdp(t.view.webContents, 'Page.handleJavaScriptDialog', { accept, ...(text !== undefined ? { promptText: text } : {}) }).catch(() => { /* already closed */ });
+    pushState();
+  }
+
+  // alert / confirm / prompt from a page, through the dialog preload: the page waits (sendSync) until answered.
+  ipcMain.removeAllListeners(DIALOG_CHANNEL);
+  ipcMain.on(DIALOG_CHANNEL, (e, req: { type?: string; message?: string; defaultPrompt?: string }) => {
+    const t = byWc.get(e.sender.id);
+    const type = (['alert', 'confirm', 'prompt'] as const).find(x => x === req?.type);
+    if (!t || !type) { e.returnValue = { accept: false }; return; }
+    // A page that loops on dialogs is answered "cancel" instead of trapping the user.
+    const now = Date.now();
+    const burst = (dialogBursts.get(t.id) ?? []).filter(x => now - x < 10_000);
+    burst.push(now);
+    dialogBursts.set(t.id, burst);
+    if (burst.length > 15 || t.dialog) { e.returnValue = { accept: false }; return; }
+    const d: DialogRequest = {
+      id: askId('j'), tabId: t.id, type, message: String(req.message ?? '').slice(0, 5000),
+      ...(type === 'prompt' ? { defaultPrompt: String(req.defaultPrompt ?? '') } : {}), byAgent: agentDriving(t),
+    };
+    let done = false;
+    raiseDialog(t, d, {
+      reply: (accept, text) => {
+        if (done) return;
+        done = true;
+        e.returnValue = { accept, ...(text !== undefined ? { text } : type === 'prompt' && accept ? { text: d.defaultPrompt ?? '' } : {}) };
+      },
+    });
+    pushState();
+  });
+
+  // ── Interface: the earlier channels ──
   ctx.handle('browser:tabs', () => list());
   ctx.handle('browser:open', (url: string, newTab?: boolean) => openUrl(url, { newTab }));
   ctx.handle('browser:newTab', (url?: string) => { const t = create(url || ctx.prefs.get().browserHome); return info(t); });
@@ -558,12 +1337,21 @@ export function registerBrowser(ctx: DesktopContext): void {
   ctx.handle('browser:select', (id: string) => service.selectTab(id));
   ctx.handle('browser:back', () => service.back());
   ctx.handle('browser:forward', () => service.forward());
-  ctx.handle('browser:reload', () => { active().view.webContents.reload(); });
+  ctx.handle('browser:reload', () => { const t = active(); t.lastNav = () => t.view.webContents.reload(); t.view.webContents.reload(); });
   ctx.handle('browser:stop', () => { active().view.webContents.stop(); });
   ctx.handle('browser:zoom', (delta: number) => {
     const wc = active().view.webContents;
-    wc.setZoomFactor(delta === 0 ? 1 : Math.max(0.3, Math.min(3, wc.getZoomFactor() + delta)));
-    announce();
+    const next = delta === 0 ? 1 : Math.max(0.3, Math.min(3, Math.round((wc.getZoomFactor() + delta) * 100) / 100));
+    wc.setZoomFactor(next);
+    const origin = originOf(wc.getURL());
+    if (origin) {
+      const s = settings.get();
+      const zoom = { ...s.zoom };
+      if (next === 1) delete zoom[origin]; else zoom[origin] = next;
+      settings.set({ ...s, zoom });
+    }
+    pushState();
+    return next;
   });
   ctx.handle('browser:devtools', () => active().view.webContents.toggleDevTools());
   ctx.handle('browser:external', () => { const u = active().view.webContents.getURL(); if (/^https?:/.test(u)) void shell.openExternal(u); });
@@ -586,4 +1374,155 @@ export function registerBrowser(ctx: DesktopContext): void {
   });
   ctx.handle('browser:console', () => service.consoleLog());
   ctx.handle('browser:network', () => service.networkLog());
+
+  // ── Interface: the full browser (shared/browser-types.ts) ──
+  ctx.handle('browser:state', () => state());
+
+  ctx.handle('browser:history:list', (opts?: HistoryListOptions) => searchHistory(history.get(), opts?.query, opts?.limit ?? 200));
+  ctx.handle('browser:history:remove', (url: string) => { history.set(removeHistory(history.get(), String(url))); return true; });
+  ctx.handle('browser:history:clear', (sinceMs?: number) => { history.set(clearHistory(history.get(), sinceMs)); history.flush(); return true; });
+
+  ctx.handle('browser:bookmarks:list', () => bookmarks.get());
+  ctx.handle('browser:bookmarks:add', (b: BookmarkInput) => {
+    const next = addBookmark(bookmarks.get(), b, Date.now());
+    bookmarks.set(next);
+    return next.find(x => x.url === b.url.trim());
+  });
+  ctx.handle('browser:bookmarks:remove', (url: string) => { bookmarks.set(removeBookmark(bookmarks.get(), String(url))); return true; });
+
+  ctx.handle('browser:downloads:list', () => downloads.list());
+  ctx.handle('browser:downloads:open', (id: string) => downloads.open(id));
+  ctx.handle('browser:downloads:show', (id: string) => downloads.show(id));
+  ctx.handle('browser:downloads:cancel', (id: string) => downloads.cancel(id));
+  ctx.handle('browser:downloads:retry', (id: string) => downloads.retry(id));
+  ctx.handle('browser:downloads:clear', () => downloads.clear());
+
+  ctx.handle('browser:find', (req: FindRequest) => new Promise<FindResult>((resolve) => {
+    const wc = active().view.webContents;
+    const text = String(req?.text ?? '');
+    if (!text) { wc.stopFindInPage('clearSelection'); lastFindText = ''; resolve({ matches: 0, active: 0 }); return; }
+    // Electron's findNext means "start a new session"; the contract's means "go to the next match".
+    const followUp = Boolean(req.findNext) && text === lastFindText;
+    lastFindText = text;
+    if (pendingFind) pendingFind.resolve({ matches: 0, active: 0 });
+    const requestId = wc.findInPage(text, { forward: req.forward !== false, findNext: !followUp });
+    pendingFind = { requestId, resolve };
+    setTimeout(() => { if (pendingFind?.requestId === requestId) { pendingFind = null; resolve({ matches: 0, active: 0 }); } }, 2000);
+  }));
+  ctx.handle('browser:findStop', () => { lastFindText = ''; active().view.webContents.stopFindInPage('clearSelection'); });
+
+  ctx.handle('browser:print', () => new Promise<boolean>((resolve) => {
+    active().view.webContents.print({ printBackground: true }, (ok) => resolve(ok));
+  }));
+  ctx.handle('browser:savePdf', async () => {
+    const wc = active().view.webContents;
+    const w = ctx.window();
+    const name = `${(wc.getTitle() || 'page').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 100).trim() || 'page'}.pdf`;
+    const opts = { defaultPath: path.join(app.getPath('downloads'), name), filters: [{ name: 'PDF', extensions: ['pdf'] }] };
+    const r = w ? await dialog.showSaveDialog(w, opts) : await dialog.showSaveDialog(opts);
+    if (r.canceled || !r.filePath) return null;
+    const pdf = await wc.printToPDF({ printBackground: true, pageSize: 'A4' });
+    fs.writeFileSync(r.filePath, pdf);
+    return r.filePath;
+  });
+
+  ctx.handle('browser:siteInfo', (): SiteInfo => {
+    const t = active();
+    const url = t.view.webContents.getURL();
+    const origin = originOf(url);
+    let host = '';
+    try { host = new URL(url).hostname; } catch { /* not a web page */ }
+    const remembered = settings.get().permissions[origin] ?? {};
+    const permissions: Record<string, PermissionSetting> = {};
+    for (const p of PERMISSIONS_SHOWN) permissions[p] = remembered[p] ?? 'ask';
+    for (const [p, v] of Object.entries(remembered)) permissions[p] = v;
+    const s = settings.get().blocking;
+    const cert = /^https:/.test(url) ? certs.get(host) : undefined;
+    return {
+      url, origin, security: securityOf(t), ...(cert ? { certificate: cert } : {}), permissions,
+      trackersBlocked: t.trackersBlocked, trackers: [...t.trackers].sort(),
+      blockingAllowedHere: s.enabled && !s.allowOrigins.includes(origin),
+    };
+  });
+  ctx.handle('browser:blocking:set', (o: { enabled?: boolean; allowOrigin?: string; disallowOrigin?: string }) => {
+    const s = settings.get();
+    let allow = [...s.blocking.allowOrigins];
+    const norm = (x: string): string => originOf(x) || x;
+    if (o?.allowOrigin) allow = [...new Set([...allow, norm(o.allowOrigin)])];
+    if (o?.disallowOrigin) allow = allow.filter(a => a !== norm(o.disallowOrigin!));
+    settings.set({ ...s, blocking: { enabled: typeof o?.enabled === 'boolean' ? o.enabled : s.blocking.enabled, allowOrigins: allow } });
+    pushState();
+    return { enabled: settings.get().blocking.enabled };
+  });
+  ctx.handle('browser:permissions:set', (o: { origin: string; permission: string; value: PermissionSetting }) => {
+    const s = settings.get();
+    const perms = { ...s.permissions };
+    const cur = { ...(perms[o.origin] ?? {}) };
+    if (o.value === 'ask') delete cur[o.permission]; else cur[o.permission] = o.value;
+    if (Object.keys(cur).length) perms[o.origin] = cur; else delete perms[o.origin];
+    settings.set({ ...s, permissions: perms });
+    return true;
+  });
+  ctx.handle('browser:mute', (tabId: string, muted: boolean) => {
+    const t = tabs.get(tabId) ?? active();
+    t.view.webContents.setAudioMuted(Boolean(muted));
+    pushState();
+  });
+
+  ctx.handle('browser:read', (req?: { mode?: 'reader' | 'full'; maxChars?: number }) => readPage(active(), req ?? {}));
+  /** The text the user has selected in the page (for the copilot), '' when none. */
+  ctx.handle('browser:selection', async () => {
+    const t = activeId ? tabs.get(activeId) : undefined;
+    if (!t || t.dialog || t.view.webContents.isDestroyed()) return '';
+    return evaluate<string>(t.view.webContents, `(() => { const s = String(getSelection() || ''); if (s) return s; const a = document.activeElement; return a && typeof a.value === 'string' && typeof a.selectionStart === 'number' && a.type !== 'password' ? a.value.slice(a.selectionStart, a.selectionEnd) : ''; })()`, 1500).then(s => (s ?? '').slice(0, 20_000)).catch(() => '');
+  });
+  ctx.handle('browser:insights', () => insightsOf(active()));
+  ctx.handle('browser:forms', () => formsOf(active()));
+
+  ctx.handle('browser:agentStop', () => {
+    agentStopped = true;
+    const t = activeId ? tabs.get(activeId) : undefined;
+    if (t) { t.agentUntil = 0; ctx.emit('browser:agent', { tabId: t.id, action: 'stop', status: 'blocked', detail: 'The user took control' } satisfies AgentEvent); }
+    pushState();
+  });
+  ctx.handle('browser:agentResume', () => { agentStopped = false; pushState(); });
+
+  ctx.handle('browser:permissionAnswer', (id: string, allow: boolean, remember: boolean) => {
+    const p = pendingPerms.get(id);
+    if (!p) return false;
+    pendingPerms.delete(id);
+    clearTimeout(p.timer);
+    p.cb(Boolean(allow));
+    if (remember) {
+      const s = settings.get();
+      settings.set({ ...s, permissions: { ...s.permissions, [p.origin]: { ...(s.permissions[p.origin] ?? {}), [p.name]: allow ? 'allow' : 'deny' } } });
+    }
+    return true;
+  });
+  ctx.handle('browser:dialogAnswer', async (id: string, accept: boolean, text?: string) => { await answerDialogImpl(id, Boolean(accept), text); return true; });
+  ctx.handle('browser:authAnswer', (id: string, creds: { username: string; password: string } | null) => {
+    const a = pendingAuth.get(id);
+    if (!a) return false;
+    pendingAuth.delete(id);
+    clearTimeout(a.timer);
+    if (creds && typeof creds.username === 'string') a.cb(creds.username, String(creds.password ?? '')); else a.cb();
+    return true;
+  });
+  ctx.handle('browser:confirmAnswer', (id: string, allow: boolean) => {
+    const c = pendingConfirm.get(id);
+    if (!c) return false;
+    pendingConfirm.delete(id);
+    clearTimeout(c.timer);
+    c.resolve(Boolean(allow));
+    return true;
+  });
+  ctx.handle('browser:certAnswer', (tabId: string, proceed?: boolean) => {
+    if (proceed) throw new Error('A page with a certificate error cannot be opened here.');
+    const t = tabs.get(tabId) ?? active();
+    const wc = t.view.webContents;
+    t.certError = undefined; t.error = undefined;
+    if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack(); else void wc.loadURL('about:blank');
+    pushState();
+    return true;
+  });
 }

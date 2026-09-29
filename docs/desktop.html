@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.26.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.27.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -61,7 +61,7 @@
     <p>
       Download the installer for your system from the
       <a href="https://github.com/suhail-akhtar/aico/releases/latest">latest release</a>:
-      <code>AICO-Setup-0.26.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
+      <code>AICO-Setup-0.27.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
       <code>.deb</code> for Linux. The builds are not code-signed yet, so Windows SmartScreen
       asks once ("More info → Run anyway"). Your chats, providers and settings are the same
       ones the CLI, the web portal and VS Code use — everything lives in <code>~/.aico</code>.
@@ -136,15 +136,28 @@
   </figure>
 
   <div class="prose">
-    <h2>A browser the agent drives</h2>
+    <h2>An AI browser</h2>
     <p>
-      The built-in browser is real Chromium with its own profile, beside the chat or full
-      size. The agent drives it with trusted input — it reads the page as an accessibility
-      snapshot with numbered elements, clicks, types, selects, waits, reads the console and
-      the network log, and takes screenshots — so it can test the app it just built, end to
-      end. It will not solve a CAPTCHA or type a password it was not given: it hands the
-      browser to you with a message, and carries on when you press Done.
+      A full browser — tabs, an omnibox with suggestions, bookmarks, history, downloads, find,
+      zoom, print, reader mode, site info with certificates and permissions, and tracker
+      blocking on by default — with an <strong>AICO copilot</strong> docked beside the page or
+      floating over it. Ask about the page you are on (<em>Summarize</em>, <em>Key points</em>,
+      <em>Extract tables</em>, <em>Find prices</em>, <em>Compare tabs</em>, <em>Translate</em>), or
+      let the agent do the work: it reads pages as clean Markdown, understands and fills forms,
+      answers dialogs, uploads files once you approve, and reports what changed after every
+      action. The element it is about to touch is highlighted, the page glows while it drives,
+      and <strong>Stop</strong> / <strong>Take over</strong> are one click away.
     </p>
+    <p>
+      It never solves CAPTCHAs or "I'm human" checks, never types passwords, card numbers or
+      one-time codes, and asks before anything that buys, books, sends or deletes — it hands the
+      page to you and carries on when you press Done. Dialogs, sign-in prompts, permissions and
+      certificate errors come to you; a bad certificate is never waved through.
+    </p>
+    <figure>
+      <img src="assets/readme/browser.jpg" alt="The AICO browser: a Wikipedia page with the AICO copilot docked beside it showing a summary" loading="lazy">
+      <figcaption>The copilot summarising the page you are on — in its own conversation, beside the page.</figcaption>
+    </figure>
     <p>
       <strong>And it can see what it looks at.</strong> On a model that reads images, a
       screenshot of the page, an image file it reads, a picture it fetches from the web, or an

@@ -1,0 +1,223 @@
+/*
+ * The built-in browser's chrome and its copilot. Plain CSS over the app's
+ * theme tokens (set at runtime by theme.ts), so light, dark and custom themes
+ * all apply without a second palette.
+ */
+
+/* ── Tabs ─────────────────────────────────────────────────────────── */
+.bx-tabstrip { background: var(--desk-sidebar, var(--aico-surface)); }
+.bx-tab {
+  position: relative; display: flex; align-items: center; gap: 7px;
+  height: 32px; min-width: 64px; max-width: 232px; flex: 1 1 200px;
+  padding: 0 6px 0 11px; border-radius: 10px 10px 0 0;
+  font-size: 12.5px; color: var(--aico-text-secondary);
+  transition: background-color .12s ease, color .12s ease;
+}
+.bx-tab:hover { background: var(--aico-hover); color: var(--aico-text-primary); }
+.bx-tab[aria-selected='true'] { background: var(--aico-bg); color: var(--aico-text-primary); box-shadow: 0 -1px 0 var(--aico-border-subtle) inset; }
+.bx-tab[aria-selected='true']::before, .bx-tab[aria-selected='true']::after {
+  content: ''; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none;
+}
+.bx-tab[aria-selected='true']::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 9.5px, var(--aico-bg) 10px); }
+.bx-tab[aria-selected='true']::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 9.5px, var(--aico-bg) 10px); }
+.bx-tab + .bx-tab:not([aria-selected='true'])::after {
+  content: ''; position: absolute; left: -1px; top: 9px; height: 14px; border-left: 1px solid var(--aico-border-subtle);
+}
+.bx-tab .bx-tab-close { opacity: 0; }
+.bx-tab:hover .bx-tab-close, .bx-tab[aria-selected='true'] .bx-tab-close { opacity: .7; }
+.bx-tab .bx-tab-close:hover { opacity: 1; }
+.bx-tab.bx-agent { color: var(--aico-text-primary); }
+.bx-tab.bx-agent .bx-tab-icon { filter: drop-shadow(0 0 4px var(--aico-accent)); }
+.bx-ai-badge {
+  display: inline-flex; align-items: center; gap: 2px; height: 16px; padding: 0 5px; border-radius: 999px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .04em; color: #fff;
+  background: linear-gradient(120deg, #6366f1, #a855f7 45%, #06b6d4);
+  background-size: 200% 100%; animation: bx-flow 2.4s linear infinite;
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────── */
+.bx-omni {
+  display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;
+  height: 32px; padding: 0 6px 0 5px; border-radius: 999px;
+  background: var(--desk-pill); border: 1px solid transparent;
+  transition: background-color .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+.bx-omni:hover { background: color-mix(in srgb, var(--desk-pill) 70%, var(--aico-hover)); }
+.bx-omni:focus-within { background: var(--aico-bg); border-color: color-mix(in srgb, var(--aico-accent) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--aico-accent) 14%, transparent); }
+.bx-omni input { font-size: 13px; }
+/* These boxes show focus themselves; the app-wide focus ring would draw a second one inside them. */
+.bx-omni input:focus-visible, .bx-bar input:focus-visible, .bx-chrome-page input:focus-visible, .cp-panel textarea:focus-visible { outline: none; }
+.bx-site {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 999px;
+  font-size: 12px; color: var(--aico-text-secondary); white-space: nowrap;
+}
+.bx-site:hover { background: var(--aico-hover); color: var(--aico-text-primary); }
+.bx-site.bx-danger { color: var(--aico-danger); }
+.bx-suggest {
+  position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 60;
+  border-radius: 16px; border: 1px solid var(--aico-border-subtle); background: var(--aico-bg);
+  box-shadow: var(--desk-shadow); padding: 6px; animation: desk-pop 120ms ease-out;
+}
+.bx-suggest-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 10px; text-align: left; font-size: 13px; }
+.bx-suggest-row[aria-selected='true'] { background: var(--aico-hover); }
+.bx-ai-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 9px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; color: var(--aico-text-primary);
+  border: 1px solid var(--aico-border-subtle); background: var(--aico-bg);
+  transition: background-color .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+.bx-ai-btn:hover { background: var(--aico-hover); }
+.bx-ai-btn[aria-pressed='true'] {
+  border-color: transparent; color: #fff;
+  background: linear-gradient(120deg, #4f46e5, #9333ea 55%, #0891b2);
+  box-shadow: 0 2px 10px color-mix(in srgb, #7c3aed 35%, transparent);
+}
+
+/* The orb: AICO's mark in the chrome. */
+.bx-orb {
+  position: relative; display: inline-block; flex-shrink: 0; border-radius: 999px;
+  background: conic-gradient(from 210deg, #6366f1, #a855f7, #ec4899, #06b6d4, #6366f1);
+}
+.bx-orb::after { content: ''; position: absolute; inset: 22%; border-radius: 999px; background: rgba(255,255,255,.9); filter: blur(1.5px); opacity: .85; }
+.bx-orb.bx-spin { animation: desk-spin 2.2s linear infinite; }
+
+/* ── The page area ────────────────────────────────────────────────── */
+.bx-page-frame { position: relative; transition: padding .18s ease; }
+/* The ring is drawn behind the page placeholder, never over it. */
+.bx-page-frame::before, .bx-page-frame::after { z-index: 0; }
+.bx-page-frame > * { position: relative; z-index: 1; }
+.bx-page-frame.bx-driving { padding: 3px; }
+.bx-page-frame.bx-driving::before {
+  content: ''; position: absolute; inset: 0; border-radius: 4px; pointer-events: none;
+  background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899, #06b6d4, #6366f1);
+  background-size: 300% 100%; animation: bx-flow 3s linear infinite;
+}
+.bx-page-frame.bx-driving::after {
+  content: ''; position: absolute; inset: -2px; border-radius: 6px; pointer-events: none; z-index: -1;
+  box-shadow: 0 0 18px 2px color-mix(in srgb, #8b5cf6 45%, transparent);
+  animation: desk-breathe 1.8s ease-in-out infinite;
+}
+.bx-page-frame.bx-handoff::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: 4px;
+  background: var(--aico-warning); animation: desk-breathe 1.4s ease-in-out infinite;
+}
+.bx-page-frame.bx-handoff { padding: 3px; }
+@keyframes bx-flow { from { background-position: 0% 0; } to { background-position: 300% 0; } }
+
+.bx-status {
+  display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 12px;
+  font-size: 12px; color: var(--aico-text-muted); border-top: 1px solid var(--aico-border-subtle);
+  background: var(--aico-bg);
+}
+.bx-status-live {
+  background: linear-gradient(90deg, color-mix(in srgb, #6366f1 10%, var(--aico-bg)), color-mix(in srgb, #a855f7 8%, var(--aico-bg)) 50%, var(--aico-bg));
+  color: var(--aico-text-primary);
+}
+.bx-shimmer-text {
+  background: linear-gradient(90deg, var(--aico-text-secondary) 0%, var(--aico-text-primary) 40%, var(--aico-text-secondary) 80%);
+  background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: bx-flow 2.2s linear infinite;
+}
+
+/* The still that stands in for the page while something covers it. */
+.bx-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: left top; }
+.bx-still-veil { position: absolute; inset: 0; background: rgba(0,0,0,.14); backdrop-filter: saturate(.7); cursor: pointer; }
+.bx-still-hint {
+  border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 500;
+  background: #0d0d0d; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.18);
+}
+html.dark .bx-still-hint { background: #f3f3f3; color: #0d0d0d; }
+
+/* ── Chrome pages (new tab, history, bookmarks, reader, errors) ──── */
+.bx-chrome-page { position: absolute; inset: 0; overflow-y: auto; background: var(--aico-bg); }
+.bx-ntp-glow { background: radial-gradient(ellipse at 50% 0%, color-mix(in srgb, #8b5cf6 12%, transparent) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, color-mix(in srgb, #06b6d4 8%, transparent), transparent 55%), var(--aico-bg); }
+.bx-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; width: 96px; padding: 12px 6px 10px;
+  border-radius: 14px; font-size: 12px; color: var(--aico-text-secondary); transition: background-color .12s ease;
+}
+.bx-tile:hover { background: var(--aico-hover); color: var(--aico-text-primary); }
+.bx-tile-icon {
+  display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 999px;
+  background: var(--desk-pill);
+}
+.bx-start-card {
+  display: flex; align-items: flex-start; gap: 12px; padding: 14px; border-radius: 16px; text-align: left;
+  border: 1px solid var(--aico-border-subtle); background: var(--aico-bg);
+  transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease;
+}
+.bx-start-card:hover { border-color: color-mix(in srgb, #8b5cf6 45%, var(--aico-border-subtle)); box-shadow: 0 6px 22px color-mix(in srgb, #7c3aed 12%, transparent); transform: translateY(-1px); }
+.bx-reader { font-size: 17px; line-height: 1.75; }
+.bx-reader .markdown-body { font-size: 17px; line-height: 1.75; }
+.bx-reader .markdown-body h1, .bx-reader .markdown-body h2, .bx-reader .markdown-body h3 { letter-spacing: -.01em; }
+
+/* ── Bars and dialogs over the page ───────────────────────────────── */
+.bx-bar { display: flex; align-items: center; gap: 10px; padding: 7px 12px; font-size: 13px; border-bottom: 1px solid var(--aico-border-subtle); animation: desk-slide-up .16s ease-out; }
+.bx-handoff {
+  display: flex; align-items: center; gap: 14px; padding: 12px 16px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--aico-warning) 16%, var(--aico-bg)), color-mix(in srgb, var(--aico-warning) 6%, var(--aico-bg)));
+  border-bottom: 1px solid color-mix(in srgb, var(--aico-warning) 40%, transparent);
+}
+.bx-modal-scrim { position: absolute; inset: 0; z-index: 40; display: flex; align-items: flex-start; justify-content: center; padding-top: 56px; background: color-mix(in srgb, #000 22%, transparent); animation: desk-fade .12s ease-out; }
+.bx-modal { width: min(440px, calc(100% - 32px)); border-radius: 18px; border: 1px solid var(--aico-border-subtle); background: var(--aico-bg); box-shadow: var(--desk-shadow); padding: 18px; animation: desk-pop .14s ease-out; }
+
+/* ── Downloads ring ───────────────────────────────────────────────── */
+.bx-ring { position: absolute; inset: 1px; pointer-events: none; }
+
+/* ── Copilot ──────────────────────────────────────────────────────── */
+.cp-panel {
+  display: flex; flex-direction: column; min-height: 0; background: var(--aico-bg);
+  color: var(--aico-text-primary);
+}
+.cp-float {
+  position: absolute; z-index: 45; border-radius: 20px; overflow: hidden;
+  border: 1px solid var(--aico-border-subtle);
+  box-shadow: 0 24px 60px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.06);
+  animation: desk-pop .16s ease-out;
+}
+html.dark .cp-float { box-shadow: 0 24px 60px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4); }
+.cp-dock { border-left: 1px solid var(--aico-border-subtle); }
+.cp-head { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--aico-border-subtle); }
+.cp-float .cp-head { cursor: grab; }
+.cp-float .cp-head:active { cursor: grabbing; }
+.cp-transcript .markdown-body { font-size: 14px; line-height: 1.65; }
+.cp-transcript .markdown-body pre { border-radius: 12px; }
+.cp-transcript .markdown-body h1 { font-size: 1.25em; }
+.cp-transcript .markdown-body h2 { font-size: 1.12em; }
+.cp-transcript .markdown-body h3 { font-size: 1.02em; }
+.cp-user { background: var(--desk-pill); border-radius: 18px; padding: 8px 13px; font-size: 14px; line-height: 1.55; max-width: 88%; }
+.cp-chipbar { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: none; }
+.cp-chipbar::-webkit-scrollbar { display: none; }
+.cp-chip {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 28px; padding: 0 10px; border-radius: 999px;
+  font-size: 12px; color: var(--aico-text-secondary); border: 1px solid var(--aico-border-subtle); background: var(--aico-bg);
+  transition: background-color .12s ease, color .12s ease, border-color .12s ease;
+}
+.cp-chip:hover:not(:disabled) { background: var(--aico-hover); color: var(--aico-text-primary); border-color: var(--aico-border); }
+.cp-chip:disabled { opacity: .45; cursor: not-allowed; }
+.cp-action {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border-radius: 12px; text-align: left;
+  font-size: 13px; color: var(--aico-text-primary); border: 1px solid var(--aico-border-subtle);
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.cp-action:hover:not(:disabled) { background: var(--aico-hover); border-color: var(--aico-border); }
+.cp-action:disabled { opacity: .45; cursor: not-allowed; }
+.cp-input-shell {
+  border-radius: 20px; border: 1px solid var(--aico-border-subtle); background: var(--aico-bg);
+  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+html.dark .cp-input-shell { background: var(--desk-pill); }
+.cp-input-shell:focus-within { border-color: var(--aico-border); box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 26px rgba(0,0,0,.09); }
+.cp-page-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 24px; padding: 0 4px 0 8px; border-radius: 999px;
+  font-size: 11.5px; color: var(--aico-text-secondary); background: var(--aico-accent-soft);
+}
+.cp-page-chip.cp-detached { background: transparent; border: 1px dashed var(--aico-border); }
+.cp-resize { position: absolute; z-index: 2; }
+.cp-launcher {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 3px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; color: var(--aico-text-primary);
+  border: 1px solid var(--aico-border-subtle); background: var(--aico-bg);
+  transition: box-shadow .12s ease, transform .12s ease;
+}
+.cp-launcher:hover { box-shadow: 0 2px 10px color-mix(in srgb, #7c3aed 25%, transparent); transform: translateY(-1px); }

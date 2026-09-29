@@ -34,7 +34,7 @@ append-only event log.** That single decision is why its prompt cache hits
 why you can steer it mid-run, and why every answer can show exactly what it read.
 
 <div align="center">
-<img src="docs/assets/readme/numbers.svg" alt="By the numbers: 91% of 80 real GitHub issues resolved (SWE-bench Lite, self-run); 96% prompt-cache hit on a long run; a cached DeepSeek token costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 3,900+ automated checks" width="100%">
+<img src="docs/assets/readme/numbers.svg" alt="By the numbers: 91% of 80 real GitHub issues resolved (SWE-bench Lite, self-run); 96% prompt-cache hit on a long run; a cached DeepSeek token costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 4,100+ automated checks" width="100%">
 </div>
 
 <sub>Methods and raw evidence: [SWE-bench Lite probes](benchmarks/swebench-lite/README.md) ·
@@ -49,10 +49,10 @@ their limits — none of these is an official leaderboard submission.</sub>
 
 | | Get it | Notes |
 |---|---|---|
-| **Windows** (10/11, x64) | [**AICO-Setup-0.26.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.26.0/AICO-Setup-0.26.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
-| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.26.0/AICO-0.26.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.26.0/AICO-0.26.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
-| **VS Code** | [**aico-vscode-0.6.22.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.26.0/aico-vscode-0.6.22.vsix) | `code --install-extension aico-vscode-0.6.22.vsix` |
-| **Web portal + terminal** | `npx github:suhail-akhtar/aico#v0.26.0 serve` | Node 22.5+; nothing else to install |
+| **Windows** (10/11, x64) | [**AICO-Setup-0.27.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.27.0/AICO-Setup-0.27.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
+| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.27.0/AICO-0.27.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.27.0/AICO-0.27.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
+| **VS Code** | [**aico-vscode-0.6.22.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.27.0/aico-vscode-0.6.22.vsix) | `code --install-extension aico-vscode-0.6.22.vsix` |
+| **Web portal + terminal** | `npx github:suhail-akhtar/aico#v0.27.0 serve` | Node 22.5+; nothing else to install |
 
 Every build: **[latest release](https://github.com/suhail-akhtar/aico/releases/latest)**.
 The desktop app needs no Node install — the engine runs inside it — and shares
@@ -179,11 +179,23 @@ for **Windows and Linux**, updating itself.
 - **Chat that keeps up** — `/` actions and `@` mentions for files, folders and agents; steer a run while it works; jump to the start of a finished answer; branch any answer into a new chat; read aloud; 👍/👎 that the agent learns from.
 - **Canvas** — documents and code the agent writes and **you edit side by side**, with versions, restore, and *Ask AI* on a selection.
 - **An IDE behind the chat** — Monaco editor, real terminals, source control that never force-pushes, and GitHub through `gh`: review a PR, fix a failing check, diagnose an Action — with AI.
-- **A browser the agent drives** — Chromium with its own profile for web QA and automation; it reads the page as an accessibility snapshot and acts with trusted input, and hands it to you for sign-ins and CAPTCHAs.
+- **An AI browser** — see below.
 - **It can see** — screenshots, images it reads or fetches, and pictures from any MCP tool reach models that read images; which models do is *learned* with a one-click probe, not guessed.
 - **Skills and agents, made your way** — import Claude-format `.skill` files, `SKILL.md` or folders; export them; define your own agents with tools, skills, a model and their own knowledge and scripts — or ask the agent to build them.
 - **Plugins, all the way down** — every feature is a plugin you can switch off; add pages, commands, themes, widgets and standing instructions with a JSON manifest, or say *"make me a plugin that…"*.
 - **Looks after itself** — automatic updates that wait for running work, backup & restore to move machines, right-click menus, tooltips, notifications and a tray.
+
+### 🌐 The AI browser
+
+<p align="center"><img src="docs/assets/readme/browser.jpg" alt="The AICO browser: a Wikipedia page with the AICO copilot docked beside it showing a summary with key takeaways" width="100%"></p>
+
+A full browser — tabs, an omnibox with suggestions, bookmarks, history, downloads,
+find, zoom, print, reader mode, site info with certificates and permissions, and
+**tracker blocking on by default** — with **AICO riding along**:
+
+- **Ask AICO about any page.** A copilot docked beside the page (or floating) knows what you are looking at: *Summarize*, *Key points*, *Explain simply*, *Extract tables*, *Find prices*, *Compare tabs*, *Translate* — answered with the full renderer, charts and maps included. It is its own conversation, so browsing never takes over your chat.
+- **Let it do the clicking.** The agent reads pages as clean Markdown, understands forms, fills them in one go, answers dialogs, uploads (after you approve), waits for pages, and reports what changed after every action. You watch it happen: the element it is about to touch is highlighted, the page glows while it drives, and **Stop** / **Take over** are one click away.
+- **Safe by design.** It never solves CAPTCHAs or "I'm human" checks, never types passwords, card numbers or one-time codes, and asks before anything that buys, books, sends or deletes — it hands the page to you, then carries on. JavaScript dialogs, sign-in prompts, permissions and certificate errors all come to you; a bad certificate is never waved through.
 
 ---
 
@@ -298,8 +310,8 @@ flowchart TB
 ## 🚀 Install & quick start
 
 ```sh
-npx github:suhail-akhtar/aico#v0.26.0 serve     # web portal, nothing to install
-npm install -g github:suhail-akhtar/aico#v0.26.0 # `aico` on your PATH (VS Code needs this)
+npx github:suhail-akhtar/aico#v0.27.0 serve     # web portal, nothing to install
+npm install -g github:suhail-akhtar/aico#v0.27.0 # `aico` on your PATH (VS Code needs this)
 ```
 
 ```sh
@@ -310,7 +322,7 @@ aico -c                                # continue the last session
 aico --agent review -p "review my diff"
 ```
 
-`#v0.26.0` pins a release, `#release/v0.26` follows its fixes, `#main` is the
+`#v0.27.0` pins a release, `#release/v0.27` follows its fixes, `#main` is the
 trunk. From source: `git clone … && npm install && npm run build && npm run build:web`.
 Requires **Node 22.5+** (built-in SQLite).
 

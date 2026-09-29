@@ -3,6 +3,54 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.27.0 — 2026-09-29
+
+An AI browser: a full browser with an AICO copilot beside every page, and an
+agent that can read, fill and navigate for you — safely.
+
+### Added (desktop)
+
+- **A full browser.** Tabs with favicons, audio and mute, and a right-click menu;
+  an omnibox with history, bookmark and search suggestions; a new-tab page with
+  AI quick starts; bookmarks, history and a downloads manager (progress, open,
+  show, cancel, retry); find in page; zoom remembered per site; print and save as
+  PDF; reader mode; site info (security, certificate, permissions, trackers);
+  **tracker blocking** on by default with a per-site allow; pop-ups that were not
+  clicked are blocked; keyboard shortcuts that work even with the page focused.
+- **The AICO copilot.** Docked beside the page (or floating, or minimised), in its
+  own conversation so browsing never hijacks your chat, aware of the page you are
+  on. Quick actions: Summarize, Key points, Explain simply, Extract tables, Find
+  prices, Fill this form, Compare tabs, Translate, What can I do here. "Open in
+  main chat" continues it in the full view.
+- **The agent drives the browser.** New tools: `browser_read` (clean Markdown,
+  reader or full), `browser_forms` / `browser_fill` (a whole form at once),
+  `browser_extract` (links, tables, prices, contacts, outline, metadata),
+  `browser_insights` (page kind, login wall, paywall, cookie banner, human check),
+  `browser_dialog`, `browser_find`, `browser_scroll_to`, tab tools,
+  `browser_downloads`, `browser_upload`, a richer `browser_wait`, and screenshots
+  the model can see. Every action reports the URL afterwards and what changed.
+  The element being touched is highlighted on the page, the page glows while the
+  agent drives, and **Stop / Take over** make every browser tool refuse until you
+  let it continue.
+- **Safety, enforced in the tools rather than asked for:** human checks
+  (reCAPTCHA, hCaptcha, Turnstile, "verify you are human") are detected and every
+  action on such a page refuses and hands the page to you; password, card, CVV and
+  one-time-code fields are never filled; uploads and agent-started executable
+  downloads need your approval; JavaScript dialogs, HTTP sign-in, permissions and
+  certificate errors come to you, and a bad certificate cannot be accepted.
+  Verified live: on reCAPTCHA's demo the agent handed off and a forced click was
+  refused; password and card fields stayed empty while the email was filled.
+- Ctrl+click a link in the chat to open it in the built-in browser.
+
+### Fixed (desktop)
+
+- Capturing the page while it was hidden (the still under a menu or the floating
+  copilot) could hang forever and, in one sequence, crashed the window. Captures
+  now have a deadline and a size cap, a hidden page serves its last still, and
+  stills no longer write a file each time; their size is read from the image.
+- Opening a URL while the browser was off screen could wait forever; it is capped.
+- Reader Markdown mangled linked images (`[![alt](src)](href)`).
+
 ## 0.26.0 — 2026-09-29
 
 Write together in a canvas, follow live sports, and a README that says what AICO

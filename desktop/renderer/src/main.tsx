@@ -23,6 +23,8 @@ import { installUpdateListener } from './updates';
 import { installChatRouteSync } from './chat/actions';
 import { installCanvasHost } from '@web/canvas-host';
 import { CanvasCode, useCanvasPanel } from './chat/CanvasPanel';
+import { installBrowserStore } from './browser/store';
+import { installBrowserLinks } from './browser/links';
 
 document.documentElement.dataset.platform = String(platform);
 
@@ -98,6 +100,9 @@ async function boot(): Promise<void> {
   installRendererBridge();
   installUpdateListener();
   installChatRouteSync();
+  // The browser's prompts (permissions, dialogs, hand-overs) are heard even while it is not on screen.
+  if (isDesktop) installBrowserStore();
+  installBrowserLinks();
   // Canvases open beside the chat here, and code canvases get Monaco.
   installCanvasHost({ openPanel: ref => useCanvasPanel.getState().show(ref), CodeEditor: CanvasCode });
   desktop.onCommand((cmd) => { if (!runCommand(cmd.id, cmd.args)) console.warn('Unknown command', cmd.id); });

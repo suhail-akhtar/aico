@@ -26,11 +26,14 @@ import { PLUGIN_API_VERSION, ICON_NAMES } from '../shared/plugin-types';
 
 export const MCP_NAME = 'aico-desktop';
 
+/** A tool result with more than text (a screenshot the model can look at). */
+interface RichResult { content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> }
+
 interface Tool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  run: (args: Record<string, unknown>) => Promise<string>;
+  run: (args: Record<string, unknown>) => Promise<string | RichResult>;
 }
 
 const TARGET_PROPS = {
@@ -50,7 +53,7 @@ function target(a: Record<string, unknown>): Target {
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07/g, '');
 
 /** The manual the agent reads. Static facts only; live state comes from ide_describe. */
-function manual(ctx: DesktopContext): string {
+export function manual(ctx: DesktopContext): string {
   const pluginInstructions = listUserPlugins(ctx)
     .filter(p => p.enabled && !p.error)
     .flatMap(p => (p.manifest.contributes.instructions ?? []).map(i => `- [${p.manifest.name}] ${i.text}`));
@@ -58,6 +61,9 @@ function manual(ctx: DesktopContext): string {
     'You are running inside AICO Desktop, a desktop IDE the user is looking at. Besides your normal tools you can drive the IDE and its built-in browser through the aico-desktop tools.',
     '',
     'IDE: call ide_describe first when asked about the IDE — it returns the live state (current view, projects, plugins and their pages/commands, theme). ide_navigate opens any view by id (chat, chats, library, scheduled, plugins, projects, project {path}, group {id}, files {root, open}, git {path}, github {path}, browser {url}, apps, activity, changes {id}, trajectory {id}, or a plugin page "<pluginId>:<viewId>"). ide_run_command runs any palette command. ide_set_appearance changes theme/colours/font size/width; ide_set_layout shows or hides the sidebar, bottom panel and side browser. ide_open_file opens a file in the editor. ide_notify shows the user a notification. ide_terminal_run starts a command in a visible terminal tab (use it for dev servers the user should watch; use your own shell tool for quick commands).',
+    '',
+    'BROWSER: a real Chromium browser inside the IDE (own profile). The user watches — your actions are highlighted on the page — and may press Stop / Take over: then every browser tool refuses; stop and ask. Work READ → ACT → VERIFY. Read: browser_open, then browser_read (the page as Markdown), browser_insights (page kind; login wall, paywall, cookie banner, human check), browser_extract (links, tables, prices, contacts, outline, metadata), browser_find. Act: browser_snapshot gives refs like [e7] for browser_click / browser_type / browser_select / browser_press; browser_forms then browser_fill fill a whole form. Refs change when the page changes — snapshot again. Verify: every action reports the URL now and what changed (navigation, validation errors, messages, dialogs, downloads); browser_wait (text, gone, url, urlChange, networkIdle); browser_screenshot shows you the page. browser_dialog answers JavaScript dialogs; browser_downloads; browser_upload (the user approves); browser_tabs. Local apps: http://localhost:<port>; browser_console / browser_network for errors.',
+    'BROWSER RULES: never solve, bypass or work around a CAPTCHA, "verify you are human" or bot check — call browser_handoff so the user does it, then poll browser_handoff_wait. Never type passwords, card numbers, CVVs or one-time codes (refused) — hand those over too. Fill forms, but ask the user before submitting anything that buys, pays, books, sends, posts or deletes. On cookie banners prefer "Reject" / "Necessary only".',
     '',
     `PLUGINS: the IDE is customised with plugins, never by editing its code. To add or change a feature, write a plugin with ide_plugin_save. A manifest is JSON: { "id": "lower.case-id", "name": "Name", "version": "0.1.0", "description": "...", "icon": one of [${ICON_NAMES.join(', ')}], "category": "...", "contributes": { ... } }. Contribution kinds:`,
     '- navItems: [{ id, title, icon, view, placement: "primary"|"more", order }] — sidebar entries; view is a page id of this plugin (or any view id).',
@@ -69,8 +75,6 @@ function manual(ctx: DesktopContext): string {
     '- widgets: [{ language, entry }] — a chat fence language drawn by the plugin\'s own HTML (it receives the fence body in aico:init payload).',
     '- instructions: [{ id, text }] — standing instructions added to every chat while the plugin is on.',
     `Plugins live in ${ctx.paths.pluginsDir}. Built-in features are plugins too (aico.chats, aico.library, aico.scheduled, aico.projects, aico.files, aico.git, aico.github, aico.browser, aico.terminal, aico.apps, aico.activity, aico.statusbar, aico.starters) and can be switched off with ide_plugin_set_enabled. Plugin API version ${PLUGIN_API_VERSION}.`,
-    '',
-    'BROWSER: a real Chromium browser inside the IDE, with its own profile. For web QA and automation: browser_open a URL, browser_snapshot to read the page (interactive elements get refs like [e7]), then browser_click / browser_type / browser_select / browser_press by ref. Take a new snapshot after anything that changes the page. browser_wait waits for text or a selector; browser_screenshot saves a PNG (read it to look at it); browser_console and browser_network show errors and requests. Never solve a CAPTCHA and never type a password you were not given: use browser_handoff to ask the user to do it, then poll browser_handoff_wait. Test local apps at http://localhost:<port>.',
     ...(pluginInstructions.length ? ['', 'INSTRUCTIONS FROM ENABLED PLUGINS:', ...pluginInstructions] : []),
   ].join('\n');
 }
@@ -213,25 +217,90 @@ export function createTools(ctx: DesktopContext): Tool[] {
     // ── Browser ──
     {
       name: 'browser_open',
-      description: 'Open a URL in the IDE\'s built-in browser (the user sees it). Use newTab to keep the current page.',
+      description: 'Open a URL in the IDE\'s built-in browser (the user sees it). Returns the tab, and flags a human check or load error. Use newTab to keep the current page. Then browser_read (to read) or browser_snapshot (to act).',
       inputSchema: { type: 'object', properties: { url: { type: 'string' }, newTab: { type: 'boolean' } }, required: ['url'] },
       run: async (a) => json(await (await browser()).open(String(a.url), { newTab: Boolean(a.newTab) })),
     },
     {
+      name: 'browser_read',
+      description: 'Read the page as clean Markdown — the way to answer questions about a page. mode "reader" (default) keeps the main content (article, results, docs) without menus and ads; "full" converts the whole page. Returns title, byline, word count, headings, links and the Markdown (cut at maxChars, default 20000). Tables come out as Markdown tables. For clicking and typing use browser_snapshot instead.',
+      inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['reader', 'full'] }, maxChars: { type: 'number', description: 'Default 20000, up to 100000.' }, links: { type: 'boolean', description: 'Also list the links (default: only when the Markdown is short).' } } },
+      run: async (a) => {
+        const r = await (await browser()).read({ mode: a.mode === 'full' ? 'full' : 'reader', maxChars: typeof a.maxChars === 'number' ? Math.min(100_000, a.maxChars) : undefined });
+        const withLinks = a.links === true || (a.links !== false && r.markdown.length < 4000);
+        return [
+          `Title: ${r.title}`, `URL: ${r.url}`, r.byline ? `By: ${r.byline}` : '', `Words: ${r.words}${r.truncated ? ' (Markdown truncated)' : ''}`,
+          r.note ? `Note: ${r.note}` : '',
+          '', r.markdown,
+          withLinks && r.links.length ? `\nLinks:\n${r.links.slice(0, 80).map(l => `- [${l.text}](${l.href})`).join('\n')}` : '',
+        ].filter(x => x !== '').join('\n');
+      },
+    },
+    {
       name: 'browser_snapshot',
-      description: 'Read the current page: title, URL, headings, every visible interactive element with a ref ([e1], [e2]…) to use with click/type/select, and the visible text. full: include more elements and text.',
+      description: 'The page for acting on it: title, URL, headings, every visible interactive element with a ref ([e1], [e2]…) for click/type/select/fill, and the visible text. Password, card, CVV and one-time-code fields are marked "user only". full: more elements and text. Take a new snapshot after anything that changes the page — refs change.',
       inputSchema: { type: 'object', properties: { full: { type: 'boolean' } } },
       run: async (a) => (await browser()).snapshot({ full: Boolean(a.full) }),
     },
     {
+      name: 'browser_forms',
+      description: 'The forms on the page as structured data: for each form its action/method, submit buttons, and every field with label, name, type, required, current value, options (selects and radio groups), validation message, and a ref. Sensitive fields (password/card/CVV/one-time code) are marked and their values hidden. Use before browser_fill.',
+      inputSchema: { type: 'object', properties: {} },
+      run: async () => {
+        const forms = await (await browser()).forms();
+        if (!forms.length) return 'No forms or input fields on this page.';
+        return json(forms.map(f => ({ ...f, fields: f.fields.map(x => ({ ...x, ...(x.options ? { options: x.options.slice(0, 40) } : {}) })) })));
+      },
+    },
+    {
+      name: 'browser_fill',
+      description: 'Fill several form fields at once with trusted typing — text, textarea, select, checkbox (true/false), radio group (option value or label), date/time. Address each field by ref (from browser_forms / browser_snapshot), label or name. Never fills password, card, CVV or one-time-code fields (refused — use browser_handoff). Does NOT submit: click the submit button yourself after checking the result, and ask the user before submitting anything that sends personal data, buys, books or posts.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          fields: {
+            type: 'array',
+            items: { type: 'object', properties: { ref: { type: 'string' }, label: { type: 'string' }, name: { type: 'string' }, value: { type: ['string', 'boolean', 'number'] } }, required: ['value'] },
+          },
+        },
+        required: ['fields'],
+      },
+      run: async (a) => {
+        const fields = Array.isArray(a.fields) ? (a.fields as Array<Record<string, unknown>>) : [];
+        if (!fields.length) throw new Error('Give fields: [{ ref | label | name, value }].');
+        return (await browser()).fill(fields.map(f => ({
+          ...(typeof f.ref === 'string' ? { ref: f.ref } : {}), ...(typeof f.label === 'string' ? { label: f.label } : {}), ...(typeof f.name === 'string' ? { name: f.name } : {}),
+          value: typeof f.value === 'boolean' ? f.value : String(f.value ?? ''),
+        })));
+      },
+    },
+    {
+      name: 'browser_extract',
+      description: 'Pull typed data out of the page. kind: "links" (text, URL, internal/external, ref), "tables" (every data table as Markdown), "prices" (currency amounts with the product/heading they belong to, plus microdata/JSON-LD offers), "contacts" (emails, phone numbers, mailto/tel links), "outline" (the heading tree with refs), "metadata" (title, description, canonical, language, OpenGraph, Twitter card, JSON-LD, feeds).',
+      inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['links', 'tables', 'prices', 'contacts', 'outline', 'metadata'] }, maxItems: { type: 'number' } }, required: ['kind'] },
+      run: async (a) => (await browser()).extract(String(a.kind) as 'links', { maxItems: typeof a.maxItems === 'number' ? a.maxItems : undefined }),
+    },
+    {
+      name: 'browser_insights',
+      description: 'A quick structural report of the page: what kind of page it is (article, product, search results, login, checkout, form…), its main call to action, forms, and whether a login wall, paywall, cookie banner or human check (CAPTCHA) is present, plus security state and trackers blocked — with hints for what to do next.',
+      inputSchema: { type: 'object', properties: {} },
+      run: async () => json(await (await browser()).insights()),
+    },
+    {
+      name: 'browser_find',
+      description: 'Find text on the page: the number of matches and, for each, a ref to the element that holds it and the surrounding text. Use the ref with browser_click or browser_scroll_to.',
+      inputSchema: { type: 'object', properties: { text: { type: 'string' }, limit: { type: 'number' } }, required: ['text'] },
+      run: async (a) => (await browser()).find(String(a.text), typeof a.limit === 'number' ? a.limit : undefined),
+    },
+    {
       name: 'browser_click',
-      description: 'Click an element (trusted mouse input). Give ref (best), selector, or visible text.',
+      description: 'Click an element (trusted mouse input) — give ref (best), selector, or visible text. The result says where the page is now and what changed (navigation, dialogs, validation errors, messages). Refused on pages with a human check (CAPTCHA).',
       inputSchema: { type: 'object', properties: { ...TARGET_PROPS, double: { type: 'boolean' }, button: { type: 'string', enum: ['left', 'right'] } } },
       run: async (a) => (await browser()).click(target(a), { double: Boolean(a.double), button: a.button === 'right' ? 'right' : 'left' }),
     },
     {
       name: 'browser_type',
-      description: 'Type into a field (replaces what is there unless clear is false). submit presses Enter after.',
+      description: 'Type into one field (replaces what is there unless clear is false); submit presses Enter after. Refused for password, card, CVV and one-time-code fields — those are the user\'s (browser_handoff). For several fields use browser_fill.',
       inputSchema: { type: 'object', properties: { ...TARGET_PROPS, value: { type: 'string', description: 'What to type' }, clear: { type: 'boolean' }, submit: { type: 'boolean' } }, required: ['value'] },
       run: async (a) => (await browser()).type(target(a), String(a.value ?? ''), { clear: a.clear !== false, submit: Boolean(a.submit) }),
     },
@@ -243,7 +312,7 @@ export function createTools(ctx: DesktopContext): Tool[] {
     },
     {
       name: 'browser_press',
-      description: 'Press a key or chord: Enter, Tab, Escape, ArrowDown, PageDown, Ctrl+A, Shift+Tab…',
+      description: 'Press a key or chord: Enter, Tab, Escape, ArrowDown, PageDown, Ctrl+A, Shift+Tab… (typing characters into a password/card/code field is refused).',
       inputSchema: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] },
       run: async (a) => (await browser()).press(String(a.key)),
     },
@@ -263,30 +332,42 @@ export function createTools(ctx: DesktopContext): Tool[] {
       },
     },
     {
+      name: 'browser_scroll_to',
+      description: 'Scroll until an element (ref) or a piece of text is in view, and point it out to the user.',
+      inputSchema: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' } } },
+      run: async (a) => (await browser()).scrollTo({ ...(typeof a.ref === 'string' ? { ref: a.ref } : {}), ...(typeof a.text === 'string' ? { text: a.text } : {}) }),
+    },
+    {
       name: 'browser_wait',
-      description: 'Wait until text or a selector appears (timeoutMs up to 25000), or just wait ms.',
-      inputSchema: { type: 'object', properties: { text: { type: 'string' }, selector: { type: 'string' }, ms: { type: 'number' }, timeoutMs: { type: 'number' } } },
-      run: async (a) => (await browser()).waitFor({ text: a.text as string | undefined, selector: a.selector as string | undefined, ms: a.ms as number | undefined, timeoutMs: a.timeoutMs as number | undefined }),
+      description: 'Wait (timeoutMs up to 25000) until: text appears, gone text disappears, a selector matches, the URL contains url, the URL changes (urlChange), or the network goes idle (networkIdle). Or just wait ms.',
+      inputSchema: { type: 'object', properties: { text: { type: 'string' }, gone: { type: 'string' }, selector: { type: 'string' }, url: { type: 'string' }, urlChange: { type: 'boolean' }, networkIdle: { type: 'boolean' }, ms: { type: 'number' }, timeoutMs: { type: 'number' } } },
+      run: async (a) => (await browser()).waitFor({
+        text: a.text as string | undefined, gone: a.gone as string | undefined, selector: a.selector as string | undefined, url: a.url as string | undefined,
+        urlChange: a.urlChange === true, networkIdle: a.networkIdle === true, ms: a.ms as number | undefined, timeoutMs: a.timeoutMs as number | undefined,
+      }),
     },
     {
       name: 'browser_text',
-      description: 'The full text of the page, or of one element.',
+      description: 'The raw visible text of the page, or of one element. Prefer browser_read for reading.',
       inputSchema: { type: 'object', properties: TARGET_PROPS },
       run: async (a) => { const t = target(a); return (await browser()).text(Object.keys(t).length ? t : undefined); },
     },
     {
       name: 'browser_evaluate',
-      description: 'Run a JavaScript expression in the page and return its (JSON) value. For reading state; prefer click/type for actions.',
+      description: 'Run a JavaScript expression in the page and return its (JSON) value. For reading state only; use click/type/fill for actions. Refused on pages with a human check.',
       inputSchema: { type: 'object', properties: { expression: { type: 'string' } }, required: ['expression'] },
       run: async (a) => json(await (await browser()).evaluate(String(a.expression))),
     },
     {
       name: 'browser_screenshot',
-      description: 'Save a PNG of the page (fullPage for the whole scroll height) and return its path. Read the file to look at it.',
+      description: 'Look at the page: returns the screenshot as an image you can see (viewport, or fullPage for the whole scroll height), and saves a PNG whose path is given.',
       inputSchema: { type: 'object', properties: { fullPage: { type: 'boolean' } } },
       run: async (a) => {
-        const s = await (await browser()).screenshot({ fullPage: Boolean(a.fullPage) });
-        return json({ path: s.path, width: s.width, height: s.height });
+        const s = await (await browser()).screenshot({ fullPage: Boolean(a.fullPage), forModel: true });
+        const content: RichResult['content'] = [];
+        if (s.model) content.push({ type: 'image', data: s.model.data, mimeType: s.model.mimeType });
+        content.push({ type: 'text', text: json({ path: s.path, width: s.width, height: s.height }) });
+        return { content };
       },
     },
     {
@@ -303,8 +384,8 @@ export function createTools(ctx: DesktopContext): Tool[] {
     },
     {
       name: 'browser_tabs',
-      description: 'List, select, open or close browser tabs.',
-      inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['list', 'select', 'close', 'new'] }, id: { type: 'string' }, url: { type: 'string' } }, required: ['action'] },
+      description: 'List browser tabs (id, URL, title, active). Also: action select/close/new (same as browser_select_tab / browser_close_tab / browser_new_tab).',
+      inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['list', 'select', 'close', 'new'] }, id: { type: 'string' }, url: { type: 'string' } } },
       run: async (a) => {
         const b = await browser();
         if (a.action === 'select' && a.id) b.selectTab(String(a.id));
@@ -312,6 +393,24 @@ export function createTools(ctx: DesktopContext): Tool[] {
         if (a.action === 'new') await b.open(String(a.url ?? 'about:blank'), { newTab: true });
         return json(b.tabs());
       },
+    },
+    {
+      name: 'browser_select_tab',
+      description: 'Switch to a browser tab by id (from browser_tabs).',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      run: async (a) => { const b = await browser(); b.selectTab(String(a.id)); return json(b.tabs()); },
+    },
+    {
+      name: 'browser_new_tab',
+      description: 'Open a new tab (optionally at a URL) and switch to it.',
+      inputSchema: { type: 'object', properties: { url: { type: 'string' } } },
+      run: async (a) => { const b = await browser(); await b.open(String(a.url ?? 'about:blank'), { newTab: true }); return json(b.tabs()); },
+    },
+    {
+      name: 'browser_close_tab',
+      description: 'Close a tab by id (the current one when omitted).',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+      run: async (a) => { const b = await browser(); b.closeTab(a.id ? String(a.id) : undefined); return json(b.tabs()); },
     },
     {
       name: 'browser_navigate',
@@ -323,8 +422,42 @@ export function createTools(ctx: DesktopContext): Tool[] {
       },
     },
     {
+      name: 'browser_dialog',
+      description: 'JavaScript dialogs (alert / confirm / prompt / leave-page). With no arguments: list the open ones. With accept (true = OK, false = Cancel) and optional text (for prompt): answer one (id, or the current tab\'s). Ask the user before accepting anything that deletes, pays, sends or confirms something irreversible.',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' }, accept: { type: 'boolean' }, text: { type: 'string' } } },
+      run: async (a) => {
+        const b = await browser();
+        if (typeof a.accept !== 'boolean') {
+          const d = b.dialogs();
+          return d.length ? json(d) : 'No JavaScript dialog is open.';
+        }
+        return b.answerDialog({ id: typeof a.id === 'string' ? a.id : undefined, accept: a.accept, text: typeof a.text === 'string' ? a.text : undefined });
+      },
+    },
+    {
+      name: 'browser_downloads',
+      description: 'The browser\'s downloads (newest first): file name, saved path, state (progressing / completed / cancelled / interrupted / awaiting-confirmation), bytes, and whether you started it. Programs you download wait for the user to allow them. Read a completed file with your own file tools.',
+      inputSchema: { type: 'object', properties: { limit: { type: 'number' } } },
+      run: async (a) => {
+        const d = (await browser()).downloads().slice(0, typeof a.limit === 'number' ? a.limit : 20);
+        return d.length ? json(d) : 'No downloads yet.';
+      },
+    },
+    {
+      name: 'browser_upload',
+      description: 'Attach local files to a file-upload field (ref of the input or of its button). The user must approve every upload in AICO: this waits up to 20 s for their answer; if they have not answered, it returns an uploadId — poll browser_upload_wait. Never submits the form.',
+      inputSchema: { type: 'object', properties: { ...TARGET_PROPS, files: { type: 'array', items: { type: 'string' }, description: 'Absolute file paths' } }, required: ['files'] },
+      run: async (a) => (await browser()).upload(target(a), Array.isArray(a.files) ? a.files.map(String) : [String(a.files ?? '')]),
+    },
+    {
+      name: 'browser_upload_wait',
+      description: 'Wait up to `seconds` (max 25) for the user to approve or decline an upload started by browser_upload.',
+      inputSchema: { type: 'object', properties: { uploadId: { type: 'string' }, seconds: { type: 'number' } }, required: ['uploadId'] },
+      run: async (a) => (await browser()).uploadWait(String(a.uploadId), typeof a.seconds === 'number' ? a.seconds : undefined),
+    },
+    {
       name: 'browser_handoff',
-      description: 'Ask the user to do something in the browser that you must not — sign in, enter an MFA code, solve a CAPTCHA, approve a payment. Shows them a banner with your message and a Done button. Then poll browser_handoff_wait.',
+      description: 'Hand the page to the user for what you must not do: a CAPTCHA or "verify you are human" check, signing in, a password, an MFA / one-time code, card or payment details, an HTTP sign-in prompt. Shows them a banner with your message and a Done button. Then poll browser_handoff_wait.',
       inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
       run: async (a) => {
         const b = await browser();
@@ -416,13 +549,13 @@ export async function startMcp(ctx: DesktopContext): Promise<McpEndpoint> {
             const args = (msg.params?.arguments ?? {}) as Record<string, unknown>;
             const started = Date.now();
             try {
-              const text = await Promise.race([
+              const out = await Promise.race([
                 tool.run(args),
                 new Promise<string>((_, reject) => setTimeout(() => reject(new Error(`${name} took longer than 27s and was stopped.`)), 27_000)),
               ]);
               log(`ok ${name} ${Date.now() - started}ms`);
               ctx.emit('activity:tool', { name, ok: true, ms: Date.now() - started });
-              ok({ content: [{ type: 'text', text }] });
+              ok(typeof out === 'string' ? { content: [{ type: 'text', text: out }] } : out);
             } catch (err) {
               log(`error ${name}: ${(err as Error).message}`);
               ok({ content: [{ type: 'text', text: `Error: ${(err as Error).message}` }], isError: true });

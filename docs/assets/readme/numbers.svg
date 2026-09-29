@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="t d">
   <title id="t">AICO by the numbers</title>
-  <desc id="d">91% of 80 real SWE-bench Lite GitHub issues resolved (self-run); up to 96% prompt-cache hit; a DeepSeek cache hit costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 3,900+ automated checks.</desc>
+  <desc id="d">91% of 80 real SWE-bench Lite GitHub issues resolved (self-run); up to 96% prompt-cache hit; a DeepSeek cache hit costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 4,100+ automated checks.</desc>
   <defs>
     <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#FFFFFF"/>
@@ -53,7 +53,7 @@
     </g>
     <g transform="translate(852 274)" filter="url(#sh)">
       <rect width="380" height="146" rx="20" fill="url(#card)" stroke="#DDE3F7"/>
-      <text x="26" y="66" font-size="52" font-weight="800" fill="url(#num)">3,900+</text>
+      <text x="26" y="66" font-size="52" font-weight="800" fill="url(#num)">4,100+</text>
       <text x="26" y="98" font-size="17" font-weight="700" fill="#141B3A">automated checks on every change</text>
       <text x="26" y="124" font-size="14" fill="#5B647D">engine · web · desktop · live model probes</text>
     </g>
