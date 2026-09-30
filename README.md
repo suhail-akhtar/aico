@@ -180,6 +180,7 @@ for **Windows and Linux**, updating itself.
 - **Canvas / AICO Docs** — documents and code the agent writes and **you edit side by side**: a document page edited in place block by block (the Markdown stays exact), tabs, tables, charts, diagrams, infographics, images, comments with *@AICO*, templates, export to Word/PDF/HTML/Markdown, versions, restore, and *Ask AI* on a selection.
 - **An IDE behind the chat** — Monaco editor, real terminals, source control that never force-pushes, and GitHub through `gh`: review a PR, fix a failing check, diagnose an Action — with AI.
 - **An AI browser** — private, protected, learning and agent-driven; see below.
+- **Credentials it uses but never sees** — a vault the agent and browser draw on by name, and server operations over SSH, APIs, WinRM and SNMP; see below.
 - **It can see** — screenshots, images it reads or fetches, and pictures from any MCP tool reach models that read images; which models do is *learned* with a one-click probe, not guessed.
 - **Skills and agents, made your way** — import Claude-format `.skill` files, `SKILL.md` or folders; export them; define your own agents with tools, skills, a model and their own knowledge and scripts — or ask the agent to build them.
 - **Plugins, all the way down** — every feature is a plugin you can switch off; add pages, commands, themes, widgets and standing instructions with a JSON manifest, or say *"make me a plugin that…"*.
@@ -224,8 +225,26 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **Ask AICO about any page.** The copilot, docked or floating over the live page, knows what you are looking at and suggests what fits it — *Compare prices* on a product, *Summarize reviews*, *Fact-check* an article, *Scale this recipe*, *Match this job to my skills*, *Draft a reply* in your mail, *Review this order before I pay* at a checkout. Right-click any link, image or selection to ask about it.
 - **Let it do the work.** The agent reads pages as clean Markdown, fills whole forms (with your saved profile when you ask), answers dialogs, compares tabs, and reports what changed after every action — the element it is about to touch is highlighted and **Stop** / **Take over** are one click away. Ask *"what was I researching last week?"* or *"clean up my idle tabs"* and it uses what the browser learned — and asks before closing anything.
 - **Private by default.** Trackers and third-party cookies blocked, HTTPS-first, Global Privacy Control sent, a Chrome-standard identity with no "Electron" fingerprint, and **everything it learns stays on this computer** — no telemetry, no account.
-- **Safe by design.** It never solves CAPTCHAs or "I'm human" checks, never types passwords, card numbers or one-time codes, and asks before anything that buys, books, sends or deletes. Your passwords live in an encrypted vault that fills only when *you* click — the agent, the copilot and the model never see them.
+- **Knows what you have open — and what you read.** The copilot always has a one-line picture of every open tab (page type, price, rating), so *"which of my open tabs is cheapest?"* needs no clicking around. Switch on **memory by meaning** and it remembers the pages you actually read, encrypted on this computer: *"where was that red leather jacket I looked at last week?"* finds it even after the tab is closed.
+- **Can't be talked into things.** Pages can hide instructions for AI in invisible text. AICO strips text a person cannot see and marks instructions aimed at the AI as untrusted page content before the model reads anything — and the shields panel shows what it caught.
+- **Safe by design.** It never solves CAPTCHAs or "I'm human" checks, never *sees* a password, card number or one-time code, and a purchase, send or delete waits for your Allow — enforced in code. It can sign in from the vault on the site a credential belongs to, without the value ever reaching the model.
 - **Pop it out.** One click (Ctrl+Shift+N) moves every tab into its own window without reloading a thing; close it and they come home.
+
+### 🔐 Credentials the agent uses but never sees
+
+Ask AICO to set up a server and it creates the service's admin account itself —
+a strong password stored straight into the **credential vault**, bound to that
+host. The model only ever handles a name like `{{secret:grafana-admin}}`; trusted
+code puts the real value in at the moment of use and blanks it out of anything
+that comes back — tool output, logs, the stream, transcripts, even when encoded.
+Later, *"show me the portal"* signs the browser in from the vault: no hand-over,
+and you never had to know the password.
+
+- **One vault** for browser passwords, SSH keys, API tokens, WinRM, SNMP and database credentials — sealed with your OS keychain, with a Credential Manager to add, restrict, rotate, reveal (after a confirmation) and audit every use.
+- **Secrets pasted into chat** are moved into the vault before the model reads them.
+- **Server operations** — `SshExec`, `SshCopy`, `SshTunnel`, `HttpRequest`, `WinRmExec`, `SnmpQuery`: host keys pinned, cloud metadata addresses refused, and destructive commands, first connections and device changes always asked first. Long runs are supervised like any background work.
+
+Details: [docs/security/credential-broker.md](docs/security/credential-broker.md) · [docs/security/ops-tools.md](docs/security/ops-tools.md)
 
 ---
 

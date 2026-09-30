@@ -191,10 +191,22 @@
       <strong>Bring everything over.</strong> Import bookmarks, history and addresses straight
       from Chrome, Edge, Brave, Vivaldi, Opera and Firefox (their files are only read), and
       passwords from the export file your browser or password manager makes. Passwords live in
-      an encrypted vault that fills a sign-in form only when you click — the agent, the copilot
-      and the model never see them. It never solves CAPTCHAs or "I'm human" checks, never types
-      passwords, card numbers or one-time codes, and asks before anything that buys, books,
-      sends or deletes.
+      one encrypted vault; the agent can sign in from it on the site a credential belongs to, but
+      the agent, the copilot and the model never see a value. It never solves CAPTCHAs or "I'm
+      human" checks, and a purchase, send or delete waits for your Allow — enforced in code.
+    </p>
+    <p>
+      <strong>It knows what you have open, and what you read.</strong> The copilot keeps a
+      one-line picture of every open tab — page type, price, rating — so "which of my open tabs
+      is cheapest?" needs no clicking around. Turn on <em>memory by meaning</em> and it remembers
+      the pages you actually read, encrypted on this computer, so "where was that red leather
+      jacket I looked at last week?" finds it after the tab is long closed.
+    </p>
+    <p>
+      <strong>It can't be talked into things.</strong> A page can hide instructions for an AI in
+      text you cannot see. Before the model reads anything, AICO strips invisible text and marks
+      instructions aimed at the AI as untrusted page content; the shields panel lists what it
+      caught.
     </p>
     <p>
       <strong>And it can see what it looks at.</strong> On a model that reads images, a
@@ -217,11 +229,28 @@
       Appearance, Your data, Engine and Help submenus.
     </p>
 
+    <h2>Credentials the agent uses but never sees — and your servers</h2>
+    <p>
+      Ask AICO to set up a server and it creates the service's admin account itself: a strong
+      password stored straight into the <strong>credential vault</strong>, bound to that host.
+      The model only ever handles a name; trusted code puts the real value in at the moment of
+      use and blanks it out of everything that comes back — tool output, logs, transcripts, even
+      encoded. Later, "show me the portal" signs the browser in from the vault. One vault holds
+      browser passwords, SSH keys, API tokens and WinRM, SNMP and database credentials, sealed
+      with your OS keychain, managed in a Credential Manager with an audit of every use. The
+      agent runs <code>SshExec</code>, <code>SshCopy</code>, <code>SshTunnel</code>,
+      <code>HttpRequest</code>, <code>WinRmExec</code> and <code>SnmpQuery</code> with pinned
+      host keys, and asks before a first connection or anything destructive.
+    </p>
+
     <h2>Canvas — write together</h2>
     <p>
       For anything you will iterate on — an email, a report, a spec, a code file — the
-      agent opens a <strong>canvas</strong> beside the chat. You edit it directly (Markdown
-      with a live preview and a formatting toolbar, or Monaco for code); the agent edits
+      agent opens a document beside the chat (<strong>AICO Docs</strong>): an outline of
+      placeholders first, then each section written while you watch. You edit the page in
+      place, block by block; add tables, charts, diagrams, infographics and images; comment
+      with <em>@AICO</em>; use tabs and templates; and export to Word, PDF, HTML or Markdown
+      with everything as it looks, a contents page and a cover. The agent edits
       the same document and your open panel updates live. Every save is a version with who
       wrote it, any version can be restored, and <em>Ask AI</em> on a selection rewrites just
       that passage. Live sports scores, fixtures and tables arrive as scoreboard cards.
