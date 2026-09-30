@@ -403,7 +403,20 @@ export { storeAttachment, readStoredAttachment } from './server/attachments.js';
 export {
   createCanvas, getCanvas, listCanvases, writeCanvas, restoreCanvas, applyFindReplace, onCanvasChange,
   CANVAS_VERSION_CAP, CANVAS_MAX_CHARS,
+  migrateCanvas, addTab, renameTab, deleteTab, addComment, replyToComment, resolveComment, listComments,
+  onCanvasActivity, onCanvasComments, setDocSettings,
 } from './canvas/store.js';
+export {
+  listSections, findSection, replaceSection, pendingBlocks, pendingLine, parsePendingLine, stripPending, sectionAt,
+} from './canvas/sections.js';
+export { locate as locateAnchor, reanchor, project as projectMarkdown, addressesAgent } from './canvas/comments.js';
+export { exportCanvas, exportSource, toHtml, buildHtml, headingPages } from './canvas/export.js';
+export { cleanSettings, mergeSettings, resolveSettings, templateById, TEMPLATES } from './canvas/doc-settings.js';
+export { parseInfographic, parseImageAttrs, normalizeAlternateSyntax } from './canvas/infographics.js';
+export { collectVisuals, renderVisuals, chartSvg, launchExportBrowser, rendererRoot, clearVisualCache } from './canvas/visuals.js';
+export { collectHeadings } from './canvas/doc-model.js';
+export { workspaceImages, decodeDataUrl, parseMarkdown } from './canvas/markdown.js';
+export { commentPrompt } from './server/canvas-routes.js';
 export { canvasTool, canvasDefinition } from './tools/canvas.js';
 // -- Credential vault & broker --
 export {

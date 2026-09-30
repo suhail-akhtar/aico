@@ -6,24 +6,45 @@
  * document is the one place its text is, and an edit the person makes in the
  * editor is what the agent reads next — not a stale copy from three turns ago.
  *
- * `update` and `edit` name the version they were based on. If the person (or
- * anything else) changed the canvas since, the write is refused and the
- * result carries the latest content to re-apply the change to. That is
- * enforced here rather than asked for in the prompt: a model that remembers
- * the text is exactly the model that stops re-reading it.
+ * `update`, `edit` and `write_section` name the version they were based on.
+ * If the person (or anything else) changed the tab since, the write is
+ * refused and the result carries the latest content to re-apply the change
+ * to. That is enforced here rather than asked for in the prompt: a model that
+ * remembers the text is exactly the model that stops re-reading it.
+ *
+ * ## AICO Docs: outline first, then one section at a time
+ *
+ * A long document written in one `create` is minutes of nothing and then a
+ * wall. `outline` lays down a placeholder per section (the person sees the
+ * skeleton at once), and `write_section` fills one at a time, each a small
+ * version-checked write announced on the stream as `canvas-activity` so the
+ * editor can show where the agent is writing. Tabs, comments (which the agent
+ * answers with `reply_comment`) and `export` (md/html/docx/pdf) complete it.
+ * Contract: `docs/engineering/canvas-docs-contract.md`.
  *
  * @module tools/canvas
  */
 
+import path from 'path';
+import { mkdir, writeFile } from 'fs/promises';
 import { currentRunContext } from '../run-context.js';
-import { getWorkspaceRuntime } from '../workspace.js';
+import { getWorkspaceInfo, getWorkspaceRuntime } from '../workspace.js';
 import {
-  applyFindReplace, createCanvas, getCanvas, listCanvases, writeCanvas,
-  type CanvasContext, type CanvasDoc,
+  addTab, announceActivity, applyFindReplace, createCanvas, getCanvas, listCanvases, listComments,
+  renameTab, replyToComment, setDocSettings, writeCanvas,
+  type CanvasContext, type CanvasDoc, type CanvasTab,
 } from '../canvas/store.js';
+import {
+  SECTION_ID, findSection, pendingBlocks, pendingLine, replaceSection, sectionAt,
+} from '../canvas/sections.js';
+import { EXPORT_FORMATS, exportCanvas, type ExportFormat } from '../canvas/export.js';
+import { TEMPLATES, mergeSettings, resolveSettings, templateById, type DocSettings } from '../canvas/doc-settings.js';
+import { workspaceImages } from '../canvas/markdown.js';
+import { resolveInsideWorkspace } from './path.js';
 
 export interface CanvasInput {
-  action?: 'create' | 'read' | 'update' | 'edit' | 'list';
+  action?: 'create' | 'read' | 'update' | 'edit' | 'list' | 'outline' | 'write_section' | 'add_tab' | 'rename_tab'
+    | 'comments' | 'reply_comment' | 'export' | 'settings';
   id?: string;
   title?: string;
   kind?: 'document' | 'code';
@@ -34,6 +55,18 @@ export interface CanvasInput {
   replace?: string;
   all?: boolean;
   note?: string;
+  tab?: string;
+  tabs?: { title?: string }[];
+  sections?: { id?: string; intent?: string; heading?: string; tab?: string }[];
+  section?: string;
+  commentId?: string;
+  body?: string;
+  resolve?: boolean;
+  format?: string;
+  template?: string;
+  settings?: Record<string, unknown>;
+  toc?: boolean;
+  path?: string;
 }
 
 function context(): CanvasContext {
@@ -48,15 +81,31 @@ function ref(doc: CanvasDoc): string {
   return `\`\`\`canvas\n${JSON.stringify(card)}\n\`\`\``;
 }
 
-function describe(doc: CanvasDoc): string {
-  const last = doc.versions[doc.versions.length - 1];
-  const by = last?.author === 'user' ? 'the user' : 'you (the agent)';
-  const what = doc.kind === 'code' ? `code${doc.language ? `, ${doc.language}` : ''}` : 'document';
-  return `Canvas ${doc.id} "${doc.title}" (${what}) — version ${doc.version}, last edited by ${by}.`;
+function tabFor(doc: CanvasDoc, tab: string | undefined): CanvasTab {
+  if (tab === undefined || tab === '') return doc.tabs[0]!;
+  const t = doc.tabs.find(x => x.id === tab) ?? doc.tabs.find(x => x.title.toLowerCase() === String(tab).trim().toLowerCase());
+  if (!t) throw new Error(`Canvas ${doc.id} has no tab "${tab}". Tabs: ${doc.tabs.map(x => `${x.id} "${x.title}"`).join(', ')}.`);
+  return t;
 }
 
-function body(doc: CanvasDoc): string {
-  return `----- canvas content (version ${doc.version}) -----\n${doc.content}\n----- end of canvas -----`;
+function tabLabel(doc: CanvasDoc, tab: CanvasTab): string {
+  return doc.tabs.length > 1 ? ` tab ${tab.id} "${tab.title}"` : '';
+}
+
+function describe(doc: CanvasDoc, tab: CanvasTab = doc.tabs[0]!): string {
+  const last = [...doc.versions].reverse().find(v => (v.tab ?? 't1') === tab.id);
+  const by = last?.author === 'user' ? 'the user' : 'you (the agent)';
+  const what = doc.kind === 'code' ? `code${doc.language ? `, ${doc.language}` : ''}` : 'document';
+  return `Canvas ${doc.id} "${doc.title}" (${what})${tabLabel(doc, tab)} — version ${tab.version}, last edited by ${by}.`;
+}
+
+function tabsLine(doc: CanvasDoc): string {
+  if (doc.tabs.length < 2) return '';
+  return `\nTabs: ${doc.tabs.map(t => `${t.id} "${t.title}" (version ${t.version})`).join(', ')}. Pass tab to read or write another one.`;
+}
+
+function body(doc: CanvasDoc, tab: CanvasTab = doc.tabs[0]!): string {
+  return `----- canvas content (${doc.tabs.length > 1 ? `tab ${tab.id}, ` : ''}version ${tab.version}) -----\n${tab.content}\n----- end of canvas -----`;
 }
 
 function card(doc: CanvasDoc): string {
@@ -65,12 +114,13 @@ function card(doc: CanvasDoc): string {
     + ref(doc);
 }
 
-function stale(doc: CanvasDoc, base: number | undefined): Error {
-  const who = doc.versions[doc.versions.length - 1]?.author === 'user' ? 'The user edited it' : 'It changed';
+function stale(doc: CanvasDoc, tab: CanvasTab, base: number | undefined): Error {
+  const last = [...doc.versions].reverse().find(v => (v.tab ?? 't1') === tab.id);
+  const who = last?.author === 'user' ? 'The user edited it' : 'It changed';
   return new Error(
-    `NOT APPLIED — canvas ${doc.id} is at version ${doc.version}, not ${base ?? '(no version given)'}. `
-    + `${who} since your last read. Re-apply your change to this latest content and pass version: ${doc.version}.\n`
-    + `${describe(doc)}\n${body(doc)}`,
+    `NOT APPLIED — canvas ${doc.id}${tabLabel(doc, tab)} is at version ${tab.version}, not ${base ?? '(no version given)'}. `
+    + `${who} since your last read. Re-apply your change to this latest content and pass version: ${tab.version}.\n`
+    + `${describe(doc, tab)}\n${body(doc, tab)}`,
   );
 }
 
@@ -81,9 +131,60 @@ async function load(ctx: CanvasContext, id: string | undefined): Promise<CanvasD
     const known = await listCanvases(ctx);
     throw new Error(`No canvas "${id}" in this chat.${known.length
       ? ` Canvases here: ${known.map(c => `${c.id} "${c.title}"`).join(', ')}.`
-      : ' There are none yet — use create.'}`);
+      : ' There are none yet — use create or outline.'}`);
   }
   return doc;
+}
+
+function pendingNote(tab: CanvasTab): string {
+  const left = pendingBlocks(tab.content);
+  if (left.length === 0) return '';
+  return `\nStill to write: ${left.map(p => `${p.id}${p.heading ? ` (${p.heading})` : ''}`).join(', ')}.`;
+}
+
+/** Run a write with `canvas-activity` frames either side, however it ends. */
+async function withActivity<T>(ctx: CanvasContext, doc: CanvasDoc, tab: CanvasTab, where: { section?: string; heading?: string },
+  fn: () => Promise<T>): Promise<T> {
+  const base = {
+    sessionId: ctx.sessionId, canvasId: doc.id, tabId: tab.id, by: 'agent' as const,
+    ...(where.section ? { section: where.section } : {}), ...(where.heading ? { heading: where.heading } : {}),
+  };
+  announceActivity({ ...base, status: 'writing' });
+  try {
+    return await fn();
+  } finally {
+    announceActivity({ ...base, status: 'done' });
+  }
+}
+
+function describeSettings(stored: Partial<DocSettings> | undefined): string {
+  const s = resolveSettings(stored);
+  return [
+    `${s.pageSize} ${s.orientation}`, `${s.font}`, s.cover?.enabled ? 'cover page' : 'no cover', s.toc ? 'contents' : 'no contents',
+    s.pageNumbers ? 'page numbers' : 'no page numbers', ...(s.header ? [`header "${s.header}"`] : []), ...(s.footer ? [`footer "${s.footer}"`] : []),
+    ...(s.watermark ? [`watermark "${s.watermark}"`] : []),
+  ].join(', ');
+}
+
+function cleanSections(input: CanvasInput['sections']): { id: string; intent: string; heading?: string; tab?: string }[] {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error('`sections` is required for outline: [{id: "s1", intent: "what this section will say", heading?: "Its heading"}, …].');
+  }
+  if (input.length > 60) throw new Error('an outline holds at most 60 sections — split the document into tabs or shorter documents.');
+  const seen = new Set<string>();
+  return input.map((s, i) => {
+    const id = typeof s?.id === 'string' && s.id.trim() ? s.id.trim() : `s${i + 1}`;
+    if (!SECTION_ID.test(id)) throw new Error(`section id "${id}" must be letters, digits, - or _ (e.g. "s${i + 1}").`);
+    if (seen.has(id)) throw new Error(`section id "${id}" is used twice — each section needs its own id.`);
+    seen.add(id);
+    const intent = typeof s?.intent === 'string' ? s.intent.trim() : '';
+    if (!intent) throw new Error(`section "${id}" needs an intent — one line on what it will cover.`);
+    return {
+      id, intent: intent.slice(0, 300),
+      ...(typeof s.heading === 'string' && s.heading.trim() ? { heading: s.heading.trim().slice(0, 200) } : {}),
+      ...(typeof s.tab === 'string' && s.tab.trim() ? { tab: s.tab.trim() } : {}),
+    };
+  });
 }
 
 export async function canvasTool(input: CanvasInput): Promise<string> {
@@ -95,17 +196,20 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
       const all = await listCanvases(ctx);
       if (all.length === 0) return 'No canvases in this chat yet.';
       return ['Canvases in this chat (newest first):', ...all.map(c =>
-        `- ${c.id} "${c.title}" — ${c.kind}${c.language ? ` (${c.language})` : ''}, version ${c.version}, `
+        `- ${c.id} "${c.title}" — ${c.kind}${c.language ? ` (${c.language})` : ''}, version ${c.version}${c.tabs > 1 ? `, ${c.tabs} tabs` : ''}, `
         + `last edited by ${c.author === 'user' ? 'the user' : 'the agent'}, ${c.chars.toLocaleString()} characters`)].join('\n');
     }
 
     case 'read': {
       const doc = await load(ctx, input.id);
-      return `${describe(doc)}\nPass version: ${doc.version} when you update or edit it.\n${body(doc)}`;
+      const tab = tabFor(doc, input.tab);
+      const open = doc.comments.filter(c => !c.resolved).length;
+      return `${describe(doc, tab)}\nPass version: ${tab.version}${doc.tabs.length > 1 ? ` (and tab: "${tab.id}")` : ''} when you update, edit or write_section.`
+        + `${tabsLine(doc)}${pendingNote(tab)}${open ? `\n${open} open comment${open === 1 ? '' : 's'} — see action comments.` : ''}\n${body(doc, tab)}`;
     }
 
     case 'create': {
-      if (typeof input.content !== 'string') throw new Error('`content` is required to create a canvas (Markdown for a document, source for code).');
+      if (typeof input.content !== 'string') throw new Error('`content` is required to create a canvas (Markdown for a document, source for code). For a long document use outline instead.');
       if (!input.title?.trim()) throw new Error('`title` is required to create a canvas.');
       const doc = await createCanvas(ctx, {
         title: input.title, kind: input.kind ?? 'document', content: input.content, author: 'agent',
@@ -114,66 +218,255 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
       return `Created canvas ${doc.id} "${doc.title}" (${doc.kind}), version 1. The user can now edit it directly.\n${card(doc)}`;
     }
 
+    case 'outline': {
+      if (!input.title?.trim()) throw new Error('`title` is required for outline.');
+      if (input.kind && input.kind !== 'document') throw new Error('outline makes documents; for code use create with kind "code".');
+      const template = input.template ? templateById(input.template) : undefined;
+      if (input.template && !template) {
+        throw new Error(`Unknown template "${input.template}". Templates: ${TEMPLATES.map(t => t.id).join(', ')}.`);
+      }
+      const sections = cleanSections(input.sections?.length ? input.sections : template?.sections);
+      const docSettings = mergeSettings(template?.docSettings, input.settings ?? {});
+      const tabTitles = (Array.isArray(input.tabs) ? input.tabs : [])
+        .map((t, i) => (typeof t?.title === 'string' && t.title.trim() ? t.title.trim() : `Tab ${i + 1}`));
+      if (tabTitles.length === 0) tabTitles.push('Tab 1');
+      const tabIndex = (name: string | undefined): number => {
+        if (!name) return 0;
+        const byId = /^t(\d+)$/.exec(name);
+        if (byId && Number(byId[1]) >= 1 && Number(byId[1]) <= tabTitles.length) return Number(byId[1]) - 1;
+        const i = tabTitles.findIndex(t => t.toLowerCase() === name.toLowerCase());
+        if (i < 0) throw new Error(`section tab "${name}" is not one of the outline's tabs: ${tabTitles.map((t, j) => `t${j + 1} "${t}"`).join(', ')}.`);
+        return i;
+      };
+      const contents = tabTitles.map(() => [] as string[]);
+      for (const s of sections) contents[tabIndex(s.tab)]!.push(pendingLine(s));
+      // A contents list the reader can see in the app too, where the settings ask for one.
+      if (docSettings.toc) contents[0]!.unshift('<!-- aico:toc -->');
+      const text = contents.map(lines => (lines.length ? `${lines.join('\n\n')}\n` : ''));
+      const doc = await createCanvas(ctx, {
+        title: input.title, kind: 'document', content: text[0]!, author: 'agent', note: 'Outline',
+        firstTabTitle: tabTitles[0],
+        tabs: tabTitles.slice(1).map((title, i) => ({ title, content: text[i + 1] })),
+        ...(Object.keys(docSettings).length ? { docSettings } : {}),
+      });
+      const order = sections.map(s => `${s.id}${s.heading ? ` "${s.heading}"` : ''}${doc.tabs.length > 1 ? ` (tab ${`t${tabIndex(s.tab) + 1}`})` : ''}`);
+      return `Outlined canvas ${doc.id} "${doc.title}" with ${sections.length} pending section${sections.length === 1 ? '' : 's'}: ${order.join(', ')}. `
+        + `Every tab is at version 1.${template ? ` Template "${template.id}" set up the export (${describeSettings(doc.docSettings)}).` : ''}\n`
+        + 'Next: tell the user in ONE short line what you are writing (e.g. "Drafting the brief now — 5 sections."), do any research you need, '
+        + 'then call write_section once per section, in order, with the section id, its Markdown (starting with its heading), and the '
+        + 'version each result gives you. Do not paste the document into the chat.\n'
+        + card(doc);
+    }
+
+    case 'write_section':
     case 'update':
     case 'edit': {
       const doc = await load(ctx, input.id);
-      if (typeof input.version !== 'number' || input.version !== doc.version) throw stale(doc, input.version);
+      const tab = tabFor(doc, input.tab);
+      if (typeof input.version !== 'number' || input.version !== tab.version) throw stale(doc, tab, input.version);
       let content: string;
-      if (action === 'update') {
-        if (typeof input.content !== 'string') throw new Error('`content` is required for update (the whole new text). For a targeted change use edit with find/replace.');
+      let where: { section?: string; heading?: string } = {};
+      let alias: { id: string; heading: string } | undefined;
+      if (action === 'write_section') {
+        if (typeof input.content !== 'string' || !input.content.trim()) {
+          throw new Error('`content` is required for write_section: the section\'s Markdown, starting with its heading.');
+        }
+        const found = findSection(tab.content, input.section ?? '', tab.sectionIds ?? {});
+        if (!found.ok) throw new Error(`NOT APPLIED — ${found.error}`);
+        const replaced = replaceSection(tab.content, found.section, input.content);
+        content = replaced.content;
+        const sectionName = found.section.type === 'pending' ? found.section.id! : (input.section ?? '').trim();
+        where = { section: sectionName, ...(found.section.heading ? { heading: found.section.heading } : {}) };
+        if (found.section.type === 'pending' && replaced.heading) alias = { id: found.section.id!, heading: replaced.heading };
+        else if (found.section.type === 'heading' && replaced.heading && replaced.heading !== found.section.heading) {
+          // Renamed by the rewrite: keep any id that pointed at the old heading pointing at the new one.
+          const id = Object.entries(tab.sectionIds ?? {}).find(([, h]) => h === found.section.heading)?.[0];
+          if (id) alias = { id, heading: replaced.heading };
+        }
+      } else if (action === 'update') {
+        if (typeof input.content !== 'string') throw new Error('`content` is required for update (the whole new text). For a targeted change use edit with find/replace, or write_section for one section.');
         content = input.content;
       } else {
-        const r = applyFindReplace(doc.content, input.find ?? '', input.replace ?? '', input.all === true);
+        const r = applyFindReplace(tab.content, input.find ?? '', input.replace ?? '', input.all === true);
         if (!r.ok) throw new Error(`NOT APPLIED — ${r.error}`);
         content = r.content;
+        const at = sectionAt(tab.content, tab.content.indexOf(input.find ?? ''));
+        if (at && input.all !== true) {
+          where = at.type === 'pending' ? { section: at.id!, ...(at.heading ? { heading: at.heading } : {}) } : { section: at.heading!, heading: at.heading! };
+        }
       }
-      const written = await writeCanvas(ctx, doc.id, {
-        content, baseVersion: doc.version, author: 'agent',
-        ...(input.note ? { note: input.note } : {}),
-        ...(input.title?.trim() ? { title: input.title } : {}),
+      const written = await withActivity(ctx, doc, tab, where, () => writeCanvas(ctx, doc.id, {
+        content, baseVersion: tab.version, author: 'agent', tab: tab.id,
+        ...(input.note ? { note: input.note } : action === 'write_section' ? { note: `Wrote ${where.heading ?? where.section}` } : {}),
+        ...(input.title?.trim() && action !== 'write_section' ? { title: input.title } : {}),
+        ...(alias ? { sectionAlias: alias } : {}),
+      }));
+      if (!written.ok) throw stale(written.canvas, tabFor(written.canvas, tab.id), input.version);
+      const nowTab = tabFor(written.canvas, tab.id);
+      if (!written.changed) return `Canvas ${doc.id}${tabLabel(doc, tab)} already has that content — still version ${tab.version}.`;
+      if (action === 'write_section') {
+        const left = pendingBlocks(nowTab.content);
+        return `Wrote ${where.heading ? `"${where.heading}"` : where.section} in canvas ${doc.id}${tabLabel(written.canvas, nowTab)} — now version ${nowTab.version} `
+          + `(pass version: ${nowTab.version} next).${left.length
+            ? ` Next pending: ${left.map(p => p.id).join(', ')}.`
+            : ' No pending sections left in this tab.'}${left.length ? '' : `\n${card(written.canvas)}`}`;
+      }
+      return `Canvas ${doc.id} "${written.canvas.title}"${tabLabel(written.canvas, nowTab)} is now version ${nowTab.version}.${pendingNote(nowTab)}\n${card(written.canvas)}`;
+    }
+
+    case 'add_tab': {
+      const doc = await load(ctx, input.id);
+      const { canvas, tab } = await addTab(ctx, doc.id, {
+        ...(input.title ? { title: input.title } : {}), content: input.content ?? '', author: 'agent',
       });
-      if (!written.ok) throw stale(written.canvas, input.version);
-      if (!written.changed) return `Canvas ${doc.id} already has that content — still version ${doc.version}.`;
-      return `Canvas ${doc.id} "${written.canvas.title}" is now version ${written.canvas.version}.\n${card(written.canvas)}`;
+      return `Added tab ${tab.id} "${tab.title}" to canvas ${canvas.id} (version 1). Write to it with tab: "${tab.id}".`;
+    }
+
+    case 'rename_tab': {
+      const doc = await load(ctx, input.id);
+      if (!input.title?.trim()) throw new Error('`title` is required for rename_tab (the new name), with `tab` naming which tab.');
+      const tab = tabFor(doc, input.tab);
+      const next = await renameTab(ctx, doc.id, tab.id, input.title);
+      return `Tab ${tab.id} of canvas ${doc.id} is now "${tabFor(next, tab.id).title}".`;
+    }
+
+    case 'comments': {
+      const doc = await load(ctx, input.id);
+      const open = await listComments(ctx, doc.id, { open: true });
+      if (open.length === 0) return `Canvas ${doc.id} has no open comments.`;
+      return [`Open comments on canvas ${doc.id} (answer with reply_comment; edit the text if they ask for a change):`,
+        ...open.map((c) => {
+          const tab = doc.tabs.find(t => t.id === c.tabId);
+          const thread = c.replies.map(r => `\n    ↳ ${r.author === 'agent' ? 'you' : 'user'}: ${r.body}`).join('');
+          return `- ${c.id}${doc.tabs.length > 1 && tab ? ` [tab ${tab.id} "${tab.title}"]` : ''}${c.orphaned ? ' [the quoted text is no longer in the document]' : ''} `
+            + `on "${c.anchor.quote.length > 200 ? `${c.anchor.quote.slice(0, 200)}…` : c.anchor.quote}" — ${c.author === 'agent' ? 'you' : 'user'}: ${c.body}${thread}`;
+        })].join('\n');
+    }
+
+    case 'reply_comment': {
+      const doc = await load(ctx, input.id);
+      if (!input.commentId) throw new Error('`commentId` is required — action comments lists them.');
+      if (typeof input.body !== 'string' || !input.body.trim()) throw new Error('`body` is required: your reply.');
+      const { comment } = await replyToComment(ctx, doc.id, input.commentId, { body: input.body, author: 'agent', resolve: input.resolve === true });
+      return `Replied to comment ${comment.id} on canvas ${doc.id}${comment.resolved ? ' and resolved it' : ''}.`;
+    }
+
+    case 'export': {
+      const doc = await load(ctx, input.id);
+      const format = String(input.format ?? '').toLowerCase().replace(/^\./, '') as ExportFormat;
+      if (!EXPORT_FORMATS.includes(format)) throw new Error(`\`format\` must be one of ${EXPORT_FORMATS.join(', ')}.`);
+      const result = await exportCanvas(doc, {
+        format, ...(input.tab ? { tab: input.tab } : {}), resolveImage: workspaceImages(ctx.cwd),
+        ...(input.settings ? { settings: input.settings } : {}), ...(typeof input.toc === 'boolean' ? { toc: input.toc } : {}),
+      });
+      let target: string;
+      if (input.path?.trim()) {
+        target = resolveInsideWorkspace(input.path.trim(), 'path');
+        if (!path.extname(target)) target = path.join(target, result.fileName);
+      } else {
+        const info = getWorkspaceInfo({ settings: ctx.settings, cwd: ctx.cwd, sessionId: ctx.sessionId });
+        target = path.join(info.artifactsDir ?? path.join(ctx.cwd, 'exports'), result.fileName);
+      }
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, result.bytes);
+      const warned = result.warnings.length
+        ? `\nNot drawn (shown as a placeholder with its source): ${[...new Set(result.warnings)].join('; ')}. Fix the block if it is wrong.` : '';
+      return `Exported canvas ${doc.id} "${doc.title}" as ${format} (${result.bytes.length.toLocaleString()} bytes): ${target}${warned}\n`
+        + 'Tell the user the path; the canvas editor can also download it directly.';
+    }
+
+    case 'settings': {
+      const doc = await load(ctx, input.id);
+      if (!input.settings || typeof input.settings !== 'object') {
+        return `Canvas ${doc.id} export settings: ${describeSettings(doc.docSettings)}. Pass settings: {…} to change them.`;
+      }
+      const next = await setDocSettings(ctx, doc.id, input.settings);
+      return `Canvas ${doc.id} export settings: ${describeSettings(next.docSettings)}.`;
     }
 
     default:
-      throw new Error(`Unknown action "${String(action)}". Use create, read, update, edit or list.`);
+      throw new Error(`Unknown action "${String(action)}". Use create, outline, read, write_section, update, edit, list, add_tab, rename_tab, comments, reply_comment, settings or export.`);
   }
 }
 
 export const canvasDefinition = {
   name: 'Canvas',
   description:
-    'A document or code file that you write and the user edits directly, side by side with the chat. '
-    + 'Use it for anything the user will iterate on — essays, emails, reports, specs, a code file — instead of '
-    + 'pasting long text into the chat. Actions:\n'
-    + '- create {title, kind: "document"|"code", language?, content} — content is Markdown for a document, source code for code.\n'
-    + '- read {id} — the latest content and its version. The user edits canvases directly, so ALWAYS read before '
-    + 'changing one they may have touched.\n'
-    + '- edit {id, version, find, replace, all?} — replace one exact passage (like Edit): `find` must occur exactly once '
-    + 'unless all: true. Prefer this for targeted changes.\n'
-    + '- update {id, version, content} — replace the whole text (rewrites, big restructures).\n'
-    + '- list — the canvases in this chat.\n'
-    + '`version` is the version your last read/create/update returned. If the canvas changed since, the write is refused '
-    + 'and the result carries the latest content — re-apply your change to it. After create/update/edit, put the '
-    + '```canvas block from the result in your reply: it is only a reference card that opens the canvas, never repeat '
-    + 'the content in the chat. A message like "Edit canvas <id> — …" means: read that canvas, then edit it.',
+    'A document or code file that you write and the user edits directly, side by side with the chat (AICO Docs). '
+    + 'Use it for anything the user will iterate on — essays, emails, reports, briefs, specs, a code file — instead of '
+    + 'pasting long text into the chat. NEVER paste a canvas\'s content into the chat.\n'
+    + 'Long documents (more than a few paragraphs): 1) outline {title, sections:[{id, intent, heading}]} — the user sees the '
+    + 'skeleton at once; 2) send the user ONE short progress line (what you are writing); 3) research if needed; 4) write_section '
+    + 'once per section, in order. Short pieces: create. For a known kind of document pass outline {template} — '
+    + `${TEMPLATES.map(t => t.id).join(', ')} — which supplies the sections (when you give none) and the page setup.\n`
+    + 'Rich blocks render in the app and in every export: ```chart (ECharts JSON), ```mermaid, $$maths$$, tables, '
+    + '```stats {"items":[{"value","label","delta"}]}, ```timeline {"items":[{"date","title","text"}]}, ```steps {"items":[{"title","text"}]}, '
+    + '```comparison {"columns":[{"title","items":[…],"highlight"}]}, ```callout info|warn|success (Markdown body), '
+    + '<!-- aico:toc --> for a table of contents, and images as ![alt](src "caption"){width=60% align=center}.\n'
+    + 'Actions:\n'
+    + '- outline {title, sections:[{id:"s1", intent, heading?, tab?}], tabs?:[{title}]} — a document of pending placeholders.\n'
+    + '- write_section {id, section, content, version, tab?} — replace exactly one section: `section` is a pending id ("s2") '
+    + 'or an exact heading; `content` is its Markdown starting with its heading. Other sections are untouched.\n'
+    + '- create {title, kind: "document"|"code", language?, content} — Markdown for a document, source code for code.\n'
+    + '- read {id, tab?} — the latest content, its version, pending sections and open-comment count. The user edits canvases '
+    + 'directly, so ALWAYS read before changing one they may have touched.\n'
+    + '- edit {id, version, find, replace, all?, tab?} — replace one exact passage (like Edit): `find` must occur exactly once '
+    + 'unless all: true. Prefer this for small changes.\n'
+    + '- update {id, version, content, tab?} — replace a whole tab (rewrites, big restructures).\n'
+    + '- add_tab {id, title, content?} · rename_tab {id, tab, title} · list.\n'
+    + '- comments {id} — open comments the user left on passages; answer each with reply_comment {id, commentId, body, resolve?} '
+    + 'and make the change they ask for with edit/write_section (resolve: true once it is done).\n'
+    + '- export {id, format: "md"|"docx"|"pdf"|"html", tab?, path?, toc?, settings?} — writes the file and returns its path.\n'
+    + '- settings {id, settings?} — read or change the export setup: {pageSize: A4|Letter, orientation, margins: normal|narrow|wide, '
+    + 'font: sans|serif, header, footer ({title} {date} {page} {pages}), pageNumbers, toc, watermark, cover: {enabled, title, subtitle, author, date, logo}}.\n'
+    + '`version` is the tab\'s version your last read/write returned (each tab has its own; the first tab is the default). '
+    + 'If it changed since, the write is refused and the result carries the latest content — re-apply your change to it. '
+    + 'After create/outline, put the ```canvas block from the result in your reply: it is only a reference card that opens '
+    + 'the canvas. A message like "Edit canvas <id> — …" means: read that canvas, then edit it.',
   inputSchema: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['create', 'read', 'update', 'edit', 'list'] },
-      id: { type: 'string', description: 'The canvas id (from create or list).' },
-      title: { type: 'string', description: 'create: the title. update/edit: optionally rename.' },
+      action: {
+        type: 'string',
+        enum: ['create', 'read', 'update', 'edit', 'list', 'outline', 'write_section', 'add_tab', 'rename_tab', 'comments', 'reply_comment', 'export', 'settings'],
+      },
+      id: { type: 'string', description: 'The canvas id (from create/outline or list).' },
+      title: { type: 'string', description: 'create/outline: the title. update/edit: optionally rename. add_tab/rename_tab: the tab name.' },
       kind: { type: 'string', enum: ['document', 'code'], description: 'create: document (Markdown) or code.' },
       language: { type: 'string', description: 'create, kind code: the language, e.g. "typescript", "python".' },
-      content: { type: 'string', description: 'create/update: the full text.' },
-      version: { type: 'number', description: 'update/edit: the version you last read or wrote.' },
+      content: { type: 'string', description: 'create/update: the full text. write_section: the section\'s Markdown incl. its heading. add_tab: optional initial text.' },
+      version: { type: 'number', description: 'update/edit/write_section: the tab version you last read or wrote.' },
       find: { type: 'string', description: 'edit: the exact passage to replace.' },
       replace: { type: 'string', description: 'edit: what replaces it.' },
       all: { type: 'boolean', description: 'edit: replace every occurrence of find.' },
-      note: { type: 'string', description: 'update/edit: a few words on what changed, shown in the version history.' },
+      note: { type: 'string', description: 'update/edit/write_section: a few words on what changed, shown in the version history.' },
+      tab: { type: 'string', description: 'The tab id ("t2") or title; default the first tab.' },
+      tabs: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' } } }, description: 'outline: tabs to create (default one).' },
+      sections: {
+        type: 'array',
+        description: 'outline: the sections, in order.',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Short id, e.g. "s1".' },
+            intent: { type: 'string', description: 'One line: what this section will cover.' },
+            heading: { type: 'string', description: 'The planned heading.' },
+            tab: { type: 'string', description: 'Which outline tab (title or "t2"); default the first.' },
+          },
+          required: ['id', 'intent'],
+        },
+      },
+      section: { type: 'string', description: 'write_section: a pending id ("s2") or the exact heading text.' },
+      commentId: { type: 'string', description: 'reply_comment: the comment id (from comments).' },
+      body: { type: 'string', description: 'reply_comment: your reply.' },
+      resolve: { type: 'boolean', description: 'reply_comment: also mark the comment resolved.' },
+      format: { type: 'string', enum: ['md', 'docx', 'pdf', 'html'], description: 'export: the file format.' },
+      path: { type: 'string', description: 'export: where to write (inside the project or workspace); default the session\'s artifacts folder.' },
+      template: { type: 'string', enum: TEMPLATES.map(t => t.id), description: 'outline: a document template (sections + page setup).' },
+      settings: { type: 'object', description: 'settings/outline: export setup to store; export: for this file only.' },
+      toc: { type: 'boolean', description: 'export: include a table of contents.' },
     },
     required: ['action'],
   },
 };
+

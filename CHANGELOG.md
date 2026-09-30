@@ -3,6 +3,100 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+AICO Docs: documents the agent outlines and writes section by section while you
+watch, edited in place like a word processor, with charts, diagrams, tables,
+infographics, images, tabs, comments, templates and Word/PDF export that keeps
+everything as it looks.
+
+### Added
+
+- **AICO Docs — engine** (the Canvas upgrade; contract in
+  `docs/engineering/canvas-docs-contract.md`). The `Canvas` tool gains
+  `outline` (a document skeleton of `<!-- aico:pending … -->` placeholders, one
+  per section with its intent), `write_section` (replace exactly one section by
+  pending id or heading, version-checked; code fences and duplicate headings
+  handled), `add_tab`/`rename_tab`, `comments`/`reply_comment` and `export`.
+  The tool description teaches the flow: outline, one progress line, then one
+  section at a time — never the document pasted into chat.
+- **Tabs**: a canvas holds up to 20 Markdown tabs, each versioned on its own;
+  `content`/`version` stay aliases of the first tab so older clients keep
+  working, and canvases written before tabs migrate on read into tab `t1`.
+- **Comments** stored beside the Markdown, anchored by quote + context against
+  a plain-text projection (so a selection on the rendered page matches), re-
+  anchored after every edit and marked orphaned when the passage is gone. A
+  comment or reply mentioning `@AICO` (or flagged "Ask AICO") starts a turn in
+  the canvas's session — queued behind a running turn — and the agent answers
+  with `reply_comment`. Routes: `GET/POST /api/canvas/:id/comments`,
+  `…/:cid/replies`, `…/:cid/resolve`, and `POST /api/canvas/tabs`.
+- **Live activity**: `canvas-activity` frames (writing/done, with the section)
+  around every agent write, `canvas-comments` frames, and `canvas` frames now
+  carrying the tab and its version.
+- **Export** to Markdown, standalone HTML, Word (.docx — headings, lists
+  nested and numbered, checklists, tables, code, quotes, links, images) and
+  PDF (printed by the installed Chrome/Edge), from the tool (into the session's
+  artifacts folder or a path in the project) and `GET /api/canvas/:id/export`.
+  Markdown parsing reuses the renderer's own parser; .docx is written directly
+  with `fflate` (ADR 0008).
+- **Exports carry what the app shows**: charts (ECharts, drawn in Node with the
+  chat's theme), Mermaid diagrams and maths (drawn by a small renderer page in
+  the web build, in the headless browser used for PDF) become 2× PNGs in Word
+  and inline SVG/PNG in HTML/PDF — one render pass per export, cached by block
+  hash, with a labelled placeholder + source when no browser is available.
+  Tables keep a shaded, repeating header row and column alignment; images take
+  `{width=… align=…}` and a caption.
+- **Infographic blocks** — `stats`, `timeline`, `steps`, `comparison`,
+  `callout info|warn|success` — rendered in HTML/PDF and as styled tables in
+  Word.
+- **Table of contents**: `<!-- aico:toc -->` (or `toc: true`) → a real,
+  updatable Word TOC field over bookmarked Heading 1–4, a linked contents list
+  in HTML, and in PDF with page numbers from a second print pass.
+- **Document setup** stored per canvas (`docSettings`): A4/Letter, orientation,
+  margins, serif/sans, header/footer text with `{title} {date} {page} {pages}`,
+  page numbers, a cover page (title, subtitle, author, date, logo) and a
+  watermark. `Canvas settings`, `export {toc, settings}`, `POST
+  /api/canvas/settings`, and `?toc=&settings=` on the export route.
+- **Templates**: `outline {template}` — report, proposal, project brief, memo,
+  letter, meeting minutes, spec/PRD, policy/SOP, one-pager, research summary —
+  each with sections, intents and page setup; `GET /api/canvas/templates` and
+  `POST /api/canvas/create` (a document the person starts, optionally from a
+  template).
+- **AICO Docs — the page** (desktop, browser, VS Code; `shared/ui/canvas`).
+  Documents open as a document page beside the chat: serif headings, a ~720px
+  measure, light and dark themes, and a layout that holds up in a narrow panel.
+  Click a paragraph, heading, list or quote to edit it in place with a small
+  rich editor (bold, italic, strike, code, links, headings, bullets, numbers,
+  checklists, quotes, Markdown shortcuts like `## `); tables, code, maths,
+  charts and diagrams open their own editors. **Only the edited block's source
+  changes** — every other line stays byte-identical, and a block the rich
+  editor could not reproduce exactly is edited as source instead. The
+  Markdown source mode is one click away.
+- **Visual blocks with editors**: tables as a real grid (add/remove rows and
+  columns, alignment, header row, paste from Excel/Sheets), charts (bar, line,
+  area, pie — edit the data in a grid, live preview), Mermaid diagrams from
+  templates (flowchart, sequence, org chart, timeline, mind map) with source
+  and preview side by side, maths, callouts, and infographics (KPI stats,
+  timeline, steps, comparison) edited as forms; images picked, pasted or
+  dropped, then resized by a handle, aligned, captioned and given alt text; a
+  live, clickable table of contents and an outline sidebar.
+- **Tabs, templates and export in the editor**: a tab menu (switch, add,
+  rename, delete); "New document" from ten templates; an Export dialog (PDF,
+  Word, HTML, Markdown; page size, orientation, margins, header/footer, page
+  numbers, cover page with logo, contents, watermark, font) with a live preview,
+  remembered per document; Share menu downloads and copy as rich text or
+  Markdown, saved through the native dialog in the desktop; full-screen mode.
+- **The agent at work, on the page**: placeholder cards for sections still to
+  write (with "Write it myself" / "Ask AICO now"), a shimmer and an "AICO"
+  label where it is writing, a brief highlight on what it just changed, and an
+  optional "Follow AICO" scroll. Your unsaved edits are re-applied on top of
+  the agent's write by block; only a block you both changed raises the
+  conflict banner, and nothing moves your focus.
+- **Comments on the page**: select text → Comment; threads sit in the margin
+  (a drawer when narrow) beside a highlight on the words, with replies,
+  resolve/reopen, orphaned comments listed separately, and "Ask AICO" /
+  `@AICO` sending the thread to the agent, whose reply appears live.
+
 ## 0.29.1 — 2026-09-30
 
 ### Fixed

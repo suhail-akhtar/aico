@@ -73,7 +73,9 @@ await build({
   },
   // Playwright ships browser-launch assets it finds relative to itself, and the
   // terminal UI's optional devtools hook is never used by a server.
-  external: ['playwright-core', 'react-devtools-core', 'electron'],
+  // cpu-features is ssh2's optional native helper, required inside a try — left out,
+  // ssh2 falls back to its own cipher order.
+  external: ['playwright-core', 'react-devtools-core', 'electron', 'cpu-features'],
   jsx: 'transform', jsxFactory: 'React.createElement', jsxFragment: 'React.Fragment',
   loader: { '.node': 'file' },
   define, logLevel: 'warning',
@@ -83,6 +85,16 @@ fs.cpSync(path.join(repo, 'templates'), path.join(engineDir, 'templates'), {
   recursive: true,
   filter: (src) => !/[\\/](node_modules|\.next|\.astro|\.expo|dist|coverage|data)([\\/]|$)/.test(src),
 });
+// Canvas export draws Mermaid and maths in a headless browser from the web
+// build's `export-render.html` (src/canvas/visuals.ts looks for `web-dist`
+// beside the engine). Without it those blocks export as placeholders, so the
+// web client is built when missing and copied in, source maps left out.
+const webDist = path.join(repo, 'web-dist');
+if (!fs.existsSync(path.join(webDist, 'export-render.html'))) {
+  const { execSync } = await import('node:child_process');
+  execSync('npm run build:web', { cwd: repo, stdio: 'inherit' });
+}
+fs.cpSync(webDist, path.join(engineDir, 'web-dist'), { recursive: true, filter: (src) => !src.endsWith('.map') });
 // `createRequire(import.meta.url)('../package.json')` in the MCP server reads
 // the version one level up from the bundle.
 fs.writeFileSync(path.join(dist, 'package.json'), JSON.stringify({ name: 'aico-desktop-dist', version: rootPkg.version }));

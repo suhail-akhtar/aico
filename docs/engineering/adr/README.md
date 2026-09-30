@@ -34,6 +34,7 @@ in the module header of the code they govern.
 | [0005](0005-browser-agent-safety-model.md) | Browser agent safety: hand off human checks, never see or fill secrets, approvals | Accepted |
 | [0006](0006-credential-broker.md) | Credential broker: agents use credentials, never read them | Accepted |
 | [0007](0007-ops-tools-and-dependencies.md) | Operate remote machines through trusted consumer tools (SSH via ssh2, HTTP, WinRM via PowerShell, SNMP via net-snmp) | Accepted |
+| [0008](0008-canvas-docs-export.md) | Export canvases with the renderer's own Markdown parser and a hand-written OOXML writer | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

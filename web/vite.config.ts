@@ -59,5 +59,13 @@ export default defineConfig({
     outDir: OUT_DIR,
     emptyOutDir: true,
     sourcemap: true,
+    // A second page: the headless renderer the engine uses to draw diagrams and
+    // maths into document exports (see web/src/export-render.ts).
+    rollupOptions: {
+      input: {
+        main: path.resolve(here, 'index.html'),
+        'export-render': path.resolve(here, 'export-render.html'),
+      },
+    },
   },
 });

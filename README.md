@@ -177,7 +177,7 @@ for **Windows and Linux**, updating itself.
 **Highlights**
 
 - **Chat that keeps up** — `/` actions and `@` mentions for files, folders and agents; steer a run while it works; jump to the start of a finished answer; branch any answer into a new chat; read aloud; 👍/👎 that the agent learns from.
-- **Canvas** — documents and code the agent writes and **you edit side by side**, with versions, restore, and *Ask AI* on a selection.
+- **Canvas / AICO Docs** — documents and code the agent writes and **you edit side by side**: a document page edited in place block by block (the Markdown stays exact), tabs, tables, charts, diagrams, infographics, images, comments with *@AICO*, templates, export to Word/PDF/HTML/Markdown, versions, restore, and *Ask AI* on a selection.
 - **An IDE behind the chat** — Monaco editor, real terminals, source control that never force-pushes, and GitHub through `gh`: review a PR, fix a failing check, diagnose an Action — with AI.
 - **An AI browser** — private, protected, learning and agent-driven; see below.
 - **It can see** — screenshots, images it reads or fetches, and pictures from any MCP tool reach models that read images; which models do is *learned* with a one-click probe, not guessed.

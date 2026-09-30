@@ -47,7 +47,7 @@ import { createGroup, deleteGroup, listGroups, updateGroup } from './groups.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { handleCanvasRoute } from './canvas-routes.js';
-import { onCanvasChange } from '../canvas/store.js';
+import { onCanvasActivity, onCanvasChange, onCanvasComments } from '../canvas/store.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
 import { isEffortChoice } from '../../shared/reasoning.js';
@@ -224,7 +224,12 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     other side changes the document. Ephemeral like a chunk: a client that
     missed it reads the current version when it next opens the canvas.
   */
-  const stopCanvasEvents = onCanvasChange(change => hub.publish({ type: 'canvas', sessionId: change.sessionId, data: change }));
+  const stopCanvasChanges = onCanvasChange(change => hub.publish({ type: 'canvas', sessionId: change.sessionId, data: change }));
+  // Where the agent is writing (the editor's "AICO is writing here" marker),
+  // and comment threads changing — both ephemeral for the same reason.
+  const stopCanvasActivity = onCanvasActivity(activity => hub.publish({ type: 'canvas-activity', sessionId: activity.sessionId, data: activity }));
+  const stopCanvasComments = onCanvasComments(change => hub.publish({ type: 'canvas-comments', sessionId: change.sessionId, data: change }));
+  const stopCanvasEvents = (): void => { stopCanvasChanges(); stopCanvasActivity(); stopCanvasComments(); };
   /*
     The credential vault's human side. Approvals and credential requests go to
     the host channel when AICO Desktop attached one, otherwise out on the
@@ -1107,7 +1112,24 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     }
 
     // Canvas documents: reads and writes, each with its own body handling.
-    if (await handleCanvasRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;
+    if (await handleCanvasRoute(route, req, res, url, {
+      resolveCwd: id => resolveCwd(id), readJson, send,
+      /*
+        A comment addressed to AICO becomes a turn in the canvas's session.
+        Behind a running turn it is queued as a followup (its own turn next),
+        never steered into the current one: the running turn is about
+        something else, and the person expects a separate answer.
+      */
+      askAgent: async (sessionId, text) => {
+        const live = runs.get(sessionId);
+        if (live?.busy) { runs.followup(sessionId, text); return; }
+        const runCwd = await resolveCwd(sessionId);
+        await runs.ensure(sessionId, runCwd);
+        const chosen = runs.modelOf(sessionId) ?? await currentDefaultModel();
+        void runs.submit(sessionId, runCwd, text, chosen, { approval: live?.approval ?? 'auto' })
+          .catch(() => { /* already reported on the stream as turn-end */ });
+      },
+    })) return;
 
     // Settings, provider onboarding, and system state. Consulted before the
     // POST guard because several of these are reads.

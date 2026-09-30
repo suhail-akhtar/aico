@@ -31,7 +31,7 @@ import { loadDismissals, saveDismissals } from './panel-memory';
 import type { ChatMessage } from '@aico/ui';
 import { PLAN_REPLY } from './plans';
 import { shouldClearBusy, type ServerTurn } from './turn-state';
-import { emitCanvasEvent } from '../../shared/ui/canvas/host';
+import { emitCanvasActivity, emitCanvasComments, emitCanvasEvent } from '../../shared/ui/canvas/host';
 
 /** The answers the plan panel can give. `amend` is not one — it sends nothing. */
 export type PlanAnswer =
@@ -1616,6 +1616,14 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
     // server, and what the open editors need is the nudge to re-read it.
     case 'canvas':
       emitCanvasEvent(data);
+      return;
+    // AICO Docs: the agent starting/finishing a section, and comment threads
+    // changing. Ephemeral nudges for the open page, same as `canvas`.
+    case 'canvas-activity':
+      emitCanvasActivity(data);
+      return;
+    case 'canvas-comments':
+      emitCanvasComments(data);
       return;
 
     case 'feedback': {

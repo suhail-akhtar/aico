@@ -6,6 +6,13 @@
  * round. The width is remembered; the canvas is not, because a canvas belongs
  * to the chat it came from and switching chats closes it.
  *
+ * Documents open as AICO Docs (`shared/ui/canvas`), which wants a page's
+ * width: the default is wider than it was for the source editor, and the
+ * editor's full-screen mode is told to start below the window's own title
+ * bar (the Windows/Linux caption buttons are drawn over the page there).
+ * Exports use the native save dialog through the preload bridge the shared
+ * code already knows (`dialog:saveFile`), so nothing else is wired here.
+ *
  * @module desktop/renderer/chat/CanvasPanel
  */
 
@@ -36,8 +43,10 @@ export function CanvasCode(props: CanvasCodeEditorProps): React.ReactElement {
 }
 
 const WIDTH_KEY = 'aico.desk.canvasWidth';
-const DEFAULT_WIDTH = 640;
+const DEFAULT_WIDTH = 720;
 const MIN_WIDTH = 420;
+/** The height of the window's own title bar (main.ts `titleBarOverlay.height`); full screen starts below it. */
+const TITLE_BAR_PX = 40;
 
 function clampWidth(w: number): number {
   return Math.round(Math.max(MIN_WIDTH, Math.min(w, window.innerWidth - 420)));
@@ -79,7 +88,7 @@ export function CanvasPanel(): React.ReactElement | null {
   if (!open) return null;
   return (
     <aside className="relative flex min-h-0 shrink-0 flex-col border-l border-aico-border-subtle bg-aico-bg animate-fade-in"
-      style={{ width }} aria-label={`Canvas: ${open.title ?? open.id}`}>
+      style={{ width, ['--adoc-focus-top' as string]: `${TITLE_BAR_PX}px` }} aria-label={`Canvas: ${open.title ?? open.id}`}>
       <div
         className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize hover:bg-aico-hover"
         onMouseDown={startResize}

@@ -182,3 +182,422 @@
 .aw .acv-ver-note { margin-top: 2px; font-size: 11.5px; color: var(--aico-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .aw .acv-empty { display: grid; place-items: center; flex: 1; padding: 24px; font-size: 13px; color: var(--aico-text-muted); text-align: center; }
+
+/* ══ AICO Docs — the page view ════════════════════════════════════════
+ * A document page beside the chat: a comfortable measure (~720px), serif
+ * headings, generous spacing, the agent's live work marked in the accent
+ * colour. Everything is built on the same tokens, so light, dark and the
+ * VS Code themes apply unchanged; container queries (not the viewport)
+ * decide the narrow layout, because the page is usually a side panel.
+ */
+.aw.acv[data-focus='1'] {
+  /* A client with its own title bar over the page (the desktop's window controls) sets --adoc-focus-top. */
+  position: fixed; inset: 0; top: var(--adoc-focus-top, 0px); z-index: 80; height: auto; border: 0; border-radius: 0; box-shadow: none;
+}
+.aw.acv[data-view='page'] .acv-tools,
+.aw.acv[data-view='source'] .acv-tools { flex-wrap: wrap; overflow: visible; row-gap: 2px; }
+.aw .acv-tools .aw-menu-list { left: 0; right: auto; }
+.aw .aw-menu-list button:disabled { opacity: 0.45; cursor: default; background: none; }
+.aw .adoc-menu-sep { height: 1px; margin: 4px 6px; background: var(--aw-soft); }
+.aw .adoc-mini.aw-btn { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 8px; }
+.aw .aw-btn.is-primary { background: var(--aico-accent); border-color: var(--aico-accent); color: #fff; }
+.aw .aw-btn.is-danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+.aw .adoc-share.aw-btn { height: 28px; gap: 5px; border-radius: 999px; padding: 0 12px; margin-right: 2px; }
+.aw .adoc-flash { color: var(--aico-text-secondary); }
+
+/* Toolbar pieces */
+.aw .adoc-tab-btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 28px; max-width: 180px; padding: 0 8px 0 10px; border: 1px solid var(--aw-soft);
+  border-radius: 8px; background: var(--aw-card); color: var(--aico-text-primary); font-size: 12.5px; font-weight: 600;
+}
+.aw .adoc-tab-btn:hover { border-color: var(--aw-line); background: var(--aico-hover); }
+.aw .adoc-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aw .adoc-tab-list { min-width: 230px; }
+.aw .adoc-tab-row { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
+.aw .adoc-tab-row:hover { background: var(--aico-hover); }
+.aw .adoc-tab-row > button:first-child { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.aw .adoc-tab-row.is-on > button:first-child { font-weight: 650; color: var(--aico-accent); }
+.aw .adoc-tab-row .adoc-tab-acts { display: inline-flex; gap: 1px; padding-right: 4px; }
+.aw .adoc-tab-list .adoc-tab-acts button { width: auto; min-width: 24px; height: 24px; padding: 0 6px; }
+.aw .adoc-tab-dot { display: inline-block; width: 12px; }
+.aw .adoc-tab-rename { display: flex; gap: 6px; padding: 4px; }
+.aw .adoc-tab-rename input, .aw .adoc-linkbox input {
+  flex: 1; min-width: 0; height: 28px; padding: 0 9px; border: 1px solid var(--aw-line); border-radius: 8px;
+  background: var(--aico-bg); color: var(--aico-text-primary); font: inherit; font-size: 12.5px; outline: none;
+}
+.aw .adoc-tab-rename input:focus, .aw .adoc-linkbox input:focus { border-color: var(--aico-accent); box-shadow: 0 0 0 3px var(--aico-accent-soft); }
+.aw .adoc-tab-list .adoc-tab-rename button { width: auto; }
+.aw .adoc-style {
+  height: 28px; padding: 0 6px; border: 1px solid transparent; border-radius: 7px; background: transparent;
+  color: var(--aico-text-secondary); font: inherit; font-size: 12.5px;
+}
+.aw .adoc-style:hover:not(:disabled) { background: var(--aico-hover); }
+.aw .adoc-style:disabled { opacity: 0.45; }
+.aw .acv-tb.adoc-ask, .aw .acv-tb.adoc-follow { display: inline-flex; gap: 5px; padding: 0 9px; font-size: 12px; font-weight: 600; }
+.aw .acv-tb.adoc-ask { color: var(--aico-accent); }
+.aw .acv-tb.adoc-follow.is-on { background: var(--aico-accent-soft); color: var(--aico-accent); }
+.aw .adoc-count-btn { position: relative; }
+.aw .adoc-count {
+  position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px;
+  background: var(--aico-accent); color: #fff; font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center;
+}
+.aw .adoc-grid-pick { padding: 8px; min-width: 0; }
+.aw .adoc-grid { display: grid; grid-template-columns: repeat(8, 16px); gap: 3px; }
+.aw .aw-menu-list .adoc-grid button { width: 16px; height: 16px; padding: 0; border: 1px solid var(--aw-line); border-radius: 3px; background: var(--aw-card); }
+.aw .aw-menu-list .adoc-grid button.is-on { background: var(--aico-accent-soft); border-color: var(--aico-accent); }
+.aw .adoc-grid-label { margin-top: 6px; font-size: 11.5px; color: var(--aico-text-muted); text-align: center; white-space: nowrap; }
+.aw .adoc-insert-list { min-width: 200px; }
+.aw .aw-menu-list.adoc-insert-list button { display: flex; align-items: center; gap: 9px; }
+.aw .adoc-linkbox {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 7px 14px; border-bottom: 1px solid var(--aw-soft);
+  background: var(--aw-raised); font-size: 12.5px; color: var(--aico-text-secondary);
+}
+.aw .adoc-linkbox-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+
+/* The scrolling page */
+.aw .adoc-scroll {
+  position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; container-type: inline-size;
+  background: var(--aw-raised);
+}
+.aw .adoc-scroll.is-dropping { outline: 2px dashed var(--aico-accent); outline-offset: -8px; }
+.aw .adoc-sheet { position: relative; display: grid; grid-template-columns: minmax(0, 760px); justify-content: center; padding: 28px 24px 96px; gap: 28px; }
+.aw .adoc-sheet.is-wide { grid-template-columns: minmax(0, 760px) 290px; }
+.aw .adoc-page {
+  position: relative; min-width: 0; padding: 48px 64px 72px; border: 1px solid var(--aw-soft); border-radius: 6px;
+  background: var(--aw-card); box-shadow: 0 1px 3px rgba(15, 17, 21, 0.06); min-height: 70vh;
+}
+@container (max-width: 700px) {
+  .aw .adoc-sheet { padding: 0; gap: 0; }
+  .aw .adoc-page { padding: 28px 24px 64px; border: 0; border-radius: 0; box-shadow: none; }
+}
+@container (max-width: 420px) {
+  .aw .adoc-page { padding: 20px 16px 56px; }
+}
+.aw.acv[data-focus='1'] .adoc-page { min-height: calc(100vh - 160px); }
+
+/* Document typography */
+.aw .adoc-body.markdown-body { font-size: 16px; line-height: 1.72; }
+.aw .adoc-page .markdown-body h1, .aw .adoc-page .markdown-body h2, .aw .adoc-page .markdown-body h3,
+.aw .adoc-page .markdown-body h4, .aw .adoc-rich h1, .aw .adoc-rich h2, .aw .adoc-rich h3, .aw .adoc-rich h4 {
+  font-family: Georgia, 'Source Serif 4', 'Source Serif Pro', 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
+  font-weight: 600; letter-spacing: -0.005em; line-height: 1.3; margin: 0;
+}
+.aw .adoc-page .markdown-body h1, .aw .adoc-rich h1 { font-size: 32px; }
+.aw .adoc-page .markdown-body h2, .aw .adoc-rich h2 { font-size: 24px; }
+.aw .adoc-page .markdown-body h3, .aw .adoc-rich h3 { font-size: 19.5px; }
+.aw .adoc-page .markdown-body h4, .aw .adoc-rich h4 { font-size: 17px; }
+.aw .adoc-page .markdown-body p, .aw .adoc-page .markdown-body ul, .aw .adoc-page .markdown-body ol,
+.aw .adoc-page .markdown-body blockquote, .aw .adoc-page .markdown-body table { margin-bottom: 0; }
+.aw .adoc-page .markdown-body a { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--aico-accent) 40%, transparent); text-underline-offset: 2px; }
+@container (max-width: 520px) {
+  .aw .adoc-page .markdown-body h1, .aw .adoc-rich h1 { font-size: 26px; }
+  .aw .adoc-page .markdown-body h2, .aw .adoc-rich h2 { font-size: 21px; }
+}
+
+/* Blocks */
+.aw .adoc-block { position: relative; margin: 0 -12px; padding: 3px 12px; border-radius: 6px; transition: background 0.2s, box-shadow 0.2s; }
+.aw .adoc-block + .adoc-block { margin-top: 14px; }
+.aw .adoc-block.is-heading + .adoc-block { margin-top: 8px; }
+.aw .adoc-block + .adoc-block.is-heading { margin-top: 30px; }
+.aw .adoc-block > .markdown-body { font-size: inherit; line-height: inherit; }
+.aw .adoc-block:not(.adoc-editing):not(.is-pending):hover { background: color-mix(in srgb, var(--aico-hover) 70%, transparent); cursor: text; }
+.aw .adoc-block:focus-visible { outline: 2px solid var(--aico-accent-soft); outline-offset: 0; }
+.aw .adoc-block.is-touched { box-shadow: inset 2px 0 0 var(--aw-line); }
+.aw .adoc-block-edit {
+  position: absolute; top: 4px; right: 4px; z-index: 3; display: none; align-items: center; gap: 4px; height: 24px; padding: 0 8px;
+  border: 1px solid var(--aw-line); border-radius: 7px; background: var(--aw-card); color: var(--aico-text-secondary);
+  font-size: 11.5px; font-weight: 600; box-shadow: var(--aw-shadow);
+}
+.aw .adoc-block:hover > .adoc-block-edit, .aw .adoc-block:focus-within > .adoc-block-edit { display: inline-flex; }
+.aw .adoc-block-edit:hover { color: var(--aico-accent); border-color: var(--aico-accent); }
+
+/* The agent at work */
+.aw .adoc-block.is-agent { box-shadow: inset 2px 0 0 var(--aico-accent); background: color-mix(in srgb, var(--aico-accent-soft) 45%, transparent); }
+.aw .adoc-block.is-fresh { animation: adoc-fresh 2.6s ease-out; }
+@keyframes adoc-fresh {
+  0% { background: var(--aico-accent-soft); box-shadow: inset 2px 0 0 var(--aico-accent); }
+  100% { background: transparent; box-shadow: inset 2px 0 0 transparent; }
+}
+.aw .adoc-agent-label {
+  position: absolute; top: -9px; left: -4px; z-index: 4; display: inline-flex; align-items: center; height: 18px; padding: 0 7px;
+  border-radius: 5px; background: var(--aico-accent); color: #fff; font: 700 10.5px/18px var(--aico-font); letter-spacing: 0.04em;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); pointer-events: none;
+}
+.aw .adoc-agent-label.is-inline { position: static; margin-right: 8px; }
+.aw .adoc-writing-top {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; margin: -16px 0 16px; padding: 8px 0;
+  background: var(--aw-card); font-size: 12.5px; color: var(--aico-text-secondary);
+}
+
+/* Pending sections */
+.aw .adoc-block.is-pending { padding: 0; margin-left: 0; margin-right: 0; }
+.aw .adoc-pending {
+  position: relative; overflow: hidden; padding: 14px 16px; border: 1px dashed var(--aw-line); border-radius: 10px;
+  background: var(--aw-raised); font-family: var(--aico-font);
+}
+.aw .adoc-pending-head { display: flex; align-items: center; gap: 7px; color: var(--aico-accent); }
+.aw .adoc-pending-title { font-size: 14px; font-weight: 650; color: var(--aico-text-primary); }
+.aw .adoc-pending-intent { margin: 6px 0 0; font-size: 13.5px; line-height: 1.55; color: var(--aico-text-secondary); }
+.aw .adoc-pending-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 11.5px; color: var(--aico-text-muted); }
+.aw .adoc-pending-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.aw .adoc-pending.is-writing { border-style: solid; border-color: color-mix(in srgb, var(--aico-accent) 55%, transparent); }
+.aw .adoc-pending.is-writing::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--aico-accent) 16%, transparent) 50%, transparent 80%);
+  background-size: 220% 100%; animation: adoc-shimmer 1.6s linear infinite;
+}
+@keyframes adoc-shimmer { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .aw .adoc-pending.is-writing::after, .aw .adoc-block.is-fresh { animation: none; }
+}
+
+/* Editing a block */
+.aw .adoc-editing { background: var(--aw-card); box-shadow: 0 0 0 1px var(--aico-accent), 0 0 0 4px var(--aico-accent-soft); }
+.aw .adoc-rich { outline: none; min-height: 1.7em; font-size: inherit; line-height: inherit; caret-color: var(--aico-accent); }
+.aw .adoc-rich > * + * { margin-top: 14px; }
+.aw .adoc-rich p, .aw .adoc-rich ul, .aw .adoc-rich ol, .aw .adoc-rich blockquote, .aw .adoc-rich h1, .aw .adoc-rich h2, .aw .adoc-rich h3 { margin-bottom: 0; margin-top: 0; }
+.aw .adoc-rich > * + * { margin-top: 14px; }
+.aw .adoc-rich li:has(> input[type='checkbox']) { list-style: none; margin-left: -22px; }
+.aw .adoc-rich input[type='checkbox'] { margin-right: 7px; accent-color: var(--aico-accent); cursor: pointer; }
+.aw .adoc-rich a { color: var(--aico-accent); text-decoration: underline; }
+.aw .adoc-source-edit { display: flex; flex-direction: column; gap: 8px; }
+.aw .adoc-source-area {
+  width: 100%; min-height: 72px; padding: 10px 12px; border: 1px solid var(--aw-line); border-radius: 8px; resize: vertical; overflow: hidden;
+  background: var(--aw-raised); color: var(--aico-text-primary); font: 13px/1.6 var(--aico-font-mono); tab-size: 2; outline: none;
+}
+.aw .adoc-source-area:focus { border-color: var(--aico-accent); }
+.aw .adoc-source-preview { padding: 4px 2px; border-top: 1px dashed var(--aw-soft); outline: none; }
+.aw .adoc-source-hint { font-size: 11px; color: var(--aico-text-muted); font-family: var(--aico-font); }
+.aw .adoc-empty-page {
+  display: block; width: 100%; padding: 40px 12px; border: 1px dashed var(--aw-line); border-radius: 10px; background: transparent;
+  color: var(--aico-text-muted); font-size: 14px; text-align: center; cursor: text;
+}
+
+/* Selection pills */
+.aw .acv-pill-row { position: absolute; z-index: 30; display: flex; gap: 6px; }
+.aw .acv-pill-row .acv-pill { position: static; }
+
+/* Comments */
+::highlight(aico-comment) { background-color: rgba(250, 204, 21, 0.32); }
+::highlight(aico-comment-active) { background-color: rgba(250, 204, 21, 0.62); }
+.aw .adoc-margin { position: relative; min-width: 0; }
+.aw .adoc-margin .adoc-thread { position: absolute; left: 0; right: 0; transition: top 0.15s; }
+.aw .adoc-thread {
+  padding: 10px 12px; border: 1px solid var(--aw-line); border-radius: 10px; background: var(--aw-card);
+  box-shadow: 0 1px 2px rgba(15, 17, 21, 0.05); font-size: 13px; cursor: default;
+}
+.aw .adoc-thread.is-active { border-color: #eab308; box-shadow: var(--aw-shadow); }
+.aw .adoc-thread.is-resolved { opacity: 0.7; }
+.aw .adoc-thread.is-new { border-color: var(--aico-accent); box-shadow: var(--aw-shadow); }
+.aw .adoc-drawer-list .adoc-thread + .adoc-thread { margin-top: 8px; }
+.aw .adoc-thread-quote {
+  margin-bottom: 7px; padding-left: 8px; border-left: 2px solid #eab308; font-size: 12px; color: var(--aico-text-secondary);
+  overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.aw .adoc-msg + .adoc-msg { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--aw-soft); }
+.aw .adoc-msg-top { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.aw .adoc-msg-body { margin: 4px 0 0; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.aw .adoc-msg-body.is-md { white-space: normal; }
+.aw .adoc-msg-body.is-md .markdown-body { font-size: 13px; line-height: 1.5; }
+.aw .adoc-msg-body.is-md .markdown-body p { margin-bottom: 6px; }
+.aw .adoc-mention { color: var(--aico-accent); font-weight: 650; }
+.aw .adoc-resolve.aw-icon-btn { width: 24px; height: 24px; }
+.aw .adoc-waiting { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--aico-accent); animation: aico-pulse 1.8s ease-in-out infinite; }
+.aw .adoc-reply { display: flex; align-items: flex-end; gap: 6px; margin-top: 8px; }
+.aw .adoc-reply textarea, .aw .adoc-thread.is-new textarea {
+  flex: 1; width: 100%; min-width: 0; padding: 6px 9px; border: 1px solid var(--aw-soft); border-radius: 8px; resize: vertical;
+  background: var(--aico-bg); color: var(--aico-text-primary); font: inherit; font-size: 12.5px; line-height: 1.45; outline: none;
+}
+.aw .adoc-reply textarea:focus, .aw .adoc-thread.is-new textarea:focus { border-color: var(--aico-accent); }
+.aw .adoc-new-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.aw .adoc-ask-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--aico-text-secondary); cursor: pointer; }
+.aw .adoc-ask-check input { accent-color: var(--aico-accent); }
+.aw .adoc-orphans { grid-column: 1 / -1; max-width: 760px; width: 100%; justify-self: center; }
+.aw .adoc-orphans-head { margin: 4px 0 8px; font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--aico-text-muted); }
+.aw .adoc-orphans-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.aw .adoc-drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 26; width: min(330px, 92%); display: flex; flex-direction: column;
+  border-left: 1px solid var(--aw-line); background: var(--aw-card); box-shadow: var(--aw-shadow-strong);
+}
+.aw .adoc-drawer-list { flex: 1; overflow-y: auto; padding: 10px; }
+.aw .adoc-empty-note { margin: 8px 4px; font-size: 12.5px; line-height: 1.5; color: var(--aico-text-muted); }
+.aw .adoc-comment-error { position: absolute; left: 16px; bottom: 12px; z-index: 5; font-size: 12px; color: #c2410c; }
+
+/* ══ AICO Docs — visual blocks, outline, dialogs ═════════════════════ */
+/* The editor is a side panel as often as a page: its own width decides the layout. */
+.aw.acv { container: acv / inline-size; }
+.aw .adoc-block-edit button { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px; border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; }
+.aw .adoc-block-edit button:hover { background: var(--aico-hover); color: var(--aico-accent); }
+.aw .adoc-block-edit { padding: 0 2px; gap: 1px; }
+.aw .adoc-seg-text button { width: auto; padding: 0 9px; font-size: 12px; font-weight: 600; }
+.aw .adoc-visual-edit { display: flex; flex-direction: column; gap: 10px; font-family: var(--aico-font); }
+.aw .adoc-visual-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.aw .adoc-visual-bar .aw-btn { gap: 4px; }
+.aw .adoc-source-area.is-prose { font: 14px/1.55 var(--aico-font); }
+.aw .adoc-title-input {
+  width: 100%; height: 32px; padding: 0 10px; border: 1px solid var(--aw-line); border-radius: 8px; background: var(--aico-bg);
+  color: var(--aico-text-primary); font: 600 14px var(--aico-font); outline: none;
+}
+.aw .adoc-title-input:focus { border-color: var(--aico-accent); }
+
+/* Side-by-side source/form and preview, when the page is wide enough. */
+.aw .adoc-side { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@container (min-width: 760px) {
+  .aw .adoc-side { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .aw .adoc-source-edit.adoc-side .adoc-source-hint { grid-column: 1 / -1; }
+  .aw .adoc-source-edit.adoc-side .adoc-source-preview { border-top: 0; border-left: 1px dashed var(--aw-soft); padding-left: 12px; }
+}
+.aw .adoc-side-form { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.aw .adoc-side-preview { min-width: 0; padding: 6px; border: 1px dashed var(--aw-soft); border-radius: 8px; }
+.aw .adoc-side-preview.is-below { border-style: dashed; }
+
+/* Grid editors (tables, chart data, infographic rows) */
+.aw .adoc-grid-edit { overflow-x: auto; max-width: 100%; }
+.aw .adoc-grid-edit table { border-collapse: collapse; margin: 0; font-size: 13px; }
+.aw .adoc-grid-edit td { padding: 0; border: 1px solid var(--aw-line); min-width: 90px; }
+.aw .adoc-grid-edit tr.is-head td { background: var(--aw-raised); }
+.aw .adoc-grid-edit tr.is-head .adoc-cell { font-weight: 650; }
+.aw .adoc-cell {
+  width: 100%; min-width: 80px; height: 32px; padding: 0 8px; border: 0; background: transparent; color: var(--aico-text-primary);
+  font: inherit; font-size: 13px; outline: none;
+}
+.aw .adoc-cell:focus { box-shadow: inset 0 0 0 2px var(--aico-accent); background: var(--aico-bg); }
+.aw .adoc-cell.is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.aw .adoc-cell-wrap { display: flex; align-items: center; }
+.aw .adoc-cell-x { flex: none; width: 22px; height: 22px; margin-right: 3px; border: 0; border-radius: 5px; background: none; color: var(--aico-text-muted); font-size: 15px; line-height: 1; }
+.aw .adoc-cell-x:hover:not(:disabled) { background: var(--aico-hover); color: #dc2626; }
+.aw .adoc-grid-corner { display: block; padding: 0 8px; font-size: 11.5px; font-weight: 650; color: var(--aico-text-muted); white-space: nowrap; }
+
+/* Images */
+.aw .adoc-figure { margin: 0; display: flex; flex-direction: column; align-items: center; }
+.aw .adoc-figure.is-left { align-items: flex-start; }
+.aw .adoc-figure.is-right { align-items: flex-end; }
+.aw .adoc-figure-img { position: relative; max-width: 100%; line-height: 0; }
+.aw .adoc-figure-img img { width: 100%; height: auto; border-radius: 6px; }
+.aw .adoc-figure.is-selected .adoc-figure-img { outline: 2px solid var(--aico-accent); outline-offset: 2px; border-radius: 6px; }
+.aw .adoc-resize {
+  position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 4px;
+  background: var(--aico-accent); cursor: nwse-resize; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); touch-action: none;
+}
+.aw .adoc-figure.is-right .adoc-resize { right: auto; left: -7px; cursor: nesw-resize; }
+.aw .adoc-resize-tip { position: absolute; top: 8px; right: 8px; padding: 2px 7px; border-radius: 5px; background: rgba(0, 0, 0, 0.7); color: #fff; font: 600 11px/1.6 var(--aico-font); }
+.aw .adoc-figure figcaption { margin-top: 8px; font-size: 13.5px; line-height: 1.45; color: var(--aico-text-secondary); text-align: center; font-style: italic; }
+.aw .adoc-figure.is-left figcaption { text-align: left; }
+.aw .adoc-figure.is-right figcaption { text-align: right; }
+.aw .adoc-caption-input, .aw .adoc-alt-input {
+  height: 30px; padding: 0 9px; border: 1px solid var(--aw-line); border-radius: 7px; background: var(--aico-bg); color: var(--aico-text-primary);
+  font: 13px var(--aico-font); outline: none;
+}
+.aw .adoc-caption-input { margin-top: 8px; width: min(100%, 460px); text-align: center; font-style: italic; }
+.aw .adoc-caption-input:focus, .aw .adoc-alt-input:focus { border-color: var(--aico-accent); }
+.aw .adoc-img-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 8px; font-family: var(--aico-font); }
+.aw .adoc-alt-input { flex: 1 1 200px; min-width: 160px; max-width: 320px; }
+
+/* Callouts */
+.aw .adoc-callout { --c: #3b82f6; padding: 12px 16px; border-left: 3px solid var(--c); border-radius: 8px; background: color-mix(in srgb, var(--c) 9%, transparent); }
+.aw .adoc-callout.is-success { --c: #16a34a; }
+.aw .adoc-callout.is-warn { --c: #d97706; }
+.aw .adoc-callout-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--c); font: 700 12.5px var(--aico-font); text-transform: uppercase; letter-spacing: 0.04em; }
+.aw .adoc-callout .markdown-body { font-size: 15px; line-height: 1.6; }
+.aw .adoc-callout .markdown-body p { margin-bottom: 6px; }
+
+/* Infographics */
+.aw .adoc-inline-md .markdown-body, .aw .adoc-inline-md .markdown-body p { display: inline; margin: 0; font-size: inherit; line-height: inherit; color: inherit; }
+.aw .adoc-stats { display: grid; gap: 12px; }
+@container (max-width: 560px) { .aw .adoc-stats, .aw .adoc-compare { grid-template-columns: minmax(0, 1fr) !important; } }
+.aw .adoc-stat { padding: 16px 18px; border: 1px solid var(--aw-soft); border-radius: 12px; background: var(--aw-raised); font-family: var(--aico-font); }
+.aw .adoc-stat-value { font: 700 28px/1.15 Georgia, 'Source Serif 4', serif; color: var(--aico-text-primary); font-variant-numeric: tabular-nums; }
+.aw .adoc-stat-label { margin-top: 4px; font-size: 12.5px; font-weight: 600; color: var(--aico-text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+.aw .adoc-stat-note { margin-top: 6px; font-size: 12.5px; color: var(--aico-text-muted); }
+.aw .adoc-stat-note.is-up { color: #16a34a; }
+.aw .adoc-stat-note.is-down { color: #dc2626; }
+.aw .adoc-timeline { position: relative; list-style: none; margin: 0; padding: 0 0 0 26px; font-family: var(--aico-font); }
+.aw .adoc-timeline::before { content: ''; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px; background: var(--aw-line); }
+.aw .adoc-timeline li { position: relative; padding: 0 0 16px; margin: 0; list-style: none; }
+.aw .adoc-tl-dot { position: absolute; left: -24px; top: 5px; width: 12px; height: 12px; border: 2px solid var(--aico-accent); border-radius: 50%; background: var(--aw-card); }
+.aw .adoc-tl-when { font-size: 12px; font-weight: 700; color: var(--aico-accent); text-transform: uppercase; letter-spacing: 0.04em; }
+.aw .adoc-tl-title { font-size: 15.5px; font-weight: 650; color: var(--aico-text-primary); }
+.aw .adoc-tl-detail { font-size: 14px; color: var(--aico-text-secondary); line-height: 1.5; }
+.aw .adoc-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-family: var(--aico-font); }
+.aw .adoc-steps li { display: flex; gap: 12px; align-items: flex-start; margin: 0; list-style: none; }
+.aw .adoc-step-n { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--aico-accent); color: #fff; font-weight: 700; font-size: 13px; }
+.aw .adoc-step-title { font-size: 15.5px; font-weight: 650; color: var(--aico-text-primary); line-height: 28px; }
+.aw .adoc-step-detail { font-size: 14px; color: var(--aico-text-secondary); line-height: 1.5; }
+.aw .adoc-compare { display: grid; gap: 12px; font-family: var(--aico-font); }
+.aw .adoc-compare-col { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--aw-soft); border-radius: 12px; background: var(--aw-raised); }
+.aw .adoc-compare-title { font: 650 17px/1.3 Georgia, 'Source Serif 4', serif; color: var(--aico-text-primary); }
+.aw .adoc-compare-note { font-size: 12.5px; font-weight: 600; color: var(--aico-accent); }
+.aw .adoc-compare-col.is-highlight { border-color: var(--aico-accent); box-shadow: 0 0 0 1px var(--aico-accent); background: color-mix(in srgb, var(--aico-accent-soft) 60%, var(--aw-raised)); }
+.aw .adoc-compare-col ul { margin: 2px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.55; }
+.aw .adoc-compare-col li { margin: 0 0 3px; }
+.aw .adoc-compare.is-edit .adoc-compare-col { background: var(--aw-card); }
+.aw .adoc-compare.is-edit .adoc-cell { border: 1px solid var(--aw-soft); border-radius: 6px; }
+
+/* Table of contents and outline */
+.aw .adoc-toc { padding: 14px 18px; border: 1px solid var(--aw-soft); border-radius: 10px; background: var(--aw-raised); font-family: var(--aico-font); }
+.aw .adoc-toc-title { margin-bottom: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--aico-text-muted); }
+.aw .adoc-toc ol { list-style: none; margin: 0; padding: 0; }
+.aw .adoc-toc li { margin: 0; list-style: none; }
+.aw .adoc-toc button, .aw .adoc-outline button {
+  display: block; width: 100%; padding: 3px 6px; border: 0; border-radius: 5px; background: none; text-align: left;
+  color: var(--aico-text-primary); font-size: 14px; line-height: 1.45; cursor: pointer;
+}
+.aw .adoc-toc button:hover, .aw .adoc-outline button:hover { background: var(--aico-hover); color: var(--aico-accent); }
+.aw .adoc-wrap { position: relative; display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.aw .adoc-outline {
+  flex: none; width: 220px; overflow-y: auto; padding: 10px 8px; border-right: 1px solid var(--aw-soft); background: var(--aw-card);
+  font-family: var(--aico-font);
+}
+.aw .adoc-outline-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--aico-text-muted); }
+.aw .adoc-outline ol { list-style: none; margin: 0; padding: 0; }
+.aw .adoc-outline li { margin: 0; }
+.aw .adoc-outline button { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aw .adoc-toc li.is-pending button, .aw .adoc-outline li.is-pending button { color: var(--aico-text-muted); font-style: italic; }
+@container acv (max-width: 720px) { .aw .adoc-outline { position: absolute; z-index: 20; top: 0; bottom: 0; left: 0; box-shadow: var(--aw-shadow-strong); } }
+
+/* Insert menu, grouped */
+.aw .adoc-insert-list { display: grid; grid-template-columns: repeat(2, minmax(170px, 1fr)); gap: 2px 8px; max-height: min(70vh, 520px); overflow-y: auto; min-width: 360px; }
+.aw .adoc-insert-group { min-width: 0; }
+.aw .adoc-insert-head { padding: 6px 10px 2px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--aico-text-muted); }
+@container acv (max-width: 560px) { .aw .adoc-insert-list { grid-template-columns: minmax(0, 1fr); min-width: 220px; } }
+
+/* Dialogs */
+.aw .adoc-modal-back { position: absolute; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: rgba(15, 17, 21, 0.35); }
+.aw .adoc-modal {
+  display: flex; flex-direction: column; width: min(560px, 100%); max-height: calc(100% - 16px); border: 1px solid var(--aw-line); border-radius: 14px;
+  background: var(--aw-card); box-shadow: var(--aw-shadow-strong); overflow: hidden; font-family: var(--aico-font);
+}
+.aw .adoc-modal.is-wide { width: min(1080px, 100%); }
+.aw .adoc-modal-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px 16px; border-bottom: 1px solid var(--aw-soft); font-size: 14.5px; font-weight: 650; }
+.aw .adoc-modal-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--aw-soft); font-size: 12px; }
+.aw .adoc-export { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; overflow: auto; }
+.aw .adoc-modal.is-wide .adoc-export { grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); }
+@container acv (max-width: 820px) { .aw .adoc-modal.is-wide .adoc-export { grid-template-columns: minmax(0, 1fr); } }
+.aw .adoc-export-form { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; overflow-y: auto; }
+.aw .adoc-export-preview { min-height: 420px; border-left: 1px solid var(--aw-soft); background: var(--aw-raised); display: flex; }
+.aw .adoc-export-preview iframe { flex: 1; width: 100%; min-height: 420px; border: 0; background: #fff; }
+.aw .adoc-fieldset { margin: 0; padding: 10px 12px 12px; border: 1px solid var(--aw-soft); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
+.aw .adoc-fieldset:disabled { opacity: 0.5; }
+.aw .adoc-fieldset legend { padding: 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--aico-text-muted); }
+.aw .adoc-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.aw .adoc-row > .adoc-field { flex: 1 1 110px; }
+.aw .adoc-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; color: var(--aico-text-secondary); }
+.aw .adoc-field > span { font-weight: 600; }
+.aw .adoc-field input, .aw .adoc-field select {
+  height: 30px; padding: 0 9px; border: 1px solid var(--aw-line); border-radius: 8px; background: var(--aico-bg);
+  color: var(--aico-text-primary); font: inherit; font-size: 13px; outline: none;
+}
+.aw .adoc-field input:focus, .aw .adoc-field select:focus { border-color: var(--aico-accent); }
+.aw .adoc-cover-fields { display: flex; flex-direction: column; gap: 8px; padding-left: 22px; }
+.aw .adoc-logo-row { align-items: center; }
+.aw .adoc-logo-thumb { height: 32px; max-width: 120px; object-fit: contain; border: 1px solid var(--aw-soft); border-radius: 6px; background: #fff; }
+.aw .adoc-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; padding: 14px 16px 6px; overflow-y: auto; }
+.aw .adoc-template {
+  display: flex; flex-direction: column; gap: 3px; min-height: 76px; padding: 10px 12px; border: 1px solid var(--aw-line); border-radius: 10px;
+  background: var(--aw-raised); text-align: left; cursor: pointer;
+}
+.aw .adoc-template:hover { border-color: var(--aico-accent); }
+.aw .adoc-template.is-on { border-color: var(--aico-accent); background: var(--aico-accent-soft); box-shadow: 0 0 0 1px var(--aico-accent); }
+.aw .adoc-template-name { font-size: 13.5px; font-weight: 650; color: var(--aico-text-primary); }
+.aw .adoc-template-desc { font-size: 11.5px; line-height: 1.4; color: var(--aico-text-muted); }
+.aw .adoc-new-fields { display: flex; flex-direction: column; gap: 10px; padding: 10px 16px 14px; }

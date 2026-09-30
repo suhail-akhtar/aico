@@ -30,7 +30,8 @@
 
 import { transportFetch } from './transport';
 import type { HostAnswer, HostCall, HostToolName } from '../../shared/host-tools';
-import type { CanvasDoc, CanvasSummary, CanvasWriteResult } from '../../shared/ui/canvas/host';
+import type { CanvasDoc, CanvasSummary, CanvasWriteResult, DocSettings, ExportFormat } from '../../shared/ui/canvas/host';
+import type { CanvasComment, CommentAnchor } from '../../shared/ui/canvas/comments';
 
 const TOKEN_KEY = 'aico.token';
 
@@ -700,10 +701,42 @@ export const api = {
   canvasGet: (sessionId: string, id: string, light = false) =>
     get<{ canvas: CanvasDoc }>(`canvas/get?session=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(id)}${light ? '&light=1' : ''}`),
   /** A person's edit. A stale `baseVersion` answers 409 with the current document — see {@link canvasWrite}. */
-  canvasSave: (sessionId: string, id: string, content: string, baseVersion: number, note?: string) =>
-    canvasWrite('canvas/save', { session: sessionId, id, content, baseVersion, ...(note ? { note } : {}) }),
-  canvasRestore: (sessionId: string, id: string, version: number, baseVersion?: number) =>
-    canvasWrite('canvas/restore', { session: sessionId, id, version, ...(baseVersion !== undefined ? { baseVersion } : {}) }),
+  canvasSave: (sessionId: string, id: string, content: string, baseVersion: number, note?: string, tab?: string) =>
+    canvasWrite('canvas/save', { session: sessionId, id, content, baseVersion, ...(note ? { note } : {}), ...(tab ? { tab } : {}) }),
+  canvasRestore: (sessionId: string, id: string, version: number, baseVersion?: number, tab?: string) =>
+    canvasWrite('canvas/restore', { session: sessionId, id, version, ...(baseVersion !== undefined ? { baseVersion } : {}), ...(tab ? { tab } : {}) }),
+  /** AICO Docs tabs: add, rename, delete. See docs/engineering/canvas-docs-contract.md. */
+  canvasTabs: (sessionId: string, id: string, op: { op: 'add' | 'rename' | 'delete'; tab?: string; title?: string; content?: string }) =>
+    post<{ canvas: CanvasDoc }>('canvas/tabs', { session: sessionId, id, ...op }),
+  canvasSettings: (sessionId: string, id: string, docSettings: DocSettings) =>
+    post<{ canvas: CanvasDoc }>('canvas/settings', { session: sessionId, id, settings: docSettings }),
+  canvasCreate: (sessionId: string, input: { title: string; content: string }) =>
+    post<{ canvas: CanvasDoc }>('canvas/create', { session: sessionId, kind: 'document', ...input }),
+  canvasComments: (sessionId: string, id: string) =>
+    get<{ comments: CanvasComment[] }>(`canvas/${encodeURIComponent(id)}/comments?session=${encodeURIComponent(sessionId)}`),
+  canvasComment: (sessionId: string, id: string, input: { tabId: string; anchor: CommentAnchor; body: string; askAgent?: boolean }) =>
+    post<{ comment: CanvasComment }>(`canvas/${encodeURIComponent(id)}/comments`, { session: sessionId, ...input }),
+  canvasCommentReply: (sessionId: string, id: string, commentId: string, body: string) =>
+    post<{ comment: CanvasComment }>(`canvas/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/replies`, { session: sessionId, body }),
+  canvasCommentResolve: (sessionId: string, id: string, commentId: string, resolved: boolean) =>
+    post<{ comment: CanvasComment }>(`canvas/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/resolve`, { session: sessionId, resolved }),
+  /**
+   * A tab exported by the engine, as bytes. Not the JSON `request`: the body is
+   * a file, and a JSON error only arrives when it failed.
+   */
+  canvasExport: async (sessionId: string, id: string, format: ExportFormat, tab?: string, settings?: DocSettings): Promise<{ blob: Blob; name: string }> => {
+    const q = `session=${encodeURIComponent(sessionId)}&format=${format}${tab ? `&tab=${encodeURIComponent(tab)}` : ''}`
+      + `${settings ? `&settings=${encodeURIComponent(JSON.stringify(settings))}` : ''}`;
+    const res = await transportFetch(`/api/canvas/${encodeURIComponent(id)}/export?${q}`, { headers: { 'x-aico-token': getToken() } });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const body = text ? safeParse(text) as { error?: string } : {};
+      throw new ApiError(body.error ?? `HTTP ${res.status}`, res.status, body);
+    }
+    const cd = res.headers.get('content-disposition') ?? '';
+    const name = /filename\*=UTF-8''([^;]+)/i.exec(cd)?.[1] ?? /filename="?([^";]+)"?/i.exec(cd)?.[1];
+    return { blob: await res.blob(), name: name ? decodeURIComponent(name) : `canvas.${format}` };
+  },
 };
 
 /**

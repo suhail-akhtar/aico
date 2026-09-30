@@ -10,7 +10,9 @@ import React from 'react';
 export type CanvasIconName =
   | 'doc' | 'code' | 'sparkle' | 'history' | 'copy' | 'check' | 'download' | 'close' | 'open' | 'undo' | 'redo'
   | 'bold' | 'italic' | 'strike' | 'inline-code' | 'link' | 'bullet' | 'number' | 'task' | 'quote' | 'codeblock'
-  | 'table' | 'rule' | 'split' | 'write' | 'eye' | 'send' | 'restore' | 'expand' | 'warn';
+  | 'table' | 'rule' | 'split' | 'write' | 'eye' | 'send' | 'restore' | 'expand' | 'warn'
+  | 'comment' | 'image' | 'plus' | 'fullscreen' | 'shrink' | 'share' | 'chevron' | 'follow' | 'callout' | 'math'
+  | 'chart' | 'diagram' | 'heading' | 'trash' | 'pencil' | 'page' | 'markdown';
 
 const PATHS: Record<CanvasIconName, React.ReactNode> = {
   doc: <><path d="M4 1.8h5.5L13 5.3V13a1.2 1.2 0 0 1-1.2 1.2H4A1.2 1.2 0 0 1 2.8 13V3A1.2 1.2 0 0 1 4 1.8z" /><path d="M9.3 1.9v3.6H13M5.3 8.3h5.4M5.3 10.8h3.6" /></>,
@@ -43,6 +45,23 @@ const PATHS: Record<CanvasIconName, React.ReactNode> = {
   restore: <><path d="M3 8a5 5 0 1 0 1.5-3.6" /><path d="M2.8 2.8v2.4h2.4" /></>,
   expand: <><path d="M9.5 2.5h4v4" /><path d="M6.5 13.5h-4v-4" /><path d="M13.5 2.5 9 7" /><path d="M2.5 13.5 7 9" /></>,
   warn: <><path d="M8 2.2 14.3 13H1.7z" /><path d="M8 6.5v3M8 11.3v.2" /></>,
+  comment: <path d="M2.5 3.8A1.3 1.3 0 0 1 3.8 2.5h8.4a1.3 1.3 0 0 1 1.3 1.3v6.1a1.3 1.3 0 0 1-1.3 1.3H7l-3 2.3v-2.3h-.2a1.3 1.3 0 0 1-1.3-1.3z" />,
+  image: <><rect x="2" y="2.8" width="12" height="10.4" rx="1.5" /><circle cx="5.6" cy="6.2" r="1.2" /><path d="m2.5 12 3.8-3.6 2.6 2.4 1.8-1.6 3 2.8" /></>,
+  plus: <path d="M8 3v10M3 8h10" />,
+  fullscreen: <><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" /></>,
+  shrink: <><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" /></>,
+  share: <><path d="M8 10V2.5" /><path d="M5 5.3 8 2.5l3 2.8" /><path d="M4.5 7.5h-1a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1h-1" /></>,
+  chevron: <path d="m4.5 6.3 3.5 3.4 3.5-3.4" />,
+  follow: <><circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v2.4M8 11.8v2.4M1.8 8h2.4M11.8 8h2.4" /></>,
+  callout: <><rect x="2" y="3" width="12" height="10" rx="1.6" /><path d="M5 6.3h6M5 9.3h4" /><path d="M2 3v10" strokeWidth={2.4} /></>,
+  math: <path d="M3 4.5h5.5M11.5 3v3M10 4.5h3M3.5 9.5l3 3M6.5 9.5l-3 3M10 10h3M10 12h3" />,
+  chart: <><path d="M2.5 13.5h11" /><path d="M4.5 11V8M7.5 11V4.5M10.5 11V6.5" strokeWidth={1.8} /></>,
+  diagram: <><rect x="1.8" y="2.3" width="4.4" height="3.4" rx=".8" /><rect x="9.8" y="10.3" width="4.4" height="3.4" rx=".8" /><path d="M4 5.7v2.8h8v1.8" /></>,
+  heading: <path d="M3.5 3v10M9.5 3v10M3.5 8h6M11.5 6.5 13 5.5V13" />,
+  trash: <><path d="M3 4.5h10M6.5 4.5V3h3v1.5" /><path d="M4.3 4.5 5 13.5h6l.7-9" /></>,
+  pencil: <><path d="M10.5 2.5l3 3-8 8H2.5v-3z" /></>,
+  page: <><rect x="3" y="1.8" width="10" height="12.4" rx="1.3" /><path d="M5.5 5h5M5.5 7.5h5M5.5 10h3" /></>,
+  markdown: <><rect x="1.5" y="3.5" width="13" height="9" rx="1.5" /><path d="M4 10.5v-5l2 2.5 2-2.5v5M11 5.5v5M9.5 9l1.5 1.5L12.5 9" /></>,
 };
 
 export function CvIcon({ name, size = 14, className }: { name: CanvasIconName; size?: number; className?: string }): React.ReactElement {

@@ -14996,7 +14996,8 @@ console.log('\n══ Canvas documents (store, Canvas tool, /api/canvas/*) ═�
 
     // ── The tool ──
     const d = Object.fromEntries(defs.map(t => [t.name, t]));
-    assert(d.Canvas && !d.Canvas.isConcurrencySafe && canvasDefinition.inputSchema.properties.action.enum.join() === 'create,read,update,edit,list'
+    assert(d.Canvas && !d.Canvas.isConcurrencySafe
+      && ['create', 'read', 'update', 'edit', 'list'].every(a => canvasDefinition.inputSchema.properties.action.enum.includes(a))
       && /```canvas/.test(canvasDefinition.description) && /ALWAYS read/.test(canvasDefinition.description),
       'Canvas is registered, exclusive, and its description says to read before editing');
     const run = (fn) => runInContext({ cwd: project, sessionId: 'canvas-tool-session', settings }, fn);
@@ -15102,6 +15103,399 @@ console.log('\n══ Canvas documents (store, Canvas tool, /api/canvas/*) ═�
     }
   } finally {
     stopHearing();
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// AICO Docs: tabs, pending sections, write_section, comments, exports.
+// Contract: docs/engineering/canvas-docs-contract.md
+// ═══════════════════════════════════════════════════════════
+console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
+{
+  const X = await import('./dist-test/test-exports.js');
+  const { unzipSync, strFromU8 } = await import('fflate');
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-docs-'));
+  const settings = {};
+  const sid = 'docs-session';
+  const ctx = { settings, cwd: project, sessionId: sid };
+  const run = (fn) => X.runInContext({ cwd: project, sessionId: sid, settings }, fn);
+  const tool = (input) => run(() => X.canvasTool(input));
+  const errOf = async (fn) => { try { await fn(); return ''; } catch (e) { return e.message; } };
+  const activity = [];
+  const commentsHeard = [];
+  const stopA = X.onCanvasActivity(a => activity.push(a));
+  const stopC = X.onCanvasComments(c => commentsHeard.push(c));
+  const F = '```';
+  try {
+    // ── Migration ──
+    const legacy = { id: 'cv-0a0a0a0a0a', title: 'Old', kind: 'document', content: 'old text', version: 4, createdAt: 1, updatedAt: 2,
+      versions: [{ version: 3, content: 'older', author: 'user', at: 1 }, { version: 4, content: 'old text', author: 'agent', at: 2 }] };
+    const m = X.migrateCanvas(legacy);
+    assert(m.tabs.length === 1 && m.tabs[0].id === 't1' && m.tabs[0].content === 'old text' && m.tabs[0].version === 4
+      && m.content === 'old text' && m.version === 4 && m.revision === 4 && Array.isArray(m.comments) && m.comments.length === 0
+      && m.versions.every(v => v.tab === 't1'), 'migration: a pre-tab canvas becomes one tab t1 keeping its version; content/version alias it');
+    const info = X.getWorkspaceInfo({ settings, cwd: project, sessionId: sid });
+    fs.mkdirSync(path.join(info.sessionDir, 'canvas'), { recursive: true });
+    fs.writeFileSync(path.join(info.sessionDir, 'canvas', `${legacy.id}.json`), JSON.stringify(legacy));
+    const onDisk = await X.getCanvas(ctx, legacy.id);
+    assert(onDisk?.tabs?.[0]?.id === 't1' && onDisk.version === 4, 'migration: a legacy file on disk reads as tabbed');
+    const legacySave = await X.writeCanvas(ctx, legacy.id, { content: 'new text', baseVersion: 4, author: 'user' });
+    assert(legacySave.ok && legacySave.canvas.version === 5 && legacySave.canvas.tabs[0].content === 'new text'
+      && legacySave.canvas.content === 'new text', 'migration: an old client saving with the old version (no tab) writes tab t1');
+    const onDiskNow = JSON.parse(fs.readFileSync(path.join(info.sessionDir, 'canvas', `${legacy.id}.json`), 'utf8'));
+    assert(Array.isArray(onDiskNow.tabs) && onDiskNow.content === 'new text', 'migration: the next write persists the tabbed shape with the alias');
+
+    // ── Pending blocks ──
+    const line = X.pendingLine({ id: 's2', intent: 'Goals: the "three" <outcomes> -- & more', heading: 'Goals' });
+    assert(!/--[^>]/.test(line.slice(4, -3)) && line.startsWith('<!-- aico:pending id="s2"'), 'pending: the line is a valid HTML comment (no inner --)');
+    const back = X.parsePendingLine(line);
+    assert(back?.id === 's2' && back.intent === 'Goals: the "three" <outcomes> -- & more' && back.heading === 'Goals', 'pending: round-trips id, intent and heading');
+    assert(X.parsePendingLine('<!-- just a comment -->') === undefined && X.parsePendingLine('text <!-- aico:pending id="x" --> more') === undefined,
+      'pending: other comments and inline markers are not placeholders');
+
+    // ── Sections ──
+    const doc1 = ['# Title', '', 'intro', '', '## A', '', 'a text', '', '### A1', '', 'a1 text', '', '## B', '', `${F}sh`, '# not a heading', `${F}`, '',
+      X.pendingLine({ id: 's9', intent: 'later' }), '', '## B', '', 'second B'].join('\n');
+    const secs = X.listSections(doc1);
+    const A = secs.find(s => s.heading === 'A');
+    assert(A && doc1.split('\n').slice(A.startLine, A.endLine).join('\n').includes('a1 text') && !doc1.split('\n').slice(A.startLine, A.endLine).join('\n').includes('## B'),
+      'sections: a heading section spans its nested subsections and stops at the next same-level heading');
+    assert(!secs.some(s => s.heading === 'not a heading'), 'sections: a # inside a code fence is not a heading');
+    const firstB = secs.find(s => s.heading === 'B');
+    assert(firstB && firstB.endLine <= secs.find(s => s.id === 's9').startLine, 'sections: a heading section ends at the next pending block');
+    const dup = X.findSection(doc1, 'B');
+    assert(!dup.ok && /occurs 2 times/.test(dup.error) && /line 13/.test(dup.error) && /line 21/.test(dup.error), 'sections: a duplicate heading is refused, listing both candidates');
+    assert(X.findSection(doc1, '## A').ok && X.findSection(doc1, 's9').ok, 'sections: addressed by "## Heading", bare heading, or pending id');
+    const miss = X.findSection(doc1, 'Nope');
+    assert(!miss.ok && /no section "Nope"/.test(miss.error) && /pending "s9"/.test(miss.error), 'sections: an unknown section lists what exists');
+    const rp = X.replaceSection(doc1, secs.find(s => s.id === 's9'), '\n\njust body\n\n');
+    assert(rp.content.includes('\n\njust body\n\n## B') && !rp.content.includes('aico:pending'), 'replace: a pending block is replaced, one blank line either side');
+    const withHeading = X.pendingLine({ id: 's3', intent: 'x', heading: 'Risks' });
+    const rh = X.replaceSection(`intro\n\n${withHeading}\n`, X.listSections(`intro\n\n${withHeading}\n`)[0], 'Only body.');
+    assert(rh.content === 'intro\n\n## Risks\n\nOnly body.\n' && rh.heading === 'Risks', 'replace: content without a heading gets the planned heading');
+    const ra = X.replaceSection(doc1, A, 'Rewritten A body.');
+    assert(ra.content.includes('## A\n\nRewritten A body.\n\n## B') && !ra.content.includes('a1 text'), 'replace: a heading section without a new heading keeps its heading');
+    assert(X.stripPending(doc1).indexOf('aico:pending') < 0 && X.stripPending(doc1).includes('# not a heading'), 'stripPending removes only placeholders');
+
+    // ── The tool: outline → write_section ×5 ──
+    const outlined = await tool({ action: 'outline', title: 'Project brief', sections: [
+      { id: 's1', intent: 'Why this project', heading: 'Background' },
+      { id: 's2', intent: 'Three outcomes', heading: 'Goals' },
+      { id: 's3', intent: 'What is in and out', heading: 'Scope' },
+      { id: 's4', intent: 'Milestones', heading: 'Timeline' },
+      { id: 's5', intent: 'What could go wrong', heading: 'Risks' },
+    ] });
+    const card = /```canvas\n(.*)\n```/.exec(outlined);
+    const id = card && JSON.parse(card[1]).id;
+    assert(id && /5 pending sections/.test(outlined) && /ONE short line/.test(outlined) && /write_section/.test(outlined),
+      'outline: creates the skeleton, returns the card and the next steps');
+    let doc = await X.getCanvas(ctx, id);
+    assert(X.pendingBlocks(doc.content).map(p => p.id).join() === 's1,s2,s3,s4,s5' && doc.version === 1, 'outline: one pending block per section, version 1');
+    const readOut = await tool({ action: 'read', id });
+    assert(/Still to write: s1 \(Background\)/.test(readOut), 'read lists the sections still to write');
+    let version = 1;
+    activity.length = 0;
+    for (const [i, h] of ['Background', 'Goals', 'Scope', 'Timeline', 'Risks'].entries()) {
+      const out = await tool({ action: 'write_section', id, section: `s${i + 1}`, version, content: `## ${h}\n\nText for ${h}. **Bold** point ${i}.` });
+      version++;
+      assert(new RegExp(`now version ${version}`).test(out), `write_section s${i + 1} → version ${version}`);
+    }
+    doc = await X.getCanvas(ctx, id);
+    assert(X.pendingBlocks(doc.content).length === 0 && doc.content.indexOf('## Background') < doc.content.indexOf('## Risks')
+      && doc.versions.filter(v => v.tab === 't1').length === 6, 'write_section ×5: every placeholder filled, in order, six versions');
+    assert(activity.length === 10 && activity.filter(a => a.status === 'writing').map(a => a.section).join() === 's1,s2,s3,s4,s5'
+      && activity.every(a => a.canvasId === id && a.tabId === 't1' && a.by === 'agent' && a.sessionId === sid)
+      && activity[0].heading === 'Background' && activity[1].status === 'done',
+      'canvas-activity: writing/done pairs per section, naming the section and heading');
+    const staleOut = await errOf(() => tool({ action: 'write_section', id, section: 'Goals', version: 3, content: '## Goals\n\nx' }));
+    assert(/NOT APPLIED/.test(staleOut) && /version 6, not 3/.test(staleOut), 'write_section on a stale version is refused with the latest');
+    const byAlias = await tool({ action: 'write_section', id, section: 's2', version: 6, content: '## Goals\n\nRevised goals.' });
+    doc = await X.getCanvas(ctx, id);
+    assert(/now version 7/.test(byAlias) && doc.content.includes('Revised goals.') && !doc.content.includes('Text for Goals'),
+      'write_section: an id already written still addresses its section');
+    const afterFail = activity.length;
+    await errOf(() => tool({ action: 'write_section', id, section: 'Nope', version: 7, content: 'x' }));
+    assert(activity.length === afterFail, 'no activity frames for a write refused before it starts');
+
+    // ── Tabs ──
+    const two = await tool({ action: 'outline', title: 'Two tabs', tabs: [{ title: 'Plan' }, { title: 'Notes' }],
+      sections: [{ id: 'p1', intent: 'plan', heading: 'Plan' }, { id: 'n1', intent: 'notes', heading: 'Notes', tab: 'Notes' }] });
+    const id2 = JSON.parse(/```canvas\n(.*)\n```/.exec(two)[1]).id;
+    let d2 = await X.getCanvas(ctx, id2);
+    assert(d2.tabs.map(t => `${t.id}:${t.title}`).join() === 't1:Plan,t2:Notes' && d2.tabs[1].content.includes('id="n1"'),
+      'outline with tabs: sections land in their tab');
+    await X.writeCanvas(ctx, id2, { content: 'user typing in plan', baseVersion: 1, author: 'user', tab: 't1' });
+    const t2w = await tool({ action: 'write_section', id: id2, tab: 't2', section: 'n1', version: 1, content: '## Notes\n\nagent notes' });
+    d2 = await X.getCanvas(ctx, id2);
+    assert(/now version 2/.test(t2w) && d2.tabs[0].version === 2 && d2.tabs[1].version === 2 && d2.revision >= 3,
+      'tabs: versions are per tab — the user on t1 and the agent on t2 do not conflict');
+    const addOut = await tool({ action: 'add_tab', id: id2, title: 'Appendix', content: '# Appendix' });
+    await tool({ action: 'rename_tab', id: id2, tab: 't3', title: 'Annex' });
+    d2 = await X.getCanvas(ctx, id2);
+    assert(/Added tab t3/.test(addOut) && d2.tabs[2].title === 'Annex' && d2.tabs[2].content === '# Appendix', 'add_tab and rename_tab');
+    assert(/no tab "t9"/.test(await errOf(() => tool({ action: 'read', id: id2, tab: 't9' }))), 'an unknown tab is refused, listing the tabs');
+    const del = await X.deleteTab(ctx, id2, 't3');
+    const lone = await X.createCanvas(ctx, { title: 'Lone', content: 'x' });
+    assert(del.tabs.length === 2 && /last one cannot/.test(await errOf(() => X.deleteTab(ctx, lone.id, 't1'))),
+      'deleteTab removes a tab but never the last');
+
+    // ── Comments ──
+    const cdoc = await X.createCanvas(ctx, { title: 'Comments', content: '## Intro\n\nThis has a **bold word** in it.\n\n## Body\n\nSome body text here.\n', author: 'agent' });
+    const { comment: c1 } = await X.addComment(ctx, cdoc.id, { tabId: 't1', anchor: { quote: 'a bold word in', prefix: 'This has ', suffix: ' it.' }, body: 'nice', author: 'user' });
+    assert(!c1.orphaned && c1.anchor.quote === 'a bold word in' && !c1.askAgent, 'comments: a rendered-text quote anchors in the Markdown (marks ignored)');
+    const { comment: c2 } = await X.addComment(ctx, cdoc.id, { anchor: { quote: 'Some body text', prefix: 'Body ', suffix: ' here.' }, body: '@AICO make this shorter', author: 'user' });
+    assert(c2.askAgent === true && commentsHeard.at(-1).askAgent === true && commentsHeard.at(-1).action === 'add', 'comments: @AICO asks the agent, and the change is announced');
+    const { comment: c3 } = await X.addComment(ctx, cdoc.id, { anchor: { quote: 'not in the text' }, body: 'lost', author: 'user' });
+    assert(c3.orphaned === true, 'comments: a quote that is not there is kept, orphaned');
+    let cur = await X.getCanvas(ctx, cdoc.id);
+    // An edit above the passage: still found.
+    let w = await X.writeCanvas(ctx, cdoc.id, { content: cur.content.replace('## Intro', '## Introduction\n\nNew opening paragraph.'), baseVersion: cur.version, author: 'user' });
+    assert(!w.canvas.comments.find(c => c.id === c1.id).orphaned, 're-anchor: an edit elsewhere leaves the comment anchored');
+    // Reworded in place: prefix and suffix survive.
+    w = await X.writeCanvas(ctx, cdoc.id, { content: w.canvas.content.replace('Some body text', 'Short text'), baseVersion: w.canvas.version, author: 'agent' });
+    const moved = w.canvas.comments.find(c => c.id === c2.id);
+    assert(!moved.orphaned && moved.anchor.quote === 'Short text', 're-anchor: a passage reworded in place moves the anchor to the new words');
+    w = await X.writeCanvas(ctx, cdoc.id, { content: '## Introduction\n\nAll new.\n', baseVersion: w.canvas.version, author: 'agent' });
+    assert(w.canvas.comments.filter(c => c.id !== c3.id).every(c => c.orphaned === true), 're-anchor: comments whose passage is gone are orphaned');
+    const listed = await tool({ action: 'comments', id: cdoc.id });
+    assert(listed.includes(c2.id) && /make this shorter/.test(listed) && /no longer in the document/.test(listed), 'tool comments lists open comments, flagging orphans');
+    const replied = await tool({ action: 'reply_comment', id: cdoc.id, commentId: c2.id, body: 'Done — shortened.', resolve: true });
+    cur = await X.getCanvas(ctx, cdoc.id);
+    const rc = cur.comments.find(c => c.id === c2.id);
+    assert(/and resolved it/.test(replied) && rc.resolved && rc.replies[0].author === 'agent' && rc.replies[0].body === 'Done — shortened.',
+      'reply_comment adds the agent reply and resolves');
+    assert(/no comment "c-nope"/.test(await errOf(() => tool({ action: 'reply_comment', id: cdoc.id, commentId: 'c-nope', body: 'x' }))), 'an unknown comment is refused');
+    const reopened = await X.resolveComment(ctx, cdoc.id, c2.id, { resolved: false, author: 'user' });
+    assert(!reopened.comment.resolved, 'a resolved comment can be reopened');
+    assert(X.addressesAgent('hey @aico, fix') && !X.addressesAgent('mail me at x@aico.dev') && !X.addressesAgent('AICO please'), 'addressesAgent: @AICO only as a mention');
+    const prompt = X.commentPrompt(cdoc.id, c2, c2.body);
+    assert(prompt.startsWith("The user commented on 'Some body text': @AICO make this shorter") && prompt.includes(c2.id) && /reply_comment/.test(prompt),
+      'the turn a comment becomes starts with the contract wording and names the comment');
+
+    // ── Exports ──
+    const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    fs.writeFileSync(path.join(project, 'pic.png'), Buffer.from(PNG1, 'base64'));
+    const rich = ['## Overview', '', 'Plain, **bold**, _italic_, `code`, ~~gone~~ and [a link](https://example.com).', '',
+      X.pendingLine({ id: 'sx', intent: 'still pending' }), '',
+      '1. first', '   - nested bullet', '     1. deep number', '2. second', '', '- [ ] open task', '- [x] done task', '',
+      '| Name | Qty |', '|:--|--:|', '| Apples | 3 |', '', `${F}ts`, 'const x = 1 < 2; // # not a heading', `${F}`, '',
+      '> a quoted line', '', '![inline pic](data:image/png;base64,' + PNG1 + ')', '', '![file pic](pic.png)', '', '![outside](../escape.png)'].join('\n');
+    const edoc = await X.createCanvas(ctx, { title: 'Export test', content: rich, author: 'agent' });
+    const imgs = X.workspaceImages(project);
+    const docx = await X.exportCanvas(edoc, { format: 'docx', resolveImage: imgs });
+    const zip = unzipSync(new Uint8Array(docx.bytes));
+    const xml = strFromU8(zip['word/document.xml']);
+    const rels = strFromU8(zip['word/_rels/document.xml.rels']);
+    assert(docx.fileName === 'export-test.docx' && docx.bytes[0] === 0x50 && docx.bytes[1] === 0x4b, 'docx: a zip named after the title');
+    assert(['[Content_Types].xml', 'word/styles.xml', 'word/numbering.xml', 'docProps/core.xml'].every(f => zip[f]), 'docx: the package parts are present');
+    assert(/<w:pStyle w:val="Title"\/>.*Export test/.test(xml) && /<w:pStyle w:val="Heading2"\/><\/w:pPr><w:bookmarkStart w:id="\d+" w:name="_Toc_overview"\/><w:r><w:t xml:space="preserve">Overview/.test(xml),
+      'docx: title and headings use Word heading styles');
+    assert(/<w:b\/><w:bCs\/><\/w:rPr><w:t xml:space="preserve">bold/.test(xml) && /<w:i\/><w:iCs\/><\/w:rPr><w:t xml:space="preserve">italic/.test(xml)
+      && /CodeChar.*code</.test(xml) && /<w:strike\/>.*gone/.test(xml), 'docx: bold, italic, inline code and strikethrough runs');
+    assert(/<w:hyperlink r:id="(rId\d+)"/.test(xml) && rels.includes('Target="https://example.com" TargetMode="External"'), 'docx: links are real hyperlinks');
+    assert(/<w:ilvl w:val="0"\/><w:numId w:val="2"\/>.*first/.test(xml) && /<w:ilvl w:val="1"\/><w:numId w:val="1"\/>.*nested bullet/.test(xml)
+      && /<w:ilvl w:val="2"\/>.*deep number/.test(xml), 'docx: nested numbered and bulleted lists carry their levels');
+    assert(xml.includes('☐ ') && xml.includes('☒ '), 'docx: checklists show their boxes');
+    assert(/<w:tbl>.*<w:tblHeader\/>.*Name.*Apples.*<w:jc w:val="right"\/>/.test(xml), 'docx: tables with a header row and alignment');
+    assert(/CodeBlock.*const x = 1 &lt; 2; \/\/ # not a heading/.test(xml) && /<w:pStyle w:val="Quote"\/>.*a quoted line/.test(xml), 'docx: code blocks and block quotes');
+    assert((xml.match(/<w:drawing>/g) ?? []).length === 2 && Object.keys(zip).filter(k => k.startsWith('word/media/')).length === 2
+      && xml.includes('[outside]'), 'docx: data-URL and project images embed; a path outside the project becomes its alt text');
+    assert(!xml.includes('aico:pending') && !xml.includes('still pending'), 'docx: pending placeholders are not exported');
+    const md = await X.exportCanvas(edoc, { format: 'md', resolveImage: imgs });
+    const mdText = md.bytes.toString('utf8');
+    assert(mdText.startsWith('# Export test\n\n## Overview') && !mdText.includes('aico:pending') && mdText.includes('- [x] done task'),
+      'md: the Markdown, title first, placeholders stripped');
+    const own = await X.createCanvas(ctx, { title: 'Export test', content: '# Export Test\n\nbody' });
+    const other = await X.createCanvas(ctx, { title: 'Export test', content: '# 1. Summary\n\nbody' });
+    assert((await X.exportCanvas(own, { format: 'md', resolveImage: imgs })).bytes.toString().startsWith('# Export Test\n\nbody')
+      && (await X.exportCanvas(other, { format: 'md', resolveImage: imgs })).bytes.toString().startsWith('# Export test\n\n# 1. Summary'),
+      'export: the title is added unless the text already opens with it (a different H1 does not count)');
+    const round = X.listSections(mdText).map(s => s.heading).join();
+    assert(round === X.listSections(X.stripPending(rich)).map(s => s.heading).join().replace(/^/, 'Export test,'), 'md: round-trips to the same sections');
+    const html = (await X.exportCanvas(edoc, { format: 'html', resolveImage: imgs })).bytes.toString('utf8');
+    assert(html.startsWith('<!doctype html>') && html.includes('<style>') && /<img src="data:image\/png;base64,/.test(html)
+      && html.includes('<table>') && html.includes('type="checkbox" disabled checked') && !html.includes('aico:pending')
+      && html.includes('<em>[outside]</em>'), 'html: standalone, inline CSS, images inlined, placeholders stripped');
+    const multi = X.exportSource(d2);
+    assert(multi.markdown.startsWith('# Plan') && multi.markdown.includes('# Notes') && X.exportSource(d2, 't2').title === 'Two tabs — Notes',
+      'export: several tabs export whole under tab headings, or one tab by id');
+    let pdfMsg = '';
+    let pdf;
+    try { pdf = await X.exportCanvas(edoc, { format: 'pdf', resolveImage: imgs }); } catch (e) { pdfMsg = e.message; }
+    if (pdf) {
+      const text = pdf.bytes.toString('latin1');
+      assert(text.startsWith('%PDF-') && (text.match(/\/Type\s*\/Page[^s]/g) ?? []).length >= 1, 'pdf: a PDF with at least one page');
+    } else {
+      assert(/needs Google Chrome or Microsoft Edge/.test(pdfMsg), `pdf: without a browser the export fails clearly (${pdfMsg})`);
+    }
+    const exported = await tool({ action: 'export', id: edoc.id, format: 'docx' });
+    const exportedPath = /: (.+\.docx)\n/.exec(exported)?.[1];
+    assert(exportedPath && fs.existsSync(exportedPath) && exportedPath.includes(path.join('sessions', sid, 'artifacts')),
+      'tool export: writes into the session\'s artifacts folder and returns the path');
+    const exportedTo = await tool({ action: 'export', id: edoc.id, format: 'md', path: 'out/brief.md' });
+    assert(fs.existsSync(path.join(project, 'out', 'brief.md')) && /brief\.md/.test(exportedTo), 'tool export: or to a path inside the project');
+    assert(/must stay inside/.test(await errOf(() => tool({ action: 'export', id: edoc.id, format: 'md', path: '../../escape.md' }))), 'tool export: a path outside is refused');
+
+    // ── Docs parity: settings, templates, infographics, TOC, visuals ──
+    const cs = X.cleanSettings({ pageSize: 'letter', orientation: 'sideways', margins: { top: 1, right: 99, bottom: 20, left: 'x' }, font: 'serif',
+      header: 'H\u0007ead', watermark: 'A'.repeat(99), cover: true, bogus: 1 });
+    assert(cs.pageSize === 'Letter' && cs.orientation === undefined && cs.margins.top === 5 && cs.margins.right === 60 && cs.margins.left === 25.4
+      && cs.font === 'serif' && cs.header === 'H ead' && cs.watermark.length === 40 && cs.cover.enabled === true && !('bogus' in cs),
+      'settings: whitelisted, clamped and cleaned');
+    const merged = X.mergeSettings({ toc: true, header: 'x' }, { header: null, pageNumbers: false });
+    assert(merged.toc === true && !('header' in merged) && merged.pageNumbers === false, 'settings: merge, null clears');
+    assert(X.resolveSettings(undefined).pageSize === 'A4' && X.resolveSettings(undefined).pageNumbers === true, 'settings: defaults');
+    assert(X.TEMPLATES.length === 10 && ['report', 'proposal', 'project-brief', 'memo', 'letter', 'meeting-minutes', 'spec', 'policy', 'one-pager', 'research-summary']
+      .every(t => X.templateById(t)) && X.templateById('PRD').id === 'spec' && X.templateById('SOP').id === 'policy', 'templates: all ten, with aliases');
+    const tpl = await tool({ action: 'outline', title: 'Annual review', template: 'report' });
+    const tplId = JSON.parse(/```canvas\n(.*)\n```/.exec(tpl)[1]).id;
+    const tplDoc = await X.getCanvas(ctx, tplId);
+    assert(X.pendingBlocks(tplDoc.content).length === 6 && tplDoc.content.startsWith('<!-- aico:toc -->') && tplDoc.docSettings.cover.enabled === true
+      && tplDoc.docSettings.toc === true && /Template "report"/.test(tpl), 'outline {template: report}: its sections, a TOC marker and its page setup');
+    assert(/Unknown template "nope"/.test(await errOf(() => tool({ action: 'outline', title: 'x', template: 'nope' }))), 'an unknown template is refused, listing them');
+    const setOut = await tool({ action: 'settings', id: tplId, settings: { pageSize: 'Letter', watermark: 'DRAFT' } });
+    assert(/Letter portrait/.test(setOut) && /watermark "DRAFT"/.test(setOut) && (await X.getCanvas(ctx, tplId)).docSettings.watermark === 'DRAFT', 'tool settings stores the setup');
+
+    assert(X.parseInfographic('stats', '[{"value":"1","label":"a","delta":"-2%"}]').value.items[0].trend === 'down'
+      && X.parseInfographic('timeline', '{"items":[{"date":"Q1","title":"x"}]}').ok
+      && X.parseInfographic('steps', '["a","b"]').value.items.length === 2
+      && !X.parseInfographic('comparison', '{"columns":[{"title":"only"}]}').ok
+      && X.parseInfographic('callout', '**Careful**\nBody *md*', 'warn').value.callout.type === 'warn'
+      && X.parseInfographic('callout', '**Careful**\nBody *md*', 'warn').value.callout.title === 'Careful'
+      && !X.parseInfographic('stats', 'not json').ok, 'infographics: lenient parsing, strict where it matters');
+    assert(JSON.stringify(X.parseImageAttrs('{width=60% align=center} rest')) === JSON.stringify({ attrs: { width: '60%', align: 'center' }, rest: ' rest' })
+      && X.parseImageAttrs('{width=300}').attrs.width === '300px' && X.parseImageAttrs('no attrs') === undefined, 'image attributes: width and align');
+    const alt = X.normalizeAlternateSyntax('> [!WARNING] Mind the gap\n> second line\n\n![a](p.png#aico:w=60,align=center "Cap")\n\n```\n> [!NOTE] in code\n```');
+    assert(alt.includes('````callout warn\n**Warning**\nMind the gap\nsecond line\n````') && alt.includes('![a](p.png "Cap"){width=60% align=center}')
+      && alt.includes('> [!NOTE] in code'), 'the editor\'s GitHub alerts and #aico: image fragments are exported like the contract syntax');
+    const chart = await X.chartSvg('{"xAxis":{"type":"category","data":["a","b"]},"yAxis":{},"series":[{"type":"bar","data":[1,2]}]}');
+    assert(chart.svg?.startsWith('<svg') && chart.width === 640, 'charts render to SVG in Node with the chat\'s theme (no browser needed)');
+    assert(/no `series`/.test((await X.chartSvg('{"xAxis":{}}')).error), 'a chart without series is an error, not an empty grid');
+
+    const rich2 = ['<!-- aico:toc -->', '', '## One', '', 'Inline $a^2$ maths.', '', `${F}chart`, '{"xAxis":{"type":"category","data":["a","b"]},"yAxis":{},"series":[{"type":"bar","data":[1,2]}]}', F, '',
+      `${F}mermaid`, 'flowchart LR', '  A --> B', F, '', '$$', 'x^2', '$$', '', '## Two', '', `${F}stats`, '[{"value":"$1M","label":"Revenue","delta":"+5%"}]', F, '',
+      `${F}callout success`, '**Done**', 'It **worked**.', F, '', `${F}comparison`, '{"columns":[{"title":"A","items":["x"]},{"title":"B","items":["y"],"highlight":true}]}', F, '',
+      '![pic](pic.png "The caption"){width=50% align=right}'].join('\n');
+    const d3 = await X.createCanvas(ctx, { title: 'Rich', content: rich2, docSettings: {
+      pageSize: 'Letter', orientation: 'landscape', font: 'serif', header: '{title}', footer: '{date} — {page}/{pages}', watermark: 'CONFIDENTIAL',
+      cover: { enabled: true, subtitle: 'Sub', author: 'Me' },
+    } });
+    X.clearVisualCache();
+    const dx = await X.exportCanvas(d3, { format: 'docx', resolveImage: imgs });
+    const z3 = unzipSync(new Uint8Array(dx.bytes));
+    const x3 = strFromU8(z3['word/document.xml']);
+    const hdr = strFromU8(z3['word/header1.xml']);
+    const ftr = strFromU8(z3['word/footer1.xml']);
+    assert(/<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"\/>/.test(x3) && /<w:titlePg\/>/.test(x3)
+      && /w:type="first"/.test(x3) && strFromU8(z3['word/styles.xml']).includes('w:ascii="Georgia"'), 'docx: Letter landscape, serif, a separate cover page');
+    assert(hdr.includes('Rich') && hdr.includes('v:textpath') && hdr.includes('string="CONFIDENTIAL"') && / PAGE /.test(ftr) && / NUMPAGES /.test(ftr)
+      && !/Page .* of/.test(ftr.replace(/<[^>]+>/g, '')), 'docx: header text, watermark, and a footer with live PAGE/NUMPAGES fields where the template put them');
+    assert(/ TOC \\o "1-4" \\h \\z \\u /.test(x3) && /<w:hyperlink w:anchor="_Toc_one"/.test(x3) && /w:name="_Toc_two"/.test(x3)
+      && strFromU8(z3['word/settings.xml']).includes('<w:updateFields w:val="true"/>'), 'docx: a real TOC field over bookmarked headings, refreshed on open');
+    assert(x3.includes('Sub') && x3.includes('Me') && /<w:pStyle w:val="Title"\/>.*Rich/.test(x3), 'docx: the cover page');
+    assert(/<w:shd w:val="clear" w:color="auto" w:fill="F4F4F5"\/>.*\$1M/.test(x3) && x3.includes('F0FDF4') && x3.includes('22C55E') && x3.includes('worked')
+      && x3.includes('2563EB'), 'docx: stats tiles, a success callout (Markdown body) and a highlighted comparison as styled tables');
+    assert(/<w:jc w:val="right"\/><\/w:pPr><w:r><w:drawing>/.test(x3) && /<w:pStyle w:val="Caption"\/>.*The caption/.test(x3), 'docx: figure alignment and caption');
+    const media3 = Object.keys(z3).filter(k => k.startsWith('word/media/'));
+    const haveRenderer = Boolean(X.rendererRoot());
+    const md3 = (await X.exportCanvas(d3, { format: 'md', resolveImage: imgs })).bytes.toString();
+    assert(!md3.includes('aico:toc') && md3.includes('- [One](#one)') && md3.includes('- [Two](#two)'), 'md: the TOC marker becomes a linked list');
+    if (pdf && haveRenderer) {
+      assert(dx.warnings.length === 0 && media3.length >= 5
+        && media3.every(k => { const b = z3[k]; return b[0] === 0x89 && b[1] === 0x50; }), `docx: chart, diagram, display + inline maths and the picture are PNGs in word/media (${media3.length})`);
+      const html3 = (await X.exportCanvas(d3, { format: 'html', resolveImage: imgs })).bytes.toString();
+      assert((html3.match(/<figure class="visual visual-(chart|diagram)"><svg/g) ?? []).length === 2 && /class="visual visual-math"><img src="data:image\/png/.test(html3)
+        && html3.includes('class="ig-stats"') && html3.includes('<nav class="toc">') && html3.includes('class="watermark"') && html3.includes('class="cover"'),
+        'html: charts and diagrams inline as SVG, maths as PNG, infographics, TOC, cover and watermark');
+      const pdf3 = await X.exportCanvas(d3, { format: 'pdf', resolveImage: imgs });
+      assert(pdf3.bytes.toString('latin1').startsWith('%PDF-') && pdf3.tocPageNumbers === true, 'pdf: printed with TOC page numbers from the second pass');
+      const again = Date.now();
+      await X.exportCanvas(d3, { format: 'docx', resolveImage: imgs });
+      assert(Date.now() - again < 5000, 'visuals are cached by block hash: a second export does not redraw them');
+    } else {
+      assert(dx.warnings.length > 0 && x3.includes('not rendered'), `without a browser/renderer the visuals are placeholders with their source (${dx.warnings[0]})`);
+    }
+
+    // ── Routes ──
+    const server = await X.serve({ port: 0, cwd: project, project, open: false });
+    const controller = new AbortController();
+    try {
+      const u = new URL(server.url);
+      const token = u.searchParams.get('token');
+      const api = (p, init = {}) => fetch(`${u.origin}/api/${p}`, { ...init, headers: { 'x-aico-token': token, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
+      const post = (p, b) => api(p, { method: 'POST', body: JSON.stringify(b) });
+      const frames = [];
+      fetch(`${u.origin}/api/events?session=${sid}&token=${token}`, { signal: controller.signal }).then(async (res) => {
+        const reader = res.body.getReader(); const dec = new TextDecoder();
+        for (;;) { const { value, done } = await reader.read(); if (done) break; frames.push(dec.decode(value)); }
+      }).catch(() => undefined);
+      for (let i = 0; i < 50 && !frames.join('').includes('caught-up'); i++) await new Promise(r => setTimeout(r, 50));
+
+      const saveT2 = await post('canvas/save', { session: sid, id: id2, tab: 't2', content: 'user on t2', baseVersion: 2 });
+      const saveT2Body = await saveT2.json();
+      assert(saveT2.status === 200 && saveT2Body.canvas.tabs[1].content === 'user on t2' && saveT2Body.canvas.tabs[1].version === 3, 'POST canvas/save with tab writes that tab');
+      assert((await post('canvas/save', { session: sid, id: id2, tab: 't2', content: 'stale', baseVersion: 2 })).status === 409, 'a stale per-tab save is 409');
+      for (let i = 0; i < 40 && !frames.join('').includes('"tabId":"t2"'); i++) await new Promise(r => setTimeout(r, 50));
+      assert(frames.join('').includes('"tabId":"t2","tabVersion":3'), 'the canvas frame carries the tab and its version');
+      const addTabRes = await (await post('canvas/tabs', { session: sid, id: id2, op: 'add', title: 'From UI' })).json();
+      assert(addTabRes.tab?.id === 't3' && addTabRes.canvas.tabs.length === 3, 'POST canvas/tabs add');
+      assert((await (await post('canvas/tabs', { session: sid, id: id2, op: 'rename', tab: 't3', title: 'Renamed' })).json()).canvas.tabs[2].title === 'Renamed', 'POST canvas/tabs rename');
+      assert((await (await post('canvas/tabs', { session: sid, id: id2, op: 'delete', tab: 't3' })).json()).canvas.tabs.length === 2, 'POST canvas/tabs delete');
+
+      const rdoc = await X.createCanvas({ settings, cwd: project, sessionId: sid }, { title: 'Routed', content: 'Alpha beta gamma delta.\n' });
+      const added = await post(`canvas/${rdoc.id}/comments`, { session: sid, tabId: 't1', anchor: { quote: 'beta gamma', prefix: 'Alpha ', suffix: ' delta' }, body: 'hmm' });
+      const addedBody = await added.json();
+      assert(added.status === 200 && addedBody.comment?.anchor.quote === 'beta gamma' && addedBody.asked === false, 'POST canvas/:id/comments adds a comment');
+      for (let i = 0; i < 40 && !frames.join('').includes('event: canvas-comments'); i++) await new Promise(r => setTimeout(r, 50));
+      assert(frames.join('').includes('event: canvas-comments'), 'a canvas-comments frame goes out on the session stream');
+      const listRes = await (await api(`canvas/${rdoc.id}/comments?session=${sid}`)).json();
+      assert(listRes.comments?.length === 1, 'GET canvas/:id/comments lists them');
+      const cid = addedBody.comment.id;
+      const rep = await (await post(`canvas/${rdoc.id}/comments/${cid}/replies`, { session: sid, body: 'more thoughts' })).json();
+      assert(rep.reply?.author === 'user' && rep.comment.replies.length === 1, 'POST …/replies adds a reply');
+      const res1 = await (await post(`canvas/${rdoc.id}/comments/${cid}/resolve`, { session: sid })).json();
+      assert(res1.comment?.resolved === true, 'POST …/resolve resolves');
+      assert((await post(`canvas/${rdoc.id}/comments/c-00000000/resolve`, { session: sid })).status === 404, 'an unknown comment is 404');
+      const ex = await fetch(`${u.origin}/api/canvas/${edoc.id}/export?session=${sid}&format=docx&token=${token}`);
+      const exBytes = Buffer.from(await ex.arrayBuffer());
+      assert(ex.status === 200 && /attachment; filename="export-test.docx"/.test(ex.headers.get('content-disposition') ?? '')
+        && ex.headers.get('content-type')?.includes('wordprocessingml') && exBytes[0] === 0x50, 'GET canvas/:id/export streams a docx download');
+      const exMd = await api(`canvas/${edoc.id}/export?session=${sid}&format=md`);
+      assert(exMd.status === 200 && (await exMd.text()).startsWith('# Export test'), 'GET export md');
+      assert((await api(`canvas/${edoc.id}/export?session=${sid}&format=exe`)).status === 400, 'an unknown export format is 400');
+      assert((await fetch(`${u.origin}/api/canvas/${edoc.id}/export?session=${sid}&format=md`)).status === 401, 'export needs the token');
+      const tplRes = await (await api('canvas/templates')).json();
+      assert(tplRes.templates?.length === 10 && tplRes.templates[0].sections.length > 0, 'GET canvas/templates lists the templates');
+      const made = await (await post('canvas/create', { session: sid, template: 'memo', title: 'Staff memo' })).json();
+      assert(made.canvas?.title === 'Staff memo' && made.canvas.versions[0].author === 'user' && /aico:pending id="s1"/.test(made.canvas.content)
+        && made.canvas.docSettings?.pageNumbers === false, 'POST canvas/create from a template: its outline, by the user, with its setup');
+      const plain = await (await post('canvas/create', { session: sid, title: 'Blank', content: '# Hi' })).json();
+      assert(plain.canvas?.content === '# Hi' && (await post('canvas/create', { session: sid, template: 'nope' })).status === 400, 'POST canvas/create with content; unknown template is 400');
+      const setRes = await (await post('canvas/settings', { session: sid, id: edoc.id, settings: { footer: 'F {page}', toc: true } })).json();
+      assert(setRes.canvas?.docSettings?.footer === 'F {page}' && setRes.canvas.docSettings.toc === true, 'POST canvas/settings stores the setup');
+      const tocMd = await (await api(`canvas/${edoc.id}/export?session=${sid}&format=md&toc=0`)).text();
+      const tocMd2 = await (await api(`canvas/${edoc.id}/export?session=${sid}&format=md`)).text();
+      assert(!tocMd.includes('**Contents**') && tocMd2.includes('**Contents**'), 'export: toc from the stored settings, overridable per request');
+      assert((await api(`canvas/${edoc.id}/export?session=${sid}&format=md&settings=%7Bbad`)).status === 400, 'export: malformed settings JSON is 400');
+
+      // Activity frames reach the stream.
+      await run(() => X.canvasTool({ action: 'write_section', id: rdoc.id, section: 'Alpha', version: 1, content: 'x' }).catch(() => undefined));
+      const cdoc2 = await X.createCanvas({ settings, cwd: project, sessionId: sid }, { title: 'Act', content: `${X.pendingLine({ id: 'q1', intent: 'q' })}\n` });
+      await run(() => X.canvasTool({ action: 'write_section', id: cdoc2.id, section: 'q1', version: 1, content: '## Q\n\nDone.' }));
+      // Wait for the closing frame, not the first one: both are written, but a read can land between them.
+      const doneFrame = `"canvasId":"${cdoc2.id}","tabId":"t1","by":"agent","section":"q1","status":"done"`;
+      for (let i = 0; i < 40 && !frames.join('').includes(doneFrame); i++) await new Promise(r => setTimeout(r, 50));
+      const actFrames = frames.join('').split('\n\n').filter(f => f.startsWith('event: canvas-activity')).map(f => JSON.parse(f.split('\n').find(l => l.startsWith('data: ')).slice(6)).data);
+      assert(actFrames.some(a => a.canvasId === cdoc2.id && a.status === 'writing' && a.section === 'q1')
+        && actFrames.some(a => a.canvasId === cdoc2.id && a.status === 'done'), 'canvas-activity frames go out on the session stream');
+    } finally {
+      controller.abort();
+      await server.close();
+    }
+  } finally {
+    stopA();
+    stopC();
     fs.rmSync(project, { recursive: true, force: true });
   }
 }

@@ -12,10 +12,17 @@
  * store forwards the session stream's `canvas` frames here, and every open
  * card and editor listens. No polling, and no store import in shared code.
  *
+ * AICO Docs adds optional host methods (tabs, comments, export, settings,
+ * create, turn state) and two more event channels — `canvas-activity` (the
+ * agent writing a section) and `canvas-comments` — on the same pattern. Every
+ * one is optional so an older engine or a thinner client still gets a working
+ * editor: a missing route is a hidden or disabled control, not an error.
+ *
  * @module shared/ui/canvas/host
  */
 
 import type React from 'react';
+import type { CanvasComment, CommentAnchor } from './comments';
 
 export type CanvasKind = 'document' | 'code';
 export type CanvasAuthor = 'agent' | 'user';
@@ -26,6 +33,18 @@ export interface CanvasVersion {
   author: CanvasAuthor;
   at: number;
   note?: string;
+  /** The tab this version belongs to (AICO Docs); absent on legacy entries, which are the first tab's. */
+  tab?: string;
+}
+
+/** One tab of an AICO Docs document. Each is versioned on its own. */
+export interface CanvasTab {
+  id: string;
+  title: string;
+  content: string;
+  version: number;
+  /** Pending ids the agent has already written, mapped to the heading each became. */
+  sectionIds?: Record<string, string>;
 }
 
 export interface CanvasDoc {
@@ -38,6 +57,33 @@ export interface CanvasDoc {
   createdAt: number;
   updatedAt: number;
   versions: CanvasVersion[];
+  /** AICO Docs. `content`/`version` alias the first tab; older engines send no tabs. */
+  tabs?: CanvasTab[];
+  /** Bumped on any change to the document (any tab, tab list, title). */
+  revision?: number;
+  /** Export settings remembered with the document (AICO Docs). */
+  docSettings?: DocSettings;
+}
+
+/** How a document exports — page, header/footer, cover, contents, watermark, font. See the contract doc. */
+export interface DocSettings {
+  pageSize?: 'A4' | 'Letter';
+  orientation?: 'portrait' | 'landscape';
+  /** A preset, or millimetres (how the engine stores a preset once saved). */
+  margins?: 'narrow' | 'normal' | 'wide' | { top: number; right: number; bottom: number; left: number };
+  header?: string;
+  footer?: string;
+  pageNumbers?: boolean;
+  cover?: { enabled: boolean; title?: string; subtitle?: string; author?: string; date?: string; logo?: string };
+  toc?: boolean;
+  watermark?: string;
+  font?: 'sans' | 'serif';
+}
+
+/** The tabs of a document — one synthesised from `content` for an engine that has none. */
+export function tabsOf(doc: CanvasDoc): CanvasTab[] {
+  if (doc.tabs && doc.tabs.length) return doc.tabs;
+  return [{ id: 't1', title: 'Tab 1', content: doc.content, version: doc.version }];
 }
 
 export interface CanvasSummary {
@@ -67,9 +113,25 @@ export interface CanvasChange {
   kind: CanvasKind;
   version: number;
   author: CanvasAuthor;
-  action: 'create' | 'update' | 'restore';
+  action: 'create' | 'update' | 'restore' | 'tabs';
   at: number;
+  tabId?: string;
+  tabVersion?: number;
+  revision?: number;
 }
+
+/** The agent starting or finishing a write, so the page can show where it is working. */
+export interface CanvasActivity {
+  canvasId: string;
+  tabId?: string;
+  /** A pending id or heading text; absent for a whole-tab write. */
+  section?: string;
+  heading?: string;
+  status: 'writing' | 'done';
+  by: 'agent';
+}
+
+export type ExportFormat = 'md' | 'html' | 'docx' | 'pdf';
 
 export type CanvasWriteResult =
   | { ok: true; canvas: CanvasDoc; changed: boolean }
@@ -93,8 +155,27 @@ export interface CanvasHost {
   list(): Promise<CanvasSummary[]>;
   /** `light`: only the current version in `versions` — what a card needs, without the history. */
   get(id: string, opts?: { light?: boolean }): Promise<CanvasDoc>;
-  save(id: string, content: string, baseVersion: number, note?: string): Promise<CanvasWriteResult>;
-  restore(id: string, version: number, baseVersion?: number): Promise<CanvasWriteResult>;
+  /** `baseVersion` is the tab's version; `tab` omitted means the first tab. */
+  save(id: string, content: string, baseVersion: number, note?: string, tab?: string): Promise<CanvasWriteResult>;
+  restore(id: string, version: number, baseVersion?: number, tab?: string): Promise<CanvasWriteResult>;
+  /** Add, rename or delete a tab (AICO Docs). Absent on hosts whose engine has no tabs route. */
+  tabs?: (id: string, op: { op: 'add' | 'rename' | 'delete'; tab?: string; title?: string; content?: string }) => Promise<CanvasDoc>;
+  /** Comment threads (AICO Docs). */
+  comments?: {
+    list(id: string): Promise<CanvasComment[]>;
+    add(id: string, input: { tabId: string; anchor: CommentAnchor; body: string; askAgent?: boolean }): Promise<CanvasComment>;
+    reply(id: string, commentId: string, body: string): Promise<CanvasComment>;
+    resolve(id: string, commentId: string, resolved: boolean): Promise<CanvasComment>;
+  };
+  /** The engine's export of a tab, as a file. `settings` override the stored ones for this export. */
+  exportFile?: (id: string, format: ExportFormat, tab?: string, settings?: DocSettings) => Promise<{ blob: Blob; name: string }>;
+  /** Remember export settings with the document. */
+  saveSettings?: (id: string, settings: DocSettings) => Promise<CanvasDoc>;
+  /** Create a document from the editor (a template). */
+  create?: (input: { title: string; content: string }) => Promise<CanvasDoc>;
+  /** Whether a turn is running in this chat, and a way to hear when that changes. */
+  turnBusy?: () => boolean;
+  onTurn?: (listener: (busy: boolean) => void) => () => void;
   /** Send a message to the agent in this chat. */
   ask(text: string): void;
   /** Open the canvas beside the chat. Absent where there is no side slot — the card expands in place instead. */
@@ -128,8 +209,11 @@ export function emitCanvasEvent(data: unknown): void {
     kind: d.kind === 'code' ? 'code' : 'document',
     version: d.version,
     author: d.author === 'user' ? 'user' : 'agent',
-    action: d.action === 'create' || d.action === 'restore' ? d.action : 'update',
+    action: d.action === 'create' || d.action === 'restore' || d.action === 'tabs' ? d.action : 'update',
     at: typeof d.at === 'number' ? d.at : Date.now(),
+    ...(typeof d.tabId === 'string' ? { tabId: d.tabId } : {}),
+    ...(typeof d.tabVersion === 'number' ? { tabVersion: d.tabVersion } : {}),
+    ...(typeof d.revision === 'number' ? { revision: d.revision } : {}),
   };
   for (const listener of listeners) {
     try { listener(change); } catch { /* one broken listener must not starve the rest */ }
@@ -139,4 +223,44 @@ export function emitCanvasEvent(data: unknown): void {
 export function onCanvasEvent(listener: (change: CanvasChange) => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
+}
+
+// ── The agent at work, and comment threads ───────────────────────────
+
+const activityListeners = new Set<(a: CanvasActivity) => void>();
+
+/** Forward a `canvas-activity` stream frame. */
+export function emitCanvasActivity(data: unknown): void {
+  const d = data as Partial<CanvasActivity> | null;
+  if (!d || typeof d.canvasId !== 'string' || (d.status !== 'writing' && d.status !== 'done')) return;
+  const a: CanvasActivity = {
+    canvasId: d.canvasId, status: d.status, by: 'agent',
+    ...(typeof d.tabId === 'string' ? { tabId: d.tabId } : {}),
+    ...(typeof d.section === 'string' && d.section ? { section: d.section } : {}),
+    ...(typeof d.heading === 'string' && d.heading ? { heading: d.heading } : {}),
+  };
+  for (const l of activityListeners) {
+    try { l(a); } catch { /* one broken listener must not starve the rest */ }
+  }
+}
+
+export function onCanvasActivity(listener: (a: CanvasActivity) => void): () => void {
+  activityListeners.add(listener);
+  return () => { activityListeners.delete(listener); };
+}
+
+const commentListeners = new Set<(canvasId: string) => void>();
+
+/** Forward a `canvas-comments` stream frame: somebody added, answered or resolved a thread. */
+export function emitCanvasComments(data: unknown): void {
+  const id = (data as { canvasId?: unknown } | null)?.canvasId;
+  if (typeof id !== 'string') return;
+  for (const l of commentListeners) {
+    try { l(id); } catch { /* as above */ }
+  }
+}
+
+export function onCanvasComments(listener: (canvasId: string) => void): () => void {
+  commentListeners.add(listener);
+  return () => { commentListeners.delete(listener); };
 }
