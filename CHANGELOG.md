@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.31.0 — 2026-10-01
 
 A truer AI browser: a guard against hidden instructions in pages, an opt-in
 memory of what you read that you can search by meaning, and a copilot that
