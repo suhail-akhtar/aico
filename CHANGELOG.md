@@ -3,6 +3,17 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Fixed
+
+- **The floating AICO panel could vanish and never come back** (Ask AICO showing
+  as on, no panel). The panel's view stays hidden until its page reports where
+  the panel goes, and it reported on a paint callback — which a hidden view never
+  gets, so a reload while hidden (or a hand-over hide) left it hidden for good.
+  It now also reports on a timer, main asks for the report whenever it needs one,
+  and the window re-asserts the panel's state every two seconds while it floats.
+
 ## 0.30.2 — 2026-09-30
 
 ### Fixed

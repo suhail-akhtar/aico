@@ -66,11 +66,16 @@ function Overlay(): React.ReactElement {
     if (m?.type === 'prefill' || m?.type === 'focus') window.dispatchEvent(new Event('aico:copilot-focus'));
   }), []);
 
-  // Loaded and painted: say where the panel goes (which lets main show the view), and again whenever it moves.
+  // Loaded: say where the panel goes (which lets main show the view), and again whenever it moves.
+  // Not only on a paint callback: this view is hidden until it reports, and a hidden view does not
+  // paint, so a reload while hidden waited for a frame that never came and the panel never returned.
+  // Main also asks (`browser:overlay:report`) whenever it needs the box and has none.
   useEffect(() => {
     const t = requestAnimationFrame(reportBox);
+    const t2 = setTimeout(reportBox, 0);
     const off = useCopilotUi.subscribe((s, p) => { if (s.x !== p.x || s.y !== p.y || s.w !== p.w || s.h !== p.h) reportBox(); });
-    return () => { cancelAnimationFrame(t); off(); };
+    const offAsk = on('browser:overlay:report', reportBox);
+    return () => { cancelAnimationFrame(t); clearTimeout(t2); off(); offAsk(); };
   }, []);
 
   const panel = state.panel ?? { x: FLOAT_SHADOW, y: FLOAT_SHADOW, width: size.width - 2 * FLOAT_SHADOW, height: size.height - 2 * FLOAT_SHADOW };

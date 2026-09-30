@@ -89,10 +89,14 @@ export function useFloatingCopilot(area: React.RefObject<HTMLElement | null>, op
     const ro = new ResizeObserver(push);
     ro.observe(el);
     window.addEventListener('resize', push);
+    // Re-assert now and then while it floats. Main can hide the view on its own (a hand-over) or
+    // lose it (the overlay reloaded); pushing only on changes meant nothing ever brought it back.
+    const beat = active ? window.setInterval(push, 2000) : 0;
     return () => {
       cancelAnimationFrame(frame);
       ro.disconnect();
       window.removeEventListener('resize', push);
+      if (beat) window.clearInterval(beat);
     };
   }, [enabled, active, opts.show]); // eslint-disable-line react-hooks/exhaustive-deps
 

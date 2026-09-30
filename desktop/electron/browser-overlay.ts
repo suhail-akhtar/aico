@@ -198,6 +198,10 @@ export function registerBrowserOverlay(ctx: DesktopContext): void {
       if (gen !== reqGen) return still ? { still } : {};
     }
     req = next;
+    // Wanted on screen but never told where: ask the overlay again rather than wait for it
+    // (a reload while hidden used to leave it waiting for a paint that never came).
+    const v = alive();
+    if (next.active && next.show && box === null && v && !v.webContents.isLoading()) v.webContents.send('browser:overlay:report');
     apply();
     return still ? { still } : {};
   });
