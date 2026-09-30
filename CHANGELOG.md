@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.30.0 — 2026-09-30
 
 AICO Docs: documents the agent outlines and writes section by section while you
 watch, edited in place like a word processor, with charts, diagrams, tables,
