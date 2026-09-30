@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, readdir, rename, stat } from 'fs/promises';
 import path from 'path';
 import { aicoHome } from './home.js';
+import { sinkRedact } from './vault/sink.js';
 import crypto from 'crypto';
 
 export interface Message {
@@ -45,7 +46,7 @@ export async function saveSession(session: Session): Promise<void> {
     }),
   );
   for (const msg of session.messages) {
-    lines.push(JSON.stringify({ type: 'message', ...msg }));
+    lines.push(JSON.stringify(sinkRedact({ type: 'message', ...msg })));
   }
   // Atomic write: write to temp file, then rename
   const filePath = sessionFilePath(session.id, session.cwd);
@@ -131,7 +132,7 @@ export async function appendMessage(
 ): Promise<void> {
   const dir = getSessionDir(cwd);
   await mkdir(dir, { recursive: true });
-  const line = JSON.stringify({ type: 'message', ...msg }) + '\n';
+  const line = JSON.stringify(sinkRedact({ type: 'message', ...msg })) + '\n';
   const { appendFile } = await import('fs/promises');
   await appendFile(sessionFilePath(sessionId, cwd), line);
 }

@@ -60,6 +60,27 @@ export interface AppInfo {
 
 export interface PickedFile { path: string; name: string; size: number }
 
+/** A credential's policy as the vault reports it (src/vault/types.ts). */
+export interface PolicyView {
+  allowedHosts: string[]; allowedOrigins: string[]; allowedTools: string[];
+  approval: 'every-use' | 'session' | 'auto'; allowShell: boolean; shellApproval?: 'every-use' | 'auto';
+  allowInsecureHttp?: boolean; allowSelfSigned?: boolean; expiresAt?: number; rateLimit?: { max: number; perSeconds: number };
+}
+/** A credential's metadata — everything but its values. */
+export interface CredentialView {
+  id: string; name: string; kind: string; username?: string; host?: string; port?: number; url?: string; description?: string;
+  tags: string[]; createdBy: string; createdAt: number; updatedAt: number; quarantined?: boolean; lastUsedAt?: number; useCount?: number;
+  public?: { publicKey?: string; fingerprint?: string; certificate?: string }; policy: PolicyView; fields: string[];
+}
+export interface AuditView {
+  at: number; action: string; outcome: string; name?: string; credentialId?: string; tool?: string; target?: string; purpose?: string;
+  sessionId?: string; actor?: string; reason?: string;
+}
+export interface VaultManagerStatus {
+  exists?: boolean; unlocked?: boolean; provider?: string; count?: number; interactive?: boolean; host?: boolean;
+  pendingApprovals?: unknown[]; pendingRequests?: unknown[]; keyProblem: string | null; lockedByYou: boolean; error?: string;
+}
+
 export interface BackupManifest {
   format: string; version: number; createdAt: string; app: string; engine: string; platform: string;
   includes: string[]; apiKeys: boolean; chats: boolean; files: number; counts: Record<string, number>;
@@ -154,6 +175,34 @@ export const desktop = {
   /** Zip a folder; with `rootName` everything sits under that one top-level folder (the `.skill` layout). */
   zipDir: (srcDir: string, destFile: string, rootName?: string) =>
     invoke<{ file: string; entries: number; bytes: number }>('fs:zipDir', srcDir, destFile, rootName),
+
+  /**
+   * The Credential Manager (electron/credential-manager.ts). No call returns a
+   * secret value: adding and rotating open main's secure prompt, revealing
+   * and copying happen in main after a native confirmation.
+   */
+  vault: {
+    status: () => invoke<VaultManagerStatus>('vault:status'),
+    list: (filter?: { host?: string; kind?: string }) => invoke<CredentialView[]>('vault:list', filter),
+    audit: (o?: { id?: string; limit?: number }) => invoke<AuditView[]>('vault:audit', o),
+    fields: () => invoke<Record<string, Array<{ field: string; label: string; optional?: boolean }>>>('vault:fields'),
+    add: (o: { name: string; kind: string; username?: string; host?: string; url?: string; port?: number; description?: string; tags?: string[]; policy?: Partial<PolicyView> }) =>
+      invoke<{ credential: CredentialView; warnings: string[] } | null>('vault:add', o),
+    generate: (o: { name: string; kind: string; username?: string; host?: string; url?: string; port?: number; description?: string; length?: number; symbols?: boolean; allowSelfSigned?: boolean }) =>
+      invoke<{ name: string; publicKey?: string; fingerprint?: string; warnings: string[] }>('vault:generate', o),
+    rotate: (id: string, mode: 'generate' | 'enter') => invoke<CredentialView | null>('vault:rotate', id, mode),
+    policy: (id: string, policy: Partial<PolicyView>) => invoke<CredentialView>('vault:policy', id, policy),
+    update: (id: string, patch: Record<string, unknown>) => invoke<CredentialView>('vault:update', id, patch),
+    remove: (id: string) => invoke<boolean>('vault:delete', id),
+    reveal: (id: string) => invoke<boolean>('vault:reveal', id),
+    copy: (id: string, field?: string) => invoke<boolean>('vault:copy', id, field),
+    lock: () => invoke<boolean>('vault:lock'),
+    unlock: () => invoke<boolean>('vault:unlock'),
+    exportEncrypted: () => invoke<{ file: string; count: number } | null>('vault:export'),
+    importEncrypted: () => invoke<{ added: number; skipped: number } | null>('vault:import'),
+    exportCsv: () => invoke<{ file: string; count: number } | null>('vault:exportCsv'),
+    onChanged: (fn: () => void) => on('vault:changed', fn),
+  },
 
   onCommand: (fn: (cmd: { id: string; args?: unknown }) => void) => on('command:run', fn),
   pathForFile: (f: File) => raw.pathForFile(f),

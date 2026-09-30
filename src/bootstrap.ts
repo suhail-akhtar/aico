@@ -23,6 +23,7 @@ import { setMemoryCacheTtl, stopMemoryWatcher } from './memory/index.js';
 import { ledger } from './work/ledger.js';
 import { setAdapterSettings, startLedgerMirroring, stopLedgerMirroring } from './work/adapters.js';
 import { supervisor } from './work/supervisor.js';
+import { getVault } from './vault/index.js';
 import type { AicoSettings } from './settings.js';
 import type { McpServerConfigV2 } from './mcp/index.js';
 
@@ -81,6 +82,11 @@ export async function initializeFeatures(opts: BootstrapOptions): Promise<void> 
   startLedgerMirroring();
   supervisor.start();
 
+  // Open the credential vault before any tool can run, so the redactor knows
+  // every stored value from the first call. A vault that needs a passphrase
+  // or a host's key stays locked and is reported, not waited on.
+  await getVault().ready();
+
   await skillRegistry.load({
     disableBuiltins: settings.skills?.disableBuiltins,
     extraDirs: settings.skills?.dirs,
@@ -97,6 +103,11 @@ export async function initializeFeatures(opts: BootstrapOptions): Promise<void> 
   // app's IDE and browser tools). Passed in the environment so nothing about
   // them — a random port, a one-run token — is ever saved to settings.
   const host = parseHostMcp(process.env.AICO_HOST_MCP);
+  // Read once, then out of the environment: it carries the desktop endpoint's
+  // bearer token, and every shell the agent starts inherits this process's
+  // environment — a `curl` with it would reach the browser tools around the
+  // engine's own tool pipeline. The registry keeps the config in memory.
+  delete process.env.AICO_HOST_MCP;
   if (host) {
     await mcpRegistry.setHostServers(host)
       .catch((err: unknown) => { warn(`  ⚠ Host MCP server failed: ${String(err)}`); });

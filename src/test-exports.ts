@@ -405,3 +405,52 @@ export {
   CANVAS_VERSION_CAP, CANVAS_MAX_CHARS,
 } from './canvas/store.js';
 export { canvasTool, canvasDefinition } from './tools/canvas.js';
+// -- Credential vault & broker --
+export {
+  getVault, configureVault, resolve as vaultResolve, redactor as vaultRedactor, redact as vaultRedact,
+  VaultError, PolicyDeniedError, ApprovalDeniedError, GrantRequiredError, CredentialNotFoundError, VaultTamperedError,
+} from './vault/index.js';
+export { VaultService } from './vault/service.js';
+export { VaultStore, similarNames } from './vault/store.js';
+export {
+  sealRecord, openRecord, deriveKeys, newMasterKey, macRecords, parseVaultFile, writeFileAtomic, withFileLock,
+  wrap as vaultWrap, unwrap as vaultUnwrap,
+} from './vault/crypto.js';
+export { memoryKeyProvider, passphraseKeyProvider, injectMasterKey, clearInjectedKey, dpapiKeyProvider, defaultKeyProvider } from './vault/keys.js';
+export { Redactor, variantsOf, MIN_SECRET_LENGTH, FULL_ENCODING_LENGTH } from './vault/redact.js';
+export { setActiveRedactor, activeRedactor, sinkRedact, sinkRedactText, sinkRedactAccumulated, stashCallEnv, takeCallEnv } from './vault/sink.js';
+export {
+  hostMatches, originMatches, parseOrigin, isPrivateHost, evaluateUse, isLoosening, normalizePolicy, effectiveScope,
+  SessionGrants, RateTracker,
+} from './vault/policy.js';
+export { parsePlaceholders, substitutePlaceholders, referenceFor, hasPlaceholders } from './vault/placeholders.js';
+export { generatePassword, generateToken, generateSshKeyPair } from './vault/generate.js';
+export { scanForSecrets, looksLikeSecret } from './vault/scan.js';
+export { fileToolDenial, shellDenial } from './vault/guard.js';
+export { installVaultStages, bindShellPlaceholders, envReference } from './vault/pipeline.js';
+export { HumanGrants, PendingApprovals, PendingRequests, denyPrompter } from './vault/human.js';
+export { AuditLog } from './vault/audit.js';
+export { handleVaultRoute } from './vault/http.js';
+export { attachVaultHostChannel } from './vault/host-channel.js';
+export { guardAgentRun, quarantineIfEnabled } from './vault/agent-hooks.js';
+export {
+  credentialList, credentialRequest, credentialGenerate, VAULT_TOOL_CLASSES,
+} from './tools/credentials.js';
+// -- Human decisions and encrypted vault backups (credential UX) --
+export { DecisionGate, decisionGate, resetDecisionGate } from './server/decision-gate.js';
+export { sealExport, openExport } from './vault/backup.js';
+// -- Ops tools: SSH, HTTP APIs, WinRM, SNMP with vault credentials (tools/ops) --
+export { classifyRemoteCommand, isDestructiveHttpMethod } from './tools/ops/destructive.js';
+export {
+  parseKnownHosts, checkHostKey, hasEntryFor, formatEntry, fingerprintOf, keyTypeOf, hostToken, readKnownHosts, trustHostKey, knownHostsPath,
+} from './tools/ops/known-hosts.js';
+export { planRemoteCommand, MarkerWatch, shQuote, lineSafe } from './tools/ops/ssh-command.js';
+export { classifyAddress, decideTarget, expandV6, resolveAll } from './tools/ops/ssrf.js';
+export { parseAuth, applyAuth, originOf, redirectPlan, maskJsonSecrets, shownHeaders, jsonPath, httpRequest } from './tools/ops/http.js';
+export { sshExec, sshCopy, sshTunnel, sshPurpose, probeHostKey, parseMode, localPathDenial, activeTunnelPorts } from './tools/ops/ssh.js';
+export { bindPowerShellPlaceholders, buildWinRmDriver, runPowerShellDriver, psQuote, winRmExec } from './tools/ops/winrm.js';
+export { snmpQuery, validOid, renderValue } from './tools/ops/snmp.js';
+export { maskUnknownSecrets, checkRate, resetOpsRateForTest, useCredential, runWithOpsPrompter, MAX_APPROVAL_PURPOSE, setOpsProgressSink } from './tools/ops/common.js';
+export { OPS_TOOL_NAMES, opsToolDefinitions, executeOpsTool, installOpsStages, isOpsTool } from './tools/ops/index.js';
+export { callbackPrompter } from './vault/human.js';
+export { toolRequiresPermission } from './permissions.js';

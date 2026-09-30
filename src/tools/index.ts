@@ -34,6 +34,12 @@ import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './
 import { askUser, askUserDefinition } from './askuser.js';
 import { getWorkingDirectory, pwdDefinition } from './pwd.js';
 import { getWidgetSpec, widgetSpecDefinition } from './widget-spec.js';
+import {
+  credentialList, credentialListDefinition, credentialRequest, credentialRequestDefinition,
+  credentialGenerate, credentialGenerateDefinition,
+} from './credentials.js';
+import { takeCallEnv } from '../vault/sink.js';
+import { executeOpsTool, isOpsTool, opsToolDefinitions } from './ops/index.js';
 // ── New feature tool imports ─────────────────────────────────────────
 import {
   backgroundTaskToolDefinition,
@@ -300,6 +306,16 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...superviseToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
   // Reading a procedure changes nothing, so several can open at once.
   { ...skillDefinition, isConcurrencySafe: true, maxResultSizeChars: 60_000 },
+  // The credential broker's model-facing side. None returns a secret value —
+  // see tools/credentials.ts and docs/security/credential-broker.md. Request
+  // waits on a person, so it is exclusive; List only reads metadata.
+  { ...credentialListDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
+  { ...credentialRequestDefinition, isConcurrencySafe: false, maxResultSizeChars: 2_000 },
+  { ...credentialGenerateDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  // Remote operations with stored credentials (SSH, HTTP APIs, WinRM, SNMP):
+  // the vault's trusted consumers. Contracts and safety model in
+  // tools/ops/index.ts and docs/security/ops-tools.md.
+  ...opsToolDefinitions,
 ];
 
 /** Get tool definitions filtered for a specific sub-agent type */
@@ -392,6 +408,9 @@ const WRITE_TOOLS = new Set([
   'WorkspaceWrite',
   'AgentCreate',
   'GenerateImage',
+  // Download into the workspace / save a response body.
+  'SshCopy',
+  'HttpRequest',
 ]);
 
 // ── Concurrency control ─────────────────────────────────────────────
@@ -522,7 +541,13 @@ export async function executeTool(
   switch (name) {
     case 'Bash':
       result = await bash(
-        { ...(args as unknown as Parameters<typeof bash>[0]), _defaultTimeout: _bashDefaultTimeout },
+        {
+          ...(args as unknown as Parameters<typeof bash>[0]),
+          _defaultTimeout: _bashDefaultTimeout,
+          // Values for this call's {{secret:…}} references, bound by the vault
+          // stage. Taken by call id; never part of the arguments.
+          _env: takeCallEnv(callId),
+        },
         signal,
       );
       noteCommandRun();
@@ -789,6 +814,23 @@ export async function executeTool(
       break;
     case 'SkillManage':
       result = await executeSkillManage(args as unknown as SkillManageInput);
+      break;
+    case 'CredentialList':
+      result = await credentialList(args as Parameters<typeof credentialList>[0]);
+      break;
+    case 'CredentialRequest':
+      result = await credentialRequest(args as unknown as Parameters<typeof credentialRequest>[0]);
+      break;
+    case 'CredentialGenerate':
+      result = await credentialGenerate(args as unknown as Parameters<typeof credentialGenerate>[0]);
+      break;
+    case 'SshExec':
+    case 'SshCopy':
+    case 'SshTunnel':
+    case 'HttpRequest':
+    case 'WinRmExec':
+    case 'SnmpQuery':
+      if (isOpsTool(name)) result = await executeOpsTool(name, args, signal);
       break;
     case 'SkillCreate':
       result = await executeSkillCreate(args as {

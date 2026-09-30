@@ -2,11 +2,41 @@ name: CI
 
 on:
   push:
-    branches: [main, aico-v0.02]
+    branches: [main, 'release/**']
   pull_request:
     branches: [main]
 
 jobs:
+  # The engineering standards a machine can check (scripts/check-standards.mjs):
+  # no AI attribution in commits or docs, versions and release stamps agree,
+  # licence strings, no committed secrets, new modules carry a header comment.
+  # The same check runs locally in the pre-push hook (--fast); this is the full
+  # run, so a skipped hook is still caught. No npm install needed: node + git.
+  standards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit range needs history, not the default single commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check standards
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="origin/${{ github.base_ref }}..HEAD"
+          elif [ -n "${{ github.event.before }}" ] && ! echo "${{ github.event.before }}" | grep -q '^0*$'; then
+            RANGE="${{ github.event.before }}..${{ github.sha }}"
+          fi
+          node scripts/check-standards.mjs ${RANGE:+--range "$RANGE"}
+
+      - name: Test the checker
+        run: node scripts/test-check-standards.mjs
+
   test:
     runs-on: ubuntu-latest
     strategy:

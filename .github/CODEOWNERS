@@ -1,0 +1,16 @@
+# The owner reviews and merges every change. Security-sensitive paths are
+# listed separately so a future co-maintainer split is a one-line change.
+*                               @suhail-akhtar
+
+/src/tools/pipeline.ts          @suhail-akhtar
+/src/safety.ts                  @suhail-akhtar
+/src/sandbox/                   @suhail-akhtar
+/src/vault/                     @suhail-akhtar
+/src/server/                    @suhail-akhtar
+/src/mcp-server/                @suhail-akhtar
+/desktop/electron/              @suhail-akhtar
+/.github/                       @suhail-akhtar
+/scripts/release.mjs            @suhail-akhtar
+/scripts/check-standards.mjs    @suhail-akhtar
+/LICENSE                        @suhail-akhtar
+/SECURITY.md                    @suhail-akhtar

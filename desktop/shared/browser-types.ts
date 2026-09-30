@@ -285,7 +285,8 @@ export interface DialogRequest { id: string; tabId: string; type: DialogType; me
 export interface AuthRequest { id: string; tabId: string; host: string; realm?: string }
 
 export interface ConfirmRequest {
-  id: string; kind: 'upload' | 'download' | 'tabs'; title: string; detail: string; files?: string[]; origin: string;
+  /** `commit`: the agent is about to buy, pay, book, send or delete (browser-commit-gate.ts). */
+  id: string; kind: 'upload' | 'download' | 'tabs' | 'commit'; title: string; detail: string; files?: string[]; origin: string;
   /** Extension: button labels ("Keep" / "Discard") and a danger styling for risky downloads. */
   okLabel?: string; cancelLabel?: string; danger?: boolean;
 }

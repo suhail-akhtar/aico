@@ -224,6 +224,26 @@ already learned is thrown away.
 
 ---
 
+## Operating your servers
+
+Store a credential for your server once (Credential Manager, or `aico vault add
+nas-root -k ssh-password --host 10.0.0.5 --username root`), then ask in plain
+words: *"install Grafana on 10.0.0.5 and set it up"*. The agent uses the
+credential by name — `SshExec`, `SshCopy`, `SshTunnel`, `HttpRequest`,
+`WinRmExec` (Windows), `SnmpQuery` — and never sees its value. Passwords for the
+accounts it creates are generated into the vault, written to the server's own
+config files (mode 0600), and reused later by name, including by the desktop
+browser to sign you in.
+
+You are asked before: the first connection to a server (you see its host-key
+fingerprint), anything destructive (deletes, drops, stopping services, firewall
+or SSH changes, reboots), SNMP writes and HTTP DELETEs. A server whose host key
+changed is refused outright. Long installs run in the background — `Supervise`
+lists them, like everything else running. Details:
+[docs/security/ops-tools.md](docs/security/ops-tools.md).
+
+---
+
 ## Letting another AI use aico
 
 `aico mcp-serve` speaks MCP on stdin and stdout, so Claude Code — or another

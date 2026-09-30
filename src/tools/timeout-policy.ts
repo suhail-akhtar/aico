@@ -79,6 +79,16 @@ const TIMEOUTS: Record<string, number> = {
 
   // Waiting on a person, who is entitled to take their time.
   AskUserQuestion: 60 * 60 * 1000,
+
+  // Remote operations (tools/ops). Each enforces its own deadline and cancels
+  // the remote side itself; these sit past those, plus the five minutes a
+  // credential approval may wait on a person.
+  SshExec: 36 * 60 * 1000,
+  SshCopy: 36 * 60 * 1000,
+  WinRmExec: 36 * 60 * 1000,
+  SshTunnel: 7 * 60 * 1000,
+  HttpRequest: 11 * 60 * 1000,
+  SnmpQuery: 8 * 60 * 1000,
 };
 
 /** MCP tools are somebody else's process; they get the default, not a guess. */

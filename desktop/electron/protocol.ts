@@ -5,7 +5,11 @@
  *
  *   aico://app/api/…         → the engine, with its token and the Origin it
  *                              expects attached. Streamed both ways, so the
- *                              event stream arrives as it is written.
+ *                              event stream arrives as it is written. Two
+ *                              exceptions: the vault routes that return a
+ *                              value are refused (main alone calls them), and
+ *                              a tool-permission answer is forwarded over the
+ *                              engine's private port instead of HTTP.
  *   aico://app/plugins/<id>/ → a plugin's own files, served with a sandboxing
  *                              content-security policy.
  *   aico://app/…             → the renderer's files; unknown paths fall back to
@@ -122,7 +126,20 @@ export interface ProtocolOptions {
   rendererDir: string;
   pluginDir: () => string;
   engine: EngineHost;
+  /**
+   * Forward a person's tool-permission decision over the engine's private
+   * port (vault-host.ts). The engine refuses an HTTP "allow" while the desktop
+   * is attached (decision-gate.ts), so this is the only way one lands.
+   */
+  decidePermission?: (sessionId: string, id: string, allow: boolean) => Promise<boolean>;
 }
+
+/**
+ * Vault routes the interface may never call: they return a value, or mint
+ * the grant that lets one out. The Credential Manager reaches them only
+ * through main (credential-manager.ts), after a native confirmation.
+ */
+const BLOCKED_FROM_RENDERER = /^\/api\/vault\/(reveal|grant|export)$/;
 
 /**
  * Third-party media the chat embeds that insists on knowing who embeds it.
@@ -146,11 +163,24 @@ export function attachEmbedReferer(ses: Electron.Session): void {
   onRequestHeaders(ses, EMBED_HOSTS, (_details, headers) => (headers.Referer || headers.referer ? undefined : { ...headers, Referer: EMBED_REFERER }));
 }
 
-export function handleProtocol({ rendererDir, pluginDir, engine }: ProtocolOptions): void {
+export function handleProtocol({ rendererDir, pluginDir, engine, decidePermission }: ProtocolOptions): void {
   protocol.handle(SCHEME, async (request) => {
     const url = new URL(request.url);
     const pathname = decodeURIComponent(url.pathname);
 
+    if (BLOCKED_FROM_RENDERER.test(pathname)) {
+      return json(403, { error: 'Values leave the vault only through AICO’s own confirmation (Settings → Credentials & passwords).' });
+    }
+    // A tool-permission answer from the interface: a yes goes over the private
+    // port, never as HTTP (the engine would refuse it); a no may go either way.
+    if (pathname === '/api/permission' && request.method === 'POST' && decidePermission) {
+      let body: { sessionId?: unknown; id?: unknown; allow?: unknown } = {};
+      try { body = await request.json() as typeof body; } catch { /* not JSON */ }
+      if (typeof body.sessionId !== 'string' || typeof body.id !== 'string' || typeof body.allow !== 'boolean') {
+        return json(400, { error: 'sessionId, id and allow required' });
+      }
+      return json(200, { ok: await decidePermission(body.sessionId, body.id, body.allow) });
+    }
     if (pathname.startsWith('/api/')) return proxy(request, url, engine);
 
     if (pathname.startsWith('/plugins/')) {

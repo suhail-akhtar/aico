@@ -19,8 +19,16 @@ import { registerRendererBridge } from './renderer-bridge';
 import { registerUpdater } from './updater';
 import { registerBackup } from './backup';
 import { registerContextMenus } from './context-menu';
+import { registerVaultHost } from './vault-host';
+import { registerCredentialManager } from './credential-manager';
+import { registerSecurePromptIpc } from './secure-prompt';
 
 export function registerFeatures(ctx: DesktopContext): void {
+  // The vault's host side first: it names the engine's key provider before the
+  // engine starts, and the browser fills logins through it.
+  registerSecurePromptIpc();
+  ctx.services.vaultHost = registerVaultHost(ctx);
+  registerCredentialManager(ctx, ctx.services.vaultHost);
   registerRendererBridge(ctx);
   registerPlugins(ctx);
   registerTerminal(ctx);

@@ -110,6 +110,8 @@ function open(cwd: string, key: string): Shell {
   const choice = detectShell();
   const child = spawn(choice.command, choice.interactive, {
     cwd,
+    // The agent's shell: the vault CLI's reveal commands refuse to run here.
+    env: { ...process.env, AICO_AGENT_SHELL: '1' },
     // A process group of its own on POSIX, so closing the shell takes its
     // children with it. Windows has no equivalent and kills the shell directly.
     ...(isWindows ? {} : { detached: true }),

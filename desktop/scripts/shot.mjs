@@ -41,7 +41,9 @@ const log = [];
 const page = await app.firstWindow();
 page.on('console', m => log.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', e => log.push(`[pageerror] ${e.message}`));
-await page.setViewportSize({ width: 1440, height: 900 }).catch(() => {});
+// Size the real window, not the page: an emulated viewport desyncs the renderer's
+// coordinates from the native browser views, which are laid out in window pixels.
+await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w?.unmaximize(); w?.setContentSize(1440, 900); }).catch(() => {});
 
 // Wait for the engine gate to go.
 try {

@@ -50,6 +50,16 @@ if (!existsSync(path.join(root, 'src'))) {
 if (process.env.AICO_PREPARING === '1') {
   process.exit(0);
 }
+/*
+  A developer's clone gets the standards hooks (commit-msg, pre-push). Best
+  effort and never fatal: CI has no use for them, an install from a git ref
+  runs in a throwaway clone where they do nothing, and install-hooks.mjs itself
+  always exits 0 and never replaces a hooksPath someone else set.
+*/
+if (!process.env.CI && existsSync(path.join(root, '.git')) && existsSync(path.join(root, 'scripts', 'install-hooks.mjs'))) {
+  spawnSync(process.execPath, [path.join(root, 'scripts', 'install-hooks.mjs'), '--quiet'], { cwd: root, stdio: 'ignore' });
+}
+
 const childEnv = { ...process.env, AICO_PREPARING: '1' };
 for (const key of Object.keys(childEnv)) {
   // Everything npm derived from the *outer* command line: global, prefix,

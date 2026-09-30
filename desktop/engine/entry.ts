@@ -10,12 +10,17 @@
  *   → { type: 'ready', url }            once listening
  *   → { type: 'error', message }        if it could not start
  *   ← { type: 'shutdown' }              close cleanly, then exit
+ *   ← { type: 'permission/decide', sessionId, id, allow }   a person's answer to a tool-permission prompt
+ *   → { type: 'permission/decided', sessionId, id, ok }
+ *   ↔ `vault/*`                          the credential vault's channel (src/vault/host-channel.ts)
  *
  * @module desktop/engine/entry
  */
 
 import os from 'node:os';
 import { serve } from '../../src/server/index.js';
+import { attachVaultHostChannel } from '../../src/vault/host-channel.js';
+import { decisionGate } from '../../src/server/decision-gate.js';
 
 interface ParentPort {
   postMessage(message: unknown): void;
@@ -37,6 +42,23 @@ async function main(): Promise<void> {
   try { process.chdir(cwd); } catch { /* stays where it started */ }
   try {
     const server = await serve({ port: 0, cwd, open: false });
+    // The credential vault's private channel: master key, human grants and
+    // approvals arrive here and nowhere a shell can reach. See
+    // src/vault/host-channel.ts and docs/security/credential-broker.md.
+    if (parent) attachVaultHostChannel(parent);
+    // Tool-permission yeses come the same way: main forwards the person's
+    // click from its own window, and HTTP can only say no (decision-gate.ts).
+    if (parent) {
+      const gate = decisionGate();
+      gate.setHostAttached(true);
+      parent.on('message', (e) => {
+        const m = e.data as { type?: string; sessionId?: unknown; id?: unknown; allow?: unknown } | undefined;
+        if (m?.type !== 'permission/decide') return;
+        if (typeof m.sessionId !== 'string' || typeof m.id !== 'string' || typeof m.allow !== 'boolean') return;
+        const ok = gate.decideFromHost(m.sessionId, m.id, m.allow);
+        parent.postMessage({ type: 'permission/decided', sessionId: m.sessionId, id: m.id, ok });
+      });
+    }
     send({ type: 'ready', url: server.url });
     let closing = false;
     const shutdown = async (): Promise<void> => {

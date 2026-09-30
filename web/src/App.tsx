@@ -23,6 +23,7 @@ import { MiniAppScope } from './components/MiniAppScope';
 import { ChatPane } from './components/ChatPane';
 import { Composer } from './components/Composer';
 import { PermissionPrompt } from './components/PermissionPrompt';
+import { VaultPrompts } from './components/VaultPrompts';
 
 import { SystemPanel } from './components/SystemPanel';
 import { Trajectory } from './components/Trajectory';
@@ -272,6 +273,8 @@ export function App(): React.ReactElement {
                 conversation is a prompt that gets missed while a run waits.
               */}
               <PermissionPrompt />
+              {/* The credential vault asking this person: a secure prompt, an approval, a notice. */}
+              <VaultPrompts />
               <Composer />
             </div>
             <AppWorkspace />

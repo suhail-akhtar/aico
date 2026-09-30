@@ -64,7 +64,7 @@ export function manual(ctx: DesktopContext): string {
     'IDE: call ide_describe first when asked about the IDE — it returns the live state (current view, projects, plugins and their pages/commands, theme). ide_navigate opens any view by id (chat, chats, library, scheduled, plugins, projects, project {path}, group {id}, files {root, open}, git {path}, github {path}, browser {url}, apps, activity, changes {id}, trajectory {id}, or a plugin page "<pluginId>:<viewId>"). ide_run_command runs any palette command. ide_set_appearance changes theme/colours/font size/width; ide_set_layout shows or hides the sidebar, bottom panel and side browser. ide_open_file opens a file in the editor. ide_notify shows the user a notification. ide_terminal_run starts a command in a visible terminal tab (use it for dev servers the user should watch; use your own shell tool for quick commands).',
     '',
     'BROWSER: a real Chromium browser inside the IDE (own profile). The user watches — your actions are highlighted on the page — and may press Stop / Take over: then every browser tool refuses; stop and ask. Work READ → ACT → VERIFY. Read: browser_open, then browser_read (the page as Markdown), browser_insights (page kind; login wall, paywall, cookie banner, human check), browser_extract (links, tables, prices, contacts, outline, metadata), browser_find. Act: browser_snapshot gives refs like [e7] for browser_click / browser_type / browser_select / browser_press; browser_forms then browser_fill fill a whole form; browser_autofill fills the user\'s own saved details (name, email, phone, address) when they ask to "fill it with my profile". Refs change when the page changes — snapshot again. Verify: every action reports the URL now and what changed (navigation, validation errors, messages, dialogs, downloads); browser_wait (text, gone, url, urlChange, networkIdle); browser_screenshot shows you the page. browser_dialog answers JavaScript dialogs; browser_downloads; browser_upload (the user approves); browser_tabs; browser_profile (their own browsing). Local apps: http://localhost:<port>; browser_console / browser_network for errors.',
-    'BROWSER RULES: never solve, bypass or work around a CAPTCHA, "verify you are human" or bot check — call browser_handoff so the user does it, then poll browser_handoff_wait. Never type passwords, card numbers, CVVs or one-time codes (refused) — hand those over too. Fill forms, but ask the user before submitting anything that buys, pays, books, sends, posts or deletes. On cookie banners prefer "Reject" / "Necessary only". Saved passwords are the user\'s alone — no tool reads or fills them.',
+    'BROWSER RULES: never solve, bypass or work around a CAPTCHA or bot check — browser_handoff, then poll browser_handoff_wait. You never see or type secrets (password/card/CVV/code fields are refused): sign in with browser_login and a stored credential NAME (browser_open says when one matches), else browser_handoff or CredentialRequest. Buying, paying, booking, sending or deleting waits for the user to allow it in AICO; if refused, ask them. Cookie banners: prefer "Reject".',
     '',
     `PLUGINS: the IDE is customised with plugins, never by editing its code. To add or change a feature, write a plugin with ide_plugin_save. A manifest is JSON: { "id": "lower.case-id", "name": "Name", "version": "0.1.0", "description": "...", "icon": one of [${ICON_NAMES.join(', ')}], "category": "...", "contributes": { ... } }. Contribution kinds:`,
     '- navItems: [{ id, title, icon, view, placement: "primary"|"more", order }] — sidebar entries; view is a page id of this plugin (or any view id).',
@@ -222,7 +222,7 @@ export function createTools(ctx: DesktopContext): Tool[] {
     // ── Browser ──
     {
       name: 'browser_open',
-      description: 'Open a URL in the IDE\'s built-in browser (the user sees it). Returns the tab, and flags a human check or load error. Use newTab to keep the current page. Then browser_read (to read) or browser_snapshot (to act).',
+      description: 'Open a URL in the IDE\'s built-in browser (the user sees it). Returns the tab, and flags a human check or load error; on a sign-in page, `signIn` says which stored credential matches this origin (then call browser_login). Use newTab to keep the current page. Then browser_read (to read) or browser_snapshot (to act).',
       inputSchema: { type: 'object', properties: { url: { type: 'string' }, newTab: { type: 'boolean' } }, required: ['url'] },
       run: async (a) => json(await (await browser()).open(String(a.url), { newTab: Boolean(a.newTab) })),
     },
@@ -329,7 +329,7 @@ export function createTools(ctx: DesktopContext): Tool[] {
     },
     {
       name: 'browser_click',
-      description: 'Click an element (trusted mouse input) — give ref (best), selector, or visible text. The result says where the page is now and what changed (navigation, dialogs, validation errors, messages). Refused on pages with a human check (CAPTCHA).',
+      description: 'Click an element (trusted mouse input) — give ref (best), selector, or visible text. The result says where the page is now and what changed (navigation, dialogs, validation errors, messages). Refused on pages with a human check (CAPTCHA). A button that buys, pays, books, places an order, sends, posts or deletes waits for the user to allow it in AICO (up to 20 s) and is refused if they do not.',
       inputSchema: { type: 'object', properties: { ...TARGET_PROPS, double: { type: 'boolean' }, button: { type: 'string', enum: ['left', 'right'] } } },
       run: async (a) => (await browser()).click(target(a), { double: Boolean(a.double), button: a.button === 'right' ? 'right' : 'left' }),
     },
@@ -491,8 +491,25 @@ export function createTools(ctx: DesktopContext): Tool[] {
       run: async (a) => (await browser()).uploadWait(String(a.uploadId), typeof a.seconds === 'number' ? a.seconds : undefined),
     },
     {
+      name: 'browser_login',
+      description: 'Sign in to the page in front with a credential stored in AICO\'s vault — you give its NAME, never a password. AICO finds the page\'s real sign-in fields, asks the vault for that credential for this page\'s exact origin (its policy decides; the user may be asked to approve), types the username and password itself with trusted keystrokes, and presses Enter. You get back only: "signed in …", "fields filled …", "no matching login form …" or "refused: <reason>" — never the value. Without name, the one credential bound to this origin is used. form picks the sign-in form when a page has several (0-based). submit false fills without pressing Enter. One-time codes and CAPTCHAs that follow are the user\'s (browser_handoff).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'The stored credential\'s name, e.g. "grafana-admin" (from CredentialList, CredentialGenerate or the browser_open hint).' },
+          form: { type: 'number', description: 'Which sign-in form on the page (0-based). Default 0.' },
+          submit: { type: 'boolean', description: 'Press Enter after filling (default true).' },
+        },
+      },
+      run: async (a) => (await browser()).login({
+        ...(typeof a.name === 'string' && a.name.trim() ? { name: a.name.trim().replace(/^\{\{secret:|\}\}$/g, '') } : {}),
+        ...(typeof a.form === 'number' ? { form: a.form } : {}),
+        ...(a.submit === false ? { submit: false } : {}),
+      }),
+    },
+    {
       name: 'browser_handoff',
-      description: 'Hand the page to the user for what you must not do: a CAPTCHA or "verify you are human" check, signing in, a password, an MFA / one-time code, card or payment details, an HTTP sign-in prompt. Shows them a banner with your message and a Done button. Then poll browser_handoff_wait.',
+      description: 'Hand the page to the user for what you must not do: a CAPTCHA or "verify you are human" check, an MFA / one-time code, card or payment details, an HTTP sign-in prompt — or a sign-in when no stored credential matches (try browser_login first). Shows them a banner with your message and a Done button. Then poll browser_handoff_wait.',
       inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
       run: async (a) => {
         const b = await browser();

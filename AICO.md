@@ -43,8 +43,18 @@ completely and spawned processes not at all. A Bash command can still write
 anywhere the user can. Defence in depth, not a jail — say so rather than
 implying otherwise.
 
+**The model uses secrets by name, never by value.** `src/vault/` is the
+credential broker: the model writes `{{secret:name}}`, trusted code resolves it
+under a policy (scope, approval, audit) at the moment of use. Every sink — the
+pipeline result (inside the PostToolUse hook), `Session.append`, spill, the SSE
+hub, API responses, run callbacks — passes `vault/sink.ts`'s redactor. A new
+sink must too; a new tool that touches the vault goes in `VAULT_TOOL_CLASSES`.
+See `docs/security/credential-broker.md`.
+
 ## Development Notes
 
+- **Working on this repo: follow `AGENTS.md`** (non-negotiables, workflow,
+  no AI attribution, never touch the real `~/.aico`) and `docs/engineering/`.
 - **Tests run against real models, not mocks.** `npm test` is the mock-based
   harness; `live-test.mjs` and `web-live-test.mjs` cost money and are not part
   of it.

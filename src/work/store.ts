@@ -22,6 +22,7 @@ import { aicoHome } from '../home.js';
 import path from 'path';
 import type { WorkEvent, WorkRecord } from './types.js';
 import { isTerminal } from './types.js';
+import { sinkRedact } from '../vault/sink.js';
 
 const LF = '\n';
 
@@ -70,7 +71,8 @@ export async function appendWorkEvent(event: WorkEvent): Promise<void> {
   const target = workStorePath();
   try {
     await mkdir(path.dirname(target), { recursive: true });
-    await appendFile(target, JSON.stringify(event) + LF, 'utf8');
+    // Commands and results land here; they pass the vault redactor like every sink.
+    await appendFile(target, JSON.stringify(sinkRedact(event)) + LF, 'utf8');
   } catch {
     // A ledger that cannot write is a degraded ledger, not a failed run. The
     // in-memory index is still correct for this process; only restart recovery

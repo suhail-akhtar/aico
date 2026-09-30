@@ -444,8 +444,11 @@ export function BrowserSection(): React.ReactElement {
           <button className="btn-danger btn-sm" onClick={() => void desktop.dialog.confirm({ title: 'Clear browsing data', message: 'Sign out of every site in the built-in browser?', ok: 'Clear', danger: true })
             .then(ok => { if (ok) void invoke('browser:clearData').then(() => toast.success('Browsing data cleared')); })}>Clear</button>
         </Row>
-        <Row title="Passwords" desc="Saved passwords for the built-in browser: encrypted on this computer, never shown to the agent, never in backups.">
-          <button className="btn-outline btn-sm" onClick={openPasswords}><Icon name="key" size={14} />Manage passwords</button>
+        <Row title="Passwords" desc="Web logins the browser saves live in AICO's credential vault: encrypted on this computer, filled only into their own site, never shown to the agent, never in backups.">
+          <div className="flex gap-2">
+            <button className="btn-outline btn-sm" onClick={openPasswords}><Icon name="key" size={14} />Passwords</button>
+            <button className="btn-ghost btn-sm" onClick={() => useDesk.getState().openSettings('credentials')}><Icon name="shield" size={14} />All credentials</button>
+          </div>
         </Row>
         <Row title="Import browser data" desc="Bookmarks, history and addresses from Chrome, Edge, Brave, Vivaldi, Opera or Firefox — and passwords from a file you export yourself.">
           <button className="btn-outline btn-sm" onClick={() => openImportWizard()}><Icon name="download" size={14} />Import…</button>

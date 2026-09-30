@@ -144,15 +144,33 @@ export type FillVerdict = { ok: true } | { ok: false; reason: string };
  * parsed, never compared as text, so `https://bank.com.evil.test` and
  * `https://evil.test/?https://bank.com` are what they are.)
  */
-export function canFill(entryOrigin: string, topUrl: string, frameUrl: string = topUrl): FillVerdict {
+export function canFill(entryOrigin: string, topUrl: string, frameUrl: string = topUrl, opts: { policyAllowsHttp?: boolean } = {}): FillVerdict {
   const want = loginOrigin(entryOrigin);
   const top = loginOrigin(topUrl);
   const frame = loginOrigin(frameUrl);
   if (!want || !top) return { ok: false, reason: 'This page has no web address a password can belong to.' };
   if (top !== want) return { ok: false, reason: `This password is for ${want}, not ${top}.` };
-  if (!isSecureOrigin(top)) return { ok: false, reason: 'Passwords are never filled into a page that is not secure (http).' };
+  // http on a private (LAN) address is allowed only when the credential's own
+  // policy binds that exact http:// origin — the engine decided that when it
+  // resolved the login; this is main's second look at the address itself.
+  if (!isSecureOrigin(top) && !(opts.policyAllowsHttp && isPrivateOrigin(top))) {
+    return { ok: false, reason: 'Passwords are never filled into a page that is not secure (http), except a private-network address the credential is explicitly bound to.' };
+  }
   if (frame !== top) return { ok: false, reason: 'Passwords are never filled into a frame from another site.' };
   return { ok: true };
+}
+
+/** An http(s) origin on this machine or a private network (RFC 1918, link-local, CGNAT, ULA, .local/.lan/.internal/.home.arpa). */
+export function isPrivateOrigin(origin: string): boolean {
+  let host: string;
+  try { host = new URL(origin).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { return false; }
+  if (host === 'localhost' || /\.(localhost|local|lan|internal|home\.arpa)$/.test(host)) return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+  }
+  return host === '::1' || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
 }
 
 /** Logins saved for exactly this page's origin (no other origin, not even a subdomain). */

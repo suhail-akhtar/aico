@@ -4,3 +4,7 @@
 
 # Ensure skill markdown files always use LF (the frontmatter parser depends on it)
 *.md text eol=lf
+
+# Git hooks are sh scripts: a CRLF checkout turns `--pre-push` into
+# `--pre-push\r` and the hook fails on an argument nobody typed.
+.githooks/* text eol=lf

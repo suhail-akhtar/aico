@@ -7,6 +7,7 @@
  * Three bundles and a Vite build, all into `dist/`:
  *   dist/main.cjs        Electron main process
  *   dist/preload.cjs     the renderer's only bridge to main
+ *   dist/secure-prompt-preload.cjs  the secure prompt window's submit/cancel (secure-prompt.ts)
  *   dist/engine/         the AICO engine (serve()), with its built-in skills and
  *                        app templates beside it where the loaders look
  *   dist/renderer/       the interface (index.html), the floating copilot's
@@ -48,6 +49,13 @@ await build({
 await build({
   entryPoints: [path.join(desktop, 'electron/preload.ts')],
   outfile: path.join(dist, 'preload.cjs'),
+  bundle: true, platform: 'node', format: 'cjs', target: 'node24',
+  external: ['electron'], define, logLevel: 'warning',
+});
+// The secure prompt's own preload (secure-prompt.ts): submit and cancel, nothing else.
+await build({
+  entryPoints: [path.join(desktop, 'electron/secure-prompt-preload.ts')],
+  outfile: path.join(dist, 'secure-prompt-preload.cjs'),
   bundle: true, platform: 'node', format: 'cjs', target: 'node24',
   external: ['electron'], define, logLevel: 'warning',
 });

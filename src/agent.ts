@@ -107,6 +107,11 @@ import { matchKnowledge, renderKnowledge } from './knowledge/match.js';
 import { activeMemories } from './memory/store.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
+import { sinkRedact, sinkRedactText } from './vault/sink.js';
+import { guardAgentRun } from './vault/agent-hooks.js';
+import { installVaultStages } from './vault/pipeline.js';
+import { callbackPrompter, ttyPrompter } from './vault/human.js';
+import { installOpsStages } from './tools/ops/index.js';
 
 // Increase max listeners to avoid warnings during long tool chains
 process.setMaxListeners(50);
@@ -748,6 +753,10 @@ export function resolveToolSet(opts: {
   if (opts.headless || !canAskUser()) {
     defs = defs.filter(d => d.name !== 'AskUserQuestion');
   }
+  // Same reasoning: a credential request with nobody to type it is a wait on nothing.
+  if (opts.headless) {
+    defs = defs.filter(d => d.name !== 'CredentialRequest');
+  }
 
   // Apps are a plugin, and "off" has to mean the model cannot see the tool —
   // not that it is told not to use it. A tool present in the list is a tool
@@ -1199,8 +1208,11 @@ export function budgetImages(
  * at once — the browser client's whole reason for existing. It defaults to
  * `process.cwd()`, which is what the CLI has always meant by "here".
  */
-export async function runAgent(opts: AgentOptions): Promise<string> {
-  return runInContext(
+export async function runAgent(rawOpts: AgentOptions): Promise<string> {
+  // The user's message is scanned for secrets, and every callback that leaves
+  // this run is wrapped by the vault redactor. See vault/agent-hooks.
+  const opts = await guardAgentRun(rawOpts);
+  const result = await runInContext(
     {
       cwd: opts.cwd ?? process.cwd(),
       model: opts.model,
@@ -1236,6 +1248,9 @@ export async function runAgent(opts: AgentOptions): Promise<string> {
     },
     () => runAgentInContext(opts),
   );
+  // The final text goes to a background registry, a parent's Task result, a
+  // cron log or a terminal — all sinks.
+  return sinkRedactText(result);
 }
 
 async function runAgentInContext(opts: AgentOptions): Promise<string> {
@@ -1456,6 +1471,25 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
   };
   const handlers = buildToolHandlers(handlerOpts);
+
+  // The credential vault's guard (its files and key stores are off limits to
+  // tools) and its shell-placeholder binding. A person approves shell uses:
+  // the process-wide prompter when a server or desktop set one, otherwise
+  // this run's own permission dialog — never an unattended run's policy.
+  installVaultStages(pipeline, {
+    cwd: () => currentCwd(),
+    ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+    ...(!opts.headless && onPermissionRequest
+      ? { fallbackPrompter: callbackPrompter((title, detail) => onPermissionRequest(title, detail)) }
+      : !opts.headless && process.stdin.isTTY ? { fallbackPrompter: ttyPrompter() } : {}),
+  });
+  // The ops tools (SSH, HTTP APIs, WinRM, SNMP) ask the same person the same
+  // way when a use needs approval and no process-wide prompter is set.
+  installOpsStages(pipeline, {
+    ...(!opts.headless && onPermissionRequest
+      ? { fallbackPrompter: callbackPrompter((title, detail) => onPermissionRequest(title, detail)) }
+      : !opts.headless && process.stdin.isTTY ? { fallbackPrompter: ttyPrompter() } : {}),
+  });
 
   // Loop-breaker. Advisory only: it never vetoes a call, it injects an
   // escalating reminder when the model repeats one verbatim. Registered after
@@ -2532,10 +2566,14 @@ const GOAL_REMINDER_EVERY = 6;
               result = merged;
             }
 
+            // The last point before the model sees it. The pipeline already
+            // redacts built-in tools; this also covers the handlers that do not
+            // run through it (Task, Investigate, MCP) and their error paths.
+            result = sinkRedact(result);
             return {
               result,
               isError: typeof result === 'object' && result !== null && 'error' in result,
-              ...(contexts?.length ? { additionalContexts: contexts } : {}),
+              ...(contexts?.length ? { additionalContexts: sinkRedact(contexts) } : {}),
             };
           },
           onCommit: (call, outcome) => {

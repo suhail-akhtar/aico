@@ -18,9 +18,16 @@
  * WHAT IT WILL NOT DO (browser-safety.ts decides, in main):
  *   - act on a page with a CAPTCHA / "verify you are human" check — every
  *     action there is refused with a hand-over hint;
- *   - type into password, card-number, CVV or one-time-code fields;
+ *   - type into password, card-number, CVV or one-time-code fields — the
+ *     agent never sees or types a secret; `login()` (browser_login) asks the
+ *     vault for a stored credential by NAME for the page's exact origin and
+ *     AICO types it itself (browser-login.ts);
+ *   - press a control that buys, pays, books, sends or deletes without the
+ *     person allowing it in an AICO prompt (browser-commit-gate.ts);
  *   - upload a file, or download a program, without the user confirming;
- *   - answer an HTTP sign-in prompt or accept a bad certificate.
+ *   - answer an HTTP sign-in prompt, or accept a bad certificate — except a
+ *     self-signed one on a private address whose exact origin a stored
+ *     credential allows it for (`allowSelfSigned`), pinned on first sight.
  * `handoff()` shows you what the agent needs and waits for you to press Done.
  * Stop / Take over (`browser:agentStop`) makes every agent tool refuse until
  * `browser:agentResume`.
@@ -63,6 +70,10 @@ import { openBrowserSession, registerTabSession, type TabSession } from './brows
 import { registerAutofill, type AutofillService } from './browser-autofill-store';
 import { registerVault } from './browser-vault';
 import { registerImport } from './browser-import';
+import { classifyCommit, commitQuestion, type CommitSignals, type CommitVerdict } from './browser-commit-gate';
+import { isRealPasswordField, isUsernameField, loginFormJs, passwordOf, type LoginFormReport } from './browser-login';
+import { isPrivateOrigin, loginOrigin } from './browser-vault-core';
+import { PAGE_SIGNALS_JS, type PageSignals } from '../shared/page-signals';
 
 /** The profile's older home (Electron's partition); it now lives in <AICO_HOME>/desktop/browser/profile — see browser-session.ts. */
 export const BROWSER_PARTITION = 'persist:aico-browser';
@@ -147,6 +158,12 @@ export interface BrowserService {
   selectTab(id: string): void;
   newTab(url?: string): Promise<TabInfo>;
   handoff(message: string, timeoutMs?: number): Promise<string>;
+  /**
+   * Sign in to the page in front with a stored credential, by name (or the one
+   * bound to this origin). The value goes vault → main → page as keystrokes;
+   * the result never contains it.
+   */
+  login(opts: { name?: string; form?: number; submit?: boolean; sessionId?: string }): Promise<string>;
   // Page understanding and forms (agent-facing: access-checked, visible to the user).
   read(opts: { mode?: 'reader' | 'full'; maxChars?: number }): Promise<PageRead>;
   forms(): Promise<FormModel[]>;
@@ -283,6 +300,16 @@ export function registerBrowser(ctx: DesktopContext): void {
     agentDriving: (wcId) => agentDriving(byWc.get(wcId)),
   });
   const certs = new Map<string, { issuer: string; subject: string; validTo: number }>();
+  /** Self-signed certificates accepted this run, by origin (trust on first use; a different one is refused). */
+  const selfSignedPins = new Map<string, string>();
+  const selfSignedAllowed = async (origin: string, fingerprint: string): Promise<boolean> => {
+    const pinned = selfSignedPins.get(origin);
+    if (pinned) return pinned === fingerprint;
+    const logins = await vault.loginsFor(origin);
+    if (!logins.some(l => l.allowSelfSigned)) return false;
+    selfSignedPins.set(origin, fingerprint);
+    return true;
+  };
   app.on('before-quit', () => { history.flush(); bookmarks.flush(); settings.flush(); downloads.flush(); });
 
   // ── Questions for the user (permissions, JS dialogs, HTTP auth, confirmations) ──
@@ -297,15 +324,70 @@ export function registerBrowser(ctx: DesktopContext): void {
   let askSeq = 0;
   const askId = (p: string): string => `${p}${Date.now().toString(36)}${++askSeq}`;
 
-  const confirm = (req: Omit<ConfirmRequest, 'id'>, timeoutMs = 10 * 60_000): { id: string; done: Promise<boolean> } => {
+  const confirm = (req: Omit<ConfirmRequest, 'id'>, timeoutMs = 10 * 60_000): { id: string; done: Promise<boolean>; cancel: () => void } => {
     const id = askId('c');
     const done = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => { pendingConfirm.delete(id); resolve(false); }, timeoutMs);
+      const timer = setTimeout(() => { pendingConfirm.delete(id); ctx.emit('browser:confirmGone', id); resolve(false); }, timeoutMs);
       pendingConfirm.set(id, { resolve, timer });
     });
     ctx.emit('browser:confirm', { id, ...req } satisfies ConfirmRequest);
     ctx.revealBrowser();
-    return { id, done };
+    /** Withdraw the question (nobody answered in time): it is a no, and it leaves the screen. */
+    const cancel = (): void => {
+      const c = pendingConfirm.get(id);
+      if (!c) return;
+      pendingConfirm.delete(id);
+      clearTimeout(c.timer);
+      ctx.emit('browser:confirmGone', id);
+      c.resolve(false);
+    };
+    return { id, done, cancel };
+  };
+
+  // ── The purchase / send gate (browser-commit-gate.ts): enforced here, not asked for in a prompt ──
+  /** What the control the agent is about to activate says about itself (read-only, in the page). */
+  const commitSignals = async (t: Tab, ref: string | null): Promise<CommitSignals | null> => {
+    const wc = t.view.webContents;
+    const probe = await evaluate<Omit<CommitSignals, 'checkout'> | null>(wc, `(() => {
+      const ref = ${JSON.stringify(ref)};
+      const el = ref ? document.querySelector('[data-aico-ref="' + ref + '"]') : document.activeElement;
+      if (!el) return null;
+      const text = (x) => String(x == null ? '' : x).replace(/\\s+/g, ' ').trim().slice(0, 160);
+      const labelOf = (x) => text(x.getAttribute && (x.getAttribute('aria-label') || '')) || text(x.value && x.tagName === 'INPUT' ? x.value : '') || text(x.innerText || x.textContent) || text(x.getAttribute && x.getAttribute('title'));
+      const btn = (el.closest && el.closest('button, [role=button], input[type=submit], input[type=image], input[type=button], a')) || el;
+      const form = btn.form || (btn.closest && btn.closest('form')) || null;
+      const type = String(btn.getAttribute && btn.getAttribute('type') || '').toLowerCase();
+      const enter = !ref;
+      const submits = Boolean(form) && (enter
+        ? (el.tagName === 'INPUT' && !['button', 'checkbox', 'radio', 'file'].includes(String(el.type).toLowerCase()))
+        : (btn.tagName === 'INPUT' ? ['submit', 'image'].includes(type) : btn.tagName === 'BUTTON' ? (type === '' || type === 'submit') : false));
+      const formButtons = enter && form ? Array.from(form.querySelectorAll('button:not([type]), button[type=submit], input[type=submit]')).slice(0, 4).map(labelOf).filter(Boolean) : [];
+      const cardFields = Array.from(document.querySelectorAll('input')).filter(i => /cc-(number|csc|exp)/.test(i.getAttribute('autocomplete') || '')).length;
+      return {
+        label: enter ? '' : labelOf(btn), tag: String(btn.tagName || '').toLowerCase(), type, submits,
+        formAction: form ? String(btn.formAction || form.action || '') : '', formButtons, url: location.href, title: document.title, cardFields,
+      };
+    })()`, 4000).catch(() => null);
+    if (!probe) return null;
+    const sig = await evaluate<PageSignals>(wc, PAGE_SIGNALS_JS, 4000).catch(() => null);
+    return { ...probe, checkout: Boolean(sig?.cues.checkout || sig?.cues.placeOrder && /order|pay|purchase/i.test(probe.label)) };
+  };
+  /**
+   * A commit needs the person's explicit Allow in an AICO prompt that says
+   * what will happen. No answer within ~20 s (the tool call must return) is a
+   * no: nothing is clicked, and the agent is told to ask.
+   */
+  const requireCommitApproval = async (t: Tab, v: CommitVerdict): Promise<void> => {
+    const origin = originOf(t.view.webContents.getURL()) || t.view.webContents.getURL();
+    const q = commitQuestion(v, origin);
+    agentEvent(t, 'confirm', 'blocked', q.title);
+    const c = confirm({ kind: 'commit', origin, title: q.title, detail: q.detail, okLabel: q.okLabel, cancelLabel: 'Don’t allow', danger: true });
+    const answer = await Promise.race([c.done, sleep(22_000).then(() => null)]);
+    if (answer === null) {
+      c.cancel();
+      throw new Error(`Refused: nothing was pressed. “${v.label || 'That action'}” would ${v.kind === 'purchase' ? 'buy or pay for something' : v.kind === 'send' ? 'send or publish something' : v.kind === 'delete' ? 'delete something' : v.kind === 'booking' ? 'make a booking' : 'start a payment'}, which needs the user's approval in AICO, and they did not answer within 20 seconds. Tell the user what you are about to do and ask them to approve; then try again.`);
+    }
+    if (!answer) throw new Error(`Refused: the user did not allow “${v.label || 'that action'}”. Nothing was pressed. Do not retry; ask the user how to proceed.`);
   };
 
   // ── What the agent is doing (for the interface and for results) ──
@@ -636,10 +718,16 @@ export function registerBrowser(ctx: DesktopContext): void {
       pushState();
     });
     wc.on('certificate-error', (e, url, error, certificate, cb, isMainFrame) => {
-      // Never accepted — not by the agent, not by a click-through.
+      // Never accepted by a click-through or by the agent. The one exception is
+      // written down by a person or the agent's own CredentialGenerate: a
+      // credential bound to exactly this origin with `allowSelfSigned`, on a
+      // private-network address (a self-hosted server), and then only for the
+      // first certificate seen this run (a changed one is refused).
       e.preventDefault();
-      cb(false);
-      if (isMainFrame) { tab.certError = { url, error, issuer: certificate.issuerName }; pushState(); }
+      const refuse = (): void => { cb(false); if (isMainFrame) { tab.certError = { url, error, issuer: certificate.issuerName }; pushState(); } };
+      const origin = loginOrigin(url);
+      if (!origin || !/^https:/i.test(origin) || !isPrivateOrigin(origin) || !/ERR_CERT_(AUTHORITY_INVALID|COMMON_NAME_INVALID)/.test(error)) { refuse(); return; }
+      void selfSignedAllowed(origin, certificate.fingerprint).then((ok) => { if (ok) cb(true); else refuse(); }).catch(refuse);
     });
     wc.on('login', (e, _details, authInfo, cb) => {
       e.preventDefault();
@@ -928,6 +1016,110 @@ export function registerBrowser(ctx: DesktopContext): void {
     });
   }
 
+  // ── Signing in from the vault (browser-login.ts) ──
+  /** On a sign-in page: which stored credential matches this exact origin — names only. */
+  async function loginSuggestion(t: Tab): Promise<string | undefined> {
+    const url = t.view.webContents.getURL();
+    const origin = loginOrigin(url);
+    if (!origin) return undefined;
+    const form = await evaluate<LoginFormReport>(t.view.webContents, loginFormJs(0), 4000).catch(() => null);
+    if (!form || (!form.forms && !form.identifierOnly)) return undefined;
+    const list = await vault.loginsFor(origin).catch(() => []);
+    if (list.length === 1) return `A stored credential "${list[0]!.name}" matches this origin — call browser_login to sign in (it fills the password itself; you never see or type it).`;
+    if (list.length > 1) return `Stored credentials for this origin: ${list.map(l => `"${l.name}"${l.username ? ` (${l.username})` : ''}`).join(', ')} — call browser_login with the name to use.`;
+    return `This is a sign-in page and no stored credential is bound to ${origin}. Ask the user to sign in (browser_handoff), or CredentialRequest with url "${origin}" so it can be saved for next time.`;
+  }
+
+  /** Focus a field by clicking it, and check the focus really is there before a keystroke goes in. */
+  async function focusField(t: Tab, ref: string): Promise<boolean> {
+    const at = await locate(t, { ref });
+    if (at.inFrame || at.disabled) return false;
+    await mouseClick(t, at.x, at.y);
+    await sleep(60);
+    return evaluate<boolean>(t.view.webContents, `(() => { const a = document.activeElement; return Boolean(a && a.getAttribute('data-aico-ref') === ${JSON.stringify(ref)}); })()`, 3000).catch(() => false);
+  }
+
+  /** Type into the focused field with trusted input, replacing what is there. */
+  async function typeInto(t: Tab, text: string): Promise<void> {
+    await pressKey(t, process.platform === 'darwin' ? 'Meta+a' : 'Ctrl+a');
+    await pressKey(t, 'Backspace');
+    await cdp(t.view.webContents, 'Input.insertText', { text });
+  }
+
+  async function loginImpl(t: Tab, opts: { name?: string; form?: number; submit?: boolean; sessionId?: string }): Promise<string> {
+    const wc = t.view.webContents;
+    await waitLoad(wc, 8000);
+    const origin = loginOrigin(wc.getURL());
+    if (!origin) return 'no matching login form: this page has no web address a credential can be bound to.';
+    let form = await evaluate<LoginFormReport>(wc, loginFormJs(opts.form ?? 0), 5000).catch(() => null);
+    if (!form || (!form.password && !form.identifierOnly)) return `no matching login form on ${wc.getURL()} (no visible username or password field in the page itself). Take a snapshot; if the sign-in is in a pop-up or another page, open that first.`;
+    const host = ctx.services.vaultHost;
+    if (!host) return 'refused: the credential vault is not available in this window.';
+    // The tool call must return within the MCP deadline; a person answering an
+    // approval may take longer. Then the agent is told to wait and call again.
+    const pending = host.requestFill({
+      origin, tool: 'browser_login', ...(opts.name ? { name: opts.name } : {}), ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+      purpose: `sign in to ${origin} in the AICO browser (the agent asked; it never sees the value)`,
+    });
+    const reply = await Promise.race([pending, sleep(23_000).then(() => null)]);
+    if (!reply) {
+      // A late answer is dropped as soon as it arrives.
+      void pending.then((late) => { late.fields = {}; });
+      return 'refused: the user has not approved this sign-in yet (AICO is asking them). Tell them, then call browser_login again once they have answered.';
+    }
+    if (!reply.ok) {
+      const names = reply.candidates?.length ? ` Credentials bound to this origin: ${reply.candidates.join(', ')}.` : '';
+      return `refused: ${reply.reason ?? 'the vault refused'}.${names}`;
+    }
+    let password = passwordOf(reply.kind, reply.fields) ?? '';
+    const username = reply.username ?? '';
+    reply.fields = {};
+    if (!password) return `refused: "${reply.name}" is a ${reply.kind ?? 'credential'} without a password a sign-in form can take.`;
+    try {
+      // Two-step sign-in: the identifier first, then the password page.
+      if (!form.password && form.identifierOnly) {
+        if (!username) return `no matching login form: the page asks for a username first, and "${reply.name}" has none.`;
+        if (!isUsernameField(form.identifierOnly.field) || !(await focusField(t, form.identifierOnly.ref))) return 'refused: the username field could not be focused safely (it may be in a frame, or not a plain text field).';
+        await typeInto(t, username);
+        await pressKey(t, 'Enter');
+        await settle(wc);
+        const deadline = Date.now() + 8000;
+        while (Date.now() < deadline) {
+          form = await evaluate<LoginFormReport>(wc, loginFormJs(0), 3000).catch(() => null);
+          if (form?.password) break;
+          await sleep(400);
+        }
+        if (!form?.password) return 'fields filled: the username was entered, but no password field appeared (the site may want a code or a different step — take a snapshot).';
+        if (loginOrigin(wc.getURL()) !== origin) return `refused: the sign-in moved to ${loginOrigin(wc.getURL())}, which "${reply.name}" is not bound to. Nothing more was typed.`;
+      }
+      const pw = form.password!;
+      if (!isRealPasswordField(pw.field)) return 'refused: the field that looks like the password is not a real password field.';
+      if (form.username && username) {
+        if (!isUsernameField(form.username.field)) return 'refused: the field next to the password is not a plain username field.';
+        if (!(await focusField(t, form.username.ref))) return 'refused: the username field could not be focused safely.';
+        await typeInto(t, username);
+      }
+      if (!(await focusField(t, pw.ref))) return 'refused: the password field could not be focused safely (it may be covered, or in a frame).';
+      // The one place a value goes into a page for the agent: a trusted keystroke stream into this field.
+      if (loginOrigin(wc.getURL()) !== origin) return 'refused: the page navigated away before the password was typed. Nothing was typed.';
+      await typeInto(t, password);
+      vault.markFilled(wc);
+      vault.noteKnown(origin, username, password);
+    } finally {
+      password = '';
+    }
+    if (opts.submit === false) return `fields filled with "${reply.name}"${username ? ` (user ${username})` : ''}; not submitted.`;
+    await pressKey(t, 'Enter');
+    await settle(wc);
+    await sleep(400);
+    const after = await evaluate<LoginFormReport>(wc, loginFormJs(0), 4000).catch(() => null);
+    const h = await humanCheck(t);
+    if (h.detected) return `fields filled and submitted with "${reply.name}", and the site now shows a human check (${h.kind}) — call browser_handoff for the user.`;
+    if (after?.otp) return `fields filled and submitted with "${reply.name}"; the site now asks for a one-time code — that is the user's (call browser_handoff).`;
+    if (after?.password) return `fields filled and submitted with "${reply.name}", but the page still shows a sign-in form — take a snapshot and look for an error message (wrong password, locked account).`;
+    return `signed in with "${reply.name}"${username ? ` as ${username}` : ''} — now at ${wc.getURL()}.`;
+  }
+
   let pendingFind: { requestId: number; resolve: (r: FindResult) => void } | null = null;
   let lastFindText = '';
 
@@ -957,10 +1149,12 @@ export function registerBrowser(ctx: DesktopContext): void {
       agentEvent(t, 'open', 'done', r.url);
       const h = await humanCheck(t);
       const err = t.certError ? `\nCertificate error (${t.certError.error}) — the page is blocked and will not be accepted. Tell the user.` : t.error ? `\nThe page failed to load: ${t.error.description} (${t.error.code}).` : '';
+      const login = h.detected || err ? undefined : await loginSuggestion(t).catch(() => undefined);
       return {
         ...r,
         ...(h.detected ? { humanCheck: `Human check on this page (${h.kind}) — call browser_handoff; do not attempt it.` } : {}),
         ...(err ? { error: err.trim() } : {}),
+        ...(login ? { signIn: login } : {}),
       } as TabInfo;
     },
     openForUser(url, opts) {
@@ -998,6 +1192,10 @@ export function registerBrowser(ctx: DesktopContext): void {
         const at = await locate(t, target, `AICO: clicking "${pre.label || pre.tag}"`);
         if (at.disabled) return `The ${at.tag} "${at.label}" is disabled — it cannot be clicked yet (a required field may be missing).`;
         if (at.isFile) return 'That is a file-upload control. Use browser_upload with this ref and the file paths — the user will be asked to confirm.';
+        // Buying, paying, booking, sending, deleting: the person allows it here, or nothing is clicked.
+        const sig = await commitSignals(t, at.ref);
+        const commit = sig ? classifyCommit(sig) : null;
+        if (commit) await requireCommitApproval(t, commit);
         await mouseClick(t, at.x, at.y, opts?.button ?? 'left', opts?.double ? 2 : 1);
         await settle(wc);
         return `Clicked ${at.tag} "${at.label}".${at.coveredBy ? ` Note: it looked covered by ${at.coveredBy} — the click may have hit that instead.` : ''}`;
@@ -1016,7 +1214,14 @@ export function registerBrowser(ctx: DesktopContext): void {
           await pressKey(t, 'Backspace');
         }
         await cdp(wc, 'Input.insertText', { text });
-        if (opts?.submit) { await pressKey(t, 'Enter'); await settle(wc); }
+        if (opts?.submit) {
+          // Enter submits the form this field is in: the same gate as a click on its button.
+          const sig = await commitSignals(t, null);
+          const commit = sig ? classifyCommit(sig) : null;
+          if (commit) await requireCommitApproval(t, commit);
+          await pressKey(t, 'Enter');
+          await settle(wc);
+        }
         return `Typed ${text.length} character(s) into ${at.tag} "${at.label}"${opts?.submit ? ' and pressed Enter' : ''}.`;
       });
     },
@@ -1026,6 +1231,15 @@ export function registerBrowser(ctx: DesktopContext): void {
           const f = await page<{ none?: boolean; field?: FieldDescriptor; label?: string }>(t, 'focused', {});
           const s = f.field ? classifySensitiveField(f.field) : null;
           if (s) throw new Error(sensitiveRefusal(s.kind, f.label ?? ''));
+        }
+        // Enter (or Space on a focused button) may submit a purchase or send a message.
+        if (/^(enter|return|space| )$/i.test(key.trim())) {
+          const focusedRef = await evaluate<string | null>(t.view.webContents, `(() => { const a = document.activeElement; if (!a || !a.matches || !a.matches('button, [role=button], input[type=submit], input[type=image], a')) return null; let r = a.getAttribute('data-aico-ref'); if (!r) { r = 'k' + Date.now().toString(36); a.setAttribute('data-aico-ref', r); } return r; })()`, 3000).catch(() => null);
+          if (/^(enter|return)$/i.test(key.trim()) || focusedRef) {
+            const sig = await commitSignals(t, focusedRef);
+            const commit = sig ? classifyCommit(sig) : null;
+            if (commit) await requireCommitApproval(t, commit);
+          }
         }
         await pressKey(t, key);
         await settle(t.view.webContents);
@@ -1236,6 +1450,9 @@ export function registerBrowser(ctx: DesktopContext): void {
       });
     },
 
+    login(opts) {
+      return act('login', { gate: true, diff: false, label: `Signing in${opts.name ? ` with ${opts.name}` : ''} from the vault` }, (t) => loginImpl(t, opts));
+    },
     async read(opts) {
       checkAccess();
       const t = active();

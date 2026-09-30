@@ -42,9 +42,27 @@ function write(key: string, value: string): void {
   try { localStorage.setItem(key, value); } catch { /* see above */ }
 }
 
-/** Pull the token out of the URL on first load, then hide it. */
+/**
+ * The UI key: the part of the printed link after `#ui=`. The server needs it
+ * (traded for a per-client nonce, below) before this window may *allow* a
+ * waiting tool call — the token alone may only refuse. A fragment is never
+ * sent to a server, so it is not in any request log. See the engine's
+ * server/decision-gate.ts.
+ */
+const UI_KEY = 'aico.uiKey';
+
+/** Pull the token (and the UI key) out of the URL on first load, then hide them. */
 export function bootstrapToken(): string | null {
   const url = new URL(window.location.href);
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
+  const uiKey = hash.get('ui');
+  if (uiKey) {
+    write(UI_KEY, uiKey);
+    hash.delete('ui');
+    const rest = hash.toString();
+    url.hash = rest ? `#${rest}` : '';
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  }
   const fromUrl = url.searchParams.get('token');
   if (fromUrl) {
     write(TOKEN_KEY, fromUrl);
@@ -53,6 +71,26 @@ export function bootstrapToken(): string | null {
     return fromUrl;
   }
   return read(TOKEN_KEY);
+}
+
+/** This window's per-client nonce, once the UI key has been traded for one. In memory only. */
+let clientNonce: string | null = null;
+let attaching: Promise<string | null> | null = null;
+
+/**
+ * Trade the UI key for a nonce, once per page. Without a key (the desktop,
+ * whose main process forwards decisions itself; the VS Code panel, whose
+ * extension host adds the key) there is nothing to trade and null is fine.
+ */
+export function ensureUiClient(): Promise<string | null> {
+  if (clientNonce) return Promise.resolve(clientNonce);
+  const key = read(UI_KEY);
+  if (!key) return Promise.resolve(null);
+  attaching ??= post<{ client?: string }>('ui/attach', { uiKey: key })
+    .then((r) => { clientNonce = r.client ?? null; return clientNonce; })
+    .catch(() => null)
+    .finally(() => { attaching = null; });
+  return attaching;
 }
 
 export function getToken(): string {
@@ -72,7 +110,8 @@ export function setToken(token: string): void {
  * what actually happened.
  */
 export function clearToken(): void {
-  try { localStorage.removeItem(TOKEN_KEY); } catch { /* see above */ }
+  try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(UI_KEY); } catch { /* see above */ }
+  clientNonce = null;
 }
 
 /**
@@ -127,6 +166,40 @@ const post = <T,>(path: string, body: unknown): Promise<T> =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
 const get = <T,>(path: string): Promise<T> => request<T>(path, { method: 'GET' });
+
+// ── credential vault (engine: src/vault/human.ts) ────────────────────
+
+/** A credential the agent asked a person for. Carries no secret. */
+export interface VaultCredentialRequest {
+  requestId: string;
+  name: string;
+  kind: string;
+  fields: string[];
+  username?: string;
+  host?: string;
+  url?: string;
+  reason: string;
+  sessionId?: string;
+  /** AICO Desktop is showing its own secure prompt: this client must not open one. */
+  hostPrompt?: boolean;
+}
+
+/** A stored credential's use waiting for a person's yes. */
+export interface VaultApproval {
+  id: string;
+  credential: { id: string; name: string; kind: string };
+  tool: string;
+  target?: string;
+  purpose: string;
+  description: string;
+  sessionId?: string;
+  mode: 'every-use' | 'session';
+  /** How a yes can be proven here: AICO Desktop's own dialog, or the grant passphrase. */
+  needs?: 'desktop' | 'passphrase';
+}
+
+/** Secrets caught in a message the person sent, moved into the vault. */
+export interface VaultQuarantine { items: Array<{ name: string; kind: string; label: string }>; dropped: number }
 
 // ── conversation ─────────────────────────────────────────────────────
 
@@ -249,8 +322,29 @@ export const api = {
    * pending request and answers that one; without the id, a decision made
    * about a `Write` could arrive in time to allow whatever is waiting.
    */
-  permit: (sessionId: string, id: string, allow: boolean) =>
-    post<{ ok: boolean }>('permission', { sessionId, id, allow }),
+  permit: async (sessionId: string, id: string, allow: boolean) =>
+    // A yes carries this window's nonce (decision-gate.ts); a no needs nothing.
+    post<{ ok: boolean }>('permission', { sessionId, id, allow, ...(allow ? { client: await ensureUiClient() ?? undefined } : {}) }),
+
+  // ── the credential vault's human side (docs/security/credential-broker.md §9) ──
+
+  /** What is waiting on a person: approvals and credential requests (no values in either). */
+  vaultStatus: () => get<{ pendingApprovals?: VaultApproval[]; pendingRequests?: VaultCredentialRequest[]; grantPassphrase?: boolean; host?: boolean }>('vault/status'),
+
+  /**
+   * Answer a credential request. Write-only: the values go in, a status comes
+   * back. The caller must not keep them anywhere (no store, no draft, no log).
+   */
+  vaultFulfil: (requestId: string, secret: Record<string, string>, username?: string) =>
+    post<{ ok: boolean }>('vault/fulfil', { requestId, secret, ...(username ? { username } : {}) }),
+  vaultDecline: (requestId: string) => post<{ ok: boolean }>('vault/fulfil', { requestId, decline: true }),
+
+  /**
+   * Answer an approval. Approving needs the grant passphrase in a standalone
+   * server (the token is not proof of a person); declining needs nothing.
+   */
+  vaultApprove: (id: string, approve: boolean, opts: { passphrase?: string; scope?: 'once' | 'session' } = {}) =>
+    post<{ ok: boolean }>('vault/approve', { id, approve, ...(opts.passphrase ? { passphrase: opts.passphrase } : {}), ...(opts.scope ? { scope: opts.scope } : {}) }),
 
   /**
    * Report what happened to a write this client was handed.
@@ -1347,9 +1441,13 @@ export function streamSession(
     controller = new AbortController();
 
     try {
+      // The stream is what makes this window's nonce "connected" to the
+      // session, so it is obtained first and named here.
+      const client = await ensureUiClient();
       const res = await transportFetch(
         `/api/events?session=${encodeURIComponent(sessionId)}&since=${since}`
         + `&token=${encodeURIComponent(getToken())}`
+        + (client ? `&client=${encodeURIComponent(client)}` : '')
         + (project ? `&project=${encodeURIComponent(project)}` : ''),
         { signal: controller.signal, headers: { Accept: 'text/event-stream' } },
       );

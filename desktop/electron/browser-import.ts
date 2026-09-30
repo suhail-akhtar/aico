@@ -115,7 +115,7 @@ export function registerImport(ctx: DesktopContext, deps: ImportDeps): ImportSer
   const dropPending = (t: string): void => { const p = pending.get(t); if (p) { clearTimeout(p.timer); pending.delete(t); } };
 
   ctx.handle('browser:import:pickPasswords', async (): Promise<PasswordFilePreview | null> => {
-    const s = deps.vault.status();
+    const s = await deps.vault.status();
     if (!s.available) throw new Error(s.reason ?? 'Passwords cannot be stored on this computer.');
     const w = ctx.window();
     const o: Electron.OpenDialogOptions = {
@@ -133,11 +133,13 @@ export function registerImport(ctx: DesktopContext, deps: ImportDeps): ImportSer
     pending.set(token, { file, source: parsed.source, logins: parsed.logins, timer: setTimeout(() => pending.delete(token), 10 * 60_000) });
     return { token, file, source: parsed.source, count: parsed.logins.length, skipped: parsed.skipped, reasons: parsed.reasons, sites: new Set(parsed.logins.map(l => l.origin)).size };
   });
-  ctx.handle('browser:import:passwords', (token: string): PasswordImportResult => {
+  ctx.handle('browser:import:passwords', async (token: string): Promise<PasswordImportResult> => {
     const p = pending.get(String(token));
     if (!p) throw new Error('Choose the file again — the one you picked has been forgotten.');
     dropPending(String(token));
-    const r = deps.vault.addMany(p.logins);
+    // Into the credential vault, as browser logins bound to their exact origins (browser-vault.ts).
+    const r = await deps.vault.addMany(p.logins);
+    for (const l of p.logins) l.password = '';
     importedFiles.add(p.file);
     note({ passwords: { ...r, source: p.source }, at: Date.now() });
     return { ...r, file: p.file };

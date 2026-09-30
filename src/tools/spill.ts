@@ -29,6 +29,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getWorkspaceInfo } from '../workspace.js';
+import { sinkRedact, sinkRedactText } from '../vault/sink.js';
 
 /** How much of the excerpt is taken from the end rather than the beginning. */
 const TAIL_SHARE = 0.35;
@@ -90,7 +91,9 @@ export function saveSpill(toolName: string, content: string, callId?: string): S
   try {
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, suggestName(toolName, callId));
-    fs.writeFileSync(file, content, 'utf8');
+    // Redacted before it touches disk: the agent reads spill files back with
+    // Read, and a vault value written here would come straight back to it.
+    fs.writeFileSync(file, sinkRedactText(content), 'utf8');
     return { path: file, chars: content.length };
   } catch {
     // The workspace may be read-only, full, or on a disconnected drive. None of
@@ -163,6 +166,10 @@ export function spillResult(
   toolName: string,
   callId?: string,
 ): unknown {
+  // Redact first, so an excerpt's cut can never split a secret into a
+  // fragment the redactor no longer recognises. Every dispatch path — built-in
+  // tools, MCP tools, Task and Investigate reports — passes through here.
+  result = sinkRedact(result);
   if (typeof result === 'string') {
     if (result.length <= maxChars) return result;
     return excerpt(result, maxChars, saveSpill(toolName, result, callId));

@@ -1,0 +1,27 @@
+name: Feature request
+description: A problem AICO should solve.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way? Describe the problem, not a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: An example of it working
+      description: A concrete scenario that would show the problem solved (this becomes the acceptance check).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried or considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Engine / agent loop, Tools, Providers, Desktop app, Desktop browser, VS Code, Web portal, Apps / templates, Background work / cron / MCP, Docs]

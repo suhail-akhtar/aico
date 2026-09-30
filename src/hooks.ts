@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { AicoSettings } from './settings.js';
+import { sinkRedact } from './vault/sink.js';
 
 export type HookEvent =
   | 'PreToolUse'
@@ -86,6 +87,9 @@ export async function runHooks(
   const hooks = getHooks(settings);
   const commands = hooks?.[event as keyof typeof hooks] as string[] | undefined;
   if (!commands || commands.length === 0) return undefined;
+  // Hook commands are user scripts that log freely; they get what the model
+  // would get, never a vault value. See vault/sink.
+  ctx = sinkRedact(ctx);
 
   const envOverride: Record<string, string> = {
     AICO_EVENT: event,

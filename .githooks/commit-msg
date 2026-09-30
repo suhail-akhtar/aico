@@ -1,0 +1,5 @@
+#!/bin/sh
+# AICO commit-msg hook: refuses AI attribution (co-author trailers naming an AI
+# tool, "Generated with ..." footers). Project policy, see AGENTS.md.
+# Installed by `node scripts/install-hooks.mjs` (core.hooksPath=.githooks).
+exec node "$(git rev-parse --show-toplevel)/scripts/check-standards.mjs" --commit-msg "$1" --quiet

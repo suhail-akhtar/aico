@@ -47,6 +47,7 @@ import {
   type ProviderInstance, type ProviderTypeInfo, type SessionSummary, type Project, type Group,
   type Goal, type Feedback, type Deliverable, type Attachment, type SubAgentView,
   type PermissionRequest, type EditRequest,
+  type VaultApproval, type VaultCredentialRequest, type VaultQuarantine,
   type HostAnswer, type HostCall, type HostToolName,
   streamApps,
   type MiniAppsView,
@@ -335,6 +336,21 @@ interface AppState {
   /** Allow or refuse it. */
   permit: (allow: boolean) => Promise<void>;
   /**
+   * The credential vault asking this session's person for something
+   * (docs/security/credential-broker.md §9): a credential to type into a
+   * secure prompt, or a yes for a stored credential's use. Neither carries a
+   * secret, and what the person types is never put here — the prompt posts it
+   * straight to the vault and forgets it.
+   */
+  vaultRequest: VaultCredentialRequest | null;
+  vaultApproval: VaultApproval | null;
+  /** Secrets moved out of a message this person sent ("stored as github-token"). */
+  vaultNotice: VaultQuarantine | null;
+  /** Clear a settled request or approval (answered here or elsewhere), or the notice. */
+  clearVault: (what: 'request' | 'approval' | 'notice') => void;
+  /** Re-read what the vault is waiting on for this session (after a reload). */
+  syncVault: () => Promise<void>;
+  /**
    * A file write this client was handed to apply, when it said it could.
    *
    * Null for every client that did not opt in, which is all of them except the
@@ -475,6 +491,9 @@ export const useStore = create<AppState>((set, get) => ({
   dismissed: {},
   question: null,
   permission: null,
+  vaultRequest: null,
+  vaultApproval: null,
+  vaultNotice: null,
   edit: null,
   hostCall: null,
   notice: null,
@@ -528,6 +547,7 @@ export const useStore = create<AppState>((set, get) => ({
       sessionAgent: null,
       pendingAttachments: [],
       question: null, permission: null, edit: null, hostCall: null, notice: null,
+      vaultRequest: null, vaultApproval: null, vaultNotice: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
@@ -720,7 +740,33 @@ export const useStore = create<AppState>((set, get) => ({
     // Same optimism, same reason. The id travels with it so a decision cannot
     // land on a different call than the one that was shown.
     set({ permission: null });
-    await api.permit(sessionId, permission.id, allow);
+    try {
+      await api.permit(sessionId, permission.id, allow);
+    } catch (err) {
+      // A yes the server would not take from this window (no approval key:
+      // decision-gate.ts). The run is still waiting, so the prompt comes back
+      // with the reason rather than vanishing over a blocked turn.
+      if (get().sessionId === sessionId) set({ permission, error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  clearVault: (what) => {
+    if (what === 'request') set({ vaultRequest: null });
+    else if (what === 'approval') set({ vaultApproval: null });
+    else set({ vaultNotice: null });
+  },
+
+  syncVault: async () => {
+    const sessionId = get().sessionId;
+    try {
+      const st = await api.vaultStatus();
+      if (get().sessionId !== sessionId) return;
+      // AICO Desktop answers these in its own windows; its clients never prompt.
+      if (st.host) { set({ vaultRequest: null, vaultApproval: null }); return; }
+      const req = (st.pendingRequests ?? []).find(r => r.sessionId === sessionId) ?? null;
+      const appr = (st.pendingApprovals ?? []).find(a => a.sessionId === sessionId) ?? null;
+      set({ vaultRequest: req, vaultApproval: appr ? { ...appr, needs: appr.needs ?? 'passphrase' } : null });
+    } catch { /* no vault, or an older server: nothing is waiting */ }
   },
 
   answerPlan: async (decision) => {
@@ -1367,6 +1413,37 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       // Empty id, same meaning: answered, or the turn ended underneath it.
       const wanted = data as unknown as HostCall;
       set(() => ({ hostCall: wanted?.id ? wanted : null }));
+      return;
+    }
+
+    // ── the credential vault (engine: src/vault/service.ts) ─────────
+    case 'vault-request': {
+      const r = data as unknown as VaultCredentialRequest;
+      // AICO Desktop shows its own secure prompt; the value never enters this DOM.
+      if (!r?.requestId || r.hostPrompt) return;
+      set(() => ({ vaultRequest: r }));
+      return;
+    }
+    case 'vault-request-done': {
+      const id = String((data as { requestId?: string }).requestId ?? '');
+      set(state => (state.vaultRequest?.requestId === id ? { vaultRequest: null } : {}));
+      return;
+    }
+    case 'vault-approval': {
+      const a = data as unknown as VaultApproval;
+      if (!a?.id || a.needs === 'desktop') return;
+      set(() => ({ vaultApproval: a }));
+      return;
+    }
+    case 'vault-approval-done': {
+      const id = String((data as { id?: string }).id ?? '');
+      set(state => (state.vaultApproval?.id === id ? { vaultApproval: null } : {}));
+      return;
+    }
+    case 'vault-quarantined': {
+      const q = data as unknown as VaultQuarantine;
+      if (!q || (!q.items?.length && !q.dropped)) return;
+      set(() => ({ vaultNotice: { items: q.items ?? [], dropped: q.dropped ?? 0 } }));
       return;
     }
 

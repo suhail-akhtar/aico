@@ -32,6 +32,7 @@
  */
 
 import type { MessageSource } from '../session/events.js';
+import { sinkRedact, sinkRedactText } from '../vault/sink.js';
 
 // ── Call context ─────────────────────────────────────────────────────
 
@@ -232,6 +233,12 @@ export class ToolPipeline {
       }
     }
 
+    // ── redaction (before any post-execute stage sees the result) ─────
+    // Vault secret values are replaced here, inside every observer: the
+    // PostToolUse hook, the repeat guard and whatever registers later see the
+    // redacted result, never the raw one. See vault/sink.ts.
+    outcome = { ...outcome, result: sinkRedact(outcome.result) };
+
     // ── post-execute (runs for denied calls too — see module header) ──
     let post: PostDecision;
     try {
@@ -244,16 +251,17 @@ export class ToolPipeline {
       post = { outcome, additionalContexts: [] };
     }
 
+    // Again on the way out: a post stage may replace the result or add context.
     return {
-      outcome: post.outcome,
-      additionalContexts: post.additionalContexts,
+      outcome: { ...post.outcome, result: sinkRedact(post.outcome.result) },
+      additionalContexts: sinkRedact(post.additionalContexts),
       denied,
-      ...(denialReason === undefined ? {} : { denialReason }),
+      ...(denialReason === undefined ? {} : { denialReason: sinkRedactText(denialReason) }),
     };
   }
 
   private normalizedFailure(ctx: ToolCallContext, err: unknown, stage: string): PipelineResult {
-    const reason = err instanceof Error ? err.message : String(err);
+    const reason = sinkRedactText(err instanceof Error ? err.message : String(err));
     return {
       outcome: { result: { error: `${stage} stage failed for ${ctx.name}: ${reason}` }, isError: true },
       additionalContexts: [],

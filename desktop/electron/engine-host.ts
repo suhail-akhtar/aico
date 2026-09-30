@@ -10,6 +10,10 @@
  * The token stays in main. Requests from the renderer reach the engine through
  * the `aico://` proxy (see protocol.ts), which attaches it on the way past.
  *
+ * Besides `ready`/`error`, the engine speaks the vault's private channel over
+ * the same port (src/vault/host-channel.ts): those messages are re-emitted as
+ * `message` for vault-host.ts and sent with `post()`. They are never logged.
+ *
  * @module desktop/electron/engine-host
  */
 
@@ -59,6 +63,17 @@ export class EngineHost extends EventEmitter {
     return res.json();
   }
 
+  /** Like request(), with the status — for routes whose refusal the caller acts on (a 403 that wants a grant). */
+  async call<T = Record<string, unknown>>(route: string, body?: unknown): Promise<{ status: number; json: T }> {
+    const e = await this.ready(30_000);
+    const res = await fetch(`${e.origin}/api/${route}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { 'x-aico-token': e.token, origin: e.origin, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: res.status, json: await res.json().catch(() => ({})) as T };
+  }
+
   /** The engine's endpoint, waiting for it if it is still starting. */
   ready(timeoutMs = 90_000): Promise<EngineEndpoint> {
     if (this.endpoint) return Promise.resolve(this.endpoint);
@@ -73,6 +88,16 @@ export class EngineHost extends EventEmitter {
   }
 
   current(): EngineEndpoint | null { return this.endpoint; }
+
+  /**
+   * Send a message over the utility process's private port — the channel a
+   * shell command cannot write to (vault keys, human grants, approvals).
+   * False when there is no engine to send to.
+   */
+  post(message: unknown): boolean {
+    if (!this.child) return false;
+    try { this.child.postMessage(message); return true; } catch { return false; }
+  }
 
   /** The last lines the engine printed — shown when it fails to start. */
   recentLog(): string[] { return [...this.lastLog]; }
@@ -108,11 +133,18 @@ export class EngineHost extends EventEmitter {
         this.endpoint = { origin: u.origin, token };
         this.attempt = 0;
         this.setState({ status: 'ready', origin: u.origin, startedAt: Date.now() });
+        // Before the waiters: the vault's key must be on its way before anything
+        // the interface does can ask the engine for a credential.
+        this.emit('engine-ready', this.endpoint);
         const waiting = this.waiters;
         this.waiters = [];
         for (const w of waiting) w(this.endpoint);
       } else if (msg?.type === 'error') {
         this.lastLog.push(msg.message ?? 'unknown error');
+      } else if (msg && typeof msg.type === 'string') {
+        // The private channel (vault/*, permission/*): handled by vault-host.ts.
+        // Never logged — some of these carry credential values bound for a page.
+        this.emit('message', msg);
       }
     });
 

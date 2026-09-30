@@ -109,9 +109,19 @@ export class HttpTunnel {
       */
       if (url.searchParams.has('token')) url.searchParams.set('token', running.token);
 
+      /*
+        The UI key rides along too, for the same reason the token does: the
+        webview never holds it. The server accepts a tool-permission *yes* only
+        with it (aico's server/decision-gate.ts), and this extension host — which
+        read it from the server's own stdout — is the panel's proof of a person.
+      */
       const res = await fetch(url.toString(), {
         method: req.method ?? 'GET',
-        headers: { ...(req.headers ?? {}), 'x-aico-token': running.token },
+        headers: {
+          ...(req.headers ?? {}),
+          'x-aico-token': running.token,
+          ...(running.uiKey ? { 'x-aico-ui-key': running.uiKey } : {}),
+        },
         ...(req.body === undefined ? {} : { body: req.body }),
         signal: controller.signal,
       });

@@ -27,6 +27,7 @@ import type {
   TurnEndReason,
 } from './events.js';
 import { isSurfaceEvent } from './events.js';
+import { sinkRedact } from '../vault/sink.js';
 
 /** Options accepted when appending an event. */
 export interface AppendOptions {
@@ -124,7 +125,10 @@ export class Session {
       seq: this.nextSeq++,
       type,
       timestamp: options.timestamp ?? Date.now(),
-      data,
+      // Every durable fact passes the vault redactor on its way in, so the
+      // log — and the persisted file, the replay, the export and every model
+      // request derived from it — cannot hold a stored secret. See vault/sink.
+      data: sinkRedact(data),
       ...(options.surfaceOp ? { surfaceOp: options.surfaceOp } : {}),
       ...(options.sourceEventSeqs ? { sourceEventSeqs: options.sourceEventSeqs } : {}),
     };

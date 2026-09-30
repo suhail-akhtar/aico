@@ -9,7 +9,7 @@
  * @module desktop/renderer/plugins/builtins
  */
 
-import { lazy } from 'react';
+import React, { lazy } from 'react';
 import { useStore } from '@web/store';
 import type { PluginManifest } from '@desk/plugin-types';
 import { useRegistry, type BuiltinPlugin } from './registry';
@@ -21,7 +21,12 @@ import { toggleCopilot, useCopilotUi } from '@/browser/copilot-ui';
 import { browserElsewhere, popInBrowser, popOutBrowser, showBrowser } from '@/browser/host';
 import { ChatView } from '@/chat/ChatView';
 import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection, BrowserSection, AboutSection } from '@/settings/sections/AppSections';
+import { CredentialManager } from '@/settings/CredentialManager';
+
 import { ModelsSection, SkillsSection, McpSection, AgentsSection, enginePaneSection } from '@/settings/sections/AgentSections';
+
+// Settings → Credentials & passwords: the whole vault (the browser's Passwords page is the same manager, filtered).
+const CredentialsSection = (): React.ReactElement => <CredentialManager />;
 
 const lazyPage = <T extends string>(load: () => Promise<Record<T, React.ComponentType<{ params?: Record<string, string> }>>>, name: T) =>
   lazy(() => load().then(m => ({ default: m[name] })));
@@ -68,6 +73,7 @@ export const BUILTINS: BuiltinPlugin[] = [
       { id: 'zoom.out', title: 'Zoom out', category: 'View', icon: 'minus', run: () => void desktop.win.zoom(-0.1) },
       { id: 'zoom.reset', title: 'Reset zoom', category: 'View', icon: 'refresh', run: () => void desktop.win.zoom(0) },
       { id: 'engine.restart', title: 'Restart the engine', category: 'Application', icon: 'refresh', run: () => { void desktop.engine.restart(); toast.info('Restarting the engine…'); } },
+      { id: 'credentials.open', title: 'Credentials & passwords', category: 'Application', icon: 'key', run: () => useDesk.getState().openSettings('credentials') },
       { id: 'engine.web', title: 'Open in the web client', category: 'Application', icon: 'globe', run: () => void desktop.engine.webUrl().then(u => u && desktop.shell.openExternal(u)) },
       { id: 'app.devtools', title: 'Toggle developer tools', category: 'Application', icon: 'code', run: () => void desktop.win.devtools() },
       { id: 'app.reload', title: 'Reload window', category: 'Application', icon: 'refresh', run: () => location.reload() },
@@ -77,6 +83,8 @@ export const BUILTINS: BuiltinPlugin[] = [
       { id: 'general', title: 'General', icon: 'settings', group: 'app', order: 1, component: GeneralSection },
       { id: 'application', title: 'Application', icon: 'monitor', group: 'app', order: 2, component: ApplicationSection },
       { id: 'appearance', title: 'Appearance', icon: 'palette', group: 'app', order: 3, component: AppearanceSection },
+      // One manager for the vault: agent-made credentials, your keys and tokens, and the browser's saved logins.
+      { id: 'credentials', title: 'Credentials & passwords', icon: 'key', group: 'app', order: 4, component: CredentialsSection },
       { id: 'shortcuts', title: 'Shortcuts', icon: 'keyboard', group: 'app', order: 90, component: ShortcutsSection },
       { id: 'about', title: 'About', icon: 'info', group: 'app', order: 99, component: AboutSection },
       { id: 'models', title: 'Models', icon: 'sparkles', group: 'agent', order: 10, component: ModelsSection },

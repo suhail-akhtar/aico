@@ -12,6 +12,7 @@
 
 import { runAgent } from '../agent.js';
 import { setBashProgressSink } from '../tools/bash.js';
+import { setOpsProgressSink, STREAMING_OPS_TOOLS } from '../tools/ops/index.js';
 import { createTokenTracker } from '../tokens.js';
 import { getContextWindow, resolveWindow } from '../context-window.js';
 import { openSession } from '../session/open.js';
@@ -75,6 +76,7 @@ async function appStateSection(
 import { getMiniApp, miniAppDir } from '../miniapps/store.js';
 import { maybeCompactSession } from '../session/compact.js';
 import { readTodos } from '../tools/todo.js';
+import { quarantineIfEnabled } from '../vault/agent-hooks.js';
 import {
   hostToolsFrom, type HostAnswer, type HostCall, type HostToolName,
 } from '../../shared/host-tools.js';
@@ -418,6 +420,11 @@ export class RunManager {
     // Fresh per turn: an AbortController is single-use, so reusing one would
     // make every turn after the first cancellation start pre-aborted.
     run.abort = new AbortController();
+
+    // Secrets the person typed are vaulted and replaced by references before
+    // the title, the stream, the log or the model see this text. After `busy`
+    // is set, so a second submit cannot slip in while a new vault is created.
+    task = (await quarantineIfEnabled(task, settings, sessionId)).text;
 
     const emit = (type: string, data: unknown): void =>
       this.hub.publish({ type, sessionId, data });
@@ -810,9 +817,15 @@ export class RunManager {
                 elapsedMs,
               }));
           }
+          // A remote command (SshExec, WinRmExec) streams the same way; its
+          // output is already a redacted tail.
+          if (STREAMING_OPS_TOOLS.has(name)) {
+            setOpsProgressSink(({ output, elapsedMs }) => emit('tool-progress', { callId, output, elapsedMs }));
+          }
         },
         onToolDone: (name, result, callId) => {
           if (name === 'Bash') setBashProgressSink(undefined);
+          if (STREAMING_OPS_TOOLS.has(name)) setOpsProgressSink(undefined);
           emit('tool-done', { name, result, callId });
         },
         onTokens: (input, output, cached, cacheWrite) => {

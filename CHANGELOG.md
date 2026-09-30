@@ -3,6 +3,89 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+The agent can now use credentials it never sees: a credential vault and broker,
+one vault shared with the browser, server operations over SSH/HTTP/WinRM/SNMP,
+and engineering standards every contributor (human or AI) must follow.
+
+### Added
+
+- **Credential vault & broker** (`src/vault/`): AES-256-GCM records with the
+  master key sealed by the OS (DPAPI / Keychain / Secret Service), injected by
+  the desktop, or a passphrase — never plaintext, never in an environment
+  variable. The model only handles names (`{{secret:name}}`); trusted code
+  resolves values at the moment of use, only for the host/origin/tool the
+  credential is bound to, with approvals and an audit log. Every tool result,
+  log, stream event, spill file, hook input and transcript is redacted (raw and
+  common encodings, split across chunks). Secrets pasted into chat are moved
+  into the vault before the model sees them. New tools `CredentialList`,
+  `CredentialRequest`, `CredentialGenerate` (no tool ever returns a value);
+  `aico vault …` CLI; `/api/vault/*` where revealing needs a human grant.
+  See `docs/security/credential-broker.md`.
+- **Engineering standards**: `AGENTS.md` (the operating manual for any AI or
+  human contributor), `docs/engineering/` (principles, lifecycle, architecture,
+  coding, testing, security, DevOps, releasing, review, ADRs 0001–0007),
+  `npm run check:standards` in CI and git hooks (no AI attribution, versions,
+  licence, secrets, module headers), and `npm run release` automating the
+  release checklist. CONTRIBUTING, PR/issue templates, CODEOWNERS.
+- **Ops tools: operate your servers with credentials the agent never sees.**
+  `SshExec` (commands, `sudo`, background runs, `capture` of generated secrets),
+  `SshCopy` (SFTP files/directories, or `content` with `{{secret:…}}` written 0600),
+  `SshTunnel` (loopback port forward to a server's localhost UI), `HttpRequest`
+  (bearer/basic/header/query auth bound to the credential's origin, redirects that
+  cannot carry it elsewhere, SSRF policy with cloud metadata always refused, token
+  masking and `capture`), `WinRmExec` (PowerShell remoting; Windows engines) and
+  `SnmpQuery` (v2c/v3 get/walk/set). SSH host keys are pinned in AICO's own
+  known_hosts with trust-on-first-use approved by a person; destructive commands
+  (deletes, drops, service stops, firewall and SSH changes, reboots), SNMP sets and
+  HTTP DELETE always ask a person. Every call is a work-ledger record `Supervise`
+  can list, wait on and stop. See `docs/security/ops-tools.md` and ADR 0007.
+- **`server-ops` built-in skill**: inventory → plan → dry run → apply with checks
+  → verify → credentials in the vault → handover, with a workspace runbook.
+- Dependencies: `ssh2` and `net-snmp` (both MIT, pure JavaScript).
+- **One vault, and the agent signs in without seeing the password.** The
+  desktop browser's saved passwords move into the credential vault on first
+  start (verified, idempotent, the 0.28.0 file kept as `vault.bin.migrated-…`),
+  as `login` credentials bound to their exact origin and usable only by the
+  browser. New `browser_login` tool: the agent names a stored credential and
+  AICO types it into the page's real sign-in fields with trusted keystrokes;
+  the result is only "signed in / fields filled / no matching login form /
+  refused". `browser_open` says when a stored credential matches a sign-in
+  page. A self-signed certificate is accepted only on a private address whose
+  exact origin a credential allows it for (pinned on first sight).
+- **Credential Manager** (Settings → Credentials & passwords; the browser's
+  Passwords page is the same manager filtered to web logins): search and
+  filter by kind, creator and host; details with "Created by AICO for this
+  chat"; policy editor (origins, hosts, tools, approval, shell, self-signed,
+  expiry); usage history from the audit log; Add (values typed into a
+  main-owned secure prompt), Generate (SSH keys show their public key),
+  Rotate, Delete, Reveal/Copy (native confirmation, value shown in a
+  self-closing native dialog or copied and cleared after 45 s), Lock/Unlock,
+  encrypted Export/Import.
+- **Desktop host side of the vault channel**: the master key sealed with
+  `safeStorage` and injected at engine start; approvals as native dialogs
+  naming the credential, tool, target and purpose (Allow once / for this
+  session / Deny); `CredentialRequest` answered in a secure prompt window.
+- **Web client and VS Code panel** show credential requests (write-only secure
+  form), approvals (grant passphrase) and a notice when a pasted secret was
+  moved into the vault.
+
+### Security
+
+- **Purchase / send gate, enforced in code.** An agent click, Enter or
+  submit that would buy, pay, book, place an order, send, post or delete now
+  waits for the person's Allow in an AICO prompt (refused on deny or after
+  20 s). "Add to cart", "Proceed to checkout" and the like are not gated —
+  see `desktop/electron/browser-commit-gate.ts` for the line.
+- **`/api/permission` no longer accepts a yes on the token alone.** Desktop:
+  only over the private host channel. `aico serve`/VS Code: a UI key from the
+  printed link's `#ui=` fragment, traded for a per-client nonce bound to an
+  open event stream (VS Code's extension host sends the key itself). A no
+  still needs nothing. Residual risk documented in `src/server/decision-gate.ts`.
+- `AICO_HOST_MCP` (the desktop endpoint's bearer token) is removed from the
+  engine's environment once read, so agent shells no longer inherit it.
+
 ## 0.28.0 — 2026-09-30
 
 The browser grows up: a real browser that is private and protected by default,

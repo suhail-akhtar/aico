@@ -40,6 +40,7 @@ import fs from 'fs';
 import path from 'path';
 import type { AicoSettings } from '../settings.js';
 import { getWorkspaceInfo } from '../workspace.js';
+import { sinkRedactText } from '../vault/sink.js';
 import { decisionsNote } from '../project/decisions.js';
 import { deriveMessages, maskState } from './derive.js';
 import { STATE_HEADING, buildHandoff, sectionOf } from './handoff.js';
@@ -79,7 +80,7 @@ function spillDropped(
         '',
         ...dropped.map(m => `## ${m.role}\n\n${m.content}\n`),
       ].join('\n');
-      fs.writeFileSync(file, body, 'utf8');
+      fs.writeFileSync(file, sinkRedactText(body), 'utf8');
       parts.push(`Full detail of the compacted turns: ${file}`);
     }
   } catch { /* the summary still stands without the spill */ }

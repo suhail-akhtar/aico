@@ -1,6 +1,7 @@
 /**
  * Everything that needs you, pinned just above the composer: a permission to
- * grant, a question to answer, a plan to approve — plus the running task list
+ * grant, a question to answer, a plan to approve, a secret moved out of your
+ * message into the vault — plus the running task list
  * and delegated sub-agents, so a long turn is legible at a glance.
  *
  * When the window is not in front, the same moments raise a native
@@ -16,11 +17,15 @@ import { todosFrom } from '@web/todos';
 import { Icon } from '@/lib/icons';
 import { cls, duration } from '@/lib/util';
 import { useTranscript } from './Transcript';
+import { VaultNotice } from '@web/components/VaultPrompts';
 
 export function Attention(): React.ReactElement | null {
   return (
     <div className="mx-auto mb-2 w-full max-w-column space-y-2 empty:hidden">
       <Permission />
+      {/* A secret caught in your message and moved into the vault. (Credential
+          requests and approvals are main's own secure windows in the desktop.) */}
+      <VaultNotice />
       <Question />
       <PlanApproval />
       <Progress />

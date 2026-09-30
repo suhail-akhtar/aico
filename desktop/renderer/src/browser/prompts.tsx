@@ -222,7 +222,7 @@ function ConfirmDialog({ p }: { p: ConfirmPrompt }): React.ReactElement {
     <div className="bx-modal" role="alertdialog" aria-label={p.title} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); answer(false); } }}>
       <div className="flex items-start gap-3">
         <span className={cls('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', risky ? 'bg-aico-warning/15 text-aico-warning' : 'bg-aico-accent-soft text-aico-accent')}>
-          <Icon name={p.kind === 'upload' ? 'upload' : p.kind === 'tabs' ? 'layers' : risky ? 'alert' : 'download'} size={17} />
+          <Icon name={p.kind === 'commit' ? 'shield' : p.kind === 'upload' ? 'upload' : p.kind === 'tabs' ? 'layers' : risky ? 'alert' : 'download'} size={17} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-semibold">{p.title}</div>
@@ -233,12 +233,13 @@ function ConfirmDialog({ p }: { p: ConfirmPrompt }): React.ReactElement {
               {p.files.map(f => <div key={f} className="truncate">{f}</div>)}
             </div>
           )}
-          {risky && <div className="mt-2 text-[12px] text-aico-warning">Programs and scripts can harm your computer. Allow only if you trust this site.</div>}
+          {risky && p.kind !== 'commit' && <div className="mt-2 text-[12px] text-aico-warning">Programs and scripts can harm your computer. Allow only if you trust this site.</div>}
+          {p.kind === 'commit' && <div className="mt-2 text-[12px] text-aico-warning">The agent cannot press this without you. If you did not ask for it, choose Don’t allow.</div>}
         </div>
       </div>
       <div className="mt-4 flex justify-end gap-2">
         <button className="btn-outline" onClick={() => answer(false)} autoFocus>{p.cancelLabel ?? (p.kind === 'upload' ? 'Don’t send' : 'Cancel')}</button>
-        <button className={risky ? 'btn-danger' : 'btn-primary'} onClick={() => answer(true)}>{p.okLabel ?? (p.kind === 'upload' ? 'Send files' : 'Download')}</button>
+        <button className={risky ? 'btn-danger' : 'btn-primary'} onClick={() => answer(true)}>{p.okLabel ?? (p.kind === 'upload' ? 'Send files' : p.kind === 'commit' ? 'Allow' : 'Download')}</button>
       </div>
     </div>
   );

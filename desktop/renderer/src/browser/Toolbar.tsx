@@ -378,6 +378,7 @@ function BrowserMenu({ compact, tab }: { compact?: boolean; tab: TabState | unde
         <MenuItem icon="download" label="Downloads" hint="Ctrl+J" onClick={run(() => showInternal('downloads'))} />
         <MenuItem icon="chart" label="Insights" onClick={run(() => showInternal('insights'))} />
         <MenuItem icon="key" label="Passwords" onClick={run(() => showInternal('passwords'))} />
+        <MenuItem icon="shield" label="Credentials & passwords…" onClick={run(() => useDesk.getState().openSettings('credentials'))} />
         <MenuItem icon="download" label="Import browser data…" onClick={run(() => openImportWizard())} />
         <MenuSep />
         <div className="flex items-center gap-2 px-2.5 py-1 text-[13.5px]">

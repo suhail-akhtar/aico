@@ -1,0 +1,6 @@
+#!/bin/sh
+# AICO pre-push hook: runs the fast standards check over the commits and files
+# being pushed (attribution, versions, changelog, licence, secrets, module
+# headers). git passes the pushed refs on stdin; the checker reads them.
+# Installed by `node scripts/install-hooks.mjs` (core.hooksPath=.githooks).
+exec node "$(git rev-parse --show-toplevel)/scripts/check-standards.mjs" --pre-push

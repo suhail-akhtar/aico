@@ -17,6 +17,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 const PREFIXES = [
   'app:', 'engine:', 'prefs:', 'win:', 'shell:', 'dialog:', 'notify:', 'clipboard:', 'export:',
   'fs:', 'term:', 'gh:', 'git:', 'browser:', 'plugins:', 'mcp:', 'activity:', 'command:', 'updates:', 'backup:',
+  // The Credential Manager (credential-manager.ts). None of its channels returns a value.
+  'vault:',
 ];
 
 function allowed(channel: string): boolean {

@@ -536,6 +536,14 @@ Design decisions live in the module headers next to the code they govern
 (`src/session/`, `src/registry/`, `src/sandbox/`, `desktop/DESIGN.md`) rather
 than in a document that drifts. Issues and pull requests are welcome.
 
+**Standards.** Anyone changing the code — person or AI agent — follows
+[AGENTS.md](AGENTS.md) and the engineering standards in
+[docs/engineering/](docs/engineering/README.md) (principles, architecture,
+testing, security, releasing, and the [decision records](docs/engineering/adr/README.md)).
+`node scripts/install-hooks.mjs` installs the commit and push checks;
+`npm run check:standards` runs them; releases go through `npm run release`.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 AICO is **source-available** under the

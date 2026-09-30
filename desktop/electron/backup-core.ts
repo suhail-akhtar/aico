@@ -156,8 +156,12 @@ function expand(home: string, spec: string): string[] {
  * (desktop/browser/vault.bin). It is sealed with this machine's OS keychain, so
  * it would not open anywhere else — and a backup file is exactly what should
  * not carry passwords around. Move them with the Passwords page's CSV export.
+ * Since 0.29 the same goes for the 0.28 file kept after moving it into the
+ * credential vault (`vault.bin.migrated-…`) and the vault's safeStorage-sealed
+ * master key (`desktop/vault-key.bin`); the vault itself travels only as the
+ * Credential Manager's encrypted export.
  */
-export const NEVER_BACKED_UP = /^desktop\/browser\/vault\.bin(\.tmp)?$/i;
+export const NEVER_BACKED_UP = /^desktop\/browser\/vault\.bin(\.tmp|\.migrated-[\w.-]+)?$|^desktop\/vault-key\.bin(\.tmp)?$/i;
 
 /** The files a backup with these options would hold, by category. */
 export function collect(home: string, opts: BackupOptions = {}): Map<BackupCategory, string[]> {

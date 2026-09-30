@@ -25,6 +25,7 @@
  */
 
 import type { ServerResponse } from 'http';
+import { sinkRedact } from '../vault/sink.js';
 
 /** A frame on the wire. `seq` is present only for log-backed events. */
 export interface StreamEvent {
@@ -78,7 +79,7 @@ export class EventHub {
 
   /** Fan a frame out to every stream watching a topic. */
   publishTopic(topic: string, type: string, data: unknown): void {
-    const frame = `event: ${type}\ndata: ${JSON.stringify({ type, topic, data })}\n\n`;
+    const frame = `event: ${type}\ndata: ${JSON.stringify({ type, topic, data: sinkRedact(data) })}\n\n`;
     for (const sub of this.topics) {
       if (sub.topic !== topic) continue;
       try { sub.res.write(frame); } catch { this.topics.delete(sub); }
@@ -117,7 +118,8 @@ export class EventHub {
 
   /** Fan an event out to every stream watching its session. */
   publish(event: StreamEvent): void {
-    const frame = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+    // The stream is a sink like the log: every frame passes the vault redactor.
+    const frame = `event: ${event.type}\ndata: ${JSON.stringify({ ...event, data: sinkRedact(event.data) })}\n\n`;
     for (const sub of this.subscribers) {
       if (sub.sessionId !== event.sessionId) continue;
       try {

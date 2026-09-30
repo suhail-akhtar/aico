@@ -19,6 +19,7 @@ import { spawn, execFile, execFileSync } from 'child_process';
 import { currentCwd } from '../run-context.js';
 import { detectShell } from './shell-choice.js';
 import { closeBackgroundProcess, registerBackgroundProcess } from '../work/register.js';
+import { sinkRedactAccumulated } from '../vault/sink.js';
 
 export interface BashInput {
   command: string;
@@ -38,6 +39,12 @@ export interface BashInput {
    * Internal — not part of the model-facing schema.
    */
   cwd?: string;
+  /**
+   * Extra environment for this one child: the values behind `{{secret:…}}`
+   * references, bound by the vault's pipeline stage. Internal — never from the
+   * model, and never logged.
+   */
+  _env?: Record<string, string>;
 }
 
 export interface BashResult {
@@ -273,6 +280,9 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
       // rather than just the shell. Without this a killed `sh -c` leaves its
       // children running and holding the pipes open.
       detached: process.platform !== 'win32',
+      // Marked as the agent's shell, so the vault CLI's reveal commands refuse
+      // to run from it; plus this call's secret bindings, if any.
+      env: { ...process.env, AICO_AGENT_SHELL: '1', ...(input._env ?? {}) },
     });
 
     let stdout = '';
@@ -295,7 +305,8 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
       }
       lastReport = now;
       pending = false;
-      progressSink({ output: combined, elapsedMs: now - startedAt });
+      // Live output is a sink too; accumulated, so a value still arriving is held back.
+      progressSink({ output: sinkRedactAccumulated(combined), elapsedMs: now - startedAt });
     };
 
     // Flush anything coalesced away, so the last line before a long silence is

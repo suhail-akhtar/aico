@@ -17,6 +17,7 @@
 import type { Session } from './session.js';
 import { currentTitle } from './title.js';
 import { currentGoal, deliverables } from './projections.js';
+import { sinkRedactText } from '../vault/sink.js';
 
 export interface ExportOptions {
   /** Include the model's reasoning. Default: true, collapsed. */
@@ -120,7 +121,9 @@ export function toMarkdown(session: Session, opts: ExportOptions = {}): string {
     out.push('');
   }
 
-  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+  // The log is already redacted; this covers a log written before the vault
+  // knew a value, which an export would otherwise carry out of the machine.
+  return sinkRedactText(out.join('\n').replace(/\n{3,}/g, '\n\n'));
 }
 
 /**

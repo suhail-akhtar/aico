@@ -556,6 +556,16 @@ export interface AicoSettings {
     /** Warn when a tool's confinement is only partially enforced. Default: true. */
     warnOnPartial?: boolean;
   };
+  /**
+   * The credential vault (docs/security/credential-broker.md). Settings are
+   * not a trusted surface — the agent can write this file — so nothing here
+   * can loosen a credential's policy or reveal a value; that needs a human
+   * grant. These only choose conveniences.
+   */
+  vault?: {
+    /** Scan messages the user submits for secrets and vault them. Default: true. */
+    scanUserMessages?: boolean;
+  };
   repeatGuard?: {
     enabled?: boolean;              // default: true (root agents only)
     thresholds?: number[];          // default: [3, 5, 8]

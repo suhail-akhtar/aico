@@ -1,0 +1,53 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security issues go to a private advisory, not here** (see SECURITY.md).
+        Never paste API keys, tokens or the contents of `~/.aico/settings.json` — redact them.
+  - type: input
+    id: version
+    attributes:
+      label: AICO version
+      description: "`aico --version`, the desktop About screen, or the tag you installed (e.g. v0.28.0)."
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Where
+      options: [Desktop app, VS Code panel, Web portal (aico serve), Terminal (aico / aico -p), aico mcp-serve, Cron / background work]
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS, Node version, provider and model
+      placeholder: "Windows 11, Node 22.12, DeepSeek deepseek-v4-flash"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows it.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Error text, screenshots, the relevant part of a session log (redact secrets).
+      render: text

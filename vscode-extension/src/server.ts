@@ -25,10 +25,16 @@ export interface RunningServer {
   url: string;
   port: number;
   token: string;
+  /**
+   * The UI key from the URL's `#ui=` fragment (aico 0.29+). The server
+   * accepts a tool-permission "allow" only with it; the tunnel adds it to the
+   * panel's requests, so the webview never holds it. Absent on older servers.
+   */
+  uiKey?: string;
 }
 
 /** Where the URL line appears in `serve` output, and what it looks like. */
-const URL_LINE = /http:\/\/127\.0\.0\.1:(\d+)\/\?token=([A-Za-z0-9_-]+)/;
+const URL_LINE = /http:\/\/127\.0\.0\.1:(\d+)\/\?token=([A-Za-z0-9_-]+)(?:#ui=([A-Za-z0-9_-]+))?/;
 
 /** How long to wait for that line before giving up on the child. */
 const READY_TIMEOUT_MS = 90_000;
@@ -152,10 +158,11 @@ export class ServerManager implements vscode.Disposable {
         this.output.append(text);
         const match = URL_LINE.exec(text);
         if (match && !settled) {
-          const server = {
-            url: match[0],
+          const server: RunningServer = {
+            url: match[0].replace(/#.*$/, ''),
             port: Number(match[1]),
-            token: match[2],
+            token: match[2]!,
+            ...(match[3] ? { uiKey: match[3] } : {}),
           };
           this.running = server;
           finish(undefined, server);
@@ -192,6 +199,7 @@ export class ServerManager implements vscode.Disposable {
       headers: {
         'Content-Type': 'application/json',
         'x-aico-token': server.token,
+        ...(server.uiKey ? { 'x-aico-ui-key': server.uiKey } : {}),
       },
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     });

@@ -39,6 +39,8 @@ export interface DesktopServices {
   browserOverlay?: { raise(): void; rehost(): void };
   /** The browser's own window (browser-window.ts): null while the browser is in the AICO window. */
   browserWindow?: { window(): BrowserWindow | null; popOut(): void; popIn(opts?: { show?: boolean }): void };
+  /** The credential vault's private channel (vault-host.ts): grants, approvals, fills. */
+  vaultHost?: import('./vault-host').VaultHost;
   renderer?: {
     /** Ask the interface something and wait for the answer (see renderer-bridge.ts). */
     call<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;

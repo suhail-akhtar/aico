@@ -117,6 +117,11 @@ import { createMiniApp, slugify } from '../miniapps/store.js';
 import { cp } from 'fs/promises';
 import { closeDatabase } from '../miniapps/data.js';
 import { setWakeDelivery } from '../work/watchers.js';
+import { getVault } from '../vault/index.js';
+import { handleVaultRoute } from '../vault/http.js';
+import { quarantineIfEnabled } from '../vault/agent-hooks.js';
+import { sinkRedact } from '../vault/sink.js';
+import { decisionGate } from './decision-gate.js';
 
 export interface ServeOptions {
   port?: number;
@@ -220,6 +225,19 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     missed it reads the current version when it next opens the canvas.
   */
   const stopCanvasEvents = onCanvasChange(change => hub.publish({ type: 'canvas', sessionId: change.sessionId, data: change }));
+  /*
+    The credential vault's human side. Approvals and credential requests go to
+    the host channel when AICO Desktop attached one, otherwise out on the
+    session's stream to be answered through /api/vault/* — where approving
+    needs a passphrase, because the token alone is not proof of a person.
+    Events with no session go to the `vault` topic (the Credential Manager).
+  */
+  const vault = getVault();
+  vault.setApprovalPrompter(vault.serverPrompter());
+  vault.setNotifier((sessionId, type, data) => {
+    if (sessionId) hub.publish({ type, sessionId, data });
+    else hub.publishTopic('vault', type, data);
+  });
   /**
    * The model a turn uses when the client names none.
    *
@@ -239,6 +257,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   }
 
   const runs = new RunManager(hub, settings);
+  // Who may say yes to a waiting tool call — not the token alone (decision-gate.ts).
+  const gate = decisionGate();
+  gate.setDecider((sessionId, id, allow) => runs.decide(sessionId, id, allow));
 
   // Watchers know when a condition fires; they do not know how to reach a
   // conversation. Wired here rather than imported there so the work subsystem
@@ -386,6 +407,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   async function api(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
     const route = url.pathname.slice('/api/'.length);
 
+    // The Credential Manager's routes. Secrets go in, never out, except
+    // through a human grant — see vault/http.ts.
+    if (await handleVaultRoute(req, res, route, url)) return;
+
     // ── SSE stream ────────────────────────────────────────────────────
     if (route === 'events' && req.method === 'GET') {
       const sessionId = url.searchParams.get('session');
@@ -394,6 +419,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
       const detach = hub.subscribe(sessionId, res);
       req.on('close', detach);
+      // A client that traded the UI key for a nonce is "connected" to this
+      // session while this stream is open — the condition for its yes.
+      const release = gate.connect(url.searchParams.get('client'), sessionId);
+      req.on('close', release);
 
       // Replay the gap from the log before going live. The log is the history,
       // so this is a read rather than a buffer the server had to maintain.
@@ -1503,13 +1532,34 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         if (!sessionId || !id || typeof allow !== 'boolean') {
           send(res, 400, { error: 'sessionId, id and allow required' }); return;
         }
+        // A no needs nothing. A yes needs proof of the person's window, not
+        // just the token a model might have learned (decision-gate.ts).
+        if (allow) {
+          const verdict = gate.checkAllow({
+            sessionId,
+            client: (body as { client?: unknown }).client ?? req.headers['x-aico-client'],
+            uiKey: req.headers['x-aico-ui-key'],
+            fetchSite: typeof req.headers['sec-fetch-site'] === 'string' ? req.headers['sec-fetch-site'] : undefined,
+          });
+          if (!verdict.ok) { send(res, 403, { error: verdict.reason, code: 'human-required' }); return; }
+        }
         send(res, 200, { ok: runs.decide(sessionId, id, allow) });
+        return;
+      }
+      case 'ui/attach': {
+        // Trade the UI key (from the printed link's fragment) for a per-client
+        // nonce. The key itself is never returned by any route.
+        const out = gate.attach((body as { uiKey?: unknown }).uiKey,
+          typeof req.headers['sec-fetch-site'] === 'string' ? req.headers['sec-fetch-site'] : undefined);
+        send(res, 'error' in out ? 403 : 200, out);
         return;
       }
       case 'steer':
       case 'followup': {
-        const { sessionId, content } = body as { sessionId?: string; content?: string };
-        if (!sessionId || !content) { send(res, 400, { error: 'sessionId and content required' }); return; }
+        const { sessionId, content: typed } = body as { sessionId?: string; content?: string };
+        if (!sessionId || !typed) { send(res, 400, { error: 'sessionId and content required' }); return; }
+        // A message typed mid-turn is scanned exactly like a new one.
+        const { text: content } = await quarantineIfEnabled(typed, await loadSettings(), sessionId);
         const ok = route === 'steer'
           ? runs.steer(sessionId, content)
           : runs.followup(sessionId, content);
@@ -1644,7 +1694,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   const address = server.address();
   const boundPort = typeof address === 'object' && address ? address.port : requestedPort;
   port = boundPort;
-  const url = `http://127.0.0.1:${boundPort}/?token=${token}`;
+  // The fragment carries the UI key (decision-gate.ts): a browser never sends
+  // it to a server, and it is the one thing that lets that window say yes.
+  const url = `http://127.0.0.1:${boundPort}/?token=${token}#ui=${gate.uiKey}`;
 
   await reconcileMiniApps(boundPort);
   // Once per start: what repeats across projects becomes a global proposal.
@@ -1721,7 +1773,10 @@ function streamFile(file: string, res: http.ServerResponse): void {
 }
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body);
+  // Every JSON response is a sink: file views, session reads and settings
+  // alike pass the vault redactor. (The vault's own reveal route has its own
+  // sender; it is the one deliberate exception, behind a human grant.)
+  const payload = JSON.stringify(sinkRedact(body));
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(payload);
 }

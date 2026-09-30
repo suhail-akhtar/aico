@@ -170,6 +170,8 @@ export function installBrowserStore(): void {
   on<DialogPrompt>('browser:dialog', (p) => push('dialogs', p, `${site(p.tabId)} is showing a message.`));
   on<AuthPrompt>('browser:auth', (p) => push('auths', p, `${p.host} asks you to sign in.`));
   on<ConfirmPrompt>('browser:confirm', (p) => push('confirms', p, p.title));
+  // Withdrawn by main (nobody answered in time): it is a no, and it leaves the screen.
+  on<string>('browser:confirmGone', (id) => useBrowser.setState(s => ({ confirms: s.confirms.filter(c => c.id !== id) })));
   on<HandoffPrompt>('browser:handoff', (h) => {
     // The page must be live and in front: no chrome page, reader or still over it.
     useBrowser.setState({ handoff: h, internal: null, reader: null, takenOver: false });

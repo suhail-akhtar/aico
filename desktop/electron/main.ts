@@ -230,7 +230,11 @@ app.on('second-instance', () => ctx.reveal());
 
 app.whenReady().then(async () => {
   nativeTheme.themeSource = prefs.get().theme;
-  handleProtocol({ rendererDir: path.join(distDir, 'renderer'), pluginDir: () => pluginsDir, engine });
+  handleProtocol({
+    rendererDir: path.join(distDir, 'renderer'), pluginDir: () => pluginsDir, engine,
+    // A person's Allow on a tool-permission prompt travels over the private port (vault-host.ts).
+    decidePermission: (sessionId, id, allow) => ctx.services.vaultHost?.decidePermission(sessionId, id, allow) ?? Promise.resolve(false),
+  });
   attachEmbedReferer(session.defaultSession);
   registerCoreIpc(ctx);
   registerFeatures(ctx);

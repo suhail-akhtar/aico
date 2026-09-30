@@ -15,6 +15,15 @@ const TOOLS_REQUIRING_PERMISSION = new Set([
   // CurrencyRates and SportsScores are absent on purpose: read-only lookups,
   // classified exactly as WebFetch and WebSearch are.
   'GenerateImage',
+  // Act on the owner's remote machines (tools/ops). Destructive commands,
+  // unknown host keys and SNMP sets also need a person through the credential
+  // broker, whatever this prompt answers.
+  'SshExec',
+  'SshCopy',
+  'SshTunnel',
+  'HttpRequest',
+  'WinRmExec',
+  'SnmpQuery',
 ]);
 
 const DANGEROUS_TOOLS = new Set([

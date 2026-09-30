@@ -39,6 +39,7 @@ import { PlanCard } from './components/PlanCard';
 import { GoalBar } from './components/GoalBar';
 import { Composer } from './components/Composer';
 import { PermissionBridge } from './components/PermissionBridge';
+import { VaultPrompts } from '@web/components/VaultPrompts';
 import { EditBridge } from './components/EditBridge';
 import { HostBridge } from './components/HostBridge';
 
@@ -272,6 +273,8 @@ export function Panel(): React.ReactElement {
         seen before writing the next message.
       */}
       <GoalBar />
+      {/* The credential vault asking for a credential or a yes (shared with the browser client). */}
+      <VaultPrompts />
       <Composer />
       <PermissionBridge />
       <EditBridge />
