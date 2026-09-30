@@ -3,6 +3,17 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Fixed
+
+- The context meter compared the chat's **total** input (every request adds the
+  whole conversation again, so it can be many times the window) with the context
+  window, and pinned at 100% after a chat was reopened. It now shows the latest
+  request's prompt — how full the window really is — and the tooltip lists the
+  chat's totals separately ("This chat: … in · … out · … cached"). Live and
+  reopened chats now report the same figures.
+
 ## 0.29.0 — 2026-09-30
 
 The agent can now use credentials it never sees: a credential vault and broker,

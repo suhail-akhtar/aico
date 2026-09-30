@@ -101,6 +101,12 @@ export interface Usage {
    */
   contextWindow: number;
   /**
+   * How full the window is now: the latest request's prompt. `input` is the
+   * chat's running total (every request resends the conversation), so it
+   * measures spend and can be many times the window.
+   */
+  context: number;
+  /**
    * Whether that window is measured or guessed.
    *
    * `assumed` in particular has to reach the reader: it means no source knew
@@ -114,7 +120,7 @@ export interface Usage {
 const NO_USAGE: Usage = {
   input: 0, output: 0, cached: 0, cacheWrite: 0,
   costUsd: 0, costEstimated: false, usageEstimated: false,
-  contextWindow: 0, contextSource: '',
+  contextWindow: 0, contextSource: '', context: 0,
 };
 
 interface AppState {
@@ -596,6 +602,7 @@ export const useStore = create<AppState>((set, get) => ({
             usageEstimated: Boolean(u.usageEstimated),
             contextWindow: Number(u.contextWindow ?? 0),
             contextSource: (u.contextSource as Usage['contextSource']) ?? '',
+            context: Number(u.lastInputTokens ?? 0),
           },
         });
       })
@@ -1639,6 +1646,7 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
           usageEstimated: Boolean(data.usageEstimated),
           contextWindow: Number(data.contextWindow ?? 0),
           contextSource: (data.contextSource as Usage['contextSource']) ?? '',
+          context: Number(data.context ?? data.input ?? 0),
         },
       }));
       return;

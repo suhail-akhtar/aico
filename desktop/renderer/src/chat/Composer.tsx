@@ -561,13 +561,14 @@ export function ProjectChip({ large }: { large?: boolean }): React.ReactElement 
 
 function ContextMeter(): React.ReactElement | null {
   const usage = useStore(s => s.usage);
-  if (!usage.contextWindow || !usage.input) return null;
-  const pct = Math.min(100, Math.round((usage.input / usage.contextWindow) * 100));
+  if (!usage.contextWindow || !usage.context) return null;
+  // Occupancy is the latest request's prompt; `input` is the chat's running total (spend).
+  const pct = Math.min(100, Math.round((usage.context / usage.contextWindow) * 100));
   const r = 7; const c = 2 * Math.PI * r;
   const tone = pct > 85 ? 'var(--aico-danger)' : pct > 65 ? 'var(--aico-warning)' : 'var(--aico-accent)';
   return (
     <span className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-aico-muted"
-      title={`Context: ${usage.input.toLocaleString()} of ${usage.contextWindow.toLocaleString()} tokens (${pct}%)\nOutput: ${usage.output.toLocaleString()} · cached ${usage.cached.toLocaleString()}\nCost: $${usage.costUsd.toFixed(4)}${usage.costEstimated ? ' (estimated)' : ''}`}>
+      title={`Context: ${usage.context.toLocaleString()} of ${usage.contextWindow.toLocaleString()} tokens (${pct}%)\nThis chat: ${usage.input.toLocaleString()} in · ${usage.output.toLocaleString()} out · ${usage.cached.toLocaleString()} cached\nCost: $${usage.costUsd.toFixed(4)}${usage.costEstimated ? ' (estimated)' : ''}`}>
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
         <circle cx="9" cy="9" r={r} fill="none" stroke="var(--aico-border)" strokeWidth="2.2" />
         <circle cx="9" cy="9" r={r} fill="none" stroke={tone} strokeWidth="2.2" strokeDasharray={`${(pct / 100) * c} ${c}`} transform="rotate(-90 9 9)" strokeLinecap="round" />

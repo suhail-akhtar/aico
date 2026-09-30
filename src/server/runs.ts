@@ -845,8 +845,14 @@ export class RunManager {
             });
             windowAtStart = fact.tokens;
           }
+          const totals = run.tokenTracker.getUsage();
           emit('tokens', {
-            input, output, cached, cacheWrite,
+            // Occupancy: this request's prompt, i.e. how full the window is now.
+            context: input,
+            // Spend: the whole chat so far. Sent as totals so a reopened chat
+            // (which only has totals) and a live one show the same figures.
+            input: totals.inputTokens, output: totals.outputTokens,
+            cached: totals.cachedTokens, cacheWrite: totals.cacheWriteTokens,
             costUsd: run.tokenTracker.estimateCost(model, settings),
             // Sent so the reader is not shown an invented number as a fact. The
             // engine has always known this; only the CLI ever said it.

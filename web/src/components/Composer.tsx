@@ -514,11 +514,11 @@ ${prefill.text}` : prefill.text));
             an older server shows the counts it always did rather than a bar
             drawn against a guess.
           */}
-          {usage.input > 0 && usage.contextWindow > 0 && (
+          {usage.context > 0 && usage.contextWindow > 0 && (
             <>
               <span aria-hidden>·</span>
               <ContextMeter
-                used={usage.input}
+                used={usage.context}
                 total={usage.contextWindow}
                 source={usage.contextSource}
               />

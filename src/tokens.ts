@@ -12,6 +12,12 @@ export interface TokenUsage {
   /** Subset of `inputTokens` written to the prompt cache (billed 1.25x on Anthropic). */
   cacheWriteTokens: number;
   sessions: number;
+  /**
+   * The most recent request's prompt size — how full the context window is
+   * right now. The totals above add every request of the chat together (the
+   * whole conversation is resent each time), so they measure spend, not room.
+   */
+  lastInputTokens?: number;
 }
 
 interface CostRate {
@@ -291,6 +297,7 @@ export function createTokenTracker() {
   let cacheWriteTokens = 0;
   let cacheWrite1hTokens = 0;
   let sessions = 0;
+  let lastInputTokens = 0;
   /**
    * Requests whose numbers were counted here rather than reported by the API.
    *
@@ -313,6 +320,7 @@ export function createTokenTracker() {
       if (!measured) estimatedRequests++;
       cacheWrite1hTokens += Math.ceil(cacheWrite1h);
       inputTokens += Math.ceil(input);
+      lastInputTokens = Math.ceil(input);
       outputTokens += Math.ceil(output);
       cachedTokens += Math.ceil(cached);
       cacheWriteTokens += Math.ceil(cacheWrite);
@@ -320,7 +328,7 @@ export function createTokenTracker() {
     },
 
     getUsage(): TokenUsage {
-      return { inputTokens, outputTokens, cachedTokens, cacheWriteTokens, sessions };
+      return { inputTokens, outputTokens, cachedTokens, cacheWriteTokens, sessions, lastInputTokens };
     },
 
     /**
