@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.29.0 — 2026-09-30
 
 The agent can now use credentials it never sees: a credential vault and broker,
 one vault shared with the browser, server operations over SSH/HTTP/WinRM/SNMP,
