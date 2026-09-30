@@ -91,6 +91,8 @@ export interface TabState {
   threat?: ThreatInfo;
   /** Tabs: pinned (icon-only, always first). */
   pinned?: boolean;
+  /** Prompt-injection guard: what was hidden or flagged on this page when the agent read it. */
+  injectionGuard?: InjectionGuardInfo;
 }
 
 export interface HttpsFallback { httpUrl: string; httpsUrl: string; reason: string }
@@ -220,6 +222,19 @@ export interface PageRead {
   truncated?: boolean;
   /** Extension: why the page could not be read as HTML (PDF viewer, image, plain text…). */
   note?: string;
+  /** Prompt-injection guard: passages dropped because a person cannot see them (browser-page.ts). */
+  concealed?: ConcealedReport;
+}
+
+/** What the page script dropped as invisible: how many, how many by a trick (not plain display:none), and samples. */
+export interface ConcealedReport { count: number; tricks: number; samples: Array<{ reason: string; text: string }> }
+
+/** Prompt-injection guard, per tab and page (shared/injection-guard.ts): shown in Shields. */
+export interface InjectionGuardInfo {
+  url: string;
+  hidden: number;
+  flagged: number;
+  snippets: Array<{ text: string; hidden: boolean }>;
 }
 
 export interface PageInsights {
@@ -236,6 +251,8 @@ export interface PageInsights {
   humanCheck: boolean;
   security: SecurityState;
   trackersBlocked: number;
+  /** Prompt-injection guard counts for this page, once the agent has read it. */
+  injectionGuard?: { hidden: number; flagged: number };
 }
 
 export type SensitiveKind = 'password' | 'card' | 'cvv' | 'otp';
@@ -353,7 +370,7 @@ export interface ShieldSettingsView {
   cookies3p: boolean;
   httpsFirst: boolean;
   gpc: boolean;
-  protection: { heuristics: boolean; list: boolean; autoCheck: boolean };
+  protection: { heuristics: boolean; list: boolean; autoCheck: boolean; injectionGuard: boolean };
   notificationsAsk: boolean;
   insights: boolean;
   clearOnExit: { cookies: boolean; cache: boolean; history: boolean; insights: boolean };

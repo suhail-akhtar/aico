@@ -45,6 +45,12 @@ export interface LearnHooks {
   bookmarkedUrls(): string[];
   confirm(req: Omit<ConfirmRequest, 'id'>): { id: string; done: Promise<boolean> };
   history(): HistoryEntry[];
+  /**
+   * The tab in front was read for `ms` more (every gate above passed: focused
+   * window, someone there, not flagged, not the agent's, not excluded, not
+   * paused) — "Remember what I read" (browser-memory.ts) keys off this.
+   */
+  reading?(tabId: string, url: string, wc: WebContents, ms: number, scroll?: number): void;
 }
 
 /** What the agent's tools call (mcp.ts). */
@@ -156,10 +162,12 @@ export function createLearning(ctx: DesktopContext, hooks: LearnHooks): Learning
       ]).catch(() => null).then((scroll) => {
         learnActive(d(), front.url, TICK, now, typeof scroll === 'number' ? scroll : undefined);
         save();
+        if (!wc.isDestroyed()) hooks.reading?.(front.id, front.url, wc, TICK, typeof scroll === 'number' ? scroll : undefined);
       });
     } else {
       learnActive(d(), front.url, TICK, now);
       save();
+      if (wc && !wc.isDestroyed()) hooks.reading?.(front.id, front.url, wc, TICK);
     }
   }, TICK).unref?.();
   setInterval(() => { store.set(pruneLearn(d(), Date.now())); }, 6 * 3600_000).unref?.();

@@ -45,8 +45,10 @@ import type { DesktopContext } from './context';
 import type {
   AgentEvent, BrowserState, ConfirmRequest, DialogRequest, DownloadItem, ExtractKind, FindRequest,
   FindResult, FormModel, HistoryEntry, HistoryListOptions, PageInsights, PageRead, PageStill, PermissionSetting, SecurityState, SiteInfo, TabState,
+  ConcealedReport, InjectionGuardInfo,
 } from '../shared/browser-types';
 import { aicoPage } from './browser-page';
+import { guardPageText, withNotice } from '../../shared/injection-guard';
 import { originOf, shouldBlock } from './browser-trackers';
 import {
   classifySensitiveField, describeChange, detectHumanCheck, HUMAN_CHECK_SELECTORS, humanCheckRefusal, sensitiveRefusal,
@@ -63,10 +65,12 @@ import {
 import { createDownloads } from './browser-downloads';
 import { createPrivacy } from './browser-privacy';
 import { createLearning } from './browser-learn';
+import { createMemory } from './browser-memory';
+import { createTabAwareness } from './browser-tab-summary';
 import { registerBookmarks } from './browser-bookmarks';
 import { browserShortcutSpec } from './browser-keys';
 import { DIALOG_CHANNEL, installDialogPreload } from './browser-preload';
-import { openBrowserSession, registerTabSession, type TabSession } from './browser-session';
+import { AICO_WORLD, openBrowserSession, registerTabSession, type TabSession } from './browser-session';
 import { registerAutofill, type AutofillService } from './browser-autofill-store';
 import { registerVault } from './browser-vault';
 import { registerImport } from './browser-import';
@@ -121,6 +125,9 @@ interface Tab {
   openerId?: string;
   deferred?: import('./browser-session-core').SavedTab;
   throttled?: boolean;
+  /** Prompt-injection guard: what the page script dropped on the last read/snapshot, and the page's totals (Shields). */
+  guardPending?: { url: string; report: ConcealedReport };
+  guard?: InjectionGuardInfo;
 }
 
 export type Target = { ref?: string; selector?: string; text?: string };
@@ -177,6 +184,12 @@ export interface BrowserService {
   upload(target: Target, files: string[]): Promise<string>;
   uploadWait(id: string, seconds?: number): Promise<string>;
   agentStopped(): boolean;
+  /**
+   * Prompt-injection guard for an agent tool result from the page in front
+   * (shared/injection-guard.ts): wraps instruction-like passages, leads with
+   * the notice, and records the counts for Shields. Unchanged when the setting is off.
+   */
+  guardText(text: string): string;
   /** The browser moved to another window (browser-window.ts): its tabs leave the old one now; the new one's page area places them. */
   rehost(): void;
 }
@@ -412,11 +425,29 @@ export function registerBrowser(ctx: DesktopContext): void {
     counts: (id) => { const t = tabs.get(id); return { trackersBlocked: t?.trackersBlocked ?? 0, popupsBlocked: t?.popupsBlocked ?? 0 }; },
     trackers: () => settings.get().blocking,
     pushState: () => pushState(),
-    clearHistory: () => { history.set([]); history.flush(); learn.clear(); },
+    clearHistory: () => { history.set([]); history.flush(); learn.clear(); memory.clear(); },
   });
+
+  // "Remember what I read": off by default; fed by the learning tick below (browser-memory.ts).
+  const memory = createMemory(ctx, {
+    flagged: (id) => privacy.flagged(id),
+    byAgent: (id) => agentDriving(tabs.get(id)) || (id === activeId && Date.now() - agentOpen.at < 15_000),
+  });
+  // One line per open tab for the copilot's header (browser-tab-summary.ts).
+  const tabAware = createTabAwareness({
+    tabs: () => state().tabs.map(t => ({ id: t.id, url: t.url, title: t.title })),
+    activeId: () => activeId,
+    flagged: (id) => privacy.flagged(id),
+    run: <T>(wc: WebContents, code: string, ms: number) => Promise.race([
+      wc.executeJavaScriptInIsolatedWorld(AICO_WORLD, [{ code }]) as Promise<T>,
+      sleep(ms).then(() => null),
+    ]).catch(() => null),
+  });
+  ctx.services.browserTabs = tabAware;
 
   // Browsing intelligence: what AICO learns from your browsing, on this device (browser-learn.ts).
   const learn = createLearning(ctx, {
+    reading: (id, url, wc, ms, scroll) => memory.reading(id, url, wc, ms, scroll),
     state: () => state(),
     frontTab: () => { const t = visible && activeId ? tabs.get(activeId) : undefined; return t && !t.view.webContents.isDestroyed() ? { id: t.id, url: t.view.webContents.getURL() } : null; },
     lastInput: (id) => tabs.get(id)?.lastGestureAt ?? 0,
@@ -541,6 +572,7 @@ export function registerBrowser(ctx: DesktopContext): void {
       trackersBlocked: t.trackersBlocked, agentActive: Date.now() < t.agentUntil, humanCheck: t.humanCheck,
       ...(t.error ? { error: t.error } : {}), ...(t.popupsBlocked ? { popupsBlocked: t.popupsBlocked } : {}),
       ...privacy.tabExtras(t.id),
+      ...(t.guard && t.guard.url === wc.getURL() ? { injectionGuard: t.guard } : {}),
     };
   };
   const state = (): BrowserState => ({
@@ -656,6 +688,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     byWc.set(wc.id, tab);
     privacy.attachTab(id, wc);
     learn.attachTab(id, wc);
+    tabAware.attachTab(id, wc);
 
     wc.setWindowOpenHandler((d) => {
       const gesture = Date.now() - tab.lastGestureAt < 5000;
@@ -991,7 +1024,9 @@ export function registerBrowser(ctx: DesktopContext): void {
   // ── Page understanding ──
   async function readPage(t: Tab, opts: { mode?: 'reader' | 'full'; maxChars?: number }): Promise<PageRead> {
     await waitLoad(t.view.webContents, 8000);
-    return page<PageRead>(t, 'read', { mode: opts.mode === 'full' ? 'full' : 'reader', maxChars: opts.maxChars }, 20_000);
+    const r = await page<PageRead>(t, 'read', { mode: opts.mode === 'full' ? 'full' : 'reader', maxChars: opts.maxChars, guard: privacy.injectionGuard() }, 20_000);
+    if (r.concealed) t.guardPending = { url: t.view.webContents.getURL(), report: r.concealed };
+    return r;
   }
   async function formsOf(t: Tab): Promise<FormModel[]> {
     await waitLoad(t.view.webContents, 8000);
@@ -1002,6 +1037,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     const sig = await page<InsightSignals>(t, 'insights', { humanSelectors: HUMAN_CHECK_SELECTORS }, 15_000);
     const ins = buildInsights(sig, { security: securityOf(t), trackersBlocked: t.trackersBlocked, httpStatus: t.httpStatus });
     if (t.humanCheck !== ins.humanCheck) { t.humanCheck = ins.humanCheck; pushState(); }
+    if (t.guard && t.guard.url === t.view.webContents.getURL()) ins.injectionGuard = { hidden: t.guard.hidden, flagged: t.guard.flagged };
     return ins;
   }
 
@@ -1009,7 +1045,8 @@ export function registerBrowser(ctx: DesktopContext): void {
     const wc = t.view.webContents;
     await waitLoad(wc, 8000);
     if (t.dialog) return `${dialogOpenMessage(t.dialog)}\n\nPage: ${wc.getTitle()}\nURL: ${wc.getURL()}`;
-    const s = await page<SnapshotRaw>(t, 'snapshot', { full });
+    const s = await page<SnapshotRaw & { concealed?: ConcealedReport }>(t, 'snapshot', { full, guard: privacy.injectionGuard() });
+    if (s.concealed) t.guardPending = { url: wc.getURL(), report: s.concealed };
     const h = await humanCheck(t);
     return formatSnapshot(s, {
       ...(h.detected ? { humanCheck: `Human check on this page (${h.kind}). You must not attempt it: call browser_handoff so the user completes it.` } : {}),
@@ -1566,7 +1603,7 @@ export function registerBrowser(ctx: DesktopContext): void {
       const t = active();
       agentEvent(t, 'find', 'start', `Finding "${text}"`);
       try {
-        const r = await page<{ count: number; matches: Array<{ ref: string; tag: string; context: string }> }>(t, 'find', { text, limit: limit ?? 20 });
+        const r = await page<{ count: number; matches: Array<{ ref: string; tag: string; context: string }> }>(t, 'find', { text, limit: limit ?? 20, guard: privacy.injectionGuard() });
         if (!r.count) return `"${text}" is not on the page (${t.view.webContents.getURL()}).`;
         return [`${r.count} match(es) for "${text}"${r.count > r.matches.length ? ` (first ${r.matches.length})` : ''}:`, ...r.matches.map(m => `[${m.ref}] ${m.tag}: …${m.context}…`)].join('\n');
       } finally { agentEvent(t, 'find', 'done'); }
@@ -1652,6 +1689,23 @@ export function registerBrowser(ctx: DesktopContext): void {
       visible = false;
       layout();
       pushState();
+    },
+    guardText(text) {
+      if (!privacy.injectionGuard()) return text;
+      const t = activeId ? tabs.get(activeId) : undefined;
+      const url = t && !t.view.webContents.isDestroyed() ? t.view.webContents.getURL() : '';
+      const pending = t?.guardPending && t.guardPending.url === url ? t.guardPending.report : undefined;
+      if (t) t.guardPending = undefined;
+      const g = guardPageText(text, { hidden: pending?.count, tricks: pending?.tricks, hiddenSamples: pending?.samples });
+      if (t && url && (g.hidden || g.flagged || g.hiddenFlagged)) {
+        // One page's totals: the most any single read saw, and every distinct snippet (up to 8).
+        const prev = t.guard && t.guard.url === url ? t.guard : { url, hidden: 0, flagged: 0, snippets: [] };
+        const snippets = [...prev.snippets];
+        for (const sn of g.snippets) if (snippets.length < 8 && !snippets.some(x => x.text === sn.text)) snippets.push({ text: sn.text, hidden: sn.hidden });
+        t.guard = { url, hidden: Math.max(prev.hidden, g.hidden), flagged: Math.max(prev.flagged, g.flagged), snippets };
+        pushState();
+      }
+      return withNotice(g);
     },
   };
   ctx.services.browser = service;
@@ -1787,8 +1841,8 @@ export function registerBrowser(ctx: DesktopContext): void {
   ctx.handle('browser:state', () => state());
 
   ctx.handle('browser:history:list', (opts?: HistoryListOptions) => searchHistory(history.get(), opts?.query, opts?.limit ?? 200));
-  ctx.handle('browser:history:remove', (url: string) => { history.set(removeHistory(history.get(), String(url))); learn.forgetUrl(String(url)); return true; });
-  ctx.handle('browser:history:clear', (sinceMs?: number) => { history.set(clearHistory(history.get(), sinceMs)); history.flush(); privacy.clearInsights(sinceMs); learn.clear(sinceMs); return true; });
+  ctx.handle('browser:history:remove', (url: string) => { history.set(removeHistory(history.get(), String(url))); learn.forgetUrl(String(url)); memory.forgetUrl(String(url)); return true; });
+  ctx.handle('browser:history:clear', (sinceMs?: number) => { history.set(clearHistory(history.get(), sinceMs)); history.flush(); privacy.clearInsights(sinceMs); learn.clear(sinceMs); memory.clear(sinceMs); return true; });
 
   ctx.handle('browser:downloads:list', () => downloads.list());
   ctx.handle('browser:downloads:open', (id: string) => downloads.open(id));
@@ -1887,6 +1941,8 @@ export function registerBrowser(ctx: DesktopContext): void {
     return evaluate<string>(t.view.webContents, `(() => { const s = String(getSelection() || ''); if (s) return s; const a = document.activeElement; return a && typeof a.value === 'string' && typeof a.selectionStart === 'number' && a.type !== 'password' ? a.value.slice(a.selectionStart, a.selectionEnd) : ''; })()`, 1500).then(s => (s ?? '').slice(0, 20_000)).catch(() => '');
   });
   ctx.handle('browser:insights', () => insightsOf(active()));
+  // The copilot's "Open tabs" header block and its chip (browser-tab-summary.ts).
+  ctx.handle('browser:tabs:summary', () => tabAware.view());
   ctx.handle('browser:forms', () => formsOf(active()));
 
   ctx.handle('browser:agentStop', () => {

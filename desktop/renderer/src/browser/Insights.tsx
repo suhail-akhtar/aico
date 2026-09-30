@@ -20,6 +20,7 @@ import { call, useAvailable } from './ipc';
 import { Favicon } from './Omnibox';
 import { openUrl, showInternal } from './store';
 import { ForYouCards, LearnedPanel } from './ForYou';
+import { MemorySearch } from './MemorySearch';
 
 const fmt = (n: number): string => n.toLocaleString();
 
@@ -76,6 +77,7 @@ export function InsightsPage(): React.ReactElement {
       </>
     }>
       {!available && <p className="py-16 text-center text-[13px] text-aico-muted">Insights are not available in this version.</p>}
+      <MemorySearch />
       {available && data === undefined && <div className="skeleton h-40 w-full" />}
       {data && t && (
         <>

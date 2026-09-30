@@ -41,10 +41,21 @@ import { inBrowserWindow } from './host';
 import type { OverlayMessage } from '@desk/copilot-float';
 import type { Insights } from './types';
 
+/** What main keeps about every open tab (electron/browser-tab-summary.ts), for the header and the chip. */
+interface TabsView {
+  tabs: Array<{ id: string; url: string; title: string; site: string; label: string; gist?: string; facts?: string }>;
+  lines: string[];
+  activeId: string | null;
+}
+
 /** Ask the page what the header should say, briefly — sending must not wait on a slow page. */
 async function pageContext(quick?: QuickAction): Promise<PageContext | null> {
   const tab = activeTab();
-  if (!tab || isBlankUrl(tab.url)) return null;
+  const share = useCopilotUi.getState().shareTabs;
+  const tabsView = share ? await callWithin<TabsView>(800, 'browser:tabs:summary') : undefined;
+  const openTabs = tabsView?.lines.length ? tabsView.lines : undefined;
+  // On the new tab page there is no page to name, but the open tabs still are worth knowing.
+  if (!tab || isBlankUrl(tab.url)) return openTabs ? { url: 'aico://newtab', title: 'New tab', openTabs } : null;
   const [insights, selection] = await Promise.all([
     callWithin<Insights>(1200, 'browser:insights'),
     callWithin<string | { text?: string }>(500, 'browser:selection'),
@@ -58,7 +69,7 @@ async function pageContext(quick?: QuickAction): Promise<PageContext | null> {
     humanCheck: Boolean(tab.humanCheck || insights?.humanCheck),
     loginWall: Boolean(insights?.loginWall),
     paywall: Boolean(insights?.paywall),
-    ...(quick?.id === 'compare' || others.length <= 4 ? { otherTabs: others.map(t => ({ title: t.title, url: t.url })) } : {}),
+    ...(openTabs ? { openTabs } : share && (quick?.id === 'compare' || others.length <= 4) ? { otherTabs: others.map(t => ({ title: t.title, url: t.url })) } : {}),
   };
 }
 
@@ -421,7 +432,7 @@ function CopilotInput(): React.ReactElement {
       )}
       <div className="cp-input-shell px-3 pb-2 pt-2">
         {onPage && (
-          <div className="mb-1.5 flex">
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
             <button className={cls('cp-page-chip', !attach && 'cp-detached')}
               onClick={() => useCopilotUi.setState({ attachPage: !attach })}
               title={attach ? 'AICO sees which page you are on with each message — click to stop sharing it' : 'Not sharing the page — click to let AICO see which page you are on'}>
@@ -429,6 +440,7 @@ function CopilotInput(): React.ReactElement {
               <span className="truncate">{attach ? <>Using this page: <span className="text-aico-primary">{tab!.title || hostOf(tab!.url)}</span></> : 'Page not shared'}</span>
               <Icon name={attach ? 'x' : 'plus'} size={11} className="shrink-0 opacity-70" />
             </button>
+            {attach && <OpenTabsChip />}
           </div>
         )}
         <div className="flex items-end gap-2">
@@ -451,6 +463,58 @@ function CopilotInput(): React.ReactElement {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * "AICO can see N open tabs": what the header tells the agent about the other
+ * tabs, opened to show the list, with the switch to stop sharing them.
+ */
+function OpenTabsChip(): React.ReactElement | null {
+  const share = useCopilotUi(s => s.shareTabs);
+  const tabKey = useBrowser(s => s.state.tabs.map(t => `${t.id}:${t.url}:${t.loading ? 1 : 0}`).join('|'));
+  const [view, setView] = useState<TabsView | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    // Main summarises a page ~1 s after it loads; ask again a little later so the chip catches up.
+    let live = true;
+    const load = (): void => { void callWithin<TabsView>(800, 'browser:tabs:summary').then(v => { if (live) setView(v ?? null); }); };
+    load();
+    const t = setTimeout(load, 2500);
+    return () => { live = false; clearTimeout(t); };
+  }, [tabKey, open]);
+  const web = (view?.tabs ?? []).filter(t => /^https?:/i.test(t.url));
+  if (web.length < 2) return null;
+  return (
+    <div className="relative">
+      <button className={cls('cp-page-chip', !share && 'cp-detached')} onClick={() => setOpen(o => !o)} aria-expanded={open}
+        title={share ? 'AICO sees a one-line summary of each open tab with each message' : 'Open tabs are not shared'}>
+        <Icon name={share ? 'layers' : 'eye-off'} size={12} />
+        <span className="truncate">{share ? `AICO can see ${web.length} open tabs` : 'Tabs not shared'}</span>
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} className="shrink-0 opacity-70" />
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 z-20 mb-1 w-[300px] rounded-xl border border-aico-border-subtle bg-aico-bg p-2 text-[12px] shadow-lg" role="dialog" aria-label="Open tabs AICO can see">
+          <label className="mb-1.5 flex cursor-pointer items-center gap-2 px-1">
+            <input type="checkbox" className="accent-[var(--aico-accent)]" checked={share} onChange={e => useCopilotUi.setState({ shareTabs: e.target.checked })} />
+            <span>Share open tabs with AICO</span>
+          </label>
+          <div className="max-h-56 space-y-0.5 overflow-y-auto thin-scroll">
+            {web.map(t => (
+              <div key={t.id} className={cls('rounded-lg px-1.5 py-1', !share && 'opacity-50')}>
+                <div className="flex items-center gap-1.5">
+                  <span className="shrink-0 rounded bg-aico-hover px-1 text-[10.5px] text-aico-secondary">{t.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                  {t.facts && <span className="shrink-0 tabular-nums text-aico-secondary">{t.facts}</span>}
+                </div>
+                {t.gist && <div className="truncate text-[11px] text-aico-muted">{t.gist}</div>}
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 px-1 text-[11px] text-aico-muted">A line per tab from what each page says about itself, kept on this device. It is sent only with your messages.</div>
+        </div>
+      )}
     </div>
   );
 }

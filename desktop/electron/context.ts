@@ -35,6 +35,10 @@ export interface DesktopServices {
   browserImport?: import('./browser-import').ImportService;
   /** Browsing intelligence (browser-learn.ts): what was learned, for the agent's browser_profile / tabs tools. */
   browserLearn?: import('./browser-learn').LearnService;
+  /** "Remember what I read" (browser-memory.ts): the agent's browser_memory_search. */
+  browserMemory?: import('./browser-memory').MemoryService;
+  /** One-line summaries of the open tabs (browser-tab-summary.ts). */
+  browserTabs?: import('./browser-tab-summary').TabAwareness;
   /** The floating copilot's view over the page (browser-overlay.ts): kept above tabs as they are attached, and moved with the browser. */
   browserOverlay?: { raise(): void; rehost(): void };
   /** The browser's own window (browser-window.ts): null while the browser is in the AICO window. */

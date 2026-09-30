@@ -132,6 +132,7 @@ function ShieldPanel({ tab, close }: { tab: TabState; close: () => void }): Reac
         </div>
       )}
       {info === null && <div className="px-2 py-2 text-[12px] text-aico-muted">Shield details are not available for this page.</div>}
+      <InjectionGuardRow tab={tab} />
       <div className="mt-1.5 flex items-center gap-1 border-t border-aico-border-subtle px-1 pt-1.5">
         <span className="flex-1 truncate px-1 text-[11px] text-aico-muted" title="Global Privacy Control and Do Not Track are sent to every site">
           {info?.gpc ? 'Sending “Do not sell or share” (GPC)' : ''}
@@ -139,6 +140,33 @@ function ShieldPanel({ tab, close }: { tab: TabState; close: () => void }): Reac
         <button className="btn-ghost btn-sm" onClick={() => { close(); showInternal('insights'); }}><Icon name="chart" size={13} />Insights</button>
         <button className="btn-ghost btn-sm" onClick={() => { close(); showInternal('privacy'); }}><Icon name="settings" size={13} />Settings</button>
       </div>
+    </div>
+  );
+}
+
+/** What the prompt-injection guard found when the agent read this page (shared/injection-guard.ts). */
+function InjectionGuardRow({ tab }: { tab: TabState }): React.ReactElement | null {
+  const [open, setOpen] = useState(false);
+  const g = tab.injectionGuard;
+  if (!g) return null;
+  const alert = g.flagged > 0 || g.snippets.length > 0;
+  return (
+    <div className={cls('mx-1 mt-2 rounded-xl px-3 py-2 text-[12.5px]', alert ? 'bg-aico-warning/10' : 'bg-aico-hover/60')}>
+      <button className="flex w-full items-center gap-2 text-left" onClick={() => setOpen(v => !v)} aria-expanded={open} disabled={!g.snippets.length}>
+        <Icon name={alert ? 'alert' : 'shield-check'} size={14} className={alert ? 'text-aico-warning' : 'text-aico-muted'} />
+        <span className="min-w-0 flex-1">Prompt-injection guard: <span className="tabular-nums">{g.hidden}</span> hidden / <span className="tabular-nums">{g.flagged}</span> flagged on this page</span>
+        {g.snippets.length > 0 && <Icon name={open ? 'chevron-up' : 'chevron-down'} size={13} />}
+      </button>
+      {open && (
+        <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto thin-scroll">
+          {g.snippets.map((sn, i) => (
+            <div key={i} className="rounded-lg border border-aico-border-subtle px-2 py-1 text-[11.5px] text-aico-secondary selectable">
+              <span className="mr-1 text-[10.5px] uppercase tracking-wide text-aico-muted">{sn.hidden ? 'hidden' : 'flagged'}</span>{sn.text}
+            </div>
+          ))}
+          <div className="text-[11px] text-aico-muted">The agent was told to treat this text as data, never as instructions.</div>
+        </div>
+      )}
     </div>
   );
 }

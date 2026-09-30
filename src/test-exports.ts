@@ -303,6 +303,10 @@ export { readDecisions, countDecisions, seedDecisions, appendDecision, decisions
 export { recommendedAgentModels, unsetCheapRoles, CHEAP_ROLES } from './agents/economy.js';
 export { CHEAP_MODELS, familyOfModel } from '../shared/models.js';
 export { suggestKnowledge } from '../shared/knowledge-suggest.js';
+export {
+  guardPageText, scanInstructions, scorePassage, isInstructionLike, stripHiddenHtml, stripInvisibleUnicode, inlineConcealment, guardNotice,
+  FLAG_THRESHOLD, UNTRUSTED_OPEN, UNTRUSTED_CLOSE,
+} from '../shared/injection-guard.js';
 export { exportSkill } from './skills/import.js';
 export { listDirectory } from './tools/ls.js';
 export { globFiles } from './tools/glob.js';

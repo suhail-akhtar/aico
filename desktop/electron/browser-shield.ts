@@ -104,6 +104,8 @@ export interface ShieldSettings {
     list: boolean;
     /** Open the copilot with an analysis when a page is flagged. */
     autoCheck: boolean;
+    /** Prompt-injection guard: drop hidden text and flag instruction-like text in what the agent reads (shared/injection-guard.ts). */
+    injectionGuard: boolean;
   };
   /** Let sites ask to show notifications (off: such requests are refused silently). */
   notificationsAsk: boolean;
@@ -118,7 +120,7 @@ export interface ShieldSettings {
 
 export const DEFAULT_SHIELD: ShieldSettings = {
   cookies3p: true, httpsFirst: true, gpc: true,
-  protection: { heuristics: true, list: true, autoCheck: true },
+  protection: { heuristics: true, list: true, autoCheck: true, injectionGuard: true },
   notificationsAsk: false, insights: true,
   clearOnExit: { cookies: false, cache: false, history: false, insights: false },
   sites: {}, httpsExceptions: [],
@@ -142,7 +144,7 @@ export function normaliseShield(raw: unknown): ShieldSettings {
   }
   return {
     cookies3p: bool(r.cookies3p, d.cookies3p), httpsFirst: bool(r.httpsFirst, d.httpsFirst), gpc: bool(r.gpc, d.gpc),
-    protection: { heuristics: bool(p.heuristics, true), list: bool(p.list, true), autoCheck: bool(p.autoCheck, true) },
+    protection: { heuristics: bool(p.heuristics, true), list: bool(p.list, true), autoCheck: bool(p.autoCheck, true), injectionGuard: bool(p.injectionGuard, true) },
     notificationsAsk: bool(r.notificationsAsk, false), insights: bool(r.insights, true),
     clearOnExit: { cookies: bool(c.cookies, false), cache: bool(c.cache, false), history: bool(c.history, false), insights: bool(c.insights, false) },
     sites,

@@ -79,6 +79,124 @@ export function aicoPage(op, args, envIn) {
   };
   const isOverlay = (el) => isEl(el) && el.hasAttribute && el.hasAttribute('data-aico-overlay');
 
+  // ── Prompt-injection guard: text a person cannot see ──
+  // A page can hide instructions for the agent in text no person sees (white on
+  // white, opacity 0, a 1px font, off-screen, clipped to nothing). read and
+  // snapshot drop it and count it; main decides what to tell the model
+  // (shared/injection-guard.ts). A. guard === false (the setting is off) keeps
+  // the old behaviour. Unit tests have no layout, so there the rules read the
+  // inline style attribute (with inheritance done by hand).
+  const guardOn = A.guard !== false;
+  const concealed = { count: 0, tricks: 0, samples: [] };
+  const noted = new Set();
+  const SUSPECT = /ignore|instruction|assistant|\bai\b|prompt|system|exfil|http|you are|do not tell|llm|model|agent|\[inst|<\||summar|secret|password|token|cookie/i;
+  const noteConcealed = (el, reason, text) => {
+    if (!guardOn || noted.has(el)) return;
+    noted.add(el);
+    const t = clean(text);
+    if (t.length < 3) return;
+    concealed.count++;
+    if (reason !== 'display') concealed.tricks++;
+    const keep = SUSPECT.test(t) ? 60 : 20;
+    if (concealed.samples.length < keep) concealed.samples.push({ reason, text: t.slice(0, 500) });
+  };
+  const inlineStyle = (el) => {
+    const out = {};
+    const s = attr(el, 'style') || '';
+    for (const d of s.split(';')) { const i = d.indexOf(':'); if (i > 0) out[lower(d.slice(0, i).trim())] = lower(d.slice(i + 1).replace(/!important/i, '').trim()); }
+    return out;
+  };
+  const toPx = (v) => {
+    const m = /^\s*(-?[\d.]+)\s*(px|pt|em|rem|%)?/.exec(String(v == null ? '' : v));
+    if (!m) return null;
+    const n = Number(m[1]); const u = m[2] || 'px';
+    return u === 'pt' ? n * 4 / 3 : (u === 'em' || u === 'rem') ? n * 16 : u === '%' ? n * 0.16 : n;
+  };
+  const NAMED = { white: [255, 255, 255, 1], black: [0, 0, 0, 1], transparent: [0, 0, 0, 0] };
+  const colour = (c) => {
+    const v = lower(c).replace(/\s+/g, '');
+    if (!v) return null;
+    if (NAMED[v]) return NAMED[v];
+    let m = /^rgba?\((\d+(?:\.\d+)?),(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)(?:[,/]([\d.]+%?))?\)$/.exec(v);
+    if (m) { let a = m[4] === undefined ? 1 : m[4].endsWith('%') ? Number(m[4].slice(0, -1)) / 100 : Number(m[4]); return [Number(m[1]), Number(m[2]), Number(m[3]), a]; }
+    m = /^#([0-9a-f]{3,8})$/.exec(v);
+    if (m) {
+      let h = m[1];
+      if (h.length <= 4) h = h.split('').map(x => x + x).join('');
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), h.length >= 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1];
+    }
+    return null;
+  };
+  const parentOf = (n) => (n && (n.parentNode && n.parentNode.nodeType === 1 ? n.parentNode : (n.parentNode && n.parentNode.host) || null));
+  /** An inherited property: computed in a page, looked up the inline-style chain in the tests. */
+  const inherited = (el, css, prop) => {
+    if (real) { const s = styleOf(el); return s ? s[prop] : ''; }
+    for (let a = el, i = 0; a && isEl(a) && i < 40; a = parentOf(a), i++) { const v = inlineStyle(a)[css]; if (v) return v; }
+    return '';
+  };
+  /** The solid colour behind an element, or null when it cannot be known (an image, a translucent layer). */
+  const backdrop = (el) => {
+    for (let a = el, i = 0; a && isEl(a) && i < 40; a = parentOf(a), i++) {
+      let img = ''; let bg = '';
+      if (real) { const s = styleOf(a); if (!s) return null; img = s.backgroundImage; bg = s.backgroundColor; }
+      else { const s = inlineStyle(a); bg = s['background-color'] || (/^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|[a-z]+)$/.test(s.background || '') ? s.background : ''); img = /url\(|gradient/.test(s['background-image'] || s.background || '') ? 'x' : ''; }
+      if (img && img !== 'none') return null;
+      const c = colour(bg);
+      if (c && c[3] >= 0.9) return c;
+      if (c && c[3] > 0.1) return null;
+    }
+    return [255, 255, 255, 1];
+  };
+  /** Why this element and everything in it cannot be seen ('' when it can). */
+  const concealBox = (el) => {
+    if (!guardOn || !isEl(el)) return '';
+    if (real) {
+      const s = styleOf(el);
+      if (!s) return '';
+      if (Number(s.opacity) <= 0.05) return 'transparent';
+      if (/rect\(0px,?\s*0px,?\s*0px,?\s*0px\)/.test(s.clip || '') || /inset\((50|100)%\)|circle\(0/.test(s.clipPath || '')) return 'clipped';
+      if (s.display === 'contents' || !el.getBoundingClientRect) return '';
+      const r = el.getBoundingClientRect();
+      const ov = (s.overflow || '') + ' ' + (s.overflowX || '') + ' ' + (s.overflowY || '');
+      if ((r.width <= 1 || r.height <= 1) && /hidden|clip/.test(ov)) return 'clipped';
+      const sx = win.scrollX || 0; const sy = win.scrollY || 0;
+      const dw = Math.max((doc.documentElement && doc.documentElement.scrollWidth) || 0, win.innerWidth || 0);
+      if ((s.position === 'absolute' || s.position === 'fixed') && (r.right + sx <= 0 || r.bottom + sy <= 0 || r.left + sx >= dw + 50)) return 'off-screen';
+      if (attr(el, 'aria-hidden') === 'true' && (r.width < 2 || r.height < 2)) return 'aria-hidden';
+      return '';
+    }
+    const s = inlineStyle(el);
+    const op = toPx(s.opacity);
+    if (op !== null && op <= 0.05) return 'transparent';
+    if ((s.position === 'absolute' || s.position === 'fixed') && ['left', 'top', 'right', 'bottom'].some(k => { const n = toPx(s[k]); return n !== null && n <= -500; })) return 'off-screen';
+    if (/rect\(\s*0(px)?[\s,]+0(px)?[\s,]+0(px)?[\s,]+0(px)?\s*\)/.test(s.clip || '') || /inset\((50|100)%\)|circle\(0/.test(s['clip-path'] || '')) return 'clipped';
+    const w = toPx(s.width); const h = toPx(s.height);
+    if (((w !== null && w <= 1) || (h !== null && h <= 1)) && /hidden|clip/.test(s.overflow || '')) return 'clipped';
+    return '';
+  };
+  /** Why this element's own text cannot be read (tiny, pushed away, or the colour of what is behind it). */
+  const concealText = (el) => {
+    if (!guardOn || !isEl(el)) return '';
+    const fs = toPx(inherited(el, 'font-size', 'fontSize'));
+    if (fs !== null && fs <= 1.5) return 'tiny-font';
+    const ti = toPx(real ? (styleOf(el) || {}).textIndent : inlineStyle(el)['text-indent']);
+    if (ti !== null && ti <= -500) return 'off-screen';
+    const fg = colour(inherited(el, 'color', 'color'));
+    if (!fg) return '';
+    if (fg[3] <= 0.05) return 'same-colour';
+    const bg = backdrop(el);
+    if (bg && Math.abs(fg[0] - bg[0]) + Math.abs(fg[1] - bg[1]) + Math.abs(fg[2] - bg[2]) <= 24) return 'same-colour';
+    return '';
+  };
+  const ownTextOf = (el) => Array.from(el.childNodes || []).filter(n => n.nodeType === 3).map(n => n.nodeValue).join(' ');
+  /** Any reason text inside `el` would be invisible, looking up its ancestors (for find). */
+  const hiddenDeep = (el) => {
+    if (!guardOn) return false;
+    if (concealText(el)) return true;
+    for (let a = el, i = 0; a && isEl(a) && i < 40; a = parentOf(a), i++) if (!rendered(a) || concealBox(a)) return true;
+    return false;
+  };
+
   /** Children as rendered: a shadow root's tree (with slots filled) instead of the light DOM. */
   const kids = (n) => {
     if (isEl(n) && n.shadowRoot) return Array.from(n.shadowRoot.childNodes || []);
@@ -334,15 +452,44 @@ export function aicoPage(op, args, envIn) {
     }
     const heads = allElements(docRoot()).filter(h => /^H[1-3]$/.test(tag(h)) && visible(h)).slice(0, 20).map(h => lower(tag(h)) + ': ' + clip(textOf(h), 100));
     const main = (doc.querySelector && (doc.querySelector('main') || doc.querySelector('[role=main]'))) || doc.body;
-    const text = main ? textOf(main).replace(/\n{3,}/g, '\n\n').trim() : '';
+    const text = main ? (guardOn ? seenText(main) : textOf(main)).replace(/\n{3,}/g, '\n\n').trim() : '';
     const dialogs = allElements(docRoot()).filter(d => (matches(d, 'dialog[open]') || ['dialog', 'alertdialog'].includes(attr(d, 'role') || '')) && visible(d)).map(d => clip(attr(d, 'aria-label') || textOf(d), 160));
     const limit = full ? 12000 : 3500;
     return {
       title: doc.title || '', url: pageUrl(),
       scroll: real ? { y: Math.round(win.scrollY), height: doc.documentElement.scrollHeight, viewport: win.innerHeight } : { y: 0, height: 0, viewport: 0 },
       headings: heads, elements, total, crossOriginFrames: frames.slice(0, 10), dialogs,
-      text: text.slice(0, limit), truncated: text.length > limit,
+      text: text.slice(0, limit), truncated: text.length > limit, concealed,
     };
+  };
+
+  /** innerText without what a person cannot see (the guard's version of the snapshot text). */
+  const seenText = (root) => {
+    const parts = [];
+    visited = 0;
+    const LINE =/^(P|DIV|SECTION|ARTICLE|MAIN|HEADER|FOOTER|ASIDE|NAV|FORM|FIELDSET|FIGURE|FIGCAPTION|ADDRESS|DETAILS|SUMMARY|LI|UL|OL|DL|DT|DD|TR|TABLE|PRE|BLOCKQUOTE|H[1-6]|HR|BR|DIALOG)$/;
+    const walk = (n) => {
+      if (++visited > MAX_NODES) return;
+      if (n.nodeType === 3) {
+        const p = n.parentNode;
+        if (isEl(p) && clean(n.nodeValue)) { const why = concealText(p); if (why) { noteConcealed(p, why, ownTextOf(p)); return; } }
+        parts.push(n.nodeValue || '');
+        return;
+      }
+      if (n.nodeType === 11 || n.nodeType === 9) { kids(n).forEach(walk); return; }
+      if (!isEl(n)) return;
+      const t = tag(n);
+      if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'HEAD', 'META', 'LINK', 'IFRAME', 'FRAME', 'OBJECT', 'EMBED', 'SVG'].includes(t) || isOverlay(n)) return;
+      if (!rendered(n)) { noteConcealed(n, 'display', n.textContent); return; }
+      const why = concealBox(n);
+      if (why) { noteConcealed(n, why, n.textContent); return; }
+      const line = LINE.test(t);
+      if (line) parts.push('\n');
+      kids(n).forEach(walk);
+      if (line) parts.push('\n'); else if (t === 'TD' || t === 'TH') parts.push('\t');
+    };
+    walk(root);
+    return parts.join('').replace(/[ \t ]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   };
 
   // ── Locate (and highlight) ──
@@ -484,6 +631,8 @@ export function aicoPage(op, args, envIn) {
       if (++visited > MAX_NODES) return '';
       if (n.nodeType === 3) {
         const v = n.nodeValue || '';
+        const par = n.parentNode;
+        if (guardOn && isEl(par) && clean(v)) { const why = concealText(par); if (why) { noteConcealed(par, why, ownTextOf(par)); return ''; } }
         if (st.pre) return v;
         const t = v.replace(/\s+/g, ' ');
         if (clean(t)) words += clean(t).split(' ').length;
@@ -493,7 +642,9 @@ export function aicoPage(op, args, envIn) {
       if (!isEl(n)) return '';
       const t = tag(n);
       if (SKIP.has(t) || isOverlay(n)) return '';
-      if (!rendered(n)) return '';
+      if (!rendered(n)) { noteConcealed(n, 'display', n.textContent); return ''; }
+      const why = concealBox(n);
+      if (why) { noteConcealed(n, why, n.textContent); return ''; }
       if (reader && n !== root) {
         if (['NAV', 'ASIDE', 'FOOTER', 'FORM'].includes(t)) return '';
         const ci = classId(n);
@@ -662,7 +813,7 @@ export function aicoPage(op, args, envIn) {
     const max = Math.max(500, Math.min(Number(A.maxChars) || 20000, 200000));
     const truncated = md.length > max;
     if (truncated) md = md.slice(0, max).replace(/\n[^\n]*$/, '') + '\n\n…(truncated — call again with a larger maxChars, or use browser_extract / browser_find for the part you need)';
-    return { url, title: pageTitle || title, byline: bylineOf() || undefined, markdown: md, words: r.words, headings: r.headings, links: r.links, images: r.images, truncated };
+    return { url, title: pageTitle || title, byline: bylineOf() || undefined, markdown: md, words: r.words, headings: r.headings, links: r.links, images: r.images, truncated, concealed };
   };
 
   // ── Forms ──
@@ -941,6 +1092,7 @@ export function aicoPage(op, args, envIn) {
         const v = n.nodeValue || '';
         const low = lower(v.replace(/\s+/g, ' '));
         let i = low.indexOf(want);
+        if (i >= 0 && hiddenDeep(el)) continue;
         while (i >= 0) {
           count++;
           if (out.length < limit) {

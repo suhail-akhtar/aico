@@ -26,12 +26,14 @@ export interface CopilotUi {
   dockWidth: number;
   /** Send the page header with each message. */
   attachPage: boolean;
+  /** Include the one-line summary of every open tab in that header ("AICO can see N open tabs"). */
+  shareTabs: boolean;
   /** Text to put in the copilot's input (a quick start), stamped so the same text twice still arrives. */
   prefill: { text: string; at: number } | null;
 }
 
 const KEY = 'aico.browser.copilot.ui';
-const DEFAULTS: CopilotUi = { open: false, minimized: false, mode: 'dock', x: -1, y: 16, w: 400, h: 560, dockWidth: 400, attachPage: true, prefill: null };
+const DEFAULTS: CopilotUi = { open: false, minimized: false, mode: 'dock', x: -1, y: 16, w: 400, h: 560, dockWidth: 400, attachPage: true, shareTabs: true, prefill: null };
 
 function load(): CopilotUi {
   try {

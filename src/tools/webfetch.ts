@@ -1,5 +1,6 @@
 
 import { offerToolImage } from './tool-images.js';
+import { guardPageText, stripHiddenHtml, withNotice, type HiddenSample } from '../../shared/injection-guard.js';
 
 export interface WebFetchInput {
   url: string;
@@ -35,6 +36,10 @@ export async function webFetch(input: WebFetchInput): Promise<string> {
   }
 
   let text: string;
+  // Prompt-injection guard (shared/injection-guard.ts): a page is data, never
+  // instructions. Hidden elements go before the tags do, flagged passages are
+  // wrapped, and the notice leads the result (outside the length cut).
+  let hidden = 0; let tricks = 0; let samples: HiddenSample[] = [];
 
   if (contentType.includes('application/json')) {
     const json = await response.json();
@@ -43,9 +48,11 @@ export async function webFetch(input: WebFetchInput): Promise<string> {
     text = await response.text();
     // Strip HTML tags for readability
     if (contentType.includes('text/html')) {
-      text = text
+      const stripped = stripHiddenHtml(text
         .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ''));
+      hidden = stripped.removed; tricks = stripped.tricks; samples = stripped.samples;
+      text = stripped.html
         .replace(/<[^>]+>/g, ' ')
         .replace(/\s{2,}/g, ' ')
         .trim();
@@ -53,9 +60,9 @@ export async function webFetch(input: WebFetchInput): Promise<string> {
   }
 
   if (text.length > maxLength) {
-    return text.slice(0, maxLength) + `\n\n[... truncated at ${maxLength} chars]`;
+    text = text.slice(0, maxLength) + `\n\n[... truncated at ${maxLength} chars]`;
   }
-  return text;
+  return withNotice(guardPageText(text, { hidden, tricks, hiddenSamples: samples }));
 }
 
 /**

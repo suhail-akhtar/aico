@@ -77,6 +77,8 @@ export interface Privacy {
   /** Refuse a notification prompt without asking (the default). */
   quietNotifications(tabId: string): boolean;
   flagged(tabId: string | undefined): boolean;
+  /** The prompt-injection guard setting (on by default). */
+  injectionGuard(): boolean;
   noteDownload(): void;
   clearInsights(sinceMs?: number): void;
   flush(): void;
@@ -578,6 +580,7 @@ export function createPrivacy(ctx: DesktopContext, hooks: PrivacyHooks): Privacy
       return true;
     },
     flagged: (tabId) => Boolean(tabOf(tabId)?.threat),
+    injectionGuard: () => s().protection.injectionGuard,
     noteDownload() { if (s().insights) { recordCount(insights.get(), Date.now(), 'downloads'); insights.set(insights.get()); } },
     clearInsights(sinceMs) { insights.set(clearInsights(insights.get(), sinceMs)); insights.flush(); },
     flush() { insights.flush(); settings.flush(); listMeta.flush(); },

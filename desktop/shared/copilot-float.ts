@@ -68,9 +68,9 @@ export function overlayLayout(area: Rect, box: FloatBox, zoom = 1): { bounds: Re
 }
 
 /** The copilot's remembered look, as both windows persist it (localStorage). */
-export interface SyncedUi { open: boolean; minimized: boolean; mode: 'dock' | 'float'; x: number; y: number; w: number; h: number; dockWidth: number; attachPage: boolean }
+export interface SyncedUi { open: boolean; minimized: boolean; mode: 'dock' | 'float'; x: number; y: number; w: number; h: number; dockWidth: number; attachPage: boolean; shareTabs: boolean }
 
-const SYNCED: Array<keyof SyncedUi> = ['open', 'minimized', 'mode', 'x', 'y', 'w', 'h', 'dockWidth', 'attachPage'];
+const SYNCED: Array<keyof SyncedUi> = ['open', 'minimized', 'mode', 'x', 'y', 'w', 'h', 'dockWidth', 'attachPage', 'shareTabs'];
 
 /**
  * What another window wrote to the shared copilot record, as a patch for this

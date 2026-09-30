@@ -2,7 +2,8 @@
  * Privacy & security — the browser's settings page: Shields defaults,
  * protected browsing (and whether AICO checks flagged pages by itself),
  * notification prompts, every site's remembered permissions with a reset, the
- * per-site shield exceptions, insights, and what to clear when AICO closes.
+ * per-site shield exceptions, "Remember what I read" (MemorySearch.tsx),
+ * insights, and what to clear when AICO closes.
  *
  * @module desktop/renderer/browser/PrivacyPage
  */
@@ -18,6 +19,7 @@ import { showInternal } from './store';
 import { ChromePage } from './Insights';
 import { Toggle } from './Shields';
 import { clearBrowsingData } from './Toolbar';
+import { MemorySettings } from './MemorySearch';
 
 const PERMS: Array<[string, string, string]> = [
   ['camera', 'Camera', 'camera'], ['microphone', 'Microphone', 'mic'], ['camera-microphone', 'Camera and microphone', 'camera'],
@@ -61,6 +63,8 @@ export function PrivacyPage(): React.ReactElement {
               hint={`${s.list.source}; downloaded at most once a day — only the list, nothing about you. Free for non-commercial use.${s.protection.list ? ` ${s.list.hosts ? `${s.list.hosts.toLocaleString()} hosts` : 'Not downloaded yet'}${s.list.updatedAt ? `, updated ${new Date(s.list.updatedAt).toLocaleString()}` : ''}${s.list.error ? ` (last attempt failed: ${s.list.error})` : ''}.` : ''}`} />
             <Toggle label="Let AICO check suspicious pages automatically" hint="When a page is flagged, the copilot opens and explains why. It only looks — it never clicks, types or submits on a flagged page." on={s.protection.autoCheck}
               set={on => global({ protection: { ...s.protection, autoCheck: on } })} />
+            <Toggle label="Guard the agent against prompt injection" hint="When AICO reads a page for you, text you cannot see (hidden, white on white, tiny, off-screen) is left out, and text that tries to give the AI instructions is marked as untrusted. Shields shows what was found." on={s.protection.injectionGuard}
+              set={on => global({ protection: { ...s.protection, injectionGuard: on } })} />
           </Section>
 
           <Section title="Site permissions" hint="What sites have been allowed or refused. A site not listed asks first.">
@@ -109,6 +113,8 @@ export function PrivacyPage(): React.ReactElement {
               </div>
             ))}
           </Section>
+
+          <MemorySettings />
 
           <Section title="Insights" hint="Time on sites, visits and what was blocked — kept on this device only.">
             <Toggle label="Record browsing insights" on={s.insights} set={on => global({ insights: on })} />
