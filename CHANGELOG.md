@@ -3,6 +3,15 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.30.1 — 2026-09-30
+
+### Fixed
+
+- Attaching a file over about 6 MB failed with "request body too large": uploads
+  travel as base64 inside JSON (a third larger than the file) and every request
+  was capped at 8 MB. The upload route now has its own limit, and files up to
+  **25 MB** each (100 MB per chat) are accepted.
+
 ## 0.30.0 — 2026-09-30
 
 AICO Docs: documents the agent outlines and writes section by section while you

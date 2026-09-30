@@ -472,7 +472,7 @@ assert(await resolveFileAttachment('nope.xyz', process.cwd()) === null, 'Missing
 
 // Size guard
 const bigF = path.resolve('./test-big.tmp');
-fs.writeFileSync(bigF, Buffer.alloc(11 * 1024 * 1024));
+fs.writeFileSync(bigF, Buffer.alloc(26 * 1024 * 1024));
 try { await resolveFileAttachment(bigF, process.cwd()); assert(false, 'should throw'); }
 catch (e) { assert(e.message.includes('too large'), 'Big file blocked'); }
 finally { fs.unlinkSync(bigF); }

@@ -6,8 +6,8 @@ import type { AicoSettings } from '../settings.js';
 import { ensureWorkspace, getWorkspaceInfo } from '../workspace.js';
 import { imageDimensions, describeOversize } from './image-dimensions.js';
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_SESSION_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_SESSION_BYTES = 100 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
 
 /**
@@ -139,7 +139,7 @@ export async function storeAttachment(input: {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64) || input.base64.length % 4 !== 0) throw new Error('attachment data is not valid base64');
   const bytes = Buffer.from(input.base64, 'base64');
   if (bytes.length === 0) throw new Error('attachment is empty');
-  if (bytes.length > MAX_FILE_BYTES) throw new Error('attachment exceeds the 10 MB file limit');
+  if (bytes.length > MAX_FILE_BYTES) throw new Error('attachment exceeds the 25 MB file limit');
   validateContent(ext, bytes);
   await ensureWorkspace({ settings: input.settings, cwd: input.cwd, sessionId: input.sessionId });
   const dir = directory(input.settings, input.cwd, input.sessionId);
@@ -151,7 +151,7 @@ export async function storeAttachment(input: {
     if (same.reduce((sum, item) => sum + item.bytes, 0) + bytes.length > MAX_TOOL_BYTES) throw new Error('the session store for tool-produced images (200 MB) is full');
   } else {
     if (same.length >= MAX_ATTACHMENTS) throw new Error('session attachment limit (20 files) reached');
-    if (same.reduce((sum, item) => sum + item.bytes, 0) + bytes.length > MAX_SESSION_BYTES) throw new Error('session attachment limit (50 MB) exceeded');
+    if (same.reduce((sum, item) => sum + item.bytes, 0) + bytes.length > MAX_SESSION_BYTES) throw new Error('session attachment limit (100 MB) exceeded');
   }
   const id = crypto.randomUUID();
   const file = `${id}${ext}`;

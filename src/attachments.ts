@@ -79,8 +79,8 @@ export function parseAttachTokens(prompt: string): { prompt: string; paths: stri
  *   3. Text / code file   → { type: "file",  path }       (SDK reads directly)
  *   4. Unknown extension  → { type: "file",  path }       (SDK best-effort)
  */
-/** Max attachment file size: 10MB */
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+/** Max attachment file size: 25MB (the same as the server's upload limit). */
+const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
 
 /** Check if a file is likely binary by reading first 8KB and looking for null bytes */
 async function isBinaryFile(filePath: string): Promise<boolean> {

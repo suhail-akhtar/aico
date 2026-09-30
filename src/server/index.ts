@@ -1133,7 +1133,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     // Settings, provider onboarding, and system state. Consulted before the
     // POST guard because several of these are reads.
-    const systemBody = req.method === 'POST' ? await readJson(req) : {};
+    const systemBody = req.method === 'POST' ? await readJson(req, route === 'attachments/upload' ? UPLOAD_BODY_MAX : undefined) : {};
     const handled = await handleSystemRoute(route, req.method ?? 'GET', systemBody as Record<string, unknown>, url.searchParams);
     if (handled) {
       // A settings write can turn the Mini Apps host on, off, or move it. Doing
@@ -1803,9 +1803,15 @@ function send(res: http.ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-/** Read a JSON body, capped so a malformed client cannot exhaust memory. */
-async function readJson(req: http.IncomingMessage): Promise<unknown> {
-  const MAX = 8 * 1024 * 1024;
+/**
+ * Read a JSON body, capped so a malformed client cannot exhaust memory.
+ *
+ * Uploads arrive as base64 inside JSON — a third larger than the file — so the
+ * attachment route gets room for the largest file `attachments.ts` accepts.
+ */
+const UPLOAD_BODY_MAX = 36 * 1024 * 1024;
+async function readJson(req: http.IncomingMessage, max = 8 * 1024 * 1024): Promise<unknown> {
+  const MAX = max;
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
