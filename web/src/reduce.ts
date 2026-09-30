@@ -12,7 +12,7 @@
  * @module reduce
  */
 
-import type { ChatMessage } from '@aico/ui';
+import type { ChatMessage, MessageAttachment } from '@aico/ui';
 
 /** Sentinel key for the optimistic user echo. Sorts after any real seq. */
 export const PENDING_KEY = Number.MAX_SAFE_INTEGER;
@@ -32,6 +32,7 @@ export function applyLogEvent(
   seq: number,
   data: Record<string, unknown>,
   now = Date.now(),
+  sessionId?: string,
 ): Map<number, ChatMessage> {
   const type = String(data.type ?? '');
   // Carried onto the messages that can be branched from. Only the conversation
@@ -81,10 +82,14 @@ export function applyLogEvent(
         return next;
       }
 
+      const attachments = attachmentsOf(data, sessionId);
       next.set(seq, {
         id: `seq-${seq}`,
         type: 'user',
-        content,
+        // The file list written for the model is not something the person
+        // typed; the bubble shows the files themselves instead.
+        content: attachments.length ? stripAttachmentManifest(content) : content,
+        ...(attachments.length ? { attachments } : {}),
         ...turn,
         timestamp: now,
       });
@@ -357,10 +362,47 @@ export function withPending(
   logged: Map<number, ChatMessage>,
   content: string,
   now = Date.now(),
+  attachments?: MessageAttachment[],
 ): Map<number, ChatMessage> {
   const next = new Map(logged);
-  next.set(PENDING_KEY, { id: 'pending-user', type: 'user', content, timestamp: now });
+  next.set(PENDING_KEY, {
+    id: 'pending-user', type: 'user', content, timestamp: now,
+    ...(attachments?.length ? { attachments } : {}),
+  });
   return next;
+}
+
+/** The line the engine starts its file list with (src/server/attachments.ts). */
+const MANIFEST_INTRO = '\n\nThe user attached these files.';
+
+/** The message as the person typed it, without the file list appended for the model. */
+export function stripAttachmentManifest(content: string): string {
+  const at = content.indexOf(MANIFEST_INTRO);
+  return at >= 0 ? content.slice(0, at) : content;
+}
+
+/** Where the engine serves an attachment of this session. */
+export function attachmentUrl(sessionId: string, id: string): string {
+  return `/api/attachments/file?session=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(id)}`;
+}
+
+/**
+ * What a user message carried: the recorded `attachments`, or — for logs
+ * written before those were recorded — the pictures in `images`.
+ */
+export function attachmentsOf(data: Record<string, unknown>, sessionId?: string): MessageAttachment[] {
+  const recorded = Array.isArray(data.attachments) ? data.attachments as Array<Record<string, unknown>> : null;
+  const images = Array.isArray(data.images) ? data.images as Array<Record<string, unknown>> : [];
+  const raw: MessageAttachment[] = recorded
+    ? recorded.map(a => ({
+      id: String(a.id ?? ''), name: String(a.name ?? 'file'), mimeType: String(a.mimeType ?? ''),
+      bytes: Number(a.bytes ?? 0), kind: a.kind === 'image' ? 'image' as const : 'file' as const,
+    }))
+    : images.map(i => ({
+      id: String(i.id ?? ''), name: String(i.name ?? 'image'), mimeType: String(i.mediaType ?? 'image/png'),
+      bytes: 0, kind: 'image' as const,
+    }));
+  return raw.filter(a => a.id).map(a => (sessionId ? { ...a, url: attachmentUrl(sessionId, a.id) } : a));
 }
 
 export function dropPending(logged: Map<number, ChatMessage>): Map<number, ChatMessage> {

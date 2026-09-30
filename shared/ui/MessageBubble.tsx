@@ -15,6 +15,7 @@
  * @module shared/ui/MessageBubble
  */
 
+import { AttachmentStrip } from './AttachmentStrip';
 import React from 'react';
 import type { ChatMessage } from './types';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -75,8 +76,9 @@ export const MessageBubble = React.memo(function MessageBubble({
 
   if (message.type === 'user') {
     return (
-      <div className="my-6 flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-aico-elevated px-4 py-2.5 selectable">
+      <div className="my-6 flex flex-col items-end">
+        {message.attachments?.length ? <AttachmentStrip attachments={message.attachments} /> : null}
+        {message.content.trim() !== '' && <div className="max-w-[85%] rounded-2xl rounded-br-md bg-aico-elevated px-4 py-2.5 selectable">
           {/*
             The correlation marker a repair request carries is plumbing, not
             something the reader wrote or should have to look at. Stripped here
@@ -87,7 +89,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           <p className="whitespace-pre-wrap break-words text-[15px] leading-[26px] text-aico-primary">
             {stripFixMarker(message.content)}
           </p>
-        </div>
+        </div>}
       </div>
     );
   }

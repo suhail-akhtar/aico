@@ -15,6 +15,7 @@ import { setBashProgressSink } from '../tools/bash.js';
 import { setOpsProgressSink, STREAMING_OPS_TOOLS } from '../tools/ops/index.js';
 import { createTokenTracker } from '../tokens.js';
 import { getContextWindow, resolveWindow } from '../context-window.js';
+import { getModelCapabilities } from '../model-capabilities.js';
 import { openSession } from '../session/open.js';
 import { loadSettings } from '../settings.js';
 import { instructionsFor } from './projects.js';
@@ -31,6 +32,7 @@ import {
 import { personaFor, resolveAgent } from '../agents/resolve.js';
 import { activeProviderType } from '../providers/instances.js';
 import type { ImageRef } from '../providers/types.js';
+import type { UserAttachment } from '../session/events.js';
 import { readFile } from 'fs/promises';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
@@ -396,6 +398,8 @@ export class RunManager {
       hostTools?: readonly string[];
       /** Images the reader attached to this turn, by attachment id. */
       images?: ImageRef[];
+      /** Everything the reader attached, for showing it on their message. */
+      attachments?: UserAttachment[];
     } = {},
   ): Promise<string> {
     const run = await this.ensure(sessionId, cwd);
@@ -649,6 +653,21 @@ export class RunManager {
       // What the meter was drawn against when the turn began, so a window
       // that grows from use is announced once, not on every token event.
       let windowAtStart = getContextWindow(model, settings);
+      /*
+        A picture for a model nothing has vouched for. Unknown means text-only
+        on purpose, so without this the picture is withheld and the reader, who
+        knows their model sees, is told it cannot. One tiny probe settles it and
+        is remembered; bounded so a slow endpoint cannot hold the turn.
+      */
+      const probeModel = model ?? agent.model;
+      if (opts.images?.length && probeModel && getModelCapabilities(probeModel, settings).source === 'assumed') {
+        emit('notice', { text: `Checking once whether ${probeModel} can read images…` });
+        const { probeModelImageInput } = await import('../providers/capability-probe.js');
+        await Promise.race([
+          probeModelImageInput({ settings, model: probeModel }).catch(() => undefined),
+          new Promise(resolve => setTimeout(resolve, 30_000)),
+        ]);
+      }
       const appStateTail = await appStateSection(run.session, settings, run.cwd);
       const boundAppOpt = await boundApp(run.session, settings, run.cwd);
       const result = await runAgent({
@@ -660,6 +679,7 @@ export class RunManager {
         // resolver below. Whether they are fetched at all is a question about
         // the model, answered inside the run where the model is known.
         ...(opts.images?.length ? { images: opts.images } : {}),
+        ...(opts.attachments?.length ? { shownAttachments: opts.attachments } : {}),
         resolveImages: async (refs) => {
           const { resolveAttachment } = await import('./attachments.js');
           return Promise.all(refs.map(async (ref) => {

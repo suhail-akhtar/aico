@@ -20,6 +20,7 @@
  */
 
 import type { AicoMessage, ImageRef, ReasoningTrace, ToolCall } from '../providers/types.js';
+import type { UserAttachment } from './events.js';
 import type { MessageSource, RequestHeader, TurnEndReason, Usage } from './events.js';
 import type { Session } from './session.js';
 
@@ -34,7 +35,7 @@ export interface Transcript {
    *   reminder, a completion-gate nudge) must declare its plugin so a UI does
    *   not render it as something the user typed.
    */
-  recordUserMessage(content: string, source?: MessageSource, images?: ImageRef[]): void;
+  recordUserMessage(content: string, source?: MessageSource, images?: ImageRef[], attachments?: UserAttachment[]): void;
 
   /** Open a turn. Returns its number. */
   beginTurn(): number;
@@ -120,12 +121,14 @@ export class SessionTranscript implements Transcript {
     content: string,
     source: MessageSource = { kind: 'human' },
     images?: ImageRef[],
+    attachments?: UserAttachment[],
   ): void {
     this.session.append('user/message', {
       turn: this.turn,
       content,
       source,
       ...images?.length ? { images } : {},
+      ...attachments?.length ? { attachments } : {},
     }, { surfaceOp: { op: 'append' } });
   }
 

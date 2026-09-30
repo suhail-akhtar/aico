@@ -58,7 +58,7 @@ import {
 let appsHandle: ReturnType<typeof streamApps> | null = null;
 let appsRefs = 0;
 import {
-  applyLogEvent, withPending, dropPending, emptyDraft,
+  applyLogEvent, withPending, dropPending, emptyDraft, attachmentUrl,
   type Draft, type ReasoningBurst,
 } from './reduce';
 import { merge as mergeSessions, promote } from './grouping';
@@ -832,7 +832,11 @@ export const useStore = create<AppState>((set, get) => ({
       // statement that this is now the most recent session.
       set(state => ({
         pendingAttachments: [],
-        logged: withPending(state.logged, task),
+        logged: withPending(state.logged, task, Date.now(), state.pendingAttachments.map(a => ({
+          id: a.id, name: a.name, mimeType: a.mimeType, bytes: a.bytes,
+          kind: a.mimeType.startsWith('image/') ? 'image' as const : 'file' as const,
+          url: attachmentUrl(sessionId, a.id),
+        }))),
         sessions: promote(state.sessions, sessionId, Date.now(), state.title ? { title: state.title } : {}),
       }));
       const pending = get().pendingGroup;
@@ -1298,7 +1302,7 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
     case 'log':
       set(state => {
         const patch: Partial<AppState> = {
-          logged: applyLogEvent(state.logged, event.seq ?? 0, data),
+          logged: applyLogEvent(state.logged, event.seq ?? 0, data, Date.now(), state.sessionId ?? undefined),
           lastSeq: Math.max(state.lastSeq, event.seq ?? 0),
         };
         // The real message has arrived, so the placeholder standing in for it

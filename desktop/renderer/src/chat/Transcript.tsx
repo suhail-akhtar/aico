@@ -13,7 +13,7 @@
  */
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { MessageBubble, type ChatMessage } from '@aico/ui';
+import { AttachmentStrip, MessageBubble, type ChatMessage } from '@aico/ui';
 import { useStore } from '@web/store';
 import { composeMessages } from '@web/reduce';
 import { applyVersions, editMarker, seqOf, stripEditMarker } from '@web/message-versions';
@@ -304,9 +304,12 @@ function UserMessage({ message, version, setVersion }: {
 
   return (
     <div className="group mb-5 flex flex-col items-end">
-      <div className="user-bubble max-w-[80%] whitespace-pre-wrap break-words rounded-3xl px-4 py-2.5 text-[15px] leading-relaxed selectable">
-        {text}
-      </div>
+      {message.attachments?.length ? <AttachmentStrip attachments={message.attachments} /> : null}
+      {text.trim() !== '' && (
+        <div className="user-bubble max-w-[80%] whitespace-pre-wrap break-words rounded-3xl px-4 py-2.5 text-[15px] leading-relaxed selectable">
+          {text}
+        </div>
+      )}
       <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
         {version && version.total > 1 && (
           <span className="mr-1 flex items-center text-[12px] text-aico-muted">

@@ -3,6 +3,23 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Fixed
+
+- **Your message shows what you attached.** Pictures appear as thumbnails on the
+  message (click for full size) and other files as chips with type and size —
+  when sending, and after the chat is reopened. The file list written for the
+  model no longer shows in your bubble. Attachments are recorded on the message
+  in the log (`attachments`); older chats show their pictures from `images`.
+- **`deepseek-flash` reads images.** It was unknown to the capability table, so
+  AICO treated it as text-only and withheld pictures from it. Probed today: it
+  named both test colours; `deepseek-v4-pro` on the DeepSeek API did not, and is
+  now listed as text-only instead of inheriting the v4 rule.
+- **An unknown model is checked once when a picture is attached**, with the
+  existing image probe (a tiny request, remembered), instead of silently
+  assuming it cannot see.
+
 ## 0.30.1 — 2026-09-30
 
 ### Fixed

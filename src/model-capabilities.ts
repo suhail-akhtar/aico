@@ -197,6 +197,12 @@ const BUILTIN_CAPABILITIES: CapabilityEntry[] = [
   // The experimental vision build is the one id that certainly reads images;
   // the gateways list the plain flash and pro ids as text. Named first so the
   // broader v4 rule below cannot shadow it.
+  // DeepSeek's own API ids, probed 2026-09-30 with the red/blue picture test
+  // (src/providers/capability-probe.ts): `deepseek-flash` named both colours;
+  // `deepseek-v4-pro` answered "NONE" both times. Listed before the v4 rule,
+  // which would otherwise claim vision for the pro id.
+  { match: 'deepseek-flash', input: ['text', 'image'] },
+  { match: 'deepseek-v4-pro', input: ['text'] },
   { match: 'deepseek/deepseek-v4-flash-vision', input: ['text', 'image'] },
   { match: 'deepseek-v4-flash-vision', input: ['text', 'image'] },
   { match: 'deepseek/deepseek-v4', input: ['text', 'image'] },

@@ -94,6 +94,15 @@ export type MessageSource =
  * Logged whenever it changes so a transcript can explain why two requests in
  * the same session behaved differently.
  */
+/** One file the person attached to a message, for showing it back to them. */
+export interface UserAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+  kind: 'image' | 'file';
+}
+
 export interface RequestHeader {
   provider: string;
   model: string;
@@ -156,7 +165,16 @@ export interface SessionEventMap {
   'step/end': { turn: number; step: number; firstTokenAt?: number };
 
   /** SURFACE. Input entering the model request. */
-  'user/message': { turn: number; content: string; source: MessageSource };
+  'user/message': {
+    turn: number; content: string; source: MessageSource;
+    /**
+     * What the person attached, as they would describe it: name, type, size.
+     * Display only — the model learns of documents from the manifest in
+     * `content` and of pictures from `images` — but without it a reopened chat
+     * shows the question and not the file it was about.
+     */
+    attachments?: UserAttachment[];
+  };
 
   /** SURFACE. One assistant reply, with any tool calls it requested. */
   'assistant/message': {

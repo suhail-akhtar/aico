@@ -13,6 +13,7 @@ import { suggestKnowledge } from './dist-test/knowledge-suggest.mjs';
 import {
   applyLogEvent, readReasoning, parseArgs, orderMessages,
   withPending, dropPending, PENDING_KEY,
+  attachmentsOf, stripAttachmentManifest,
 } from './dist-test/reduce.mjs';
 
 let pass = 0, fail = 0;
@@ -320,6 +321,44 @@ test('with nothing asked, the trigger still says something a reader can edit', (
   const s = suggestKnowledge(undefined, '  keep it  ');
   assert.equal(s.trigger, 'when doing this kind of task');
   assert.equal(s.content, 'keep it');
+});
+
+
+// ── Attachments on the person's own message ──
+test('a user message shows what was attached, without the file list written for the model', () => {
+  const content = 'summarise this\n\nThe user attached these files. Read one with the ReadAttachment tool…:\n- plan.pdf (PDF, 7.0 MB)\n  /tmp/plan.pdf';
+  const logged = applyLogEvent(new Map(), 5, {
+    type: 'user/message', content, source: { kind: 'human' },
+    attachments: [
+      { id: 'a1', name: 'plan.pdf', mimeType: 'application/pdf', bytes: 7340032, kind: 'file' },
+      { id: 'a2', name: 'shot.png', mimeType: 'image/png', bytes: 1200, kind: 'image' },
+    ],
+  }, 0, 'web-1');
+  const m = logged.get(5);
+  assert.equal(m.content, 'summarise this');
+  assert.equal(m.attachments.length, 2);
+  assert.equal(m.attachments[1].kind, 'image');
+  assert.equal(m.attachments[0].url, '/api/attachments/file?session=web-1&id=a1');
+});
+
+test('an older log with only pictures still shows them', () => {
+  const shown = attachmentsOf({ images: [{ id: 'p1', mediaType: 'image/png', name: 'pasted.png' }] }, 's1');
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].name, 'pasted.png');
+  assert.equal(shown[0].kind, 'image');
+});
+
+test('a message without attachments is untouched', () => {
+  const logged = applyLogEvent(new Map(), 2, { type: 'user/message', content: 'hello\n\nThe user attached these files.', source: { kind: 'human' } });
+  assert.equal(logged.get(2).content, 'hello\n\nThe user attached these files.');
+  assert.equal(logged.get(2).attachments, undefined);
+  assert.equal(stripAttachmentManifest('no list here'), 'no list here');
+});
+
+test('the optimistic echo carries the attachments too', () => {
+  const logged = withPending(new Map(), 'look', 0, [{ id: 'x', name: 'a.png', mimeType: 'image/png', bytes: 1, kind: 'image' }]);
+  const echo = [...logged.values()][0];
+  assert.equal(echo.attachments.length, 1);
 });
 
 console.log(`  WEB REDUCER: ${pass} passed, ${fail} failed`);

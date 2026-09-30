@@ -39,6 +39,7 @@ import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
 import { activeProviderType } from '../providers/instances.js';
 import type { ImageRef } from '../providers/types.js';
+import type { UserAttachment } from '../session/events.js';
 import {
   addProject, browse, findProjectForSession, isKnownProject, listProjects,
   normalizeProjectPath, removeProject, updateProject,
@@ -1259,6 +1260,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // without the manifest and the reason is said out loud.
         let task2 = task;
         let pictures: ImageRef[] = [];
+        let shown: UserAttachment[] = [];
         const attachmentIds = (body as { attachmentIds?: string[] }).attachmentIds ?? [];
         if (attachmentIds.length > 0) {
           try {
@@ -1281,6 +1283,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
             // References, not bytes. The log records these, and the run reads
             // the bytes back through `resolveImages` below — which is what lets
             // a session reopened tomorrow still show the model the screenshot.
+            shown = files.map(file => ({
+              id: file.id, name: file.name, mimeType: file.mimeType, bytes: file.bytes,
+              kind: isImage(file.extension) ? 'image' as const : 'file' as const,
+            }));
             pictures = images.map(file => ({
               id: file.id,
               mediaType: IMAGE_MEDIA_TYPES[file.extension]!,
@@ -1344,6 +1350,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
             ? { effort: (body as { effort: string }).effort }
             : {}),
           ...(pictures.length ? { images: pictures } : {}),
+          ...(shown.length ? { attachments: shown } : {}),
         }).catch(() => { /* already reported on the stream as turn-end */ });
         return;
       }

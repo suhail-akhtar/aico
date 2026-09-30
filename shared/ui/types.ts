@@ -24,10 +24,24 @@ export type MessageType =
   | 'system'
   | 'error';
 
+/** A file the person attached to their message, as it is shown back to them. */
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  /** 0 when unknown (older logs recorded pictures without a size). */
+  bytes: number;
+  kind: 'image' | 'file';
+  /** Where the engine serves it, when the session is known. */
+  url?: string;
+}
+
 export interface ChatMessage {
   id: string;
   type: MessageType;
   content: string;
+  /** For user messages: what came with it — pictures and files, shown on the bubble. */
+  attachments?: MessageAttachment[];
   /**
    * The turn this message belongs to, when it came from a stored log.
    *

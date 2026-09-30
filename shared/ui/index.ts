@@ -15,7 +15,7 @@
  * @module shared/ui
  */
 
-export type { ChatMessage, MessageType, UsageSummary } from './types';
+export type { ChatMessage, MessageAttachment, MessageType, UsageSummary } from './types';
 export { EMPTY_USAGE } from './types';
 export { MarkdownRenderer } from './MarkdownRenderer';
 export { CodeBlock } from './CodeBlock';
@@ -35,6 +35,7 @@ export { FileDiff, changeFromArgs } from './FileDiff';
 export { ToolCallCard } from './ToolCallCard';
 export { formatResult } from './tool-result';
 export { MessageBubble } from './MessageBubble';
+export { AttachmentStrip } from './AttachmentStrip';
 export { setMediaUrlResolver, mediaUrl } from './media';
 // The canvas seam: each client registers how cards and editors reach the engine.
 export { setCanvasHost, getCanvasHost, emitCanvasEvent, onCanvasEvent } from './canvas/host';

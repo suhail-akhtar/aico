@@ -23,6 +23,7 @@ import { runHooks } from './hooks.js';
 import { estimateTokens } from './tokens.js';
 import type { SdkAttachment } from './attachments.js';
 import type { AicoMessage, ImagePart, ImageRef } from './providers/types.js';
+import type { UserAttachment } from './session/events.js';
 import { modelAccepts, explainRefusal } from './model-capabilities.js';
 import {
   createToolImageSink, drainToolImages, toolImagesMessage, withToolCall, type ToolImageBytes,
@@ -413,6 +414,8 @@ export interface AgentOptions {
    * {@link projectImages}, which is where the model is known.
    */
   images?: ImageRef[];
+  /** What the person attached, recorded on their message so clients can show it. */
+  shownAttachments?: UserAttachment[];
   /**
    * Fetch the bytes behind image references.
    *
@@ -1881,7 +1884,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // The images ride with this exact message, not the turn: a completion-gate
   // nudge later in the same turn is a different message and must not inherit
   // the reader's screenshot.
-  transcript.recordUserMessage(userMessage, undefined, opts.images);
+  transcript.recordUserMessage(userMessage, undefined, opts.images, opts.shownAttachments);
 
   // Recording starts here, before any tool can write, and captures each file
   // as it was when the turn began. Only the root agent opens one: a sub-agent
