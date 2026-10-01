@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.33.0 — 2026-10-02
 
 Security first: MCP tools, sub-agents and cloned projects now go through the
 same checks as everything else. Plus structured test results, the project's own

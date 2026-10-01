@@ -3,7 +3,7 @@
   "productName": "AICO",
   "private": true,
   "type": "module",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "AICO Desktop — the AICO coding agent as a native app for Windows and Linux.",
   "author": {
     "name": "Suhail Akhtar",
