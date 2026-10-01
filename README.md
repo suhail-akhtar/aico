@@ -70,8 +70,9 @@ The desktop app needs no Node install — the engine runs inside it — and shar
 Requests are built from an append-only log, so the prompt prefix never changes
 behind the model's back and **provider prompt caches actually hit — 79–96%
 measured.** On DeepSeek a cached token costs **1/50** of a fresh one; on OpenAI
-and Anthropic, 1/10. Old tool output is masked in batches (so the cache breaks
-rarely), not re-sent forever. [How →](#-token-saving-by-design)
+and Anthropic, 1/10. Rarely used tools load only when needed, so **every request
+is 41% smaller** (~24K → ~14K tokens). Old tool output is masked in batches (so
+the cache breaks rarely), not re-sent forever. [How →](#-token-saving-by-design)
 
 </td>
 <td width="50%" valign="top">
@@ -229,6 +230,7 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **Can't be talked into things.** Pages can hide instructions for AI in invisible text. AICO strips text a person cannot see and marks instructions aimed at the AI as untrusted page content before the model reads anything — and the shields panel shows what it caught.
 - **Safe by design.** It never solves CAPTCHAs or "I'm human" checks, never *sees* a password, card number or one-time code, and a purchase, send or delete waits for your Allow — enforced in code. It can sign in from the vault on the site a credential belongs to, without the value ever reaching the model.
 - **Pop it out.** One click (Ctrl+Shift+N) moves every tab into its own window without reloading a thing; close it and they come home.
+- **Many agents, no collisions.** Each chat drives its own labelled background tabs, so two projects can use the browser at once while your page stays yours; a tab two chats want is taken in turn. The browser copilot answers about the page — and hands real work (code, projects, servers) to a proper chat with the page attached.
 
 ### 🔐 Credentials the agent uses but never sees
 
@@ -310,6 +312,7 @@ Plus: **steer a run mid-flight** (delivered at the next step boundary, nothing l
 | [**Custom-stack architecture**](benchmarks/custom-app-architecture/README.md) — ambiguous greenfield briefs, no template | **4 / 5 built clean (17/17 checks each)**; the fifth hit a real iteration cap at 60% | Deciding the data model, stack and boundaries — not just filling in a template |
 | **Hidden-test implementation** — a spec, 7 visible tests, graded by 23 it never saw | **23 / 23** on both gpt-5.6-luna and gpt-5.6-terra | Implementing to a spec, not to the visible tests |
 | **Nine app templates** — each built end to end by a real model | **9 / 9 proven live**, opened in a browser at two widths | The app platform works as a whole |
+| [**Engineering benchmark**](scripts/eng-bench.mjs) (`npm run bench:eng`) — multi-tenant API with JWT/RBAC, a bug in an unfamiliar codebase, a pattern refactor, an architecture doc, a full-stack feature, delegated security fixes; independent graders and black-box checks | **≈99 / 100 checks** on `deepseek-flash` for **≈$0.35 a full run**; delegation 12/12 | The everyday enterprise work, measured on every prompt or tool change — a skill that bloated output was caught and removed before release |
 
 Every one is reproducible from scripts in this repository, with per-instance
 evidence committed. SWE-bench was run blind — no dependency install, no local
