@@ -42,6 +42,7 @@ all of them. Run all three before saying "tests pass".
 | `npm run test:templates` | every process template installs, typechecks, tests and builds from clean (network; slow — run before a release that touches templates) |
 | `npm run test:nextapp`, `test:miniapps` | Next.js / Mini App host install, serve, persist, refuse |
 | `npm run test:panel` | the VS Code panel's transport against a real server (no model) |
+| `npm run test:bench:graders` | the eng-bench graders fail each untouched fixture and plausible-but-wrong mutant, and score each reference solution 100% (needs Chrome; ~40 s) |
 | `desktop/scripts/shot.mjs <out> <steps.json>` | drives the real desktop app under Playwright `_electron` with an isolated store |
 
 ### Paid — real models; only with the owner's approval
@@ -55,6 +56,7 @@ all of them. Run all three before saying "tests pass".
 | `npm run test:skills:live`, `test:apps:build`, `test:nextbuild`, `test:section` | skills and app builds end to end |
 | `npm run test:vscode` | the panel in a real VS Code (runs a real turn on the default model) |
 | `node scripts/long-horizon-live.mjs …`, `scripts/swebench-live.mjs`, `bench.mjs`, `bench-build.mjs` | benchmarks and evidence |
+| `npm run bench:eng` (`scripts/eng-bench.mjs`) | six fixed engineering tasks (API build, bug fix, refactor, design doc, full-stack feature, delegation) with hidden-test graders, tokens and USD per task; `--aico <dist>` pins a frozen build, `--compare <old.json>` prints deltas |
 
 Live probes pin `deepseek/deepseek-v4-flash` unless the test is about a
 specific model; a slow default model makes 120 s turn budgets flaky. When a

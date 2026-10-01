@@ -27,7 +27,7 @@
  *   browser:read            (ReadRequest)       → PageRead
  *   browser:insights        ()                  → PageInsights
  *   browser:forms           ()                  → FormModel[]
- *   browser:agentStop       () / browser:agentResume ()
+ *   browser:agentStop       (tabId?) / browser:agentResume (tabId?)   per tab; no id = the tab in front
  *   browser:permissionAnswer (id, allow, remember)
  *   browser:dialogAnswer    (id, accept, text?)
  *   browser:authAnswer      (id, creds | null)
@@ -93,6 +93,20 @@ export interface TabState {
   pinned?: boolean;
   /** Prompt-injection guard: what was hidden or flagged on this page when the agent read it. */
   injectionGuard?: InjectionGuardInfo;
+  /** The chat that opened this tab for its own work (browser-owners.ts); absent for the person's tabs. */
+  owner?: TabOwnerInfo;
+  /** The chat driving this tab right now (holds its lease), when one is. */
+  driver?: string;
+  /** The person took this tab back (Stop / Take over, or input on the page): agents wait until they let AICO continue. */
+  agentPaused?: boolean;
+}
+
+export interface TabOwnerInfo {
+  title: string;
+  /** Hue (0–359) shared by every tab of that chat, so its tabs read as a group. */
+  hue: number;
+  /** The chat's run ended: the tab stays open, nobody drives it. */
+  released?: boolean;
 }
 
 export interface HttpsFallback { httpUrl: string; httpsUrl: string; reason: string }
@@ -114,7 +128,7 @@ export interface BrowserState {
   activeId: string | null;
   tabs: TabState[];
   blocking: { enabled: boolean };
-  /** Extension: the user pressed Stop / Take over — agent browser tools refuse until resumed. */
+  /** Extension: the user pressed Stop / Take over on the tab in front — agent browser tools refuse there until resumed. */
   agentStopped?: boolean;
 }
 

@@ -34,6 +34,9 @@
   background: linear-gradient(120deg, #6366f1, #a855f7 45%, #06b6d4);
   background-size: 200% 100%; animation: bx-flow 2.4s linear infinite;
 }
+/* A chat's own tab: its colour (set inline) on a dot; faded once the chat has let go of it. */
+.bx-owner-dot { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+.bx-owner-dot[data-released] { opacity: .55; }
 
 /* ── Toolbar ──────────────────────────────────────────────────────── */
 .bx-omni {

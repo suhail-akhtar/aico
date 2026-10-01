@@ -13,6 +13,12 @@
  * What it does not do that the main store does: attachments, plan mode, edit
  * hand-offs, host tools, sub-agent panels. A browsing chat needs none of them.
  *
+ * Its turns are submitted as `surface: 'browser-copilot'`: the engine adds the
+ * copilot brief and `HandOffToChat`, and withholds the build-and-run tools, so
+ * code, project and server work moves to a full chat (src/server/chat-handoff.ts).
+ * `handOffNow` is the composer's "Hand off to chat" button — the same move,
+ * without asking the model.
+ *
  * Two documents can show it: the main window (docked, or minimised to the
  * launcher) and the floating copilot's own view over the page. Only the one on
  * screen holds the stream — `attachCopilot` when it takes over, `detachCopilot`
@@ -26,7 +32,7 @@
 
 import { create } from 'zustand';
 import type { ChatMessage } from '@aico/ui';
-import { api, streamSession, type PermissionRequest, type StreamEvent, type StreamHandle, type SubmitOptions } from '@web/api';
+import { api, streamSession, type ChatHandOff, type ChatHandOffRequest, type PermissionRequest, type StreamEvent, type StreamHandle, type SubmitOptions } from '@web/api';
 import { applyLogEvent, dropPending, emptyDraft, withPending, type Draft, type ReasoningBurst } from '@web/reduce';
 import { freshSessionId } from '@web/session-memory';
 import { useStore } from '@web/store';
@@ -56,6 +62,11 @@ export interface CopilotState {
   turnStartedAt: number | null;
   /** How many messages this conversation has, so an empty one shows the start screen. */
   started: boolean;
+  /**
+   * Hand-offs made with the composer's button, for their cards. (One the model
+   * makes is a tool call in the log, and its card is drawn from that.)
+   */
+  handoffs: ChatHandOff[];
 }
 
 export const useCopilot = create<CopilotState>(() => ({
@@ -72,6 +83,7 @@ export const useCopilot = create<CopilotState>(() => ({
   error: null,
   turnStartedAt: null,
   started: false,
+  handoffs: [],
 }));
 
 let handle: StreamHandle | null = null;
@@ -117,7 +129,7 @@ export function connectCopilot(sessionId: string): void {
   useCopilot.setState({
     sessionId, project, status: 'connecting', logged: new Map(), draft: emptyDraft(), busy: false, lastSeq: 0,
     title: useStore.getState().sessions.find(x => x.id === sessionId)?.title ?? '',
-    question: null, permission: null, error: null, turnStartedAt: null, started: false,
+    question: null, permission: null, error: null, turnStartedAt: null, started: false, handoffs: [],
   });
   open(sessionId, 0);
 }
@@ -158,6 +170,7 @@ export async function sendCopilot(task: string, opts: { title?: string; approval
     await api.submit({
       sessionId,
       task,
+      surface: 'browser-copilot',
       ...(project ? { project } : {}),
       ...(opts.approval && opts.approval !== 'auto' ? { approval: opts.approval } : {}),
       ...(opts.effort && opts.effort !== 'auto' ? { effort: opts.effort } : {}),
@@ -172,6 +185,28 @@ export async function sendCopilot(task: string, opts: { title?: string; approval
   } catch (err) {
     useCopilot.setState({ busy: false, turnStartedAt: null, error: (err as Error).message });
     return false;
+  }
+}
+
+/**
+ * Move this request to a full chat now, without the model deciding: the
+ * composer's "Hand off to chat". The engine opens, seeds and starts the chat;
+ * the card shows here, and the main window's toast comes from the
+ * `chat-handoff` topic like any other hand-off.
+ */
+export async function handOffNow(task: string, page: ChatHandOffRequest['page']): Promise<ChatHandOff | null> {
+  const { sessionId } = useCopilot.getState();
+  useCopilot.setState({ error: null });
+  try {
+    const out = await api.handOff({ task, page, ...(sessionId ? { fromSessionId: sessionId } : {}) });
+    if (!out.ok) { useCopilot.setState({ error: out.error }); return null; }
+    const done: ChatHandOff = { sessionId: out.sessionId, title: out.title, project: out.project, existing: out.existing, queued: out.queued };
+    useCopilot.setState(s => ({ handoffs: [...s.handoffs, done] }));
+    void useStore.getState().refreshSessions();
+    return done;
+  } catch (err) {
+    useCopilot.setState({ error: `Could not hand off: ${(err as Error).message}` });
+    return null;
   }
 }
 

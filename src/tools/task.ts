@@ -3,7 +3,9 @@ import crypto from 'crypto';
 import type { SubAgentType } from './index.js';
 import { runHooks } from '../hooks.js';
 import type { AicoSettings } from '../settings.js';
-import { AGENT_PROMPTS } from '../agents/prompts-registry.js';
+import { AGENT_PROMPTS, REPORT_CONTRACT } from '../agents/prompts-registry.js';
+import { workOf, absorbWork } from '../checks.js';
+import { noteFileWritten } from '../verification.js';
 import { loadProfile, renderProfile } from '../project/profile.js';
 import { projectRoot } from '../run-context.js';
 
@@ -227,114 +229,210 @@ export function clearCompletedAgents() {
 /** System prompt prefixes per agent type */
 const AGENT_TYPE_PROMPTS: Record<SubAgentType, string> = AGENT_PROMPTS;
 
+/**
+ * The roles Task offers: one implementer, and read-only roles named for what
+ * they do rather than for a job title.
+ */
+export const TASK_AGENT_TYPES = ['general', 'explore', 'plan', 'review', 'verification', 'security-audit'] as const;
+
+/**
+ * Retired role names, mapped to what they now mean. The implementation
+ * personas (frontend, backend, qa, healer, devops…) become `general`, whose
+ * prompt follows the code that is there instead of assuming a stack;
+ * `architect` designs and so becomes `plan`; `devsecops` is the read-only
+ * security role. Mapped, not refused: old sessions, specs and habits name them.
+ */
+const LEGACY_AGENT_TYPES: Record<string, SubAgentType> = {
+  frontend: 'general', backend: 'general', qa: 'general', healer: 'general',
+  devops: 'general', project: 'general', 'tech-writer': 'general', 'product-owner': 'general',
+  architect: 'plan', devsecops: 'security-audit',
+};
+
+/** The role a requested `subagent_type` runs as; unknown or absent is `general`. */
+export function canonicalAgentType(requested: string | undefined): SubAgentType {
+  const name = (requested ?? '').trim().toLowerCase();
+  if ((TASK_AGENT_TYPES as readonly string[]).includes(name)) return name as SubAgentType;
+  return LEGACY_AGENT_TYPES[name] ?? 'general';
+}
+
+/*
+  The tool's description is a decision aid and a brief template, not a
+  catalogue.
+
+  It used to list sixteen agent types with a paragraph of dispatch modes —
+  ~1.3K tokens on every request, most of it the role-based build team
+  (frontend, backend, qa, architect…) that this codebase's own research names
+  as the anti-pattern (see tools/investigate.ts). The enum kept offering them,
+  and a parent picked `backend` — a TypeScript-server persona — for plain JS
+  libraries. The enum now offers only TASK_AGENT_TYPES; an old name from a
+  stored session or a habit is mapped by `canonicalAgentType`, so nothing that
+  names one breaks.
+
+  The brief is structured because the failure of delegation is not the model
+  doing the work badly, it is the model doing different work: a child that was
+  never told the scope edits outside it, one never told what "done" means
+  stops at "it compiles". Goal, scope, constraints and acceptance criteria are
+  separate fields so each one is visibly present or visibly missing, and the
+  criteria are required where the child can change files (`briefProblem`).
+*/
 export const taskToolDefinition = {
   name: 'Task',
   description: [
-    'Spawn a focused sub-agent to complete a specific task.',
-    'Use for: parallel work, long research tasks, isolated file operations, or keeping the main context clean.',
-    'Multiple Task calls in the same response run in PARALLEL automatically.',
-    '',
-    'Three dispatch modes (in priority order):',
-    '',
-    '1. agent_spec (MOST FLEXIBLE): Define a fully custom agent inline with its own instructions, tools, and model.',
-    '   This lets you synthesize a specialist for exactly the task at hand.',
-    '   Example: agent_spec: { instructions: "You are a database migration specialist...", tools: ["Read","Write","Bash"], model: "glm-4.6" }',
-    '',
-    '2. agent_name: Spawn a registered custom agent (created via AgentCreate or defined in ~/.aico/agents/).',
-    '   Uses the spec\'s tools, system prompt, and pinned model.',
-    '',
-    '3. subagent_type (PREDEFINED): Use a built-in agent type:',
-    '   "general" (default) — full tool access.',
-    '   "project" — project-dedicated orchestrator. Full access + spawns specialists.',
-    '   "explore" — read-only: Glob, Grep, Read, LS, Bash, WebFetch, Pwd. Fast codebase exploration.',
-    '   "plan" — read-only + TodoWrite. For designing implementation approaches.',
-    '   "review" — industry-standard code review: SOLID, architecture, code smells, security, performance. Read + Bash.',
-    '   "verification" — adversarial: tries to BREAK the work. Returns VERDICT: PASS/FAIL/PARTIAL.',
-    '   "devops" — DevOps/Platform Engineer: IaC (Terraform/Ansible/Pulumi), CI/CD, Docker/K8s, cloud.',
-    '   "devsecops" — DevSecOps: SAST/DAST, container/dependency/IaC scanning, secrets, SBOM.',
-    '   "security-audit" — defensive security analysis: OWASP, CVEs, secrets, misconfigs. Returns SECURITY SCORE: X/10.',
-    '   "architect" — system design, TASKS.md, API specs. Read/write access.',
-    '   "backend" — TypeScript API/server implementation. Full access.',
-    '   "frontend" — React/Vue/Angular UI implementation. Full access.',
-    '   "qa" — test writing and execution. Read/write + Bash.',
-    '   "tech-writer" — documentation. Full access.',
-    '   "product-owner" — PRD, user stories, quality gate. Read/write + Web.',
-    '   "healer" — error recovery and bug fixing. Full access.',
-    '',
-    'agent_spec.tools accepts: "all", "readonly", or an explicit array like ["Read","Write","Edit","Bash"].',
-    'Different agents can use different models — pass model per Task call or pin it in the agent spec.',
+    'Delegate one self-contained task to a sub-agent. It starts with none of this conversation; several Task calls in one response run in parallel.',
+    'Worth it for wide work (many files you would read once), independent pieces, or a clean context. Do it yourself when it is a few files, the steps depend on each other, or briefing would take longer than doing.',
+    'Brief it like a capable colleague new to the repo: prompt = the goal and the context you already hold (paths, findings, decisions, the why); files = scope; constraints = what not to change, patterns to follow; acceptance_criteria = checkable conditions for done (required when it can change files), covering the change\'s security and edge cases — never declare one out of scope unless the user did.',
+    'It reports STATUS, changes, evidence per criterion and open risks. That report is a claim: files it changes count against this turn\'s checks, so RunChecks (and VerifyApp for pages) still decide when the work is done.',
+    'Who runs it: subagent_type — general (default: implements in any language/stack, all tools), explore (fast read-only search), plan (read-only design), review (code review), verification (tries to break the work), security-audit (read-only); agent_name — a registered agent; agent_spec — inline instructions, tools ("all", "readonly" or names) and model.',
   ].join('\n'),
   inputSchema: {
     type: 'object',
     properties: {
       description: {
         type: 'string',
-        description: 'Brief label shown in the UI while this sub-agent runs (e.g. "Searching docs", "Writing tests")',
+        description: 'Short label shown while it runs.',
       },
       prompt: {
         type: 'string',
-        description: 'Full instructions for the sub-agent. Be specific — it has NO context from the parent conversation.',
+        description: 'The goal and the context it needs: what to achieve and why, what you already know (paths, findings, decisions, commands).',
+      },
+      acceptance_criteria: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Checkable conditions that decide it is done, e.g. "npm test passes", "GET /items?page=2 returns 20 rows". Required when it can change files.',
+      },
+      files: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Files or directories in scope.',
+      },
+      constraints: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'What not to change; patterns, libraries or conventions to follow.',
       },
       model: {
         type: 'string',
-        description: 'Optional: override model for this sub-agent. Defaults to parent model. Lets you mix models — e.g. backend on Claude, exploration on DeepSeek.',
+        description: 'Model for this sub-agent; defaults to yours. A cheaper one suits mechanical work.',
       },
       subagent_type: {
         type: 'string',
-        enum: [
-          'general', 'explore', 'plan', 'verification', 'security-audit',
-          'project', 'devops', 'devsecops', 'review',
-          'frontend', 'backend', 'qa', 'architect',
-          'tech-writer', 'product-owner', 'healer',
-        ],
-        description: 'Predefined agent type controlling tool access (default: general). Ignored if agent_spec or agent_name is provided.',
+        enum: [...TASK_AGENT_TYPES],
       },
       agent_name: {
         type: 'string',
-        description: 'Optional: name of a registered custom agent (from AgentCreate or ~/.aico/agents/). Loads its tools, system prompt, and pinned model.',
+        description: 'A registered agent (AgentList).',
       },
       agent_spec: {
         type: 'object',
-        description: 'Optional: define a fully custom agent inline. Overrides subagent_type and agent_name.',
+        description: 'An inline agent. Overrides subagent_type and agent_name.',
         properties: {
-          instructions: { type: 'string', description: 'Custom system prompt for this agent.' },
+          instructions: { type: 'string' },
           tools: {
             oneOf: [
               { type: 'string', enum: ['all', 'readonly'] },
               { type: 'array', items: { type: 'string' } },
             ],
-            description: 'Tool whitelist: "all", "readonly", or an explicit array of tool names.',
           },
-          model: { type: 'string', description: 'Model to use for this agent.' },
-          role: { type: 'string', description: 'Display label for this agent.' },
+          model: { type: 'string' },
+          role: { type: 'string', description: 'Display label.' },
         },
       },
       timeout: {
         type: 'number',
-        description: 'Idle timeout in seconds: the sub-agent is stopped after this long with no tool activity. '
-          + 'Default: 60 (120 for studio roles). A hard ceiling of 15 min (30 for studio roles) also applies; '
-          + 'a larger timeout raises it. Use 300-600 for complex implementation phases.',
+        description: 'Idle seconds before it is stopped (default 60; 300-600 for long implementation). Also raises the 15-minute ceiling.',
       },
       isolation: {
         type: 'string',
         enum: ['worktree'],
-        description: 'Optional: run this sub-agent in an isolated git worktree. Pass "worktree" to enable. The worktree is automatically cleaned up when the agent finishes; if it has changes the branch is preserved.',
+        description: 'Run in a temporary git worktree; a branch with its changes is kept.',
       },
       detach: {
         type: 'boolean',
-        description:
-          'Return as soon as the sub-agent starts instead of waiting for it. Default false, and '
-          + 'false is right for most work — you get the result straight back from the call. '
-          + 'Set true only when you intend to supervise: while you are waiting on a Task you are '
-          + 'suspended inside it and cannot look at anything. Detached, you can watch it with '
-          + 'Supervise, correct it mid-run without losing what it has learned, stop it, and '
-          + 'collect the result with "wait". If you detach, you MUST wait before treating the '
-          + 'work as done — a detached call returns an id, never an answer.',
+        description: 'Default false: the result comes back from the call. True returns an id at once so you can watch, guide or stop it with Supervise — only when you will supervise, and you MUST wait for it (Supervise "wait") before treating the work as done.',
       },
     },
     required: ['description', 'prompt'],
   },
 };
+
+/** The structured parts of a brief, as the model passes them. */
+export interface TaskBrief {
+  prompt: string;
+  acceptance_criteria?: unknown;
+  files?: unknown;
+  constraints?: unknown;
+}
+
+/** Tools that can change the working tree. Bash counts: it can write anywhere. */
+const WRITING_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit', 'Bash', 'Terminal', 'MultiEdit']);
+
+/** Agent types whose tool set cannot change files (Bash there is for running scanners and tests). */
+const READ_ONLY_TYPES = new Set<SubAgentType>(['explore', 'plan', 'verification', 'security-audit', 'devsecops', 'review']);
+
+/** Whether a resolved sub-agent can change files. */
+export function canWrite(tools: string[] | 'all' | 'readonly' | undefined, agentType: SubAgentType): boolean {
+  if (tools === 'readonly') return false;
+  if (Array.isArray(tools)) return tools.some(t => WRITING_TOOLS.has(t));
+  if (tools === 'all') return true;
+  return !READ_ONLY_TYPES.has(agentType);
+}
+
+function list(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
+  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  return [];
+}
+
+/**
+ * Why a brief cannot be sent as written, or undefined when it can.
+ *
+ * Refused before anything is spawned, so the cost of a missing criterion is
+ * one short tool result rather than a sub-agent run that stops wherever it
+ * decides "done" is. Only the model-facing Task call is held to this; the
+ * engine's own callers (Investigate, the studio pipeline) compose their briefs
+ * themselves.
+ */
+export function briefProblem(brief: TaskBrief, writable: boolean): string | undefined {
+  if (!brief.prompt?.trim()) return 'Task refused: prompt is empty. Give the goal and the context the sub-agent needs.';
+  if (writable && list(brief.acceptance_criteria).length === 0) {
+    return 'Task refused: this sub-agent can change files, so it needs acceptance_criteria — checkable conditions '
+      + 'that decide it is done (e.g. "npm test passes", "the /items route returns 400 for page=0"). '
+      + 'Add them and call Task again; for read-only work use subagent_type explore, plan or review.';
+  }
+  return undefined;
+}
+
+/**
+ * The brief the sub-agent actually reads: the goal, then each structured part
+ * under a plain label, then the report it owes.
+ *
+ * The report shape is the token saving. A child's final message is the only
+ * thing that comes back, and an unstructured one was often the whole story of
+ * the run — every file it read, every command it tried. Asking for status,
+ * changes, evidence and open items, briefly, gives the parent what it acts on
+ * and leaves the rest in the child's own log.
+ */
+export function composeBrief(
+  brief: TaskBrief,
+  writable: boolean,
+  /** False when the agent's own role prompt already states the report shape. */
+  withReport = true,
+): string {
+  const parts = [brief.prompt.trim()];
+  const files = list(brief.files);
+  const constraints = list(brief.constraints);
+  const criteria = list(brief.acceptance_criteria);
+  if (files.length) parts.push(`Scope (stay within these unless a criterion needs more, and say so):\n${files.map(f => `- ${f}`).join('\n')}`);
+  if (constraints.length) parts.push(`Constraints:\n${constraints.map(c => `- ${c}`).join('\n')}`);
+  if (criteria.length) parts.push(`Done when — check each one yourself and cite the evidence:\n${criteria.map(c => `- ${c}`).join('\n')}`);
+  if (withReport) {
+    parts.push(writable
+      ? REPORT_CONTRACT
+      : 'Your final message is all the caller sees. Findings first, each with its file:line or source as evidence; '
+        + 'then what you did not check. Under ~250 words unless the task asks for more. Do not narrate your search.');
+  }
+  return parts.join('\n\n');
+}
 
 export interface RunTaskOpts {
   /** GitHub token — optional now, kept for backward compat */
@@ -372,6 +470,8 @@ export interface RunTaskOpts {
    * promise the whole tree has to keep, not just its root.
    */
   planMode?: boolean;
+  /** On-demand tool groups the parent has loaded, so the child starts with them. */
+  toolGroups?: readonly string[];
   onSubagentStart?: (rec: SubAgentRecord) => void;
   onSubagentStop?: (rec: SubAgentRecord) => void;
   /**
@@ -386,6 +486,16 @@ export async function runTask(
   args: {
     description: string;
     prompt: string;
+    /** Structured brief parts — see {@link composeBrief}. Used when `contract` is set. */
+    acceptance_criteria?: unknown;
+    files?: unknown;
+    constraints?: unknown;
+    /**
+     * Hold this call to the delegation contract: refuse a write-capable brief
+     * with no acceptance criteria, and compose the brief with the report shape.
+     * Set by the model-facing Task handler only.
+     */
+    contract?: boolean;
     model?: string;
     subagent_type?: SubAgentType;
     agent_name?: string;
@@ -410,7 +520,7 @@ export async function runTask(
   }
 
   const agentId = crypto.randomUUID().slice(0, 8);
-  const agentType: SubAgentType = args.subagent_type ?? 'general';
+  const agentType: SubAgentType = canonicalAgentType(args.subagent_type);
 
   // ── Resolve agent spec (dynamic dispatch) ──────────────────────────
   // Three modes in priority order:
@@ -454,7 +564,10 @@ export async function runTask(
   // set to. A fleet of explorers running greps was billed at the rate chosen
   // for the session's hardest reasoning.
   const IMPLEMENTATION_AGENTS = new Set(['frontend', 'backend', 'qa', 'healer']);
-  const roleModel = opts.settings?.agentModels?.[agentType]
+  // The name as requested first, so a model configured for a retired role
+  // name still applies to calls that use it.
+  const roleModel = (args.subagent_type ? opts.settings?.agentModels?.[args.subagent_type] : undefined)
+    ?? opts.settings?.agentModels?.[agentType]
     ?? opts.settings?.agentModels?.default;
   const requestedModel = resolvedModel ?? args.model ?? roleModel ?? opts.model;
   const agentModel = (
@@ -463,14 +576,27 @@ export async function runTask(
   const colorIdx = _registry.size % AGENT_COLORS.length;
   const color = AGENT_COLORS[colorIdx];
 
+  // ── The delegation contract ───────────────────────────────────────
+  // Checked after resolution because only then is it known whether this child
+  // can change files — an agent_name's tools come from its spec.
+  let brief = args.prompt;
+  if (args.contract) {
+    const writable = canWrite(resolvedTools, agentType);
+    const problem = briefProblem(args, writable);
+    if (problem) return problem;
+    const roleStatesReport = !resolvedInstructions
+      && (AGENT_TYPE_PROMPTS[agentType] ?? '').includes(REPORT_CONTRACT);
+    brief = composeBrief(args, writable, !(writable && roleStatesReport));
+  }
+
   // ── Prompt resolution ─────────────────────────────────────────────
   // Priority: agent_spec.instructions > agent_name spec prompt > type prompt
   let fullPrompt: string;
   if (resolvedInstructions) {
-    fullPrompt = `${resolvedInstructions}\n\n---\n\n${args.prompt}`;
+    fullPrompt = `${resolvedInstructions}\n\n---\n\n${brief}`;
   } else {
     const typePrompt = AGENT_TYPE_PROMPTS[agentType];
-    fullPrompt = typePrompt ? `${typePrompt}\n\n---\n\n${args.prompt}` : args.prompt;
+    fullPrompt = typePrompt ? `${typePrompt}\n\n---\n\n${brief}` : brief;
   }
 
   const now = Date.now();
@@ -654,6 +780,7 @@ export async function runTask(
       // from its siblings', which is what `maxCostPerSubagent` measures.
       ...(opts.tokenTracker ? { tokenTracker: createChildTracker(opts.tokenTracker) } : {}),
       ...(opts.planMode ? { planMode: true } : {}),
+      ...(opts.toolGroups?.length ? { toolGroups: opts.toolGroups } : {}),
       // Pass the resolved spec tools so runAgent uses the custom whitelist
       // instead of the hardcoded SUBAGENT_TOOL_SETS for this agent type.
       ...(resolvedTools ? { agentSpecTools: resolvedTools } : {}),
@@ -830,6 +957,24 @@ export async function runTask(
     }
     return `[Sub-agent "${args.description}" failed: ${errMsg}]`;
   } finally {
+    /*
+      The child's file changes are the parent's changes.
+
+      Every gate is per run, and a sub-agent is a run of its own whose gates
+      are off — so a parent that delegated an implementation used to finish
+      with its checks gate silent: it had touched nothing itself. "Delegation
+      does not transfer responsibility" was a sentence in the prompt and
+      nothing in the loop. Now what the child wrote is noted in this (the
+      parent's) run, together with any check the child actually ran: a real
+      RunChecks result is evidence whoever ran it, and a stale one is caught
+      by the same mtime rule as the parent's own. Success, failure or stop
+      alike — a child cut short can still have written half a change.
+    */
+    const work = workOf(`sub-${agentId}`);
+    if (work) {
+      absorbWork(work);
+      for (const file of work.written) noteFileWritten(file);
+    }
     // Whatever happened, this child can no longer be steered, and its log is
     // flushed. Leaving the inbox behind would let a later `guide` queue an
     // instruction for an agent that will never read it and report success.

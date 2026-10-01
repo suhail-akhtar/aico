@@ -1,0 +1,1 @@
+{ "install": "node -e \"0\"", "test": "node --test", "start": "node server.js" }

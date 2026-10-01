@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helpdesk</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Helpdesk</h1>
+    <form id="new-ticket" class="new-ticket" autocomplete="off">
+      <input name="title" data-testid="new-ticket-title" placeholder="New ticket title" maxlength="200" required>
+      <select name="priority" data-testid="new-ticket-priority">
+        <option value="low">Low</option>
+        <option value="normal" selected>Normal</option>
+        <option value="high">High</option>
+      </select>
+      <button type="submit" data-testid="new-ticket-submit">Add ticket</button>
+    </form>
+  </header>
+  <main class="layout">
+    <ul id="tickets" class="tickets" data-testid="ticket-list" aria-label="Tickets"></ul>
+    <section id="detail" class="detail" data-testid="ticket-detail" aria-live="polite">
+      <p class="muted">Select a ticket.</p>
+    </section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

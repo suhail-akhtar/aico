@@ -49,6 +49,8 @@ export interface SkillManageInput {
   prompt?: string;
   aliases?: string[];
   trigger?: string;
+  /** Not in the tool schema; carried so an update keeps a hand-written one. */
+  antiTrigger?: string;
   allowedTools?: string[];
   resources?: SkillResource[];
   /** For import: a folder, .zip/.skill, or SKILL.md. For export: where to write. */
@@ -69,6 +71,7 @@ function composeMarkdown(input: SkillManageInput): string {
   const lines = ['---', `name: ${yamlValue(input.name ?? '')}`, `description: ${yamlValue(input.description ?? '')}`];
   if (input.aliases?.length) lines.push(`aliases: [${input.aliases.join(', ')}]`);
   if (input.trigger) lines.push(`trigger: ${input.trigger}`);
+  if (input.antiTrigger) lines.push(`antiTrigger: ${input.antiTrigger}`);
   if (input.allowedTools?.length) lines.push(`allowed-tools: [${input.allowedTools.join(', ')}]`);
   lines.push('author: aico-orchestrator', 'version: 1.0.0', '---', input.prompt ?? '');
   return lines.join('\n');
@@ -332,6 +335,7 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
         prompt: input.prompt ?? skill.promptTemplate,
         aliases: input.aliases ?? skill.frontmatter.aliases,
         trigger: input.trigger ?? skill.frontmatter.trigger,
+        antiTrigger: skill.frontmatter.antiTrigger,
         allowedTools: input.allowedTools ?? skill.frontmatter.allowedTools,
       };
       fs.writeFileSync(path.join(dir, 'SKILL.md'), composeMarkdown(merged), 'utf8');

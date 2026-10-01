@@ -1,0 +1,20 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #1d232b; background: #f5f6f8; }
+.top { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 20px; background: #fff; border-bottom: 1px solid #dde1e6; }
+.top h1 { font-size: 18px; margin: 0; }
+.new-ticket { display: flex; gap: 8px; flex-wrap: wrap; }
+.new-ticket input { min-width: 240px; }
+input, select, textarea, button { font: inherit; padding: 6px 10px; border: 1px solid #c4cad2; border-radius: 6px; background: #fff; }
+button { background: #2457d6; color: #fff; border-color: #2457d6; cursor: pointer; }
+.layout { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 16px; padding: 16px 20px; }
+.tickets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ticket { display: flex; gap: 8px; align-items: center; padding: 10px 12px; background: #fff; border: 1px solid #dde1e6; border-radius: 8px; cursor: pointer; }
+.ticket.selected { border-color: #2457d6; box-shadow: 0 0 0 1px #2457d6; }
+.ticket .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge, .status { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: #eef1f5; }
+.badge.high { background: #fde3e1; }
+.detail { background: #fff; border: 1px solid #dde1e6; border-radius: 8px; padding: 16px 20px; min-height: 240px; }
+.detail h2 { margin: 0 0 4px; font-size: 18px; }
+.meta, .muted { color: #5b6573; font-size: 13px; }
+.field { display: inline-flex; gap: 8px; align-items: center; margin: 8px 0; }
+@media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }

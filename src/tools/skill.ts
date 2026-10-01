@@ -25,6 +25,7 @@
 import fs from 'fs';
 import path from 'path';
 import { skillRegistry } from '../skills/index.js';
+import { triggerMatches } from '../skills/registry.js';
 import { disabledIn } from '../registry-state.js';
 import { runScoped } from '../run-scoped.js';
 import type { Skill } from '../skills/types.js';
@@ -84,12 +85,32 @@ export function skillCatalogue(): string {
 export function matchingSkills(request: string): Skill[] {
   if (!request.trim()) return [];
   const off = disabledIn('skills');
-  return skillRegistry.list().filter(skill => {
-    if (off.has(skill.frontmatter.name.toLowerCase())) return false;
-    if (!skill.frontmatter.trigger) return false;
-    try { return new RegExp(skill.frontmatter.trigger, 'i').test(request); }
-    catch { return false; }
-  });
+  return skillRegistry.list().filter(skill =>
+    !off.has(skill.frontmatter.name.toLowerCase()) && triggerMatches(skill, request));
+}
+
+/**
+ * Which matching skills have already been suggested to this session.
+ *
+ * The suggestion rode in the per-step tail, so a model that had decided a
+ * skill did not fit was asked again on every step — and, told to "say so",
+ * said so: twelve of eighteen replies in one real bug-fix turn opened by
+ * declining app-design. A suggestion is made once; after that, the decision
+ * is the model's, and repeating the question only buys a repeated answer.
+ */
+const suggestedSkills = runScoped<Set<string>>(() => new Set());
+
+/**
+ * The matching skills worth naming now: not opened already, not suggested
+ * already this session. Records what it returns as suggested.
+ */
+export function skillsToSuggest(request: string): Skill[] {
+  const shown = shownSkills.get();
+  const suggested = suggestedSkills.get();
+  const fresh = matchingSkills(request).filter(s =>
+    !shown.has(s.frontmatter.name) && !suggested.has(s.frontmatter.name));
+  for (const s of fresh) suggested.add(s.frontmatter.name);
+  return fresh;
 }
 
 /**

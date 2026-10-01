@@ -308,12 +308,15 @@ export function cookieToSet(c: CookieLike): CookieSet | null {
 
 export type TabMenuAction =
   | 'newTabRight' | 'reload' | 'duplicate' | 'pin' | 'unpin' | 'mute' | 'unmute'
-  | 'bookmark' | 'copyAddress' | 'close' | 'closeOthers' | 'closeRight' | 'reopenClosed' | 'popOut' | 'popIn';
+  | 'bookmark' | 'copyAddress' | 'close' | 'closeOthers' | 'closeRight' | 'reopenClosed' | 'popOut' | 'popIn' | 'handToChat';
 
 export type TabMenuSpec = { type: 'separator' } | { type: 'item'; action: TabMenuAction; label: string; enabled: boolean; accelerator?: string };
 
-/** `window`: where the browser is — the AICO window or its own (browser-window.ts); absent, no item to move it. */
-export function tabMenuTemplate(t: { blank: boolean; pinned: boolean; muted: boolean; bookmarked: boolean; count: number; isLast: boolean; closedCount: number; window?: 'main' | 'own' }): TabMenuSpec[] {
+/**
+ * `window`: where the browser is — the AICO window or its own (browser-window.ts); absent, no item to move it.
+ * `handToChat`: offer "Let the open chat use this tab" (browser-owners.ts) — a chat may drive a tab it did not open only when handed it.
+ */
+export function tabMenuTemplate(t: { blank: boolean; pinned: boolean; muted: boolean; bookmarked: boolean; count: number; isLast: boolean; closedCount: number; window?: 'main' | 'own'; handToChat?: boolean }): TabMenuSpec[] {
   const i = (action: TabMenuAction, label: string, enabled = true, accelerator?: string): TabMenuSpec => ({ type: 'item', action, label, enabled, ...(accelerator ? { accelerator } : {}) });
   const sep: TabMenuSpec = { type: 'separator' };
   return [
@@ -326,6 +329,7 @@ export function tabMenuTemplate(t: { blank: boolean; pinned: boolean; muted: boo
     sep,
     i('bookmark', t.bookmarked ? 'Remove bookmark' : 'Bookmark tab', !t.blank),
     i('copyAddress', 'Copy address', !t.blank),
+    ...(t.handToChat ? [i('handToChat', 'Let the open chat use this tab', !t.blank)] : []),
     ...(t.window === 'main' ? [i('popOut', 'Open browser in its own window', true, 'CmdOrCtrl+Shift+N')] : []),
     ...(t.window === 'own' ? [i('popIn', 'Move browser back to the AICO window', true, 'CmdOrCtrl+Shift+N')] : []),
     sep,

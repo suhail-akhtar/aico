@@ -1,5 +1,6 @@
 import path from 'path';
 import { mkdir, readFile, readdir, stat, writeFile } from 'fs/promises';
+import { existsSync, realpathSync } from 'fs';
 import { aicoHome } from './home.js';
 import crypto from 'crypto';
 import type { AicoSettings } from './settings.js';
@@ -56,11 +57,32 @@ function cleanSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 }
 
+function projectWorkspaceDir(projectPath: string): string {
+  const projectName = cleanSegment(path.basename(projectPath) || 'project');
+  const hash = crypto.createHash('sha1').update(projectPath.toLowerCase()).digest('hex').slice(0, 10);
+  return path.join(aicoHome(), 'workspace', 'projects', `${projectName}-${hash}`);
+}
+
+/**
+ * The per-project workspace, keyed by the project's canonical path.
+ *
+ * Canonical means resolved, then `realpath.native` — so `C:\Users\SUHAIL~1\x`
+ * and `C:\Users\Suhail Akhtar\x`, or a symlink and its target, are one
+ * project — then lower-cased, as the key always was (drive-letter case).
+ * Where canonicalising changed the spelling and only the folder under the
+ * old spelling exists, that folder is kept: an existing workspace stays where
+ * its files are rather than silently starting over beside them.
+ */
 function defaultProjectWorkspaceRoot(cwd: string): string {
   const resolved = path.resolve(cwd);
-  const projectName = cleanSegment(path.basename(resolved) || 'project');
-  const hash = crypto.createHash('sha1').update(resolved.toLowerCase()).digest('hex').slice(0, 10);
-  return path.join(aicoHome(), 'workspace', 'projects', `${projectName}-${hash}`);
+  let canonical = resolved;
+  try { canonical = realpathSync.native(resolved); } catch { /* not on disk yet: the resolved path is all there is */ }
+  const preferred = projectWorkspaceDir(canonical);
+  if (canonical.toLowerCase() !== resolved.toLowerCase() && !existsSync(preferred)) {
+    const legacy = projectWorkspaceDir(resolved);
+    if (existsSync(legacy)) return legacy;
+  }
+  return preferred;
 }
 
 export function resolveWorkspaceRoot(settings?: AicoSettings, cwd = process.cwd()): string {
@@ -85,10 +107,22 @@ function isDefaultWorkspaceRoot(dir: string): boolean {
   return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel) && !rel.includes(path.sep);
 }
 
+/*
+  Defaults come from the run context (getWorkspaceRuntime), never straight from
+  `process.cwd()` and the module globals. They did, and the two halves of the
+  workspace disagreed: WorkspaceInfo/WorkspaceWrite keyed the folder by the
+  server's launch directory while Write's guard (`writableRoots`) keyed it by
+  the run's project — two folders, `enterprise-api-b43bb0eed1` and
+  `-c3dc124cf7`, and a file WorkspaceWrite had just written was "outside the
+  AICO workspace" to Write. The session id had the same flaw: a sub-agent's
+  `setWorkspaceRuntime` left `sub-…` in the global, and the parent's next
+  WorkspaceWrite landed in the sub-agent's session folder.
+*/
 export function getWorkspaceInfo(ctx: WorkspaceContext = {}): WorkspaceInfo {
-  const settings = ctx.settings ?? runtimeSettings;
-  const cwd = ctx.cwd ?? process.cwd();
-  const sessionId = ctx.sessionId ?? runtimeSessionId;
+  const runtime = getWorkspaceRuntime();
+  const settings = ctx.settings ?? runtime.settings;
+  const cwd = ctx.cwd ?? runtime.cwd ?? process.cwd();
+  const sessionId = ctx.sessionId ?? runtime.sessionId;
   const root = resolveWorkspaceRoot(settings, cwd);
   const sessionsDir = path.join(root, 'sessions');
   const sessionDir = sessionId ? path.join(sessionsDir, cleanSegment(sessionId)) : undefined;

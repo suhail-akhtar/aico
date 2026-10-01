@@ -3,6 +3,114 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+Every chat gets its own browser tabs, the browser copilot hands real work to a
+chat, and the agent engineers better for less: 41% fewer tokens on every
+request, a delegation contract with checked results, and engine fixes found by
+a new engineering benchmark (`npm run bench:eng`).
+
+### Added
+
+- **The browser copilot hands work that is not browsing to a full chat.** The
+  copilot's turns now carry a small brief (in the request tail): it is AICO's
+  browsing specialist — the page, every open tab, history, bookmarks and
+  browsing memory — and answers from the page with sources. Code, project or
+  repo work, long builds, server operations and documents meant for a project go
+  to a chat instead: the new `HandOffToChat` tool (offered only on copilot turns)
+  creates a chat in the named project or the copilot's folder — or sends to an
+  existing chat by name ("send this to my Asterxa chat"; several matches are
+  asked about, never guessed) — seeds it with the task and a compact context
+  block (page URL/title/selection and the copilot's notes, page text through the
+  prompt-injection guard), and starts it. The copilot shows a "Continued in chat:
+  <title> — Open" card and the main window a toast with Open. When a request
+  could go either way the copilot asks "Do this here, or in a new chat?" with
+  two buttons, and the composer has a "Hand off to chat" button to force it. The
+  copilot is no longer offered the shell, file-editing, git, ops or Task tools,
+  so handing off is enforced in the loop, not only asked for.
+- **Each chat drives its own browser tabs.** Every chat and the browser copilot
+  used to drive the one tab in front, so two chats — or a chat and the copilot —
+  navigated and clicked on each other's page and on the page you were reading.
+  The engine now tells the desktop which session makes each host-tool call (MCP
+  `_meta`, sent to the host's own servers only), and the browser routes by it
+  (`desktop/electron/browser-owners.ts`): the copilot keeps working on the tab in
+  front; any other chat's first `browser_open` opens a tab of its own in the
+  background (never stealing the front tab or focus), and its later calls act on
+  that tab. A tab it does not own is refused with a message saying how to get it
+  — right-click a tab → "Let the open chat use this tab" hands it over. One
+  driver per tab: a second chat waits in line (up to 15 s, inside the tool
+  call's deadline) and is then told "Tab … is busy: the chat “…” is driving it".
+  You always win: a click or key on a tab an agent is driving pauses it there
+  (Take over) until "Let AICO continue". Stop, Take over, the status line and the
+  glow now act on the tab in front, not the whole browser. A chat's tabs carry
+  its colour and a dot whose tooltip names the chat; when its run ends they stay
+  open, marked released. Every safety rule (purchase gate, human checks, vault
+  sign-in, injection guard) applies per tab, whoever drives.
+- **Rarely used tools are loaded on demand — about 10K fewer tokens on every
+  request.** The remote-ops, credential, agent/skill/MCP registry, cron, world
+  lookup, image, background and session tools are named in one `LoadTools`
+  tool and their schemas sent only once a session loads them (by `LoadTools`,
+  by calling one by name, or by opening the server-ops skill). A depth-0 request
+  went from ~24.2K to ~14.3K tokens of system prompt plus schemas (72 → 34
+  tools); a `general` sub-agent from ~25K to ~12K. Loading is sticky for the
+  session, read from its log, inherited by sub-agents, and costs one cache miss
+  per group, never one per step. `deferTools: false` in settings sends every
+  schema as before.
+- **A delegation contract.** `Task` takes `acceptance_criteria`, `files` and
+  `constraints` beside `prompt`; a sub-agent that can change files is refused
+  without acceptance criteria, before anything is spawned. The child reads a
+  labelled brief and owes a short report (STATUS / Changed / Verified / Open).
+  The Task description is a decision aid instead of a catalogue of sixteen
+  roles, and the default sub-agent prompt is a third of its old size.
+- **On-demand `test-strategy` skill** (the level by what can break, cases that
+  would catch a wrong implementation, determinism), triggered from the request.
+  A `system-design` skill was tried and removed: on the engineering benchmark it
+  tripled design-doc length (6k → 15–18k words) and steps for no score gain.
+
+### Changed
+
+- **Code a sub-agent wrote now holds the parent's turn to the project's
+  checks.** Gates are per run and a sub-agent's are off, so a parent that
+  delegated an implementation could finish with its checks gate silent. The
+  child's written files and check results are now taken into the parent's run:
+  it must run RunChecks (and VerifyApp for pages) over the delegated code,
+  unless the child's own green run is still fresh.
+- The system prompt asks for a decision before non-trivial edits (requirements,
+  constraints, a design that justifies any new stack or dependency), a test that
+  fails without the change, and a read of the whole diff before reporting; the
+  re-read after every edit is gone. Plan-mode steps name the check that proves
+  them. Same prompt size. A sub-agent's prompt no longer carries the chat's
+  rendered-block catalogue (~1.35K tokens).
+
+### Fixed
+
+- Sub-agents were shown the `Supervise` schema (and a browser-QA sub-agent every
+  built-in) with no handler behind it, because the tool list was built without
+  the run's depth.
+- At depth 0 a browser-testing message dropped the `Task` schema while keeping
+  its handler, changing the tool list mid-session (a cache break).
+- The prompt told the model to call `widget_spec`; the tool is `WidgetSpec`.
+- **A matching-skill suggestion is made once.** It rode in the per-step tail and
+  told the model to "say so" when declining, so a bug-fix turn declined
+  `app-design` in 12 of 18 replies. It is now sent on the first step of a turn
+  only, never again in the session for a skill already suggested or opened, and
+  declining is silent. Skills can declare an `antiTrigger`; `app-design` no
+  longer matches bug reports ("admin UI" in a CSV export bug).
+- **One workspace folder per project.** `WorkspaceInfo`/`WorkspaceWrite` keyed
+  the workspace by the server's launch directory while `Write` keyed it by the
+  run's project, so files `WorkspaceWrite` wrote were refused by `Write`. Both
+  now read the run's project; the key is the canonical path (`realpath`), and a
+  workspace already under the old spelling keeps being used.
+- **A sub-agent no longer moves the parent's workspace session.** Each sub-agent
+  overwrote the process-wide session id, so the parent's next `WorkspaceWrite`
+  landed in `sessions/sub-…`. The run context now answers, and only top-level
+  runs set the fallback (parallel and failing sub-agents included).
+- **`Task` offers six general roles** (`general`, `explore`, `plan`, `review`,
+  `verification`, `security-audit`) instead of sixteen; retired names
+  (`backend`, `frontend`, `qa`, `healer`, `architect`, …) still run, mapped to
+  these. Its brief guidance now says acceptance criteria cover the change's
+  security and edge cases, never declared out of scope unless the user did.
+
 ## 0.31.0 — 2026-10-01
 
 A truer AI browser: a guard against hidden instructions in pages, an opt-in

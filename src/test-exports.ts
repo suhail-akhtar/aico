@@ -188,6 +188,8 @@ export { buildMcpTools } from './mcp-server/tools.js';
 export { attachMcpHandlers } from './mcp-server/index.js';
 export { Rpc as McpRpc, textResult as mcpTextResult } from './mcp-server/protocol.js';
 export { McpStdioClient } from './mcp/stdio.js';
+export { McpHttpClient } from './mcp/http.js';
+export { hostCallMeta } from './mcp/registry.js';
 export { costFor } from './tokens.js';
 export { decideHeadlessPermission } from './background/index.js';
 export { cronScheduler } from './cron/scheduler.js';
@@ -241,7 +243,10 @@ export {
   learnFromError, resetReasoningForTest,
 } from '../shared/reasoning.js';
 export { resolvedEffort } from './run-context.js';
-export { resolveToolSet, isRetryableError } from './agent.js';
+export { resolveToolSet, isRetryableError, buildToolDefs } from './agent.js';
+export {
+  TOOL_GROUPS, LOAD_TOOLS, groupOf, groupsLoadedBy, loadedGroupsFromLog, isDeferred, loadToolsDefinition, executeLoadTools,
+} from './tools/deferred.js';
 export { HOST_TOOLS, hostToolsFrom, isHostTool } from '../shared/host-tools.js';
 export {
   vsCodeDiagnostics, vsCodeTasks, vsCodeWorkspace,
@@ -266,7 +271,7 @@ export { skillRegistry } from './skills/registry.js';
 export { executeSkillCreate } from './skills/create.js';
 export { executeSkillManage, verifySkillDir, draftsDir } from './skills/manage.js';
 export { setEnabled, isDisabled, disabledIn, registryStatePath } from './registry-state.js';
-export { matchingSkills } from './tools/skill.js';
+export { matchingSkills, skillsToSuggest } from './tools/skill.js';
 export { executeAgentManage } from './tools/manage-agents.js';
 export { resolveAgent, inlineSkills, personaFor } from './agents/resolve.js';
 export { currentAgent, currentModel } from './session/projections.js';
@@ -342,8 +347,11 @@ export { DIAGRAM_TYPES, diagramType, diagramIndex } from '../shared/widgets/diag
 export { selectToolProfile } from './agent.js';
 export {
   owningSession, registerOwnerForTest, requestAgentStop, guideAgent, detachedRun,
-  taskToolDefinition, runTask, getAgentRegistry,
+  taskToolDefinition, runTask, getAgentRegistry, briefProblem, composeBrief, canWrite,
+  canonicalAgentType, TASK_AGENT_TYPES,
 } from './tools/task.js';
+export { workOf, absorbWork } from './checks.js';
+export { REPORT_CONTRACT } from './agents/prompts-registry.js';
 export { executeSupervise, superviseToolDefinition } from './tools/supervise.js';
 export { loadSettings } from './settings.js';
 export {
@@ -471,3 +479,10 @@ export { maskUnknownSecrets, checkRate, resetOpsRateForTest, useCredential, runW
 export { OPS_TOOL_NAMES, opsToolDefinitions, executeOpsTool, installOpsStages, isOpsTool } from './tools/ops/index.js';
 export { callbackPrompter } from './vault/human.js';
 export { toolRequiresPermission } from './permissions.js';
+
+// -- Browser copilot hand-off to a full chat (shared/chat-handoff, server/chat-handoff, tools/handoff-to-chat) --
+export { handOffToChat as serverHandOffToChat, mintSessionId } from './server/chat-handoff.js';
+export { handOffToChat as handOffToChatTool, handOffToChatDefinition } from './tools/handoff-to-chat.js';
+export { COPILOT_WITHHELD } from './agent.js';
+export { COPILOT_BRIEF } from './prompts.js';
+export * as chatHandOff from '../shared/chat-handoff.js';

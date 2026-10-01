@@ -1,0 +1,13 @@
+{
+  "name": "ledger-export",
+  "version": "1.4.2",
+  "private": true,
+  "type": "module",
+  "description": "Ledger transaction store, bulk importer and nightly CSV export",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

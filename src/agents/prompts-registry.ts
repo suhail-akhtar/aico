@@ -47,9 +47,18 @@ const DEFINITION_OF_DONE = `Definition of Done — verify ALL before declaring c
 6. No secrets, credentials, or PII committed. No \`console.log\` / \`print\` left in shipped code.
 7. You re-read your own diff as if you were the reviewer and fixed what you'd push back on.`;
 
-const REPORT_CONTRACT = `End your final message with EXACTLY this line (the orchestrator parses it):
-STATUS: COMPLETE | typecheck: pass | tests: <passed>/<run> | risks: <none|brief>
-If you could not fully complete the task, use STATUS: PARTIAL and explain what remains.`;
+/*
+  One report shape for every writing agent, and the one `composeBrief`
+  (tools/task.ts) asks for. Short on purpose: the final message is the only
+  thing that reaches the orchestrator's context, and an unbounded one was
+  often the whole story of the run. The first line is parsed
+  (`appendVerificationNudge`).
+*/
+export const REPORT_CONTRACT = `Your final message is all the caller sees. Keep it under ~250 words, in this shape:
+STATUS: COMPLETE | PARTIAL | FAIL
+Changed: each file, one line on what and why (or "none")
+Verified: each criterion → the command you ran or what you observed, and the result
+Open: what is left, risks, assumptions you made (or "none")`;
 
 const SECURITY_AUDIT_RUBRIC = `Severity rubric (use consistently):
 - CRITICAL: exploitable vulnerability, data loss, or remote code execution.
@@ -62,23 +71,19 @@ const SECURITY_AUDIT_RUBRIC = `Severity rubric (use consistently):
 
 export const AGENT_PROMPTS: Record<SubAgentType, string> = {
 
-  general: `You are a Senior Software Engineer — a versatile, staff-level generalist.
-You write production-quality code in whatever language and framework the project uses.
-
-${STACK_DISCOVERY}
-
-${CORE_PRINCIPLES}
-
-Implementation discipline:
-- Read the relevant code before changing it. Understand the data flow and call sites.
-- Make the smallest correct change. Do not refactor unrelated code in the same task.
-- Handle errors explicitly — never swallow exceptions, never leave an empty catch.
-- Add or update tests for the behavior you change. Run them.
-- Document non-obvious logic with a brief comment. Update relevant docs/README if the change is user-facing.
-
-${EDGE_CASES}
-
-${DEFINITION_OF_DONE}
+  /*
+    The default sub-agent, so the one most often paid for — and lean on
+    purpose. It used to carry the full doctrine (SOLID/DRY/KISS, a six-item
+    edge-case list, a seven-step definition of done): ~600 tokens restating
+    what the system prompt's behaviour rules and the structured brief already
+    say, on every delegation. What is left is what a delegated engineer needs
+    that its brief does not give it.
+  */
+  general: `You are a senior software engineer working on a task delegated by another agent. The brief below is everything you know; when it is silent, follow the code that is already there.
+- Learn the stack from the "Project profile" block if present, otherwise the manifest and two neighbouring modules. Match their conventions exactly.
+- Make the smallest correct change. Handle errors explicitly; cover the edge cases the inputs allow (empty, boundary, invalid, concurrent).
+- Add or update tests for behaviour you change, then run the project's checks (RunChecks) and read the result. A criterion you did not check is reported as unchecked, not as met.
+- Before reporting, read your own diff as a reviewer would and fix what you would push back on.
 
 ${REPORT_CONTRACT}`,
 

@@ -401,6 +401,7 @@ export function registerTabSession(ctx: DesktopContext, b: BrowserInternals): Ta
       blank, pinned: Boolean(t.pinned), muted: t.view.webContents.isAudioMuted(), bookmarked: Boolean(info?.bookmarked),
       count: ids.length, isLast: ids[ids.length - 1] === t.id, closedCount: closed.length,
       window: ctx.services.browserWindow ? (ctx.services.browserWindow.window() ? 'own' : 'main') : undefined,
+      handToChat: Boolean(ctx.services.browser),
     });
     let picked: TabMenuAction | null = null;
     const run = (a: TabMenuAction): void => {
@@ -423,6 +424,13 @@ export function registerTabSession(ctx: DesktopContext, b: BrowserInternals): Ta
         case 'reopenClosed': reopenClosed(); break;
         case 'popOut': ctx.services.browserWindow?.popOut(); break;
         case 'popIn': ctx.services.browserWindow?.popIn({ show: true }); break;
+        case 'handToChat':
+          void ctx.services.browser?.handToOpenChat(t.id).then((title) => {
+            void ctx.services.renderer?.call('notify', title
+              ? { title: 'Tab handed over', body: `“${title}” may now use this tab (its tools name it by id ${t.id}).`, kind: 'success' }
+              : { title: 'No chat to hand it to', body: 'Open the chat that should use this tab, then try again.', kind: 'warning' }).catch(() => {});
+          });
+          break;
         case 'bookmark': break; // the interface does it (the bookmarks list is its)
       }
       resolve(a);

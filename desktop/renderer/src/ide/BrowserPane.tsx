@@ -245,14 +245,18 @@ function StatusLine({ docked }: { docked?: boolean }): React.ReactElement | null
   const hidden = !ui.open || ui.minimized;
   const minimized = ui.open && ui.minimized;
 
+  // Per tab: the line speaks for whoever drives the page in front — the copilot, or the chat that owns it.
+  const front = useActiveTab();
   const live = (busy || (copilotBusy && hidden)) && !handoff && !takenOver;
   const showLauncher = !docked && minimized;
   if (!live && !takenOver && !showLauncher) return null;
 
-  const text = agent.event && Date.now() - agent.at < 20_000
+  const who = front?.driver && front.driver !== 'Copilot' ? ` · ${front.driver}` : '';
+  const text = (agent.event && agent.event.tabId === front?.id && Date.now() - agent.at < 20_000
     ? agentLine(agent.event)
-    : busy ? 'AICO is using this page…' : 'AICO is working…';
-  const stop = (): void => { agentStop(); if (useCopilot.getState().busy) void cancelCopilot(); };
+    : busy ? 'AICO is using this page…' : 'AICO is working…') + who;
+  // Stop pauses this tab; the copilot's turn is cancelled only when this page is the copilot's (not a chat's own tab).
+  const stop = (): void => { agentStop(); if (useCopilot.getState().busy && !front?.owner) void cancelCopilot(); };
 
   return (
     <div className={cls('bx-status', live && 'bx-status-live')} role="status" aria-live="polite">

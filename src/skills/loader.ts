@@ -62,6 +62,7 @@ export function parseSkillFile(content: string, filePath: string, isBuiltin: boo
     name: String(fm['name']),
     description: String(fm['description']),
     trigger: fm['trigger'] ? String(fm['trigger']) : undefined,
+    antiTrigger: fm['antiTrigger'] ? String(fm['antiTrigger']) : undefined,
     aliases: Array.isArray(fm['aliases']) ? (fm['aliases'] as string[]) : undefined,
     author: fm['author'] ? String(fm['author']) : undefined,
     version: fm['version'] ? String(fm['version']) : undefined,

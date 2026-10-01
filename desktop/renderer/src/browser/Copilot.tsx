@@ -8,6 +8,12 @@
  * well; answers render with the same renderers as the main chat, and links in
  * them open in the browser.
  *
+ * Work that is not browsing (code, a project, server ops) is handed to a full
+ * chat — by the model's `HandOffToChat`, or by the composer's "Hand off to
+ * chat" button — and shows here as a "Continued in chat" card with Open. When
+ * the model cannot tell, its one-line "here, or in a new chat?" question is
+ * drawn as two buttons.
+ *
  * Docked, it is part of the browser pane. Floating, it is drawn by its own
  * view over the page (copilot-main.tsx, placed by electron/browser-overlay.ts),
  * so the page stays live round it: `FloatingCopilot` is that view's content,
@@ -33,8 +39,11 @@ import { usePageSuggestions } from './useSuggestions';
 import { Favicon } from './Omnibox';
 import { activeTab, agentStop, letAgentContinue, openUrl, useActiveTab, useBrowser } from './store';
 import {
-  answerCopilot, cancelCopilot, newCopilotChat, permitCopilot, sendCopilot, useCopilot,
+  answerCopilot, cancelCopilot, handOffNow, newCopilotChat, permitCopilot, sendCopilot, useCopilot,
 } from './copilot-session';
+import {
+  HANDOFF_CHOICE_ANSWERS, HANDOFF_TOOL, isHandOffChoice, parseHandOffResult, type HandOffDone,
+} from '@aico/shared/chat-handoff';
 import { clampFloat, copilotSurface, minimizeCopilot, toggleCopilot, useCopilotUi } from './copilot-ui';
 import { dragFloat, resizeFloat } from './geometry';
 import { inBrowserWindow } from './host';
@@ -82,6 +91,19 @@ export async function askCopilot(text: string, quick?: QuickAction): Promise<voi
   const started = useCopilot.getState().started;
   const title = started ? undefined : `Browser · ${quick ? quick.label : (tab && !isBlankUrl(tab.url) ? tab.title || hostOf(tab.url) : text.slice(0, 40))}`;
   await sendCopilot(withContext(text, ctx), { title, approval: getSendOptions().approval, effort: getSendOptions().effort });
+}
+
+/** Open a chat in the main view — from the floating copilot or the browser's own window, through the main window. */
+function openInMain(sessionId: string): void {
+  if (copilotSurface() === 'overlay' || inBrowserWindow()) toWindow({ type: 'openChat', sessionId });
+  else void openChat(sessionId);
+}
+
+/** "Hand off to chat": this request, with the page it is about, to a new chat — no model decision. */
+async function handOffFromComposer(text: string): Promise<boolean> {
+  const ctx = useCopilotUi.getState().attachPage ? await pageContext() : null;
+  const page = ctx && !isBlankUrl(ctx.url) ? { url: ctx.url, title: ctx.title, ...(ctx.selection ? { selection: ctx.selection } : {}) } : null;
+  return Boolean(await handOffNow(text, page));
 }
 
 /** The docked copilot, in the browser pane. Floating, it is its own view (see FloatingCopilot). */
@@ -180,6 +202,7 @@ function CopilotBody({ floating, box, area }: {
   const draft = useCopilot(s => s.draft);
   const busy = useCopilot(s => s.busy);
   const error = useCopilot(s => s.error);
+  const handoffs = useCopilot(s => s.handoffs);
   const messages = useMemo(() => composeMessages(logged, draft, busy), [logged, draft, busy]);
   const turns = useMemo(() => groupTurns(messages, busy), [messages, busy]);
   const scroll = useRef<HTMLDivElement>(null);
@@ -218,7 +241,7 @@ function CopilotBody({ floating, box, area }: {
         </div>
         <button className="icon-btn-sm" onClick={() => newCopilotChat()} disabled={busy} title="New copilot chat"><Icon name="new-chat" size={15} /></button>
         <button className="icon-btn-sm" disabled={!sessionId || turns.length === 0}
-          onClick={() => { if (!sessionId) return; if (copilotSurface() === 'overlay' || inBrowserWindow()) toWindow({ type: 'openChat', sessionId }); else void openChat(sessionId); }}
+          onClick={() => { if (sessionId) openInMain(sessionId); }}
           title="Open in main chat — continue this conversation in the full chat view">
           <Icon name="chat" size={15} />
         </button>
@@ -232,7 +255,8 @@ function CopilotBody({ floating, box, area }: {
 
       <div ref={scroll} className="cp-transcript min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-3 thin-scroll" onClickCapture={onLink}
         onScroll={e => { const el = e.currentTarget; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
-        {turns.length === 0 && !busy ? <StartScreen /> : turns.map((t, i) => <CopilotTurn key={t.key} turn={t} last={i === turns.length - 1} />)}
+        {turns.length === 0 && !busy && handoffs.length === 0 ? <StartScreen /> : turns.map((t, i) => <CopilotTurn key={t.key} turn={t} last={i === turns.length - 1} />)}
+        {handoffs.map(h => <HandOffCard key={h.sessionId + h.title} done={h} />)}
         {error && (
           <div className="mt-3 flex items-start gap-2 rounded-xl border border-aico-danger/30 bg-aico-danger/5 px-3 py-2 text-[12.5px] text-aico-danger">
             <Icon name="alert" size={14} className="mt-0.5 shrink-0" /><span className="min-w-0 flex-1 break-words">{error}</span>
@@ -289,6 +313,11 @@ function CopilotTurn({ turn, last }: { turn: Turn; last: boolean }): React.React
     return () => clearInterval(t);
   }, [turn.running]);
   const hasWork = turn.work.length > 0;
+  // Where the model handed this turn's work, from the tool's result in the log (so a reload still shows it).
+  const handedTo = [...turn.work, ...turn.answer]
+    .filter(m => m.type === 'tool' && m.toolName === HANDOFF_TOOL && !m.toolRunning)
+    .map(m => parseHandOffResult(m.toolResult))
+    .filter((d): d is HandOffDone => d !== null);
   return (
     <section className="mb-5" data-turn={last ? 'last' : undefined}>
       {turn.user && <UserLine message={turn.user} />}
@@ -314,6 +343,7 @@ function CopilotTurn({ turn, last }: { turn: Turn; last: boolean }): React.React
           </div>
         ))}
       </div>
+      {handedTo.map(d => <HandOffCard key={d.sessionId} done={d} />)}
       {!turn.running && answerText && (
         <div className="mt-1 flex items-center gap-0.5 text-aico-muted" data-no-export>
           <button className="icon-btn-sm h-6 w-6" title={copied ? 'Copied' : 'Copy answer'}
@@ -323,6 +353,23 @@ function CopilotTurn({ turn, last }: { turn: Turn; last: boolean }): React.React
         </div>
       )}
     </section>
+  );
+}
+
+/** "Continued in chat: <title> — Open": where work from the copilot went. */
+function HandOffCard({ done }: { done: HandOffDone }): React.ReactElement {
+  const where = done.existing ? (done.queued ? 'Queued in chat' : 'Sent to chat') : 'Continued in chat';
+  return (
+    <div className="cp-handoff mt-2 flex items-center gap-2.5 rounded-xl border border-aico-accent/35 bg-aico-accent/5 px-3 py-2" data-handoff={done.sessionId}>
+      <Icon name="chat" size={15} className="shrink-0 text-aico-accent" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-aico-muted">{where}</div>
+        <div className="truncate text-[13px] font-medium" title={done.project ? `${done.title} — ${done.project}` : done.title}>{done.title}</div>
+      </div>
+      <button className="btn-outline btn-sm shrink-0" onClick={() => openInMain(done.sessionId)} title="Open this chat in the main view">
+        Open <Icon name="external" size={12} />
+      </button>
+    </div>
   );
 }
 
@@ -359,6 +406,20 @@ function CopilotAttention(): React.ReactElement | null {
         <div className="mt-2 flex justify-end gap-2">
           <button className="btn-outline btn-sm" onClick={() => void permitCopilot(false)}>Deny</button>
           <button className="btn-primary btn-sm" onClick={() => void permitCopilot(true)}>Allow</button>
+        </div>
+      </div>
+    );
+  }
+  if (question && isHandOffChoice(question)) {
+    // The copilot could not tell where this belongs: one line, two buttons.
+    return (
+      <div className="mx-3 mb-2 rounded-2xl border border-aico-accent/40 p-3 animate-pop-in" role="alertdialog" data-handoff-choice>
+        <div className="flex items-start gap-2 text-[13px]"><Icon name="help" size={15} className="mt-0.5 text-aico-accent" /><span className="min-w-0 flex-1 selectable">{question}</span></div>
+        <div className="mt-2 flex justify-end gap-2">
+          <button className="btn-outline btn-sm" onClick={() => void answerCopilot(HANDOFF_CHOICE_ANSWERS.here)}>Here</button>
+          <button className="btn-primary btn-sm" onClick={() => void answerCopilot(HANDOFF_CHOICE_ANSWERS.chat)}>
+            <Icon name="chat" size={12} /> New chat
+          </button>
         </div>
       </div>
     );
@@ -418,6 +479,13 @@ function CopilotInput(): React.ReactElement {
     });
   }, [text, busy]);
   const stop = (): void => { void cancelCopilot(); agentStop(); };
+  const [handing, setHanding] = useState(false);
+  const handOff = (): void => {
+    const t = text.trim();
+    if (!t || busy || handing) return;
+    setHanding(true);
+    void handOffFromComposer(t).then(done => { if (done) setText(''); }).finally(() => setHanding(false));
+  };
 
   return (
     <div className="shrink-0 px-3 pb-3">
@@ -452,6 +520,12 @@ function CopilotInput(): React.ReactElement {
               const wantCtrl = sendKey === 'ctrl-enter';
               if ((wantCtrl && (e.ctrlKey || e.metaKey)) || (!wantCtrl && !e.shiftKey && !e.ctrlKey)) { e.preventDefault(); send(); }
             }} />
+          {!busy && (
+            <button className="icon-btn-sm h-8 w-8 shrink-0 disabled:opacity-30" disabled={!text.trim() || handing} onClick={handOff}
+              title="Hand off to chat — do this in a new full chat instead of here (code, projects, long builds)" aria-label="Hand off to chat">
+              {handing ? <span className="spinner h-3.5 w-3.5" /> : <Icon name="share" size={15} />}
+            </button>
+          )}
           {busy ? (
             <button className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-aico-primary text-aico-bg hover:opacity-90" onClick={stop} title="Stop — also stops AICO in the browser">
               <Icon name="stop" size={13} style={{ fill: 'currentColor' }} />

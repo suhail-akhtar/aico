@@ -196,9 +196,16 @@ interface ChecksState {
    * the run cannot be trusted to still describe the code.
    */
   commands: number;
+  /**
+   * Every file this run wrote through the write path, source or not — what a
+   * parent absorbs from a sub-agent (see {@link absorbWork}). Wider than
+   * `touched`, which only holds files that invalidate a check: a page the
+   * child wrote matters to the parent's browser gate though no check covers it.
+   */
+  written: Set<string>;
 }
 
-const state = runScoped<ChecksState>(() => ({ touched: new Map(), results: new Map(), commands: 0 }));
+const state = runScoped<ChecksState>(() => ({ touched: new Map(), results: new Map(), commands: 0, written: new Set() }));
 
 /** Note that a shell command ran. Called from the Bash and Terminal paths. */
 export function noteCommandRun(): void {
@@ -217,10 +224,42 @@ export function resetChecks(): void {
 
 /** Note that a source file changed. Called from the write path. */
 export function noteSourceChanged(file: string): void {
-  if (!isSourceFile(file)) return;
   const abs = path.resolve(file);
+  state.get().written.add(abs);
+  if (!isSourceFile(file)) return;
   try { state.get().touched.set(abs, fs.statSync(abs).mtimeMs); }
   catch { /* written and already gone; nothing to gate on */ }
+}
+
+/** What a finished run changed and checked — handed from a sub-agent to its parent. */
+export interface RunWork {
+  written: string[];
+  results: CheckResult[];
+}
+
+/** A run's work by its session id, or undefined when it recorded none. */
+export function workOf(sessionId: string): RunWork | undefined {
+  const s = state.peek(sessionId);
+  if (!s || (s.written.size === 0 && s.results.size === 0)) return undefined;
+  return { written: [...s.written], results: [...s.results.values()] };
+}
+
+/**
+ * Take a sub-agent's work into the current run.
+ *
+ * Its files count as changed here, so this run's gate holds them to the
+ * project's checks. Its check results come along too, and the newer result
+ * per check wins: a RunChecks the child ran after its last edit is genuine
+ * evidence and need not be paid for twice, while one it ran before a later
+ * edit is stale by the ordinary mtime rule.
+ */
+export function absorbWork(work: RunWork): void {
+  for (const file of work.written) noteSourceChanged(file);
+  const { results } = state.get();
+  for (const result of work.results) {
+    const mine = results.get(result.name);
+    if (!mine || result.at > mine.at) results.set(result.name, result);
+  }
 }
 
 /** The newest change this turn made, or 0 when it changed nothing. */

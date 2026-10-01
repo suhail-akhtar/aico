@@ -249,6 +249,33 @@ export interface SubmitOptions {
    * put a silent dependency on two sentences staying identical for ever.
    */
   retireTasks?: 'done' | 'cancelled';
+  /**
+   * The desktop browser's copilot is asking: its turns get the copilot brief
+   * and `HandOffToChat`, and not the build-and-run tools. Per turn.
+   */
+  surface?: 'browser-copilot';
+}
+
+/** A chat the browser copilot handed work to (`chat/handoff`, and the `chat-handoff` topic). */
+export interface ChatHandOff {
+  sessionId: string;
+  title: string;
+  project: string;
+  existing: boolean;
+  queued: boolean;
+  /** The copilot conversation it came from. */
+  from?: string;
+}
+
+export interface ChatHandOffRequest {
+  task: string;
+  fromSessionId?: string;
+  project?: string;
+  title?: string;
+  chat?: string;
+  notes?: string;
+  /** The page to carry; `null` for none (otherwise the copilot's latest page is used). */
+  page?: { url: string; title?: string; selection?: string } | null;
 }
 
 export const api = {
@@ -311,6 +338,8 @@ export const api = {
   }>(`session?id=${encodeURIComponent(id)}${project ? `&project=${encodeURIComponent(project)}` : ''}`),
 
   submit: (opts: SubmitOptions) => post<{ accepted: boolean }>('submit', opts),
+  /** Move work to a full chat and start it there — the copilot's "Hand off to chat". */
+  handOff: (req: ChatHandOffRequest) => post<({ ok: true } & ChatHandOff) | { ok: false; error: string; candidates?: Array<{ title: string; project?: string }> }>('chat/handoff', req),
   cancel: (sessionId: string) => post<{ cancelled: boolean }>('cancel', { sessionId }),
   steer: (sessionId: string, content: string) => post<{ ok: boolean }>('steer', { sessionId, content }),
   /** Resolve the question a blocked turn is waiting on. */
@@ -1433,6 +1462,14 @@ export function streamTopic<T = unknown>(
 }
 
 /** The Apps screen's stream: one full frame, then process state and list changes. */
+/** Hand-offs from the browser copilot to a chat, as they happen (no replay). */
+export function streamHandOffs(
+  onEvent: (event: TopicEvent<ChatHandOff>) => void,
+  onStatus?: (status: 'connecting' | 'live' | 'lost') => void,
+): StreamHandle {
+  return streamTopic('chat/handoff/events', onEvent, onStatus);
+}
+
 export function streamApps(
   onEvent: (event: TopicEvent<MiniAppsView | { processes: MiniAppProcess[] } | Record<string, never>>) => void,
   onStatus?: (status: 'connecting' | 'live' | 'lost') => void,

@@ -33,7 +33,9 @@ guidance expires, and a table of stale citations is worse than none.
 **Everything volatile lives in the tail, never the system prompt.** Providers
 render `tools → system → messages`, so churn in the system block invalidates the
 prefix of every message behind it. Git status and the date ride after the
-transcript instead. This is why the prompt is ~1.3K tokens and stable.
+transcript instead. This is why the prompt is stable. Tool schemas outweigh the
+prompt about 2:1, so rarely used tool groups are sent only once a session loads
+them (`src/tools/deferred.ts`); a load costs one prefix miss, never one per step.
 
 **Guards may only deny, never grant.** Tool policy runs as ordered named stages
 — hooks, plan mode, bash safety, sandbox, permission.

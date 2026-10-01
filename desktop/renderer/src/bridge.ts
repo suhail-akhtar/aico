@@ -18,6 +18,7 @@ import { applyContributedTheme } from '@/plugins/run-action';
 import { THEME_PRESETS } from '@desk/prefs';
 import { FRAME_METHODS } from '@/plugins/frame-rpc';
 import { browserElsewhere } from '@/browser/host';
+import { useCopilot } from '@/browser/copilot-session';
 
 void useNavItems;
 
@@ -106,6 +107,24 @@ const HANDLERS: Record<string, Handler> = {
     if (p.enabled) disabled.delete(id); else disabled.add(id);
     await d.setPrefs({ plugins: { ...d.prefs.plugins, disabled: [...disabled] } });
     return { ok: true };
+  },
+  /**
+   * Who is who, for the browser's tab ownership (electron/browser-owners.ts):
+   * which session is the browser copilot (it works on the page in front; every
+   * other chat gets tabs of its own), the chat on screen (a tab handed over
+   * goes to it), and the chats' titles and whether they are running.
+   */
+  browserSessions: () => {
+    const s = useStore.getState();
+    // The copilot's conversation, as both documents that show it share it (browser/copilot-session.ts).
+    let copilot: string | null = null;
+    try { copilot = localStorage.getItem('aico.browser.copilot.session'); } catch { /* storage unavailable */ }
+    copilot ??= useCopilot.getState().sessionId;
+    return {
+      copilot,
+      onScreen: s.sessionId ? { sessionId: s.sessionId, title: s.title ?? '' } : null,
+      sessions: s.sessions.slice(0, 300).map(x => ({ id: x.id, title: x.title, running: x.id === s.sessionId ? Boolean(s.busy || x.running) : Boolean(x.running) })),
+    };
   },
   /** The agent is about to use the browser: make sure the page is on screen so it lays out. */
   ensureBrowserVisible: async () => {

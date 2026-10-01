@@ -90,7 +90,7 @@ export const proposePlanDefinition = {
           type: 'object',
           properties: {
             title: { type: 'string', description: 'What this step does, in one line.' },
-            detail: { type: 'string', description: 'Anything the reader needs to judge it.' },
+            detail: { type: 'string', description: 'Anything the reader needs to judge it, and the check that will prove it done.' },
             touches: {
               type: 'array',
               items: { type: 'string' },

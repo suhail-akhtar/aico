@@ -1,0 +1,10 @@
+{
+  "name": "shipping-quotes",
+  "version": "3.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Shipping quote calculation for checkout and returns",
+  "scripts": {
+    "test": "node --test"
+  }
+}

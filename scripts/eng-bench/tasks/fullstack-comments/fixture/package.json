@@ -1,0 +1,14 @@
+{
+  "name": "helpdesk",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "description": "Internal support-ticket desk",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

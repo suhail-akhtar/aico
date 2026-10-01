@@ -29,8 +29,16 @@
  *     self-signed one on a private address whose exact origin a stored
  *     credential allows it for (`allowSelfSigned`), pinned on first sight.
  * `handoff()` shows you what the agent needs and waits for you to press Done.
- * Stop / Take over (`browser:agentStop`) makes every agent tool refuse until
- * `browser:agentResume`.
+ * Stop / Take over (`browser:agentStop`) makes every agent tool refuse on that
+ * tab until `browser:agentResume`; so does your own input on a tab an agent is
+ * driving.
+ *
+ * WHOSE TAB. Each tool call says which chat made it (`asCaller`, from the MCP
+ * `_meta` the engine sends). The browser copilot works on the tab in front; any
+ * other chat works in background tabs of its own, one driver per tab at a time
+ * (browser-owners.ts has the rules). A chat's tab is laid out *under* the one
+ * in front, so it renders and takes trusted input like a page on screen while
+ * you keep looking at yours.
  *
  * Everything the interface shows comes from one pushed `browser:state`
  * (see shared/browser-types.ts for the whole IPC contract).
@@ -41,6 +49,7 @@
 import { app, dialog, ipcMain, shell, WebContentsView, session as electronSession, type BrowserWindow, type WebContents, type Session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { DesktopContext } from './context';
 import type {
   AgentEvent, BrowserState, ConfirmRequest, DialogRequest, DownloadItem, ExtractKind, FindRequest,
@@ -78,6 +87,7 @@ import { classifyCommit, commitQuestion, type CommitSignals, type CommitVerdict 
 import { isRealPasswordField, isUsernameField, loginFormJs, passwordOf, type LoginFormReport } from './browser-login';
 import { isPrivateOrigin, loginOrigin } from './browser-vault-core';
 import { PAGE_SIGNALS_JS, type PageSignals } from '../shared/page-signals';
+import { busyMessage, ownerHue, personTookOver, TabLeases, TabOwners, type Caller, type Intent, type World } from './browser-owners';
 
 /** The profile's older home (Electron's partition); it now lives in <AICO_HOME>/desktop/browser/profile — see browser-session.ts. */
 export const BROWSER_PARTITION = 'persist:aico-browser';
@@ -113,6 +123,8 @@ interface Tab {
   certError?: { url: string; error: string; issuer: string };
   httpStatus?: number;
   lastGestureAt: number;
+  /** When the agent last sent this tab trusted input (its own input events are not the person taking over). */
+  agentInputAt: number;
   inflight: Set<number>;
   lastNetAt: number;
   pageEnabled: boolean;
@@ -183,7 +195,18 @@ export interface BrowserService {
   downloads(): DownloadItem[];
   upload(target: Target, files: string[]): Promise<string>;
   uploadWait(id: string, seconds?: number): Promise<string>;
+  /** The tab in front is paused (Stop / Take over). */
   agentStopped(): boolean;
+  /**
+   * Run one agent tool call as the chat that made it (`sessionId` from the
+   * engine's MCP `_meta`; `tabId` when the call names a tab). Every browser
+   * method called inside acts on that chat's tab (browser-owners.ts).
+   */
+  asCaller<T>(call: { sessionId?: string; tabId?: string }, fn: () => Promise<T>): Promise<T>;
+  /** browser_tabs for the calling chat: its tabs, those handed to it, and the person's tab in front (read-only). */
+  agentTabs(): Array<TabInfo & Record<string, unknown>>;
+  /** The person handed this tab to the chat open in the main window. Resolves its title, or null. */
+  handToOpenChat(tabId: string): Promise<string | null>;
   /**
    * Prompt-injection guard for an agent tool result from the page in front
    * (shared/injection-guard.ts): wraps instruction-like passages, leads with
@@ -293,7 +316,6 @@ export function registerBrowser(ctx: DesktopContext): void {
   /** The window the tab views are attached to — the browser's window (ctx.browserWindow) once laid out there. */
   let placedIn: BrowserWindow | null = null;
   let ses: Session | null = null;
-  let agentStopped = false;
   /** Session restore, tab order, full screen (browser-session.ts) and autofill — set at the end of this function. */
   let tabSession: TabSession | null = null;
   let autofillService: AutofillService | null = null;
@@ -404,10 +426,11 @@ export function registerBrowser(ctx: DesktopContext): void {
   };
 
   // ── What the agent is doing (for the interface and for results) ──
-  let capture: { tab: Tab; download?: string; newTab?: string; auth?: string } | null = null;
+  /** Per tab: what the action in flight there caused (a download, a new tab, an HTTP sign-in). Two chats act at once. */
+  const captures = new Map<Tab, { download?: string; newTab?: string; auth?: string }>();
   /** When the agent last navigated (browser_open): a download that follows is the agent's. */
   let agentOpen: { at: number; download?: string } = { at: 0 };
-  const agentDriving = (t: Tab | undefined): boolean => Boolean(t && (Date.now() < t.agentUntil + 3000 || capture?.tab === t));
+  const agentDriving = (t: Tab | undefined): boolean => Boolean(t && (Date.now() < t.agentUntil + 3000 || captures.has(t)));
   const agentEvent = (t: Tab, action: string, status: AgentEvent['status'], label?: string, detail?: string): void => {
     if (status === 'start') t.agentUntil = Date.now() + 2000;
     else t.agentUntil = Math.max(t.agentUntil, Date.now() + 2000);
@@ -415,6 +438,121 @@ export function registerBrowser(ctx: DesktopContext): void {
     pushState();
     setTimeout(pushState, 2100);
   };
+
+  // ── Whose tab (browser-owners.ts): the copilot works on the tab in front, every other chat in its own ──
+  interface CallScope { caller: Caller | null; tabId?: string; used?: string }
+  /** The tool call in progress, through every await of it (two chats call at once). */
+  const calls = new AsyncLocalStorage<CallScope>();
+  const owners = new TabOwners();
+  const LEASE_IDLE_MS = 20_000;
+  // Bounded well under the MCP call's 27 s: the action itself still has to run after the wait.
+  const leases = new TabLeases({ idleMs: LEASE_IDLE_MS, waitMs: 15_000 });
+  /** Tabs the person took back (Stop / Take over, or their own input while an agent drove it). */
+  const paused = new Set<string>();
+  const lastCallAt = new Map<string, number>();
+  const liveTab = (id: string): Tab | undefined => { const t = tabs.get(id); return t && !t.view.webContents.isDestroyed() ? t : undefined; };
+  const world = (): World => ({ alive: (id) => Boolean(liveTab(id)), front: activeId });
+
+  /** Which chat is the copilot, the chats' titles and whether they are running — the interface knows (bridge.ts). */
+  interface SessionsInfo { copilot: string | null; onScreen: { sessionId: string; title: string } | null; sessions: Array<{ id: string; title?: string; running?: boolean }> }
+  let sessionsSeen: { at: number; info: SessionsInfo | null } = { at: 0, info: null };
+  const refreshedFor = new Set<string>();
+  const fetchSessions = async (maxAgeMs = 3000): Promise<SessionsInfo | null> => {
+    if (Date.now() - sessionsSeen.at < maxAgeMs) return sessionsSeen.info;
+    const r = ctx.services.renderer;
+    const info = r ? await r.call<SessionsInfo>('browserSessions', {}, 2000).catch(() => null) : null;
+    sessionsSeen = { at: Date.now(), info: info ?? sessionsSeen.info };
+    if (info) applySessions(info);
+    return sessionsSeen.info;
+  };
+  /** Titles follow renames; a chat whose run ended (or that has gone quiet) lets go of its tabs — they stay open, released. */
+  const applySessions = (info: SessionsInfo): void => {
+    let changed = false;
+    for (const s of info.sessions) if (s.title && owners.rename(s.id, s.title)) changed = true;
+    const now = Date.now();
+    for (const sid of owners.activeSessions()) {
+      const s = info.sessions.find(x => x.id === sid);
+      const quiet = now - (lastCallAt.get(sid) ?? 0);
+      if ((s && s.running === false && quiet > LEASE_IDLE_MS) || (!s && quiet > 5 * 60_000)) {
+        if (owners.release(sid).length) changed = true;
+        leases.releaseSession(sid);
+      }
+    }
+    if (changed) { layout(); pushState(); }
+  };
+  setInterval(() => { if (owners.activeSessions().length) void fetchSessions(0); }, 10_000).unref();
+
+  const callerFor = async (sessionId: string | undefined): Promise<Caller | null> => {
+    if (!sessionId) return null;
+    let info = await fetchSessions();
+    // A chat that just started is not in the list yet: look once more, fresh.
+    if (info && info.copilot !== sessionId && !info.sessions.some(s => s.id === sessionId) && !refreshedFor.has(sessionId)) {
+      refreshedFor.add(sessionId);
+      info = await fetchSessions(0);
+    }
+    // Without the interface nobody can tell the copilot from a chat: every call acts on the tab in front, as before.
+    if (!info) return null;
+    // The copilot is named as such (the status line leaves its name off: it is the page's own helper).
+    const title = info.copilot === sessionId ? 'Copilot' : info.sessions.find(s => s.id === sessionId)?.title || `chat ${sessionId.slice(0, 8)}`;
+    return { sessionId, copilot: info.copilot === sessionId, title };
+  };
+
+  const pausedMessage = 'The user has taken control of this tab (Stop / Take over). Do not use it now — tell the user what you were about to do and ask before continuing; they will let you continue when ready.';
+  function checkPaused(t: Tab): void {
+    if (!paused.has(t.id)) return;
+    ctx.emit('browser:agent', { tabId: t.id, action: 'refused', status: 'blocked', detail: 'The user has taken control' } satisfies AgentEvent);
+    throw new Error(pausedMessage);
+  }
+  /** The person takes a tab back: whoever drives it stops there, until they let AICO continue. */
+  function pauseTab(t: Tab, detail: string): void {
+    paused.add(t.id);
+    leases.drop(t.id);
+    t.agentUntil = 0;
+    ctx.emit('browser:agent', { tabId: t.id, action: 'stop', status: 'blocked', detail } satisfies AgentEvent);
+    pushState();
+  }
+
+  /** The tab this call acts on (no lease): the caller's own, one it names, or — for the copilot — the one in front. */
+  const pick = (intent: Intent = 'act'): Tab => {
+    const scope = calls.getStore();
+    if (!scope) return active();
+    const r = owners.route(scope.caller, { ...(scope.tabId ? { tabId: scope.tabId } : {}), intent }, world());
+    if (r.kind === 'refuse') throw new Error(r.message);
+    const t = (r.kind === 'tab' ? liveTab(r.tabId) : undefined) ?? active();
+    scope.used = t.id;
+    if (scope.caller) owners.use(t.id, scope.caller.sessionId);
+    return t;
+  };
+  /** One call on a tab under its lease: one chat drives a tab at a time; a second waits, then hears who has it. */
+  async function drive<T>(t: Tab, fn: () => Promise<T>): Promise<T> {
+    checkPaused(t);
+    const caller = calls.getStore()?.caller;
+    if (!caller) return fn();
+    const got = await leases.acquire(t.id, { sessionId: caller.sessionId, title: caller.title });
+    if (!got.ok) {
+      ctx.emit('browser:agent', { tabId: t.id, action: 'refused', status: 'blocked', detail: `Busy with ${got.busyWith.title || 'another chat'}` } satisfies AgentEvent);
+      throw new Error(busyMessage(t.id, got.busyWith));
+    }
+    pushState();
+    try {
+      checkPaused(t);
+      return await fn();
+    } finally {
+      got.release();
+      pushState();
+      setTimeout(pushState, LEASE_IDLE_MS + 200);
+    }
+  }
+  /** An agent call: the access check, its tab, the pause, the lease. */
+  async function agentCall<T>(intent: Intent, fn: (t: Tab) => Promise<T>): Promise<T> {
+    checkAccess();
+    const t = pick(intent);
+    return drive(t, () => fn(t));
+  }
+  /** For the methods the interface calls too (back, reload, console…): an agent call when one is in progress, the tab in front otherwise. */
+  const either = <T>(fn: (t: Tab) => Promise<T>): Promise<T> => (calls.getStore() ? agentCall('act', fn) : fn(active()));
+  /** A chat's tab is laid out under the one in front (rendering, taking input) until its chat lets go. */
+  const underneath = (t: Tab): boolean => { const o = owners.ownerOf(t.id); return Boolean(o && !o.released && !t.deferred); };
 
   // Shields, protected browsing, insights (browser-privacy.ts).
   const privacy = createPrivacy(ctx, {
@@ -453,7 +591,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     lastInput: (id) => tabs.get(id)?.lastGestureAt ?? 0,
     byAgent: (id) => agentDriving(tabs.get(id)) || (id === activeId && Date.now() - agentOpen.at < 15_000),
     flagged: (id) => privacy.flagged(id),
-    closeTab: (id) => service.closeTab(id),
+    closeTab: (id) => closeTabImpl(id),
     bookmarkFolder: (title, items) => bookmarks.addTabs({ title, items }),
     bookmarkedUrls: () => flattenBookmarks(bookmarks.tree()).map(b => b.url),
     confirm: (req) => confirm(req),
@@ -465,7 +603,8 @@ export function registerBrowser(ctx: DesktopContext): void {
     confirm: (req) => confirm(req).done,
     started: (item, wc) => {
       const t = wc ? byWc.get(wc.id) : undefined;
-      if (capture && (!t || capture.tab === t)) capture.download = item.filename;
+      const c = t ? captures.get(t) : captures.size === 1 ? [...captures.values()][0] : undefined;
+      if (c) c.download = item.filename;
       if (wc && Date.now() - agentOpen.at < 15_000) agentOpen.download = item.filename;
       privacy.noteDownload();
     },
@@ -573,11 +712,22 @@ export function registerBrowser(ctx: DesktopContext): void {
       ...(t.error ? { error: t.error } : {}), ...(t.popupsBlocked ? { popupsBlocked: t.popupsBlocked } : {}),
       ...privacy.tabExtras(t.id),
       ...(t.guard && t.guard.url === wc.getURL() ? { injectionGuard: t.guard } : {}),
+      ...ownership(t),
+    };
+  };
+  /** Whose tab it is, who drives it now, and whether the person took it back — for the strip and the status line. */
+  const ownership = (t: Tab): Pick<TabState, 'owner' | 'driver' | 'agentPaused'> => {
+    const o = owners.ownerOf(t.id);
+    const h = leases.holder(t.id);
+    return {
+      ...(o ? { owner: { title: o.title, hue: ownerHue(o.sessionId), ...(o.released ? { released: true } : {}) } } : {}),
+      ...(h ? { driver: h.title } : {}),
+      ...(paused.has(t.id) ? { agentPaused: true } : {}),
     };
   };
   const state = (): BrowserState => ({
     activeId, tabs: [...tabs.values()].filter(t => !t.view.webContents.isDestroyed()).map(tabState),
-    blocking: { enabled: settings.get().blocking.enabled }, agentStopped,
+    blocking: { enabled: settings.get().blocking.enabled }, agentStopped: Boolean(activeId && paused.has(activeId)),
   });
   const info = (t: Tab): TabInfo => {
     const wc = t.view.webContents;
@@ -615,16 +765,34 @@ export function registerBrowser(ctx: DesktopContext): void {
     // The browser moved window: nothing stays behind in the old one.
     if (placedIn && placedIn !== win) detachAll();
     if (!win || win.isDestroyed()) return;
+    const front = activeId ? tabs.get(activeId) : undefined;
+    const frontFull = front ? tabSession?.boundsFor(front) ?? null : null;
+    const frontShown = Boolean(front && (frontFull !== null || (visible && bounds !== null)));
     for (const t of tabs.values()) {
       // A page in HTML full screen (a video) fills the window, whatever the interface is doing.
       const full = tabSession?.boundsFor(t) ?? null;
       const show = t.id === activeId && (full !== null || (visible && bounds !== null));
+      // A chat's own tab sits under the one in front, the same size: it lays out, paints and takes trusted
+      // input like a page on screen (a view that is hidden or never placed has no viewport), unseen.
+      const under = !show && frontShown && t.id !== activeId && underneath(t);
       if (show && !t.attached) { win.contentView.addChildView(t.view); t.attached = true; placedIn = win; }
+      if (under && !t.attached) {
+        const at = front?.attached ? win.contentView.children.indexOf(front.view) : -1;
+        if (at >= 0) win.contentView.addChildView(t.view, at); else win.contentView.addChildView(t.view);
+        t.attached = true; placedIn = win;
+      }
       if (show) { t.view.setBounds(full ?? bounds!); t.view.setVisible(true); }
+      else if (under) { t.view.setBounds(frontFull ?? bounds!); t.view.setVisible(true); }
       else if (t.attached) { t.view.setVisible(false); }
-      // Background tabs are throttled as in any browser; the one in front (which the agent drives, even unseen) is not.
-      const throttle = t.id !== activeId;
+      // Background tabs are throttled as in any browser; the one in front (which the agent drives, even unseen) and a chat's own are not.
+      const throttle = t.id !== activeId && !under;
       if (t.throttled !== throttle && !t.view.webContents.isDestroyed()) { t.view.webContents.setBackgroundThrottling(throttle); t.throttled = throttle; }
+    }
+    // The tab in front stays above the chats' tabs under it.
+    if (front?.attached && frontShown) {
+      const kids = win.contentView.children;
+      const i = kids.indexOf(front.view);
+      if (i >= 0 && [...tabs.values()].some(x => x !== front && x.attached && kids.indexOf(x.view) > i)) win.contentView.addChildView(front.view);
     }
     ctx.services.browserOverlay?.raise();
   };
@@ -668,7 +836,7 @@ export function registerBrowser(ctx: DesktopContext): void {
   const page = <T>(t: Tab, op: string, args?: unknown, timeoutMs?: number): Promise<T> => evaluate<T>(t.view.webContents, pageJs(op, args), timeoutMs);
 
   // ── Tabs ──
-  const create = (url?: string, adopt?: WebContents): Tab => {
+  const create = (url?: string, adopt?: WebContents, opts?: { background?: boolean }): Tab => {
     const view = adopt
       ? new WebContentsView({ webContents: adopt })
       : new WebContentsView({
@@ -682,7 +850,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     const id = `b${++seq}`;
     const tab: Tab = {
       id, view, console: [], network: [], attached: false, trackers: new Set(), trackersBlocked: 0, popupsBlocked: 0,
-      agentUntil: 0, humanCheck: false, lastGestureAt: 0, inflight: new Set(), lastNetAt: 0, pageEnabled: false, allowUnload: false,
+      agentUntil: 0, humanCheck: false, lastGestureAt: 0, agentInputAt: 0, inflight: new Set(), lastNetAt: 0, pageEnabled: false, allowUnload: false,
     };
     const wc = view.webContents;
     byWc.set(wc.id, tab);
@@ -698,13 +866,18 @@ export function registerBrowser(ctx: DesktopContext): void {
         pushState();
         return { action: 'deny' };
       }
-      if (capture?.tab === tab) capture.newTab = d.url;
+      const cap = captures.get(tab);
+      if (cap) cap.newTab = d.url;
       // Opened as a tab of this browser, keeping window.opener (sign-in pop-ups need it).
       return {
         action: 'allow',
         createWindow: (options) => {
           const adoptWc = (options as { webContents?: WebContents }).webContents;
-          const t = create(adoptWc ? undefined : d.url, adoptWc);
+          // A pop-up from a chat's own tab in the background is that chat's too, and stays in the background.
+          const o = owners.ownerOf(tab.id);
+          const background = Boolean(o && !o.released && tab.id !== activeId);
+          const t = create(adoptWc ? undefined : d.url, adoptWc, { background });
+          if (background) owners.claim(t.id, o!);
           tabSession?.placeNew(t, tab.id);
           layout();
           return t.view.webContents;
@@ -767,7 +940,8 @@ export function registerBrowser(ctx: DesktopContext): void {
       const reqId = askId('a');
       const timer = setTimeout(() => { pendingAuth.delete(reqId); cb(); }, 5 * 60_000);
       pendingAuth.set(reqId, { cb, timer });
-      if (capture?.tab === tab) capture.auth = authInfo.host;
+      const cap = captures.get(tab);
+      if (cap) cap.auth = authInfo.host;
       ctx.emit('browser:auth', { id: reqId, tabId: tab.id, host: authInfo.host, ...(authInfo.realm ? { realm: authInfo.realm } : {}) });
       ctx.revealBrowser();
     });
@@ -790,6 +964,11 @@ export function registerBrowser(ctx: DesktopContext): void {
     });
     wc.on('input-event', (_e, input) => {
       if (['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'char', 'touchStart', 'gestureTap', 'pointerDown'].includes(input.type)) tab.lastGestureAt = Date.now();
+      // The person always wins: their click or key on a tab an agent is driving pauses the agent there.
+      if (['mouseDown', 'keyDown', 'rawKeyDown', 'touchStart', 'pointerDown'].includes(input.type) && !paused.has(tab.id)
+        && personTookOver({ driving: agentDriving(tab), held: Boolean(leases.holder(tab.id)), agentInputAt: tab.agentInputAt, now: Date.now() })) {
+        pauseTab(tab, 'The user took over this page');
+      }
     });
     wc.on('before-input-event', (e, input) => {
       if (input.type === 'keyDown') tab.lastGestureAt = Date.now();
@@ -830,7 +1009,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     });
 
     tabs.set(id, tab);
-    activeId = id;
+    if (!opts?.background) activeId = id;
     if (url && !adopt) void wc.loadURL(normalise(url)).catch(() => {});
     layout();
     pushState();
@@ -893,13 +1072,9 @@ export function registerBrowser(ctx: DesktopContext): void {
     await sleep(250);
   }
 
+  /** The person's setting; whether the tab is paused is per tab (checkPaused, in drive). */
   function checkAccess(): void {
     if (ctx.prefs.get().browserAgentAccess === 'deny') throw new Error('The user has not allowed the agent to use the built-in browser (Settings → Browser).');
-    if (agentStopped) {
-      const t = activeId ? tabs.get(activeId) : undefined;
-      if (t) ctx.emit('browser:agent', { tabId: t.id, action: 'refused', status: 'blocked', detail: 'The user has taken control' } satisfies AgentEvent);
-      throw new Error('The user has taken control of the browser (Stop / Take over). Do not use the browser tools now — tell the user what you were about to do and ask before continuing; they will resume you when ready.');
-    }
     ctx.emit('browser:agent-active', { at: Date.now() });
   }
 
@@ -918,6 +1093,7 @@ export function registerBrowser(ctx: DesktopContext): void {
   async function mouseClick(t: Tab, x: number, y: number, button: 'left' | 'right' = 'left', clickCount = 1): Promise<void> {
     const wc = t.view.webContents;
     t.lastGestureAt = Date.now();
+    t.agentInputAt = Date.now();
     await cdp(wc, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
     for (let i = 1; i <= clickCount; i++) {
       await cdp(wc, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: i });
@@ -928,6 +1104,7 @@ export function registerBrowser(ctx: DesktopContext): void {
   async function pressKey(t: Tab, spec: string): Promise<void> {
     const wc = t.view.webContents;
     t.lastGestureAt = Date.now();
+    t.agentInputAt = Date.now();
     const { def, modifiers, commands } = parseKey(spec);
     await cdp(wc, 'Input.dispatchKeyEvent', {
       type: def.text ? 'keyDown' : 'rawKeyDown', key: def.key, code: def.code, windowsVirtualKeyCode: def.keyCode,
@@ -949,11 +1126,13 @@ export function registerBrowser(ctx: DesktopContext): void {
    * the action returns as soon as one opens), and a compact account of what
    * changed.
    */
-  async function act(action: string, opts: { gate?: boolean; diff?: boolean; label?: string }, fn: (t: Tab) => Promise<string>): Promise<string> {
-    checkAccess();
-    const t = active();
+  function act(action: string, opts: { gate?: boolean; diff?: boolean; label?: string }, fn: (t: Tab) => Promise<string>): Promise<string> {
+    return agentCall('act', (t) => actOn(t, action, opts, fn));
+  }
+  async function actOn(t: Tab, action: string, opts: { gate?: boolean; diff?: boolean; label?: string }, fn: (t: Tab) => Promise<string>): Promise<string> {
     agentEvent(t, action, 'start', opts.label);
-    capture = { tab: t };
+    const capture: { download?: string; newTab?: string; auth?: string } = {};
+    captures.set(t, capture);
     const watch = waitDialog(t);
     try {
       if (t.dialog && action !== 'dialog') throw new Error(dialogOpenMessage(t.dialog));
@@ -976,12 +1155,12 @@ export function registerBrowser(ctx: DesktopContext): void {
         const after = await probe(t);
         const extra = {
           ...(t.dialog ? { jsDialog: { type: t.dialog.type, message: t.dialog.message } } : {}),
-          ...(capture?.download ? { download: capture.download } : {}),
-          ...(capture?.newTab ? { newTab: capture.newTab } : {}),
+          ...(capture.download ? { download: capture.download } : {}),
+          ...(capture.newTab ? { newTab: capture.newTab } : {}),
         };
         const change = describeChange(before, after ?? (t.dialog ? null : { url: t.view.webContents.getURL(), title: t.view.webContents.getTitle(), alerts: [], invalid: [], modals: [] }), extra);
         if (change) text += `\n${change}`;
-        if (capture?.auth) text += `\nThe site asked for an HTTP sign-in (${capture.auth}); the user has been asked to answer it — wait, then take a snapshot.`;
+        if (capture.auth) text += `\nThe site asked for an HTTP sign-in (${capture.auth}); the user has been asked to answer it — wait, then take a snapshot.`;
       }
       agentEvent(t, action, 'done', opts.label);
       return text;
@@ -991,15 +1170,20 @@ export function registerBrowser(ctx: DesktopContext): void {
       throw err;
     } finally {
       watch.cancel();
-      capture = null;
+      captures.delete(t);
     }
   }
 
-  async function openUrl(url: string, opts?: { newTab?: boolean }): Promise<TabInfo> {
-    // Restored tabs are the user's pages: something opened now gets a tab of its own.
-    const restored = !activeId && Boolean(tabSession?.restore());
-    const t = opts?.newTab || restored || !activeId ? create() : active();
-    activeId = t.id;
+  /** `tab`: load into that tab (a chat's own, in the background) and leave the one in front alone. */
+  async function openUrl(url: string, opts?: { newTab?: boolean; tab?: Tab }): Promise<TabInfo> {
+    let t: Tab;
+    if (opts?.tab) t = opts.tab;
+    else {
+      // Restored tabs are the user's pages: something opened now gets a tab of its own.
+      const restored = !activeId && Boolean(tabSession?.restore());
+      t = opts?.newTab || restored || !activeId ? create() : active();
+      activeId = t.id;
+    }
     const target = normalise(url);
     t.lastNav = () => { void t.view.webContents.loadURL(target).catch(() => {}); };
     // Capped: a view that is not on screen can stall its load promise, and an
@@ -1157,42 +1341,172 @@ export function registerBrowser(ctx: DesktopContext): void {
     return `signed in with "${reply.name}"${username ? ` as ${username}` : ''} — now at ${wc.getURL()}.`;
   }
 
+  /** browser_open's work: load the page (into `into`, or as before), then say what is there. */
+  async function openOn(url: string, opts: { newTab?: boolean } | undefined, into: Tab | undefined): Promise<TabInfo> {
+    const t0 = into ?? (activeId ? tabs.get(activeId) : undefined);
+    if (t0?.dialog && (into || !opts?.newTab)) throw new Error(dialogOpenMessage(t0.dialog));
+    agentOpen = { at: Date.now() };
+    if (t0) agentEvent(t0, 'open', 'start', url);
+    let r: TabInfo;
+    try {
+      r = await openUrl(url, into ? { tab: into } : opts);
+    } catch (err) {
+      // A URL that is a file, not a page: Chromium cancels the navigation and downloads it instead.
+      await sleep(400);
+      if (agentOpen.download) {
+        const d = downloads.list().find(x => x.filename === agentOpen.download);
+        return { ...(t0 ? info(t0) : {}), download: { file: agentOpen.download, path: d?.path, state: d?.state, note: 'This URL is a file: it was downloaded instead of opened. See browser_downloads.' } } as unknown as TabInfo;
+      }
+      throw err;
+    }
+    const t = tabs.get(r.id)!;
+    agentEvent(t, 'open', 'done', r.url);
+    const h = await humanCheck(t);
+    const err = t.certError ? `\nCertificate error (${t.certError.error}) — the page is blocked and will not be accepted. Tell the user.` : t.error ? `\nThe page failed to load: ${t.error.description} (${t.error.code}).` : '';
+    const login = h.detected || err ? undefined : await loginSuggestion(t).catch(() => undefined);
+    const o = owners.ownerOf(t.id);
+    return {
+      ...r,
+      // For a chat's own tab, "active" means its own current tab — the person's tab in front is not touched.
+      ...(o && t.id !== activeId ? { active: true, background: 'This tab is yours and stays in the background; the user keeps the tab they are looking at.' } : {}),
+      ...(h.detected ? { humanCheck: `Human check on this page (${h.kind}) — call browser_handoff; do not attempt it.` } : {}),
+      ...(err ? { error: err.trim() } : {}),
+      ...(login ? { signIn: login } : {}),
+    } as TabInfo;
+  }
+
+  /** A screenshot of this tab: for the model (kept as a file) or the interface's still. */
+  async function shoot(t: Tab, opts?: { fullPage?: boolean; forModel?: boolean }): Promise<{ path: string; dataUrl: string; width: number; height: number; model?: { data: string; mimeType: string } }> {
+    const wc = t.view.webContents;
+    if (t.dialog) throw new Error(dialogOpenMessage(t.dialog));
+    let dataUrl: string; let width: number; let height: number;
+    let model: { data: string; mimeType: string } | undefined;
+    if (opts?.fullPage) {
+      const m = await cdp<{ contentSize: { width: number; height: number } }>(wc, 'Page.getLayoutMetrics');
+      const w = Math.min(4000, Math.ceil(m.contentSize.width)); const h = Math.min(12000, Math.ceil(m.contentSize.height));
+      const r = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: w, height: h, scale: 1 } }), 'The full-page screenshot');
+      dataUrl = `data:image/png;base64,${r.data}`; width = w; height = h;
+      if (opts.forModel) {
+        const mh = Math.min(h, 6000);
+        const scale = Math.min(1, 1280 / Math.max(1, w));
+        const j = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'jpeg', quality: 70, captureBeyondViewport: true, clip: { x: 0, y: 0, width: w, height: mh, scale } }), 'The full-page screenshot');
+        model = { data: j.data, mimeType: 'image/jpeg' };
+      }
+    } else {
+      // A still for a hidden view (under a menu) is the one browser:setBounds
+      // captured as it hid it. Capturing a hidden view hangs, so it never is.
+      if (!opts?.forModel && !visible) {
+        if (t.lastStill) return { path: '', ...t.lastStill };
+        throw new Error('The page is not on screen, so there is nothing to capture.');
+      }
+      const r = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'png' }), 'The screenshot');
+      dataUrl = `data:image/png;base64,${r.data}`;
+      const b = t.view.getBounds(); width = b.width; height = b.height;
+      if (opts?.forModel) {
+        const j = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'jpeg', quality: 70 }), 'The screenshot');
+        model = { data: j.data, mimeType: 'image/jpeg' };
+      }
+    }
+    // The image's own size, from its PNG header: the view's bounds differ from
+    // what the page captured whenever the view is hidden or being resized, and
+    // the interface drew the still stretched.
+    const png = Buffer.from(dataUrl.split(',')[1]!, 'base64');
+    if (png.length > 24 && png.toString('ascii', 12, 16) === 'IHDR') { width = png.readUInt32BE(16); height = png.readUInt32BE(20); }
+    if (!opts?.fullPage) t.lastStill = { dataUrl, width, height };
+    // Only the agent's screenshots are kept as files; the interface's stills
+    // under menus and the floating copilot are taken often and need none.
+    let file = '';
+    if (opts?.forModel) {
+      fs.mkdirSync(shotsDir, { recursive: true });
+      file = path.join(shotsDir, `shot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
+      fs.writeFileSync(file, png);
+      agentEvent(t, 'screenshot', 'done');
+    }
+    return { path: file, dataUrl, width, height, ...(model ? { model } : {}) };
+  }
+
+  /** Close a tab (the person's tab strip, tidying, and an agent closing its own). */
+  function closeTabImpl(id?: string): void {
+    const t = tabs.get(id ?? activeId ?? '');
+    if (!t) return;
+    // Remembered for Ctrl+Shift+T; the tab to its right comes forward.
+    const next = tabSession?.closing(t);
+    if (t.attached && placedIn && !placedIn.isDestroyed()) placedIn.contentView.removeChildView(t.view);
+    for (const [k, d] of dialogs) if (d.tab === t) { d.reply?.(false); dialogs.delete(k); }
+    if (!t.view.webContents.isDestroyed()) t.view.webContents.close();
+    tabs.delete(t.id);
+    owners.forget(t.id); leases.forget(t.id); paused.delete(t.id);
+    if (activeId === t.id) activeId = next !== undefined && (next === null || tabs.has(next)) ? next : [...tabs.keys()].pop() ?? null;
+    const front = activeId ? tabs.get(activeId) : undefined;
+    if (front?.deferred) tabSession?.wake(front);
+    layout(); pushState();
+  }
+  function selectTabImpl(id: string): void {
+    const t = tabs.get(id);
+    if (!t) return;
+    activeId = id;
+    if (t.deferred) tabSession?.wake(t);
+    layout(); pushState();
+  }
+
   let pendingFind: { requestId: number; resolve: (r: FindResult) => void } | null = null;
   let lastFindText = '';
 
   const service: BrowserService = {
     tabs: list,
     state,
-    agentStopped: () => agentStopped,
+    agentStopped: () => Boolean(activeId && paused.has(activeId)),
+    async asCaller(call, fn) {
+      const caller = await callerFor(call.sessionId);
+      if (caller) lastCallAt.set(caller.sessionId, Date.now());
+      return calls.run({ caller, ...(call.tabId ? { tabId: call.tabId } : {}) }, fn);
+    },
+    agentTabs() {
+      const scope = calls.getStore();
+      const all = list();
+      const caller = scope?.caller ?? null;
+      const current = caller && !caller.copilot ? owners.current(caller.sessionId, world()) : null;
+      return owners.visible(caller, all.map(t => t.id), activeId).map((v) => {
+        const t = all.find(x => x.id === v.id)!;
+        if (!caller || caller.copilot) return { ...t, ...(v.owner ? { openedBy: v.owner } : {}) };
+        // For a chat, "active" is its own current tab; the person's tab in front is listed so it knows what they see.
+        return {
+          ...t, active: v.id === current,
+          ...(v.yours ? { yours: true } : {}), ...(v.handedToYou ? { handedToYou: true } : {}),
+          ...(v.userFront ? { userFront: true } : {}), ...(v.readOnly ? { readOnly: true } : {}), ...(v.owner ? { openedBy: v.owner } : {}),
+        };
+      });
+    },
+    async handToOpenChat(tabId) {
+      const info = await fetchSessions(0);
+      const chat = info?.onScreen;
+      if (!chat || !liveTab(tabId) || chat.sessionId === info?.copilot) return null;
+      owners.grant(tabId, chat.sessionId);
+      pushState();
+      return chat.title || 'the open chat';
+    },
     async open(url, opts) {
       checkAccess();
-      const t0 = activeId ? tabs.get(activeId) : undefined;
-      if (t0?.dialog && !opts?.newTab) throw new Error(dialogOpenMessage(t0.dialog));
-      agentOpen = { at: Date.now() };
-      if (t0) agentEvent(t0, 'open', 'start', url);
-      let r: TabInfo;
-      try {
-        r = await openUrl(url, opts);
-      } catch (err) {
-        // A URL that is a file, not a page: Chromium cancels the navigation and downloads it instead.
-        await sleep(400);
-        if (agentOpen.download) {
-          const d = downloads.list().find(x => x.filename === agentOpen.download);
-          return { ...(t0 ? info(t0) : {}), download: { file: agentOpen.download, path: d?.path, state: d?.state, note: 'This URL is a file: it was downloaded instead of opened. See browser_downloads.' } } as unknown as TabInfo;
-        }
-        throw err;
+      const scope = calls.getStore();
+      const caller = scope?.caller ?? null;
+      const route = scope ? owners.route(caller, { ...(scope.tabId ? { tabId: scope.tabId } : {}), intent: opts?.newTab ? 'openNew' : 'open' }, world()) : null;
+      if (route?.kind === 'refuse') throw new Error(route.message);
+      // Where it lands: a tab the call names, or the chat's own; a new one of the chat's own, in the background;
+      // otherwise (the copilot, or a call that names no chat) the tab in front, or a new front tab — as before.
+      let into: Tab | undefined = route?.kind === 'tab' ? liveTab(route.tabId) : undefined;
+      if (!into && route?.kind === 'create' && caller && !caller.copilot) {
+        into = create(undefined, undefined, { background: true });
+        owners.claim(into.id, caller);
       }
-      const t = tabs.get(r.id)!;
-      agentEvent(t, 'open', 'done', r.url);
-      const h = await humanCheck(t);
-      const err = t.certError ? `\nCertificate error (${t.certError.error}) — the page is blocked and will not be accepted. Tell the user.` : t.error ? `\nThe page failed to load: ${t.error.description} (${t.error.code}).` : '';
-      const login = h.detected || err ? undefined : await loginSuggestion(t).catch(() => undefined);
-      return {
-        ...r,
-        ...(h.detected ? { humanCheck: `Human check on this page (${h.kind}) — call browser_handoff; do not attempt it.` } : {}),
-        ...(err ? { error: err.trim() } : {}),
-        ...(login ? { signIn: login } : {}),
-      } as TabInfo;
+      if (into && caller) owners.use(into.id, caller.sessionId);
+      const lead = into ?? (opts?.newTab ? undefined : (activeId ? tabs.get(activeId) : undefined));
+      if (scope && lead) scope.used = lead.id;
+      const run = async (): Promise<TabInfo> => {
+        const r = await openOn(url, opts, into);
+        if (scope && r.id) scope.used = r.id;
+        return r;
+      };
+      return lead ? drive(lead, run) : run();
     },
     openForUser(url, opts) {
       const prev = activeId;
@@ -1216,11 +1530,11 @@ export function registerBrowser(ctx: DesktopContext): void {
         return autofillService.describe(await autofillService.fill(t.view.webContents, opts));
       });
     },
-    async snapshot(opts) {
-      checkAccess();
-      const t = active();
-      agentEvent(t, 'snapshot', 'start');
-      try { return await snapshotText(t, Boolean(opts?.full)); } finally { agentEvent(t, 'snapshot', 'done'); }
+    snapshot(opts) {
+      return agentCall('act', async (t) => {
+        agentEvent(t, 'snapshot', 'start');
+        try { return await snapshotText(t, Boolean(opts?.full)); } finally { agentEvent(t, 'snapshot', 'done'); }
+      });
     },
     click(target, opts) {
       return act('click', { gate: true, diff: true }, async (t) => {
@@ -1357,126 +1671,89 @@ export function registerBrowser(ctx: DesktopContext): void {
         throw new Error(`Timed out waiting for ${what}. Now at ${wc.getURL()}.`);
       });
     },
-    async text(target) {
-      checkAccess();
-      const t = active();
-      const s = await evaluate<string>(t.view.webContents, target ? `(() => {
-        const t = ${JSON.stringify(target)};
-        const el = t.ref ? document.querySelector('[data-aico-ref="' + t.ref + '"]') : t.selector ? document.querySelector(t.selector) : null;
-        return el ? el.innerText : 'No such element.';
-      })()` : 'document.body ? document.body.innerText : ""');
-      return (s ?? '').slice(0, 40000);
+    text(target) {
+      return agentCall('act', async (t) => {
+        const s = await evaluate<string>(t.view.webContents, target ? `(() => {
+          const t = ${JSON.stringify(target)};
+          const el = t.ref ? document.querySelector('[data-aico-ref="' + t.ref + '"]') : t.selector ? document.querySelector(t.selector) : null;
+          return el ? el.innerText : 'No such element.';
+        })()` : 'document.body ? document.body.innerText : ""');
+        return (s ?? '').slice(0, 40000);
+      });
     },
     async evaluate(expression) {
       let out: unknown;
       await act('evaluate', { gate: true }, async (t) => { vault.guardAgent(t.view.webContents); out = await evaluate(t.view.webContents, expression); return ''; });
       return out;
     },
-    async screenshot(opts) {
-      if (opts?.forModel) checkAccess();
-      const t = active();
-      const wc = t.view.webContents;
-      if (t.dialog) throw new Error(dialogOpenMessage(t.dialog));
-      let dataUrl: string; let width: number; let height: number;
-      let model: { data: string; mimeType: string } | undefined;
-      if (opts?.fullPage) {
-        const m = await cdp<{ contentSize: { width: number; height: number } }>(wc, 'Page.getLayoutMetrics');
-        const w = Math.min(4000, Math.ceil(m.contentSize.width)); const h = Math.min(12000, Math.ceil(m.contentSize.height));
-        const r = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: w, height: h, scale: 1 } }), 'The full-page screenshot');
-        dataUrl = `data:image/png;base64,${r.data}`; width = w; height = h;
-        if (opts.forModel) {
-          const mh = Math.min(h, 6000);
-          const scale = Math.min(1, 1280 / Math.max(1, w));
-          const j = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'jpeg', quality: 70, captureBeyondViewport: true, clip: { x: 0, y: 0, width: w, height: mh, scale } }), 'The full-page screenshot');
-          model = { data: j.data, mimeType: 'image/jpeg' };
-        }
-      } else {
-        // A still for a hidden view (under a menu) is the one browser:setBounds
-        // captured as it hid it. Capturing a hidden view hangs, so it never is.
-        if (!opts?.forModel && !visible) {
-          if (t.lastStill) return { path: '', ...t.lastStill };
-          throw new Error('The page is not on screen, so there is nothing to capture.');
-        }
-        const r = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'png' }), 'The screenshot');
-        dataUrl = `data:image/png;base64,${r.data}`;
-        const b = t.view.getBounds(); width = b.width; height = b.height;
-        if (opts?.forModel) {
-          const j = await boundedCapture(cdp<{ data: string }>(wc, 'Page.captureScreenshot', { format: 'jpeg', quality: 70 }), 'The screenshot');
-          model = { data: j.data, mimeType: 'image/jpeg' };
-        }
-      }
-      // The image's own size, from its PNG header: the view's bounds differ from
-      // what the page captured whenever the view is hidden or being resized, and
-      // the interface drew the still stretched.
-      const png = Buffer.from(dataUrl.split(',')[1]!, 'base64');
-      if (png.length > 24 && png.toString('ascii', 12, 16) === 'IHDR') { width = png.readUInt32BE(16); height = png.readUInt32BE(20); }
-      if (!opts?.fullPage) t.lastStill = { dataUrl, width, height };
-      // Only the agent's screenshots are kept as files; the interface's stills
-      // under menus and the floating copilot are taken often and need none.
-      let file = '';
-      if (opts?.forModel) {
-        fs.mkdirSync(shotsDir, { recursive: true });
-        file = path.join(shotsDir, `shot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
-        fs.writeFileSync(file, png);
-        agentEvent(t, 'screenshot', 'done');
-      }
-      return { path: file, dataUrl, width, height, ...(model ? { model } : {}) };
+    screenshot(opts) {
+      return opts?.forModel ? agentCall('act', (t) => shoot(t, opts)) : shoot(active(), opts);
     },
     consoleLog(clear) {
-      const t = active();
+      const t = calls.getStore() ? pick('act') : active();
       const out = t.console.slice(-120).map(c => `[${c.level}] ${c.text}${c.source ? ` (${path.basename(c.source)}:${c.line ?? 0})` : ''}`).join('\n');
       if (clear) t.console = [];
       return out || '(no console messages)';
     },
     networkLog(clear) {
-      const t = active();
+      const t = calls.getStore() ? pick('act') : active();
       const out = t.network.slice(-150).map(n => `${n.status} ${n.method} ${n.type} ${n.url.slice(0, 180)}`).join('\n');
       if (clear) t.network = [];
       return out || '(no requests recorded)';
     },
-    async back() {
-      const t = active(); const wc = t.view.webContents;
-      t.lastNav = () => { if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack(); };
-      if (wc.navigationHistory.canGoBack()) { wc.navigationHistory.goBack(); await settle(wc); }
-      return wc.getURL();
+    back() {
+      return either(async (t) => {
+        const wc = t.view.webContents;
+        t.lastNav = () => { if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack(); };
+        if (wc.navigationHistory.canGoBack()) { wc.navigationHistory.goBack(); await settle(wc); }
+        return wc.getURL();
+      });
     },
-    async forward() {
-      const t = active(); const wc = t.view.webContents;
-      t.lastNav = () => { if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward(); };
-      if (wc.navigationHistory.canGoForward()) { wc.navigationHistory.goForward(); await settle(wc); }
-      return wc.getURL();
+    forward() {
+      return either(async (t) => {
+        const wc = t.view.webContents;
+        t.lastNav = () => { if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward(); };
+        if (wc.navigationHistory.canGoForward()) { wc.navigationHistory.goForward(); await settle(wc); }
+        return wc.getURL();
+      });
     },
-    async reload() {
-      const t = active(); const wc = t.view.webContents;
-      t.lastNav = () => wc.reload();
-      wc.reload(); await waitLoad(wc); return wc.getURL();
+    reload() {
+      return either(async (t) => {
+        const wc = t.view.webContents;
+        t.lastNav = () => wc.reload();
+        wc.reload(); await waitLoad(wc); return wc.getURL();
+      });
     },
     closeTab(id) {
-      const t = tabs.get(id ?? activeId ?? '');
-      if (!t) return;
-      // Remembered for Ctrl+Shift+T; the tab to its right comes forward.
-      const next = tabSession?.closing(t);
-      if (t.attached && placedIn && !placedIn.isDestroyed()) placedIn.contentView.removeChildView(t.view);
-      for (const [k, d] of dialogs) if (d.tab === t) { d.reply?.(false); dialogs.delete(k); }
-      if (!t.view.webContents.isDestroyed()) t.view.webContents.close();
-      tabs.delete(t.id);
-      if (activeId === t.id) activeId = next !== undefined && (next === null || tabs.has(next)) ? next : [...tabs.keys()].pop() ?? null;
-      const front = activeId ? tabs.get(activeId) : undefined;
-      if (front?.deferred) tabSession?.wake(front);
-      layout(); pushState();
+      const caller = calls.getStore()?.caller;
+      if (caller && !caller.copilot) {
+        const target = id ?? owners.current(caller.sessionId, world());
+        if (!target || !owners.mayClose(caller, target)) throw new Error(`You may close only tabs this chat opened${target ? ` — tab ${target} is not one of them` : ''}. Call browser_tabs to see yours.`);
+        closeTabImpl(target);
+        return;
+      }
+      closeTabImpl(id);
     },
     selectTab(id) {
-      const t = tabs.get(id);
-      if (!t) return;
-      activeId = id;
-      if (t.deferred) tabSession?.wake(t);
-      layout(); pushState();
+      const caller = calls.getStore()?.caller;
+      if (caller && !caller.copilot) {
+        // A chat switches its own current tab; the tab the person is looking at does not move.
+        const r = owners.route(caller, { tabId: id, intent: 'act' }, world());
+        if (r.kind === 'refuse') throw new Error(r.message);
+        owners.use(id, caller.sessionId);
+        return;
+      }
+      selectTabImpl(id);
     },
     async newTab(url) {
       return openUrl(url || ctx.prefs.get().browserHome || 'about:blank', { newTab: true });
     },
     handoff(message, timeoutMs = 10 * 60_000) {
       const id = `h${Date.now()}`;
+      // The person has to see the page they are asked to finish: a chat's own tab comes to the front for it.
+      let mine: Tab | undefined;
+      try { mine = calls.getStore() ? pick('act') : undefined; } catch { mine = undefined; }
+      if (mine && mine.id !== activeId) selectTabImpl(mine.id);
       ctx.emit('browser:handoff', { id, message });
       const t = activeId ? tabs.get(activeId) : undefined;
       if (t) ctx.emit('browser:agent', { tabId: t.id, action: 'handoff', status: 'blocked', label: message.slice(0, 120) } satisfies AgentEvent);
@@ -1490,17 +1767,17 @@ export function registerBrowser(ctx: DesktopContext): void {
     login(opts) {
       return act('login', { gate: true, diff: false, label: `Signing in${opts.name ? ` with ${opts.name}` : ''} from the vault` }, (t) => loginImpl(t, opts));
     },
-    async read(opts) {
-      checkAccess();
-      const t = active();
-      agentEvent(t, 'read', 'start', opts.mode === 'full' ? 'Reading the whole page' : 'Reading the page');
-      try { return await readPage(t, opts); } finally { agentEvent(t, 'read', 'done'); }
+    read(opts) {
+      return agentCall('act', async (t) => {
+        agentEvent(t, 'read', 'start', opts.mode === 'full' ? 'Reading the whole page' : 'Reading the page');
+        try { return await readPage(t, opts); } finally { agentEvent(t, 'read', 'done'); }
+      });
     },
-    async forms() {
-      checkAccess();
-      const t = active();
-      agentEvent(t, 'forms', 'start', 'Reading the forms');
-      try { return await formsOf(t); } finally { agentEvent(t, 'forms', 'done'); }
+    forms() {
+      return agentCall('act', async (t) => {
+        agentEvent(t, 'forms', 'start', 'Reading the forms');
+        try { return await formsOf(t); } finally { agentEvent(t, 'forms', 'done'); }
+      });
     },
     fill(fields) {
       return act('fill', { gate: true, diff: true, label: `Filling ${fields.length} field(s)` }, async (t) => {
@@ -1561,66 +1838,70 @@ export function registerBrowser(ctx: DesktopContext): void {
         return `Filled ${filled} of ${fields.length} field(s). Nothing was submitted.\n${lines.join('\n')}`;
       });
     },
-    async extract(kind, opts) {
-      checkAccess();
-      const t = active();
-      agentEvent(t, 'extract', 'start', `Extracting ${kind}`);
-      try {
-        await waitLoad(t.view.webContents, 8000);
-        const max = Math.max(1, Math.min(opts?.maxItems ?? 200, 1000));
-        const raw = await page<Record<string, unknown>>(t, 'extract', { kind }, 20_000);
-        if (raw.error) throw new Error(String(raw.error));
-        const url = t.view.webContents.getURL();
-        if (kind === 'links') {
-          const host = (() => { try { return new URL(url).hostname; } catch { return ''; } })();
-          const links = (raw.links as Array<{ text: string; href: string; rel?: string; ref: string }>).slice(0, max)
-            .map(l => { let internal = false; try { internal = new URL(l.href).hostname === host; } catch { /* keep */ } return { ...l, internal }; });
-          return JSON.stringify({ url, count: (raw.links as unknown[]).length, links }, null, 1);
-        }
-        if (kind === 'tables') {
-          const tables = raw.tables as Array<{ caption: string; rows: string[][] }>;
-          if (!tables.length) return 'No data tables on this page.';
-          return tables.slice(0, 20).map((tb, i) => `Table ${i + 1}${tb.caption ? ` — ${tb.caption}` : ''} (${tb.rows.length} rows)\n${tableToMarkdown({ rows: tb.rows })}`).join('\n\n');
-        }
-        if (kind === 'prices') {
-          const prices = findPrices(raw.blocks as Array<{ text: string; context?: string }>, raw.structured as Array<{ amount: string; currency: string; context?: string; source: string }>);
-          return JSON.stringify({ url, count: prices.length, prices: prices.slice(0, max) }, null, 1);
-        }
-        if (kind === 'contacts') {
-          return JSON.stringify({ url, ...findContacts(String(raw.text ?? ''), raw.links as Array<{ href: string; text: string }>) }, null, 1);
-        }
-        return JSON.stringify(raw, null, 1).slice(0, 60_000);
-      } finally { agentEvent(t, 'extract', 'done'); }
+    extract(kind, opts) {
+      return agentCall('act', async (t) => {
+        agentEvent(t, 'extract', 'start', `Extracting ${kind}`);
+        try {
+          await waitLoad(t.view.webContents, 8000);
+          const max = Math.max(1, Math.min(opts?.maxItems ?? 200, 1000));
+          const raw = await page<Record<string, unknown>>(t, 'extract', { kind }, 20_000);
+          if (raw.error) throw new Error(String(raw.error));
+          const url = t.view.webContents.getURL();
+          if (kind === 'links') {
+            const host = (() => { try { return new URL(url).hostname; } catch { return ''; } })();
+            const links = (raw.links as Array<{ text: string; href: string; rel?: string; ref: string }>).slice(0, max)
+              .map(l => { let internal = false; try { internal = new URL(l.href).hostname === host; } catch { /* keep */ } return { ...l, internal }; });
+            return JSON.stringify({ url, count: (raw.links as unknown[]).length, links }, null, 1);
+          }
+          if (kind === 'tables') {
+            const tables = raw.tables as Array<{ caption: string; rows: string[][] }>;
+            if (!tables.length) return 'No data tables on this page.';
+            return tables.slice(0, 20).map((tb, i) => `Table ${i + 1}${tb.caption ? ` — ${tb.caption}` : ''} (${tb.rows.length} rows)\n${tableToMarkdown({ rows: tb.rows })}`).join('\n\n');
+          }
+          if (kind === 'prices') {
+            const prices = findPrices(raw.blocks as Array<{ text: string; context?: string }>, raw.structured as Array<{ amount: string; currency: string; context?: string; source: string }>);
+            return JSON.stringify({ url, count: prices.length, prices: prices.slice(0, max) }, null, 1);
+          }
+          if (kind === 'contacts') {
+            return JSON.stringify({ url, ...findContacts(String(raw.text ?? ''), raw.links as Array<{ href: string; text: string }>) }, null, 1);
+          }
+          return JSON.stringify(raw, null, 1).slice(0, 60_000);
+        } finally { agentEvent(t, 'extract', 'done'); }
+      });
     },
-    async insights() {
-      checkAccess();
-      const t = active();
-      agentEvent(t, 'insights', 'start', 'Looking at the page');
-      try { return await insightsOf(t); } finally { agentEvent(t, 'insights', 'done'); }
+    insights() {
+      return agentCall('act', async (t) => {
+        agentEvent(t, 'insights', 'start', 'Looking at the page');
+        try { return await insightsOf(t); } finally { agentEvent(t, 'insights', 'done'); }
+      });
     },
-    async find(text, limit) {
-      checkAccess();
-      const t = active();
-      agentEvent(t, 'find', 'start', `Finding "${text}"`);
-      try {
-        const r = await page<{ count: number; matches: Array<{ ref: string; tag: string; context: string }> }>(t, 'find', { text, limit: limit ?? 20, guard: privacy.injectionGuard() });
-        if (!r.count) return `"${text}" is not on the page (${t.view.webContents.getURL()}).`;
-        return [`${r.count} match(es) for "${text}"${r.count > r.matches.length ? ` (first ${r.matches.length})` : ''}:`, ...r.matches.map(m => `[${m.ref}] ${m.tag}: …${m.context}…`)].join('\n');
-      } finally { agentEvent(t, 'find', 'done'); }
+    find(text, limit) {
+      return agentCall('act', async (t) => {
+        agentEvent(t, 'find', 'start', `Finding "${text}"`);
+        try {
+          const r = await page<{ count: number; matches: Array<{ ref: string; tag: string; context: string }> }>(t, 'find', { text, limit: limit ?? 20, guard: privacy.injectionGuard() });
+          if (!r.count) return `"${text}" is not on the page (${t.view.webContents.getURL()}).`;
+          return [`${r.count} match(es) for "${text}"${r.count > r.matches.length ? ` (first ${r.matches.length})` : ''}:`, ...r.matches.map(m => `[${m.ref}] ${m.tag}: …${m.context}…`)].join('\n');
+        } finally { agentEvent(t, 'find', 'done'); }
+      });
     },
     dialogs() {
-      return [...dialogs.values()].map(d => d.req);
+      const caller = calls.getStore()?.caller;
+      return [...dialogs.values()].filter(d => !caller || caller.copilot || owners.mayDrive(d.tab.id, caller.sessionId)).map(d => d.req);
     },
-    async answerDialog(opts) {
-      checkAccess();
-      const t = active();
-      const entry = opts.id ? dialogs.get(opts.id) : [...dialogs.values()].find(d => d.tab === t) ?? [...dialogs.values()][0];
-      if (!entry) return 'No JavaScript dialog is open.';
-      agentEvent(entry.tab, 'dialog', 'start', `${opts.accept ? 'Accepting' : 'Dismissing'} "${entry.req.message.slice(0, 60)}"`);
-      await answerDialogImpl(entry.req.id, opts.accept, opts.text);
-      await settle(entry.tab.view.webContents);
-      agentEvent(entry.tab, 'dialog', 'done');
-      return `${opts.accept ? 'Accepted' : 'Dismissed'} the ${entry.req.type} dialog. Now at ${entry.tab.view.webContents.getURL()} — take a snapshot to continue.`;
+    answerDialog(opts) {
+      return agentCall('act', async (t) => {
+        const caller = calls.getStore()?.caller;
+        const mayAnswer = (d: { tab: Tab }): boolean => !caller || caller.copilot || owners.mayDrive(d.tab.id, caller.sessionId);
+        const entry = opts.id ? dialogs.get(opts.id) : [...dialogs.values()].find(d => d.tab === t) ?? [...dialogs.values()].find(mayAnswer);
+        if (!entry) return 'No JavaScript dialog is open.';
+        if (!mayAnswer(entry)) throw new Error('That dialog is on a tab that is not this chat’s.');
+        agentEvent(entry.tab, 'dialog', 'start', `${opts.accept ? 'Accepting' : 'Dismissing'} "${entry.req.message.slice(0, 60)}"`);
+        await answerDialogImpl(entry.req.id, opts.accept, opts.text);
+        await settle(entry.tab.view.webContents);
+        agentEvent(entry.tab, 'dialog', 'done');
+        return `${opts.accept ? 'Accepted' : 'Dismissed'} the ${entry.req.type} dialog. Now at ${entry.tab.view.webContents.getURL()} — take a snapshot to continue.`;
+      });
     },
     downloads: () => downloads.list(),
     upload(target, files) {
@@ -1692,7 +1973,9 @@ export function registerBrowser(ctx: DesktopContext): void {
     },
     guardText(text) {
       if (!privacy.injectionGuard()) return text;
-      const t = activeId ? tabs.get(activeId) : undefined;
+      // The page this call read: a chat's own tab, not necessarily the one in front.
+      const used = calls.getStore()?.used;
+      const t = (used ? tabs.get(used) : undefined) ?? (activeId ? tabs.get(activeId) : undefined);
       const url = t && !t.view.webContents.isDestroyed() ? t.view.webContents.getURL() : '';
       const pending = t?.guardPending && t.guardPending.url === url ? t.guardPending.report : undefined;
       if (t) t.guardPending = undefined;
@@ -1768,8 +2051,8 @@ export function registerBrowser(ctx: DesktopContext): void {
   ctx.handle('browser:tabs', () => list());
   ctx.handle('browser:open', (url: string, newTab?: boolean) => openUrl(url, { newTab }));
   ctx.handle('browser:newTab', (url?: string) => { tabSession?.restore(); const t = create(url || ctx.prefs.get().browserHome); return info(t); });
-  ctx.handle('browser:close', (id: string) => service.closeTab(id));
-  ctx.handle('browser:select', (id: string) => service.selectTab(id));
+  ctx.handle('browser:close', (id: string) => closeTabImpl(id));
+  ctx.handle('browser:select', (id: string) => selectTabImpl(id));
   ctx.handle('browser:back', () => service.back());
   ctx.handle('browser:forward', () => service.forward());
   ctx.handle('browser:reload', () => { const t = active(); t.lastNav = () => t.view.webContents.reload(); t.view.webContents.reload(); });
@@ -1945,13 +2228,16 @@ export function registerBrowser(ctx: DesktopContext): void {
   ctx.handle('browser:tabs:summary', () => tabAware.view());
   ctx.handle('browser:forms', () => formsOf(active()));
 
-  ctx.handle('browser:agentStop', () => {
-    agentStopped = true;
-    const t = activeId ? tabs.get(activeId) : undefined;
-    if (t) { t.agentUntil = 0; ctx.emit('browser:agent', { tabId: t.id, action: 'stop', status: 'blocked', detail: 'The user took control' } satisfies AgentEvent); }
+  // Per tab: the one named, else the one in front. Stop on one chat's page leaves the others working.
+  ctx.handle('browser:agentStop', (tabId?: string) => {
+    const t = tabs.get(typeof tabId === 'string' ? tabId : activeId ?? '');
+    if (t) pauseTab(t, 'The user took control');
+  });
+  ctx.handle('browser:agentResume', (tabId?: string) => {
+    const id = typeof tabId === 'string' ? tabId : activeId;
+    if (id) paused.delete(id);
     pushState();
   });
-  ctx.handle('browser:agentResume', () => { agentStopped = false; pushState(); });
 
   ctx.handle('browser:permissionAnswer', (id: string, allow: boolean, remember: boolean) => {
     const p = pendingPerms.get(id);
@@ -1995,7 +2281,7 @@ export function registerBrowser(ctx: DesktopContext): void {
   // ── Tabs like a real browser: session restore, order, pin, reopen, full screen (browser-session.ts) ──
   tabSession = registerTabSession(ctx, {
     tabs, active: () => activeId, setActive: (id) => { activeId = id; },
-    create: (url) => create(url), close: (id) => service.closeTab(id), layout, pushState,
+    create: (url) => create(url), close: (id) => closeTabImpl(id), layout, pushState,
     home: () => ctx.prefs.get().browserHome,
   });
   autofillService = registerAutofill(ctx, () => {

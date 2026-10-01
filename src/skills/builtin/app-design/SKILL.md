@@ -4,6 +4,7 @@ description: Make a screen look and behave like a product people pay for — one
 author: aico
 version: 1.0.0
 trigger: \b(design|ui|ux|look and feel|looks? (good|bad|professional|ugly)|polish|professional|beautiful|good.looking|layout|styling|theme|responsive|dashboard)\b
+antiTrigger: \b(bugs?|root cause|regression|stack ?trace|traceback|crash(es|ed|ing)?|data loss|csv|pagination|cursor|sql|cli|no ui)\b
 ---
 Design is decided before the first component and checked in a screenshot after the last. A screen is done when a stranger can tell what it is for, what to do first, and what just happened. Sketches: `references/patterns.md`. {args}
 

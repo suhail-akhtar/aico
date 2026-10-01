@@ -53,6 +53,8 @@ import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
 import { isEffortChoice } from '../../shared/reasoning.js';
 import { hostToolsFrom } from '../../shared/host-tools.js';
+import { handOffToChat, mintSessionId, type HandOffDeps, type HandOffInput } from './chat-handoff.js';
+import type { ChatRow } from '../../shared/chat-handoff.js';
 import { saveKnowledge } from '../knowledge/store.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
@@ -356,6 +358,58 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     // below rather than leaving sessions with nowhere to run.
   }
 
+  /*
+    The browser copilot's hand-off to a full chat (server/chat-handoff.ts):
+    the model's `HandOffToChat` and the copilot's "Hand off to chat" button
+    both come through `runs.handOff`. A new chat is opened in its folder,
+    named, and started like any submitted turn; a busy one gets the message as
+    its next turn. The main window hears about it on the `chat-handoff` topic.
+  */
+  const handOffDeps: HandOffDeps = {
+    listChats: async () => {
+      const projects = await listProjects(cwd);
+      const rows: ChatRow[] = (await Promise.all(projects.map(async project => {
+        const found = project.exists ? await listSessionSummaries(project.path).catch(() => []) : [];
+        return found.filter(isUsedSession).map(row => ({ ...row, project: project.path }));
+      }))).flat().map(row => {
+        const live = runs.titleOf(row.id);
+        const archived = runs.archivedOf(row.id);
+        return {
+          id: row.id, project: row.project, updatedAt: row.updatedAt,
+          ...(live?.title ?? row.title ? { title: live?.title ?? row.title } : {}),
+          ...((archived ?? row.archived) ? { archived: true } : {}),
+        };
+      });
+      for (const row of rows) if (row.project) sessionCwd.set(row.id, row.project);
+      return rows;
+    },
+    listProjects: async () => (await listProjects(cwd)).filter(p => p.exists).map(p => ({ path: p.path, name: p.name })),
+    source: (sessionId) => {
+      const run = runs.get(sessionId);
+      if (!run) return undefined;
+      const userMessages = run.session.events
+        .filter(e => e.type === 'user/message')
+        .map(e => String((e.data as { content?: unknown }).content ?? ''));
+      const title = runs.titleOf(sessionId)?.title;
+      return { cwd: run.cwd, userMessages, ...(title ? { title } : {}) };
+    },
+    addProject: async (dir) => (await addProject(dir)).path,
+    start: async (sessionId, dir, message, { title, existing }) => {
+      const runCwd = await resolveCwd(sessionId, dir);
+      await runs.ensure(sessionId, runCwd);
+      if (!existing && title) runs.rename(sessionId, title);
+      const live = runs.get(sessionId);
+      if (live?.busy) { runs.followup(sessionId, message); return 'queued'; }
+      const model = runs.modelOf(sessionId) ?? await currentDefaultModel();
+      void runs.submit(sessionId, runCwd, message, model, { approval: live?.approval ?? 'auto' })
+        .catch(() => { /* already reported on the chat's own stream as turn-end */ });
+      return 'started';
+    },
+    announce: (event) => hub.publishTopic('chat-handoff', 'handoff', event),
+    newSessionId: () => mintSessionId(),
+  };
+  runs.handOff = (fromSessionId, request) => handOffToChat(handOffDeps, fromSessionId, request);
+
   async function resolveCwd(sessionId: string, requested?: string | null): Promise<string> {
     if (requested && await isKnownProject(cwd, requested)) {
       const target = normalizeProjectPath(requested);
@@ -552,6 +606,14 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         return;
       }
       send(res, 200, await startApp(body.slug, miniAppDir(body.slug, live, cwd), app));
+      return;
+    }
+
+    // Hand-offs from the browser copilot to a chat, for the main window's toast.
+    // No full frame: a hand-off missed while disconnected is in the sidebar anyway.
+    if (route === 'chat/handoff/events' && req.method === 'GET') {
+      const detach = hub.subscribeTopic('chat-handoff', res);
+      req.on('close', detach);
       return;
     }
 
@@ -1351,7 +1413,34 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
             : {}),
           ...(pictures.length ? { images: pictures } : {}),
           ...(shown.length ? { attachments: shown } : {}),
+          // Only the one value this server knows; anything else is an ordinary chat.
+          ...((body as { surface?: unknown }).surface === 'browser-copilot' ? { surface: 'browser-copilot' as const } : {}),
         }).catch(() => { /* already reported on the stream as turn-end */ });
+        return;
+      }
+      /*
+        The copilot's "Hand off to chat" button: the same hand-off the model's
+        tool does, without asking the model. The page comes with the request
+        (the button knows it); `fromSessionId` names the copilot conversation.
+      */
+      case 'chat/handoff': {
+        const b = body as Partial<HandOffInput> & { fromSessionId?: string };
+        if (typeof b.task !== 'string' || !b.task.trim()) { send(res, 400, { error: 'task required' }); return; }
+        const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+        const page = b.page && typeof b.page === 'object' && typeof b.page.url === 'string'
+          ? { url: b.page.url, ...(str(b.page.title) ? { title: str(b.page.title)! } : {}), ...(str(b.page.selection) ? { selection: str(b.page.selection)! } : {}) }
+          : undefined;
+        const outcome = await runs.handOff!(str(b.fromSessionId) ?? '', {
+          task: b.task,
+          ...(str(b.project) ? { project: str(b.project)! } : {}),
+          ...(str(b.title) ? { title: str(b.title)! } : {}),
+          ...(str(b.chat) ? { chat: str(b.chat)! } : {}),
+          ...(str(b.notes) ? { notes: str(b.notes)! } : {}),
+          ...(b.includePage === false ? { includePage: false } : {}),
+          ...(page ? { page } : b.page === null ? { page: null } : {}),
+        } as HandOffInput);
+        // 200 either way: a refusal (no such chat, several) is an answer the button shows, not a failure.
+        send(res, 200, outcome);
         return;
       }
       case 'goal': {

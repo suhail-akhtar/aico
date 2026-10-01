@@ -43,6 +43,27 @@ export interface HostBridge {
   tools: readonly HostToolName[];
 }
 
+/** What `HandOffToChat` asks for: a chat to continue the work in. */
+export interface HandOffRequest {
+  task: string;
+  /** A project by name or path; the copilot's own folder when omitted. */
+  project?: string;
+  title?: string;
+  /** An existing chat, by (part of) its title, instead of a new one. */
+  chat?: string;
+  /** Carry the page the copilot is on (default true). */
+  includePage?: boolean;
+  /** What the chat needs from the page or the conversation. Page text is guarded. */
+  notes?: string;
+}
+
+/** The outcome, as the tool reports it. `candidates` when a chat name matched several. */
+export type HandOffOutcome =
+  | { ok: true; sessionId: string; title: string; project: string; existing: boolean; queued: boolean }
+  | { ok: false; error: string; candidates?: Array<{ title: string; project?: string }> };
+
+export type HandOffBridge = (request: HandOffRequest) => Promise<HandOffOutcome>;
+
 export interface RunContext {
   /** Absolute path the run treats as the project root. */
   cwd: string;
@@ -73,6 +94,14 @@ export interface RunContext {
    * See `shared/host-tools` for what can be asked and why the list is short.
    */
   host?: HostBridge;
+  /**
+   * Where this run can hand work to a full chat — set only for the desktop
+   * browser's copilot, and only for its own turns (the client says so per
+   * turn, like `host`). Its presence is also what marks a run as the copilot:
+   * `resolveToolSet` offers `HandOffToChat` and withholds the build-and-run
+   * tools on that basis. See tools/handoff-to-chat and server/chat-handoff.
+   */
+  handOff?: HandOffBridge;
   /**
    * How hard this run asks the model to think, when the model can be asked.
    *

@@ -27,6 +27,7 @@ import { installBrowserStore } from './browser/store';
 import { installBrowserLinks } from './browser/links';
 import { installBrowserHost } from './browser/host';
 import { installCopilotRelay } from './browser/copilot-overlay';
+import { installHandOffToasts } from './browser/handoff-toasts';
 
 document.documentElement.dataset.platform = String(platform);
 
@@ -106,6 +107,8 @@ async function boot(): Promise<void> {
   if (isDesktop) installBrowserStore();
   // Where the browser is (here, or popped out into its own window), and "open in main chat" from it.
   if (isDesktop) { installBrowserHost(); installCopilotRelay(); }
+  // Work the browser copilot hands to a chat: a toast with Open, wherever the copilot is.
+  if (isDesktop) installHandOffToasts();
   installBrowserLinks();
   // Canvases open beside the chat here, and code canvases get Monaco.
   installCanvasHost({ openPanel: ref => useCanvasPanel.getState().show(ref), CodeEditor: CanvasCode });

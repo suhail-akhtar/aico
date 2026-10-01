@@ -43,6 +43,8 @@ import { learnFromTurn } from '../learning/index.js';
 import { backlogProgress, effectiveKind, hasProcess } from '../miniapps/store.js';
 import { appState } from '../miniapps/process.js';
 import type { PromptSection } from '../prompt/types.js';
+import { COPILOT_BRIEF } from '../prompts.js';
+import type { HandOffOutcome, HandOffRequest } from '../run-context.js';
 
 /**
  * The moving state of the app a bound session is building, for the volatile
@@ -278,6 +280,13 @@ const PROGRESS_TAIL_CHARS = 16_000;
 export class RunManager {
   private readonly runs = new Map<string, ActiveRun>();
 
+  /**
+   * Where the browser copilot's `HandOffToChat` lands (server/chat-handoff.ts).
+   * Set by the server once it has the pieces (projects, the sessions list, the
+   * topic hub); unset — and so never offered — in a manager built without them.
+   */
+  handOff?: (fromSessionId: string, request: HandOffRequest) => Promise<HandOffOutcome>;
+
   constructor(
     private readonly hub: EventHub,
     /**
@@ -400,6 +409,13 @@ export class RunManager {
       images?: ImageRef[];
       /** Everything the reader attached, for showing it on their message. */
       attachments?: UserAttachment[];
+      /**
+       * Who is asking, when it changes what the agent is. `browser-copilot` is
+       * the desktop browser's panel: its turns get the copilot brief in the
+       * tail and the hand-off tool, and lose the build-and-run tools. Per turn,
+       * like `hostTools` — the same session opened in the main chat is a chat.
+       */
+      surface?: 'browser-copilot';
     } = {},
   ): Promise<string> {
     const run = await this.ensure(sessionId, cwd);
@@ -670,6 +686,10 @@ export class RunManager {
       }
       const appStateTail = await appStateSection(run.session, settings, run.cwd);
       const boundAppOpt = await boundApp(run.session, settings, run.cwd);
+      // The copilot's brief: constant, so it is byte-identical on every step.
+      const copilot = opts.surface === 'browser-copilot';
+      const brief: PromptSection[] = copilot ? [{ id: 'browser_copilot', body: COPILOT_BRIEF, order: 880 }] : [];
+      const handOff = copilot && this.handOff ? this.handOff : undefined;
       const result = await runAgent({
         task,
         // What the run did to its own context — older output cleared, earlier
@@ -710,13 +730,16 @@ export class RunManager {
         cwd: run.cwd,
         // The app's moving state, for the tail, when this session is about one —
         // and re-read before every step, because it moves during the turn.
+        ...(brief.length ? { volatileSections: brief } : {}),
         ...(appStateTail ? {
-          volatileSections: [appStateTail],
+          volatileSections: [...brief, appStateTail],
           refreshVolatile: async () => {
             const fresh = await appStateSection(run.session, settings, run.cwd);
             return fresh ? [fresh] : [];
           },
         } : {}),
+        // The copilot's hand-off to a full chat, with this session as the source.
+        ...(handOff ? { handOff: (request: HandOffRequest) => handOff(sessionId, request) } : {}),
         // A verifier screenshot, or an image a tool returned (Read on a PNG,
         // WebFetch of an image URL, an MCP screenshot), becomes an attachment
         // of this session, so the next request can show it to a model that

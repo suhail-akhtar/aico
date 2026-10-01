@@ -4,6 +4,18 @@ import { McpStdioClient } from './stdio.js';
 import { McpHttpClient } from './http.js';
 import { McpSseClient } from './sse.js';
 import type { McpBaseClient } from './base.js';
+import { currentRunContext } from '../run-context.js';
+
+/**
+ * What the hosting process is told with each tool call: the calling session.
+ * The desktop app's browser gives each chat its own tab by it (and keeps the
+ * browser copilot on the page the user is looking at); without it, every
+ * chat drove the one tab in front. Host servers only — they run this engine.
+ */
+export function hostCallMeta(): Record<string, unknown> | undefined {
+  const sessionId = currentRunContext()?.sessionId;
+  return sessionId ? { 'aico/sessionId': sessionId } : undefined;
+}
 
 export interface McpServerInfo {
   name: string;
@@ -48,6 +60,7 @@ class McpServerRegistry {
     for (const [name, serverConfig] of Object.entries({ ...config, ...this._host })) {
       try {
         const client = this._createClient(serverConfig);
+        if (name in this._host) client.callMeta = hostCallMeta;
         await client.initialize();
         const tools = await client.listTools();
         const resources = await client.listResources();

@@ -34,12 +34,16 @@ export function isCertError(e: TabError | undefined): boolean {
   return Boolean(e && e.code <= -200 && e.code > -300);
 }
 
-/** Is the agent working in the browser right now (from main's flag, or its recent actions)? */
+/**
+ * Is an agent working on the tab in front right now (from main's flag, or its
+ * recent actions)? Per tab: a chat working in its own background tab does not
+ * light up the page you are looking at (electron/browser-owners.ts).
+ */
 export function agentBusy(s: { agent: { event: AgentEvent | null; at: number }; state: BrowserState; legacyAgentAt: number }, now = Date.now()): boolean {
-  if (s.state.tabs.some(t => t.agentActive)) return true;
+  if (s.state.tabs.some(t => t.agentActive && t.id === s.state.activeId)) return true;
   if (now - s.legacyAgentAt < 8000) return true;
   const ev = s.agent.event;
-  if (!ev) return false;
+  if (!ev || (s.state.activeId && ev.tabId !== s.state.activeId)) return false;
   const age = now - s.agent.at;
   return ev.status === 'start' ? age < 20_000 : age < 4_000;
 }
@@ -83,4 +87,11 @@ export function previewOrder<T extends { id: string }>(tabs: T[], draggedId: str
   const rest = tabs.filter(t => t.id !== draggedId);
   const at = Math.max(0, Math.min(rest.length, to));
   return [...rest.slice(0, at), d, ...rest.slice(at)];
+}
+
+/** "Opened by the chat “Fix the login” — working now", for the badge's tooltip; '' for the person's own tabs. */
+export function ownerLine(tab: Pick<TabState, 'owner' | 'driver' | 'agentPaused'>): string {
+  if (!tab.owner) return tab.driver ? `In use by “${tab.driver}”` : '';
+  const state = tab.agentPaused ? ' — paused (you took over)' : tab.driver ? ' — working now' : tab.owner.released ? ' — finished; nobody is using it' : '';
+  return `Opened by the chat “${tab.owner.title}”${state}`;
 }

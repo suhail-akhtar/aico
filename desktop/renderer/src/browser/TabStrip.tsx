@@ -6,7 +6,9 @@
  * stays among the pinned ones. Right-click opens the native tab menu (pin,
  * duplicate, mute, close others / to the right, reopen closed). The ⌄ at the
  * end searches the open and recently closed tabs. A tab the agent is driving
- * wears an "AI" badge.
+ * wears an "AI" badge. A tab a chat opened for its own work (electron/
+ * browser-owners.ts) carries that chat's colour along its top edge and a dot
+ * whose tooltip names the chat — so a chat's tabs read as a group.
  *
  * In full view the strip is the top of the window: its empty space drags the
  * window, it keeps clear of the window's own controls, and it carries the
@@ -26,7 +28,7 @@ import { isBlankUrl, hostOf } from './urls';
 import { Favicon } from './Omnibox';
 import { closeTab, newTab, openUrl, useBrowser } from './store';
 import { bookmarkTab } from './bookmarks';
-import { dropIndex, previewOrder } from './tabs';
+import { dropIndex, ownerLine, previewOrder } from './tabs';
 import { setFullView, useFullView } from './fullview';
 import { inBrowserWindow, openAicoWindow } from './host';
 import type { TabState } from './types';
@@ -152,10 +154,12 @@ function Tab({ tab, active, onPointerDown, dragging, style }: {
     else if (action === 'copyAddress') toast.success('Address copied');
     else if (action === undefined) fallbackMenu(tab);
   };
+  const owner = ownerLine(tab);
+  const ownerColour = tab.owner ? `hsl(${tab.owner.hue} 70% ${tab.owner.released ? '62%' : '50%'})` : undefined;
   return (
-    <div role="tab" aria-selected={active} tabIndex={0} data-tab={tab.id}
+    <div role="tab" aria-selected={active} tabIndex={0} data-tab={tab.id} data-owner={tab.owner?.title}
       className={cls('bx-tab no-drag group cursor-default select-none', pinned && 'bx-tab-pinned', tab.agentActive && 'bx-agent', dragging && 'bx-tab-dragging')}
-      style={style}
+      style={ownerColour ? { ...style, boxShadow: `inset 0 2px 0 ${ownerColour}` } : style}
       onPointerDown={(e) => {
         if (e.button === 1) { e.preventDefault(); if (!pinned) closeTab(tab.id); return; }
         if (e.button === 0 && !active) fire('browser:select', tab.id);
@@ -165,13 +169,16 @@ function Tab({ tab, active, onPointerDown, dragging, style }: {
       onAuxClick={e => e.preventDefault()}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fire('browser:select', tab.id); }}
       onContextMenu={e => { e.preventDefault(); void menu(); }}
-      title={`${tabTitle(tab)}${isBlankUrl(tab.url) ? '' : `\n${hostOf(tab.url) || tab.url}`}`}>
+      title={`${tabTitle(tab)}${isBlankUrl(tab.url) ? '' : `\n${hostOf(tab.url) || tab.url}`}${owner ? `\n${owner}` : ''}`}>
       <span className="bx-tab-icon relative flex h-4 w-4 shrink-0 items-center justify-center">
         {tab.loading ? <span className="spinner h-3.5 w-3.5" /> : isBlankUrl(tab.url) ? <span className="bx-orb h-3.5 w-3.5" /> : <Favicon src={tab.favicon} url={tab.url} size={16} />}
         {pinned && (tab.audible || tab.muted) && <span className="bx-pin-audio"><Icon name={tab.muted ? 'volume-x' : 'volume'} size={9} /></span>}
       </span>
       {!pinned && <span className="min-w-0 flex-1 truncate">{tabTitle(tab)}</span>}
-      {!pinned && tab.agentActive && <span className="bx-ai-badge" title="AICO is using this tab">AI</span>}
+      {!pinned && tab.owner && !tab.agentActive && (
+        <span className="bx-owner-dot" data-released={tab.owner.released ? '' : undefined} style={{ background: ownerColour }} title={owner} aria-label={owner} />
+      )}
+      {!pinned && tab.agentActive && <span className="bx-ai-badge" title={tab.driver ? `“${tab.driver}” is using this tab` : 'AICO is using this tab'}>AI</span>}
       {!pinned && (tab.audible || tab.muted) && (
         <button className={cls('icon-btn-sm h-5 w-5 shrink-0', tab.muted && 'text-aico-muted')} disabled={!canMute}
           onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); fire('browser:mute', tab.id, !tab.muted); }}

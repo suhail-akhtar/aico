@@ -11,6 +11,16 @@ export interface SkillFrontmatter {
   description: string;
   /** Auto-dispatch trigger pattern (regex string) */
   trigger?: string;
+  /**
+   * Requests this skill is NOT for, even when `trigger` matches (regex string).
+   *
+   * A trigger is a bag of words, and words travel: "the admin UI shows 1,203
+   * rows" in a backend CSV bug report matched app-design's `ui`, and the
+   * suggestion was declined in twelve of eighteen replies. A negative cue is
+   * cheaper and more honest than trying to make the positive regex know every
+   * sentence a word can appear in.
+   */
+  antiTrigger?: string;
   /** Alternative names for this skill */
   aliases?: string[];
   author?: string;

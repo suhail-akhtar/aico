@@ -131,7 +131,7 @@ export interface RuntimeBlocksInput {
  * carries — together they were half the tail, paid on every step.
  */
 export interface RuntimeBlocks {
-  /** Model, directory, session, workspace, agents, skills, cron — the identity of this run. */
+  /** Model, directory, session, workspace, agents, cron — the identity of this run. */
   runtime: string;
   /** The handful of process decisions the model actually has to make. */
   operatingProcesses: string;
@@ -144,16 +144,17 @@ export interface RuntimeBlocks {
 /** The six decisions worth stating. Everything else is in the tool descriptions. */
 const OPERATING_PROCESSES = [
   '<process name="single-agent">Do small or tightly-coupled work yourself with direct tools.</process>',
-  '<process name="sub-agents">Task spawns one isolated specialist (subagent_type, agent_name or agent_spec) with complete context; Investigate is the read-only fan-out for research. No role-based build teams.</process>',
+  '<process name="sub-agents">Task delegates one briefed task (subagent_type, agent_name or agent_spec); Investigate is the read-only fan-out for research. No role-based build teams.</process>',
   '<process name="apps">Build applications with AppManage: a template first (zero-token skeleton with a worked feature, tests and a Dockerfile), one writing agent, RunChecks, then start and VerifyApp. The whole platform — kinds, templates, files, the workspace panel the person sees, the gates — is Skill app-platform; read it once before working on an app.</process>',
-  '<process name="skills">Prefer a skill over working the procedure out again; a skill flagged as matching the request is the first thing to consider. SkillManage creates and registers them.</process>',
+  '<process name="skills">Prefer a skill over working the procedure out again; a skill flagged as matching the request is the first thing to consider.</process>',
   '<process name="memory">MemoryManage remembers durable facts by scope (global, project, session). Remember when told to, and when a fact will still be true next week.</process>',
-  '<process name="mcp">Use MCP tools when loaded; McpManage changes what is connected. WorkspaceWrite keeps durable reports and handoffs.</process>',
+  // Deferred groups (tools/deferred.ts) are named in LoadTools' own schema;
+  // this line is only so a missing tool reads as "load it", not "it does not exist".
+  '<process name="tools">A tool you need but do not have may be in a LoadTools group. MCP tools appear once their server is connected. WorkspaceWrite keeps durable reports and handoffs.</process>',
 ].join('\n');
 
 export function buildRuntimeBlocks(input: RuntimeBlocksInput): RuntimeBlocks {
   const agents = input.agents.map((a) => `${a.name}(${a.role})`).join('; ') || 'none';
-  const skills = input.skills.map((s) => s.frontmatter.name).join(', ') || 'none';
   const cron = input.cronJobs.map((j) => `${j.name}:${j.status}:${j.schedule}`).join('; ') || 'none';
   const mcp = input.mcpServers.map((s) => `${s.name}:${s.health}/${s.toolCount} tools`).join(', ');
 
@@ -178,7 +179,8 @@ export function buildRuntimeBlocks(input: RuntimeBlocksInput): RuntimeBlocks {
       `<session_id>${input.sessionId ?? 'none'}</session_id>`,
       `<workspace>${input.workspace.root}</workspace>`,
       `<agents>${agents}</agents>`,
-      `<skills>${skills}</skills>`,
+      // Skill names are not repeated here: the `skills` prompt section lists
+      // each one with the description that decides whether to open it.
       `<cron_jobs>${cron}</cron_jobs>`,
       // A server's own manual for its tools. Stable for the life of a
       // connection, so it belongs in the cached prefix with the rest of this.

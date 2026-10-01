@@ -47,6 +47,13 @@ export interface RunScoped<T> {
   get(): T;
   /** Replace this run's state with a fresh value. */
   reset(): void;
+  /**
+   * Another run's state, by session id, without creating it.
+   *
+   * For a parent reading what a finished sub-agent left behind — the one
+   * legitimate reason to look into a bucket that is not your own.
+   */
+  peek(sessionId: string): T | undefined;
   /** Buckets currently held. Exposed for tests and for spotting a leak. */
   size(): number;
 }
@@ -83,6 +90,7 @@ export function runScoped<T>(create: () => T): RunScoped<T> {
       buckets.set(currentKey(), create());
       evictIfNeeded();
     },
+    peek: (sessionId: string) => buckets.get(sessionId),
     size: () => buckets.size,
   };
 }

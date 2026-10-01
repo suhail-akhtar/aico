@@ -80,6 +80,18 @@ export function manual(ctx: DesktopContext): string {
   ].join('\n');
 }
 
+/**
+ * The browser tools that act on one page: each takes an optional `tabId`, and
+ * a chat that names none acts on its own most recent tab (browser-owners.ts).
+ */
+const TAB_SCOPED = new Set([
+  'browser_open', 'browser_read', 'browser_snapshot', 'browser_forms', 'browser_fill', 'browser_autofill', 'browser_extract', 'browser_insights',
+  'browser_find', 'browser_click', 'browser_type', 'browser_select', 'browser_press', 'browser_hover', 'browser_scroll', 'browser_scroll_to',
+  'browser_wait', 'browser_text', 'browser_evaluate', 'browser_screenshot', 'browser_console', 'browser_network', 'browser_navigate',
+  'browser_dialog', 'browser_upload', 'browser_login', 'browser_handoff',
+]);
+const TAB_ID_PROP = { type: 'string', description: 'The tab to act on (an id from browser_tabs). Default: your own most recent tab (the browser copilot: the tab in front).' };
+
 export function createTools(ctx: DesktopContext): Tool[] {
   const renderer = (): NonNullable<DesktopContext['services']['renderer']> => {
     if (!ctx.services.renderer) throw new Error('The interface is not ready.');
@@ -222,7 +234,7 @@ export function createTools(ctx: DesktopContext): Tool[] {
     // ── Browser ──
     {
       name: 'browser_open',
-      description: 'Open a URL in the IDE\'s built-in browser (the user sees it). Returns the tab, and flags a human check or load error; on a sign-in page, `signIn` says which stored credential matches this origin (then call browser_login). Use newTab to keep the current page. Then browser_read (to read) or browser_snapshot (to act).',
+      description: 'Open a URL in the IDE\'s built-in browser. In a chat it opens in a background tab of the chat\'s own (the user keeps the page they are looking at, and sees your tab in the strip); later browser_* calls act on that tab. The user\'s tab, or another chat\'s, is refused unless the user handed it to this chat; "busy" means another chat is driving it — wait, or use your own. (The browser copilot works on the user\'s tab in front.) Returns the tab, and flags a human check or load error; on a sign-in page, `signIn` says which stored credential matches this origin (then call browser_login). Use newTab to keep the current page. Then browser_read (to read) or browser_snapshot (to act).',
       inputSchema: { type: 'object', properties: { url: { type: 'string' }, newTab: { type: 'boolean' } }, required: ['url'] },
       run: async (a) => json(await (await browser()).open(String(a.url), { newTab: Boolean(a.newTab) })),
     },
@@ -419,33 +431,33 @@ export function createTools(ctx: DesktopContext): Tool[] {
     },
     {
       name: 'browser_tabs',
-      description: 'List browser tabs (id, URL, title, active). Also: action select/close/new (same as browser_select_tab / browser_close_tab / browser_new_tab).',
+      description: 'List the browser tabs you may use (id, URL, title; active = the tab your calls act on; yours / handedToYou / userFront + readOnly). Also: action select/close/new (same as browser_select_tab / browser_close_tab / browser_new_tab).',
       inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['list', 'select', 'close', 'new'] }, id: { type: 'string' }, url: { type: 'string' } } },
       run: async (a) => {
         const b = await browser();
         if (a.action === 'select' && a.id) b.selectTab(String(a.id));
         if (a.action === 'close') b.closeTab(a.id ? String(a.id) : undefined);
         if (a.action === 'new') await b.open(String(a.url ?? 'about:blank'), { newTab: true });
-        return json(b.tabs());
+        return json(b.agentTabs());
       },
     },
     {
       name: 'browser_select_tab',
-      description: 'Switch to a browser tab by id (from browser_tabs).',
+      description: 'Switch to a browser tab by id (from browser_tabs): later calls act on it. For a chat this never changes the tab the user is looking at.',
       inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
-      run: async (a) => { const b = await browser(); b.selectTab(String(a.id)); return json(b.tabs()); },
+      run: async (a) => { const b = await browser(); b.selectTab(String(a.id)); return json(b.agentTabs()); },
     },
     {
       name: 'browser_new_tab',
-      description: 'Open a new tab (optionally at a URL) and switch to it.',
+      description: 'Open a new tab (optionally at a URL) and switch to it (a chat\'s new tab opens in the background).',
       inputSchema: { type: 'object', properties: { url: { type: 'string' } } },
-      run: async (a) => { const b = await browser(); await b.open(String(a.url ?? 'about:blank'), { newTab: true }); return json(b.tabs()); },
+      run: async (a) => { const b = await browser(); await b.open(String(a.url ?? 'about:blank'), { newTab: true }); return json(b.agentTabs()); },
     },
     {
       name: 'browser_close_tab',
-      description: 'Close a tab by id (the current one when omitted).',
+      description: 'Close a tab by id (the current one when omitted). A chat may close only tabs it opened.',
       inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
-      run: async (a) => { const b = await browser(); b.closeTab(a.id ? String(a.id) : undefined); return json(b.tabs()); },
+      run: async (a) => { const b = await browser(); b.closeTab(a.id ? String(a.id) : undefined); return json(b.agentTabs()); },
     },
     {
       name: 'browser_navigate',
@@ -591,6 +603,11 @@ export function createTools(ctx: DesktopContext): Tool[] {
       }),
     },
   ];
+  for (const t of tools) {
+    if (!TAB_SCOPED.has(t.name)) continue;
+    const schema = t.inputSchema as { properties?: Record<string, unknown> };
+    schema.properties = { ...(schema.properties ?? {}), tabId: TAB_ID_PROP };
+  }
   return tools;
 }
 
@@ -612,6 +629,13 @@ export function guardPageResult(ctx: Pick<DesktopContext, 'services'>, name: str
   if (!name.startsWith('browser_') || NOT_PAGE_CONTENT.has(name)) return text;
   const b = ctx.services.browser;
   return b ? b.guardText(text) : text;
+}
+
+/** The calling session the engine names in a tool call's `_meta` (host servers only). */
+export function callerSession(params: Record<string, unknown> | undefined): string | undefined {
+  const meta = params?._meta;
+  const id = meta && typeof meta === 'object' ? (meta as Record<string, unknown>)['aico/sessionId'] : undefined;
+  return typeof id === 'string' && /^[\w.:-]{1,200}$/.test(id) ? id : undefined;
 }
 
 export interface McpEndpoint { url: string; token: string; close: () => void }
@@ -674,13 +698,18 @@ export async function startMcp(ctx: DesktopContext): Promise<McpEndpoint> {
             const args = (msg.params?.arguments ?? {}) as Record<string, unknown>;
             const started = Date.now();
             try {
+              // Guarded inside the call: the guard counts against the tab this call read, not the one in front.
+              const call = (): Promise<string | RichResult> => tool.run(args).then(out => (typeof out === 'string' ? guardPageResult(ctx, name, out) : out));
+              // Which chat is calling (the engine's `_meta`, src/mcp/registry.ts): its browser calls act on its own tab.
+              const b = ctx.services.browser;
+              const tabId = typeof args.tabId === 'string' && args.tabId ? args.tabId : undefined;
               const out = await Promise.race([
-                tool.run(args),
+                name.startsWith('browser_') && b ? b.asCaller({ sessionId: callerSession(msg.params), ...(tabId ? { tabId } : {}) }, call) : call(),
                 new Promise<string>((_, reject) => setTimeout(() => reject(new Error(`${name} took longer than 27s and was stopped.`)), 27_000)),
               ]);
               log(`ok ${name} ${Date.now() - started}ms`);
               ctx.emit('activity:tool', { name, ok: true, ms: Date.now() - started });
-              ok(typeof out === 'string' ? { content: [{ type: 'text', text: guardPageResult(ctx, name, out) }] } : out);
+              ok(typeof out === 'string' ? { content: [{ type: 'text', text: out }] } : out);
             } catch (err) {
               log(`error ${name}: ${(err as Error).message}`);
               ok({ content: [{ type: 'text', text: `Error: ${(err as Error).message}` }], isError: true });

@@ -40,6 +40,23 @@ function safeResourcePath(dir: string, relative: string): string | null {
   return resolved;
 }
 
+/**
+ * Whether `request` is the kind of request this skill declares it is for:
+ * its `trigger` matches and its `antiTrigger`, if any, does not. An invalid
+ * regex in either never matches — a typo in a skill file must not start
+ * offering that skill for everything.
+ */
+export function triggerMatches(skill: Skill, request: string): boolean {
+  const { trigger, antiTrigger } = skill.frontmatter;
+  if (!trigger) return false;
+  try {
+    if (!new RegExp(trigger, 'i').test(request)) return false;
+    return !(antiTrigger && new RegExp(antiTrigger, 'i').test(request));
+  } catch {
+    return false;
+  }
+}
+
 export class SkillRegistry {
   private _skills: Skill[] = [];
   private _subscribers: SubscriberFn[] = [];
@@ -87,15 +104,7 @@ export class SkillRegistry {
 
   /** Check if user input auto-dispatches to a skill via its trigger pattern */
   matchTrigger(userInput: string): Skill | undefined {
-    for (const skill of this._skills) {
-      if (!skill.frontmatter.trigger) continue;
-      try {
-        if (new RegExp(skill.frontmatter.trigger, 'i').test(userInput)) return skill;
-      } catch {
-        // Ignore invalid trigger regexes
-      }
-    }
-    return undefined;
+    return this._skills.find(skill => triggerMatches(skill, userInput));
   }
 
   list(): Skill[] {

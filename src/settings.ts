@@ -513,6 +513,16 @@ export interface AicoSettings {
    */
   disabledTools?: string[];
   /**
+   * Offer rarely used tool groups on demand (default true).
+   *
+   * The remote-ops, credential, registry, cron, world-lookup, image,
+   * background and session tools are listed by name in one `LoadTools` tool
+   * and their schemas sent only once a session loads them — about 10K fewer
+   * tokens on every request. `false` offers every schema up front, as before.
+   * See `src/tools/deferred.ts`.
+   */
+  deferTools?: boolean;
+  /**
    * How `GenerateImage` makes pictures.
    *
    * Everything is optional. With nothing set, the first usable OpenAI

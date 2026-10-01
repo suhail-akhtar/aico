@@ -25,6 +25,7 @@ import { noteSourceChanged } from '../checks.js';
 import { webSearch, webSearchDefinition } from './websearch.js';
 import { places, placesDefinition } from './places.js';
 import { weather, weatherDefinition } from './weather.js';
+import { handOffToChat, handOffToChatDefinition } from './handoff-to-chat.js';
 import { currencyRates, currencyRatesDefinition } from './currency.js';
 import { sportsScores, sportsScoresDefinition } from './sports.js';
 import { generateImage, generateImageDefinition } from './generate-image.js';
@@ -242,6 +243,9 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...todoWriteDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...proposePlanDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...askUserDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  // The browser copilot's hand-off to a full chat. Offered only on copilot
+  // turns (agent.ts resolveToolSet); exclusive because it starts a turn elsewhere.
+  { ...handOffToChatDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...pwdDefinition, isConcurrencySafe: true, maxResultSizeChars: 1_000 },
   // Reads a constant. Nothing to race, and the answer is a page at most.
   { ...widgetSpecDefinition, isConcurrencySafe: true, maxResultSizeChars: 8_000 },
@@ -317,6 +321,15 @@ export const toolDefinitions: ToolDefinition[] = [
   // tools/ops/index.ts and docs/security/ops-tools.md.
   ...opsToolDefinitions,
 ];
+
+/**
+ * Whether an agent type is handed the whole built-in set rather than a list
+ * someone chose by name. Only those sets are subject to on-demand tool groups
+ * (see `tools/deferred.ts`); a hand-picked set is left exactly as picked.
+ */
+export function agentTypeGetsAllTools(agentType: SubAgentType | undefined): boolean {
+  return agentType === undefined || SUBAGENT_TOOL_SETS[agentType] === 'all';
+}
 
 /** Get tool definitions filtered for a specific sub-agent type */
 export function getToolsForAgent(agentType: SubAgentType = 'general'): ToolDefinition[] {
@@ -667,6 +680,9 @@ export async function executeTool(
       break;
     case 'AskUserQuestion':
       result = await askUser(args as unknown as Parameters<typeof askUser>[0]);
+      break;
+    case 'HandOffToChat':
+      result = await handOffToChat(args as unknown as Parameters<typeof handOffToChat>[0]);
       break;
     case 'Pwd':
       result = await getWorkingDirectory(args as unknown as Parameters<typeof getWorkingDirectory>[0]);

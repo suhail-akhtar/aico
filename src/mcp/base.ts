@@ -100,6 +100,14 @@ export abstract class McpBaseClient {
    * manual for its tools is telling the model something the tool schemas cannot.
    */
   instructions?: string;
+  /**
+   * MCP `_meta` to send with each `tools/call`, read at call time. Set only
+   * for the host's own servers (see `registry.setHostServers`): the desktop's
+   * browser tools must know which chat is calling so two chats — or a chat
+   * and the browser copilot — each drive their own tab. A third-party server
+   * is never told the session id.
+   */
+  callMeta?: () => Record<string, unknown> | undefined;
 
   /** Send a JSON-RPC request and return the result */
   abstract send(method: string, params?: unknown): Promise<unknown>;
@@ -150,7 +158,8 @@ export abstract class McpBaseClient {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-    const result = (await this.send('tools/call', { name, arguments: args })) as {
+    const meta = this.callMeta?.();
+    const result = (await this.send('tools/call', { name, arguments: args, ...(meta ? { _meta: meta } : {}) })) as {
       content?: McpContentItem[];
     };
     const content = result?.content ?? [];

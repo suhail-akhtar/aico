@@ -4,7 +4,10 @@ import chalk from 'chalk';
 import { buildSystemPrompt, buildVolatileContext } from './prompts.js';
 import { PromptDocument, renderPrompt, renderTail, DEFAULT_DIALECT } from './prompt/index.js';
 import { spillResult } from './tools/spill.js';
-import { toolDefinitions, executeTool, setBashDefaultTimeout, getToolsForAgent, getToolsForSpec, truncateResult, type SubAgentType } from './tools/index.js';
+import { toolDefinitions, executeTool, setBashDefaultTimeout, getToolsForAgent, getToolsForSpec, truncateResult, agentTypeGetsAllTools, type SubAgentType } from './tools/index.js';
+import {
+  LOAD_TOOLS, executeLoadTools, groupsLoadedBy, isDeferred, loadToolsDefinition, loadedGroupsFromLog,
+} from './tools/deferred.js';
 import { taskToolDefinition, runTask } from './tools/task.js';
 import { mcpRegistry } from './mcp.js';
 import { checkPermission } from './permissions.js';
@@ -81,8 +84,9 @@ function getExecutionMode(name: string): ExecutionMode {
   return 'exclusive';
 }
 import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
-import { currentRunContext, runInContext, type HostBridge } from './run-context.js';
+import { currentRunContext, runInContext, type HostBridge, type HandOffBridge } from './run-context.js';
 import { isHostTool } from '../shared/host-tools.js';
+import { HANDOFF_TOOL } from '../shared/chat-handoff.js';
 import type { FileWriter } from './tools/file-writer.js';
 import { isEffortChoice } from '../shared/reasoning.js';
 import { buildRuntimeBlocks } from './capabilities.js';
@@ -100,7 +104,7 @@ import { checkProjectGate, resetChecks } from './checks.js';
 import { gateChecks } from './tools/run-checks.js';
 import { loadProfile, renderProfile } from './project/profile.js';
 import { installProfileObserver } from './project/observe.js';
-import { skillCatalogue, matchingSkills } from './tools/skill.js';
+import { skillCatalogue, skillsToSuggest } from './tools/skill.js';
 import { loadKnowledge } from './knowledge/store.js';
 import { beginCheckpoint, commitCheckpoint } from './checkpoint/index.js';
 import { checkpointDir } from './tools/checkpoint.js';
@@ -386,6 +390,11 @@ export interface AgentOptions {
    * being shown a tool that only an editor can answer.
    */
   host?: HostBridge;
+  /**
+   * Set only for the desktop browser copilot's turns: where `HandOffToChat`
+   * sends work. Also what marks the run as the copilot (see resolveToolSet).
+   */
+  handOff?: HandOffBridge;
   /** Ink UI AskUser callback — agent pauses to ask human a question */
   onAskUser?: (question: string) => Promise<string>;
   /**
@@ -445,6 +454,14 @@ export interface AgentOptions {
    * the tools their spec defines ('all', 'readonly', or explicit names).
    */
   agentSpecTools?: string[] | 'all' | 'readonly';
+  /**
+   * On-demand tool groups already loaded by whoever delegated this run.
+   *
+   * A sub-agent has a fresh log, so without this a parent that had loaded the
+   * remote tools would hand a server task to a child that has to spend a step
+   * loading them again. See `tools/deferred.ts`.
+   */
+  toolGroups?: readonly string[];
   /**
    * A persona this whole run is held under, with its skills' procedures inlined.
    *
@@ -784,6 +801,23 @@ export function resolveToolSet(opts: {
   const hostTools = new Set<string>(host?.tools ?? []);
   defs = defs.filter(d => !isHostTool(d.name) || hostTools.has(d.name));
 
+  /*
+    The browser copilot, and only the conversation itself (not its sub-agents).
+
+    `HandOffToChat` exists only where there is a chat to hand to and someone
+    watching the copilot — the run context carries the bridge on the copilot's
+    own turns and nowhere else. The build-and-run tools go the other way: the
+    copilot is told to hand that work off, and taking the shell, the editors,
+    git, the ops tools and Task away is what makes "hand it off" the path of
+    least resistance rather than a request the model can talk itself out of.
+    Stable for every copilot turn, so the tool list (and the cache behind it)
+    does not move between them.
+  */
+  const copilot = Boolean(currentRunContext()?.handOff) && (opts.depth ?? 0) === 0;
+  defs = copilot
+    ? defs.filter(d => !COPILOT_WITHHELD.has(d.name))
+    : defs.filter(d => d.name !== HANDOFF_TOOL);
+
   // Last, so it overrides every selection above it. One list, applied in one
   // place, is what makes a capability removable without editing the code that
   // offers it — and applying it here rather than at each call site means a
@@ -797,6 +831,17 @@ export function resolveToolSet(opts: {
 
   return { defs, dispatch };
 }
+
+/**
+ * What the browser copilot is not given: the tools for building and operating
+ * things, which belong in a full chat (see `HandOffToChat`). Writing a file is
+ * kept — saving a table from a page is browsing work.
+ */
+export const COPILOT_WITHHELD = new Set([
+  'Bash', 'Terminal', 'Edit', 'MultiEdit', 'NotebookEdit', 'Git', 'AppManage',
+  'RunChecks', 'VerifyApp', 'EnterWorktree', 'ExitWorktree', 'Task',
+  'SshExec', 'SshCopy', 'SshTunnel', 'WinRmExec', 'SnmpQuery', 'HttpRequest',
+]);
 
 /** Tools a plan-mode run may use. Read-only by construction. */
 const PLAN_MODE_TOOLS = new Set([
@@ -998,19 +1043,38 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
  * sees and the handlers that can actually run cannot drift apart — a mismatch
  * there is a model calling a tool that does not exist.
  */
-function buildToolDefs(opts: {
+export function buildToolDefs(opts: {
   toolRegistry?: ToolRegistryCapability;
   agentType?: SubAgentType;
   planMode?: boolean;
   toolProfile?: AgentToolProfile;
   agentSpecTools?: string[] | 'all' | 'readonly';
   settings?: AicoSettings;
+  depth?: number;
+  headless?: boolean;
+  /**
+   * On-demand groups loaded so far. Absent means nothing is deferred — every
+   * tool is offered, which is also what `deferTools: false` asks for.
+   */
+  loadedGroups?: ReadonlySet<string>;
 }): ToolDef[] {
-  return resolveToolSet(opts).defs.map(d => ({
-    name: d.name,
-    description: d.description,
-    inputSchema: d.inputSchema,
-  }));
+  const defs = resolveToolSet(opts).defs;
+  /*
+    Deferral applies only where the whole built-in set was handed over. An
+    agent type's own list, a spec's explicit array and a composed registry
+    were each chosen by name, and withholding part of a hand-picked set would
+    second-guess whoever picked it.
+  */
+  const wholesale = !opts.toolRegistry
+    && (opts.agentSpecTools === 'all' || (!opts.agentSpecTools && agentTypeGetsAllTools(opts.agentType)));
+  const loaded = opts.loadedGroups;
+  const shown = loaded && wholesale ? defs.filter(d => !isDeferred(d.name, loaded)) : defs;
+  const out: ToolDef[] = shown.map(d => ({ name: d.name, description: d.description, inputSchema: d.inputSchema }));
+  if (loaded && wholesale) {
+    const loader = loadToolsDefinition(new Set(defs.map(d => d.name)), loaded);
+    if (loader) out.push(loader);
+  }
+  return out;
 }
 
 /**
@@ -1229,6 +1293,8 @@ export async function runAgent(rawOpts: AgentOptions): Promise<string> {
       ...(opts.applyEdit ? { applyEdit: opts.applyEdit } : {}),
       // Which editor, if any, this run can ask to do things it cannot.
       ...(opts.host ? { host: opts.host } : {}),
+      // The browser copilot's way to hand work to a full chat; absent elsewhere.
+      ...(opts.handOff ? { handOff: opts.handOff } : {}),
       /*
         How hard to think, for the providers that can be asked.
 
@@ -1279,7 +1345,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
 
   // Wire AskUser callback so the tool handler can reach Ink UI
   if (onAskUser) setAskUserCallback(onAskUser);
-  setWorkspaceRuntime({ settings, sessionId: opts.sessionId });
+  // The process-wide fallback is the top-level run's alone. A sub-agent's
+  // session is on its run context, which ends with it; written here too, it
+  // outlived the sub-agent and the parent's next WorkspaceWrite landed in
+  // `sessions/sub-…`.
+  if ((opts.depth ?? 0) === 0) setWorkspaceRuntime({ settings, sessionId: opts.sessionId });
 
   // Wire bash default timeout from settings
   if (settings?.bashTimeout !== undefined) {
@@ -1355,6 +1425,17 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   */
   promptDoc.add({ id: 'runtime', order: 34, body: runtime.runtime });
   promptDoc.add({ id: 'operating_processes', order: 36, body: runtime.operatingProcesses });
+  /*
+    A sub-agent's reader is its parent, not a person looking at a chat. The
+    rendered-block catalogue (~1.4K tokens) and the prose-style note shape a
+    reply someone reads in a UI; a delegated report is read by a model as a
+    tool result. Every child paid for them uncached on its first request, and
+    Investigate paid once per angle.
+  */
+  if (depth > 0) {
+    promptDoc.remove('rendered_blocks');
+    promptDoc.remove('output_style');
+  }
   if (runtime.remembered) promptDoc.add({ id: 'remembered', order: 848, body: runtime.remembered });
   /*
     What this project is and how it is run, from `.aico/profile.json`.
@@ -1403,15 +1484,21 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // lives, is the version that acts. It stays a recommendation — the model can
   // still decide the skill is wrong for this case, which is why the wording
   // says consider rather than must.
-  const matched = matchingSkills(task);
+  //
+  // Sent once: on the first step of this turn only (stripped from the tail
+  // below once a request carrying it has completed), and never again in this
+  // session for a skill already suggested or opened (`skillsToSuggest`). The
+  // tail is re-sent every step, and a model asked the same question every step
+  // answers it every step — a real bug-fix turn declined app-design in twelve
+  // of eighteen replies. Declining is silent: no "say so" asking for a reply.
+  const matched = skillsToSuggest(task);
   if (matched.length > 0) {
     volatileDoc.add({
       id: 'matching_skills',
       body: [
         'These installed skills declare that they are for requests like this one:',
         ...matched.map(s => `- ${s.frontmatter.name}: ${s.frontmatter.description}`),
-        'Open the relevant one with Skill before working the procedure out yourself. '
-        + 'If none of them actually fit, say so and carry on.',
+        'If one fits, open it with Skill before working the procedure out yourself; if none does, ignore this note.',
       ].join('\n'),
     });
   }
@@ -1474,6 +1561,28 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
   };
   const handlers = buildToolHandlers(handlerOpts);
+
+  /*
+    On-demand tool groups (see `tools/deferred.ts`): what this session has
+    loaded, read from its own log and from whoever delegated this run, and
+    grown as calls are dispatched. Undefined switches deferral off — every
+    schema is offered, as before.
+
+    Handlers above are built for every tool regardless; only the schemas the
+    model is shown depend on this set.
+  */
+  const loadedGroups: Set<string> | undefined = settings?.deferTools === false
+    ? undefined
+    : new Set([...loadedGroupsFromLog(opts.session?.events), ...(opts.toolGroups ?? [])]);
+  if (loadedGroups) {
+    handlers.set(LOAD_TOOLS, async (args: Record<string, unknown>, callId: string) => {
+      if (!silent) showToolCall(LOAD_TOOLS, args, verbose);
+      onToolCall?.(LOAD_TOOLS, args, callId);
+      const result = executeLoadTools(args as { groups?: unknown });
+      onToolDone?.(LOAD_TOOLS, result, callId);
+      return { result };
+    });
+  }
 
   // The credential vault's guard (its files and key stores are off limits to
   // tools) and its shell-placeholder binding. A person approves shell uses:
@@ -1539,7 +1648,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     handlers.set(taskToolDefinition.name, async (args: Record<string, unknown>, callId: string) => {
       const {
         description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout,
-        isolation, detach,
+        isolation, detach, acceptance_criteria, files, constraints,
       } = args as {
         description: string; prompt: string; model?: string;
         subagent_type?: SubAgentType; agent_name?: string;
@@ -1547,6 +1656,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         timeout?: number;
         isolation?: 'worktree';
         detach?: boolean;
+        acceptance_criteria?: unknown; files?: unknown; constraints?: unknown;
       };
       onToolCall?.(taskToolDefinition.name, args, callId);
       try {
@@ -1559,6 +1669,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout,
             ...(isolation === 'worktree' ? { isolation } : {}),
             ...(detach === true ? { detach } : {}),
+            // The model-facing call is held to the delegation contract; the
+            // engine's own callers of runTask compose their briefs themselves.
+            acceptance_criteria, files, constraints, contract: true,
           },
           {
             token: opts.token ?? '',
@@ -1568,6 +1681,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             depth,
             settings,
             abortSignal: loopSignal,
+            ...(loadedGroups?.size ? { toolGroups: [...loadedGroups] } : {}),
             // Constraints the child must inherit — see the note in runTask.
             ...(opts.context ? { context: opts.context } : {}),
             ...(tokenTracker ? { tokenTracker } : {}),
@@ -1653,35 +1767,57 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   };
   for (const t of mcpTools) installMcpHandler(t);
 
-  // Build ToolDef array for the provider
-  const toolDefs: ToolDef[] = buildToolDefs({
-    agentType: opts.agentType, planMode: opts.planMode, toolProfile,
-    ...(toolRegistry ? { toolRegistry } : {}),
-    ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
-    ...(settings ? { settings } : {}),
-  });
-  // Add Task tool def
-  if (depth < 4 && toolProfile !== 'browser-qa') {
-    toolDefs.push({
-      name: taskToolDefinition.name,
-      description: taskToolDefinition.description,
-      inputSchema: taskToolDefinition.inputSchema,
+  /*
+    The ToolDef array for the provider, always in one canonical order:
+    built-ins (less any unloaded on-demand group, plus LoadTools while one is
+    left), then Task and Investigate, then MCP. Rebuilt in place when the MCP
+    set or the loaded groups move, so the request after a change and the first
+    request of the next turn are byte-identical — any order that differed
+    between them would cost a second prefix miss for the same change.
+
+    `depth` is passed so the schemas agree with the handlers: without it a
+    sub-agent was shown Supervise (and, in a browser-QA child, every built-in)
+    with no handler behind it.
+  */
+  const toolDefs: ToolDef[] = [];
+  let builtGroups = loadedGroups ? [...loadedGroups].sort().join() : '';
+  const rebuildToolDefs = (): void => {
+    const next = buildToolDefs({
+      agentType: opts.agentType, planMode: opts.planMode, toolProfile, depth,
+      ...(toolRegistry ? { toolRegistry } : {}),
+      ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
+      ...(settings ? { settings } : {}),
+      ...(loadedGroups ? { loadedGroups } : {}),
     });
-    // Same depth gate as Task, and the same reason: it spawns sub-agents.
-    // Offered only where they can actually run, so the model is never shown a
-    // fan-out it would be refused for using.
-    if (!settings?.disabledTools?.includes('Investigate')) {
-      toolDefs.push({
-        name: investigateDefinition.name,
-        description: investigateDefinition.description,
-        inputSchema: investigateDefinition.inputSchema,
-      });
+    // Task. The handler's own condition: at depth 0 a QA-shaped message keeps
+    // the tool set whole (see resolveToolSet), so the schema must stay too —
+    // dropping it there was the same cache break that rule exists to prevent.
+    if (depth < 4 && (toolProfile !== 'browser-qa' || depth === 0)) {
+      // Not for the browser copilot, which hands such work to a chat (COPILOT_WITHHELD).
+      if (!(depth === 0 && currentRunContext()?.handOff)) {
+        next.push({
+          name: taskToolDefinition.name,
+          description: taskToolDefinition.description,
+          inputSchema: taskToolDefinition.inputSchema,
+        });
+      }
+      // Same depth gate as Task, and the same reason: it spawns sub-agents.
+      // Offered only where they can actually run, so the model is never shown a
+      // fan-out it would be refused for using.
+      if (!settings?.disabledTools?.includes('Investigate')) {
+        next.push({
+          name: investigateDefinition.name,
+          description: investigateDefinition.description,
+          inputSchema: investigateDefinition.inputSchema,
+        });
+      }
     }
-  }
-  // Add MCP tool defs
-  for (const t of mcpTools) {
-    toolDefs.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
-  }
+    for (const t of mcpTools) {
+      next.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
+    }
+    toolDefs.splice(0, toolDefs.length, ...next);
+  };
+  rebuildToolDefs();
   /**
    * Bring the MCP tools up to date with the registry, mid-turn.
    *
@@ -1700,9 +1836,17 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     if (before.size === after.size && [...before].every(n => after.has(n))) return false;
     for (const name of before) if (!after.has(name)) handlers.delete(name);
     for (const t of now) installMcpHandler(t);
-    for (let i = toolDefs.length - 1; i >= 0; i--) if (toolDefs[i]!.name.startsWith('mcp__')) toolDefs.splice(i, 1);
-    for (const t of now) toolDefs.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
     mcpTools = now;
+    rebuildToolDefs();
+    return true;
+  };
+  /** Offer the schemas of any group loaded since the last request. */
+  const syncDeferredTools = (): boolean => {
+    if (!loadedGroups) return false;
+    const now = [...loadedGroups].sort().join();
+    if (now === builtGroups) return false;
+    builtGroups = now;
+    rebuildToolDefs();
     return true;
   };
 
@@ -1796,6 +1940,14 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const rendered = renderPrompt(promptDoc, dialect, provider.id);
   const systemPrompt = rendered.system;
   const volatileContext = renderTail(volatileDoc, rendered.reprise, dialect, provider.id);
+  // The same tail without the one-shot skill suggestion, for every step after
+  // a request carrying it has completed.
+  const laterVolatileDoc = volatileDoc.clone();
+  const hadSkillNote = laterVolatileDoc.remove('matching_skills');
+  const laterVolatileContext = hadSkillNote
+    ? renderTail(laterVolatileDoc, rendered.reprise, dialect, provider.id)
+    : volatileContext;
+  let skillNoteDelivered = !hadSkillNote;
 
   // ── Auto-detect context window on first interaction ────────────────
   // If the model's context window isn't already persisted in settings,
@@ -2204,11 +2356,12 @@ const GOAL_REMINDER_EVERY = 6;
         // rather than once per turn; the tail is rebuilt only when the caller
         // gave something to rebuild it from, so an ordinary turn pays nothing.
         syncMcpTools();
-        let stepVolatileContext = volatileContext;
+        syncDeferredTools();
+        let stepVolatileContext = skillNoteDelivered ? laterVolatileContext : volatileContext;
         if (opts.refreshVolatile) {
           const fresh = await opts.refreshVolatile().catch(() => [] as PromptSection[]);
           if (fresh.length > 0) {
-            const stepDoc = volatileDoc.clone();
+            const stepDoc = (skillNoteDelivered ? laterVolatileDoc : volatileDoc).clone();
             for (const section of fresh) stepDoc.add(section);
             stepVolatileContext = renderTail(stepDoc, rendered.reprise, dialect, provider.id);
           }
@@ -2344,6 +2497,7 @@ const GOAL_REMINDER_EVERY = 6;
           if (!silent) stopSpinner();
           throw err;
         }
+        skillNoteDelivered = true;
 
         const text = textParts.join('');
         // Tagged with the producing provider so it is only ever replayed to a
@@ -2539,6 +2693,10 @@ const GOAL_REMINDER_EVERY = 6;
           onStart: (call) => {
             if (!silent) startSpinner(`${call.name}…`);
             transcript.recordToolCall(call);
+            // The same rule the log is read with at turn start, applied as the
+            // call is recorded — so a LoadTools (or a call to a deferred tool
+            // by name) offers its group from the next step of this turn.
+            if (loadedGroups) for (const g of groupsLoadedBy(call.name, call.input)) loadedGroups.add(g);
           },
           dispatch: async (call) => {
             const handler = handlers.get(call.name);
