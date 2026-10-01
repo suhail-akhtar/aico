@@ -1,17 +1,23 @@
 /**
- * SkillCreate tool — lets the orchestrator (or any agent) create a new skill
- * at runtime. The skill is written to disk AND hot-merged into the registry,
- * so it's immediately usable in the same session without a manual reload.
+ * SkillCreate tool — the older, single-purpose way for an agent to write a
+ * skill, kept because sessions and prompts still name it.
+ *
+ * It used to write the skill straight into the skills directory and hot-merge
+ * it into the catalogue. That contradicted the decision `skills/manage.ts`
+ * records — creating a skill must not register it, because a tool that
+ * installs on the first call makes trying it first optional, and optional
+ * verification does not happen. So this is now `SkillManage create` under its
+ * old name: it writes a DRAFT the loader never scans, runs the checks, and
+ * says that `register` is the step that installs.
  */
 
-import { skillRegistry } from './registry.js';
+import { executeSkillManage } from './manage.js';
 
 export const skillCreateToolDefinition = {
   name: 'SkillCreate',
   description: [
-    'Create a reusable skill (prompt template) that can be invoked via /<name> or auto-triggered.',
-    'The skill is saved to disk and immediately available — no reload needed.',
-    'Skills can be assigned to agents to give them specialized capabilities.',
+    'Draft a reusable skill (a written procedure). It is written as a DRAFT and is NOT usable yet:',
+    'check it, try it on a real example, then install it with SkillManage action:"register".',
     'Write the prompt body with {args} as a placeholder for user-provided arguments.',
   ].join(' '),
   inputSchema: {
@@ -41,7 +47,7 @@ export const skillCreateToolDefinition = {
       scope: {
         type: 'string',
         enum: ['user', 'project'],
-        description: 'Where to save: "user" (global, ~/.aico/skills/) or "project" (.aico/skills/). Default: user.',
+        description: 'Where registering installs it: "user" (global, ~/.aico/skills/) or "project" (this project\'s .aico/skills/). Default: user.',
       },
       allowedTools: {
         type: 'array',
@@ -72,20 +78,6 @@ export const skillCreateToolDefinition = {
   },
 };
 
-/**
- * A frontmatter value that cannot break the block it sits in.
- *
- * The parser reads `key: value` a line at a time, so a description containing
- * a newline silently truncates the skill and one containing a leading `[` is
- * read as a list. Quoting is cheaper than discovering either later.
- */
-function yamlValue(raw: string): string {
-  const flat = raw.replace(/\r?\n/g, ' ').trim();
-  return /^[^'"\[\]{}#&*!|>%@`:-]/.test(flat) && !flat.includes(': ')
-    ? flat
-    : `"${flat.replace(/"/g, '\\"')}"`;
-}
-
 export async function executeSkillCreate(args: {
   name: string;
   description: string;
@@ -96,47 +88,26 @@ export async function executeSkillCreate(args: {
   allowedTools?: string[];
   resources?: Array<{ path: string; content: string }>;
 }): Promise<string> {
-  const { name, description, prompt, aliases, trigger, scope, allowedTools, resources } = args;
-
   // The description is the only part another agent sees before choosing this
   // skill, so an empty one makes it unreachable no matter how good the body is.
-  if (!description?.trim()) {
+  if (!args.description?.trim()) {
     return 'Error creating skill: a description is required — it is the only part visible when '
       + 'deciding whether to use this skill, so without one it can never be chosen.';
   }
 
-  // Build the markdown skill file with YAML frontmatter
-  const fmLines = [
-    '---',
-    `name: ${yamlValue(name)}`,
-    `description: ${yamlValue(description)}`,
-  ];
-  if (aliases?.length) fmLines.push(`aliases: [${aliases.join(', ')}]`);
-  if (trigger) fmLines.push(`trigger: ${trigger}`);
-  // Claude's spelling, so a skill authored here and one imported from outside
-  // are the same kind of file.
-  if (allowedTools?.length) fmLines.push(`allowed-tools: [${allowedTools.join(', ')}]`);
-  fmLines.push('author: aico-orchestrator');
-  fmLines.push('version: 1.0.0');
-  fmLines.push('---');
-  fmLines.push(prompt);
-
-  const content = fmLines.join('\n');
-
   try {
-    const existing = skillRegistry.lookup(name);
-    const skill = await skillRegistry.addSkill(content, name, scope ?? 'user', resources ?? []);
-    const shipped = skill.resources ?? [];
-    return `Skill "${skill.frontmatter.name}" created and activated immediately.\n` +
-      `Description: ${skill.frontmatter.description}\n` +
-      `Scope: ${scope ?? 'user'}\n` +
-      `File: ${skill.filePath}\n` +
-      (aliases?.length ? `Aliases: ${aliases.join(', ')}\n` : '') +
-      (shipped.length ? `Ships with: ${shipped.join(', ')}\n` : '') +
-      // Said plainly, because overwriting someone's procedure silently is the
-      // kind of thing that should never be discovered later.
-      (existing && !existing.isBuiltin ? `Replaced the previous skill of the same name.\n` : '') +
-      `The skill is now available as /${skill.frontmatter.name} and can be assigned to agents.`;
+    const drafted = await executeSkillManage({
+      action: 'create',
+      name: args.name,
+      description: args.description,
+      prompt: args.prompt,
+      ...(args.aliases ? { aliases: args.aliases } : {}),
+      ...(args.trigger ? { trigger: args.trigger } : {}),
+      ...(args.allowedTools ? { allowedTools: args.allowedTools } : {}),
+      ...(args.resources ? { resources: args.resources } : {}),
+      ...(args.scope ? { scope: args.scope } : {}),
+    });
+    return `${drafted}\nTo install it: SkillManage action:"register" name:"${args.name}".`;
   } catch (err) {
     return `Error creating skill: ${err instanceof Error ? err.message : String(err)}`;
   }

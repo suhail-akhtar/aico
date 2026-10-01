@@ -244,6 +244,29 @@ lists them, like everything else running. Details:
 
 ---
 
+## MCP servers, and trusting a project
+
+Every MCP tool call goes through the same checks as aico's own tools: hooks,
+plan mode, an agent's tool list and — in `ask`/`edits` mode — a prompt before it
+runs. aico assumes a server's tools can change things (servers describe
+themselves, and that description is not trusted). If a server only reads, say so
+and plan mode and read-only agents may use it:
+
+```jsonc
+{ "mcpServers": { "docs": { "command": "npx", "args": ["some-docs-server"], "readOnly": true } } }
+```
+
+A project's own `.aico/settings.json` (or `settings.local.json`) that defines MCP
+servers, hooks or environment variables runs nothing until you approve it: the
+terminal asks when you start `aico` in that folder, and the web portal and the
+desktop ask on the first chat. You are shown the exact commands. A change to
+them asks again; one-shot and scheduled runs skip them and say so. An agent's
+tool list can name MCP tools — `mcp:github`, `mcp:github:create_issue`,
+`mcp__github__*`, or `MCP` for all of them — and a sub-agent never gets more
+tools than the agent that started it.
+
+---
+
 ## Letting another AI use aico
 
 `aico mcp-serve` speaks MCP on stdin and stdout, so Claude Code — or another

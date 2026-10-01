@@ -34,6 +34,8 @@ const VERB: Record<string, string> = {
   WebFetch: 'fetch a URL',
   WebSearch: 'search the web',
   Task: 'delegate to a sub-agent',
+  // Workspace trust (src/workspace-trust.ts): the detail lists what would run.
+  TrustProjectSettings: "run commands from this project's .aico settings",
 };
 
 export function PermissionPrompt(): React.ReactElement | null {
@@ -57,7 +59,7 @@ export function PermissionPrompt(): React.ReactElement | null {
       </p>
 
       {permission.detail && (
-        <p className="mt-1 break-words font-mono text-[12px] text-aico-secondary">
+        <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[12px] text-aico-secondary">
           {permission.detail}
         </p>
       )}

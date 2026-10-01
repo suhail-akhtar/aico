@@ -75,7 +75,7 @@ export function inlineSkills(names: string[]): { block: string; missing: string[
 export async function personaFor(
   name: string | undefined,
   cwd?: string,
-): Promise<{ persona?: { name: string; instructions: string }; tools?: string[]; model?: string; notice?: string }> {
+): Promise<{ persona?: { name: string; instructions: string }; tools?: string[]; model?: string; notice?: string; canDelegate?: boolean }> {
   if (!name) return {};
 
   const resolved = await resolveAgent(name, cwd);
@@ -94,6 +94,8 @@ export async function personaFor(
     persona: { name: resolved.spec.name, instructions: resolved.instructions },
     ...(resolved.tools?.length ? { tools: resolved.tools } : {}),
     ...(resolved.model ? { model: resolved.model } : {}),
+    // Enforced by the run (agent.ts), not merely stated in the persona's prompt.
+    ...(resolved.spec.canDelegate === false ? { canDelegate: false } : {}),
   };
 }
 

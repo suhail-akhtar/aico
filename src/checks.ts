@@ -31,6 +31,7 @@
 import fs from 'fs';
 import path from 'path';
 import { runScoped } from './run-scoped.js';
+import { formatTestSummary, type TestSummary } from './test-results.js';
 
 /** One thing that must pass. */
 export interface Check {
@@ -50,6 +51,11 @@ export interface Check {
    * ordinary repository has its own manifest, and its checks run from there.
    */
   cwd?: string;
+  /**
+   * The command exits 0 either way and lists what is wrong instead — `gofmt -l`
+   * prints unformatted files. Any output is then a failure.
+   */
+  failOnOutput?: boolean;
 }
 
 /** Manifest files that mark the root a set of checks belongs to. */
@@ -100,6 +106,8 @@ export interface CheckResult {
   /** When it ran, and the newest source mtime it therefore describes. */
   at: number;
   sourceMtimeMs: number;
+  /** What the test runner reported, when its output could be read (see `test-results.ts`). */
+  tests?: TestSummary;
 }
 
 /** Ordering weights. Lower runs first. */
@@ -124,6 +132,13 @@ function readJson(file: string): Record<string, unknown> | undefined {
   catch { return undefined; }
 }
 
+/** How this project runs a package.json script: the lockfile decides. */
+export function scriptRunner(root: string): string {
+  return fs.existsSync(path.join(root, 'pnpm-lock.yaml')) ? 'pnpm'
+    : fs.existsSync(path.join(root, 'yarn.lock')) ? 'yarn'
+    : 'npm run';
+}
+
 /**
  * Work out what this project's checks are, from the file that already knows.
  *
@@ -136,9 +151,7 @@ export function detectChecks(root: string): Check[] {
   const pkg = readJson(path.join(root, 'package.json'));
   if (pkg) {
     const scripts = (pkg.scripts ?? {}) as Record<string, string>;
-    const runner = fs.existsSync(path.join(root, 'pnpm-lock.yaml')) ? 'pnpm'
-      : fs.existsSync(path.join(root, 'yarn.lock')) ? 'yarn'
-      : 'npm run';
+    const runner = scriptRunner(root);
     for (const { kind, names } of NPM_SCRIPTS) {
       const script = names.find(n => typeof scripts[n] === 'string');
       if (script) found.push({ name: kind, command: `${runner} ${script}`, weight: WEIGHT[kind] });
@@ -300,6 +313,22 @@ export function touchedFiles(): string[] {
  */
 const ESCAPE = 'If the person running this has deliberately asked for something the checks will reject — a fixture that must not compile, a snapshot being rewritten — say so once and stop. Do not argue the point on every step.';
 
+/**
+ * What the gate quotes from a failing check.
+ *
+ * A test run the runner's summary could be read from is quoted as its first
+ * failures — the assertion, not the last six lines, which for most runners
+ * are a timing line and a coverage table. The counts go last, so the first
+ * line that names an error is a failure's own (the learning extractor keys on it).
+ */
+function failureDetail(r: CheckResult): string {
+  if (r.tests && r.tests.failures.length > 0) {
+    const [counts, ...failures] = formatTestSummary(r.tests, { max: 3 }).split('\n');
+    return [...failures, `(${counts})`].join('\n');
+  }
+  return r.output.split('\n').slice(-6).join('\n');
+}
+
 export interface ChecksGate {
   ok: boolean;
   message?: string;
@@ -338,7 +367,7 @@ ${ESCAPE}`,
 
   const failed = checks.map(c => results.get(c.name)).filter((r): r is CheckResult => !!r && !r.passed);
   if (failed.length > 0) {
-    const detail = failed.map(r => `  ${r.name} — ${r.command}\n${r.output.split('\n').slice(-6).join('\n')}`)
+    const detail = failed.map(r => `  ${r.name} — ${r.command}\n${failureDetail(r)}`)
       .join('\n\n');
     return {
       ok: false,

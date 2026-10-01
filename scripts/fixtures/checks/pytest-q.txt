@@ -1,0 +1,20 @@
+.FsF                                                                     [100%]
+================================== FAILURES ===================================
+__________________________________ test_sub ___________________________________
+
+>   def test_sub(): assert 5 - 3 == 3
+                    ^^^^^^^^^^^^^^^^^
+E   assert (5 - 3) == 3
+
+tests\test_calc.py:3: AssertionError
+__________________________________ test_err ___________________________________
+
+    def test_err():
+>       raise ValueError("bad value")
+E       ValueError: bad value
+
+tests\test_calc.py:7: ValueError
+=========================== short test summary info ===========================
+FAILED tests/test_calc.py::test_sub - assert (5 - 3) == 3
+FAILED tests/test_calc.py::test_err - ValueError: bad value
+2 failed, 1 passed, 1 skipped in 0.20s

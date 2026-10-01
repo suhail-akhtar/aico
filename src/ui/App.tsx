@@ -1622,7 +1622,7 @@ export function AicoApp(props: InkAppProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load persisted trust from .aico/trust.json on mount
+  // Load this project's remembered answers (kept in the user's store — see trust.ts)
   useEffect(() => {
     loadTrust(props.cwd).then(trust => {
       trustRef.current = trust;

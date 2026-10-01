@@ -472,6 +472,14 @@ export interface RunTaskOpts {
   planMode?: boolean;
   /** On-demand tool groups the parent has loaded, so the child starts with them. */
   toolGroups?: readonly string[];
+  /**
+   * What the delegating run may use. The child's own tools (a type's set, a
+   * named agent's list, an inline spec's — `'all'` included) are intersected
+   * with it, so delegating can never widen what the parent could do. Without
+   * it, a read-only reviewer's `tools: 'all'` child got Write. Engine callers
+   * that compose their own runs (the studio pipeline) leave it unset.
+   */
+  toolScope?: import('../agents/effective.js').ToolScope;
   onSubagentStart?: (rec: SubAgentRecord) => void;
   onSubagentStop?: (rec: SubAgentRecord) => void;
   /**
@@ -518,6 +526,10 @@ export async function runTask(
   if (opts.depth >= 4) {
     return `[error] Sub-agent depth limit reached — max nesting is 4 levels.`;
   }
+  // The second line behind the tool not being offered at all (agent.ts).
+  if (opts.toolScope && !opts.toolScope.delegate) {
+    return '[error] This agent may not delegate (canDelegate is off for it or for an agent above it). Do the work yourself.';
+  }
 
   const agentId = crypto.randomUUID().slice(0, 8);
   const agentType: SubAgentType = canonicalAgentType(args.subagent_type);
@@ -531,6 +543,8 @@ export async function runTask(
   let resolvedInstructions: string | undefined;
   let resolvedTools: string[] | 'all' | 'readonly' | undefined;
   let resolvedModel: string | undefined;
+  /** A named agent's `canDelegate`, which the child's run enforces. */
+  let resolvedCanDelegate: boolean | undefined;
 
   if (args.agent_spec) {
     resolvedInstructions = args.agent_spec.instructions;
@@ -548,6 +562,7 @@ export async function runTask(
       resolvedInstructions = resolved.instructions;
       resolvedTools = resolved.tools;
       resolvedModel = resolved.model;
+      resolvedCanDelegate = resolved.spec.canDelegate;
     } catch {
       return `[error] Failed to load agent "${args.agent_name}".`;
     }
@@ -784,6 +799,11 @@ export async function runTask(
       // Pass the resolved spec tools so runAgent uses the custom whitelist
       // instead of the hardcoded SUBAGENT_TOOL_SETS for this agent type.
       ...(resolvedTools ? { agentSpecTools: resolvedTools } : {}),
+      //   toolScope    the parent's effective set — the child's own list is
+      //                intersected with it, so `tools: 'all'` means the parent's.
+      //   canDelegate  a named agent that may not delegate does not, in code.
+      ...(opts.toolScope ? { toolScope: opts.toolScope } : {}),
+      ...(resolvedCanDelegate === false ? { canDelegate: false } : {}),
       abortSignal: abortController.signal,
       // Sub-agent status updates feed back into registry — AND reset heartbeat
       onToolCall: (name: string) => {

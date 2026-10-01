@@ -259,6 +259,13 @@ export { observe, blockedReason, resetObservations, isObserved } from './tools/o
 export { runScoped } from './run-scoped.js';
 export { detectChecks, isSourceFile, resetChecks, noteSourceChanged, recordCheck, checkProjectGate, checkResults, newestSourceChange, touchedFiles } from './checks.js';
 export { runChecks } from './tools/run-checks.js';
+export { parseTestOutput, parseJUnitXml, formatTestSummary } from './test-results.js';
+export { detectStyleTools, styleChecks } from './style-tools.js';
+export {
+  dependencyAudit, parseNpmAudit, parsePipAudit, parseCargoAudit, parseDotnetVulnerable, parseGovulncheck,
+  classifyLicense, scanNodeLicenses, scanPythonLicenses, findSitePackages, detectEcosystems, formatAudit,
+  DEFAULT_ALLOWED_LICENSES,
+} from './tools/dependency-audit.js';
 export { listChanges, diffOf, revertFile, isGitRepo, gitLog } from './server/changes.js';
 export { projectStats } from './project/stats.js';
 export {
@@ -486,3 +493,17 @@ export { handOffToChat as handOffToChatTool, handOffToChatDefinition } from './t
 export { COPILOT_WITHHELD } from './agent.js';
 export { COPILOT_BRIEF } from './prompts.js';
 export * as chatHandOff from '../shared/chat-handoff.js';
+
+// -- Phase 0 of the agents/skills/tools design (scripts/phase0-security-test.mjs) --
+export { mcpRegistry } from './mcp/registry.js';
+export { SkillRegistry, projectSkillDirs } from './skills/registry.js';
+export { loadTrust } from './trust.js';
+export {
+  projectTrustStatus, ensureProjectTrust, approveProjectTrust, evaluateProjectLayers, trustPromptDetail,
+  untrustedNotice, TRUST_GATED_SECTIONS,
+} from './workspace-trust.js';
+export {
+  narrowScope, scopeAllows, scopeDenial, layerFor, mcpEntryMatches, entryMatches, OPEN_SCOPE,
+} from './agents/effective.js';
+export { isMcpToolName, isReadOnlyMcpTool, parseMcpToolName, HOST_READ_TOOLS } from './mcp/policy.js';
+export { mcpToolAllowed } from './agent.js';

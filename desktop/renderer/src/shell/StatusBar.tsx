@@ -6,7 +6,7 @@
  * @module desktop/renderer/shell/StatusBar
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useStore } from '@web/store';
 import { useDesk, go } from '@/state/desk';
 import { useStatusItems, runCommand } from '@/plugins/registry';
@@ -18,12 +18,20 @@ export function StatusBar(): React.ReactElement | null {
   const activity = useDesk(s => s.activity);
   const sessions = useStore(s => s.sessions);
   const status = useStore(s => s.status);
+  const system = useStore(s => s.system);
+  const refreshSystem = useStore(s => s.refreshSystem);
+  // Background work lives in the engine's ledger; keep it fresh here too (the Activity page polls faster).
+  useEffect(() => { const t = setInterval(() => { void refreshSystem(); }, 10_000); return () => clearInterval(t); }, [refreshSystem]);
   const items = useStatusItems();
   const disabled = useDesk(s => s.prefs.plugins.disabled);
   if (disabled.includes('aico.statusbar')) return null;
+  // The same count the Activity page shows: chats with a turn in flight plus live background work.
+  // A chat's turn is also in this window's feed (kind 'turn'), so feed turns are not counted again —
+  // that double count showed "2 running" for one chat.
   const runningChats = sessions.filter(s => s.running).length;
-  const runningWork = activity.filter(a => a.status === 'running').length;
-  const running = runningChats + runningWork;
+  const liveWork = (system?.work ?? []).filter(w => ['running', 'queued', 'blocked'].includes(w.state)).length;
+  const otherFeed = activity.filter(a => a.status === 'running' && a.kind !== 'turn').length;
+  const running = runningChats + Math.max(liveWork, otherFeed);
   const tone = engine.status === 'ready' ? (status === 'lost' ? 'bg-aico-warning' : 'bg-aico-success') : engine.status === 'crashed' ? 'bg-aico-danger' : 'bg-aico-warning';
   const label = engine.status === 'ready' ? (status === 'lost' ? 'Reconnecting' : 'Engine ready') : engine.status === 'crashed' ? 'Engine stopped' : 'Starting engine';
   const left = items.filter(i => i.align !== 'right');

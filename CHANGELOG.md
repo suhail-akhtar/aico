@@ -3,6 +3,108 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+Security first: MCP tools, sub-agents and cloned projects now go through the
+same checks as everything else. Plus structured test results, the project's own
+formatter and linter, a dependency vulnerability and licence audit, and a
+status bar that counts what is really running.
+
+### Added
+
+- **RunChecks reports test results, not just the end of the output.** The
+  output of node:test (TAP and spec), Jest and Vitest (text and `--json`),
+  Mocha, pytest, `go test`, `cargo test`, `dotnet test` and JUnit XML (printed,
+  or a report file the run just wrote) is read into passed/failed/skipped
+  counts and the failures — test name, file, the assertion without its stack —
+  capped at eight. The raw tail is kept only when the output could not be read
+  or the exit code disagrees with the counts. The counts also decide: a runner
+  that reports a failure fails the check even if the command exited 0, and a
+  green run that ran no tests says so. The checks gate quotes the failures.
+- **The project's own formatter and linter, through RunChecks.** Prettier,
+  ESLint, Biome, Ruff, Black, gofmt, rustfmt and `dotnet format` are detected
+  from the project's own config, scripts or pre-commit hooks — never a tool the
+  project does not already use (`npx --no` will not download one). `RunChecks
+  only: ["format"]` checks without changing anything; `fix: true` applies the
+  fix form. They are not part of the completion gate.
+- **DependencyAudit** (an on-demand tool, loaded with the new `audit` group):
+  runs the ecosystem's own auditor — `npm`/`pnpm audit`, `pip-audit`, `cargo
+  audit`, `dotnet list package --vulnerable`, `govulncheck` — and scans
+  installed packages' licences (`node_modules`, the project's virtualenv). One
+  compact report: severity counts, the worst advisories with the version that
+  fixes them, and licences outside the allowlist (copyleft and undeclared by
+  default; set `dependencyAudit.allowLicenses` in settings to change it). It
+  never blocks, and a missing auditor is reported with how to install it, not
+  installed.
+
+### Changed
+
+- The always-sent tool schemas shrank slightly (34,807 → 34,731 characters)
+  despite RunChecks' new `fix` option and the new `audit` group in LoadTools:
+  the RunChecks description was trimmed to make room.
+
+### Security
+
+Phase 0 of the agents, skills and tools design
+([docs/engineering/design/agents-skills-tools.md](docs/engineering/design/agents-skills-tools.md) §10).
+
+- **MCP tool calls go through the same policy pipeline as built-in tools.**
+  They used to be dispatched straight to the server: no PreToolUse/PostToolUse
+  hook, no plan-mode check, no permission prompt. Now every MCP call passes the
+  hooks, the agent's allow-list, plan mode, the approval prompt, the vault's
+  guards and redaction. **What you will notice:** in `ask` and `edits` mode an
+  MCP tool now asks before it runs, and the terminal asks too. A server's own
+  `readOnlyHint` annotations are untrusted and ignored for policy, so every MCP
+  server is treated as able to write unless its settings entry says
+  `"readOnly": true`. Plan mode offers only those servers' tools (and the
+  desktop's own browser/IDE read tools).
+- **An agent's restrictions now bound everything it delegates to.** One
+  resolver computes what a run may use — its own list ∩ its delegator's ∩
+  settings — and applies it to the tools offered and, through a deny-only
+  `agent-scope` guard, to the calls dispatched. A read-only `review` agent's
+  `Task(agent_spec: {tools: 'all'})` child gets the review agent's tools, not
+  Write and Edit; `canDelegate: false` removes `Task` and `Investigate` in code
+  rather than asking in the prompt, for that agent and everything below it.
+- **Agent tool lists cover MCP tools.** `MCP` (every MCP tool), `mcp:<server>`,
+  `mcp:<server>:<tool>`, `mcp__<server>__<tool>` and `mcp__<server>__*` are
+  recognised, so the desktop agent editor's MCP chips are now enforced; an
+  agent limited to `[Read]` gets no MCP tools. Restricted sub-agent types
+  (explore, review, …) get only read-only servers' tools.
+- **Workspace trust.** A project's `.aico/settings.json` /
+  `settings.local.json` that defines MCP servers, hooks or environment
+  variables no longer runs anything until you approve it — once per project,
+  and again whenever that part of the file changes (the approval is bound to a
+  hash, kept in `~/.aico/workspace-trust.json`, never in the project). The
+  terminal asks at startup; the web portal and desktop ask on the chat's
+  permission card at the start of a turn; one-shot, cron, background and
+  `mcp-serve` runs skip the entries and print one clear warning. Projects that
+  already had their own MCP servers or hooks will be asked once.
+- **`mcpSecurity` is removed.** It was printed by `/mcp-security` and enforced
+  nowhere (and a project file could set it). A warning names its replacements:
+  workspace trust and `readOnly`. `/mcp-security` now reports what is enforced.
+- **The terminal's "always allow" answers are kept in your store, not the
+  project.** They were read from the project's own `.aico/trust.json`, so a
+  repository could ship `{"trustAll": true}` and have every tool auto-approved.
+  That file is now ignored; answers live under `~/.aico/tool-trust/`.
+- **`SkillCreate` writes a draft.** It installed straight into the catalogue,
+  skipping the draft → check → register flow `SkillManage` enforces; it is now
+  that flow under its old name, and `register` is what installs.
+- **Project skills land in the project and survive a restart.** A
+  `scope: 'project'` skill was written to the server's own directory and never
+  read back. Skills in the run's `<project>/.aico/skills` and
+  `<project>/.agents/skills` now load for runs in that project.
+- **A skill is presented as reference material from a named source**, not as
+  "instruction" with authority over the system rules: the `Skill` result names
+  where it came from and says it does not override the system instructions or
+  the person.
+
+### Fixed
+
+- The status bar said "2 running" for one running chat: a chat's turn was counted
+  once as a running chat and again from the window's activity feed. It now counts
+  what the Activity page shows — chats with a turn in flight plus live background
+  work — and refreshes the background-work list every 10 seconds.
+
 ## 0.32.0 — 2026-10-01
 
 Every chat gets its own browser tabs, the browser copilot hands real work to a

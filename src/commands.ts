@@ -238,31 +238,41 @@ function serializeTranscript(messages: CommandContext['conversationHistory'], se
   return lines.join('\n');
 }
 
-function mcpSecurityReport(settings: AicoSettings | undefined): string {
+/*
+  What actually guards MCP, stated as it is enforced.
+
+  This used to print `mcpSecurity.trustedServers/allowedCommands` — a posture
+  nothing in the engine read, which is worse than printing nothing. What is
+  enforced now: a project's servers start only once the project is trusted
+  (workspace-trust.ts), every MCP call goes through the tool pipeline, and a
+  server is treated as able to write unless settings mark it `readOnly`.
+*/
+async function mcpSecurityReport(settings: AicoSettings | undefined): Promise<string> {
   const servers = settings?.mcpServers ?? {};
-  const trusted = new Set(settings?.mcpSecurity?.trustedServers ?? []);
-  const allowed = new Set(settings?.mcpSecurity?.allowedCommands ?? ['node', 'npx']);
+  const { projectTrustStatus } = await import('./workspace-trust.js');
+  const trust = await projectTrustStatus(process.cwd());
   const lines = [
     'MCP Security',
     '------------',
-    `Warn untrusted: ${String(settings?.mcpSecurity?.warnUntrusted ?? true)}`,
-    `Trusted servers: ${trusted.size ? [...trusted].join(', ') : '(none)'}`,
-    `Allowed commands: ${allowed.size ? [...allowed].join(', ') : '(none)'}`,
+    `Project config (${process.cwd()}): ${trust.state === 'none' ? 'defines no MCP servers or hooks'
+      : trust.state === 'trusted' ? 'trusted' : `NOT trusted — not loaded: ${trust.names.join(', ')}`}`,
+    'Every MCP call passes hooks, plan mode, agent allow-lists and the approval prompt.',
+    'A server may write unless its settings say "readOnly": true (its own annotations are not trusted).',
+    ...(settings?.mcpSecurity !== undefined
+      ? ['mcpSecurity is set but no longer used — it was never enforced; workspace trust and readOnly replace it.']
+      : []),
     '',
   ];
   for (const [name, cfg] of Object.entries(servers)) {
     const command = cfg.type === 'stdio' ? cfg.command : cfg.type;
     const envKeys = cfg.type === 'stdio' && cfg.env ? Object.keys(cfg.env) : [];
-    const warnings: string[] = [];
-    if (!trusted.has(name)) warnings.push('untrusted');
-    if (cfg.type === 'stdio' && command && !allowed.has(command)) warnings.push(`command not allowlisted: ${command}`);
     lines.push(
       `${name}`,
       `  type    : ${cfg.type}`,
       `  command : ${command ?? '(n/a)'}`,
       `  args    : ${cfg.type === 'stdio' ? (cfg.args ?? []).join(' ') || '(none)' : '(n/a)'}`,
       `  env     : ${envKeys.length ? envKeys.map((k) => `${k}=<redacted>`).join(', ') : '(none)'}`,
-      `  warnings: ${warnings.length ? warnings.join(', ') : '(none)'}`,
+      `  access  : ${cfg.readOnly ? 'read-only (you marked it)' : 'may write — asks in ask/edits mode, hidden in plan mode'}`,
     );
   }
   if (!Object.keys(servers).length) lines.push('(No MCP servers configured)');
@@ -916,7 +926,7 @@ export async function handleSlashCommand(
     }
 
     case 'mcp-security': {
-      return { handled: true, output: mcpSecurityReport(ctx.settings) };
+      return { handled: true, output: await mcpSecurityReport(ctx.settings) };
     }
 
     case 'workspace': {

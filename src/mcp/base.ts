@@ -11,6 +11,15 @@ export interface McpServerConfigV2 {
   url?: string;
   /** Extra HTTP headers (e.g. Authorization) */
   headers?: Record<string, string>;
+  /**
+   * The person says this server's tools only read. Plan mode and read-only
+   * agents may then use them, and the terminal does not ask before each one.
+   *
+   * Only settings can say it. A server's own `readOnlyHint` annotations are
+   * untrusted by the MCP spec and ignored for policy, so a server that sets no
+   * flag here is treated as one that may write (see `mcp/policy`).
+   */
+  readOnly?: boolean;
 }
 
 /** Backward-compat alias — existing configs only need command + type:'stdio' */

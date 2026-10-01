@@ -117,6 +117,10 @@ import { guardAgentRun } from './vault/agent-hooks.js';
 import { installVaultStages } from './vault/pipeline.js';
 import { callbackPrompter, ttyPrompter } from './vault/human.js';
 import { installOpsStages } from './tools/ops/index.js';
+import {
+  entryMatches, layerFor, narrowScope, scopeAllows, scopeDenial, type ToolAllow, type ToolScope,
+} from './agents/effective.js';
+import { isMcpToolName, isReadOnlyMcpTool, parseMcpToolName } from './mcp/policy.js';
 
 // Increase max listeners to avoid warnings during long tool chains
 process.setMaxListeners(50);
@@ -455,6 +459,17 @@ export interface AgentOptions {
    */
   agentSpecTools?: string[] | 'all' | 'readonly';
   /**
+   * What the delegating run may use. This run's own list (`agentSpecTools` or
+   * `agentType`) is intersected with it, so a child never holds more than its
+   * parent. Absent at the top of a tree. See `agents/effective`.
+   */
+  toolScope?: ToolScope;
+  /**
+   * False when this run's agent may not delegate: `Task` and `Investigate` are
+   * then neither offered nor dispatched, here or in anything below it.
+   */
+  canDelegate?: boolean;
+  /**
    * On-demand tool groups already loaded by whoever delegated this run.
    *
    * A sub-agent has a fresh log, so without this a parent that had loaded the
@@ -597,6 +612,8 @@ interface ToolHandlerOpts {
   pipeline?: ToolPipeline;
   /** Forwarded into each call's context so stages can observe cancellation. */
   signal?: AbortSignal;
+  /** What this run may use, enforced by the `agent-scope` guard. See `agents/effective`. */
+  scope?: ToolScope;
 }
 
 /** What a tool handler returns: the result plus anything to inject after it. */
@@ -714,6 +731,8 @@ export function resolveToolSet(opts: {
   settings?: AicoSettings;
   /** 0 for the conversation itself; 1 or more inside a delegation. */
   depth?: number;
+  /** What this run may use, parent bound included. Undefined is unrestricted. */
+  scope?: ToolScope;
 }): ResolvedToolSet {
   let defs: ToolDefinition[];
   let dispatch: ResolvedToolSet['dispatch'];
@@ -829,7 +848,56 @@ export function resolveToolSet(opts: {
     defs = defs.filter(d => !off.has(d.name));
   }
 
+  /*
+    The agent's effective set: its own list intersected with every delegator's.
+    Applied to whichever source produced the list — a composed registry is no
+    way round it, and neither is a child asking for `tools: 'all'`, which
+    selected the full built-in set above and is narrowed back to the parent's
+    here. The `agent-scope` guard refuses the same tools at dispatch.
+  */
+  if (opts.scope) {
+    const scope = opts.scope;
+    defs = defs.filter(d => scopeAllows(scope, d.name));
+  }
+
   return { defs, dispatch };
+}
+
+/**
+ * Which MCP tools a run is offered: its scope, plan mode and `disabledTools`
+ * apply to them exactly as to built-ins.
+ *
+ * Plan mode keeps only tools known to read (a server the person marked
+ * read-only, or the desktop host's read tools) — an MCP server's own
+ * annotations are untrusted, so "may write" is the default. See `mcp/policy`.
+ */
+export function mcpToolAllowed(name: string, opts: {
+  scope?: ToolScope | undefined;
+  planMode?: boolean | undefined;
+  settings?: AicoSettings | undefined;
+}): boolean {
+  if (opts.planMode && !isReadOnlyMcpTool(name)) return false;
+  if (opts.settings?.disabledTools?.some(entry => entryMatches(entry, name))) return false;
+  return scopeAllows(opts.scope, name);
+}
+
+/**
+ * The layer this run's own tool list adds to its scope.
+ *
+ * An explicit spec list wins (it is what `getToolsForSpec` selected); otherwise
+ * a restricted agent type's set. A restricted type is offered MCP tools only
+ * from read-only servers — a reviewer is read-only whichever protocol the tool
+ * speaks. Types with every tool add nothing.
+ */
+function ownScopeLayer(agentSpecTools: ToolAllow | undefined, agentType: SubAgentType | undefined) {
+  const readonly = getToolsForSpec('readonly').map(d => d.name);
+  if (agentSpecTools) {
+    return layerFor(Array.isArray(agentSpecTools) ? 'its tool list' : `tools: '${String(agentSpecTools)}'`, agentSpecTools, readonly);
+  }
+  if (agentType && !agentTypeGetsAllTools(agentType)) {
+    return { label: `the ${agentType} agent's tools`, tools: new Set(getToolsForAgent(agentType).map(d => d.name)), mcp: 'readonly' as const };
+  }
+  return undefined;
 }
 
 /**
@@ -839,7 +907,7 @@ export function resolveToolSet(opts: {
  */
 export const COPILOT_WITHHELD = new Set([
   'Bash', 'Terminal', 'Edit', 'MultiEdit', 'NotebookEdit', 'Git', 'AppManage',
-  'RunChecks', 'VerifyApp', 'EnterWorktree', 'ExitWorktree', 'Task',
+  'RunChecks', 'VerifyApp', 'DependencyAudit', 'EnterWorktree', 'ExitWorktree', 'Task',
   'SshExec', 'SshCopy', 'SshTunnel', 'WinRmExec', 'SnmpQuery', 'HttpRequest',
 ]);
 
@@ -872,7 +940,16 @@ const PLAN_MODE_TOOLS = new Set([
  * Build a map of { toolName → async handler } for all tools available in this
  * agent context. Handlers include permission checks, safety checks, and hooks.
  */
-function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly'; depth?: number }): Map<string, ToolHandler> {
+function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly'; depth?: number }): {
+  handlers: Map<string, ToolHandler>;
+  /**
+   * A handler that runs `body` through this run's pipeline. Exposed so tools
+   * that are not in the built-in list — MCP tools, which can arrive mid-turn —
+   * get exactly the policy the built-ins get, rather than a second, shorter
+   * path beside it.
+   */
+  wrap: (name: string, body: (call: ToolCallContext) => Promise<unknown>) => ToolHandler;
+} {
   // Tool set and dispatch come from the registry when one is composed, and from
   // the historical built-in selection otherwise.
   const { defs, dispatch } = resolveToolSet(opts);
@@ -880,9 +957,10 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
   // ── Policy pipeline ────────────────────────────────────────────────
   // The same concerns the old inline closure handled, now as ordered named
   // stages. Registration order below reproduces the original order exactly:
-  //   PreToolUse hook → plan-mode → bash safety → permission → body → PostToolUse
+  //   PreToolUse hook → agent-scope → plan-mode → bash safety → permission → body → PostToolUse
   // Everything after this point can be extended (timeouts, retries, metrics,
-  // loop guards) without touching the agent loop.
+  // loop guards) without touching the agent loop. MCP tools run through the
+  // same stages (see `wrap`): before that they skipped every one of them.
   const pipeline = opts.pipeline ?? new ToolPipeline();
 
   pipeline.onPreExecute('hooks:pre-tool-use', async (ctx, next) => {
@@ -906,12 +984,36 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
     return next();
   });
 
+  /*
+    The effective set, at dispatch. The schemas offered are filtered by the
+    same scope, so this is the second line: it is what makes "not allowed"
+    true for a tool whose name the model learned anyway — from an earlier turn
+    of the session, or by guessing. Scoped to this run's agent id because a
+    composed pipeline can be shared, and one agent's bound is not another's.
+  */
+  if (opts.scope) {
+    const scope = opts.scope;
+    pipeline.onGuard('agent-scope', (ctx) => {
+      if (ctx.agentId !== opts.agentId) return { kind: 'abstain' };
+      const denial = scopeDenial(scope, ctx.name);
+      return denial ? { kind: 'deny', reason: denial } : { kind: 'abstain' };
+    });
+  }
+
   if (opts.planMode) {
     pipeline.onGuard('plan-mode', (ctx) => {
       if (ctx.name === 'Bash' && ctx.arguments.command && !isBashReadOnly(String(ctx.arguments.command))) {
         return {
           kind: 'deny',
           reason: 'Plan mode: only read-only commands allowed. This command may modify files.',
+        };
+      }
+      // Not offered in plan mode either (mcpToolAllowed); this is for a name
+      // the model already knew.
+      if (isMcpToolName(ctx.name) && !isReadOnlyMcpTool(ctx.name)) {
+        return {
+          kind: 'deny',
+          reason: `Plan mode: ${ctx.name} may change things (its server is not marked read-only), so it is not available while planning.`,
         };
       }
       return { kind: 'abstain' };
@@ -942,9 +1044,14 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
     if (opts.autoApprove) return { kind: 'abstain' };
 
     const args = ctx.arguments;
+    const mcp = isMcpToolName(ctx.name) ? parseMcpToolName(ctx.name) : undefined;
     let allowed: boolean;
     if (opts.onPermissionRequest) {
-      const detail = String(args.command ?? args.file_path ?? args.path ?? args.pattern ?? args.url ?? args.name ?? '');
+      // An MCP call's arguments have no fixed shape, so the person is shown
+      // which server, which tool, and the arguments themselves.
+      const detail = mcp
+        ? `${mcp.server} → ${mcp.tool} ${JSON.stringify(args)}`
+        : String(args.command ?? args.file_path ?? args.path ?? args.pattern ?? args.url ?? args.name ?? '');
       // For Edit/Write, build a diff preview so the UI can show what changes
       // before the user approves.
       let fileDiff: { path: string; added?: string[]; removed?: string[]; preview?: string } | undefined;
@@ -971,7 +1078,11 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
           }
         } catch { /* diff is best-effort */ }
       }
-      allowed = await opts.onPermissionRequest(ctx.name, detail.slice(0, 100), fileDiff);
+      allowed = await opts.onPermissionRequest(ctx.name, detail.slice(0, mcp ? 300 : 100), fileDiff);
+    } else if (mcp && isReadOnlyMcpTool(ctx.name)) {
+      // The terminal asks only before tools that change things, and the person
+      // said this server only reads.
+      allowed = true;
     } else {
       allowed = await checkPermission(ctx.name, args, opts.autoApprove);
     }
@@ -1001,28 +1112,25 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
   // ── Handlers ───────────────────────────────────────────────────────
   const handlers = new Map<string, ToolHandler>();
 
-  for (const def of defs) {
-    handlers.set(def.name, async (args: Record<string, unknown>, callId: string) => {
-      if (!opts.silent) showToolCall(def.name, args, opts.verbose);
-      opts.onToolCall?.(def.name, args, callId);
+  const wrap = (name: string, body: (call: ToolCallContext) => Promise<unknown>): ToolHandler =>
+    async (args: Record<string, unknown>, callId: string) => {
+      if (!opts.silent) showToolCall(name, args, opts.verbose);
+      opts.onToolCall?.(name, args, callId);
 
       const ctx: ToolCallContext = {
         callId,
-        name: def.name,
+        name,
         arguments: args,
         agentId: opts.agentId,
         state: new Map<string, unknown>(),
         ...(opts.signal ? { signal: opts.signal } : {}),
       };
 
-      const outcome = await pipeline.execute(
-        ctx,
-        (call) => dispatch(call.name, call.arguments, call.callId, call.signal),
-      );
+      const outcome = await pipeline.execute(ctx, body);
       const result = outcome.outcome.result;
 
-      if (!opts.silent) showToolResult(def.name, result, opts.verbose);
-      opts.onToolDone?.(def.name, result, callId);
+      if (!opts.silent) showToolResult(name, result, opts.verbose);
+      opts.onToolDone?.(name, result, callId);
 
       return {
         result,
@@ -1030,10 +1138,13 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
           ? { additionalContexts: outcome.additionalContexts }
           : {}),
       };
-    });
+    };
+
+  for (const def of defs) {
+    handlers.set(def.name, wrap(def.name, (call) => dispatch(call.name, call.arguments, call.callId, call.signal)));
   }
 
-  return handlers;
+  return { handlers, wrap };
 }
 
 /**
@@ -1052,6 +1163,8 @@ export function buildToolDefs(opts: {
   settings?: AicoSettings;
   depth?: number;
   headless?: boolean;
+  /** What this run may use; see `resolveToolSet`. */
+  scope?: ToolScope;
   /**
    * On-demand groups loaded so far. Absent means nothing is deferred — every
    * tool is offered, which is also what `deferTools: false` asks for.
@@ -1359,6 +1472,21 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const depth = opts.depth ?? 0;
   const toolProfile = selectToolProfile(task);
 
+  /*
+    What this run may use: whatever its delegator could, narrowed by its own
+    list. One value, handed to the schemas, the dispatch guard and every child
+    this run spawns — see `agents/effective`.
+  */
+  const scope = narrowScope(opts.toolScope, {
+    layer: ownScopeLayer(opts.agentSpecTools, opts.agentSpecTools ? undefined : opts.agentType),
+    canDelegate: opts.canDelegate,
+  });
+
+  // This run's project's skills (`.aico/skills`, `.agents/skills`) — read from
+  // disk per project, so they survive a restart and belong to the run's
+  // directory rather than the server's. Before the catalogue is rendered.
+  await skillRegistry.ensureProject().catch(() => undefined);
+
   // ── System prompt ──────────────────────────────────────────────────
   // Built as a document, not a string: it is rendered below in whatever shape
   // the resolved provider's vendor documents as best (XML for Anthropic,
@@ -1559,8 +1687,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     agentId, pipeline, signal: loopSignal, depth,
     ...(toolRegistry ? { toolRegistry } : {}),
     ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
+    // Only when it restricts something, so an unrestricted run's pipeline is
+    // exactly what it was.
+    ...(scope.layers.length > 0 || !scope.delegate ? { scope } : {}),
   };
-  const handlers = buildToolHandlers(handlerOpts);
+  const { handlers, wrap: wrapInPipeline } = buildToolHandlers(handlerOpts);
 
   /*
     On-demand tool groups (see `tools/deferred.ts`): what this session has
@@ -1643,8 +1774,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
 
   // Add Task tool (sub-agent dispatch) if within depth limit. Browser QA
   // removes it for sub-agents only — see resolveToolSet on why depth 0 keeps
-  // its tool set whole.
-  if (depth < 4 && (toolProfile !== 'browser-qa' || depth === 0)) {
+  // its tool set whole. An agent that may not delegate gets neither Task nor
+  // Investigate — enforced here, not asked for in its prompt — and a child
+  // inherits that.
+  const mayDelegate = depth < 4 && (toolProfile !== 'browser-qa' || depth === 0) && scope.delegate;
+  if (mayDelegate) {
     handlers.set(taskToolDefinition.name, async (args: Record<string, unknown>, callId: string) => {
       const {
         description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout,
@@ -1686,6 +1820,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             ...(opts.context ? { context: opts.context } : {}),
             ...(tokenTracker ? { tokenTracker } : {}),
             ...(opts.planMode ? { planMode: true } : {}),
+            // The child's tools are intersected with these: it can never be
+            // given more than this run has.
+            toolScope: scope,
             onSubagentStart: opts.onSubagentStart,
             onSubagentStop: opts.onSubagentStop,
           },
@@ -1724,6 +1861,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             ...(opts.context ? { context: opts.context } : {}),
             ...(tokenTracker ? { tokenTracker } : {}),
             ...(opts.planMode ? { planMode: true } : {}),
+            toolScope: scope,
             onSubagentStart: opts.onSubagentStart,
             onSubagentStop: opts.onSubagentStop,
           });
@@ -1743,27 +1881,24 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // Add MCP tools. A browser-QA sub-agent keeps only the Playwright tools; the
   // conversation itself keeps every MCP tool it had, so the tool set — and the
   // cache behind it — does not change because one message mentioned a URL.
+  // Scope, plan mode and `disabledTools` apply to them as to built-ins.
   const currentMcpTools = () => mcpRegistry.getToolsForAgent().filter((t) =>
-    toolProfile === 'browser-qa' && depth > 0 ? t.name.startsWith('mcp__playwright__') : true,
+    (toolProfile === 'browser-qa' && depth > 0 ? t.name.startsWith('mcp__playwright__') : true)
+    && mcpToolAllowed(t.name, { scope, planMode: opts.planMode, settings }),
   );
   let mcpTools = currentMcpTools();
+  /*
+    Through the same pipeline as every built-in: PreToolUse hooks, the scope and
+    plan-mode guards, the permission prompt, the vault's guards and redaction,
+    and PostToolUse. These calls used to go straight to the server, so `ask`
+    mode never asked before an MCP tool that deletes, and a hook that blocks a
+    tool could not see one. A throw becomes an error result in the pipeline,
+    the same shape the old catch produced.
+  */
   const installMcpHandler = (t: (typeof mcpTools)[number]) => {
-    handlers.set(t.name, async (args: Record<string, unknown>, callId: string) => {
-      if (!silent) showToolCall(t.name, args, verbose);
-      onToolCall?.(t.name, args, callId);
-      try {
-        // Same budget as before; the overflow is now kept rather than cut.
-        const result = spillResult(await t.execute(args), 80_000, t.name, callId);
-        if (!silent) showToolResult(t.name, result, verbose);
-        onToolDone?.(t.name, result, callId);
-        return { result };
-      } catch (err) {
-        const error = { error: err instanceof Error ? err.message : String(err) };
-        if (!silent) showToolResult(t.name, error, verbose);
-        onToolDone?.(t.name, error, callId);
-        return { result: error };
-      }
-    });
+    handlers.set(t.name, wrapInPipeline(t.name, async (call) =>
+      // Same budget as before; the overflow is kept rather than cut.
+      spillResult(await t.execute(call.arguments), 80_000, t.name, call.callId)));
   };
   for (const t of mcpTools) installMcpHandler(t);
 
@@ -1788,11 +1923,12 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
       ...(settings ? { settings } : {}),
       ...(loadedGroups ? { loadedGroups } : {}),
+      ...(handlerOpts.scope ? { scope: handlerOpts.scope } : {}),
     });
     // Task. The handler's own condition: at depth 0 a QA-shaped message keeps
     // the tool set whole (see resolveToolSet), so the schema must stay too —
     // dropping it there was the same cache break that rule exists to prevent.
-    if (depth < 4 && (toolProfile !== 'browser-qa' || depth === 0)) {
+    if (mayDelegate) {
       // Not for the browser copilot, which hands such work to a chat (COPILOT_WITHHELD).
       if (!(depth === 0 && currentRunContext()?.handOff)) {
         next.push({

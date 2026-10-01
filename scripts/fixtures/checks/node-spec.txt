@@ -1,0 +1,51 @@
+✔ adds (0.5708ms)
+✖ subtracts (0.6247ms)
+﹣ later (0.0669ms) # SKIP
+▶ suite
+  ✔ inner ok (0.1379ms)
+  ✖ inner bad (0.0771ms)
+✖ suite (0.8882ms)
+ℹ tests 5
+ℹ suites 1
+ℹ pass 2
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 78.2314
+
+✖ failing tests:
+
+test at math.test.mjs:4:1
+✖ subtracts (0.6247ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 3
+  
+      at TestContext.<anonymous> (file:///work/node/math.test.mjs:4:34)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1047:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+      at Test.postRun (node:internal/test_runner/test:1173:19)
+      at Test.run (node:internal/test_runner/test:1101:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at math.test.mjs:8:3
+✖ inner bad (0.0771ms)
+  Error: boom inside
+      at TestContext.<anonymous> (file:///work/node/math.test.mjs:8:35)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1047:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:744:18)
+      at Test.postRun (node:internal/test_runner/test:1173:19)
+      at Test.run (node:internal/test_runner/test:1101:12)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1442:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7)

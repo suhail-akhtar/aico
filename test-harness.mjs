@@ -7686,8 +7686,12 @@ console.log('  -- The orchestrator can author a skill, and cannot escape with on
       { path: 'SKILL.md', content: 'would overwrite the skill with its own attachment' },
     ],
   });
-  assert(/created and activated/.test(created), `the skill is created: ${created.slice(0, 120)}`);
-  assert(/Ships with:/.test(created), 'and reports what it ships with');
+  // Since Phase 0 (design §10, F4) creating writes a draft; register installs.
+  assert(/Draft written/.test(created) && /NOT registered/.test(created), `the skill is drafted, not installed: ${created.slice(0, 120)}`);
+  assert(/scripts\/check\.py/.test(created) && /references\/tone\.md/.test(created), 'and reports what it ships with');
+  assert(!fs.existsSync(path.join(home, 'harness-authored')), 'nothing is installed until it is registered');
+  const registered = await executeSkillManage({ action: 'register', name: 'harness-authored' });
+  assert(/Registered/.test(registered), `register installs the draft: ${registered.slice(0, 120)}`);
 
   const dir = path.join(home, 'harness-authored');
   assert(fs.existsSync(path.join(dir, 'SKILL.md')), 'a directory skill has SKILL.md at its top');
@@ -7711,7 +7715,8 @@ console.log('  -- The orchestrator can author a skill, and cannot escape with on
     description: 'Deploy: staging first, then production',
     prompt: 'body',
   });
-  assert(/created and activated/.test(tricky), 'a description containing a colon still creates');
+  assert(/Draft written/.test(tricky), 'a description containing a colon still creates');
+  await executeSkillManage({ action: 'register', name: 'harness-colon' });
   const colonSkill = (await loadAllSkills({ disableBuiltins: true, extraDirs: [home] }))
     .find(s => s.frontmatter.name === 'harness-colon');
   assert(colonSkill?.frontmatter.description === 'Deploy: staging first, then production',
@@ -7723,8 +7728,10 @@ console.log('  -- The orchestrator can author a skill, and cannot escape with on
   assert(/never be chosen/.test(blank), 'and the refusal says why that matters');
 
   fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(path.join(home, 'harness-colon'), { recursive: true, force: true });
   fs.rmSync(path.join(home, 'harness-colon.md'), { force: true });
   fs.rmSync(path.join(home, 'harness-blank.md'), { force: true });
+  await skillRegistry.reload();
 }
 
 console.log('  -- Memory you can point at one at a time --');

@@ -18,6 +18,7 @@ import { getContextWindow, resolveWindow } from '../context-window.js';
 import { getModelCapabilities } from '../model-capabilities.js';
 import { openSession } from '../session/open.js';
 import { loadSettings } from '../settings.js';
+import { ensureProjectTrust, projectTrustStatus, untrustedNotice } from '../workspace-trust.js';
 import { instructionsFor } from './projects.js';
 import { groupInstructions } from './groups.js';
 import { Inbox } from '../session/inbox.js';
@@ -422,7 +423,7 @@ export class RunManager {
     if (run.busy) throw new Error('A turn is already running — use steer or followup');
     run.approval = opts.approval ?? 'auto';
 
-    const settings = await this.currentSettings();
+    let settings = await this.currentSettings();
     const goal = currentGoal(run.session);
 
     // Who this conversation is being held with. Resolved per turn from the log
@@ -666,6 +667,9 @@ export class RunManager {
     };
 
     try {
+      // A project config that wants to run commands is asked about first, on
+      // the ordinary permission card, and applies to this turn if allowed.
+      if (await this.trustGate(run, emit)) settings = await this.currentSettings();
       // What the meter was drawn against when the turn began, so a window
       // that grows from use is announced once, not on every token event.
       let windowAtStart = getContextWindow(model, settings);
@@ -810,6 +814,7 @@ export class RunManager {
         // whether it was delegated to or is being spoken to directly.
         ...(agent.persona ? { agentPersona: agent.persona } : {}),
         ...(agent.tools?.length ? { agentSpecTools: agent.tools } : {}),
+        ...(agent.canDelegate === false ? { canDelegate: false } : {}),
         /*
           The two halves of one decision.
 
@@ -1327,6 +1332,53 @@ export class RunManager {
   /** The question this session is waiting on, if any. */
   questionOf(sessionId: string): string | undefined {
     return this.runs.get(sessionId)?.pendingQuestion?.question;
+  }
+
+  /** Project configs a person declined this process, by hash — asked once, not every turn. */
+  private readonly declinedTrust = new Set<string>();
+  /** A trust question already on screen somewhere; a second session does not ask too. */
+  private trustAsking = false;
+
+  /**
+   * Ask whether to trust the launch directory's project config, when it wants
+   * to run something (MCP servers, hooks, environment) and nobody has said.
+   *
+   * Through the run's own permission slot, in every approval mode: it is the
+   * card both clients already render, and its yes goes through the decision
+   * gate — so the API token alone can never trust a project. Settings are read
+   * from the directory the server started in (as `loadSettings` reads them),
+   * which is what this asks about. Returns true when trust was just granted,
+   * after the project's MCP servers have been started.
+   */
+  private async trustGate(run: ActiveRun, emit: (type: string, data: unknown) => void): Promise<boolean> {
+    const status = await projectTrustStatus(process.cwd());
+    if (status.state !== 'untrusted' || this.declinedTrust.has(status.hash) || this.trustAsking) return false;
+    this.trustAsking = true;
+    try {
+      const outcome = await ensureProjectTrust({
+        cwd: status.root,
+        ask: (tool, detail) => new Promise<boolean>((resolve) => {
+          if (run.pendingPermission) { resolve(false); return; }
+          const pending: PendingPermission = {
+            id: `perm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+            tool, detail, resolve, at: Date.now(),
+          };
+          run.pendingPermission = pending;
+          emit('permission', { id: pending.id, tool, detail });
+        }),
+      });
+      if (outcome !== 'trusted') {
+        this.declinedTrust.add(status.hash);
+        emit('notice', { text: untrustedNotice(status) });
+        return false;
+      }
+      const { reloadMcpServers } = await import('../mcp/manage.js');
+      await reloadMcpServers().catch(() => undefined);
+      emit('notice', { text: `Trusted this project's settings: ${status.names.join(', ')} now active.` });
+      return true;
+    } finally {
+      this.trustAsking = false;
+    }
   }
 
   /**

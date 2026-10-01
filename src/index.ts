@@ -229,6 +229,25 @@ program
       Object.assign(settings, fresh);
     }
 
+    // Workspace trust: this folder's .aico settings want to run something.
+    // Asked once here, at a terminal with a person at it; a one-shot or piped
+    // run never asks — loadSettings already left the entries out and said so.
+    if (!prompt && !opts.print && process.stdin.isTTY) {
+      const { ensureProjectTrust } = await import('./workspace-trust.js');
+      const { createInterface } = await import('readline');
+      const outcome = await ensureProjectTrust({
+        cwd: process.cwd(),
+        ask: (_title, detail) => new Promise<boolean>((resolve) => {
+          const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+          rl.question(chalk.yellow(`\n  ⚠ ${detail}\n  Trust this project's settings? [y/N] `), (answer) => {
+            rl.close();
+            resolve(/^y(es)?$/i.test(answer.trim()));
+          });
+        }),
+      });
+      if (outcome === 'trusted') Object.assign(settings, await loadSettings());
+    }
+
     // Resolve model: CLI flag → settings → auto-detect from provider
     const rawModel = opts.model || settings.model || defaultModel();
     opts.model = resolveModel(rawModel);
@@ -749,6 +768,7 @@ async function startReadlineREPL(
           ...(inbox ? { inbox } : {}),
           ...(persona.persona ? { agentPersona: persona.persona } : {}),
           ...(persona.tools?.length ? { agentSpecTools: persona.tools } : {}),
+          ...('canDelegate' in persona && persona.canDelegate === false ? { canDelegate: false } : {}),
         });
         if (finalMessage) {
           conversationHistory.push({ role: 'user',      content: trimmed });

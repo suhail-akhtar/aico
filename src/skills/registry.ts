@@ -2,9 +2,25 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { aicoHome } from '../home.js';
 import type { Skill } from './types.js';
-import { loadAllSkills, parseSkillFile } from './loader.js';
+import { loadAllSkills, loadSkillsFromDir, parseSkillFile } from './loader.js';
 import { safeName } from './import.js';
 import { resolveSkillRef } from './resolver.js';
+import { currentCwd } from '../run-context.js';
+
+/**
+ * Where a project keeps its skills: AICO's own `.aico/skills`, and the
+ * cross-client `.agents/skills` the Agent Skills spec suggests. Later wins on
+ * a name clash, so AICO's directory is read last.
+ */
+export function projectSkillDirs(projectDir: string): string[] {
+  return [path.join(projectDir, '.agents', 'skills'), path.join(projectDir, '.aico', 'skills')];
+}
+
+/** A cache key for a project directory, case-folded where the filesystem is. */
+function projectKey(dir: string): string {
+  const resolved = path.resolve(dir);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
 
 type SubscriberFn = (skills: Skill[]) => void;
 
@@ -61,6 +77,20 @@ export class SkillRegistry {
   private _skills: Skill[] = [];
   private _subscribers: SubscriberFn[] = [];
   private _opts: { disableBuiltins?: boolean; extraDirs?: string[] } = {};
+  /**
+   * Each project's own skills, by project directory.
+   *
+   * The registry is one per process, and a server drives sessions in several
+   * projects; a project's skills must reach runs in that project and no other.
+   * They used to be written to the *server's* directory and never read back,
+   * so a project skill worked until the restart and then was gone. Now they
+   * are read from disk per project (`ensureProject`, called at the start of
+   * every run) and overlaid on the global list for runs whose directory it is.
+   *
+   * Project skills are instructions, the same tier as AICO.md, so they load
+   * without the workspace-trust prompt (design §4.4); they run nothing.
+   */
+  private _project = new Map<string, Skill[]>();
 
   async load(opts: { disableBuiltins?: boolean; extraDirs?: string[] } = {}): Promise<void> {
     this._opts = opts;
@@ -89,13 +119,46 @@ export class SkillRegistry {
   }
 
   async reload(): Promise<void> {
+    this._project.clear();
     await this.load(this._opts);
+  }
+
+  /**
+   * Read a project's own skills from disk, once per project until `reload`.
+   *
+   * Defaults to the current run's directory. Idempotent and cheap after the
+   * first call, so every run can call it before its catalogue is rendered.
+   */
+  async ensureProject(projectDir: string = currentCwd()): Promise<void> {
+    const key = projectKey(projectDir);
+    if (this._project.has(key)) return;
+    const byName = new Map<string, Skill>();
+    for (const dir of projectSkillDirs(projectDir)) {
+      for (const skill of await loadSkillsFromDir(dir, false)) {
+        const name = skill.frontmatter.name.trim().toLowerCase();
+        byName.delete(name);
+        byName.set(name, skill);
+      }
+    }
+    this._project.set(key, [...byName.values()]);
+  }
+
+  /**
+   * The skills visible to the current run: the global list, with the current
+   * project's own skills overriding by name (project wins, as the loader's
+   * built-in → user → project order always meant).
+   */
+  private visible(): Skill[] {
+    const project = this._project.get(projectKey(currentCwd()));
+    if (!project?.length) return this._skills;
+    const names = new Set(project.map(s => s.frontmatter.name.trim().toLowerCase()));
+    return [...this._skills.filter(s => !names.has(s.frontmatter.name.trim().toLowerCase())), ...project];
   }
 
   /** Look up a skill by exact name or alias */
   lookup(commandName: string): Skill | undefined {
     const lower = commandName.toLowerCase();
-    return this._skills.find(
+    return this.visible().find(
       (s) =>
         s.frontmatter.name.toLowerCase() === lower ||
         s.frontmatter.aliases?.some((a) => a.toLowerCase() === lower),
@@ -104,11 +167,11 @@ export class SkillRegistry {
 
   /** Check if user input auto-dispatches to a skill via its trigger pattern */
   matchTrigger(userInput: string): Skill | undefined {
-    return this._skills.find(skill => triggerMatches(skill, userInput));
+    return this.visible().find(skill => triggerMatches(skill, userInput));
   }
 
   list(): Skill[] {
-    return [...this._skills];
+    return [...this.visible()];
   }
 
   subscribe(fn: SubscriberFn): () => void {
@@ -182,9 +245,11 @@ export class SkillRegistry {
     if (!skill) throw new Error('Invalid skill file — missing frontmatter (name + description required)');
 
     const safe = safeSkillFile(skill.frontmatter.name);
+    // The run's project, not the process's directory: on a server those are
+    // different places, and the process's was never read back.
     const root = scope === 'user'
       ? path.join(aicoHome(), 'skills')
-      : path.join(process.cwd(), '.aico', 'skills');
+      : path.join(currentCwd(), '.aico', 'skills');
 
     let filePath: string;
     if (resources.length > 0) {
@@ -212,6 +277,14 @@ export class SkillRegistry {
     }
 
     skill.filePath = filePath;
+    if (scope === 'project') {
+      // A project's skill belongs to that project's runs only: re-read its
+      // directory rather than merging it into every project's list.
+      this._project.delete(projectKey(currentCwd()));
+      await this.ensureProject();
+      this._emit();
+      return skill;
+    }
     // Hot-merge: remove any existing skill with the same name, then add
     this._skills = this._skills.filter(
       (s) => s.frontmatter.name !== skill.frontmatter.name,

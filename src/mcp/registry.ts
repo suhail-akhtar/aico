@@ -198,6 +198,21 @@ class McpServerRegistry {
   getConfigs(): Record<string, McpServerConfigV2> {
     return Object.fromEntries(this._configs.entries());
   }
+
+  /** The config a loaded server runs under, for policy decisions (`mcp/policy`). */
+  configOf(serverName: string): McpServerConfigV2 | undefined {
+    return this._configs.get(serverName);
+  }
+
+  /** Whether a server was contributed by the hosting process rather than settings. */
+  isHost(serverName: string): boolean {
+    return serverName in this._host;
+  }
+
+  /** Names of the servers whose tools are loaded, for splitting `mcp__<server>__<tool>`. */
+  serverNames(): string[] {
+    return [...this._toolCache.keys()];
+  }
 }
 
 export const mcpRegistry = new McpServerRegistry();

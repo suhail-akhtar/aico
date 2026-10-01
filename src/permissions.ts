@@ -104,8 +104,17 @@ export function revokeToolPermission(toolName: string): void {
   sessionTrust.delete(toolName);
 }
 
+/**
+ * MCP tools (`mcp__<server>__<tool>`) ask too. A server's own annotations are
+ * untrusted, so its tools are assumed to write; the agent skips the prompt only
+ * for a server the person marked `readOnly` (see `mcp/policy`).
+ */
+function isMcpTool(toolName: string): boolean {
+  return toolName.startsWith('mcp__');
+}
+
 export function toolRequiresPermission(toolName: string): boolean {
-  return TOOLS_REQUIRING_PERMISSION.has(toolName);
+  return TOOLS_REQUIRING_PERMISSION.has(toolName) || isMcpTool(toolName);
 }
 
 export async function checkPermission(
@@ -119,7 +128,7 @@ export async function checkPermission(
   if (sessionTrust === 'none') return false;
 
   // Read-only tools never need permission
-  if (!TOOLS_REQUIRING_PERMISSION.has(toolName)) return true;
+  if (!toolRequiresPermission(toolName)) return true;
 
   // Already approved this tool type this session
   if (sessionTrust instanceof Set && sessionTrust.has(toolName)) return true;

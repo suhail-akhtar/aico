@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="4" failures="2" errors="0" time="0.007999">
+    <testsuite name="a.test.js" timestamp="2026-10-01T13:36:47.779Z" hostname="SUHAILAKHTAR-7i" tests="4" failures="2" errors="0" skipped="1" time="0.007999">
+        <testcase classname="a.test.js" name="cart &gt; totals" time="0.0009734">
+        </testcase>
+        <testcase classname="a.test.js" name="cart &gt; discount" time="0.0056353">
+            <failure message="expected 9 to be 8 // Object.is equality" type="AssertionError">
+AssertionError: expected 9 to be 8 // Object.is equality
+
+- Expected
++ Received
+
+- 8
++ 9
+
+ ❯ a.test.js:3:45
+            </failure>
+        </testcase>
+        <testcase classname="a.test.js" name="cart &gt; tax" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="a.test.js" name="top level fails" time="0.0003875">
+            <failure message="x is not a function" type="TypeError">
+TypeError: x is not a function
+ ❯ a.test.js:6:39
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,5 +1,6 @@
 import { bash, bashDefinition } from './bash.js';
-import { currentCwd } from '../run-context.js';
+import { currentCwd, currentRunContext } from '../run-context.js';
+import { loadSettings } from '../settings.js';
 import { readFile, readDefinition } from './read.js';
 import { readAttachment, readAttachmentDefinition } from './read-attachment.js';
 import { writeFile, writeDefinition } from './write.js';
@@ -29,6 +30,7 @@ import { handOffToChat, handOffToChatDefinition } from './handoff-to-chat.js';
 import { currencyRates, currencyRatesDefinition } from './currency.js';
 import { sportsScores, sportsScoresDefinition } from './sports.js';
 import { generateImage, generateImageDefinition } from './generate-image.js';
+import { dependencyAudit, dependencyAuditDefinition, type DependencyAuditInput } from './dependency-audit.js';
 import { canvasTool, canvasDefinition } from './canvas.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
@@ -238,6 +240,9 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...canvasDefinition, isConcurrencySafe: false, maxResultSizeChars: 450_000 },
   // Spends the user's money and writes files: exclusive, and asks permission.
   { ...generateImageDefinition, isConcurrencySafe: false, maxResultSizeChars: 10_000 },
+  // Runs package managers that share caches and lock files with RunChecks and
+  // Bash installs: exclusive. Deferred (the `audit` group); read-only.
+  { ...dependencyAuditDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...notebookEditDefinition, isConcurrencySafe: false, maxResultSizeChars: 50_000 },
   { ...todoReadDefinition, isConcurrencySafe: true, maxResultSizeChars: 10_000 },
   { ...todoWriteDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
@@ -645,6 +650,13 @@ export async function executeTool(
     case 'SportsScores':
       result = await sportsScores(args as unknown as Parameters<typeof sportsScores>[0]);
       break;
+    case 'DependencyAudit': {
+      // The run's merged settings (project over global) when there is a run, as GenerateImage reads them.
+      const settings = currentRunContext()?.settings ?? getWorkspaceRuntime().settings ?? await loadSettings();
+      const allowLicenses = settings.dependencyAudit?.allowLicenses;
+      result = await dependencyAudit(args as DependencyAuditInput, { ...(allowLicenses ? { allowLicenses } : {}), signal });
+      break;
+    }
     case 'GenerateImage':
       result = await generateImage(args as unknown as Parameters<typeof generateImage>[0]);
       break;

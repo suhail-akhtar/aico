@@ -31,6 +31,7 @@ import { skillRegistry } from './registry.js';
 import { parseSkillFile, loadSkillsFromDir } from './loader.js';
 import { importSkill, exportSkill, removeSkill, userSkillsDir, safeName } from './import.js';
 import { disabledIn, isDisabled, setEnabled, forget } from '../registry-state.js';
+import { currentCwd } from '../run-context.js';
 import type { Skill } from './types.js';
 
 /** Where drafts wait. Deliberately not a directory the loader scans. */
@@ -56,6 +57,26 @@ export interface SkillManageInput {
   /** For import: a folder, .zip/.skill, or SKILL.md. For export: where to write. */
   path?: string;
   overwrite?: boolean;
+  /**
+   * Where `register` installs: the user's skills (default) or the current
+   * run's project (`<project>/.aico/skills`). `create` records it in the draft,
+   * with the project, so a later `register` installs where it was meant to.
+   */
+  scope?: 'user' | 'project';
+}
+
+/** Beside a draft: where it is meant to be installed. Dot-named, so it never ships. */
+const DRAFT_META = '.aico-draft.json';
+
+interface DraftMeta { scope: 'user' | 'project'; project?: string }
+
+function readDraftMeta(dir: string): DraftMeta | undefined {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, DRAFT_META), 'utf8')) as DraftMeta;
+    return meta.scope === 'project' || meta.scope === 'user' ? meta : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** A frontmatter value that cannot break the block it sits in. */
@@ -253,10 +274,15 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
 
       const dir = path.join(draftsDir(), safe);
       const written = writeSkillTree(dir, composeMarkdown(input), input.resources ?? []);
+      if (input.scope === 'project') {
+        const meta: DraftMeta = { scope: 'project', project: currentCwd() };
+        fs.writeFileSync(path.join(dir, DRAFT_META), JSON.stringify(meta, null, 2), 'utf8');
+      }
       const report = verifySkillDir(dir);
 
       return [
-        `Draft written to ${dir}. It is NOT registered yet and the agent cannot use it.`,
+        `Draft written to ${dir}. It is NOT registered yet and the agent cannot use it.`
+          + (input.scope === 'project' ? ` Registering installs it in ${path.join(currentCwd(), '.aico', 'skills')}.` : ''),
         written.length ? `Files: SKILL.md, ${written.join(', ')}` : 'Files: SKILL.md',
         '',
         report.ok
@@ -304,8 +330,18 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
           + '\nFix the draft and try again.';
       }
 
-      const result = await importSkill(draft, { overwrite: input.overwrite ?? false });
+      // A project draft installs in the project it was drafted for, whichever
+      // directory registers it; an explicit scope on this call wins.
+      const meta = readDraftMeta(draft);
+      const scope = input.scope ?? meta?.scope ?? 'user';
+      const project = meta?.project ?? currentCwd();
+      const targetDir = scope === 'project' ? path.join(project, '.aico', 'skills') : undefined;
+      const result = await importSkill(draft, {
+        overwrite: input.overwrite ?? false,
+        ...(targetDir ? { targetDir } : {}),
+      });
       if (!result.ok) return `Not registered: ${result.error}`;
+      if (result.installedAt) fs.rmSync(path.join(result.installedAt, DRAFT_META), { force: true });
 
       fs.rmSync(draft, { recursive: true, force: true });
       await skillRegistry.reload();
@@ -356,7 +392,9 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
     case 'delete': {
       const skill = skillRegistry.lookup(name);
       if (skill?.isBuiltin) return `"${name}" is built in and cannot be deleted. Disable it instead.`;
-      const result = removeSkill(name);
+      // Wherever it is installed — a project skill lives in its project.
+      const root = skill?.dir ? path.dirname(skill.dir) : skill?.filePath ? path.dirname(skill.filePath) : undefined;
+      const result = root ? removeSkill(skill?.frontmatter.name ?? name, root) : removeSkill(name);
       if (!result.ok) return `Not deleted: ${result.error}`;
       forget('skills', name);
       await skillRegistry.reload();
@@ -452,6 +490,7 @@ export const skillManageToolDefinition = {
       },
       path: { type: 'string', description: 'For import: what to install. For export: where to write the .zip.' },
       overwrite: { type: 'boolean', description: 'Replace an existing skill of the same name.' },
+      scope: { type: 'string', enum: ['user', 'project'], description: 'create/register: for you everywhere (default), or for this project only.' },
     },
     required: ['action'],
   },

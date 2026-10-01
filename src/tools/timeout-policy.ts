@@ -66,6 +66,8 @@ const TIMEOUTS: Record<string, number> = {
   CurrencyRates: 60 * 1000,
   // Up to four requests in a row (TheSportsDB, then ESPN's team list and schedules).
   SportsScores: 90 * 1000,
+  // Up to five auditors in a row, each bounded at two minutes by the tool itself.
+  DependencyAudit: 12 * 60 * 1000,
   // A high-quality picture takes a minute or more; Gemini draws one per request.
   GenerateImage: 6 * 60 * 1000,
 

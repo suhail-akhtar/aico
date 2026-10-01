@@ -2,6 +2,9 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { aicoHome } from './home.js';
 import type { McpServerConfig } from './mcp.js';
+import {
+  carryTrustAcrossOwnWrite, evaluateProjectLayers, projectTrustStatus, stripGated, untrustedNotice,
+} from './workspace-trust.js';
 
 import type { ProviderInstance } from './providers/instances.js';
 
@@ -293,7 +296,13 @@ export interface AicoSettings {
     /** Repeat the open todo list at the end of each request. Default: true. */
     reciteTodos?: boolean;
   };
-  /** MCP security posture controls and trust metadata. */
+  /**
+   * @deprecated Removed: it was printed by `/mcp-security` and enforced
+   * nowhere, and a project file could set it. `loadSettings` warns when it is
+   * present. The replacements are workspace trust (a project's MCP servers and
+   * hooks run only once approved — see `workspace-trust.ts`) and a server's
+   * own `readOnly` flag.
+   */
   mcpSecurity?: {
     trustedServers?: string[];
     allowedCommands?: string[];
@@ -513,6 +522,15 @@ export interface AicoSettings {
    */
   disabledTools?: string[];
   /**
+   * DependencyAudit's licence allowlist (SPDX ids). Installed packages under
+   * any other licence are listed for review — never blocked. Unset means the
+   * built-in permissive list, which flags copyleft and undeclared licences.
+   * Usually set per project, in `.aico/settings.json`.
+   *
+   * Example: { "dependencyAudit": { "allowLicenses": ["MIT", "Apache-2.0", "LGPL-3.0-only"] } }
+   */
+  dependencyAudit?: { allowLicenses?: string[] };
+  /**
    * Offer rarely used tool groups on demand (default true).
    *
    * The remote-ops, credential, registry, cron, world-lookup, image,
@@ -605,7 +623,7 @@ async function tryReadJson(filePath: string): Promise<AicoSettings> {
  */
 const MERGED_SECTIONS = [
   'providers', 'hooks', 'env', 'mcpServers', 'workspace', 'autoCompact', 'contextManagement',
-  'mcpSecurity', 'skills', 'memory', 'cron', 'promptCaching', 'contextWindows',
+  'skills', 'memory', 'cron', 'promptCaching', 'contextWindows',
   'modelCapabilities',
   'modelPricing',
   'agentModels',
@@ -716,6 +734,17 @@ export interface SettingsAudit {
 
 let _lastAudit: SettingsAudit | null = null;
 
+/**
+ * Warnings already printed, so a setting re-read on every turn (the server
+ * does) warns once per process rather than once per message.
+ */
+const warned = new Set<string>();
+function warnOnce(key: string, message: string): void {
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(message);
+}
+
 /** Get the audit trail from the most recent loadSettings() call */
 export function getSettingsAudit(): SettingsAudit | null {
   return _lastAudit;
@@ -741,6 +770,25 @@ export async function loadSettings(): Promise<AicoSettings> {
       { path: localPath, found: existsSync(localPath), keys: Object.keys(local) },
     ],
   };
+
+  /*
+    Workspace trust. A project's own files may not make AICO run anything —
+    spawn an MCP server, run a hook, set this process's environment — until a
+    person has approved exactly that config (see workspace-trust.ts). Left out
+    here, at the one place settings are merged, so nothing downstream can load
+    them by forgetting to check. The rest of the project's settings apply.
+  */
+  const trust = evaluateProjectLayers(cwd, project as Record<string, unknown>, local as Record<string, unknown>);
+  if (trust.state === 'untrusted') {
+    stripGated(project as Record<string, unknown>);
+    stripGated(local as Record<string, unknown>);
+    warnOnce(`trust:${trust.root}:${trust.hash}`, `  ⚠ ${untrustedNotice(trust)}`);
+  }
+  if ([global_, project, local].some(layer => layer.mcpSecurity !== undefined)) {
+    warnOnce('mcpSecurity', '  ⚠ Settings warning: mcpSecurity is no longer used (it was never enforced). '
+      + 'A project\'s MCP servers and hooks now run only after you trust the project; mark a server that '
+      + 'only reads with "readOnly": true.');
+  }
 
   let merged = deepMerge(defaults, global_);
   merged = deepMerge(merged, project);
@@ -886,6 +934,7 @@ export async function saveProjectMcpServers(
   const filePath = getProjectLocalSettingsPath(cwd);
   await mkdir(path.dirname(filePath), { recursive: true });
 
+  const before = await projectTrustStatus(cwd);
   const existing = await tryReadJson(filePath);
   const updated: AicoSettings = {
     ...existing,
@@ -893,6 +942,9 @@ export async function saveProjectMcpServers(
   };
 
   await writeFile(filePath, JSON.stringify(updated, null, 2));
+  // AICO wrote this on the person's behalf: a trusted (or empty) config stays
+  // trusted. One that was never approved stays unapproved.
+  await carryTrustAcrossOwnWrite(cwd, before);
 }
 
 export async function saveProjectWorkspacePath(
@@ -918,8 +970,10 @@ export async function saveProjectSettingsPatch(
   const filePath = getProjectLocalSettingsPath(cwd);
   await mkdir(path.dirname(filePath), { recursive: true });
 
+  const before = await projectTrustStatus(cwd);
   const existing = await tryReadJson(filePath);
   const updated = deepMerge(existing, patch);
   await writeFile(filePath, JSON.stringify(updated, null, 2));
+  await carryTrustAcrossOwnWrite(cwd, before);
   return updated;
 }

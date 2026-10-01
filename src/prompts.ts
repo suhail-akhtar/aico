@@ -317,6 +317,12 @@ ${detectShell().describe}`,
       loudly when a change does not land, so the re-read was a paid step that
       proved nothing the tool result had not — and the diff review below
       covers what re-reading was really for.
+
+      Tried and reverted (2026-10-01): "documents included (a design doc: a few
+      thousand words)" appended to the concision bullet. On eng-bench's
+      architecture-doc task the doc still came out at 13.9K words (range
+      1.2K–9K) and the run cost $0.21 against $0.03–0.10 before — the model
+      kept appending sections. A prompt line does not cap document length.
     */
     body: `- Match the process to the task. A question is answered by answering it; a one-line fix is one edit and the one check that covers it. What follows is about *changes you make*; confirming twice what one command already showed is not diligence.
 - For non-trivial work, decide before editing: the requirements in the user's words, the constraints (existing patterns, interfaces, data, security, performance), and the design — where the change lives, which pattern it follows, and for a new stack, service or dependency, why it beats the alternatives. Then build it in small steps, each verified before the next, tracked with TodoWrite; mark a todo complete only after verifying it.

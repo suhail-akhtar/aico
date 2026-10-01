@@ -46,7 +46,10 @@ function Permission(): React.ReactElement | null {
       <div className="flex items-start gap-3">
         <Icon name="shield" size={18} className="mt-0.5 text-aico-warning" />
         <div className="min-w-0 flex-1">
-          <div className="text-[14px] font-medium">Allow <span className="font-mono">{permission.tool}</span>?</div>
+          {/* Workspace trust rides the same card; its detail lists exactly what would run. */}
+          <div className="text-[14px] font-medium">{permission.tool === 'TrustProjectSettings'
+            ? <>Trust this project&apos;s settings?</>
+            : <>Allow <span className="font-mono">{permission.tool}</span>?</>}</div>
           <div className="mt-1 whitespace-pre-wrap break-words text-[13px] text-aico-secondary selectable">{permission.detail}</div>
           {diff && (
             <div className="mt-2 max-h-56 overflow-auto rounded-lg border border-aico-border-subtle bg-aico-code font-mono text-[12px]">

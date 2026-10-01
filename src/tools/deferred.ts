@@ -99,6 +99,11 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ['GenerateImage'],
   },
   {
+    id: 'audit',
+    summary: 'dependency vulnerabilities and licences',
+    tools: ['DependencyAudit'],
+  },
+  {
     id: 'background',
     summary: 'background agents, desktop notifications, manual git worktrees',
     tools: ['BackgroundTask', 'PushNotification', 'EnterWorktree', 'ExitWorktree'],

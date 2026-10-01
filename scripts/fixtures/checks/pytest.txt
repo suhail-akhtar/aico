@@ -1,0 +1,28 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: /work\py
+plugins: anyio-4.12.1, langsmith-0.10.2, asyncio-1.3.0, typeguard-4.5.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 4 items
+
+tests\test_calc.py .FsF                                                  [100%]
+
+================================== FAILURES ===================================
+__________________________________ test_sub ___________________________________
+
+>   def test_sub(): assert 5 - 3 == 3
+                    ^^^^^^^^^^^^^^^^^
+E   assert (5 - 3) == 3
+
+tests\test_calc.py:3: AssertionError
+__________________________________ test_err ___________________________________
+
+    def test_err():
+>       raise ValueError("bad value")
+E       ValueError: bad value
+
+tests\test_calc.py:7: ValueError
+=========================== short test summary info ===========================
+FAILED tests/test_calc.py::test_sub - assert (5 - 3) == 3
+FAILED tests/test_calc.py::test_err - ValueError: bad value
+=================== 2 failed, 1 passed, 1 skipped in 0.10s ====================
