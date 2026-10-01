@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.32.0 — 2026-10-01
 
 Every chat gets its own browser tabs, the browser copilot hands real work to a
 chat, and the agent engineers better for less: 41% fewer tokens on every
