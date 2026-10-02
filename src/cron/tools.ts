@@ -40,6 +40,17 @@ export const cronCreateToolDefinition = {
           + 'files; "readonly" can only read and report. There is no third option that '
           + 'asks — nobody is there to answer.',
       },
+      autonomy: {
+        type: 'string',
+        enum: ['L3', 'L4'],
+        description: 'For a "full" job: "L4" (default) parks any call that needs a person '
+          + '(a destructive tool) in the inbox for approval later; "L3" refuses it instead.',
+      },
+      agent: {
+        type: 'string',
+        description: 'Run as this registered agent (optional). At L4 the agent must be certified, '
+          + 'else the job runs at L3.',
+      },
     },
     required: ['name', 'schedule', 'prompt'],
   },
@@ -99,8 +110,12 @@ export async function executeCronCreate(args: {
   model?: string;
   cwd?: string;
   permissions?: CronJob['permissions'];
+  autonomy?: unknown;
+  agent?: string;
 }): Promise<CronJob> {
-  return cronScheduler.createJob(args);
+  // Only the two levels a schedule can mean; anything else is the default.
+  const { autonomy, ...rest } = args;
+  return cronScheduler.createJob({ ...rest, ...(autonomy === 'L3' || autonomy === 'L4' ? { autonomy } : {}) });
 }
 
 export async function executeCronDelete(args: { job_id: string }): Promise<{ deleted: boolean }> {

@@ -31,6 +31,7 @@ import {
   currentGoal, currentAgent, currentModel, feedbackBySeq, deliverables, trajectory,
 } from '../session/projections.js';
 import { personaFor, resolveAgent } from '../agents/resolve.js';
+import { effectiveLevel, levelLabel, modeFromLevel, type AutonomyLevel } from '../autonomy/levels.js';
 import { activeProviderType } from '../providers/instances.js';
 import type { ImageRef } from '../providers/types.js';
 import type { UserAttachment } from '../session/events.js';
@@ -388,6 +389,13 @@ export class RunManager {
       /** How much to ask before acting. Defaults to `auto`, as it always was. */
       approval?: ApprovalMode;
       /**
+       * The autonomy level (L0–L4), for a client that speaks the scale. When
+       * set it decides plan mode and the approval mode (the two fields above
+       * are ignored), capped by the agent's ceiling; L4 parks calls that need
+       * a person in the approve-later inbox.
+       */
+      autonomy?: AutonomyLevel;
+      /**
        * The client will apply this run's file writes itself.
        *
        * Set by the VS Code panel, which applies them as `WorkspaceEdit`s. Any
@@ -436,6 +444,18 @@ export class RunManager {
     const agentName = directChat ? currentAgent(run.session) : undefined;
     const agent = await personaFor(agentName, run.cwd);
     const activeGoal = goal?.status === 'active' ? goal.text : undefined;
+    // The autonomy scale (design §4.2): a client that sends a level gets plan
+    // mode and the approval mode from it, capped by the agent's ceiling; L4
+    // also parks what would be asked (Phase 7). Without one, the modes stand.
+    // L4 for a named agent needs a current certificate (Phase 4); runAgent
+    // enforces it, this only lets the turn say so up front.
+    const certified = opts.autonomy === 'L4' && agent.bounds?.name
+      ? (await (await import('../evals/certificate.js')).isCertified(agent.bounds.name, { cwd: run.cwd, model: model ?? agent.model ?? '' })).ok
+      : undefined;
+    const leveled = opts.autonomy ? effectiveLevel({ requested: opts.autonomy, agentCeiling: agent.bounds?.autonomy, ...(certified === undefined ? {} : { certified }) }) : undefined;
+    const levelMode = leveled ? modeFromLevel(leveled.level) : undefined;
+    if (levelMode) run.approval = levelMode.approval;
+    const planMode = levelMode ? levelMode.planMode : (opts.planMode ?? false);
 
     run.busy = true;
     // Fresh per turn: an AbortController is single-use, so reusing one would
@@ -463,6 +483,7 @@ export class RunManager {
     // deleted or switched off used to run as the orchestrator with nothing on
     // screen to explain why the replies had changed character.
     if (agent.notice) emit('notice', { text: agent.notice });
+    if (leveled?.cappedBy) emit('notice', { text: `This turn runs at ${levelLabel(leveled.level)}, not ${leveled.requested}: ${leveled.reason}.` });
 
     emit('turn-start', { task, model });
 
@@ -586,6 +607,23 @@ export class RunManager {
             id: pending.id, tool, detail, ...(fileDiff ? { fileDiff } : {}),
           });
         });
+
+    /**
+     * Ask a person whatever the approval mode: a custom tool's every-use or
+     * first-use approval (a destructive tool at `auto`, design §4.2). The same
+     * card and the same one-at-a-time slot as above, so the decision gate
+     * applies and the API token alone can never answer it.
+     */
+    const onApprovalRequired = (tool: string, detail: string): Promise<boolean> =>
+      new Promise<boolean>((resolve) => {
+        if (run.pendingPermission) { resolve(false); return; }
+        const pending: PendingPermission = {
+          id: `perm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          tool, detail, resolve, at: Date.now(),
+        };
+        run.pendingPermission = pending;
+        emit('permission', { id: pending.id, tool, detail });
+      });
 
     /**
      * Sub-agent activity, which the browser previously could not see at all.
@@ -815,6 +853,9 @@ export class RunManager {
         ...(agent.persona ? { agentPersona: agent.persona } : {}),
         ...(agent.tools?.length ? { agentSpecTools: agent.tools } : {}),
         ...(agent.canDelegate === false ? { canDelegate: false } : {}),
+        // Deny list, MCP servers, delegation rule, autonomy ceiling, budget
+        // and write paths — the same bounds Task applies (agents/resolve).
+        ...(agent.bounds ? { agentBounds: agent.bounds } : {}),
         /*
           The two halves of one decision.
 
@@ -825,12 +866,14 @@ export class RunManager {
         */
         autoApprove: run.approval === 'auto' ? (opts.autoApprove ?? true) : false,
         ...(onPermissionRequest ? { onPermissionRequest } : {}),
+        onApprovalRequired,
         ...(opts.applyEdits ? { applyEdit: applyEditThroughClient } : {}),
         // Only when the client named at least one tool it can service. An empty
         // list is the same as no editor, and passing a bridge for it would
         // advertise nothing while still costing a check per tool call.
         ...(declared.length ? { host: callHost } : {}),
-        planMode: opts.planMode ?? false,
+        planMode,
+        ...(leveled ? { autonomy: leveled.level, parkFrom: { origin: 'chat' as const, label: currentTitle(run.session)?.title ?? 'chat' } } : {}),
         ...(opts.effort ? { effort: opts.effort } : {}),
         abortSignal: run.abort.signal,
 

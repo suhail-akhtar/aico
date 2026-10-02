@@ -27,6 +27,19 @@ export interface CronJob {
   cwd: string;
   /** See {@link CronPermissions}. Absent means `full`, for jobs created before this existed. */
   permissions?: CronPermissions;
+  /**
+   * The run's autonomy level (autonomy/levels). Absent means L4 for `full`:
+   * a custom-tool call that needs a person is parked in the approve-later
+   * inbox, not refused. `L3` refuses such calls instead; a `readonly` job never
+   * parks. Lower levels than L3 ask, and nobody is there, so they refuse too.
+   */
+  autonomy?: 'L3' | 'L4';
+  /**
+   * Run as this registered agent rather than the orchestrator. An unattended
+   * (L4) firing needs the agent to hold a current certificate (Phase 4);
+   * without one it runs at L3 and says why.
+   */
+  agent?: string;
   status: CronJobStatus;
   createdAt: number;
   /** Unix ms of last run start */

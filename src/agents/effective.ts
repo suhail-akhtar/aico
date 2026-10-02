@@ -29,9 +29,17 @@
  * that names none admits none — a restricted agent never picks up a tool a
  * person installed later.
  *
+ * Phase 3 (agents v2) adds two more things a scope carries down the tree,
+ * each only ever narrowing: a deny list per layer (`disallowedTools`) and
+ * write-path bounds (every agent's globs must admit a write). The autonomy
+ * ceiling travels on the run context instead (`agents/ceiling`), where the
+ * level already lives. `delegateTo` is the one field
+ * that is not inherited: it says what *this* run may hand to its children,
+ * and the children's own scope already carries the result.
+ *
  * What it does not do: decide permission prompts (that is the permission
- * stage), or validate names at save time (the design's Phase 3). Unknown names
- * simply match nothing.
+ * stage), or validate names at save time (`agents/validate`). Unknown names
+ * simply match nothing here.
  *
  * @module agents/effective
  */
@@ -49,6 +57,16 @@ export interface ScopeLayer {
   tools: 'all' | ReadonlySet<string>;
   /** MCP tools allowed: every one, only read-only ones, or those matching these entries. */
   mcp: 'all' | 'readonly' | readonly string[];
+  /** Entries refused even when allowed above (`disallowedTools`), any spelling `entryMatches` reads. */
+  deny?: readonly string[];
+}
+
+/** One agent's write bound: AICO's file tools may write only paths under `root` matching a glob. */
+export interface WriteBound {
+  label: string;
+  /** Absolute directory the globs are relative to (the agent's run directory). */
+  root: string;
+  globs: readonly string[];
 }
 
 /** What a run may use. Passed to every child it delegates to. */
@@ -56,6 +74,10 @@ export interface ToolScope {
   readonly layers: readonly ScopeLayer[];
   /** Whether `Task`/`Investigate` are available. False anywhere above means false here. */
   readonly delegate: boolean;
+  /** What this run's own children may be: read-only, or only these named agents. Not inherited. */
+  readonly delegateTo?: 'readonly' | readonly string[];
+  /** Write bounds from every agent in the chain; a write must satisfy all of them. */
+  readonly writeBounds?: readonly WriteBound[];
 }
 
 /** No restriction: the orchestrator's scope when nobody narrowed it. */
@@ -124,13 +146,38 @@ export function layerFor(label: string, allow: ToolAllow | undefined, readonlyTo
 /** A child's scope: everything the parent's says, plus its own. */
 export function narrowScope(
   parent: ToolScope | undefined,
-  own: { layer?: ScopeLayer | undefined; canDelegate?: boolean | undefined },
+  own: {
+    layer?: ScopeLayer | undefined;
+    /** More layers of the same agent (its deny list, its MCP servers). */
+    extra?: readonly ScopeLayer[] | undefined;
+    canDelegate?: boolean | undefined;
+    delegateTo?: 'readonly' | readonly string[] | undefined;
+    writeBound?: WriteBound | undefined;
+  },
 ): ToolScope {
   const base = parent ?? OPEN_SCOPE;
+  const layers = [...base.layers, ...(own.layer ? [own.layer] : []), ...(own.extra ?? [])];
+  const writeBounds = [...(base.writeBounds ?? []), ...(own.writeBound ? [own.writeBound] : [])];
   return {
-    layers: own.layer ? [...base.layers, own.layer] : base.layers,
+    layers: layers.length === base.layers.length ? base.layers : layers,
     delegate: base.delegate && own.canDelegate !== false,
+    ...(own.delegateTo ? { delegateTo: own.delegateTo } : {}),
+    ...(writeBounds.length ? { writeBounds } : {}),
   };
+}
+
+/**
+ * The layers an agent definition adds, beyond its allow-list: its deny list
+ * and, when it names MCP servers, a bound to those servers. Shared by the run
+ * and the summary so the two cannot disagree.
+ */
+export function agentExtraLayers(def: { disallowedTools?: readonly string[] | undefined; mcpServers?: readonly string[] | undefined }): ScopeLayer[] {
+  const out: ScopeLayer[] = [];
+  const deny = (def.disallowedTools ?? []).map(s => String(s).trim()).filter(Boolean);
+  if (deny.length) out.push({ label: 'its disallowedTools', tools: 'all', mcp: 'all', deny });
+  const servers = (def.mcpServers ?? []).map(s => String(s).trim()).filter(Boolean);
+  if (servers.length) out.push({ label: 'its mcpServers', tools: 'all', mcp: servers.map(s => `mcp:${s}`) });
+  return out;
 }
 
 /** The first layer that refuses this tool, or undefined when every layer allows it. */
@@ -139,6 +186,7 @@ export function refusingLayer(scope: ToolScope | undefined, name: string): Scope
   if (DELEGATION_TOOLS.has(name)) return scope.delegate ? undefined : 'delegate';
   const mcp = isMcpToolName(name);
   for (const layer of scope.layers) {
+    if (layer.deny?.some(entry => entryMatches(entry, name))) return layer;
     if (mcp) {
       if (layer.mcp === 'all') continue;
       if (layer.mcp === 'readonly') {

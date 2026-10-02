@@ -39,6 +39,7 @@ import { Field } from './Field';
 import { ModelsPane } from './ModelsPane';
 import { SkillsPane } from './SkillsPane';
 import { McpPane } from './McpPane';
+import { ToolsPane } from './ToolsPane';
 import { AgentsPane } from './AgentsPane';
 import { MemoryPane } from './MemoryPane';
 
@@ -282,6 +283,7 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
                   {pane.custom === 'models' ? <ModelsPane />
                     : pane.custom === 'skills' ? <SkillsPane onClose={onClose} />
                     : pane.custom === 'mcp' ? <McpPane />
+                    : pane.custom === 'tools' ? <ToolsPane />
                     : pane.custom === 'agents' ? <AgentsPane onClose={onClose} />
                     : pane.custom === 'memory' ? <MemoryPane /> : null}
 

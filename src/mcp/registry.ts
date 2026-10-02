@@ -5,6 +5,8 @@ import { McpHttpClient } from './http.js';
 import { McpSseClient } from './sse.js';
 import type { McpBaseClient } from './base.js';
 import { currentRunContext } from '../run-context.js';
+import { reviewServerTools, approveTools, type HeldTool } from './pins.js';
+import { resolveConfigSecrets } from './secrets.js';
 
 /**
  * What the hosting process is told with each tool call: the calling session.
@@ -28,6 +30,15 @@ export interface McpServerInfo {
   instructions?: string;
   /** Contributed by the process hosting the engine (not in settings). */
   host?: boolean;
+  /** `modern` (2026-07-28) or `legacy` (initialize handshake), and the revision in use. */
+  era?: 'modern' | 'legacy';
+  protocolVersion?: string;
+  /** Tools held back until a person approves them (changed or new; see `mcp/pins`). */
+  heldCount?: number;
+  /** The last failure refreshing it, if any. */
+  lastError?: string;
+  /** Milliseconds the last connect (spawn, negotiate, list) took. */
+  connectMs?: number;
 }
 
 type SubscriberFn = (servers: McpServerInfo[]) => void;
@@ -46,6 +57,13 @@ class McpServerRegistry {
    * must not unplug the window the engine is running in.
    */
   private _host: Record<string, McpServerConfigV2> = {};
+  /** Tools a server listed that wait for a person (rug-pull defence). */
+  private _held = new Map<string, HeldTool<McpTool>[]>();
+  /** Every tool a server listed last time, approved or not. */
+  private _listed = new Map<string, McpTool[]>();
+  private _errors = new Map<string, string>();
+  private _connectMs = new Map<string, number>();
+  private _refreshing = new Map<string, Promise<void>>();
 
   /** Register the host's servers and connect them now. */
   async setHostServers(config: Record<string, McpServerConfigV2>): Promise<void> {
@@ -58,22 +76,34 @@ class McpServerRegistry {
     this.stopAll();
 
     for (const [name, serverConfig] of Object.entries({ ...config, ...this._host })) {
+      const started = Date.now();
+      let client: McpBaseClient | undefined;
       try {
-        const client = this._createClient(serverConfig);
+        // `{{secret:…}}` in env/headers becomes the value here, for this
+        // spawn only; settings and `_configs` keep the reference.
+        client = this._createClient(await resolveConfigSecrets(name, serverConfig));
         if (name in this._host) client.callMeta = hostCallMeta;
         await client.initialize();
-        const tools = await client.listTools();
+        this._configs.set(name, serverConfig);
+        const tools = await this._applyListing(name, await client.listTools());
         const resources = await client.listResources();
 
         this._clients.set(name, client);
-        this._toolCache.set(name, tools);
         this._resourceCache.set(name, resources);
-        this._configs.set(name, serverConfig);
+        this._connectMs.set(name, Date.now() - started);
+        this._errors.delete(name);
+        client.onToolsChanged = () => { void this.refreshTools(name); };
 
+        const held = this._held.get(name)?.length ?? 0;
         process.stdout.write(
-          chalk.gray(`  ✓ MCP server "${name}": ${tools.length} tools, ${resources.length} resources\n`),
+          chalk.gray(`  ✓ MCP server "${name}": ${tools.length} tools, ${resources.length} resources`
+            + `${held ? `, ${held} held until a person approves them (/mcp-review)` : ''}\n`),
         );
       } catch (err) {
+        try { client?.stop(); } catch { /* already gone */ }
+        this._configs.delete(name);
+        this._toolCache.delete(name);
+        this._errors.set(name, err instanceof Error ? err.message : String(err));
         process.stderr.write(
           chalk.yellow(`  ⚠ MCP server "${name}" failed to load: ${err}\n`),
         );
@@ -81,6 +111,88 @@ class McpServerRegistry {
     }
 
     this._emit();
+  }
+
+  /**
+   * Take a server's listing: pin-check it (host servers excepted), cache what
+   * may be used, keep the rest for review. Returns the usable tools.
+   */
+  private async _applyListing(name: string, listed: McpTool[]): Promise<McpTool[]> {
+    this._listed.set(name, listed);
+    let allowed = listed;
+    if (!(name in this._host)) {
+      const review = reviewServerTools(name, listed, { trusted: this._configs.get(name)?.trust === 'trusted' });
+      allowed = review.allowed;
+      this._held.set(name, review.held);
+    } else {
+      this._held.delete(name);
+    }
+    this._toolCache.set(name, allowed);
+    return allowed;
+  }
+
+  /**
+   * Re-list one server's tools now: on its `list_changed` notification, on
+   * the periodic refresh, after an approval. A changed description takes the
+   * tool away from the agent from the next step on (`agent.ts`
+   * `syncMcpTools`), and the call-time check in `getToolsForAgent` refuses a
+   * call through a handler built before the change. Coalesced per server.
+   */
+  refreshTools(name: string): Promise<void> {
+    const running = this._refreshing.get(name);
+    if (running) return running;
+    const run = (async () => {
+      const client = this._clients.get(name);
+      if (!client) return;
+      try {
+        await this._applyListing(name, await client.listTools());
+        this._errors.delete(name);
+      } catch (err) {
+        this._errors.set(name, err instanceof Error ? err.message : String(err));
+      }
+      this._emit();
+    })().finally(() => this._refreshing.delete(name));
+    this._refreshing.set(name, run);
+    return run;
+  }
+
+  /** Tools waiting for a person, per server. */
+  heldTools(name?: string): Array<{ server: string; held: HeldTool<McpTool> }> {
+    const out: Array<{ server: string; held: HeldTool<McpTool> }> = [];
+    for (const [server, held] of this._held) {
+      if (name && server !== name) continue;
+      for (const h of held) out.push({ server, held: h });
+    }
+    return out;
+  }
+
+  /**
+   * A person approved a server's held tools (all, or the named ones): pin the
+   * definitions as listed now and offer them. The caller establishes that a
+   * person asked (see `McpManage approve`); this never decides that.
+   */
+  async approveHeld(name: string, tools?: readonly string[]): Promise<string[]> {
+    const held = this._held.get(name) ?? [];
+    const chosen = held.filter(h => !tools?.length || tools.includes(h.tool.name)).map(h => h.tool);
+    if (!chosen.length) return [];
+    const pinned = approveTools(name, chosen);
+    await this.refreshTools(name);
+    return pinned;
+  }
+
+  /** Why a configured server is not loaded (or last failed to refresh). */
+  errorOf(name: string): string | undefined {
+    return this._errors.get(name);
+  }
+
+  /** Every tool the server listed last time, approved or not. */
+  listedTools(name: string): McpTool[] {
+    return this._listed.get(name) ?? [];
+  }
+
+  /** The live client, for `McpManage test` detail. */
+  clientOf(name: string): McpBaseClient | undefined {
+    return this._clients.get(name);
   }
 
   private _createClient(config: McpServerConfigV2): McpBaseClient {
@@ -101,7 +213,15 @@ class McpServerRegistry {
           name: `mcp__${serverName}__${t.name}`,
           description: `[MCP:${serverName}] ${t.description}`,
           inputSchema: t.inputSchema,
-          execute: t.execute,
+          // Checked at call time too: a handler built before a refresh held
+          // this tool back must not still reach the server.
+          execute: (args: Record<string, unknown>) => {
+            if (!this._toolCache.get(serverName)?.some(c => c.name === t.name)) {
+              return Promise.reject(new Error(`MCP tool ${t.name} on "${serverName}" is not available: its definition `
+                + 'changed since it was approved, or the server stopped offering it. A person can review it with /mcp-review.'));
+            }
+            return t.execute(args);
+          },
         });
       }
     }
@@ -136,13 +256,13 @@ class McpServerRegistry {
     let changed = false;
     for (const [name, client] of this._clients) {
       const wasHealthy = client.getHealth() === 'healthy';
-      try {
-        // Refresh tool metadata and use the request itself as the health ping.
-        const tools = await client.listTools();
-        this._toolCache.set(name, tools);
-      } catch {
-        // Client will update its own health status
-      }
+      // Refresh tool metadata and use the request itself as the health ping.
+      // Through the pin check, so a description that changed on a server that
+      // sends no list_changed (or over HTTP, where none is listened for) is
+      // caught here.
+      const before = this._toolCache.get(name)?.map(t => t.name).join() ?? '';
+      await this.refreshTools(name);
+      if ((this._toolCache.get(name)?.map(t => t.name).join() ?? '') !== before) changed = true;
       const isHealthy = client.getHealth() === 'healthy';
       if (wasHealthy !== isHealthy) changed = true;
     }
@@ -169,6 +289,11 @@ class McpServerRegistry {
       lastChecked: Date.now(),
       ...(client.instructions ? { instructions: client.instructions } : {}),
       ...(name in this._host ? { host: true } : {}),
+      ...(client.era ? { era: client.era } : {}),
+      ...(client.protocolVersion ? { protocolVersion: client.protocolVersion } : {}),
+      ...(this._held.get(name)?.length ? { heldCount: this._held.get(name)!.length } : {}),
+      ...(this._errors.get(name) ? { lastError: this._errors.get(name)! } : {}),
+      ...(this._connectMs.has(name) ? { connectMs: this._connectMs.get(name)! } : {}),
     }));
   }
 
@@ -187,6 +312,9 @@ class McpServerRegistry {
     }
     this._clients.clear();
     this._toolCache.clear();
+    this._held.clear();
+    this._listed.clear();
+    this._errors.clear();
     this._resourceCache.clear();
     this._configs.clear();
   }

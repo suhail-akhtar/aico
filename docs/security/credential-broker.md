@@ -219,6 +219,7 @@ indexed encoding, replaced by `[secret:<name>]`.
 | Legacy CLI history | `history.ts` | redacted |
 | Audit log | `vault/audit.ts` | built from fixed fields, never a record or body; free text redacted and bounded |
 | **User messages** | `server/runs.ts` `submit()`, the steer/followup route, `runAgent()` (depth 0) | **scanned**: detected secrets are vaulted (quarantined) and replaced by `[secret:name]` before the title, stream, hooks, log or model see them; a value that cannot be vaulted is removed from the text instead |
+| Custom tools (`{{secret:…}}` / `{{secret-file:…}}` in `env`, `{{secret:…}}` in HTTP headers) | `custom-tools/runner.ts` | resolved under `tool:<name>` into the child's environment, or a 0600 file in a fresh 0700 temp directory deleted when the call ends however it ends ([ADR 0010](../engineering/adr/0010-secret-file-sink.md)); never in argv or URLs; the result passes the pipeline's redaction |
 | Memory, knowledge, canvas, files the agent writes | — | not separately filtered: they are written from model output and tool arguments, which only ever contain what the model was given (already redacted) and what the user typed (scanned) |
 
 Everything in this table is exercised by the canary test (`scripts/vault-test.mjs`, V12–V15):

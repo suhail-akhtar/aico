@@ -31,6 +31,8 @@ import { moveFocus, HANDLED_KEYS } from '../sidebar-keys';
 import { dropAction, SESSION_DRAG_TYPE } from '../sidebar-drop';
 import { loadSidebarMemory, saveSidebarMemory, defaultCollapsed, type SidebarMemory } from '../sidebar-memory';
 import { toggleDestination, type Route } from '../navigation';
+import { badgeText } from '../inbox';
+import { useInboxCount } from './InboxPanel';
 import { Icon, type Glyph } from './Icon';
 import { Portal } from './Portal';
 import { SessionRowMenu } from './SessionRowMenu';
@@ -58,6 +60,8 @@ export function Sidebar(
   { route, onRoute, open, onClose, onSettings, settingsOpen, onAddProject }: Props,
 ): React.ReactElement {
   const sessions = useStore(s => s.sessions);
+  // Calls unattended runs parked for a person (the approve-later inbox).
+  const inboxCount = useInboxCount();
   const activeSessions = useStore(s => s.activeSessions);
   const sessionId = useStore(s => s.sessionId);
   const openSession = useStore(s => s.openSession);
@@ -555,6 +559,14 @@ export function Sidebar(
             Apps
           </NavButton>
           <NavButton
+            icon="clock"
+            active={route.destination === 'inbox'}
+            onClick={() => { onRoute(toggleDestination(route, 'inbox')); onClose(); }}
+            badge={badgeText(inboxCount)}
+          >
+            Waiting for you
+          </NavButton>
+          <NavButton
             icon="activity"
             active={route.destination === 'system'}
             onClick={() => { onRoute(toggleDestination(route, 'system')); onClose(); }}
@@ -798,8 +810,10 @@ function FirstRun(
 }
 
 function NavButton(
-  { active, onClick, icon, children }: {
+  { active, onClick, icon, children, badge }: {
     active: boolean; onClick: () => void; icon: Glyph; children: React.ReactNode;
+    /** A count beside the label (words in its title, never colour alone). */
+    badge?: string;
   },
 ): React.ReactElement {
   return (
@@ -813,6 +827,11 @@ function NavButton(
     >
       <Icon name={icon} size={17} className={active ? 'text-aico-accent' : 'text-aico-muted'} />
       {children}
+      {badge && (
+        <span className="ml-auto rounded-full bg-aico-warning px-1.5 text-[11px] font-medium text-aico-bg" title={`${badge} waiting`}>
+          {badge}
+        </span>
+      )}
     </button>
   );
 }

@@ -19,8 +19,9 @@
  * @module agents/resolve
  */
 
-import type { AgentSpec } from './types.js';
+import type { AgentBounds, AgentSpec } from './types.js';
 import { getAgentSpec } from './registry.js';
+import { delegateFromCanDelegate } from './format.js';
 import { skillRegistry } from '../skills/index.js';
 import { isDisabled } from '../registry-state.js';
 
@@ -36,6 +37,28 @@ export interface ResolvedAgent {
   model?: string;
   /** Skills named by the spec that do not exist, so the caller can say so. */
   missingSkills: string[];
+  /** What the run enforces for it (agents/effective, agent.ts). */
+  bounds: AgentBounds;
+}
+
+/**
+ * What a run enforces for this agent. Naming Task or Investigate in
+ * `disallowedTools` means "no delegation" — delegation is decided by
+ * `delegate`, not by name lists, so it is folded in here.
+ */
+export function boundsOf(spec: AgentSpec): AgentBounds {
+  const disallowed = spec.disallowedTools?.filter(Boolean) ?? [];
+  const noDelegation = disallowed.some(t => t === 'Task' || t === 'Investigate');
+  return {
+    name: spec.name,
+    ...(spec.tools?.length ? { tools: [...spec.tools] } : {}),
+    ...(disallowed.length ? { disallowedTools: disallowed } : {}),
+    ...(spec.mcpServers?.length ? { mcpServers: [...spec.mcpServers] } : {}),
+    delegate: noDelegation ? 'none' : spec.delegate ?? delegateFromCanDelegate(spec.canDelegate),
+    ...(spec.autonomy ? { autonomy: spec.autonomy } : {}),
+    ...(spec.budget && Object.keys(spec.budget).length ? { budget: { ...spec.budget } } : {}),
+    ...(spec.paths?.write?.length ? { writePaths: [...spec.paths.write] } : {}),
+  };
 }
 
 /** The skill procedures an agent should have in front of it. */
@@ -75,7 +98,7 @@ export function inlineSkills(names: string[]): { block: string; missing: string[
 export async function personaFor(
   name: string | undefined,
   cwd?: string,
-): Promise<{ persona?: { name: string; instructions: string }; tools?: string[]; model?: string; notice?: string; canDelegate?: boolean }> {
+): Promise<{ persona?: { name: string; instructions: string }; tools?: string[]; model?: string; notice?: string; canDelegate?: boolean; bounds?: AgentBounds }> {
   if (!name) return {};
 
   const resolved = await resolveAgent(name, cwd);
@@ -95,7 +118,8 @@ export async function personaFor(
     ...(resolved.tools?.length ? { tools: resolved.tools } : {}),
     ...(resolved.model ? { model: resolved.model } : {}),
     // Enforced by the run (agent.ts), not merely stated in the persona's prompt.
-    ...(resolved.spec.canDelegate === false ? { canDelegate: false } : {}),
+    ...(resolved.bounds.delegate === 'none' ? { canDelegate: false } : {}),
+    bounds: resolved.bounds,
   };
 }
 
@@ -119,5 +143,6 @@ export async function resolveAgent(name: string, cwd?: string): Promise<Resolved
     tools: spec.tools?.length ? spec.tools : undefined,
     model: spec.model,
     missingSkills: missing,
+    bounds: boundsOf(spec),
   };
 }

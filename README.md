@@ -232,6 +232,15 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **Pop it out.** One click (Ctrl+Shift+N) moves every tab into its own window without reloading a thing; close it and they come home.
 - **Many agents, no collisions.** Each chat drives its own labelled background tabs, so two projects can use the browser at once while your page stays yours; a tab two chats want is taken in turn. The browser copilot answers about the page — and hands real work (code, projects, servers) to a proper chat with the page attached.
 
+### 🤖 Agents, skills and tools — built, verified, trusted
+
+- **Custom agents** in Claude's agent format, with instructions, model, skills, tools (built-in, custom, MCP), delegation, an autonomy ceiling, a budget and the paths they may write — every limit enforced by the engine, and a "what this agent can do" summary computed from the same rules.
+- **Certified before they run unattended.** `aico agent certify` runs a safety pack (planted instructions, secret requests, refused deletions, out-of-scope edits) and the agent's own golden tasks with side effects mocked; the certificate is tied to everything the agent depends on, and changes void it.
+- **Custom tools** wrap a command or an HTTP call with typed parameters — no shell — and a risk class (read, write, exec, external, destructive); destructive calls show a preview before you approve, and secrets come from the vault.
+- **Claude skills, both ways.** Import a `.skill`, a folder, a pack or a Claude plugin through a security scan and a review screen; export in Claude's format. The built-in `skill-author` drafts a skill with evals and must show it beats no skill before it is registered.
+- **MCP on the current spec**, with each approved tool pinned (a changed description switches it off), secrets moved into the vault, and tools loaded only when needed.
+- **Autonomy you can leave running.** Levels L0–L4; an unattended run parks anything that needs a person in a "Waiting for you" inbox, and on approval AICO runs exactly that call — or refuses if anything changed.
+
 ### 🔐 Credentials the agent uses but never sees
 
 Ask AICO to set up a server and it creates the service's admin account itself —

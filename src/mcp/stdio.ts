@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
-import { McpBaseClient, type McpServerConfigV2, type McpHealthStatus } from './base.js';
+import { McpBaseClient, type McpServerConfigV2, type McpHealthStatus, type SendOptions } from './base.js';
+import { McpRpcError, McpTimeoutError } from './protocol.js';
 
 interface JsonRpcPendingRequest {
   resolve: (value: unknown) => void;
@@ -86,15 +87,24 @@ export class McpStdioClient extends McpBaseClient {
       try {
         const msg = JSON.parse(line) as {
           id?: number;
+          method?: string;
+          params?: unknown;
           result?: unknown;
-          error?: { message: string };
+          error?: { message: string; code?: number; data?: unknown };
         };
+        // Started by the server (a notification, or a legacy request): never
+        // matched against this client's own pending ids.
+        if (typeof msg.method === 'string') {
+          const reply = this.handleServerMessage({ id: msg.id, method: msg.method, params: msg.params });
+          if (reply && msg.id !== undefined) this.write({ jsonrpc: '2.0', id: msg.id, ...reply });
+          continue;
+        }
         if (msg.id === undefined) continue;
         const resolver = this.pendingRequests.get(msg.id);
         if (resolver) {
           this.pendingRequests.delete(msg.id);
           if (msg.error) {
-            resolver.reject(new Error(msg.error.message));
+            resolver.reject(new McpRpcError(msg.error.message, msg.error.code, msg.error.data));
           } else {
             resolver.resolve(msg.result);
           }
@@ -113,7 +123,16 @@ export class McpStdioClient extends McpBaseClient {
     return this.isAlive() ? 'healthy' : 'disconnected';
   }
 
-  async send(method: string, params?: unknown): Promise<unknown> {
+  private write(message: unknown): void {
+    try { this.proc.stdin!.write(JSON.stringify(message) + '\n'); } catch { /* the exit handler reports a dead process */ }
+  }
+
+  async notify(method: string, params?: unknown): Promise<void> {
+    if (!this.isAlive()) return;
+    this.write({ jsonrpc: '2.0', method, params: params ?? {} });
+  }
+
+  async send(method: string, params?: unknown, opts?: SendOptions): Promise<unknown> {
     if (!this.isAlive()) {
       throw new Error(`MCP server process is dead (exit code: ${this.proc.exitCode})`);
     }
@@ -131,12 +150,15 @@ export class McpStdioClient extends McpBaseClient {
         return;
       }
 
-      setTimeout(() => {
-        if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(new Error(`MCP timeout: ${method}`));
-        }
-      }, 30_000);
+      const timeoutMs = opts?.timeoutMs ?? 30_000;
+      if (timeoutMs > 0) {
+        setTimeout(() => {
+          if (this.pendingRequests.has(id)) {
+            this.pendingRequests.delete(id);
+            reject(new McpTimeoutError(method));
+          }
+        }, timeoutMs);
+      }
     });
   }
 

@@ -2,6 +2,12 @@ import { loadSettings, saveProjectMcpServers, getProjectLocalSettingsPath } from
 import { mcpRegistry } from './registry.js';
 import { disabledIn } from '../registry-state.js';
 import type { McpServerConfigV2 } from './base.js';
+import { forgetServerPins } from './pins.js';
+import { describeMove, moveLiteralSecrets } from './secrets.js';
+import type { CreatedBy } from '../vault/types.js';
+
+/** Who is writing a config: a person at the terminal, or the agent's tool call. */
+export type McpActor = CreatedBy;
 
 export type McpPreset = 'playwright';
 
@@ -61,19 +67,23 @@ async function persistAndReload(servers: Record<string, McpServerConfigV2>): Pro
   mcpRegistry.startHealthChecks();
 }
 
-export async function addMcpServer(input: McpAddServerInput): Promise<string> {
+export async function addMcpServer(input: McpAddServerInput, actor: McpActor = 'agent:McpManage'): Promise<string> {
   assertValidName(input.name);
   const settings = await loadSettings();
   const current = settings.mcpServers ?? {};
-  const config = buildConfig(input);
-  const next = { ...current, [input.name]: config };
+  // A literal secret goes to the vault before anything is written (mcp/secrets).
+  const secured = await moveLiteralSecrets(input.name, buildConfig(input), actor);
+  const next = { ...current, [input.name]: secured.config };
+  // A new server under an old name is a new server: its tools are pinned afresh.
+  if (!current[input.name]) forgetServerPins(input.name);
   await persistAndReload(next);
 
   const info = mcpRegistry.getServerInfos().find((s) => s.name === input.name);
   const status = info
     ? `${info.health}, ${info.toolCount} tool(s), ${info.resourceCount} resource(s)`
-    : 'configured but not loaded';
-  return `MCP server "${input.name}" saved to ${getProjectLocalSettingsPath()} and loaded: ${status}`;
+    : `configured but not loaded${mcpRegistry.errorOf(input.name) ? ` (${mcpRegistry.errorOf(input.name)})` : ''}`;
+  const moved = describeMove(input.name, secured);
+  return `MCP server "${input.name}" saved to ${getProjectLocalSettingsPath()} and loaded: ${status}${moved ? `\n${moved}` : ''}`;
 }
 
 /**
@@ -88,7 +98,7 @@ export async function addMcpServer(input: McpAddServerInput): Promise<string> {
  * the common edit is one variable — usually a rotated token — and replacing the
  * map would silently drop the others.
  */
-export async function updateMcpServer(input: McpAddServerInput): Promise<string> {
+export async function updateMcpServer(input: McpAddServerInput, actor: McpActor = 'agent:McpManage'): Promise<string> {
   assertValidName(input.name);
   const settings = await loadSettings();
   const current = settings.mcpServers ?? {};
@@ -107,13 +117,16 @@ export async function updateMcpServer(input: McpAddServerInput): Promise<string>
       : {}),
   } as McpServerConfigV2;
 
-  await persistAndReload({ ...current, [input.name]: merged });
+  const secured = await moveLiteralSecrets(input.name, merged, actor);
+  await persistAndReload({ ...current, [input.name]: secured.config });
 
   const info = mcpRegistry.getServerInfos().find((s) => s.name === input.name);
   const changed = ['type', 'command', 'args', 'url', 'env', 'headers']
     .filter((k) => input[k as keyof McpAddServerInput] !== undefined);
+  const moved = describeMove(input.name, secured);
   return `Updated MCP server "${input.name}" (${changed.join(', ') || 'nothing'}) and reloaded it: `
-    + (info ? `${info.health}, ${info.toolCount} tool(s)` : 'not loaded');
+    + (info ? `${info.health}, ${info.toolCount} tool(s)` : 'not loaded')
+    + (moved ? `\n${moved}` : '');
 }
 
 export async function removeMcpServer(name: string): Promise<string> {
@@ -123,6 +136,7 @@ export async function removeMcpServer(name: string): Promise<string> {
   if (!current[name]) return `MCP server "${name}" is not configured.`;
   delete current[name];
   await persistAndReload(current);
+  forgetServerPins(name);
   return `Removed MCP server "${name}" from ${getProjectLocalSettingsPath()}.`;
 }
 

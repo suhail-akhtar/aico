@@ -56,7 +56,11 @@ export const agentPromptToolDefinition = {
 };
 
 export async function executeAgentCreate(args: AgentCreateInput): Promise<string> {
-  const spec = await createAgentSpec(args);
+  // A refusal (unknown tools or skills, agents/validate) is a result the model
+  // can act on, not an exception that ends the turn.
+  let spec;
+  try { spec = await createAgentSpec(args); }
+  catch (err) { return err instanceof Error ? err.message : String(err); }
   return `Agent "${spec.name}" saved (${spec.source}).\nRole: ${spec.role}\nSkills: ${spec.skills.join(', ') || '(none)'}`;
 }
 

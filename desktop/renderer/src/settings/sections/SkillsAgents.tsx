@@ -47,6 +47,9 @@ import { MenuButton, MenuItem, MenuSep } from '@/shell/Popover';
 import { ModelCombobox } from '@/shell/ModelCombobox';
 import { newChat } from '@/chat/actions';
 import { EnginePane, Row, Switch } from '../fields';
+import { AgentBuilder } from '@web/components/settings/AgentBuilder';
+import { AgentVerify, CertBadge } from '@web/components/settings/AgentVerify';
+import { EMPTY_DRAFT, draftOf, duplicateDraft, type AgentDraft } from '@web/agent-builder';
 
 /** Start a chat that asks the agent to build something, and close settings so it is visible. */
 function askAgent(prompt: string): void {
@@ -271,7 +274,7 @@ export function SkillsSection(): React.ReactElement {
             <>
               <MenuItem icon="sparkles" label="Create with the agent" hint="recommended" onClick={() => {
                 close();
-                askAgent('Help me create a new skill. First ask what procedure it should capture and when it should be used. Then write it in Claude\'s skill format with SkillManage: a precise `description` (what it does and when to use it), clear numbered steps in SKILL.md, and any scripts, reference files or templates it needs in the skill folder beside it. Keep SKILL.md focused and move long detail into reference files. Test any script you add, then show me the result.');
+                askAgent('Help me create a new skill. Open the skill-author skill and follow it: first ask what procedure it should capture and when it should be used, draft it with its evals, show me the tasks, measure it with and without the skill, and show me the results before anything is registered.');
               }} />
               <MenuItem icon="edit" label="Write it myself" onClick={() => { close(); setCreating(true); }} />
             </>
@@ -396,25 +399,19 @@ function SkillEditor({ onDone }: { onDone: (saved: boolean) => void | Promise<vo
 
 // ── Agents ─────────────────────────────────────────────────────────────
 
-/** The built-in tools an agent can be limited to. Anything else can be typed (MCP tools by name). */
-const TOOL_CHOICES: Array<[string, string]> = [
-  ['Read', 'read files'], ['Grep', 'search contents'], ['Glob', 'find files'], ['LS', 'list folders'],
-  ['Write', 'create files'], ['Edit', 'change files'], ['Bash', 'run commands'], ['WebFetch', 'read web pages'],
-  ['WebSearch', 'search the web'], ['Task', 'sub-tasks'], ['WorkspaceWrite', 'scratch files'], ['Git', 'version control'],
-  ['RunChecks', 'tests and builds'], ['MCP', 'every MCP tool'],
-];
-
-interface AgentDraft {
-  name: string; description: string; role: string; goals: string; model: string;
-  skills: string[]; tools: string[]; canDelegate: boolean;
-  knowledge: Array<{ abs: string; rel: string }>;
-}
-
-const EMPTY_AGENT: AgentDraft = { name: '', description: '', role: '', goals: '', model: '', skills: [], tools: ['Read', 'Grep', 'Glob', 'LS'], canDelegate: false, knowledge: [] };
+/**
+ * Agents are edited with the shared builder (`@web/components/settings/
+ * AgentBuilder`): the engine validates as you type and generates the summary,
+ * so the desktop and the web panel cannot disagree. What only the desktop can
+ * do rides in the builder's slots — the model picker, and the agent's own
+ * knowledge files, saved as its companion skill before the agent is.
+ */
+type Knowledge = Array<{ abs: string; rel: string }>;
 
 export function AgentsSection(): React.ReactElement {
   const [agents, setAgents] = useState<AgentSpec[] | null>(null);
   const [editing, setEditing] = useState<{ draft: AgentDraft; existing: boolean } | null>(null);
+  const [verifying, setVerifying] = useState<string | null>(null);
   const load = useCallback(async () => { try { setAgents((await api.agents()).agents); } catch { setAgents([]); } }, []);
   useEffect(() => { void load(); }, [load]);
   const pane = PANES.find(p => p.id === 'agents');
@@ -431,32 +428,37 @@ export function AgentsSection(): React.ReactElement {
   };
 
   const importAgents = async (): Promise<void> => {
-    const picked = await desktop.dialog.pickFiles({ title: 'Import agents', filters: [{ name: 'Agents JSON', extensions: ['json'] }] });
+    const picked = await desktop.dialog.pickFiles({ title: 'Import agents (AICO .json, or Claude Code / Copilot .md)', filters: [{ name: 'Agents', extensions: ['json', 'md'] }] });
     if (picked[0]) await act({ action: 'import', path: picked[0].path }, 'Agents imported');
+  };
+  const importFolder = async (): Promise<void> => {
+    const dir = await desktop.dialog.pickFolder('Import a folder of agents (.claude/agents, .github/agents)');
+    if (dir) await act({ action: 'import', path: dir }, 'Agents imported');
   };
   const exportAgents = async (): Promise<void> => {
     const dest = await desktop.dialog.saveFile({ defaultName: 'aico-agents.json', content: '{}', filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (dest) await act({ action: 'export', path: dest }, 'Agents exported');
   };
-
-  const edit = (a: AgentSpec): void => setEditing({ existing: true, draft: {
-    name: a.name, description: a.description, role: a.role ?? '', goals: (a.goals ?? []).join('\n'), model: a.model ?? '',
-    skills: a.skills ?? [], tools: a.tools ?? [], canDelegate: a.canDelegate, knowledge: [],
-  } });
+  const effective = async (a: AgentSpec): Promise<void> => {
+    const r = await api.manage('agents', { action: 'effective', name: a.name });
+    toast.info(`What @${a.name} can do`, r.result ?? r.error ?? '');
+  };
 
   const mine = (agents ?? []).filter(a => a.source !== 'builtin');
   const builtin = (agents ?? []).filter(a => a.source === 'builtin');
   const row = (a: AgentSpec): React.ReactElement => (
     <Row key={a.name}
-      title={<span className="flex items-center gap-2">@{a.name}<span className="badge bg-aico-hover text-aico-muted">{a.source}</span>{a.model && <span className="badge bg-aico-hover font-mono text-aico-muted">{a.model}</span>}</span>}
+      title={<span className="flex items-center gap-2">@{a.name}<span className="badge bg-aico-hover text-aico-muted">{a.source}</span>{a.autonomy && <span className="badge bg-aico-hover text-aico-muted">{a.autonomy}</span>}{a.format === 'json' && <span className="badge bg-aico-hover text-aico-muted" title="Saved as .md the next time it is edited">legacy JSON</span>}{a.model && <span className="badge bg-aico-hover font-mono text-aico-muted">{a.model}</span>}<CertBadge status={a.certification?.status} {...(a.certification?.text ? { text: a.certification.text } : {})} /></span>}
       desc={<span className="line-clamp-2">{a.description}{a.skills?.length ? <span className="text-aico-muted"> · skills: {a.skills.join(', ')}</span> : null}</span>}>
       <div className="flex items-center gap-1">
         <MenuButton className="icon-btn-sm" title="More" placement="bottom-end" width={220} button={<Icon name="more" size={15} />}>
           {close => (
             <>
               <MenuItem icon="chat" label="Talk to it" onClick={() => { close(); useDesk.getState().closeSettings(); newChat(); void useStore.getState().setSessionAgent(a.name); toast.success(`Talking to @${a.name}`); }} />
-              {a.source !== 'builtin' && <MenuItem icon="edit" label="Edit" onClick={() => { close(); edit(a); }} />}
-              <MenuItem icon="copy" label="Duplicate as mine" onClick={() => { close(); edit(a); setEditing(e => e && { existing: false, draft: { ...e.draft, name: `${a.name}-copy` } }); }} />
+              <MenuItem icon="info" label="What it can do" onClick={() => { close(); void effective(a); }} />
+              <MenuItem icon="check" label="Verify and certify…" hint="for unattended runs" onClick={() => { close(); setEditing(null); setVerifying(a.name); }} />
+              {a.source !== 'builtin' && <MenuItem icon="edit" label="Edit" onClick={() => { close(); setEditing({ existing: true, draft: draftOf(a) }); }} />}
+              <MenuItem icon="copy" label="Duplicate as mine" onClick={() => { close(); setEditing({ existing: false, draft: duplicateDraft(a, (agents ?? []).map(x => x.name)) }); }} />
               {a.source !== 'builtin' && <><MenuSep /><MenuItem icon="trash" danger label="Delete…" onClick={async () => {
                 close();
                 if (await desktop.dialog.confirm({ title: 'Delete agent', message: `Delete @${a.name}?`, ok: 'Delete', danger: true })) await act({ action: 'delete', name: a.name }, 'Agent deleted');
@@ -471,25 +473,50 @@ export function AgentsSection(): React.ReactElement {
 
   return (
     <div>
-      <p className="-mt-2 mb-4 text-[13px] text-aico-muted">Specialists the orchestrator hands work to — each with its own instructions, tools, skills, model and knowledge. Talk to one directly with <code>@name</code> in the composer.</p>
+      <p className="-mt-2 mb-4 text-[13px] text-aico-muted">Specialists the orchestrator hands work to — each a Markdown file in Claude Code's agent format with its own instructions, tools, skills, model, autonomy ceiling, budget and write paths, enforced by the engine. Talk to one directly with <code>@name</code> in the composer.</p>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex-1" />
-        <button className="btn-outline btn-sm" onClick={() => void importAgents()}><Icon name="upload" size={13} />Import</button>
+        <MenuButton className="btn-outline btn-sm" title="Import agents" placement="bottom-end" width={260} button={<><Icon name="upload" size={13} />Import</>}>
+          {close => (
+            <>
+              <MenuItem icon="file" label="A file…" hint=".json, .md" onClick={() => { close(); void importAgents(); }} />
+              <MenuItem icon="folder" label="A folder…" hint=".claude/agents" onClick={() => { close(); void importFolder(); }} />
+            </>
+          )}
+        </MenuButton>
         <button className="btn-outline btn-sm" onClick={() => void exportAgents()}><Icon name="download" size={13} />Export</button>
         <MenuButton className="btn-primary btn-sm" title="Create an agent" placement="bottom-end" width={290} button={<><Icon name="plus" size={13} />New agent</>}>
           {close => (
             <>
               <MenuItem icon="sparkles" label="Create with the agent" hint="recommended" onClick={() => {
                 close();
-                askAgent('Create a new agent for me. First ask what kind of work it should take on. Then use AgentManage to define it: a description precise enough that you would know when to hand it a task, its role and goals, only the tools it needs, and the skills it should reach for. If it needs its own knowledge (reference documents) or scripts, create a skill for them with SkillManage first — references/ and scripts/ beside SKILL.md — and give the agent that skill. Show me the result and how to talk to it.');
+                askAgent('Create a new agent for me. First ask what kind of work it should take on. Then use AgentManage to define it: a description precise enough that you would know when to hand it a task, its instructions, only the tools it needs, the skills it should reach for, an autonomy ceiling and a budget. If it needs its own knowledge (reference documents) or scripts, create a skill for them with SkillManage first — references/ and scripts/ beside SKILL.md — and give the agent that skill. Validate it, then show me what it can do and how to talk to it.');
               }} />
-              <MenuItem icon="edit" label="Define it myself" onClick={() => { close(); setEditing({ existing: false, draft: { ...EMPTY_AGENT } }); }} />
+              <MenuItem icon="edit" label="Define it myself" onClick={() => { close(); setEditing({ existing: false, draft: { ...EMPTY_DRAFT } }); }} />
             </>
           )}
         </MenuButton>
       </div>
 
-      {editing && <AgentEditor initial={editing.draft} existing={editing.existing} onDone={async (saved) => { setEditing(null); if (saved) await load(); }} act={act} />}
+      {editing && <div className="mt-4"><DesktopAgentBuilder key={`${editing.draft.name}-${editing.existing}`} initial={editing.draft} existing={editing.existing} onDone={async (saved, savedName) => {
+        const name = savedName ?? editing.draft.name;
+        setEditing(null);
+        if (saved) { toast.success(editing.existing ? `Agent @${name} updated` : `Agent @${name} created`); await load(); }
+      }} /></div>}
+
+      {verifying && (() => {
+        const a = (agents ?? []).find(x => x.name === verifying);
+        return (
+          <div className="mt-4 rounded-xl border border-aico-border p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[13px] font-medium">Verify @{verifying}</span>
+              <div className="flex-1" />
+              <button className="icon-btn-sm" onClick={() => setVerifying(null)} aria-label="Close"><Icon name="x" size={13} /></button>
+            </div>
+            <AgentVerify name={verifying} {...(a?.certification ? { status: a.certification.status, statusText: a.certification.text } : {})} onDone={load} />
+          </div>
+        );
+      })()}
 
       {mine.length > 0 && <><h3 className="set-heading">Yours</h3><div className="set-group">{mine.map(row)}</div></>}
       <h3 className="set-heading">Built in</h3>
@@ -502,20 +529,12 @@ export function AgentsSection(): React.ReactElement {
   );
 }
 
-function AgentEditor({ initial, existing, onDone, act }: {
+/** The shared builder, with the desktop's model picker and knowledge files. */
+function DesktopAgentBuilder({ initial, existing, onDone }: {
   initial: AgentDraft; existing: boolean;
-  onDone: (saved: boolean) => void | Promise<void>;
-  act: (input: Record<string, unknown>, success?: string) => Promise<boolean>;
+  onDone: (saved: boolean, name?: string) => void | Promise<void>;
 }): React.ReactElement {
-  const [d, setD] = useState<AgentDraft>(initial);
-  const [skills, setSkills] = useState<SkillSummary[]>([]);
-  const [toolText, setToolText] = useState('');
-  const [saving, setSaving] = useState(false);
-  const system = useStore(s => s.system);
-  useEffect(() => { void api.skills().then(r => setSkills(r.skills)).catch(() => {}); }, []);
-  const set = (patch: Partial<AgentDraft>): void => setD(x => ({ ...x, ...patch }));
-  const toggleIn = (list: string[], v: string): string[] => (list.includes(v) ? list.filter(x => x !== v) : [...list, v]);
-  const mcpNames = useMemo(() => (system?.mcpServers ?? []).filter(s => s.enabled).map(s => s.name), [system]);
+  const [knowledge, setKnowledge] = useState<Knowledge>([]);
 
   const addKnowledge = async (kind: 'files' | 'folder' | 'scripts'): Promise<void> => {
     if (kind === 'folder') {
@@ -523,124 +542,62 @@ function AgentEditor({ initial, existing, onDone, act }: {
       if (!dir) return;
       const base = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'docs';
       const files = await folderFiles(dir);
-      set({ knowledge: [...d.knowledge, ...files.map(f => ({ abs: f.abs, rel: `references/${base}/${f.rel}` }))] });
+      setKnowledge(k => [...k, ...files.map(f => ({ abs: f.abs, rel: `references/${base}/${f.rel}` }))]);
       return;
     }
     const picked = await desktop.dialog.pickFiles({ title: kind === 'scripts' ? 'Add scripts' : 'Add knowledge files' });
-    set({ knowledge: [...d.knowledge, ...picked.map(p => ({ abs: p.path, rel: `${kind === 'scripts' ? 'scripts' : 'references'}/${p.name}` }))] });
+    setKnowledge(k => [...k, ...picked.map(p => ({ abs: p.path, rel: `${kind === 'scripts' ? 'scripts' : 'references'}/${p.name}` }))]);
   };
 
-  const save = async (): Promise<void> => {
+  // The agent's own knowledge and scripts become its companion skill, saved first.
+  const beforeSave = async (d: AgentDraft): Promise<string[] | false> => {
+    if (knowledge.length === 0) return [];
     const name = slugName(d.name);
-    if (!name || !d.description.trim()) { toast.warning('A name and a description are both needed', 'The description decides when the orchestrator hands this agent a task.'); return; }
-    setSaving(true);
-    try {
-      let skillsFor = d.skills;
-      // The agent's own knowledge and scripts become its companion skill.
-      if (d.knowledge.length > 0) {
-        const kit = `${name}-kit`;
-        const refs = d.knowledge.filter(k => k.rel.startsWith('references/')).map(k => `- \`${k.rel}\``);
-        const scripts = d.knowledge.filter(k => k.rel.startsWith('scripts/')).map(k => `- \`${k.rel}\``);
-        const md = [
-          '---', `name: ${kit}`, `description: Knowledge and scripts for the ${name} agent — read the references before answering questions in its area, and use the scripts instead of rewriting them.`, '---', '',
-          `# ${name} kit`, '',
-          ...(refs.length ? ['## Reference knowledge', '', 'Read the relevant file before answering; cite it by path.', '', ...refs, ''] : []),
-          ...(scripts.length ? ['## Scripts', '', 'Run these rather than reimplementing them. Read a script before running it the first time.', '', ...scripts, ''] : []),
-        ].join('\n');
-        const r = await api.saveAuthoredSkill([{ path: 'SKILL.md', base64: btoa(unescape(encodeURIComponent(md))) }, ...await toUpload(d.knowledge)], true);
-        if (!r.ok) { toast.error('Knowledge not saved', r.error); return; }
-        skillsFor = [...new Set([...skillsFor, r.name ?? kit])];
-      }
-      const ok = await act({
-        action: existing ? 'update' : 'create', name,
-        description: d.description.trim(), role: d.role.trim() || undefined,
-        goals: d.goals.split('\n').map(g => g.trim()).filter(Boolean),
-        skills: skillsFor, tools: d.tools, canDelegate: d.canDelegate,
-        ...(d.model.trim() ? { model: d.model.trim() } : {}),
-      }, existing ? `Agent @${name} updated` : `Agent @${name} created`);
-      if (ok) await onDone(true);
-    } finally { setSaving(false); }
+    const kit = `${name}-kit`;
+    const refs = knowledge.filter(k => k.rel.startsWith('references/')).map(k => `- \`${k.rel}\``);
+    const scripts = knowledge.filter(k => k.rel.startsWith('scripts/')).map(k => `- \`${k.rel}\``);
+    const md = [
+      '---', `name: ${kit}`, `description: Knowledge and scripts for the ${name} agent — read the references before answering questions in its area, and use the scripts instead of rewriting them.`, '---', '',
+      `# ${name} kit`, '',
+      ...(refs.length ? ['## Reference knowledge', '', 'Read the relevant file before answering; cite it by path.', '', ...refs, ''] : []),
+      ...(scripts.length ? ['## Scripts', '', 'Run these rather than reimplementing them. Read a script before running it the first time.', '', ...scripts, ''] : []),
+    ].join('\n');
+    const r = await api.saveAuthoredSkill([{ path: 'SKILL.md', base64: btoa(unescape(encodeURIComponent(md))) }, ...await toUpload(knowledge)], true);
+    if (!r.ok) { toast.error('Knowledge not saved', r.error); return false; }
+    return [r.name ?? kit];
   };
 
   return (
-    <div className="mt-4 space-y-3 rounded-xl border border-aico-border-subtle p-4">
-      <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-1"><span className="label">Name</span>
-          <input className="input font-mono" value={d.name} onChange={e => set({ name: e.target.value })} placeholder="security-reviewer" disabled={existing} autoFocus={!existing} />
-        </label>
-        <label className="space-y-1"><span className="label">Model <span className="text-aico-muted">(optional)</span></span>
-          <ModelCombobox value={d.model} onChange={v => set({ model: v })} placeholder="same as the chat"
-            load={async () => { const r = await api.providerModels(); return { models: r.models.map(id => ({ id, ...(r.capabilities?.[id] ?? {}) })), error: r.error }; }} />
-        </label>
-      </div>
-      <label className="block space-y-1"><span className="label">When to hand it work</span>
-        <input className="input" value={d.description} onChange={e => set({ description: e.target.value })} placeholder="Reviews changes for security problems: injection, secrets, auth, unsafe dependencies" />
-      </label>
-      <label className="block space-y-1"><span className="label">Instructions and role</span>
-        <textarea className="input min-h-[90px] text-[13px]" value={d.role} onChange={e => set({ role: e.target.value })} placeholder="You are a meticulous application-security reviewer. Report findings with file:line, severity and a fix." />
-      </label>
-      <label className="block space-y-1"><span className="label">Goals <span className="text-aico-muted">(one per line)</span></span>
-        <textarea className="input min-h-[60px] text-[13px]" value={d.goals} onChange={e => set({ goals: e.target.value })} />
-      </label>
-
-      <div className="space-y-1">
-        <span className="label">Tools it may use</span>
-        <div className="flex flex-wrap gap-1.5">
-          {TOOL_CHOICES.map(([t, hint]) => (
-            <button key={t} type="button" title={hint} onClick={() => set({ tools: toggleIn(d.tools, t) })}
-              className={cls('chip', d.tools.includes(t) && 'border-aico-accent/50 bg-aico-accent-soft text-aico-accent')}>{d.tools.includes(t) && <Icon name="check" size={11} />}{t}</button>
-          ))}
-          {mcpNames.map(m => (
-            <button key={m} type="button" title={`Tools from the ${m} MCP server`} onClick={() => set({ tools: toggleIn(d.tools, `mcp:${m}`) })}
-              className={cls('chip', d.tools.includes(`mcp:${m}`) && 'border-aico-accent/50 bg-aico-accent-soft text-aico-accent')}><Icon name="plug" size={11} />{m}</button>
-          ))}
-          {d.tools.filter(t => !TOOL_CHOICES.some(([c]) => c === t) && !t.startsWith('mcp:')).map(t => (
-            <button key={t} type="button" className="chip border-aico-accent/50 bg-aico-accent-soft text-aico-accent" onClick={() => set({ tools: toggleIn(d.tools, t) })}>{t}<Icon name="x" size={10} /></button>
-          ))}
-          <input className="input h-7 w-40 py-0 text-[12px]" placeholder="+ tool name" value={toolText} onChange={e => setToolText(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && toolText.trim()) { e.preventDefault(); set({ tools: [...new Set([...d.tools, toolText.trim()])] }); setToolText(''); } }} />
+    <AgentBuilder
+      initial={initial}
+      existing={existing}
+      onDone={onDone}
+      beforeSave={beforeSave}
+      modelField={(value, onChange) => (
+        <ModelCombobox value={value} onChange={onChange} placeholder="same as the chat"
+          load={async () => { const r = await api.providerModels(); return { models: r.models.map(id => ({ id, ...(r.capabilities?.[id] ?? {}) })), error: r.error }; }} />
+      )}
+      extra={(d) => (
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="label">Its own knowledge and scripts</span>
+            <button className="btn-ghost btn-sm" onClick={() => void addKnowledge('files')}><Icon name="book" size={13} />Files</button>
+            <button className="btn-ghost btn-sm" onClick={() => void addKnowledge('folder')}><Icon name="folder" size={13} />Folder</button>
+            <button className="btn-ghost btn-sm" onClick={() => void addKnowledge('scripts')}><Icon name="terminal" size={13} />Scripts</button>
+          </div>
+          {knowledge.length > 0 && (
+            <ul className="max-h-[120px] space-y-0.5 overflow-y-auto thin-scroll text-[12px]">
+              {knowledge.map((k, i) => (
+                <li key={`${k.rel}${i}`} className="flex items-center gap-2 font-mono text-aico-secondary">
+                  <span className="truncate">{k.rel}</span>
+                  <button className="icon-btn-sm h-5 w-5" onClick={() => setKnowledge(knowledge.filter((_, j) => j !== i))} aria-label={`Remove ${k.rel}`}><Icon name="x" size={11} /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-[12px] text-aico-muted">Saved as the skill <code>{slugName(d.name) || 'name'}-kit</code> (references/ and scripts/ beside a SKILL.md) and given to this agent. Nothing is run when it is saved.</p>
         </div>
-      </div>
-
-      <div className="space-y-1">
-        <span className="label">Skills it reaches for</span>
-        <div className="flex max-h-[120px] flex-wrap gap-1.5 overflow-y-auto thin-scroll">
-          {skills.filter(s => s.enabled).map(s => (
-            <button key={s.name} type="button" title={s.description} onClick={() => set({ skills: toggleIn(d.skills, s.name) })}
-              className={cls('chip', d.skills.includes(s.name) && 'border-aico-accent/50 bg-aico-accent-soft text-aico-accent')}>{d.skills.includes(s.name) && <Icon name="check" size={11} />}{s.name}</button>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="label">Its own knowledge and scripts</span>
-          <button className="btn-ghost btn-sm" onClick={() => void addKnowledge('files')}><Icon name="book" size={13} />Files</button>
-          <button className="btn-ghost btn-sm" onClick={() => void addKnowledge('folder')}><Icon name="folder" size={13} />Folder</button>
-          <button className="btn-ghost btn-sm" onClick={() => void addKnowledge('scripts')}><Icon name="terminal" size={13} />Scripts</button>
-        </div>
-        {d.knowledge.length > 0 && (
-          <ul className="max-h-[120px] space-y-0.5 overflow-y-auto thin-scroll text-[12px]">
-            {d.knowledge.map((k, i) => (
-              <li key={`${k.rel}${i}`} className="flex items-center gap-2 font-mono text-aico-secondary">
-                <span className="truncate">{k.rel}</span>
-                <button className="icon-btn-sm h-5 w-5" onClick={() => set({ knowledge: d.knowledge.filter((_, j) => j !== i) })} aria-label={`Remove ${k.rel}`}><Icon name="x" size={11} /></button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="text-[12px] text-aico-muted">Saved as the skill <code>{slugName(d.name) || 'name'}-kit</code> (references/ and scripts/ beside a SKILL.md) and given to this agent. Nothing is run when it is saved.</p>
-      </div>
-
-      <label className="flex items-center gap-2 text-[13px]">
-        <Switch checked={d.canDelegate} onChange={v => set({ canDelegate: v })} label="Can delegate" />
-        May hand parts of its work to other agents
-      </label>
-
-      <div className="flex justify-end gap-2">
-        <button className="btn-outline" onClick={() => void onDone(false)}>Cancel</button>
-        <button className="btn-primary" onClick={() => void save()} disabled={saving}>{saving && <span className="spinner h-3 w-3" />}{existing ? 'Save agent' : 'Create agent'}</button>
-      </div>
-    </div>
+      )}
+    />
   );
 }

@@ -120,6 +120,7 @@ import { createMiniApp, slugify } from '../miniapps/store.js';
 import { cp } from 'fs/promises';
 import { closeDatabase } from '../miniapps/data.js';
 import { setWakeDelivery } from '../work/watchers.js';
+import { parseLevel } from '../autonomy/levels.js';
 import { getVault } from '../vault/index.js';
 import { handleVaultRoute } from '../vault/http.js';
 import { quarantineIfEnabled } from '../vault/agent-hooks.js';
@@ -1402,6 +1403,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           */
           approval: (['auto', 'edits', 'ask'] as const)
             .find(m => m === (body as { approval?: string }).approval) ?? 'auto',
+          // The L0–L4 scale, for a client that speaks it; overrides the two
+          // fields above. Unknown values are ignored, like `approval`'s.
+          ...(parseLevel((body as { autonomy?: unknown }).autonomy) ? { autonomy: parseLevel((body as { autonomy?: unknown }).autonomy)! } : {}),
           // Opt-in, never inferred: a client that claims this must answer every
           // `edit` event, because the tool call waits until it does.
           applyEdits: (body as { applyEdits?: boolean }).applyEdits === true,

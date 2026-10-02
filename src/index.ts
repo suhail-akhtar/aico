@@ -23,6 +23,8 @@ import { freezeHooks, runHooks } from './hooks.js';
 import { skillRegistry } from './skills/index.js';
 import { registerSkillCommands } from './skills/eval/cli.js';
 import { registerVaultCommands } from './vault/cli.js';
+import { registerToolCommands } from './custom-tools/cli.js';
+import { registerAgentCommands } from './evals/cli.js';
 import { initializeFeatures, shutdownFeatures } from './bootstrap.js';
 import { mcpRegistry } from './mcp/index.js';
 import { cronScheduler } from './cron/scheduler.js';
@@ -379,8 +381,13 @@ program
     process.exit(0);
   });
 
-registerSkillCommands(program, { pickModel: (m) => resolveModel(m || defaultModel()) });
+// The configured model first, as every other command does: without it `aico
+// skill eval` ran on an env-key default and, with DeepSeek configured, sent
+// DeepSeek the OpenRouter id and got a 400.
+registerSkillCommands(program, { pickModel: (m, settings) => resolveModel(m || settings?.model || defaultModel(), settings) });
 registerVaultCommands(program);
+registerToolCommands(program);
+registerAgentCommands(program, { pickModel: (m, settings) => resolveModel(m || settings?.model || defaultModel(), settings) });
 
 // ── provider subcommand ───────────────────────────────────────────────
 const providerCmd = program
@@ -778,6 +785,7 @@ async function startReadlineREPL(
           ...(persona.persona ? { agentPersona: persona.persona } : {}),
           ...(persona.tools?.length ? { agentSpecTools: persona.tools } : {}),
           ...('canDelegate' in persona && persona.canDelegate === false ? { canDelegate: false } : {}),
+          ...('bounds' in persona && persona.bounds ? { agentBounds: persona.bounds } : {}),
         });
         if (finalMessage) {
           conversationHistory.push({ role: 'user',      content: trimmed });

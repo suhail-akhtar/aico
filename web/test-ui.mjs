@@ -45,6 +45,9 @@ import {
 } from './dist-test/message-versions.mjs';
 import { checksFrom } from './dist-test/checks.mjs';
 import * as skillReview from './dist-test/skill-review.mjs';
+import * as inbox from './dist-test/inbox.mjs';
+import * as agentBuilder from './dist-test/agent-builder.mjs';
+import * as agentCertify from './dist-test/agent-certify.mjs';
 import { shouldClearBusy } from './dist-test/turn-state.mjs';
 import { searchAgents, splitAgents, mentionAt } from './dist-test/agents.mjs';
 import { effortDisplay, tuningPatch, tuningChoice, FAMILY_REASONING, reasoningFor } from './dist-test/reasoning.mjs';
@@ -286,6 +289,42 @@ test('?view= opens a destination and ignores anything else', () => {
   assert.equal(parseView('?view=sessions'), null, 'the default is not a link');
   assert.equal(parseView(''), null);
 });
+
+test('the approve-later inbox is a destination with its own name and link', () => {
+  assert.deepEqual(parseView('?view=inbox'), { destination: 'inbox' });
+  assert.equal(headerTitle({ destination: 'inbox', tab: 'chat' }, 'x'), 'Waiting for you');
+});
+
+section('Waiting for you: the approve-later inbox');
+{
+  const a = (o) => ({ id: 'a', status: 'pending', createdAt: 1, expiresAt: 10, origin: 'cron', cwd: '/x', tool: 't', effect: 'destructive', why: 'w', call: 'c', ...o });
+  test('status is a word, never only a colour', () => {
+    assert.deepEqual(['pending', 'executed', 'diverged', 'denied', 'expired'].map(inbox.statusLabel),
+      ['Waiting for you', 'Approved — ran', 'Refused — changed since parked', 'Denied', 'Expired']);
+  });
+  test('where it came from', () => {
+    assert.equal(inbox.originLabel({ origin: 'cron', label: 'nightly deploy' }), 'Schedule · nightly deploy');
+    assert.equal(inbox.originLabel({ origin: 'remote' }), 'Remote (MCP)');
+  });
+  test('expiry in words', () => {
+    assert.equal(inbox.expiresIn(1000, 2000), 'expired');
+    assert.equal(inbox.expiresIn(12 * 60_000, 0), 'expires in 12 min');
+    assert.equal(inbox.expiresIn(3 * 3_600_000, 0), 'expires in 3 h');
+    assert.equal(inbox.expiresIn(72 * 3_600_000, 0), 'expires in 3 days');
+  });
+  test('the collapsed preview line', () => {
+    assert.equal(inbox.previewSummary('Preview (k8s_helm_diff):\n- a\n+ b\n'), 'Preview (k8s_helm_diff) — 2 lines');
+    assert.equal(inbox.previewSummary(undefined), undefined);
+  });
+  test('pending first (longest waiting first), then decisions newest first', () => {
+    const list = [a({ id: 'd1', status: 'denied', decidedAt: 5 }), a({ id: 'p2', createdAt: 3 }), a({ id: 'p1', createdAt: 2 }), a({ id: 'd2', status: 'executed', decidedAt: 9 })];
+    assert.deepEqual(inbox.sortActions(list).map(x => x.id), ['p1', 'p2', 'd2', 'd1']);
+  });
+  test('only newly parked calls notify', () => {
+    assert.deepEqual(inbox.newlyPending([a({ id: 'x' })], [a({ id: 'x' }), a({ id: 'y' }), a({ id: 'z', status: 'denied' })]).map(x => x.id), ['y']);
+  });
+  test('badge text', () => assert.deepEqual([0, 3, 12].map(inbox.badgeText), ['', '3', '9+']));
+}
 
 test('leaving for Apps keeps the tab for the way back', () => {
   const onChanges = withTab(DEFAULT_ROUTE, 'changes');
@@ -2385,6 +2424,75 @@ console.log('\n-- Rich answer blocks: parsing, links, arithmetic --');
   test('trust badges in words', () =>
     assert.deepEqual(['unreviewed', 'reviewed', 'builtin', 'authored', undefined].map(skillReview.trustLabel), ['needs review', 'reviewed', 'built in', 'yours', 'yours']));
   test('sizes for people', () => assert.deepEqual([12, 2048, 3 * 1048576].map(skillReview.formatBytes), ['12 B', '2.0 KB', '3.0 MB']));
+}
+
+section('The agent builder: drafts in, AgentManage input out');
+{
+  const legacy = { name: 'old', description: 'd', role: 'senior reviewer', goals: ['look'], skills: [], tools: ['Read'], canDelegate: true, source: 'user', enabled: true };
+  test('a legacy agent opens with its role as instructions and delegate readonly', () => {
+    const d = agentBuilder.draftOf(legacy);
+    assert.equal(d.delegate, 'readonly');
+    assert.match(d.instructions, /You are a senior reviewer\./);
+    assert.equal(d.allTools, false);
+  });
+  test('an agent with no tool list means every tool', () =>
+    assert.equal(agentBuilder.draftOf({ ...legacy, tools: [] }).allTools, true));
+  test('a named delegate list round-trips', () => {
+    const d = agentBuilder.draftOf({ ...legacy, delegate: ['a', 'b'] });
+    assert.equal(d.delegate, 'named');
+    assert.deepEqual(agentBuilder.inputOf(d).delegate, ['a', 'b']);
+  });
+  test('the input sends every field, so blanks clear on update', () => {
+    const input = agentBuilder.inputOf({ ...agentBuilder.EMPTY_DRAFT, name: ' x ', maxUsd: '', maxIterations: '30', writePaths: 'docs/**\n\n src/** ' });
+    assert.equal(input.name, 'x');
+    assert.deepEqual(input.budget, { maxIterations: 30 });
+    assert.deepEqual(input.paths, { write: ['docs/**', 'src/**'] });
+    assert.equal(input.model, '');
+  });
+  test('every tool sends an empty allow-list', () =>
+    assert.deepEqual(agentBuilder.inputOf({ ...agentBuilder.EMPTY_DRAFT, allTools: true }).tools, []));
+  test('a non-number budget is passed for the engine to refuse', () =>
+    assert.ok(Number.isNaN(agentBuilder.inputOf({ ...agentBuilder.EMPTY_DRAFT, maxUsd: 'lots' }).budget.maxUsd)));
+  test('duplicating picks a free name', () =>
+    assert.equal(agentBuilder.duplicateDraft(legacy, ['old-copy']).name, 'old-copy-2'));
+  test("the engine's answer is read; text that is not JSON is an error", () => {
+    assert.deepEqual(agentBuilder.readCheck('{"ok":true,"errors":[],"warnings":["w"]}'), { ok: true, errors: [], warnings: ['w'] });
+    assert.deepEqual(agentBuilder.readCheck('Not saved — x'), { ok: false, errors: ['Not saved — x'], warnings: [] });
+    assert.equal(agentBuilder.readCheck(undefined, 'offline').errors[0], 'offline');
+  });
+  test('engine errors are placed at their field', () => {
+    assert.equal(agentBuilder.fieldOf('tools: "Raed" is not a tool AICO knows'), 'tools');
+    assert.equal(agentBuilder.fieldOf('paths.write: "/etc" is absolute'), 'writePaths');
+    assert.equal(agentBuilder.fieldOf('budget.maxUsd must be a positive number'), 'maxUsd');
+    assert.equal(agentBuilder.fieldOf('instructions are 41,000 characters'), 'instructions');
+    assert.equal(agentBuilder.fieldOf('something else'), 'other');
+  });
+  test('autonomy levels are words with a hint, never colour alone', () =>
+    assert.ok(agentBuilder.AUTONOMY_CHOICES.every(c => /^L[0-4] \w/.test(c.label) && c.hint.length > 5)));
+}
+
+section('Agent certification: badges and the certify reply');
+{
+  test('every status has a symbol and words, never colour alone', () => {
+    for (const s of ['certified', 'changed', 'failed', 'uncertified']) {
+      const b = agentCertify.certBadge(s);
+      assert.ok(b.symbol && b.label.length > 5 && b.hint.length > 20, s);
+    }
+    assert.equal(agentCertify.certBadge('changed').label, 'changed since certification');
+  });
+  test('an unknown or missing status reads as uncertified', () => {
+    assert.equal(agentCertify.certBadge(undefined).label, 'uncertified');
+    assert.equal(agentCertify.certBadge('bogus').label, 'uncertified');
+  });
+  test('the certify reply is read for its verdict and the dry run for its estimate', () => {
+    assert.equal(agentCertify.readCertifyReply('docs-bot: CERTIFIED on deepseek-flash (k=1).').passed, true);
+    assert.equal(agentCertify.readCertifyReply('docs-bot: NOT certified on deepseek-flash (k=1).').passed, false);
+    const plan = agentCertify.readCertifyReply('Certify x on m: ...\nRough estimate $0.123; hard cap $2.00, checked before every call.\n\n(Dry run: nothing was spent.)');
+    assert.equal(plan.dryRun, true);
+    assert.equal(plan.estimateUsd, 0.123);
+    assert.equal(plan.capUsd, 2);
+    assert.equal(plan.passed, null);
+  });
 }
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

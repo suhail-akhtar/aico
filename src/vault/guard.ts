@@ -85,7 +85,7 @@ const SHELL_BLOCKS: Array<{ re: RegExp; reason: string }> = [
   // named refusal. Needs both the route and the token, so a project of the
   // user's with its own /api/permission route is not caught.
   {
-    re: /^(?=[\s\S]*\/api\/(?:permission|ui\/attach|vault\/(?:approve|reveal|grant|export)))(?=[\s\S]*(?:x-aico-(?:token|ui-key|client)|[?&]token=))/i,
+    re: /^(?=[\s\S]*\/api\/(?:permission|ui\/attach|inbox\/decide|vault\/(?:approve|reveal|grant|export)))(?=[\s\S]*(?:x-aico-(?:token|ui-key|client)|[?&]token=))/i,
     reason: 'answering AICO\'s own approval prompts from the agent\'s shell',
   },
 ];

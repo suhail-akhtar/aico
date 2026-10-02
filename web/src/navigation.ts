@@ -20,7 +20,7 @@
  * @module navigation
  */
 
-export type Destination = 'sessions' | 'apps' | 'system' | 'project' | 'group';
+export type Destination = 'sessions' | 'apps' | 'system' | 'project' | 'group' | 'inbox';
 export type SessionTab = 'chat' | 'changes' | 'trajectory';
 
 export interface Route {
@@ -35,7 +35,7 @@ export interface Route {
 
 export const DEFAULT_ROUTE: Route = { destination: 'sessions', tab: 'chat' };
 
-const DESTINATIONS: readonly Destination[] = ['sessions', 'apps', 'system', 'project', 'group'];
+const DESTINATIONS: readonly Destination[] = ['sessions', 'apps', 'system', 'project', 'group', 'inbox'];
 const TABS: readonly SessionTab[] = ['chat', 'changes', 'trajectory'];
 
 export function isDestination(value: unknown): value is Destination {
@@ -64,6 +64,7 @@ export function showsSessionTabs(route: Route): boolean {
 export function headerTitle(route: Route, sessionTitle: string | undefined, projectLabel?: string): string {
   if (route.destination === 'apps') return 'Apps';
   if (route.destination === 'system') return 'System';
+  if (route.destination === 'inbox') return 'Waiting for you';
   if (route.destination === 'project') return projectLabel?.trim() || 'Workspace';
   if (route.destination === 'group') return projectLabel?.trim() || 'Group';
   return sessionTitle?.trim() || 'New session';
@@ -73,6 +74,7 @@ export function headerTitle(route: Route, sessionTitle: string | undefined, proj
  * The destination a link asked for, if it asked for a valid one.
  *
  * `?view=apps` opens the Apps screen; `?view=system` opens System;
+ * `?view=inbox` opens the approve-later inbox ("Waiting for you");
  * `?view=project&path=<encoded absolute path>` opens a workspace page — `path`
  * is read only alongside `view=project` and ignored otherwise, so it can never
  * silently attach itself to an unrelated destination. Anything else —

@@ -534,19 +534,28 @@ assert((await handleSlashCommand('/scaffold "Blog"', ctx)).output.includes('fold
 assert((await handleSlashCommand('/mcp-security', ctx)).output.includes('MCP Security'), '/mcp-security reports posture');
 const transcriptResult = await handleSlashCommand('/transcript', ctx);
 assert(transcriptResult.output.includes('Transcript exported'), '/transcript exports to workspace');
-assert((await handleSlashCommand('/agents', ctx)).output.includes('product-owner'), '/agents lists built-ins');
-assert((await handleSlashCommand('/agents show product-owner', ctx)).output.includes('System prompt XML'), '/agents show inspects agent');
-const agentRun = await handleSlashCommand('/agent product-owner review the current requirements', ctx);
+assert((await handleSlashCommand('/agents', ctx)).output.includes('security-reviewer'), '/agents lists built-ins');
+assert((await handleSlashCommand('/agents show security-reviewer', ctx)).output.includes('System prompt XML'), '/agents show inspects agent');
+const agentRun = await handleSlashCommand('/agent security-reviewer review the current requirements', ctx);
 assert(agentRun.sendAsPrompt.includes('<aico_agent_session>'), '/agent builds XML prompt');
-assert(agentRun.sendAsPrompt.includes('<role>'), '/agent includes role');
+assert(agentRun.sendAsPrompt.includes('<instructions>'), '/agent includes the agent instructions');
 // The role-based build team is retired: one writing agent, read-only fan-out.
 assert((await handleSlashCommand('/team Build a CRM', ctx)).output.includes('Unknown'), '/team is gone');
 assert(!toolDefinitions.some(d => d.name === 'TeamPrompt'), 'TeamPrompt is no longer a tool');
 assert(toolDefinitions.some(d => d.name === 'AppManage'), 'AppManage is a tool');
-const createdAgent = await executeTool('AgentCreate', {
+// Skills that do not exist are refused at save time (agents/validate) — the
+// retired role team named 20 such skills and nothing ever said so.
+const refusedAgent = await executeTool('AgentCreate', {
   name: 'test-reviewer',
   description: 'Focused reviewer for generated test artifacts',
   skills: ['qa', 'test-review'],
+  scope: 'project',
+});
+assert(typeof refusedAgent === 'string' && /^Not saved/.test(refusedAgent) && /test-review/.test(refusedAgent), 'AgentCreate refuses skills that do not exist, naming them');
+const createdAgent = await executeTool('AgentCreate', {
+  name: 'test-reviewer',
+  description: 'Focused reviewer for generated test artifacts',
+  skills: ['commit'],
   scope: 'project',
 });
 assert(typeof createdAgent === 'string' && createdAgent.includes('test-reviewer'), 'AgentCreate saves custom agent');

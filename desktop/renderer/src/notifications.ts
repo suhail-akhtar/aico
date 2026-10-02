@@ -10,7 +10,9 @@
  */
 
 import { useStore } from '@web/store';
-import { useDesk } from '@/state/desk';
+import { api } from '@web/api';
+import { newlyPending, originLabel, type ParkedAction } from '@web/inbox';
+import { toast, useDesk } from '@/state/desk';
 import { desktop } from '@/desktop';
 import { markSeen } from '@/lib/local';
 import { openChat } from '@/chat/actions';
@@ -72,4 +74,32 @@ export function installNotifications(): void {
       }
     }
   });
+
+  watchInbox(bump);
+}
+
+/**
+ * A call an unattended run parked for you (the approve-later inbox, Phase 7).
+ * Polled, because parking happens in schedules and background jobs that no
+ * open chat streams; a native notification when the window is behind, a
+ * toast when it is in front. Clicking either opens "Waiting for you".
+ */
+function watchInbox(bump: () => void): void {
+  let last: ParkedAction[] | undefined;
+  const poll = async (): Promise<void> => {
+    try {
+      const { actions } = await api.inbox('pending');
+      const fresh = last ? newlyPending(last, actions) : [];
+      last = actions;
+      if (!useDesk.getState().prefs.notifications.attention) return;
+      for (const a of fresh.slice(0, 3)) {
+        const title = `Waiting for you: ${a.tool}`;
+        const body = `${originLabel(a)} — ${a.why}`;
+        if (focused) toast.warning(title, body);
+        else { void desktop.notify({ title, body, data: { view: 'inbox' }, onlyWhenUnfocused: true }); bump(); }
+      }
+    } catch { /* the engine is starting or restarting; the next poll catches up */ }
+  };
+  void poll();
+  setInterval(() => void poll(), 30_000);
 }

@@ -407,11 +407,9 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
             // is its own task, and burying it inside whatever chat happened to
             // be open loses both the request and the result.
             askAgentFor(
-              'Write me a new skill. Ask me what the procedure is for, then use SkillManage to '
-              + 'draft it — a name, a description precise enough that you would know when to pick '
-              + 'it over anything else, and the steps in the order they should happen. Ship a '
-              + 'script or a reference alongside it if the procedure needs one. Try it on a real '
-              + 'example before registering it.',
+              'Write me a new skill. Open the skill-author skill and follow it: ask me what the '
+              + 'procedure is for, draft it with its evals, show me the tasks, measure it with and '
+              + 'without the skill, and show me the results before anything is registered.',
             );
             onClose?.();
           }}

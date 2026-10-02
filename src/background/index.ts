@@ -4,6 +4,8 @@ import { runHooks } from '../hooks.js';
 import { pushNotification } from './notifications.js';
 import type { AicoSettings } from '../settings.js';
 import type { SubAgentType } from '../tools/index.js';
+import type { AutonomyLevel } from '../autonomy/levels.js';
+import type { ActionOrigin } from '../autonomy/inbox.js';
 
 export interface BackgroundAgentRecord {
   agentId: string;
@@ -153,6 +155,29 @@ export interface SpawnBackgroundAgentOptions {
   settings?: AicoSettings;
   agentType?: SubAgentType;
   cwd?: string;
+  /**
+   * The run's autonomy level (autonomy/levels). Absent: L4 for `full` (and
+   * for `inherit` under auto-approve) — a custom-tool call that needs a person
+   * is parked in the approve-later inbox — and no level for `readonly`, whose
+   * such calls are refused as before. Set `L3` to refuse instead of parking.
+   */
+  autonomy?: AutonomyLevel;
+  /** Where a parked call says it came from. Defaults to this agent's description. */
+  parkFrom?: { origin: ActionOrigin; label?: string };
+  /**
+   * Run as this registered agent (its instructions, tools and bounds), as a
+   * persona does. At L4 it must hold a current certificate (Phase 4) or the
+   * run is held to L3 — `runAgent` enforces that. An agent that no longer
+   * exists, or is switched off, fails the run rather than quietly running as
+   * the orchestrator.
+   */
+  agent?: string;
+}
+
+/** The level a background run gets when none was set (see `autonomy` above). */
+export function defaultBackgroundLevel(permissions: BackgroundPermissions, autoApprove: boolean): AutonomyLevel | undefined {
+  if (permissions === 'readonly') return undefined;
+  return permissions === 'full' || autoApprove ? 'L4' : undefined;
 }
 
 /**
@@ -210,6 +235,23 @@ export function spawnBackgroundAgent(
 
       const { runAgent } = await import('../agent.js');
 
+      // A named agent, resolved the way a persona is (agents/resolve).
+      let asAgent: Partial<Parameters<typeof runAgent>[0]> = {};
+      if (opts.agent) {
+        const { personaFor } = await import('../agents/resolve.js');
+        const p = await personaFor(opts.agent, opts.cwd);
+        if (!p.persona || !p.bounds) {
+          const why = !p.notice ? 'has no instructions to run with' : /switched off/.test(p.notice) ? 'is switched off' : 'does not exist';
+          throw new Error(`Not run: the agent "${opts.agent}" ${why}, and this job runs as that agent, not as the orchestrator.`);
+        }
+        asAgent = {
+          agentPersona: p.persona, agentBounds: p.bounds,
+          ...(p.tools?.length ? { agentSpecTools: p.tools } : {}),
+          ...(p.canDelegate === false ? { canDelegate: false } : {}),
+          ...(p.model && !args.model ? { model: p.model } : {}),
+        };
+      }
+
       let lastActivity = Date.now();
       const idleTimeoutMs = opts.settings?.agentTimeout && opts.settings.agentTimeout > 0
         ? opts.settings.agentTimeout
@@ -252,6 +294,11 @@ export function spawnBackgroundAgent(
         conversationHistory: [],
         settings: opts.settings,
         silent: true,
+        // Unattended: a call that needs a person waits in the inbox (Phase 7).
+        ...(() => {
+          const level = opts.autonomy ?? defaultBackgroundLevel(opts.permissions ?? 'inherit', opts.autoApprove);
+          return level ? { autonomy: level, parkFrom: opts.parkFrom ?? { origin: 'background' as const, label: args.description } } : {};
+        })(),
         // No human is attached to this run. Declared rather than inferred: a
         // global askUser callback may well be registered by the web server
         // while this particular run is a 3am cron firing, and routing its
@@ -269,6 +316,7 @@ export function spawnBackgroundAgent(
 (You asked: ${question})`;
         },
         agentType: opts.agentType,
+        ...asAgent,
         abortSignal: abortController.signal,
         onToolCall: (name) => {
           const r = _bgRegistry.get(agentId);

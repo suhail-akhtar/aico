@@ -134,6 +134,39 @@ export interface RunContext {
    * at every step boundary. See `tools/tool-images`.
    */
   toolImages?: ToolImageSink;
+  /**
+   * Who asks a person for an approval nothing else would ask for (a custom
+   * tool's every-use or first-use approval at `auto`). On the context, not
+   * just the options, so a sub-agent started inside this run inherits it —
+   * without it a delegated destructive call could only ever be refused.
+   */
+  approve?: (title: string, detail: string) => Promise<boolean>;
+  /**
+   * The run's autonomy level (design §4.2), when one was set. On the context
+   * so a delegated run can never sit above the run that started it: a child's
+   * level is the minimum of its own and this. Only L4 (park instead of ask)
+   * changes behaviour in the engine today.
+   */
+  autonomy?: import('./autonomy/levels.js').AutonomyLevel;
+  /** Where a call parked by this run (or a child) says it came from. */
+  parkFrom?: { origin: import('./autonomy/inbox.js').ActionOrigin; label?: string };
+  /**
+   * Evaluation only (`evals/run`, design §6.2): answers calls whose real
+   * effect must not happen during a certification run, and records every
+   * call after the guards. On the context so a delegated child is mocked
+   * and recorded too. Absent in every normal run.
+   */
+  evalHarness?: EvalHarness;
+}
+
+/**
+ * The seam a certification run uses. `mock` is consulted after the guards
+ * have allowed a call (so scope, write paths and approvals still apply) and
+ * may answer in place of the tool; `observe` sees every call's outcome.
+ */
+export interface EvalHarness {
+  mock(name: string, args: Record<string, unknown>): { result: unknown; denied: boolean } | undefined;
+  observe(call: { name: string; args: Record<string, unknown>; denied: boolean; mocked: boolean }): void;
 }
 
 const storage = new AsyncLocalStorage<RunContext>();

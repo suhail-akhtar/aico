@@ -73,6 +73,11 @@ export function setWakeDelivery(next: WakeDelivery | undefined): void {
   delivery = next;
 }
 
+/** The wired delivery, for the other things that wake a session (the approve-later inbox). */
+export function wakeDelivery(): WakeDelivery | undefined {
+  return delivery;
+}
+
 interface ActiveWatcher {
   id: string;
   spec: WatchSpec;

@@ -86,7 +86,7 @@ export interface Pane {
   blurb?: string;
   groups: Group[];
   /** Panes that render their own thing rather than a list of fields. */
-  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory';
+  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools';
 }
 
 /* ── The schema ───────────────────────────────────────────────────── */
@@ -234,6 +234,15 @@ export const PANES: Pane[] = [
     icon: 'globe',
     blurb: 'Model Context Protocol servers. Whatever tools they expose become the tools the agent has.',
     custom: 'mcp',
+    groups: [],
+  },
+  {
+    id: 'tools',
+    label: 'Tools',
+    icon: 'bolt',
+    blurb: 'Custom tools: one command or one HTTP call, typed, with an effect class that decides when you are asked. '
+      + 'The agent can draft one; only you can enable it.',
+    custom: 'tools',
     groups: [],
   },
   {

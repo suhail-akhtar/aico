@@ -207,7 +207,9 @@ export function buildMcpTools(): McpToolSpec[] {
           // The posture is the server's, not the caller's. A `permissions`
           // argument on this tool would let the thing being restricted choose
           // its own restriction.
-          { ...opts, permissions },
+          // A call that needs a person parks in the owner's inbox, labelled as
+          // remote work (only with --allow-writes; read-only jobs refuse).
+          { ...opts, permissions, parkFrom: { origin: 'remote', label: `[mcp] ${description}` } },
         );
         // The mirror creates this synchronously on the registry's emit, so the
         // record exists by the time spawn returns.

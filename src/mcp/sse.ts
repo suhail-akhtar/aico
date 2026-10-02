@@ -1,8 +1,12 @@
-import { McpBaseClient, type McpServerConfigV2, type McpHealthStatus } from './base.js';
+import { McpBaseClient, type McpServerConfigV2, type McpHealthStatus, type SendOptions } from './base.js';
+import { McpRpcError, McpTimeoutError } from './protocol.js';
 
 /**
  * MCP SSE transport — uses Server-Sent Events for server→client streaming
  * and POST for client→server requests. Auto-reconnects on disconnect.
+ *
+ * The 2024-11-05 HTTP+SSE transport, deprecated by the spec since 2025-03-26.
+ * Legacy by definition, so it skips the 2026-07-28 probe (`legacyOnly`).
  */
 export class McpSseClient extends McpBaseClient {
   private readonly url: string;
@@ -20,6 +24,7 @@ export class McpSseClient extends McpBaseClient {
 
   constructor(config: McpServerConfigV2) {
     super();
+    this.legacyOnly = true;
     if (!config.url) throw new Error('McpSseClient requires config.url');
     this.url = config.url;
     this.headers = {
@@ -99,15 +104,22 @@ export class McpSseClient extends McpBaseClient {
       try {
         const msg = JSON.parse(data) as {
           id?: number;
+          method?: string;
+          params?: unknown;
           result?: unknown;
-          error?: { message: string };
+          error?: { message: string; code?: number; data?: unknown };
         };
+        if (typeof msg.method === 'string') {
+          const reply = this.handleServerMessage({ id: msg.id, method: msg.method, params: msg.params });
+          if (reply && msg.id !== undefined) void this.post({ jsonrpc: '2.0', id: msg.id, ...reply }).catch(() => undefined);
+          continue;
+        }
         if (msg.id === undefined) continue;
         const pending = this._pendingRequests.get(msg.id);
         if (pending) {
           this._pendingRequests.delete(msg.id);
           if (msg.error) {
-            pending.reject(new Error(msg.error.message));
+            pending.reject(new McpRpcError(msg.error.message, msg.error.code, msg.error.data));
           } else {
             pending.resolve(msg.result);
           }
@@ -127,12 +139,22 @@ export class McpSseClient extends McpBaseClient {
     return this._healthy ? 'healthy' : 'degraded';
   }
 
-  async send(method: string, params?: unknown): Promise<unknown> {
+  private post(message: unknown): Promise<Response> {
+    return fetch(this.url, { method: 'POST', headers: this.headers, body: JSON.stringify(message) });
+  }
+
+  async notify(method: string, params?: unknown): Promise<void> {
+    const resp = await this.post({ jsonrpc: '2.0', method, params: params ?? {} });
+    await resp.body?.cancel().catch(() => undefined);
+  }
+
+  async send(method: string, params?: unknown, opts?: SendOptions): Promise<unknown> {
     const id = this.msgId++;
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params: params ?? {} });
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30_000);
+    const timeoutMs = opts?.timeoutMs || 30_000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     return new Promise((resolve, reject) => {
       this._pendingRequests.set(id, { resolve, reject });
@@ -160,9 +182,9 @@ export class McpSseClient extends McpBaseClient {
       setTimeout(() => {
         if (this._pendingRequests.has(id)) {
           this._pendingRequests.delete(id);
-          reject(new Error(`SSE response timeout: ${method}`));
+          reject(new McpTimeoutError(method));
         }
-      }, 30_000);
+      }, timeoutMs);
     });
   }
 

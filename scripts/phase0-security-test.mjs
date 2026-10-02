@@ -204,7 +204,7 @@ await block("F2. Delegation is bounded by the delegator", async () => {
 
   // Built-in agents that declare canDelegate:false carry it to the run.
   if (has(T.personaFor)) {
-    const persona = await T.personaFor('security');
+    const persona = await T.personaFor('security-reviewer');
     assert(persona.canDelegate === false, 'personaFor reports a built-in agent\'s canDelegate:false so the run can enforce it');
   }
 

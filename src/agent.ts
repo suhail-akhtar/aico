@@ -6,8 +6,14 @@ import { PromptDocument, renderPrompt, renderTail, DEFAULT_DIALECT } from './pro
 import { spillResult } from './tools/spill.js';
 import { toolDefinitions, executeTool, setBashDefaultTimeout, getToolsForAgent, getToolsForSpec, truncateResult, agentTypeGetsAllTools, type SubAgentType } from './tools/index.js';
 import {
-  LOAD_TOOLS, executeLoadTools, groupsLoadedBy, isDeferred, loadToolsDefinition, loadedGroupsFromLog,
+  LOAD_TOOLS, executeLoadTools, groupsLoadedBy, isDeferred, loadToolsDefinition, loadedGroupsFromLog, type ToolGroup,
 } from './tools/deferred.js';
+import { installCustomToolGuards, taints, ttyAsk, type CustomToolStageOptions } from './custom-tools/policy.js';
+import { groupIdOf, loadCustomTools, usableTools } from './custom-tools/store.js';
+import { runCustomTool } from './custom-tools/runner.js';
+import { DEFAULT_MAX_CHARS, providerSchema } from './custom-tools/format.js';
+import { minLevel, type AutonomyLevel } from './autonomy/levels.js';
+import { parkAction, type ActionOrigin } from './autonomy/inbox.js';
 import { taskToolDefinition, runTask } from './tools/task.js';
 import { mcpRegistry } from './mcp.js';
 import { checkPermission } from './permissions.js';
@@ -118,9 +124,33 @@ import { installVaultStages } from './vault/pipeline.js';
 import { callbackPrompter, ttyPrompter } from './vault/human.js';
 import { installOpsStages } from './tools/ops/index.js';
 import {
-  entryMatches, layerFor, narrowScope, scopeAllows, scopeDenial, type ToolAllow, type ToolScope,
+  agentExtraLayers, entryMatches, layerFor, narrowScope, scopeAllows, scopeDenial, type ToolAllow, type ToolScope,
 } from './agents/effective.js';
+import { applyAutonomyCeiling, ceilingLevel, requestedLevel } from './agents/ceiling.js';
+import { installWritePathsGuard } from './agents/paths-guard.js';
+import { parseLevel } from './autonomy/levels.js';
+import { toolRequiresPermission } from './permissions.js';
 import { isMcpToolName, isReadOnlyMcpTool, parseMcpToolName } from './mcp/policy.js';
+
+/**
+ * A built-in that only reads: never asked about under an autonomy ceiling
+ * (agents/ceiling). An explicit list, not "absent from the permission list" —
+ * that list predates MultiEdit, Terminal, Git and others, and reading it as
+ * "read-only" would wave writers through at L1.
+ */
+export function isReadOnlyBuiltin(name: string): boolean {
+  if (name === 'ProposePlan' || toolRequiresPermission(name)) return false;
+  return PLAN_MODE_TOOLS.has(name) || CEILING_READ_TOOLS.has(name);
+}
+/** The read-only built-ins by name: what a `delegate: readonly` child is limited to. */
+function readOnlyBuiltinNames(): Set<string> {
+  return new Set(toolDefinitions.map(d => d.name).filter(isReadOnlyBuiltin));
+}
+const CEILING_READ_TOOLS = new Set([
+  'TodoRead', 'TodoWrite', 'Skill', 'LoadTools', 'WidgetSpec', 'WorkspaceInfo', 'WorkspaceRead', 'WorkspaceList',
+  'ReadAttachment', 'ListMcpResources', 'ReadMcpResource', 'CapabilityReport', 'AgentList', 'AgentRead',
+  'CredentialList', 'DependencyAudit',
+]);
 
 // Increase max listeners to avoid warnings during long tool chains
 process.setMaxListeners(50);
@@ -377,6 +407,14 @@ export interface AgentOptions {
   /** Ink UI permission callback — bypasses readline-based permission check */
   onPermissionRequest?: (toolName: string, detail: string, fileDiff?: { path: string; added?: string[]; removed?: string[]; preview?: string }) => Promise<boolean>;
   /**
+   * Ask a person even when nothing else asks — the every-use and first-use
+   * approvals of custom tools (a destructive tool at L3, `auto`). Unlike
+   * `onPermissionRequest`, it is consulted whatever `autoApprove` says, and
+   * sub-agents inherit it (through the run context). Undefined with no
+   * terminal means nobody can be asked, and such calls are refused.
+   */
+  onApprovalRequired?: (toolName: string, detail: string) => Promise<boolean>;
+  /**
    * Apply this run's file writes somewhere other than the filesystem.
    *
    * The VS Code panel supplies one so an edit enters the editor's undo stack
@@ -411,6 +449,17 @@ export interface AgentOptions {
    * hang wearing a different hat.
    */
   headless?: boolean;
+  /**
+   * The run's autonomy level (design §4.2, `autonomy/levels`). Only L4 changes
+   * anything here: a custom-tool call that needs a person is parked in the
+   * approve-later inbox instead of asked or refused. Never above the
+   * delegating run's level (read from the run context); undefined inherits it.
+   */
+  autonomy?: AutonomyLevel;
+  /** Where a parked call says it came from, for the inbox list. */
+  parkFrom?: { origin: ActionOrigin; label?: string };
+  /** Certification runs only (`evals/run`): mocks and records tool calls. See `RunContext.evalHarness`. */
+  evalHarness?: import('./run-context.js').EvalHarness;
   /** Called when a sub-agent starts (Task tool) */
   onSubagentStart?: (rec: import('./tools/task.js').SubAgentRecord) => void;
   /** Called when a sub-agent finishes (Task tool) */
@@ -469,6 +518,13 @@ export interface AgentOptions {
    * then neither offered nor dispatched, here or in anything below it.
    */
   canDelegate?: boolean;
+  /**
+   * The bounds of the named agent this run is (a persona or `Task agent_name`):
+   * deny list, MCP servers, delegation rule, autonomy ceiling, budget and write
+   * paths, all enforced here (agents/effective, agents/ceiling,
+   * agents/paths-guard). Its allow-list still arrives as `agentSpecTools`.
+   */
+  agentBounds?: import('./agents/types.js').AgentBounds;
   /**
    * On-demand tool groups already loaded by whoever delegated this run.
    *
@@ -608,6 +664,12 @@ interface ToolHandlerOpts {
   toolRegistry?: ToolRegistryCapability;
   /** Identity used for per-agent guard state (repeat detection, metrics). */
   agentId: string;
+  /**
+   * Custom tools this run may call (custom-tools/). Their approval is decided
+   * by their own guards — effect class, autonomy level, taint — so the
+   * generic permission stage leaves them alone.
+   */
+  customTools?: CustomToolStageOptions;
   /** Pipeline to register policy on. A fresh one is built when omitted. */
   pipeline?: ToolPipeline;
   /** Forwarded into each call's context so stages can observe cancellation. */
@@ -881,6 +943,53 @@ export function mcpToolAllowed(name: string, opts: {
   return scopeAllows(opts.scope, name);
 }
 
+/** Whether a loaded MCP server is offered on demand: not the host's own, not `alwaysLoad`. */
+export function isDeferredMcpServer(server: string): boolean {
+  return !mcpRegistry.isHost(server) && mcpRegistry.configOf(server)?.alwaysLoad !== true;
+}
+
+/**
+ * The `mcp:<server>` on-demand groups for a run's MCP tools (see
+ * `tools/deferred`). The line names the configured server and its tool count
+ * only — never the server's own description of itself, which is untrusted
+ * text and would otherwise ride in every request.
+ */
+export function mcpToolGroups(tools: ReadonlyArray<{ name: string }>): ToolGroup[] {
+  const groups = new Map<string, string[]>();
+  for (const t of tools) {
+    const parts = parseMcpToolName(t.name);
+    if (!parts || !isDeferredMcpServer(parts.server)) continue;
+    const list = groups.get(parts.server) ?? [];
+    list.push(t.name);
+    groups.set(parts.server, list);
+  }
+  return [...groups.entries()].map(([server, names]) => ({
+    id: `mcp:${server}`,
+    summary: `tools of the MCP server "${server}" (${names.length})`,
+    tools: names,
+    unlisted: true,
+  }));
+}
+
+/**
+ * A run's scope: its delegator's, narrowed by its own list and, for a named
+ * agent, its bounds. Exported because the agent summary (agents/summary) is
+ * computed with this same function — the summary, what the run is offered and
+ * what dispatch accepts cannot disagree.
+ */
+export function agentRunScope(opts: Pick<AgentOptions, 'toolScope' | 'agentSpecTools' | 'agentType' | 'canDelegate' | 'agentBounds'> & { cwd: string }): ToolScope {
+  const bounds = opts.agentBounds;
+  return narrowScope(opts.toolScope, {
+    layer: ownScopeLayer(opts.agentSpecTools, opts.agentSpecTools ? undefined : opts.agentType),
+    ...(bounds ? { extra: agentExtraLayers(bounds) } : {}),
+    canDelegate: opts.canDelegate !== false && bounds?.delegate !== 'none' ? opts.canDelegate : false,
+    ...(bounds && bounds.delegate !== 'none' ? { delegateTo: bounds.delegate } : {}),
+    ...(bounds?.writePaths?.length
+      ? { writeBound: { label: `the ${bounds.name} agent`, root: opts.cwd, globs: bounds.writePaths } }
+      : {}),
+  });
+}
+
 /**
  * The layer this run's own tool list adds to its scope.
  *
@@ -1020,6 +1129,10 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
     });
   }
 
+  // Custom tools: their arguments, then their effect-class approval. Before
+  // the generic permission stage, which skips them (see below).
+  if (opts.customTools && opts.customTools.tools.size > 0) installCustomToolGuards(pipeline, opts.customTools);
+
   pipeline.onGuard('bash-safety', (ctx) => {
     if (ctx.name !== 'Bash' || !ctx.arguments.command) return { kind: 'abstain' };
     const safety = classifyBashCommand(String(ctx.arguments.command));
@@ -1042,6 +1155,8 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
     // autoApprove (or session-wide trust 'all') short-circuits and skips the
     // callback entirely so no dialog is shown.
     if (opts.autoApprove) return { kind: 'abstain' };
+    // Decided by `custom-tool:approval`, which asked (or refused) already.
+    if (opts.customTools?.tools.has(ctx.name) && ctx.agentId === opts.agentId) return { kind: 'abstain' };
 
     const args = ctx.arguments;
     const mcp = isMcpToolName(ctx.name) ? parseMcpToolName(ctx.name) : undefined;
@@ -1126,8 +1241,18 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
         ...(opts.signal ? { signal: opts.signal } : {}),
       };
 
-      const outcome = await pipeline.execute(ctx, body);
+      // A certification run (evals/run) answers some calls itself — after the
+      // guards, so every bound still applies — and records them all.
+      const harness = currentRunContext()?.evalHarness;
+      let mocked: { result: unknown; denied: boolean } | undefined;
+      const outcome = await pipeline.execute(ctx, harness
+        ? async (call) => {
+          mocked = harness.mock(call.name, call.arguments);
+          return mocked ? mocked.result : body(call);
+        }
+        : body);
       const result = outcome.outcome.result;
+      harness?.observe({ name, args, denied: outcome.denied || Boolean(mocked?.denied), mocked: Boolean(mocked) });
 
       if (!opts.silent) showToolResult(name, result, opts.verbose);
       opts.onToolDone?.(name, result, callId);
@@ -1170,6 +1295,8 @@ export function buildToolDefs(opts: {
    * tool is offered, which is also what `deferTools: false` asks for.
    */
   loadedGroups?: ReadonlySet<string>;
+  /** Custom tool packs this run offers (`tools:<pack>`); named in `LoadTools`, schemas appended by the caller. */
+  customGroups?: readonly ToolGroup[];
 }): ToolDef[] {
   const defs = resolveToolSet(opts).defs;
   /*
@@ -1178,16 +1305,22 @@ export function buildToolDefs(opts: {
     were each chosen by name, and withholding part of a hand-picked set would
     second-guess whoever picked it.
   */
-  const wholesale = !opts.toolRegistry
-    && (opts.agentSpecTools === 'all' || (!opts.agentSpecTools && agentTypeGetsAllTools(opts.agentType)));
+  const wholesale = isWholesale(opts);
   const loaded = opts.loadedGroups;
   const shown = loaded && wholesale ? defs.filter(d => !isDeferred(d.name, loaded)) : defs;
   const out: ToolDef[] = shown.map(d => ({ name: d.name, description: d.description, inputSchema: d.inputSchema }));
   if (loaded && wholesale) {
-    const loader = loadToolsDefinition(new Set(defs.map(d => d.name)), loaded);
+    const custom = opts.customGroups ?? [];
+    const loader = loadToolsDefinition(new Set([...defs.map(d => d.name), ...custom.flatMap(g => g.tools)]), loaded, custom);
     if (loader) out.push(loader);
   }
   return out;
+}
+
+/** Whether a run was handed the whole built-in set, which is where deferral applies (see `buildToolDefs`). */
+function isWholesale(opts: { toolRegistry?: ToolRegistryCapability; agentSpecTools?: string[] | 'all' | 'readonly'; agentType?: SubAgentType }): boolean {
+  return !opts.toolRegistry
+    && (opts.agentSpecTools === 'all' || (!opts.agentSpecTools && agentTypeGetsAllTools(opts.agentType)));
 }
 
 /**
@@ -1391,7 +1524,48 @@ export function budgetImages(
 export async function runAgent(rawOpts: AgentOptions): Promise<string> {
   // The user's message is scanned for secrets, and every callback that leaves
   // this run is wrapped by the vault redactor. See vault/agent-hooks.
-  const opts = await guardAgentRun(rawOpts);
+  const guarded = await guardAgentRun(rawOpts);
+  // A named agent's autonomy ceiling, and the delegating run's level, turn
+  // the engine's switches (plan mode, autoApprove, the asker) before anything
+  // runs — agents/ceiling. Unbounded runs come back unchanged.
+  const parentRun = currentRunContext();
+  const ceiling = guarded.agentBounds?.autonomy;
+  const opts = applyAutonomyCeiling(guarded, {
+    ceiling,
+    ...(parentRun?.autonomy ? { parent: parentRun.autonomy } : {}),
+    ...((guarded.onApprovalRequired ?? parentRun?.approve) ? { approve: guarded.onApprovalRequired ?? parentRun!.approve! } : {}),
+    isRead: isReadOnlyBuiltin,
+    tty: Boolean(process.stdin.isTTY),
+  });
+  // The autonomy level: this run's own, never above the delegating run's
+  // (a child cannot raise it), else inherited. See autonomy/levels.
+  const own = opts.autonomy && parentRun?.autonomy ? minLevel(opts.autonomy, parentRun.autonomy)
+    : opts.autonomy ?? parentRun?.autonomy;
+  // The agent's ceiling lowers it, and is what children inherit. A ceiling of
+  // L3 or L4 on a run with no stated level adds nothing: it must never turn a
+  // chat into an unattended (parking) run.
+  let level = !ceiling ? own
+    : own ? minLevel(own, parseLevel(ceiling))
+      : ceilingLevel({ requested: requestedLevel(guarded), ceiling }) === 'L3' ? undefined
+        : ceilingLevel({ requested: requestedLevel(guarded), ceiling });
+  /*
+    The L4 gate (design §6.4, Phase 4): a named agent runs unattended only with
+    a certificate for exactly what it is now — its file, skills, tools, MCP
+    pins and this model. Otherwise it runs at L3, which with nobody there
+    refuses what L4 would have parked, and the result says why. The
+    orchestrator itself is not an agent definition and is not gated here.
+  */
+  let gateNotice: string | undefined;
+  if (level === 'L4' && guarded.agentBounds?.name) {
+    const { isCertified } = await import('./evals/certificate.js');
+    const cert = await isCertified(guarded.agentBounds.name, { cwd: opts.cwd ?? process.cwd(), model: opts.model });
+    if (!cert.ok) {
+      level = 'L3';
+      gateNotice = `[Ran at L3, not L4: unattended runs need a certified agent, and ${guarded.agentBounds.name} is ${cert.reason}. `
+        + `Calls that needed a person were refused, not parked. Certify it with \`aico agent certify ${guarded.agentBounds.name}\`.]`;
+    }
+  }
+  const harness = opts.evalHarness ?? parentRun?.evalHarness;
   const result = await runInContext(
     {
       cwd: opts.cwd ?? process.cwd(),
@@ -1417,6 +1591,14 @@ export async function runAgent(rawOpts: AgentOptions): Promise<string> {
         sent `reasoning_effort: high`. On the run context it now reaches both.
       */
       ...(isEffortChoice(opts.effort) ? { effort: opts.effort } : {}),
+      // A person to ask for custom-tool approvals: this run's own channel, else
+      // the delegating run's (this call runs inside the parent's context).
+      ...((opts.onApprovalRequired ?? currentRunContext()?.approve)
+        ? { approve: opts.onApprovalRequired ?? currentRunContext()!.approve! } : {}),
+      // The level worked out above (ceiling, parent, certification).
+      ...(level ? { autonomy: level } : {}),
+      ...((opts.parkFrom ?? parentRun?.parkFrom) ? { parkFrom: opts.parkFrom ?? parentRun!.parkFrom! } : {}),
+      ...(harness ? { evalHarness: harness } : {}),
       /*
         Where images a tool produces go. Created per run so a sub-agent's Read
         of a diagram lands in the sub-agent's own requests, and gated on this
@@ -1432,7 +1614,7 @@ export async function runAgent(rawOpts: AgentOptions): Promise<string> {
   );
   // The final text goes to a background registry, a parent's Task result, a
   // cron log or a terminal — all sinks.
-  return sinkRedactText(result);
+  return sinkRedactText(gateNotice ? `${gateNotice}\n\n${result}` : result);
 }
 
 async function runAgentInContext(opts: AgentOptions): Promise<string> {
@@ -1477,9 +1659,24 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     list. One value, handed to the schemas, the dispatch guard and every child
     this run spawns — see `agents/effective`.
   */
-  const scope = narrowScope(opts.toolScope, {
-    layer: ownScopeLayer(opts.agentSpecTools, opts.agentSpecTools ? undefined : opts.agentType),
-    canDelegate: opts.canDelegate,
+  // A named agent adds its deny list, its MCP-server bound, its delegation
+  // rule and its write paths (agents/resolve `boundsOf`), all inherited by
+  // every child it spawns.
+  const bounds = opts.agentBounds;
+  const scope = agentRunScope({ ...opts, cwd: currentCwd() });
+
+  /*
+    MCP servers offered on demand (`mcp:<server>` groups, `tools/deferred`):
+    wherever on-demand groups apply at all — deferral on, the whole built-in
+    set handed over — and never for a browser-QA run, whose point is the
+    Playwright tools. Decided here because the system prompt needs it: a
+    deferred server's instructions arrive with its `LoadTools` result instead
+    of on every request.
+  */
+  const mcpDeferral = settings?.deferTools !== false && toolProfile !== 'browser-qa' && isWholesale({
+    ...(opts.context?.get('tools') ? { toolRegistry: opts.context.get('tools')! } : {}),
+    ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
+    ...(opts.agentType ? { agentType: opts.agentType } : {}),
   });
 
   // This run's project's skills (`.aico/skills`, `.agents/skills`) — read from
@@ -1529,7 +1726,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       name: t.name,
       description: t.description,
     })),
-    mcpServers: mcpRegistry.getServerInfos(),
+    // A deferred server's instructions ride in its LoadTools result instead.
+    mcpServers: mcpRegistry.getServerInfos().map(s =>
+      mcpDeferral && isDeferredMcpServer(s.name) ? { ...s, instructions: undefined } : s),
     workspace: getWorkspaceInfo({ settings, sessionId: opts.sessionId }),
     agents: await listAgentSpecs(),
     skills: skillRegistry.list(),
@@ -1682,6 +1881,66 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // across sessions carries one observer, not one per turn.
   installProfileObserver(pipeline, () => projectRoot());
 
+  /*
+    Custom tools (custom-tools/): the enabled ones visible from this run's
+    directory, narrowed exactly as built-ins are — plan mode and the browser
+    copilot are offered only read tools, `disabledTools` and the agent's scope
+    apply, and the narrowed profiles (repair, a browser-QA child) and composed
+    registries get none. Not offered means no handler either. Their schemas are
+    deferred per pack (`tools:<pack>`), like any on-demand group.
+  */
+  const runCwd = currentCwd();
+  const copilotRun = Boolean(currentRunContext()?.handOff) && depth === 0;
+  const customAll = toolProfile === 'repair' || (toolProfile === 'browser-qa' && depth > 0) || toolRegistry
+    ? [] : await loadCustomTools(runCwd);
+  const customTools = usableTools(customAll.filter(t => t.def
+    && ((!opts.planMode && !copilotRun) || t.def.effect === 'read')
+    && !settings?.disabledTools?.some(entry => entryMatches(entry, t.name))
+    && scopeAllows(scope, t.name)));
+  const customGroups: ToolGroup[] = [];
+  for (const t of customTools.values()) {
+    const existing = customGroups.find(g => g.id === groupIdOf(t));
+    if (existing) (existing.tools as string[]).push(t.name);
+    else customGroups.push({ id: groupIdOf(t), summary: 'custom tools', tools: [t.name] });
+  }
+  /*
+    Every on-demand group beyond the built-in ones: custom tool packs, then
+    MCP servers (`mcp:<server>`). One array, updated in place when the MCP set
+    moves (`syncMcpTools`), so every deferral call below sees the same groups.
+  */
+  const extraGroups: ToolGroup[] = [...customGroups];
+  const setMcpGroups = (tools: ReadonlyArray<{ name: string }>): void => {
+    extraGroups.splice(customGroups.length, extraGroups.length, ...(mcpDeferral ? mcpToolGroups(tools) : []));
+  };
+  setMcpGroups(mcpRegistry.getToolsForAgent().filter(t => mcpToolAllowed(t.name, { scope, planMode: opts.planMode, settings })));
+  // The taint rule (design §4.2): web or MCP content seen in this session,
+  // read from the log and kept current as calls are dispatched.
+  let tainted = (opts.session?.events ?? []).some(e => e.type === 'tool/call' && taints(String((e.data as { name?: string }).name ?? '')));
+  // Who a custom tool's approval asks: this run's permission card, else the
+  // always-ask channel (inherited by sub-agents), else the terminal. Nobody,
+  // for a headless run — its calls that need a person are refused.
+  const askPerson = opts.headless ? undefined
+    : onPermissionRequest ? (title: string, detail: string) => onPermissionRequest(title, detail)
+      : currentRunContext()?.approve ?? (process.stdin.isTTY ? ttyAsk : undefined);
+  // L4 (unattended): such a call is parked for a person instead — the exact
+  // call, its preview and hashes go to the inbox and the run carries on. The
+  // context's level is already min(requested, agent ceiling, parent), so an
+  // agent whose ceiling is below L4 never parks (design §4.2).
+  const runLevel = currentRunContext()?.autonomy;
+  const parkFrom = currentRunContext()?.parkFrom ?? { origin: (opts.headless ? 'background' : 'chat') as ActionOrigin };
+  const park: CustomToolStageOptions['park'] = runLevel === 'L4' && !opts.planMode
+    ? async (call) => {
+      const parked = parkAction({
+        ...call, cwd: runCwd, agentId, origin: parkFrom.origin,
+        ...(parkFrom.label ? { label: parkFrom.label } : {}),
+        ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+        // A named agent's call is replayed only while its certificate still holds.
+        ...(bounds?.name ? { agentName: bounds.name, agentModel: model } : {}),
+      });
+      return 'error' in parked ? parked : { id: parked.id };
+    }
+    : undefined;
+
   const handlerOpts: ToolHandlerOpts & { toolProfile: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly'; depth?: number } = {
     autoApprove, verbose, settings, onToolCall, onToolDone,
     onPermissionRequest, onAskUser, silent,
@@ -1692,6 +1951,17 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     // Only when it restricts something, so an unrestricted run's pipeline is
     // exactly what it was.
     ...(scope.layers.length > 0 || !scope.delegate ? { scope } : {}),
+    ...(customTools.size > 0 ? {
+      customTools: {
+        agentId, sessionKey: opts.sessionId ?? agentId, tools: customTools, autoApprove,
+        ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+        ...(opts.planMode ? { planMode: true } : {}),
+        ...(askPerson ? { ask: askPerson } : {}),
+        ...(park ? { park } : {}),
+        tainted: () => tainted,
+        cwd: () => runCwd,
+      },
+    } : {}),
   };
   const { handlers, wrap: wrapInPipeline } = buildToolHandlers(handlerOpts);
 
@@ -1706,12 +1976,21 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   */
   const loadedGroups: Set<string> | undefined = settings?.deferTools === false
     ? undefined
-    : new Set([...loadedGroupsFromLog(opts.session?.events), ...(opts.toolGroups ?? [])]);
+    : new Set([
+      ...loadedGroupsFromLog(opts.session?.events, extraGroups), ...(opts.toolGroups ?? []),
+      // An agent's own MCP servers are loaded eagerly (design §5.4).
+      ...(bounds?.mcpServers ?? []).map(server => `mcp:${server}`),
+    ]);
   if (loadedGroups) {
     handlers.set(LOAD_TOOLS, async (args: Record<string, unknown>, callId: string) => {
       if (!silent) showToolCall(LOAD_TOOLS, args, verbose);
       onToolCall?.(LOAD_TOOLS, args, callId);
-      const result = executeLoadTools(args as { groups?: unknown });
+      // A deferred MCP server's own instructions arrive with its tools.
+      const wanted = Array.isArray((args as { groups?: unknown }).groups) ? ((args as { groups: unknown[] }).groups).map(String) : [];
+      const manuals = mcpRegistry.getServerInfos()
+        .filter(s => s.instructions && wanted.includes(`mcp:${s.name}`) && extraGroups.some(g => g.id === `mcp:${s.name}`))
+        .map(s => `\n<mcp_server_instructions server="${s.name}">\n${s.instructions}\n</mcp_server_instructions>`);
+      const result = executeLoadTools(args as { groups?: unknown }, extraGroups) + manuals.join('');
       onToolDone?.(LOAD_TOOLS, result, callId);
       return { result };
     });
@@ -1721,20 +2000,33 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // tools) and its shell-placeholder binding. A person approves shell uses:
   // the process-wide prompter when a server or desktop set one, otherwise
   // this run's own permission dialog — never an unattended run's policy.
+  const fallbackPrompter = !opts.headless && onPermissionRequest
+    ? callbackPrompter((title, detail) => onPermissionRequest(title, detail))
+    : !opts.headless && process.stdin.isTTY ? ttyPrompter() : undefined;
   installVaultStages(pipeline, {
     cwd: () => currentCwd(),
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
-    ...(!opts.headless && onPermissionRequest
-      ? { fallbackPrompter: callbackPrompter((title, detail) => onPermissionRequest(title, detail)) }
-      : !opts.headless && process.stdin.isTTY ? { fallbackPrompter: ttyPrompter() } : {}),
+    ...(fallbackPrompter ? { fallbackPrompter } : {}),
   });
   // The ops tools (SSH, HTTP APIs, WinRM, SNMP) ask the same person the same
   // way when a use needs approval and no process-wide prompter is set.
   installOpsStages(pipeline, {
-    ...(!opts.headless && onPermissionRequest
-      ? { fallbackPrompter: callbackPrompter((title, detail) => onPermissionRequest(title, detail)) }
-      : !opts.headless && process.stdin.isTTY ? { fallbackPrompter: ttyPrompter() } : {}),
+    ...(fallbackPrompter ? { fallbackPrompter } : {}),
   });
+  // Custom tools: dispatched through the same pipeline as every built-in, so
+  // hooks, scope, plan mode, their own argument and approval guards, the vault
+  // stages and redaction all apply; the result is capped at the tool's own
+  // `output.maxChars` with the overflow kept.
+  for (const t of customTools.values()) {
+    handlers.set(t.name, wrapInPipeline(t.name, async (call) => spillResult(
+      await runCustomTool(t.def, call.arguments, {
+        cwd: runCwd,
+        ...(call.signal ? { signal: call.signal } : {}),
+        ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+        ...(fallbackPrompter ? { prompter: fallbackPrompter } : {}),
+      }),
+      t.def.output?.maxChars ?? DEFAULT_MAX_CHARS, t.name, call.callId)));
+  }
 
   // Loop-breaker. Advisory only: it never vetoes a call, it injects an
   // escalating reminder when the model repeats one verbatim. Registered after
@@ -1745,6 +2037,12 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     ? undefined
     : new RepeatToolGuard(settings?.repeatGuard ?? {});
   repeatGuard?.install(pipeline);
+
+  // An agent's `paths.write`, and every delegator's: AICO's file tools only
+  // (Bash is not bound — agents/paths-guard says so, and so does the summary).
+  if (scope.writeBounds?.length) {
+    installWritePathsGuard(pipeline, { agentId, bounds: scope.writeBounds, cwd: () => runCwd });
+  }
 
   // File-effect confinement. Registered as a monotonic guard so no later stage
   // can turn a sandbox refusal into an approval, and inherited by sub-agents
@@ -1795,6 +2093,20 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         acceptance_criteria?: unknown; files?: unknown; constraints?: unknown;
       };
       onToolCall?.(taskToolDefinition.name, args, callId);
+      // An agent's `delegate` rule: a list names the only agents it may hand
+      // work to; `readonly` lets it delegate, but every child is read-only
+      // (no Bash either — a command line can write). Enforced here, at the
+      // one place a child is made.
+      const rule = scope.delegateTo;
+      if (Array.isArray(rule) && (!agent_name || !rule.includes(agent_name))) {
+        const error = `This agent may delegate only to: ${rule.join(', ')} (its delegate rule). `
+          + 'Call Task with agent_name set to one of those, or do the work yourself.';
+        onToolDone?.(taskToolDefinition.name, { error }, callId);
+        return { result: { error } };
+      }
+      const childScope = rule === 'readonly'
+        ? narrowScope(scope, { layer: { label: 'its delegate rule (read-only children)', tools: readOnlyBuiltinNames(), mcp: 'readonly' } })
+        : scope;
       try {
         // `isolation` and `detach` are in the tool's schema and implemented in
         // `runTask`, and were dropped right here — the model was offered both
@@ -1824,7 +2136,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             ...(opts.planMode ? { planMode: true } : {}),
             // The child's tools are intersected with these: it can never be
             // given more than this run has.
-            toolScope: scope,
+            toolScope: childScope,
             onSubagentStart: opts.onSubagentStart,
             onSubagentStop: opts.onSubagentStop,
           },
@@ -1926,6 +2238,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       ...(settings ? { settings } : {}),
       ...(loadedGroups ? { loadedGroups } : {}),
       ...(handlerOpts.scope ? { scope: handlerOpts.scope } : {}),
+      ...(extraGroups.length ? { customGroups: extraGroups } : {}),
     });
     // Task. The handler's own condition: at depth 0 a QA-shaped message keeps
     // the tool set whole (see resolveToolSet), so the schema must stay too —
@@ -1950,8 +2263,22 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         });
       }
     }
+    // A deferred server's schemas only once its `mcp:<server>` group is loaded.
     for (const t of mcpTools) {
+      const group = loadedGroups ? extraGroups.find(g => g.id.startsWith('mcp:') && g.tools.includes(t.name)) : undefined;
+      if (group && !loadedGroups!.has(group.id)) continue;
       next.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
+    }
+    // Custom tools last, in store order; a pack's schemas only once it is
+    // loaded wherever deferral applies (a hand-picked list shows its own).
+    const deferCustom = loadedGroups !== undefined && isWholesale({
+      ...(toolRegistry ? { toolRegistry } : {}),
+      ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
+      ...(opts.agentType ? { agentType: opts.agentType } : {}),
+    });
+    for (const t of customTools.values()) {
+      if (deferCustom && !loadedGroups!.has(groupIdOf(t))) continue;
+      next.push({ name: t.name, description: t.def.description, inputSchema: providerSchema(t.def) });
     }
     toolDefs.splice(0, toolDefs.length, ...next);
   };
@@ -1975,6 +2302,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     for (const name of before) if (!after.has(name)) handlers.delete(name);
     for (const t of now) installMcpHandler(t);
     mcpTools = now;
+    setMcpGroups(now);
     rebuildToolDefs();
     return true;
   };
@@ -2206,8 +2534,16 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
 
   // Safety cap against an infinite tool-calling loop. High enough that real
   // agentic work never trips it; sub-agents handle decomposition. Overridable.
-  const maxIterations = settings?.maxIterations && settings.maxIterations > 0
-    ? settings.maxIterations : 100;
+  // A named agent's own budget (design §5.4) can only lower it.
+  const budget = bounds?.budget;
+  const maxIterations = Math.min(
+    settings?.maxIterations && settings.maxIterations > 0 ? settings.maxIterations : 100,
+    budget?.maxIterations && budget.maxIterations > 0 ? budget.maxIterations : Infinity,
+  );
+  // What the run had already cost when it started: the budget is per run, and
+  // a persona's tracker is the whole session's.
+  const budgetCostAtStart = budget?.maxUsd && tokenTracker ? tokenTracker.estimateCost(model, settings) : 0;
+  const budgetStartedAt = Date.now();
 
   // Width of the parallel-safe tool pool per step. Resolved once per run so an
   // invalid value fails at the start rather than at the first tool group.
@@ -2236,6 +2572,15 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     timeoutTimer = setTimeout(() => {
       loopController.abort(new Error(`Agent timed out after ${agentTimeout}ms`));
     }, agentTimeout);
+  }
+  // The agent's wall clock: checked at every step boundary, and this timer
+  // stops a step that would run past it (a long tool call, a slow stream).
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+  if (budget?.maxMinutes && budget.maxMinutes > 0) {
+    budgetTimer = setTimeout(() => {
+      loopController.abort(new Error(`Agent cancelled: ${bounds!.name}'s time budget (${budget.maxMinutes} min) ran out`));
+    }, budget.maxMinutes * 60_000);
+    budgetTimer.unref?.();
   }
   // If the caller aborts, propagate into the loop controller too. The handle is
   // kept so the listener can be detached when this run ends — a sub-agent
@@ -2283,6 +2628,16 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
    * tracker, which now includes the in-flight turn.
    */
   const checkSafetyLimits = (): string | undefined => {
+    // The agent's own budget first: it is the tighter, per-run bound.
+    if (budget?.maxUsd && budget.maxUsd > 0 && tokenTracker) {
+      const spent = tokenTracker.estimateCost(model, settings) - budgetCostAtStart;
+      if (spent > budget.maxUsd) {
+        return `${bounds!.name}'s budget reached ($${spent.toFixed(4)} > $${budget.maxUsd} budget.maxUsd)`;
+      }
+    }
+    if (budget?.maxMinutes && budget.maxMinutes > 0 && Date.now() - budgetStartedAt > budget.maxMinutes * 60_000) {
+      return `${bounds!.name}'s time budget reached (${budget.maxMinutes} min budget.maxMinutes)`;
+    }
     const limits = settings?.safetyLimits;
     if (!limits || !tokenTracker) return undefined;
     const usage = tokenTracker.getUsage();
@@ -2834,7 +3189,8 @@ const GOAL_REMINDER_EVERY = 6;
             // The same rule the log is read with at turn start, applied as the
             // call is recorded — so a LoadTools (or a call to a deferred tool
             // by name) offers its group from the next step of this turn.
-            if (loadedGroups) for (const g of groupsLoadedBy(call.name, call.input)) loadedGroups.add(g);
+            if (loadedGroups) for (const g of groupsLoadedBy(call.name, call.input, extraGroups)) loadedGroups.add(g);
+            if (taints(call.name)) tainted = true;
           },
           dispatch: async (call) => {
             const handler = handlers.get(call.name);
@@ -3070,6 +3426,7 @@ const GOAL_REMINDER_EVERY = 6;
     // Always clear the wall-clock timer so it can never keep the event loop
     // alive past completion (the old code discarded the handle entirely).
     if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (budgetTimer) clearTimeout(budgetTimer);
     detachCallerAbort?.();
   }
 

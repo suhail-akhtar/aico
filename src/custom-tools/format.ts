@@ -440,3 +440,16 @@ export function describeCall(def: CustomToolDef, args: Record<string, unknown>):
   if (req.json !== undefined) lines.push(JSON.stringify(req.json).slice(0, 600));
   return lines.join('\n');
 }
+
+/**
+ * The schema a provider is sent: the definition's, without AICO's own
+ * keyword (`allowFlagLike`), which a strict provider validator may reject.
+ */
+export function providerSchema(def: CustomToolDef): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+  for (const [field, spec] of Object.entries(def.input_schema.properties ?? {})) {
+    const { allowFlagLike: _ignored, ...rest } = spec;
+    properties[field] = rest;
+  }
+  return { ...def.input_schema, properties };
+}

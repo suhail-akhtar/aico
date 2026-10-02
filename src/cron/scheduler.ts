@@ -181,6 +181,12 @@ class CronScheduler {
           // the authorization. Set `permissions: 'readonly'` on a job that only
           // needs to report.
           permissions: job.permissions ?? 'full',
+          // L4 unless the job says otherwise: a call that needs a person waits
+          // in the inbox for the morning instead of being refused (Phase 7).
+          ...(job.autonomy ? { autonomy: job.autonomy } : {}),
+          // Run as a registered agent; at L4 it needs a current certificate.
+          ...(job.agent ? { agent: job.agent } : {}),
+          parkFrom: { origin: 'cron', label: job.name },
         },
       );
 
@@ -228,6 +234,8 @@ class CronScheduler {
     model?: string;
     cwd?: string;
     permissions?: CronJob['permissions'];
+    autonomy?: CronJob['autonomy'];
+    agent?: string;
   }): Promise<CronJob> {
     const job: CronJob = {
       id: randomUUID(),
@@ -237,6 +245,8 @@ class CronScheduler {
       model: params.model,
       cwd: params.cwd ?? process.cwd(),
       permissions: params.permissions ?? 'full',
+      ...(params.autonomy ? { autonomy: params.autonomy } : {}),
+      ...(params.agent?.trim() ? { agent: params.agent.trim() } : {}),
       status: 'enabled',
       createdAt: Date.now(),
       nextRun: parseNextRun(params.schedule),

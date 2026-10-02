@@ -191,6 +191,35 @@ export async function handleSystemRoute(
     status: 403, body: { ok: false, code: 'human-required', error: reason ?? 'This needs a person in the AICO window.' },
   });
   switch (route) {
+    // ── the approve-later inbox (Phase 7, autonomy/inbox.ts) ─────────
+    //
+    // Calls an unattended (L4) run parked for a person. Listing is a read.
+    // Approving runs the exact parked call once, so it needs a person
+    // (`checkHuman`): the desktop window's grant, the web UI key or a live
+    // client nonce — never the API token alone, which the model may hold.
+    // Denying needs nothing: refusing is always safe.
+    case 'inbox/list': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { listActions } = await import('../autonomy/inbox.js');
+      const status = query.get('status') === 'pending' ? 'pending' : 'all';
+      const actions = listActions({ status, limit: Number(query.get('limit')) || 100 });
+      return { status: 200, body: { actions, pending: actions.filter(a => a.status === 'pending').length } };
+    }
+    case 'inbox/decide': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const id = typeof body.id === 'string' ? body.id : '';
+      const decision = body.decision;
+      if (!id || (decision !== 'approve' && decision !== 'deny')) return { status: 400, body: { error: 'id and decision ("approve" or "deny") required' } };
+      const inbox = await import('../autonomy/inbox.js');
+      if (decision === 'deny') {
+        const r = inbox.denyAction(id, 'api', typeof body.note === 'string' ? body.note : undefined);
+        return { status: r.action ? 200 : 404, body: r };
+      }
+      const person = await human();
+      if (!person.ok) return needsHuman(person.reason);
+      const r = await inbox.approveAction(id, (person as { via?: string }).via ?? 'person');
+      return { status: r.action ? 200 : 404, body: r };
+    }
     // ── project profile ──────────────────────────────────────────────
     //
     // The commands a project is held to, with provenance, for the System
@@ -394,6 +423,15 @@ export async function handleSystemRoute(
       const { disabledIn: disabledAgents } = await import('../registry-state.js');
       const specs = await listAgentSpecs();
       const offAgents = disabledAgents('agents');
+      // Certification status on every row (design §6.4), against the model the
+      // agent would run on here. A failure to read it is "uncertified", never an error.
+      const { statusOfSpec } = await import('../evals/certificate.js');
+      const { loadSettings: loadForStatus } = await import('../settings.js');
+      const defaultModel = (await loadForStatus().catch(() => undefined))?.model ?? '';
+      const certification = new Map(await Promise.all(specs.map(async spec => [spec.name,
+        await statusOfSpec(spec, { cwd: process.cwd(), model: spec.model || defaultModel })
+          .then(s => ({ status: s.status, text: s.text, ...(s.certificate ? { at: s.certificate.at } : {}) }))
+          .catch(() => ({ status: 'uncertified' as const, text: 'not certified' }))] as const)));
       return {
         status: 200,
         body: {
@@ -401,6 +439,7 @@ export async function handleSystemRoute(
           // tokens per agent, the panel lists rather than reads, and nothing in
           // the browser has a use for it.
           agents: specs.map(spec => ({
+            certification: certification.get(spec.name),
             name: spec.name,
             description: spec.description,
             role: spec.role,
@@ -411,6 +450,17 @@ export async function handleSystemRoute(
             source: spec.source,
             enabled: !offAgents.has(spec.name.toLowerCase()),
             model: spec.model,
+            // Phase 3 fields, for the builders. The instructions are the
+            // person's own text (not the generated prompt), so they are sent.
+            ...(spec.instructions ? { instructions: spec.instructions } : {}),
+            ...(spec.disallowedTools ? { disallowedTools: spec.disallowedTools } : {}),
+            ...(spec.mcpServers ? { mcpServers: spec.mcpServers } : {}),
+            ...(spec.delegate ? { delegate: spec.delegate } : {}),
+            ...(spec.autonomy ? { autonomy: spec.autonomy } : {}),
+            ...(spec.budget ? { budget: spec.budget } : {}),
+            ...(spec.paths ? { paths: spec.paths } : {}),
+            ...(spec.format ? { format: spec.format } : {}),
+            ...(spec.warnings?.length ? { warnings: spec.warnings } : {}),
           })),
         },
       };
@@ -770,9 +820,22 @@ ${content || 'Describe the procedure here.'}
             result = await executeAgentManage(input as never);
             break;
           }
+          case 'tools': {
+            const { executeToolManage } = await import('../custom-tools/manage.js');
+            // Enabling, deleting an enabled tool and executing a test are a
+            // person's acts (design §5.2): only a proven person passes.
+            const wantsHuman = input.action === 'enable' || input.action === 'test' || input.action === 'delete';
+            const person = wantsHuman ? (await human()).ok : false;
+            result = await executeToolManage(input as never, { human: person, cwd: process.cwd() });
+            break;
+          }
           case 'mcp': {
             const { executeMcpManage } = await import('../mcp/manage-tool.js');
-            result = await executeMcpManage(input as never);
+            // Approving a changed tool and rewriting settings to move secrets
+            // are a person's acts (design §5.3): only a proven person passes.
+            const wantsHuman = input.action === 'approve' || input.action === 'secure';
+            const person = wantsHuman ? (await human()).ok : false;
+            result = await executeMcpManage(input as never, { human: person });
             break;
           }
           case 'memory': {
@@ -790,6 +853,15 @@ ${content || 'Describe the procedure here.'}
       } catch (err) {
         return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
       }
+    }
+
+    // Custom tools for Settings → Tools: every one visible from the server's
+    // directory, with status, validation and the command it runs (secret
+    // names only — a definition never holds a value).
+    case 'custom-tools': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { toolsForPanel } = await import('../custom-tools/manage.js');
+      return { status: 200, body: { tools: await toolsForPanel(process.cwd()) } };
     }
 
     case 'memory': {

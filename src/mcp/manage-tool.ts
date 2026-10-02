@@ -25,9 +25,15 @@ import { loadSettings } from '../settings.js';
 import { mcpRegistry } from './registry.js';
 import { addMcpServer, updateMcpServer, removeMcpServer, reloadMcpServers } from './manage.js';
 import { disabledIn, isDisabled, setEnabled, forget } from '../registry-state.js';
+import { describeChange } from './pins.js';
+import { maskLiterals, migrateMcpSecrets } from './secrets.js';
+import type { McpServerConfigV2 } from './base.js';
 
 export interface McpManageInput {
-  action: 'list' | 'read' | 'add' | 'update' | 'remove' | 'enable' | 'disable' | 'reload' | 'test' | 'export' | 'import' | 'paste';
+  action: 'list' | 'read' | 'add' | 'update' | 'remove' | 'enable' | 'disable' | 'reload' | 'test' | 'export' | 'import' | 'paste'
+    | 'review' | 'approve' | 'secure';
+  /** For approve: the one tool to approve (all held tools of the server when absent). */
+  tool?: string;
   /** A pasted JSON config, in either the whole-file or just-the-block shape. */
   json?: string;
   name?: string;
@@ -162,10 +168,59 @@ function statusOf(name: string): string {
   return `${info.health}, ${info.toolCount} tool(s), ${info.resourceCount} resource(s)`;
 }
 
-export async function executeMcpManage(input: McpManageInput): Promise<string> {
+/**
+ * Who is asking. `human: true` only where a person is proven — the terminal's
+ * slash commands, or the server's decision gate — never the model's tool call:
+ * approving a changed tool is the whole rug-pull defence, and the party it
+ * defends against must not be able to approve it.
+ */
+export interface McpManageContext {
+  human?: boolean;
+}
+
+/** A rough schema token cost: JSON characters / 4, the estimate the rest of AICO uses. */
+function schemaTokens(tools: ReadonlyArray<{ name: string; description: string; inputSchema: Record<string, unknown> }>): number {
+  return Math.round(tools.reduce((n, t) => n + JSON.stringify({ name: t.name, description: t.description, input_schema: t.inputSchema }).length, 0) / 4);
+}
+
+export async function executeMcpManage(input: McpManageInput, ctx: McpManageContext = {}): Promise<string> {
   const name = input.name?.trim() ?? '';
+  const actor = ctx.human ? 'user' as const : 'agent:McpManage' as const;
 
   switch (input.action) {
+    case 'review': {
+      const held = mcpRegistry.heldTools(name || undefined);
+      if (held.length === 0) return name ? `"${name}" has no tools waiting for approval.` : 'No MCP tools are waiting for approval.';
+      return [
+        `${held.length} MCP tool(s) held until a person approves them — the agent cannot see or call these:`,
+        ...held.map(h => `- ${h.server} / ${h.held.tool.name}: ${describeChange(h.held)}`),
+        '',
+        'A person approves with /mcp-approve <server> [tool] (terminal) or in Settings → MCP.',
+      ].join('\n');
+    }
+
+    case 'approve': {
+      if (!ctx.human) {
+        return 'Not approved: approving an MCP tool whose definition changed is a person\'s decision, so the agent cannot do it. '
+          + `Ask the user to run /mcp-approve ${name || '<server>'}${input.tool ? ` ${input.tool}` : ''} or approve it in Settings → MCP.`;
+      }
+      if (!name) return 'A name is required.';
+      const pinned = await mcpRegistry.approveHeld(name, input.tool ? [input.tool] : undefined);
+      return pinned.length
+        ? `Approved ${pinned.length} tool(s) on "${name}": ${pinned.join(', ')}. They are available from the agent's next step.`
+        : `Nothing to approve on "${name}"${input.tool ? ` named ${input.tool}` : ''}. Use action:"review".`;
+    }
+
+    case 'secure': {
+      if (!ctx.human) {
+        return 'Not done: moving the MCP secrets in your settings files into the credential vault rewrites those files, '
+          + 'so a person starts it — /mcp-secure in the terminal, or Settings → MCP.';
+      }
+      const report = await migrateMcpSecrets(process.cwd(), actor);
+      await reloadMcpServers();
+      return report.join('\n');
+    }
+
     case 'list': {
       const settings = await loadSettings();
       const configured = Object.keys(settings.mcpServers ?? {});
@@ -193,7 +248,7 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
         `name: ${name}`,
         `enabled: ${!isDisabled('mcp', name)}`,
         `status: ${statusOf(name)}`,
-        `config: ${JSON.stringify(config, null, 2)}`,
+        `config: ${JSON.stringify(maskLiterals(config as McpServerConfigV2), null, 2)}`,
         info && tools.length ? `\ntools it contributes:\n${tools.map(t => `  - ${t.name}: ${t.description.slice(0, 100)}`).join('\n')}` : '',
       ].filter(Boolean).join('\n');
     }
@@ -220,7 +275,7 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
         return 'Give either a command to run (stdio) or a url to call (http/sse).';
       }
 
-      const saved = await addMcpServer(payload as Parameters<typeof addMcpServer>[0]);
+      const saved = await addMcpServer(payload as Parameters<typeof addMcpServer>[0], actor);
       const info = mcpRegistry.getServerInfos().find(s => s.name === name);
 
       // The check that matters, at the only moment anyone is looking.
@@ -249,7 +304,7 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
           ...(input.type ? { type: input.type } : {}),
           ...(input.env ? { env: input.env } : {}),
           ...(input.headers ? { headers: input.headers } : {}),
-        });
+        }, actor);
       } catch (err) {
         return `Not updated: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -268,7 +323,7 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
       const failed: string[] = [];
       for (const server of parsed.servers) {
         try {
-          await addMcpServer({ name: server.name, ...servers[server.name] });
+          await addMcpServer({ name: server.name, ...servers[server.name] }, actor);
           added.push(`${server.name} — ${statusOf(server.name)}`);
         } catch (err) {
           failed.push(`${server.name} (${err instanceof Error ? err.message : String(err)})`);
@@ -307,10 +362,36 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
       if (!(settings.mcpServers ?? {})[name]) return `No MCP server called "${name}".`;
       await reloadMcpServers();
       const info = mcpRegistry.getServerInfos().find(s => s.name === name);
-      if (!info) return `"${name}" is configured but did not load at all. Check the command or URL.`;
-      return info.toolCount === 0
+      if (!info) {
+        const why = mcpRegistry.errorOf(name);
+        return `"${name}" is configured but did not load at all${why ? `: ${why}` : '. Check the command or URL.'}`;
+      }
+      const head = info.toolCount === 0
         ? `"${name}" loaded (${info.health}) but contributes 0 tools. It is not doing anything for the agent.`
         : `"${name}" is ${info.health} with ${info.toolCount} tool(s) and ${info.resourceCount} resource(s).`;
+      // The detail design §5.3 asks for: revision, time, schema cost, hints
+      // beside the effect a person set, instructions, held tools.
+      const listed = mcpRegistry.listedTools(name);
+      const config = mcpRegistry.configOf(name);
+      const effect = (tool: string) => config?.readOnly ? 'read (server readOnly)'
+        : config?.tools?.[tool]?.effect ?? config?.tools?.['*']?.effect ?? 'may write (default)';
+      const hints = (t: (typeof listed)[number]) => {
+        const a = t.annotations;
+        if (!a) return 'no hints';
+        return [a.readOnlyHint ? 'readOnlyHint' : '', a.destructiveHint === false ? 'non-destructive' : a.destructiveHint ? 'destructiveHint' : '',
+          a.idempotentHint ? 'idempotent' : '', a.openWorldHint === false ? 'closed-world' : ''].filter(Boolean).join(', ') || 'no hints';
+      };
+      return [
+        head,
+        `protocol: ${info.era === 'modern' ? `${info.protocolVersion} (modern, stateless)` : `${info.protocolVersion ?? 'unknown'} (initialize handshake)`}`,
+        `connect: ${info.connectMs ?? '?'} ms`,
+        `schema cost: ~${schemaTokens(listed)} tokens if loaded (offered on demand via LoadTools unless alwaysLoad)`,
+        `instructions: ${info.instructions ? `${info.instructions.length} chars` : 'none'}`,
+        info.heldCount ? `held for approval: ${info.heldCount} (see action:"review")` : '',
+        info.lastError ? `last error: ${info.lastError}` : '',
+        listed.length ? 'tools (annotations are the server\'s untrusted hints; effect is what your settings say):' : '',
+        ...listed.slice(0, 60).map(t => `  - ${t.name}: hints ${hints(t)}; effect ${effect(t.name)}`),
+      ].filter(Boolean).join('\n');
     }
 
     case 'export': {
@@ -322,9 +403,11 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
 
       const target = path.resolve(input.path);
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, JSON.stringify({ mcpServers: chosen }, null, 2), 'utf8');
+      // References are written as they are; a literal secret never is (design §5.3).
+      const safe = Object.fromEntries(Object.entries(chosen).map(([k, v]) => [k, maskLiterals(v as McpServerConfigV2)]));
+      fs.writeFileSync(target, JSON.stringify({ mcpServers: safe }, null, 2), 'utf8');
       return `Exported ${Object.keys(chosen).length} server(s) to ${target}. `
-        + 'Anything secret lives in env values — check before sharing this file.';
+        + 'Secrets are written as {{secret:name}} references (or a "not shown" marker), never their values.';
     }
 
     case 'import': {
@@ -344,7 +427,7 @@ export async function executeMcpManage(input: McpManageInput): Promise<string> {
       for (const server of names) {
         const config = incoming[server] as Record<string, unknown>;
         try {
-          await addMcpServer({ name: server, ...config } as Parameters<typeof addMcpServer>[0]);
+          await addMcpServer({ name: server, ...config } as Parameters<typeof addMcpServer>[0], actor);
           added.push(server);
         } catch (err) {
           failed.push(`${server} (${err instanceof Error ? err.message : String(err)})`);
@@ -374,13 +457,13 @@ export const mcpManageToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'read', 'add', 'update', 'remove', 'enable', 'disable', 'reload', 'test', 'export', 'import', 'paste'],
+        enum: ['list', 'read', 'add', 'update', 'remove', 'enable', 'disable', 'reload', 'test', 'export', 'import', 'paste', 'review'],
         description:
           'list: every configured server and what it contributes. read: one in full, with its tools. '
           + 'add: connect a new one. update: change part of its config, keeping the rest. remove: delete '
           + 'its config. enable/disable: switch without losing '
           + 'the config. reload: reconnect everything. test: check one is actually working. '
-          + 'export/import: JSON config files.',
+          + 'export/import: JSON config files. review: tools held back because their definition changed (only a person can approve them).',
       },
       name: { type: 'string', description: 'Which server. Required for everything except list, reload and import.' },
       command: {

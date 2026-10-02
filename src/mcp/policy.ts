@@ -17,10 +17,11 @@
  *    tools), whose read tools are classified by name in the table below. The
  *    desktop browser's own consent gate (ADR 0005) still applies on top.
  *
- * Deliberately coarse: a whole server is read-only or it is not. Per-tool
- * effect classes and pinned tool hashes are the design's Phase 6
- * (docs/engineering/design/agents-skills-tools.md §5.3); `readOnly: true` is the
- * same thing as that design's `tools: { "*": { effect: "read" } }`.
+ *  - its settings entry gives the tool (or `*`) `{ "effect": "read" }` in
+ *    `tools` — the per-tool form of `readOnly` (design §5.3, Phase 6).
+ *
+ * Pinned tool hashes (the rug-pull defence) are `mcp/pins`; a tool whose
+ * definition changed is not offered at all, so it never reaches this question.
  *
  * @module mcp/policy
  */
@@ -74,5 +75,9 @@ export function isReadOnlyMcpTool(name: string): boolean {
   const parts = parseMcpToolName(name);
   if (!parts) return false;
   if (mcpRegistry.isHost(parts.server)) return HOST_READ_TOOLS.has(parts.tool);
-  return mcpRegistry.configOf(parts.server)?.readOnly === true;
+  const config = mcpRegistry.configOf(parts.server);
+  if (config?.readOnly === true) return true;
+  // Per-tool policy (Phase 6): the tool's own entry wins over `*`.
+  const rule = config?.tools?.[parts.tool] ?? config?.tools?.['*'];
+  return rule?.effect === 'read';
 }

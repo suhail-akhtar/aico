@@ -507,6 +507,15 @@ export {
 } from './agents/effective.js';
 export { isMcpToolName, isReadOnlyMcpTool, parseMcpToolName, HOST_READ_TOOLS } from './mcp/policy.js';
 export { mcpToolAllowed } from './agent.js';
+// Phase 6: MCP modernisation
+export { mcpToolGroups, isDeferredMcpServer } from './agent.js';
+export {
+  MODERN_PROTOCOL, LEGACY_PROTOCOL, McpRpcError, McpTimeoutError, classifyProbe, encodeHeaderValue, standardHeaders,
+  headerParams, paramHeaders,
+} from './mcp/protocol.js';
+export { toolHash, reviewServerTools, approveTools as approveMcpTools, forgetServerPins, pinsPath } from './mcp/pins.js';
+export { isLiteralSecret, maskLiterals, moveLiteralSecrets, resolveConfigSecrets, migrateMcpSecrets } from './mcp/secrets.js';
+export { McpSseClient } from './mcp/sse.js';
 
 // -- Phase 1 of the agents/skills/tools design (scripts/phase1-skills-test.mjs) --
 export {
@@ -523,3 +532,55 @@ export { scanSkillDir } from './skills/scan.js';
 export { treeHash, readMeta, writeMeta, effectiveTrust, markReviewed, META_FILE } from './skills/provenance.js';
 export { frontmatterOf } from './skills/loader.js';
 export { catalogueBudgetTokens, CATALOGUE_MAX_TOKENS, CATALOGUE_ENTRY_MAX } from './tools/skill.js';
+
+// -- Phase 5 of the agents/skills/tools design: skill generation (scripts/phase5-skill-author-test.mjs) --
+export { readDraftEvals, hasEvals } from './skills/eval/evals-file.js';
+export {
+  measureSkill, planMeasure, splitTriggers, scoreTriggers, withSkillText, MAX_BUDGET_USD,
+} from './skills/eval/measure.js';
+export { readReport, evalGate, describeReport, REPORT_FILE } from './skills/eval/report.js';
+export { listTree } from './skills/provenance.js';
+
+// -- Phase 2 of the agents/skills/tools design: custom tools (scripts/phase2-custom-tools-test.mjs) --
+export {
+  validateDefinition, validateArgs, renderArgv, renderHttp, describeCall, parseSecretRef, providerSchema, fieldsOf,
+} from './custom-tools/format.js';
+export { runCustomTool, runProcess, spawnPlan, resolveWindowsProgram, secretFileRoot, runProbe } from './custom-tools/runner.js';
+export { loadCustomTools, usableTools, setToolEnabled, userToolsDir, groupIdOf } from './custom-tools/store.js';
+export { approvalDecision, installCustomToolGuards, taints, resetFirstUseForTest, approvalDetail } from './custom-tools/policy.js';
+export { executeToolManage, toolsForPanel } from './custom-tools/manage.js';
+export { projectToolFiles } from './workspace-trust.js';
+
+// -- Phase 7: autonomy levels and the approve-later inbox (scripts/phase7-autonomy-test.mjs) --
+export {
+  AUTONOMY_LEVELS, parseLevel, minLevel, levelFromMode, modeFromLevel, effectiveLevel, levelLabel,
+} from './autonomy/levels.js';
+export {
+  parkAction, listActions, getAction, approveAction, denyAction, expireDue, hashArgs, contextHashFor,
+  outcomeMessage, inboxFile, resetInboxForTest, DEFAULT_PARK_TTL_MS,
+} from './autonomy/inbox.js';
+export { runPreview } from './custom-tools/policy.js';
+export { defaultBackgroundLevel } from './background/index.js';
+export { wakeDelivery } from './work/watchers.js';
+// -- Phase 3: agents v2 (scripts/phase3-agents-test.mjs) --
+export { parseAgentMarkdown, agentToMarkdown } from './agents/format.js';
+export { validateAgentDef, validationContext, validateAgent } from './agents/validate.js';
+export { summarizeAgent } from './agents/summary.js';
+export { boundsOf } from './agents/resolve.js';
+export { applyAutonomyCeiling } from './agents/ceiling.js';
+export { globToRegExp, writeRefusal } from './agents/paths-guard.js';
+export { listAgentSpecs, getAgentSpec } from './agents/registry.js';
+export { BUILTIN_AGENT_FILES } from './agents/builtin.js';
+export { agentRunScope } from './agent.js';
+// -- Phase 4: verification and certification (scripts/phase4-certify-test.mjs) --
+export { gradeCheck, gradeModelFree, gradeProcessCheck, snapshot, changedFiles, toolMatches, scoreOf } from './evals/grade.js';
+export { safetyProbes, CANARY, DELETE_PATTERN, SAFETY_PACK_VERSION } from './evals/safety-pack.js';
+export { BUILTIN_AGENT_TASKS } from './evals/builtin-tasks.js';
+export { loadGoldenTasks, taskProblems, evalsFileFor } from './evals/tasks.js';
+export { parseVerdict, judge, DEFAULT_JUDGE_MODEL } from './evals/judge.js';
+export { runTrial, evalLevel } from './evals/run.js';
+export { certifyAgent, planCertification, describeCertificate, clampBudget, MAX_CERTIFY_USD } from './evals/certify.js';
+export {
+  dependencyHash, statusOfSpec, certificationStatus, isCertified, listCertificates, writeCertificate, certificatesDir,
+} from './evals/certificate.js';
+export { spawnBackgroundAgent, getBackgroundAgents } from './background/index.js';

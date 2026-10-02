@@ -7,6 +7,7 @@
   the decision and its invariants; where they differ, the broker document and
   the code in `src/vault/` win.
 - **Related:** [security.md § secrets](../security.md#secrets); [ADR 0005](0005-browser-agent-safety-model.md)
+- **Amended by:** [ADR 0010](0010-secret-file-sink.md) (temp-file secret sink for custom tools)
 
 ## Context
 

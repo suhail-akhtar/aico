@@ -35,6 +35,10 @@ in the module header of the code they govern.
 | [0006](0006-credential-broker.md) | Credential broker: agents use credentials, never read them | Accepted |
 | [0007](0007-ops-tools-and-dependencies.md) | Operate remote machines through trusted consumer tools (SSH via ssh2, HTTP, WinRM via PowerShell, SNMP via net-snmp) | Accepted |
 | [0008](0008-canvas-docs-export.md) | Export canvases with the renderer's own Markdown parser and a hand-written OOXML writer | Accepted |
+| [0009](0009-custom-tools.md) | Custom tools: a typed JSON wrapper around one argv or one HTTP call, approvals by effect class | Accepted |
+| [0010](0010-secret-file-sink.md) | Amend 0006: a temp-file secret sink for custom tools, deleted after one call | Accepted |
+| [0011](0011-approve-later-inbox.md) | The approve-later inbox: unattended (L4) runs park calls that need a person; approval replays the exact call once | Accepted |
+| [0012](0012-agent-certification.md) | Agent certification: a hash-bound certificate gates unattended (L4) runs | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

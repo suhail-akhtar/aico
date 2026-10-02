@@ -23,8 +23,11 @@
  * `approval` in the definition tightens any row or relaxes `external` to
  * `none`; nothing relaxes `destructive` (validated in format.ts), and there
  * is no "always allow" for it in any client. With nobody to ask (a headless
- * or unattended run) a call that needs a person is refused, never run: the
- * approve-later inbox is Phase 7.
+ * run below L4) a call that needs a person is refused, never run. At L4
+ * (unattended, Phase 7) it is **parked** instead: the exact call, its preview
+ * and their hashes go to the approve-later inbox (`autonomy/inbox.ts`), the
+ * model is told it has not run and must not be worked around, and the run
+ * carries on with everything else.
  *
  * Taint: once the session has taken in web pages or MCP results, an
  * `external` call is asked every time even at L3 — derived from the calls
@@ -33,6 +36,7 @@
  * @module custom-tools/policy
  */
 
+import crypto from 'node:crypto';
 import readline from 'node:readline';
 import type { ToolPipeline } from '../tools/pipeline.js';
 import { sinkRedactText } from '../vault/sink.js';
@@ -92,6 +96,16 @@ export function ttyAsk(title: string, detail: string): Promise<boolean> {
 
 export type UsableTools = ReadonlyMap<string, LoadedTool & { def: CustomToolDef }>;
 
+/** What an L4 run hands the inbox for one call that needs a person. */
+export interface ParkRequest {
+  tool: LoadedTool & { def: CustomToolDef };
+  /** The preview tool as loaded now, so its file hash binds the approval too. */
+  previewTool?: LoadedTool & { def: CustomToolDef };
+  args: Record<string, unknown>;
+  why: string;
+  preview?: { text: string; hash: string };
+}
+
 export interface CustomToolStageOptions {
   agentId: string;
   /** Session id (or the run's id): first-use approvals are remembered per this key. */
@@ -102,24 +116,48 @@ export interface CustomToolStageOptions {
   autoApprove: boolean;
   /** Whoever asks a person; undefined when nobody can be asked. */
   ask?: (title: string, detail: string) => Promise<boolean>;
+  /**
+   * L4 (unattended): record the call for a person to approve later instead of
+   * asking or refusing (Phase 7, `autonomy/inbox.ts`). Wins over `ask`: at L4
+   * nobody is waiting on a card. Resolves to the inbox id, or a reason the
+   * call could not be parked (it is then refused, never run).
+   */
+  park?: (call: ParkRequest) => Promise<{ id: string } | { error: string }>;
   tainted: () => boolean;
   cwd: () => string;
 }
 
-/** Run a preview tool for an approval card. Its output is redacted and bounded. */
-async function previewFor(def: CustomToolDef, args: Record<string, unknown>, opts: CustomToolStageOptions, signal?: AbortSignal): Promise<string | undefined> {
+/**
+ * Run a call's preview tool. `text` is what a person reads (redacted, clipped
+ * to 3,000 characters); `hash` is over the whole redacted output, so a parked
+ * call's preview can be compared later even where the card was clipped
+ * (Phase 7: a changed preview refuses the approval as diverged).
+ */
+export async function runPreview(def: CustomToolDef, args: Record<string, unknown>, ctx: {
+  tools: UsableTools; cwd: string; sessionId?: string; signal?: AbortSignal;
+}): Promise<{ text: string; hash: string } | undefined> {
   const name = def.preview?.tool;
   if (!name) return undefined;
-  const preview = opts.tools.get(name);
-  if (!preview || preview.def.effect !== 'read') return `Preview (${name}) unavailable: it is not an enabled read tool.`;
+  const hashed = (text: string, full: string = text): { text: string; hash: string } =>
+    ({ text, hash: crypto.createHash('sha256').update(full).digest('hex') });
+  const preview = ctx.tools.get(name);
+  if (!preview || preview.def.effect !== 'read') return hashed(`Preview (${name}) unavailable: it is not an enabled read tool.`);
   const problems = validateArgs(preview.def.input_schema, args);
-  if (problems.length) return `Preview (${name}) not run: ${problems.join(' ')}`;
-  const out = await runCustomTool(preview.def, args, { cwd: opts.cwd(), ...(signal ? { signal } : {}), ...(opts.sessionId ? { sessionId: opts.sessionId } : {}) });
+  if (problems.length) return hashed(`Preview (${name}) not run: ${problems.join(' ')}`);
+  const out = await runCustomTool(preview.def, args, { cwd: ctx.cwd, ...(ctx.signal ? { signal: ctx.signal } : {}), ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}) });
   const text = typeof out.error === 'string'
     ? `${out.error}\n${String(out.stderr ?? '')}`
     : String(out.stdout ?? JSON.stringify(out));
   const clipped = text.length > 3000 ? `${text.slice(0, 3000)}\n… (${text.length - 3000} more characters)` : text;
-  return `Preview (${name}):\n${sinkRedactText(clipped.trimEnd())}`;
+  return hashed(`Preview (${name}):\n${sinkRedactText(clipped.trimEnd())}`, `Preview (${name}):\n${sinkRedactText(text.trimEnd())}`);
+}
+
+/** Run a preview tool for an approval card. Its output is redacted and bounded. */
+async function previewFor(def: CustomToolDef, args: Record<string, unknown>, opts: CustomToolStageOptions, signal?: AbortSignal): Promise<string | undefined> {
+  return (await runPreview(def, args, {
+    tools: opts.tools, cwd: opts.cwd(),
+    ...(opts.sessionId ? { sessionId: opts.sessionId } : {}), ...(signal ? { signal } : {}),
+  }))?.text;
 }
 
 /** What a person reads before answering: effect, why, the exact call (secrets by name), the preview. */
@@ -161,6 +199,28 @@ export function installCustomToolGuards(pipeline: ToolPipeline, opts: CustomTool
     });
     if (decision.kind === 'allow') return { kind: 'abstain' };
     if (decision.kind === 'deny') return decision;
+    if (opts.park) {
+      const args = ctx.arguments ?? {};
+      const preview = await runPreview(tool.def, args, {
+        tools: opts.tools, cwd: opts.cwd(),
+        ...(opts.sessionId ? { sessionId: opts.sessionId } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}),
+      });
+      const previewName = tool.def.preview?.tool;
+      const previewTool = previewName ? opts.tools.get(previewName) : undefined;
+      let parked: { id: string } | { error: string };
+      try {
+        parked = await opts.park({ tool, args, why: decision.why, ...(preview ? { preview } : {}), ...(previewTool ? { previewTool } : {}) });
+      } catch (err) { parked = { error: (err as Error).message }; }
+      if ('error' in parked) {
+        return { kind: 'deny', reason: `${tool.name} needs a person's approval (${decision.why}) and could not be parked for one: ${parked.error} It was not run.` };
+      }
+      return {
+        kind: 'deny',
+        reason: `PARKED: ${tool.name} needs a person's approval (${decision.why}), and this run is unattended, so the exact call was put in the AICO inbox (id ${parked.id}) for a person to approve later. It has NOT run. `
+          + 'Do not try to do the same thing another way — not with another tool, not with a shell command. Finish everything else that does not depend on it, '
+          + 'and say in your final report that this step is waiting for approval in the inbox.',
+      };
+    }
     if (!opts.ask) {
       return {
         kind: 'deny',

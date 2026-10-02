@@ -35,9 +35,12 @@ import {
 } from './import.js';
 import { parseFrontmatter, updateFrontmatter, type FmValue } from './frontmatter.js';
 import { validateFrontmatter } from './validate.js';
-import { markReviewed } from './provenance.js';
+import { markReviewed, treeHash } from './provenance.js';
+import { hasEvals, readDraftEvals } from './eval/evals-file.js';
+import { readReport, evalGate, describeReport, type SkillEvalReport } from './eval/report.js';
 import { disabledIn, isDisabled, setEnabled, forget } from '../registry-state.js';
-import { currentCwd } from '../run-context.js';
+import { currentCwd, currentRunContext } from '../run-context.js';
+import { loadSettings } from '../settings.js';
 import type { Skill } from './types.js';
 
 /** Where drafts wait. Deliberately not a directory the loader scans. */
@@ -49,7 +52,17 @@ export interface SkillResource { path: string; content: string }
 
 export interface SkillManageInput {
   action: 'list' | 'read' | 'create' | 'verify' | 'validate' | 'register'
-    | 'update' | 'delete' | 'enable' | 'disable' | 'import' | 'review' | 'install' | 'export';
+    | 'update' | 'delete' | 'enable' | 'disable' | 'import' | 'review' | 'install' | 'export' | 'eval';
+  /** For eval: the spending ceiling in USD (default 0.25, never above 2). */
+  budget?: number;
+  /** For eval: also run each task without the skill (default true). */
+  baseline?: boolean;
+  /** For eval: score and tune the description on the trigger queries (default true). */
+  triggers?: boolean;
+  /** For eval: description revisions to try (default 1, 0–3). */
+  descriptionRounds?: number;
+  /** For eval: times to re-score the final description on held-out queries (default 1). */
+  triggerRuns?: number;
   name?: string;
   description?: string;
   /** The procedure itself — the body below the frontmatter. */
@@ -227,6 +240,20 @@ export function verifySkillDir(dir: string): VerifyReport {
   const extras = [...shipped].filter(f => !/^skill\.md$/i.test(f));
   if (extras.length) notes.push(`Ships ${extras.length} file(s): ${extras.join(', ')}.`);
 
+  // The skill's own evals (Phase 5): a file that will not parse would only
+  // surface when someone paid to run it.
+  const evals = readDraftEvals(dir, parsed.frontmatter.name);
+  if (evals) {
+    problems.push(...evals.problems.map(p => `evals: ${p}`));
+    notes.push(...evals.notes.map(n => `evals: ${n}`));
+    const report = readReport(dir);
+    notes.push(!report
+      ? 'evals: not measured yet — action:"eval" runs them with and without the skill.'
+      : report.hash === treeHash(dir)
+        ? `evals: measured ${report.at.slice(0, 10)}${report.uplift !== undefined ? `, uplift ${report.uplift >= 0 ? '+' : ''}${report.uplift.toFixed(2)}` : ''}${report.complete ? '' : ' (incomplete)'}.`
+        : 'evals: the files changed since they were measured — measure again before registering.');
+  }
+
   return { ok: problems.length === 0, problems, notes };
 }
 
@@ -396,6 +423,16 @@ export async function executeSkillManage(input: SkillManageInput, ctx: SkillMana
           + '\nFix the draft and try again.';
       }
 
+      // Measured before accepted (Phase 5): a draft with evals registers only
+      // on a report for exactly these files; one that did not beat the
+      // no-skill baseline needs a person, not the model, to go ahead.
+      const gate = evalGate(draft, hasEvals(draft));
+      if (!gate.ok && !(gate.person && ctx.human)) {
+        return `Not registered — "${name}": ${gate.reason}`
+          + (gate.report ? `\n\n${describeReport(gate.report)}` : '');
+      }
+      const measured: SkillEvalReport | undefined = gate.report;
+
       // A project draft installs in the project it was drafted for, whichever
       // directory registers it; an explicit scope on this call wins.
       const meta = readDraftMeta(draft);
@@ -415,6 +452,10 @@ export async function executeSkillManage(input: SkillManageInput, ctx: SkillMana
         `Registered "${result.name}"${result.replaced ? ' (replaced the previous one)' : ''}.`,
         `Installed at ${result.installedAt}.`,
         result.resources?.length ? `Ships: ${result.resources.join(', ')}` : '',
+        measured?.uplift !== undefined
+          ? `Measured: ${measured.withMean!.toFixed(2)} with vs ${measured.withoutMean!.toFixed(2)} without (uplift ${measured.uplift >= 0 ? '+' : ''}${measured.uplift.toFixed(2)})`
+            + `${measured.triggers ? `; trigger precision ${measured.triggers.heldOut[0]!.precision?.toFixed(2) ?? 'n/a'} held out` : ''}.`
+          : '',
         'It is now in the catalogue and can be used immediately.',
       ].filter(Boolean).join('\n');
     }
@@ -570,6 +611,48 @@ export async function executeSkillManage(input: SkillManageInput, ctx: SkillMana
       ].filter(Boolean).join('\n');
     }
 
+    case 'eval': {
+      // Measure a draft (or an installed skill of the user's) on its own
+      // evals: with vs without the skill, and its triggering. Spends money,
+      // inside a hard ceiling; the result is written beside the skill and is
+      // what `register` checks.
+      if (!name) return 'A name is required.';
+      const draft = path.join(draftsDir(), safeName(name));
+      const installed = skillRegistry.lookupAny(name);
+      const target = fs.existsSync(draft) ? draft : installed && !installed.isBuiltin ? installedDir(installed) : null;
+      if (!target) return `No draft or installed directory skill called "${name}" (built-in skills are measured with \`aico skill eval\`).`;
+      const report = verifySkillDir(target);
+      if (!report.ok) return `Not measured — fix its checks first:\n${report.problems.map(p => `  - ${p}`).join('\n')}`;
+      if (!hasEvals(target)) {
+        return `"${name}" has no evals/evals.json. Write at least three tasks with deterministic checks and ten trigger `
+          + 'queries (see the skill-author skill), as resources of the draft, then measure.';
+      }
+      const run = currentRunContext();
+      const settings = run?.settings ?? await loadSettings();
+      const model = run?.model ?? settings.model;
+      if (!model) return 'No model is configured to run the measurement with.';
+      const { measureSkill } = await import('./eval/measure.js');
+      // A deadline of its own, inside the tool's: no measurement runs forever.
+      const signal = AbortSignal.timeout(15 * 60 * 1000);
+      const out = await measureSkill(target, {
+        model, settings, signal,
+        ...(input.budget !== undefined ? { budgetUsd: input.budget } : {}),
+        ...(input.baseline !== undefined ? { baseline: input.baseline } : {}),
+        ...(input.triggers !== undefined ? { triggers: input.triggers } : {}),
+        ...(input.descriptionRounds !== undefined ? { descriptionRounds: input.descriptionRounds } : {}),
+        ...(input.triggerRuns !== undefined ? { triggerRuns: input.triggerRuns } : {}),
+      });
+      if ('error' in out) return `Not measured: ${out.error}`;
+      const gate = evalGate(target, true);
+      return [
+        describeReport(out),
+        '',
+        gate.ok
+          ? 'Show the person these results; registering is their call.'
+          : `Register would refuse: ${gate.reason}`,
+      ].join('\n');
+    }
+
     default:
       return `Unknown action "${String(action)}".`;
   }
@@ -583,6 +666,7 @@ export const skillManageToolDefinition = {
     'remove, switch off, bring in or share one.',
     'Imported skills install UNREVIEWED and stay unusable until a person reviews and enables them in Settings; you cannot enable them.',
     'Creating writes a DRAFT and does not register it — write it, actually try it, then register it.',
+    'eval measures a draft that ships evals/evals.json with and without the skill (it spends money, within a ceiling); a draft with evals registers only after a fresh eval shows it helps.',
     'To *use* an existing skill, call Skill instead; this tool is for managing them.',
   ].join(' '),
   inputSchema: {
@@ -590,14 +674,14 @@ export const skillManageToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'read', 'create', 'verify', 'validate', 'register', 'update', 'delete', 'enable', 'disable', 'review', 'import', 'install', 'export'],
+        enum: ['list', 'read', 'create', 'verify', 'validate', 'register', 'update', 'delete', 'enable', 'disable', 'review', 'import', 'install', 'export', 'eval'],
         description:
           'list: every skill and whether it is enabled. read: one skill in full. create: write an '
           + 'unregistered draft. verify/validate: check a draft or skill against the spec. register: install a draft that passes. '
           + 'update: change an installed skill. delete: remove it. enable/disable: toggle without '
           + 'deleting. review: stage a folder/pack/plugin/.skill/SKILL.md (path) and report files, scripts and scan findings without installing, or review an installed skill (name). '
           + 'install: install a staged review (id, select) as unreviewed. import: review + install in one step. '
-          + "export: pack one into Claude's .skill format.",
+          + "export: pack one into Claude's .skill format. eval: run a draft's evals with and without it, score its triggering, tune its description.",
       },
       name: { type: 'string', description: 'Which skill. Required for everything except list and import.' },
       description: {
@@ -630,6 +714,9 @@ export const skillManageToolDefinition = {
       includeEvals: { type: 'boolean', description: 'For export: keep the evals/ folder (Claude ignores it).' },
       overwrite: { type: 'boolean', description: 'Replace an existing skill of the same name.' },
       scope: { type: 'string', enum: ['user', 'project'], description: 'create/register: for you everywhere (default), or for this project only.' },
+      budget: { type: 'number', description: 'For eval: spending ceiling in USD (default 0.25, at most 2).' },
+      baseline: { type: 'boolean', description: 'For eval: also run each task without the skill (default true).' },
+      triggers: { type: 'boolean', description: 'For eval: score and tune the description on the trigger queries (default true).' },
     },
     required: ['action'],
   },

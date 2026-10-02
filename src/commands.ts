@@ -121,6 +121,9 @@ Available slash commands:
   /mcp-remove <name>       Remove an MCP server
   /mcp-reload              Reload MCP servers from settings
   /mcp-security            Show MCP trust, command provenance, and env redaction
+  /mcp-review              Show MCP tools held because their definition changed
+  /mcp-approve <s> [tool]  Approve a server's held (changed or new) tools
+  /mcp-secure              Move literal MCP secrets from settings into the vault (with backup)
   /workspace               Show/create the project AICO workspace
   /workspace-set <path>    Configure workspace path (use "default" to reset)
   /capabilities            Show tools, commands, MCP servers, and workspace powers
@@ -871,7 +874,7 @@ export async function handleSlashCommand(
     case 'mcp-add': {
       try {
         const parsed = parseMcpAddCommand(args);
-        const output = await addMcpServer(parsed);
+        const output = await addMcpServer(parsed, 'user');
         return { handled: true, output };
       } catch (err) {
         return {
@@ -927,6 +930,20 @@ export async function handleSlashCommand(
 
     case 'mcp-security': {
       return { handled: true, output: await mcpSecurityReport(ctx.settings) };
+    }
+
+    // Typed by a person at the terminal, so these carry `human: true` — the
+    // agent's own McpManage call cannot approve a changed tool (mcp/pins).
+    case 'mcp-review':
+    case 'mcp-approve':
+    case 'mcp-secure': {
+      const { executeMcpManage } = await import('./mcp/manage-tool.js');
+      const [server, tool] = args.trim().split(/\s+/).filter(Boolean);
+      const which = cmd.toLowerCase();
+      if (which === 'mcp-approve' && !server) return { handled: true, output: 'Usage: /mcp-approve <server> [tool]' };
+      const action = which === 'mcp-review' ? 'review' as const : which === 'mcp-approve' ? 'approve' as const : 'secure' as const;
+      const output = await executeMcpManage({ action, ...(server ? { name: server } : {}), ...(tool ? { tool } : {}) }, { human: true });
+      return { handled: true, output };
     }
 
     case 'workspace': {

@@ -545,6 +545,8 @@ export async function runTask(
   let resolvedModel: string | undefined;
   /** A named agent's `canDelegate`, which the child's run enforces. */
   let resolvedCanDelegate: boolean | undefined;
+  /** A named agent's bounds (deny list, ceiling, budget, write paths …), enforced by the child's run. */
+  let resolvedBounds: import('../agents/types.js').AgentBounds | undefined;
 
   if (args.agent_spec) {
     resolvedInstructions = args.agent_spec.instructions;
@@ -555,14 +557,16 @@ export async function runTask(
     // whether the orchestrator delegates to it or a person talks to it.
     try {
       const { resolveAgent } = await import('../agents/resolve.js');
-      const resolved = await resolveAgent(args.agent_name);
+      // The delegating run's directory, so a project's own agents resolve.
+      const resolved = await resolveAgent(args.agent_name, currentCwd());
       if (!resolved) {
         return `[error] Agent "${args.agent_name}" not found. Use AgentList to see available agents.`;
       }
       resolvedInstructions = resolved.instructions;
       resolvedTools = resolved.tools;
       resolvedModel = resolved.model;
-      resolvedCanDelegate = resolved.spec.canDelegate;
+      resolvedCanDelegate = resolved.bounds.delegate !== 'none';
+      resolvedBounds = resolved.bounds;
     } catch {
       return `[error] Failed to load agent "${args.agent_name}".`;
     }
@@ -804,6 +808,7 @@ export async function runTask(
       //   canDelegate  a named agent that may not delegate does not, in code.
       ...(opts.toolScope ? { toolScope: opts.toolScope } : {}),
       ...(resolvedCanDelegate === false ? { canDelegate: false } : {}),
+      ...(resolvedBounds ? { agentBounds: resolvedBounds } : {}),
       abortSignal: abortController.signal,
       // Sub-agent status updates feed back into registry — AND reset heartbeat
       onToolCall: (name: string) => {

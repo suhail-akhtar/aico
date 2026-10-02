@@ -46,7 +46,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { aicoHome } from './home.js';
-import { projectToolsDir, toolFilesIn } from './custom-tools/files.js';
+import { projectToolFilesIn } from './custom-tools/files.js';
 
 /** Settings sections that make AICO execute something, and so need trust from a project file. */
 export const TRUST_GATED_SECTIONS = ['mcpServers', 'hooks', 'env'] as const;
@@ -158,7 +158,7 @@ interface ProjectTool { file: string; sha256: string; name: string; effect: stri
 
 /** The project's custom tool files, each with its hash and what it runs. Never throws. */
 export function projectToolFiles(root: string): ProjectTool[] {
-  return toolFilesIn(projectToolsDir(root)).map(({ pack, file }) => {
+  return projectToolFilesIn(root).map(({ pack, file }) => {
     let text = '';
     try { text = fs.readFileSync(file, 'utf8'); } catch { /* an unreadable file hashes as empty and loads as invalid */ }
     let parsed: { name?: unknown; effect?: unknown; run?: { argv?: unknown }; http?: { method?: unknown; url?: unknown } } = {};

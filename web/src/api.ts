@@ -164,6 +164,24 @@ function safeParse(text: string): unknown {
   try { return JSON.parse(text); } catch { return { raw: text }; }
 }
 
+import type { ParkedAction } from './inbox';
+export type { ParkedAction } from './inbox';
+
+/** One custom tool as Settings → Tools shows it (engine: custom-tools/manage `toolsForPanel`). */
+export interface CustomToolRow {
+  name: string;
+  pack: string;
+  scope: 'user' | 'project';
+  file: string;
+  status: 'enabled' | 'draft' | 'changed' | 'disabled' | 'invalid' | 'untrusted';
+  reason?: string;
+  errors: string[];
+  warnings: string[];
+  /** The exact command or request it runs, secrets by name. */
+  command?: string;
+  def?: { description: string; effect: string; input_schema: { properties?: Record<string, { type: string; description?: string }> }; preview?: { tool: string } };
+}
+
 const post = <T,>(path: string, body: unknown): Promise<T> =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
@@ -494,8 +512,17 @@ export const api = {
   // One call for every verb on every registry, hitting the same executors the
   // agent uses. The panel is a second front door to one implementation rather
   // than a parallel one that has to be kept in step.
-  manage: (registry: 'skills' | 'agents' | 'mcp' | 'memory', input: Record<string, unknown>) =>
+  manage: (registry: 'skills' | 'agents' | 'mcp' | 'memory' | 'tools', input: Record<string, unknown>) =>
     post<ManageResult>('manage', { registry, ...input }),
+
+  // ── custom tools (Settings → Tools) ────────────────────────────────
+  customTools: () => get<{ tools: CustomToolRow[] }>('custom-tools'),
+  /**
+   * Enable, test (executes a read tool) and delete are a person's acts, so
+   * they go with the proof of the person; disable is safe on the token alone.
+   */
+  customToolAction: (action: 'enable' | 'disable' | 'test' | 'delete', name: string, args?: Record<string, unknown>) =>
+    (action === 'disable' ? post : postAsPerson)<ManageResult>('manage', { registry: 'tools', action, name, ...(args ? { args } : {}) }),
   memories: (scope?: string) =>
     get<{ memories: MemorySummary[] }>(`memory${scope && scope !== 'all' ? `?scope=${encodeURIComponent(scope)}` : ''}`),
 
@@ -528,6 +555,14 @@ export const api = {
     post<{ ok: true; wrote: string }>('learning/adopt', { cwd, id, ...edits }),
   dismissProposal: (cwd: string | undefined, id: string) =>
     post<{ ok: true; id: string }>('learning/dismiss', { cwd, id }),
+
+  /** The approve-later inbox: calls unattended runs parked for a person (engine: autonomy/inbox). */
+  inbox: (status: 'pending' | 'all' = 'all') =>
+    get<{ actions: ParkedAction[]; pending: number }>(`inbox/list?status=${status}`),
+  /** Approving runs the exact parked call once, so it is sent as a person; denying needs no proof. */
+  decideParked: (id: string, decision: 'approve' | 'deny', note?: string) =>
+    (decision === 'approve' ? postAsPerson : post)<{ ok: boolean; message: string; action?: ParkedAction }>(
+      'inbox/decide', { id, decision, ...(note ? { note } : {}) }),
 
   /** Which cheap model the read-only sub-agent roles could run on, for the model in use. */
   agentRecommendation: (model?: string) =>
@@ -1019,6 +1054,29 @@ export interface AgentSpec {
   /** False when switched off: still defined, just not offered. */
   enabled: boolean;
   model?: string;
+  /** Agents v2 (`.md` agents): its own instructions and enforced bounds. */
+  instructions?: string;
+  disallowedTools?: string[];
+  mcpServers?: string[];
+  delegate?: 'none' | 'readonly' | string[];
+  autonomy?: 'L0' | 'L1' | 'L2' | 'L3' | 'L4';
+  budget?: { maxUsd?: number; maxIterations?: number; maxMinutes?: number };
+  paths?: { write?: string[] };
+  format?: 'md' | 'json';
+  warnings?: string[];
+  /** Phase 4: whether it holds a certificate for exactly what it is now (gates unattended runs). */
+  certification?: { status: 'uncertified' | 'certified' | 'changed' | 'failed'; text: string; at?: string };
+}
+
+/** What `AgentManage validate` returns: the engine's errors, warnings and summary. */
+export interface AgentCheck {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  summary?: {
+    name: string; level: string; tools: string[]; runsWithoutAsking: string[]; asksFirst: string[];
+    cannot: string[]; delegation: string; budget: string; writes: string; unattended: string; notes: string[]; text: string;
+  };
 }
 
 /** Where the agent writes files that are not part of the project. */

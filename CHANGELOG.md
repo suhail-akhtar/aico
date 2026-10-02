@@ -3,6 +3,190 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+Agents you can build, verify and trust: custom tools with risk classes, Claude-
+compatible agents with enforced limits, certification before unattended runs,
+a skill writer that measures its skills, MCP on the current spec with pinned
+tools and vaulted secrets, and an approve-later inbox for autonomous runs.
+
+### Added
+
+- **Custom tools** (design Phase 2, [ADR 0009](docs/engineering/adr/0009-custom-tools.md)).
+  A JSON file in `~/.aico/tools/<pack>/` (or a project's `.aico/tools/<pack>/`)
+  wraps one command — an argv array, never a shell string — or one HTTP call,
+  with typed parameters and an effect class (`read`, `write`, `exec`,
+  `external`, `destructive`) that decides when a person is asked. Each
+  `{field}` is one whole argument; values are validated before anything
+  starts (shell syntax, a leading `-`, `..` in free text are refused).
+  Destructive tools ask on every call, even in auto mode, showing the exact
+  command and the output of a `preview` tool (e.g. a diff), with no "always
+  allow"; unattended runs park them for approval (see "Approve later" below). External tools ask on first use (every
+  use once the chat has read web or MCP content). Plan mode offers only read
+  tools.
+- Secrets in custom tools are references: `{{secret:name}}` in `env` or an
+  HTTP header, and `{{secret-file:name}}` for programs that need a file (a
+  kubeconfig) — a private temp file deleted when the call ends, however it
+  ends ([ADR 0010](docs/engineering/adr/0010-secret-file-sink.md)).
+- The agent can draft tools with `ToolManage`; a draft is not callable until
+  a person enables it in **Settings → Custom tools** (desktop) / **Tools**
+  (web), or with `aico tool enable` at a terminal. Editing an enabled tool
+  takes it out of use until it is enabled again. `aico tool list | test |
+  enable | disable`; `aico tool test <name> --args '{…}'` validates, shows the
+  exact argv and runs read tools.
+- A project's tools load only once the project is trusted; they are part of
+  the trust prompt, command shown, and a change asks again.
+- Each pack costs one line in the request until the model loads it
+  (`LoadTools` group `tools:<pack>`). Agents name them as `custom:<name>`.
+- **Skill generation, measured before it is accepted** (design Phase 5). A
+  built-in `skill-author` skill drafts a skill together with its own evals
+  (`evals/evals.json`, skill-creator's shape plus AICO's deterministic checks,
+  and ten-plus trigger queries). `SkillManage action:"eval"` / `aico skill
+  eval <name> --draft` runs every task with the skill and without it (the
+  baseline) on the same model, scores whether the description gets the skill
+  opened on held-out queries, and tunes the description from the training
+  misses only — kept only if it scores better on the held-out ones. It prints
+  the plan and a hard ceiling first (default $0.25, never above $2) and stops
+  there. Results are written beside the skill, bound to its files: `register`
+  refuses a draft whose evals were never run or were run on different files,
+  and the model cannot register one that did not beat the baseline (a person
+  can). Settings → Skills "Create with the agent" now starts `skill-author`.
+- **MCP modernisation** (design Phase 6). The MCP client speaks revision
+  **2026-07-28** (stateless: `server/discover`, per-request `_meta` version,
+  `resultType`, Streamable HTTP's `MCP-Protocol-Version`/`Mcp-Method`/
+  `Mcp-Name`/`Mcp-Param-*` headers, multi-round-trip `input_required`) and
+  falls back to the `initialize` handshake for servers on 2025-11-25 and
+  earlier — most of them — on any non-modern answer to the probe. It reads
+  tool `annotations` (shown as untrusted hints, never used for policy),
+  `title`, `outputSchema`/`structuredContent` (shown compactly), paginated
+  listings, and `notifications/tools/list_changed`.
+- **Rug-pull defence.** Each MCP tool's name, description and schema are
+  pinned (hashed) when first approved (`~/.aico/mcp/pins.json`). A tool whose
+  definition later changes is no longer offered or callable until a person
+  approves it — `/mcp-review`, `/mcp-approve <server> [tool]`, or Settings via
+  the decision gate; the agent's `McpManage` can review but not approve. New
+  tools on an approved server wait the same way unless its entry says
+  `"trust": "trusted"`.
+- **MCP secrets in the vault.** `env` and `headers` accept `{{secret:name}}`,
+  resolved at spawn/connect time for `mcp:<server>` only. A literal secret in
+  a config being added, updated, pasted or imported is moved into the vault
+  and only the reference is written; `/mcp-secure` moves the ones already in
+  your settings files, after backing each file up. `McpManage read` and
+  `export` never show a value.
+- **MCP schemas on demand.** Each MCP server is a `LoadTools` group
+  (`mcp:<server>`), one line with its name and tool count, so five servers
+  add five lines to a request instead of their schemas (measured: +275 chars
+  against 3,435 for five small fixture servers); its instructions arrive with
+  the load. `"alwaysLoad": true` keeps a server eager; the desktop's own host
+  server is always eager.
+- Per-tool MCP policy: `"tools": { "<tool>|*": { "effect": "read" } }` in a
+  server's entry makes that tool usable in plan mode and by read-only agents.
+  `McpManage test` reports the protocol revision, connect time, schema token
+  cost, instructions length, held tools, the last error, and each tool's
+  hints beside its effect.
+- **Approve later: "Waiting for you"** (design Phase 7,
+  [ADR 0011](docs/engineering/adr/0011-approve-later-inbox.md)). Runs now have
+  one autonomy scale, L0–L4: plan mode is L0 and the approval modes are L1
+  (ask), L2 (edits) and L3 (auto), unchanged; L4 is unattended. A schedule, a
+  background job or an `mcp-serve --allow-writes` job runs at L4 by default:
+  when it reaches a call that needs a person — a destructive custom tool, an
+  external one on first use — it no longer just refuses it. It **parks** the
+  exact call with its preview (the diff) in an inbox, tells the agent the
+  step has not run and must not be worked around, and finishes everything
+  else. A person approves or denies it from **Waiting for you** (desktop
+  sidebar, with a notification; web sidebar, with a count). Approving runs
+  exactly that call, once — and refuses it if the preview now says something
+  different (the state it would act on moved), if the tool's definition
+  changed, or if it expired (24 hours). Only the AICO window can approve, not
+  the API token; denying needs nothing. The outcome is written into the chat
+  the call came from, and every step is kept in `~/.aico/inbox/actions.jsonl`.
+  Schedules take `autonomy: "L3"` to refuse instead of parking; an agent's
+  `autonomy` ceiling below L4 never parks; read-only jobs never do. A server
+  turn may send `autonomy` (`L0`–`L4`) in place of `approval`/`planMode`.
+- **Agents v2** (design Phase 3). An agent is a Markdown file in Claude
+  Code's subagent format (`~/.aico/agents/<name>.md`, or a project's
+  `.aico/agents/`): `description`, the body as its instructions, `model`,
+  `skills`, `tools` / `disallowedTools` (built-ins, `custom:<name>`,
+  `mcp__<server>__*`), `mcpServers`, `delegate` (`none`, `readonly`, or the
+  agent names it may hand work to), an `autonomy` ceiling, a `budget`
+  (`maxUsd`, `maxIterations`, `maxMinutes` per run) and `paths.write`. All of
+  it is enforced by the run, the same way whether you talk to the agent or
+  the orchestrator delegates to it: tools outside the list are neither
+  offered nor dispatched; the ceiling lowers the session's level (L0 plan,
+  L1 asks before changes, L2 edits freely) and never raises it; the budget
+  stops the run; AICO's file tools refuse writes outside `paths.write`
+  (Bash is not bound by it, and the builder and summary say so). Every save
+  is validated — unknown tools, skills or MCP servers are errors that name the
+  fix. Legacy `.json` agents still load and become `.md` when next saved.
+- The engine writes "what this agent can do" (`AgentManage effective`, and
+  `validate` for a draft), computed with the run's own resolver.
+- **Agent builder** in Settings → Agents (desktop and web): create, edit and
+  duplicate, with tools grouped by effect, custom tools, MCP servers, reviewed
+  skills, autonomy, delegation, budget and write paths; the engine validates
+  as you type, errors show at the field, Save waits for them, and the
+  summary sits beside the form.
+- `AgentManage import` reads Claude Code (`.claude/agents/*.md`) and Copilot
+  (`.github/agents/*.agent.md`) agents, a file or a folder: an imported file
+  never raises autonomy (`permissionMode: bypassPermissions` / `dontAsk` are
+  ignored with a warning), and tools, skills or servers that do not exist
+  here are dropped and named. `duplicate`, and `.md` export, are new too.
+- **Agent certification** (design Phase 4,
+  [ADR 0012](docs/engineering/adr/0012-agent-certification.md)).
+  `aico agent certify <name>` (also `AgentManage certify`, and **Verify** in
+  Settings → Agents on desktop and web) lints the agent, then runs a built-in
+  safety pack — instructions planted in a README, a request to print a secret,
+  a deletion that a person refuses, an edit outside its write paths — and the
+  agent's own golden tasks (`<name>.evals/evals.json` beside its file) k times
+  each (default 3, `--runs`), with real-world effects mocked: network, ops,
+  MCP and external/destructive custom tools, and AICO's own registries, never
+  run. Graders read the tool-call log and the files, not what the agent says;
+  an LLM judge (`deepseek-v4-pro` by default) is used only where a task asks
+  for one and never alone on a critical task. Every safety probe and critical
+  task must pass in every trial. The plan and an estimate come first; a hard
+  cap (default and maximum $2, `--budget`) is checked before every call.
+  `--dry-run` spends nothing. The built-in `security-reviewer` and
+  `test-author` ship with golden tasks (a planted SQL injection; tests that
+  must pass on the real code and fail on a seeded bug).
+- A certificate is bound to a hash of everything the agent depends on — its
+  file, preloaded skills, the custom tools and pinned MCP tools it may call,
+  the model and its tests — so the Agents list shows **certified**, **changed
+  since certification**, **failed** or **uncertified** (`aico agent status`),
+  and any edit flips it to "changed".
+- **Unattended runs need a certified agent.** A named agent (a persona, a
+  delegated agent, or a schedule or background job with the new `agent`
+  option) that would run at L4 without a current certificate runs at L3 —
+  calls that need a person are refused instead of parked — and its result
+  says why. An approval in Waiting for you is refused if the agent that
+  parked the call has changed since. Talking to an agent (L1–L3) is never
+  gated.
+
+### Changed
+
+- The built-in role team (product-owner, architect, backend, frontend, qa,
+  security) is retired: 20 of its 21 skill references pointed at skills that
+  did not exist. Two bounded examples replace it — `security-reviewer`
+  (read-only, cannot delegate) and `test-author` (writes test files only,
+  L2). The Task tool's `subagent_type` roles are unchanged. A legacy agent's
+  `canDelegate: true` now means read-only delegation, so converting never
+  widens it.
+
+### Fixed
+
+- `aico skill eval` and `aico skill optimize` ignored the configured model and
+  ran on an API-key default, so with DeepSeek configured they sent DeepSeek
+  the OpenRouter id and failed with a 400. They now use the settings' model.
+- MCP over stdio: a request *from* the server was matched against the
+  client's own pending ids, so a server's request 1 could answer the client's
+  request 1. Server messages are now handled separately (`ping` answered,
+  anything else refused).
+- MCP notifications were sent with an id and awaited, so a server that
+  (correctly) did not answer `notifications/initialized` held startup for 30 s.
+- Legacy Streamable HTTP servers that mint an `Mcp-Session-Id` got every
+  request after the handshake without it; it is now echoed.
+- An MCP tool result with `isError: true` reached the model as an ordinary
+  result; it is now an error. A server that failed to load left its process
+  running; it is stopped.
+
 ## 0.34.0 — 2026-10-02
 
 Claude skill compatibility: import single skills, packs and plugin folders

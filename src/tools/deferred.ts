@@ -42,6 +42,14 @@
  * - Apply to an explicit tool whitelist (an agent type's set, an agent spec's
  *   array, a composed registry). Someone chose those tools by name.
  *
+ * ## MCP servers
+ *
+ * Each MCP server (not the desktop host's own, and not one whose settings say
+ * `alwaysLoad: true`) is a group too, `mcp:<server>`, passed in as `extra`
+ * like a pack. Its `LoadTools` line is the server's configured name and tool
+ * count — never the server's own self-description, which is untrusted text —
+ * so five servers cost five short lines until one is needed (design §5.3).
+ *
  * ## Custom tool packs
  *
  * Each pack of custom tools (custom-tools/store.ts) is a group too, with the
@@ -63,6 +71,12 @@ export interface ToolGroup {
   /** What the group is for, in the words a request would use. */
   summary: string;
   tools: readonly string[];
+  /**
+   * Name the group by its summary alone, without listing its tools. For MCP
+   * servers: a server's tool names are its own text, and listing thirty of them
+   * on every request is the cost deferral exists to remove.
+   */
+  unlisted?: boolean;
 }
 
 /**
@@ -85,10 +99,10 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
   },
   {
     id: 'registry',
-    summary: 'create or manage durable agents, skills and MCP servers; MCP resources',
+    summary: 'create or manage durable agents, skills, custom tools and MCP servers; MCP resources',
     tools: [
       'AgentCreate', 'AgentList', 'AgentRead', 'AgentPrompt', 'AgentManage',
-      'SkillCreate', 'SkillManage',
+      'SkillCreate', 'SkillManage', 'ToolManage',
       'McpManage', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers',
       'ListMcpResources', 'ReadMcpResource',
     ],
@@ -149,12 +163,15 @@ const SKILL_LOADS: Record<string, readonly string[]> = {
 /** A custom tool pack's group id. */
 export const CUSTOM_GROUP_RE = /^tools:[a-z0-9][a-z0-9-]{0,39}$/;
 
+/** An MCP server's group id (`mcp:<server>`; server names are `[A-Za-z0-9_-]`). */
+export const MCP_GROUP_RE = /^mcp:[A-Za-z0-9_-]{1,64}$/;
+
 /** Groups one tool call loads, if any. Pure; the caller accumulates. */
 export function groupsLoadedBy(name: string, input: Record<string, unknown> | undefined, extra: readonly ToolGroup[] = []): string[] {
   if (name === LOAD_TOOLS) {
     const raw = input?.groups;
     const names = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
-    return names.map(String).filter(g => TOOL_GROUPS.some(t => t.id === g) || CUSTOM_GROUP_RE.test(g));
+    return names.map(String).filter(g => TOOL_GROUPS.some(t => t.id === g) || CUSTOM_GROUP_RE.test(g) || MCP_GROUP_RE.test(g));
   }
   if (name === 'Skill') return [...(SKILL_LOADS[String(input?.name ?? '')] ?? [])];
   const own = groupOf(name) ?? extra.find(g => g.tools.includes(name))?.id;
@@ -207,7 +224,7 @@ export function loadToolsDefinition(available: ReadonlySet<string>, loaded: Read
     name: LOAD_TOOLS,
     description: [
       'Load tool groups that are not offered by default. A loaded group stays loaded for the rest of the session; its tools are callable from your next step. Load only what the request needs.',
-      ...offered.map(g => `- ${g.id}: ${g.summary} — ${g.tools.join(', ')}`),
+      ...offered.map(g => g.unlisted ? `- ${g.id}: ${g.summary}` : `- ${g.id}: ${g.summary} — ${g.tools.join(', ')}`),
     ].join('\n'),
     inputSchema: {
       type: 'object',

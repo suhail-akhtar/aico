@@ -55,6 +55,12 @@ const TIMEOUTS: Record<string, number> = {
   // because a child stuck in its own loop must not take the parent with it.
   Task: 20 * 60 * 1000,
   Agent: 20 * 60 * 1000,
+  // `eval` runs a skill's tasks as agent turns, twice each (with and without
+  // the skill); the measurement holds its own 15-minute deadline inside this.
+  SkillManage: 16 * 60 * 1000,
+  // `certify` runs an agent's safety and golden tasks k times each; it holds
+  // its own 30-minute deadline inside this.
+  AgentManage: 31 * 60 * 1000,
 
   // Network, and someone else's server.
   WebFetch: 90 * 1000,

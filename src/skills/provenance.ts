@@ -32,8 +32,12 @@ import type { SkillProvenance, SkillTrust } from './types.js';
 
 export const META_FILE = '.aico-meta.json';
 
-/** Never part of a skill's identity: our own bookkeeping, and build debris. */
-const SKIP = new Set([META_FILE, '.aico-draft.json', '.DS_Store', '__pycache__', 'node_modules', '.git', '__MACOSX']);
+/**
+ * Never part of a skill's identity: our own bookkeeping, and build debris.
+ * `.aico-eval.json` (eval/measure.ts) records the hash of the tree it measured,
+ * so it cannot be inside that tree.
+ */
+const SKIP = new Set([META_FILE, '.aico-draft.json', '.aico-eval.json', '.DS_Store', '__pycache__', 'node_modules', '.git', '__MACOSX']);
 
 /** Every file in a skill folder, sorted, as forward-slash paths. Symlinks are not followed. */
 export function listTree(dir: string): string[] {

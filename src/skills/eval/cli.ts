@@ -10,6 +10,11 @@
  * after a person has read it. The loop can prove a candidate is not worse on
  * the corpus; only a reader can judge the tasks the corpus does not contain.
  *
+ * `eval --draft` is the Phase 5 path (`measure.ts`): a skill's own
+ * `evals/evals.json`, run with and without the skill, plus trigger scoring and
+ * description tuning. It prints the plan and ceiling first, and writes the
+ * report `register` checks.
+ *
  * @module skills/eval/cli
  */
 
@@ -17,7 +22,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { loadSettings } from '../../settings.js';
+import { loadSettings, type AicoSettings } from '../../settings.js';
 import { skillRegistry } from '../registry.js';
 import { draftsDir } from '../manage.js';
 import { assignSplits, corpusFor } from './corpus.js';
@@ -28,7 +33,7 @@ import { registerSkillImportCommands } from '../cli-import.js';
 
 export interface SkillCommandDeps {
   /** The CLI's own model resolution, so `--model` means what it means everywhere else. */
-  pickModel: (requested?: string) => string;
+  pickModel: (requested?: string, settings?: AicoSettings) => string;
 }
 
 function taskLine(r: TaskResult): string {
@@ -63,11 +68,44 @@ export function registerSkillCommands(program: Command, deps: SkillCommandDeps):
     .command('eval <name>')
     .description('run a skill against its corpus and score it')
     .option('-m, --model <model>', 'model to run the skill with')
-    .option('--budget <usd>', 'stop once this much has been spent', '1.00')
-    .option('--max-iterations <n>', 'model calls per task', '20')
-    .action(async (name: string, cmd: { model?: string; budget: string; maxIterations: string }) => {
+    .option('--budget <usd>', 'stop once this much has been spent (default 1.00; 0.25 with --draft, at most 2)')
+    .option('--max-iterations <n>', 'model calls per task (default 20; 10 with --draft)')
+    .option('--draft', "measure a skill that ships evals/evals.json (a draft, or your installed skill): with vs without it, plus triggering")
+    .option('--no-baseline', 'with --draft: skip the without-the-skill runs')
+    .option('--no-triggers', 'with --draft: skip trigger scoring and description tuning')
+    .option('--description-rounds <n>', 'with --draft: description revisions to try (0–3)', '1')
+    .option('--trigger-runs <n>', 'with --draft: score the final description this many times on held-out queries', '1')
+    .action(async (name: string, cmd: {
+      model?: string; budget?: string; maxIterations?: string; draft?: boolean;
+      baseline: boolean; triggers: boolean; descriptionRounds: string; triggerRuns: string;
+    }) => {
       const settings = await loadSettings();
       await skillRegistry.load();
+      if (cmd.draft) {
+        // Phase 5: the skill's own evals, paired with a no-skill baseline.
+        const draft = path.join(draftsDir(), name);
+        const own = skillRegistry.lookupAny(name);
+        const dir = fs.existsSync(draft) ? draft : own && !own.isBuiltin ? own.dir : undefined;
+        if (!dir) { console.error(chalk.red(`No draft or installed directory skill named "${name}".`)); process.exit(1); }
+        const { measureSkill, planMeasure, describeReport, evalGate } = await import('./measure.js');
+        const model = deps.pickModel(cmd.model, settings);
+        const opts = {
+          model, settings, budgetUsd: Number(cmd.budget ?? '0.25'),
+          baseline: cmd.baseline, triggers: cmd.triggers,
+          descriptionRounds: Number(cmd.descriptionRounds), triggerRuns: Number(cmd.triggerRuns),
+          maxIterations: Number(cmd.maxIterations ?? '10'),
+          onProgress: (line: string) => console.log(chalk.dim(line)),
+        };
+        const plan = planMeasure(dir, opts);
+        if ('error' in plan) { console.error(chalk.red(plan.error)); process.exit(1); }
+        console.log(chalk.bold(`\nMeasuring ${plan.skill}`) + chalk.dim(`  (${dir})\n`));
+        const report = await measureSkill(dir, opts);
+        if ('error' in report) { console.error(chalk.red(report.error)); process.exit(1); }
+        console.log('\n' + describeReport(report));
+        const gate = evalGate(dir, true);
+        console.log(gate.ok ? chalk.green('\nRegister will accept it.\n') : chalk.yellow(`\nRegister would refuse: ${gate.reason}\n`));
+        process.exit(report.overBudget ? 2 : 0);
+      }
       const found = skillRegistry.lookup(name);
       if (!found) { console.error(chalk.red(`No skill named "${name}".`)); process.exit(1); }
 
@@ -76,12 +114,12 @@ export function registerSkillCommands(program: Command, deps: SkillCommandDeps):
         console.error(chalk.yellow(`No tasks for "${name}". Add some under ~/.aico/skill-evals/${name}/*.json.`));
         process.exit(1);
       }
-      const model = deps.pickModel(cmd.model);
-      const budgetUsd = Number(cmd.budget);
+      const model = deps.pickModel(cmd.model, settings);
+      const budgetUsd = Number(cmd.budget ?? '1.00');
 
       console.log(chalk.bold(`\nEvaluating ${found.frontmatter.name}`) + chalk.dim(`  ${tasks.length} task(s) · ${model} · ceiling $${budgetUsd.toFixed(2)}\n`));
       const report = await evalSkill(found.frontmatter.name, found.promptTemplate, tasks, {
-        model, settings, budgetUsd, maxIterations: Number(cmd.maxIterations),
+        model, settings, budgetUsd, maxIterations: Number(cmd.maxIterations ?? '20'),
         onTask: r => console.log(taskLine(r)),
       });
       console.log('\n' + summary(report) + '\n');
@@ -111,8 +149,8 @@ export function registerSkillCommands(program: Command, deps: SkillCommandDeps):
       const sides = assignSplits(tasks);
       const train = [...sides.values()].filter(s => s === 'train').length;
       const val = tasks.length - train;
-      const model = deps.pickModel(cmd.model);
-      const optimizerModel = cmd.optimizerModel ? deps.pickModel(cmd.optimizerModel) : model;
+      const model = deps.pickModel(cmd.model, settings);
+      const optimizerModel = cmd.optimizerModel ? deps.pickModel(cmd.optimizerModel, settings) : model;
       const budgetUsd = Number(cmd.budget);
 
       console.log(chalk.bold(`\nOptimising ${found.frontmatter.name}`));

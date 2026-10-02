@@ -22,11 +22,14 @@ import { browserElsewhere, popInBrowser, popOutBrowser, showBrowser } from '@/br
 import { ChatView } from '@/chat/ChatView';
 import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection, BrowserSection, AboutSection } from '@/settings/sections/AppSections';
 import { CredentialManager } from '@/settings/CredentialManager';
+import { ToolsPane } from '@web/components/settings/ToolsPane';
 
 import { ModelsSection, SkillsSection, McpSection, AgentsSection, enginePaneSection } from '@/settings/sections/AgentSections';
 
 // Settings → Credentials & passwords: the whole vault (the browser's Passwords page is the same manager, filtered).
 const CredentialsSection = (): React.ReactElement => <CredentialManager />;
+// Settings → Custom tools: the engine's shared panel (web ToolsPane) — list, read, enable, test.
+const ToolsSection = (): React.ReactElement => <ToolsPane />;
 
 const lazyPage = <T extends string>(load: () => Promise<Record<T, React.ComponentType<{ params?: Record<string, string> }>>>, name: T) =>
   lazy(() => load().then(m => ({ default: m[name] })));
@@ -35,6 +38,7 @@ const PluginsPage = lazyPage(() => import('@/pages/PluginsPage'), 'PluginsPage')
 const ChatsPage = lazyPage(() => import('@/pages/ChatsPage'), 'ChatsPage');
 const LibraryPage = lazyPage(() => import('@/pages/LibraryPage'), 'LibraryPage');
 const ScheduledPage = lazyPage(() => import('@/pages/ScheduledPage'), 'ScheduledPage');
+const InboxPage = lazyPage(() => import('@/pages/InboxPage'), 'InboxPage');
 const ProjectsPage = lazyPage(() => import('@/pages/ProjectsPage'), 'ProjectsPage');
 const ProjectPage = lazyPage(() => import('@/pages/ProjectPage'), 'ProjectPage');
 const GroupPage = lazyPage(() => import('@/pages/GroupPage'), 'GroupPage');
@@ -95,6 +99,7 @@ export const BUILTINS: BuiltinPlugin[] = [
       { id: 'agents', title: 'Agents', icon: 'user', group: 'agent', order: 15, component: AgentsSection },
       { id: 'skills', title: 'Skills', icon: 'book', group: 'integrations', order: 20, component: SkillsSection },
       { id: 'mcp', title: 'MCP servers', icon: 'plug', group: 'integrations', order: 21, component: McpSection },
+      { id: 'tools', title: 'Custom tools', icon: 'wrench', group: 'integrations', order: 22, component: ToolsSection },
     ],
   },
   {
@@ -114,6 +119,13 @@ export const BUILTINS: BuiltinPlugin[] = [
       navItems: [{ id: 'scheduled', title: 'Scheduled', icon: 'clock', view: 'scheduled', order: 30 }],
     } }),
     views: [{ id: 'scheduled', title: 'Scheduled', icon: 'clock', component: ScheduledPage }],
+  },
+  {
+    manifest: manifest({ id: 'aico.inbox', name: 'Waiting for you', icon: 'bell', required: true, category: 'Automation', description: 'Steps unattended runs parked for your approval: the exact call and its preview, approve once or deny.', contributes: {
+      navItems: [{ id: 'inbox', title: 'Waiting for you', icon: 'bell', view: 'inbox', order: 31 }],
+    } }),
+    views: [{ id: 'inbox', title: 'Waiting for you', icon: 'inbox', component: InboxPage }],
+    commands: [{ id: 'inbox.open', title: 'Waiting for you (approve-later inbox)', category: 'Automation', icon: 'inbox', run: () => go('inbox') }],
   },
   {
     manifest: manifest({ id: 'aico.plugins', name: 'Plugins', icon: 'puzzle', required: true, category: 'Core', description: 'Switch features on and off; create and manage your own plugins.', contributes: {

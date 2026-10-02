@@ -121,6 +121,7 @@ import { skillCreateToolDefinition, executeSkillCreate } from '../skills/create.
 import { skillManageToolDefinition, executeSkillManage } from '../skills/manage.js';
 import { mcpManageToolDefinition, executeMcpManage } from '../mcp/manage-tool.js';
 import type { McpManageInput } from '../mcp/manage-tool.js';
+import { toolManageToolDefinition, executeToolManage, type ToolManageInput } from '../custom-tools/manage.js';
 import { agentManageToolDefinition, executeAgentManage } from './manage-agents.js';
 import { memoryManageToolDefinition, executeMemoryManage } from './manage-memory.js';
 import type { MemoryManageInput } from './manage-memory.js';
@@ -299,6 +300,7 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...skillCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
   { ...skillManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...mcpManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
+  { ...toolManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...agentManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...memoryManageToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   // The authoring guide a bare page app's `create` returns is long on purpose,
@@ -829,6 +831,10 @@ export async function executeTool(
       break;
     case 'McpManage':
       result = await executeMcpManage(args as unknown as McpManageInput);
+      break;
+    case 'ToolManage':
+      // From the model: never a person, so `enable` is refused and `test` is a dry run.
+      result = await executeToolManage(args as unknown as ToolManageInput);
       break;
     case 'AppManage':
     case 'MiniAppManage': // the old name, honoured one release so a transcript that says it still works

@@ -33,7 +33,7 @@ import path from 'node:path';
 import { aicoHome } from '../home.js';
 import { projectTrustStatus } from '../workspace-trust.js';
 import { validateDefinition, type CustomToolDef } from './format.js';
-import { TOOL_FILE_SUFFIX, projectToolsDir, toolFilesIn } from './files.js';
+import { TOOL_FILE_SUFFIX, projectToolFilesIn, toolFilesIn } from './files.js';
 import { contentHash } from './runner.js';
 
 export { TOOL_FILE_SUFFIX, toolFilesIn } from './files.js';
@@ -174,12 +174,12 @@ export async function loadCustomTools(cwd: string = process.cwd()): Promise<Load
       const recorded = state.enabled[key(file)];
       if (recorded === tool.sha256) tool.status = 'enabled';
       else if (recorded) { tool.status = 'changed'; tool.reason = 'changed since it was enabled — a person re-enables it after reviewing the change'; }
-      else { tool.status = 'draft'; tool.reason = 'a draft — a person enables it in Settings → Tools or with `aico tool enable`'; }
+      else { tool.status = 'draft'; tool.reason = 'a person enables it in Settings → Tools or with `aico tool enable`'; }
     }
     admit(tool);
   }
 
-  const projectFiles = toolFilesIn(projectToolsDir(cwd));
+  const projectFiles = projectToolFilesIn(cwd);
   if (projectFiles.length) {
     const trust = await projectTrustStatus(cwd);
     for (const { pack, file } of projectFiles) {

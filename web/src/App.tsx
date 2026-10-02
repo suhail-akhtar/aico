@@ -26,6 +26,7 @@ import { PermissionPrompt } from './components/PermissionPrompt';
 import { VaultPrompts } from './components/VaultPrompts';
 
 import { SystemPanel } from './components/SystemPanel';
+import { InboxPanel } from './components/InboxPanel';
 import { Trajectory } from './components/Trajectory';
 import { GoalBar } from './components/GoalBar';
 import { ActivityLine } from './components/ActivityLine';
@@ -283,6 +284,11 @@ export function App(): React.ReactElement {
         {onSessions && view === 'changes' && <ChangesPane />}
         {onSessions && view === 'trajectory' && <Trajectory />}
         {view === 'system' && <SystemPanel />}
+        {view === 'inbox' && (
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            <div className="mx-auto max-w-3xl"><InboxPanel /></div>
+          </div>
+        )}
         {view === 'apps' && <AppsPane onOpenChat={() => setRoute(withTab(route, 'chat'))} />}
         {view === 'group' && route.groupId && (
           <GroupPage

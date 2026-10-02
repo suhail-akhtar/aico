@@ -11,12 +11,16 @@
  * them into one alphabetical list buries three of yours among seven of
  * somebody else's.
  *
- * **Yours are editable in place.** Everything except the name, which is the
- * identity the rest of the system refers to — renaming would be a create and a
- * delete wearing one button. Built-ins are read-only and say so rather than
- * offering controls that refuse; the switch is offered instead, because "not
- * this one" is a real thing to mean and deleting something that returns on the
- * next install is not an answer.
+ * **Yours are editable in place** with the agent builder (`AgentBuilder`,
+ * shared with the desktop): purpose, instructions, tools and MCP, skills,
+ * autonomy, delegation, budget and write paths, validated by the engine as you
+ * type, with the engine's own summary of what the agent can do beside it.
+ * Everything except the name, which is the identity the rest of the system
+ * refers to — renaming would be a create and a delete wearing one button.
+ * Built-ins are read-only and say so rather than offering controls that
+ * refuse; they can be duplicated as yours, and switched off, because "not
+ * this one" is a real thing to mean and deleting something that returns on
+ * the next install is not an answer.
  *
  * @module components/settings/AgentsPane
  */
@@ -24,56 +28,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, type AgentSpec } from '../../api';
 import { useStore } from '../../store';
-
-/** The fields a person may change, as text the form can hold. */
-interface Draft {
-  description: string;
-  role: string;
-  goals: string;
-  skills: string;
-  tools: string;
-  model: string;
-  canDelegate: boolean;
-}
-
-const draftOf = (agent: AgentSpec): Draft => ({
-  description: agent.description ?? '',
-  role: agent.role ?? '',
-  goals: (agent.goals ?? []).join('\n'),
-  skills: (agent.skills ?? []).join(', '),
-  tools: (agent.tools ?? []).join(', '),
-  model: agent.model ?? '',
-  canDelegate: Boolean(agent.canDelegate),
-});
-
-/** Comma or newline separated, with the empties dropped. */
-const asList = (raw: string): string[] =>
-  raw.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
-
-function Field({ label, hint, children }: {
-  label: string; hint?: string; children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <label className="block">
-      <span className="text-[11px] font-medium text-aico-secondary">{label}</span>
-      {hint && <span className="ml-1.5 text-[11px] text-aico-muted">{hint}</span>}
-      <div className="mt-0.5">{children}</div>
-    </label>
-  );
-}
-
-const INPUT =
-  'w-full rounded-lg border border-aico-border bg-aico-bg px-2.5 py-1.5 text-[12px] '
-  + 'text-aico-primary placeholder:text-aico-muted focus:border-aico-accent/40 focus:outline-none';
+import { AgentBuilder } from './AgentBuilder';
+import { AgentVerify, CertBadge } from './AgentVerify';
+import { EMPTY_DRAFT, draftOf, duplicateDraft, type AgentDraft } from '../../agent-builder';
 
 export function AgentsPane({ onClose }: { onClose?: () => void }): React.ReactElement {
   const [agents, setAgents] = useState<AgentSpec[]>([]);
   const [note, setNote] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  /** What the builder is showing: an agent being edited, or a new draft (key `+new`). */
+  const [editing, setEditing] = useState<{ key: string; draft: AgentDraft; existing: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [summary, setSummary] = useState<Record<string, string>>({});
   const askAgentFor = useStore(s => s.askAgentFor);
 
   const refresh = useCallback(async () => {
@@ -98,47 +65,53 @@ export function AgentsPane({ onClose }: { onClose?: () => void }): React.ReactEl
     } finally { setBusy(false); }
   };
 
-  const startEditing = (agent: AgentSpec): void => {
-    setEditing(agent.name);
-    setDraft(draftOf(agent));
-    setOpen(null);
-  };
-
-  const save = async (name: string): Promise<void> => {
-    if (!draft) return;
-    const saved = await act({
-      action: 'update',
-      name,
-      description: draft.description,
-      role: draft.role,
-      goals: asList(draft.goals),
-      skills: asList(draft.skills),
-      tools: asList(draft.tools),
-      canDelegate: draft.canDelegate,
-      ...(draft.model.trim() ? { model: draft.model.trim() } : {}),
-    });
-    // Kept open when it was refused. Closing on failure throws away everything
-    // typed and leaves the person to reconstruct it from the error message —
-    // watched happening with a skill name that did not exist.
-    if (!saved) return;
+  /** The engine's own "what this agent can do", fetched when a row is opened. */
+  const toggleOpen = (name: string): void => {
     setEditing(null);
-    setDraft(null);
+    const next = open === name ? null : name;
+    setOpen(next);
+    if (next && !summary[next]) {
+      void api.manage('agents', { action: 'effective', name: next })
+        .then(r => setSummary(s => ({ ...s, [next]: r.result ?? r.error ?? '' })))
+        .catch(() => {});
+    }
   };
 
   const mine = agents.filter(a => a.source !== 'builtin');
   const builtin = agents.filter(a => a.source === 'builtin');
 
+  const builder = (key: string): React.ReactElement | null => editing?.key === key ? (
+    <div className="border-t border-aico-border px-3 py-2.5">
+      <AgentBuilder
+        initial={editing.draft}
+        existing={editing.existing}
+        onDone={async (saved, name) => {
+          setEditing(null);
+          if (saved) {
+            setNote({ tone: 'good', text: `Saved @${name ?? editing.draft.name}.` });
+            setSummary({});
+            await refresh();
+          }
+        }}
+      />
+    </div>
+  ) : null;
+
   const row = (agent: AgentSpec): React.ReactElement => (
     <li key={agent.name} className="rounded-xl border border-aico-border">
       <div className="flex items-start gap-2 px-3 py-2">
-        <button
-          onClick={() => { setEditing(null); setOpen(open === agent.name ? null : agent.name); }}
-          className="min-w-0 flex-1 text-left"
-        >
+        <button onClick={() => toggleOpen(agent.name)} className="min-w-0 flex-1 text-left">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-mono text-[12px] text-aico-primary">{agent.name}</span>
             {agent.source === 'project' && (
               <span className="rounded bg-aico-hover px-1.5 py-0.5 text-[10px] text-aico-muted">this project</span>
+            )}
+            {agent.autonomy && (
+              <span className="rounded bg-aico-hover px-1.5 py-0.5 text-[10px] text-aico-muted">{agent.autonomy}</span>
+            )}
+            <CertBadge status={agent.certification?.status} {...(agent.certification?.text ? { text: agent.certification.text } : {})} />
+            {agent.format === 'json' && (
+              <span className="rounded bg-aico-hover px-1.5 py-0.5 text-[10px] text-aico-muted" title="Saved as .md the next time it is edited">legacy JSON</span>
             )}
             {!agent.enabled && (
               <span className="rounded bg-aico-warning/15 px-1.5 py-0.5 text-[10px] text-aico-warning">off</span>
@@ -153,7 +126,7 @@ export function AgentsPane({ onClose }: { onClose?: () => void }): React.ReactEl
         <div className="flex shrink-0 gap-1">
           {agent.source !== 'builtin' && (
             <button
-              onClick={() => startEditing(agent)}
+              onClick={() => { setOpen(null); setEditing({ key: agent.name, draft: draftOf(agent), existing: true }); }}
               disabled={busy}
               className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
                          hover:bg-aico-hover hover:text-aico-primary disabled:opacity-40"
@@ -161,6 +134,14 @@ export function AgentsPane({ onClose }: { onClose?: () => void }): React.ReactEl
               Edit
             </button>
           )}
+          <button
+            onClick={() => { setOpen(null); setEditing({ key: agent.name, draft: duplicateDraft(agent, agents.map(a => a.name)), existing: false }); }}
+            disabled={busy}
+            className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
+                       hover:bg-aico-hover hover:text-aico-primary disabled:opacity-40"
+          >
+            Duplicate
+          </button>
           <button
             onClick={() => void act({ action: agent.enabled ? 'disable' : 'enable', name: agent.name })}
             disabled={busy}
@@ -212,109 +193,26 @@ export function AgentsPane({ onClose }: { onClose?: () => void }): React.ReactEl
         </div>
       )}
 
-      {editing === agent.name && draft && (
-        <div className="space-y-2 border-t border-aico-border bg-aico-hover/30 px-3 py-2.5">
-          {/*
-            The name is not here on purpose: it is the identity Task and
-            AgentPrompt refer to, so renaming would be a create and a delete
-            wearing one button.
-          */}
-          <p className="text-[11px] text-aico-muted">
-            Editing <span className="font-mono text-aico-secondary">{agent.name}</span>. The name is
-            fixed — it is what the rest of the system calls this agent.
-          </p>
-
-          <Field label="Description" hint="decides when it gets the task">
-            <textarea
-              value={draft.description}
-              onChange={e => setDraft({ ...draft, description: e.target.value })}
-              rows={2}
-              className={`${INPUT} resize-y`}
-            />
-          </Field>
-
-          <Field label="Role">
-            <input value={draft.role} onChange={e => setDraft({ ...draft, role: e.target.value })}
-              placeholder="e.g. senior backend engineer" className={INPUT} />
-          </Field>
-
-          <Field label="Goals" hint="one per line">
-            <textarea
-              value={draft.goals}
-              onChange={e => setDraft({ ...draft, goals: e.target.value })}
-              rows={2}
-              className={`${INPUT} resize-y`}
-            />
-          </Field>
-
-          <Field label="Skills" hint="checked — a name that does not exist is refused">
-            <input value={draft.skills} onChange={e => setDraft({ ...draft, skills: e.target.value })}
-              placeholder="commit, release-notes" className={`${INPUT} font-mono`} />
-          </Field>
-
-          <Field label="Tools" hint="blank means all of them">
-            <input value={draft.tools} onChange={e => setDraft({ ...draft, tools: e.target.value })}
-              placeholder="Read, Grep, Bash" className={`${INPUT} font-mono`} />
-          </Field>
-
-          <Field label="Model" hint="blank uses the session's model">
-            <input value={draft.model} onChange={e => setDraft({ ...draft, model: e.target.value })}
-              placeholder="deepseek-v4-flash" className={`${INPUT} font-mono`} />
-          </Field>
-
-          <label className="flex items-center gap-2 text-[12px] text-aico-secondary">
-            <input
-              type="checkbox"
-              checked={draft.canDelegate}
-              onChange={e => setDraft({ ...draft, canDelegate: e.target.checked })}
-            />
-            May spawn agents of its own
-          </label>
-
-          <div className="flex gap-1.5 pt-0.5">
-            <button
-              onClick={() => void save(agent.name)}
-              disabled={busy || !draft.description.trim()}
-              className="rounded-lg bg-aico-accent px-3 py-1.5 text-[12px] font-medium text-white
-                         transition-opacity hover:opacity-90 disabled:opacity-40"
-            >
-              Save
-            </button>
-            <button
-              onClick={() => { setEditing(null); setDraft(null); }}
-              className="rounded-lg px-3 py-1.5 text-[12px] text-aico-secondary transition-colors hover:bg-aico-hover"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      {builder(agent.name)}
 
       {open === agent.name && (
-        <dl className="border-t border-aico-border px-3 py-2 text-[11px] leading-[18px]">
-          <div className="flex gap-2"><dt className="w-20 shrink-0 text-aico-muted">role</dt>
-            <dd className="text-aico-secondary">{agent.role}</dd></div>
-          {agent.model && (
-            <div className="flex gap-2"><dt className="w-20 shrink-0 text-aico-muted">model</dt>
-              <dd className="font-mono text-aico-secondary">{agent.model}</dd></div>
-          )}
-          {agent.goals?.length > 0 && (
-            <div className="flex gap-2"><dt className="w-20 shrink-0 text-aico-muted">goals</dt>
-              <dd className="text-aico-secondary">{agent.goals.join(' · ')}</dd></div>
-          )}
-          {agent.tools?.length > 0 && (
-            <div className="flex gap-2"><dt className="w-20 shrink-0 text-aico-muted">tools</dt>
-              <dd className="font-mono text-aico-secondary">{agent.tools.join(', ')}</dd></div>
-          )}
-          <div className="flex gap-2"><dt className="w-20 shrink-0 text-aico-muted">delegates</dt>
-            <dd className="text-aico-secondary">{agent.canDelegate ? 'yes' : 'no'}</dd></div>
+        <div className="border-t border-aico-border px-3 py-2 text-[11px] leading-[18px]">
+          <p className="mb-1 font-medium text-aico-secondary">What it can do</p>
+          <pre className="whitespace-pre-wrap font-sans text-aico-secondary">{summary[agent.name] ?? 'Working it out…'}</pre>
+          {agent.warnings?.length ? (
+            <ul className="mt-1">{agent.warnings.map(w => <li key={w} className="text-aico-warning">⚠ {w}</li>)}</ul>
+          ) : null}
+          <div className="mt-2 border-t border-aico-border pt-2">
+            <p className="mb-1 font-medium text-aico-secondary">Verify</p>
+            <AgentVerify name={agent.name} {...(agent.certification ? { status: agent.certification.status, statusText: agent.certification.text } : {})} onDone={refresh} />
+          </div>
           {agent.source === 'builtin' && (
             <p className="mt-1 text-aico-muted">
               Built in, so it cannot be edited or deleted — it would return on the next install.
-              Disable it, or make your own with a different name.
+              Duplicate it to make your own, or disable it.
             </p>
           )}
-        </dl>
+        </div>
       )}
     </li>
   );
@@ -326,15 +224,16 @@ export function AgentsPane({ onClose }: { onClose?: () => void }): React.ReactEl
           Your agents <span className="text-aico-muted">({mine.length})</span>
         </h3>
         <p className="mt-0.5 text-[12px] text-aico-muted">
-          Ones you made. Editable, and yours to remove.
+          Ones you made. Saved as Markdown in Claude Code's agent format; their tools, autonomy,
+          budget and write paths are enforced by the engine, not just described.
         </p>
 
         {mine.length > 0
           ? <ul className="mt-2 space-y-1">{mine.map(row)}</ul>
           : (
             <p className="mt-2 text-[12px] text-aico-muted">
-              None yet. The built-ins below cover most work; make your own when you keep handing out
-              the same kind of task.
+              None yet. An agent is a file: a description that says when to hand it work, its
+              instructions, and the tools it may use.
             </p>
           )}
 
@@ -346,25 +245,33 @@ export function AgentsPane({ onClose }: { onClose?: () => void }): React.ReactEl
           </p>
         )}
 
-        {/*
-          Defining an agent properly means goals, tools, and what it may
-          delegate — real work, and a blank form is the wrong shape for it. This
-          hands over a brief, in a conversation of its own.
-        */}
-        <button
-          onClick={() => {
-            askAgentFor(
-              'Create a new agent for me. Ask what kind of work it should take on, then use '
-              + 'AgentManage to define it — a description precise enough that you would know when '
-              + 'to hand it a task, the goals it is working towards, the tools it needs, and any '
-              + 'skills it should reach for.',
-            );
-            onClose?.();
-          }}
-          className="mt-2 text-[12px] text-aico-accent underline underline-offset-2 hover:opacity-80"
-        >
-          Make one with the agent →
-        </button>
+        <div className="mt-2 flex flex-wrap gap-3">
+          <button
+            onClick={() => { setOpen(null); setEditing({ key: '+new', draft: { ...EMPTY_DRAFT }, existing: false }); }}
+            className="text-[12px] text-aico-accent underline underline-offset-2 hover:opacity-80"
+          >
+            Define one myself
+          </button>
+          {/*
+            Defining an agent well is real work, and a conversation suits it:
+            this hands over a brief in a chat of its own.
+          */}
+          <button
+            onClick={() => {
+              askAgentFor(
+                'Create a new agent for me. Ask what kind of work it should take on, then use '
+                + 'AgentManage to define it — a description precise enough that you would know when '
+                + 'to hand it a task, its instructions, only the tools it needs, any skills it should '
+                + 'reach for, an autonomy ceiling and a budget. Validate it first and show me what it can do.',
+              );
+              onClose?.();
+            }}
+            className="text-[12px] text-aico-accent underline underline-offset-2 hover:opacity-80"
+          >
+            Make one with the agent →
+          </button>
+        </div>
+        {editing?.key === '+new' && <div className="mt-2">{builder('+new')}</div>}
       </section>
 
       <section>
@@ -372,7 +279,7 @@ export function AgentsPane({ onClose }: { onClose?: () => void }): React.ReactEl
           Built in <span className="text-aico-muted">({builtin.length})</span>
         </h3>
         <p className="mt-0.5 text-[12px] text-aico-muted">
-          Shipped with AICO. Read-only, but you can switch any of them off.
+          Shipped with AICO as examples of bounded specialists. Read-only — duplicate one to make it yours.
         </p>
         <ul className="mt-2 space-y-1">{builtin.map(row)}</ul>
       </section>
