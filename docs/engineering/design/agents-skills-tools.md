@@ -1,6 +1,6 @@
 # Design: skills, custom tools, MCP, custom agents, verification and autonomy
 
-Status: **Accepted 2026-10-01 with the recommended answers to §12 (see below). Phase 0 implemented (unreleased; see §10 Phase 0 → Status).**
+Status: **Accepted 2026-10-01 with the recommended answers to §12 (see below). Phase 0 shipped in 0.33.0; Phase 1 implemented (unreleased; see §10 Phase 1 → Status).**
 Date: 2026-10-01. Scope: the engine (`src/`) and every client (desktop, web,
 VS Code panel, terminal). Audience: whoever implements it, and the owner who
 decides the open questions in §12.
@@ -1044,6 +1044,30 @@ Deviations and deferrals, stated plainly:
 **Tests:** harness and web unit; `test:skills:live` only on request.
 
 **Risks:** stricter validation can reject existing user skills. Mitigation: warnings, not errors, for the name rules on already-installed skills, with a "fix it" action.
+
+**Status (2026-10-02): implemented, unreleased.** `scripts/phase1-skills-test.mjs` (part of `npm test`) checks every acceptance item offline; the web review logic is in `test:web:unit`.
+
+| Item | What shipped | Where |
+|---|---|---|
+| F6 parser | An in-house YAML-subset reader (owner decision Q1): plain/quoted/multi-line scalars, `\|`/`>` with chomping, block and flow lists, nested and flow maps, comments. Anchors, tags and tabs are refused with a line number. Every top-level entry keeps its raw text, so `updateFrontmatter` rewrites only the keys it changes. All built-ins parse exactly as the old line parser read them. | `skills/frontmatter.ts`, `skills/loader.ts` |
+| Spec validation | One validator, strict on import/export (errors block), lenient for installed skills (name rules warn). Messages name the fix. `verify`/`validate` and the review screen use it. | `skills/validate.ts` |
+| Import sources | Folder, bare `SKILL.md`, `.skill`/`.zip`, pack (`*/SKILL.md` two levels down), Claude Code plugin (`.claude-plugin/plugin.json` → `skills/`; agents, commands and MCP servers listed, not imported), uploaded files, pasted markdown. | `skills/import.ts` `stageImport` |
+| Archive caps | Our own zip reader judges the central directory before writing: traversal/absolute/drive/colon names, symlinks, devices, encryption, ZIP64, > 2,000 entries, > 50 MB unpacked, ratio > 100× over 1 MB; each entry inflated with `maxOutputLength`. Folders with links are refused. | `skills/archive.ts` |
+| Static scan | Scripts (+interpreter), binaries, network, exec/eval, credential paths, base64, oversized files, long bodies, hidden Unicode and injection phrases (`shared/injection-guard`) with file and line. Information, never a verdict; no false positive on the built-ins. | `skills/scan.ts` |
+| Provenance + gate (F5) | `.aico-meta.json` (source, kind, tree sha256, source sha256, time, trust, scan totals). `unreviewed` skills are out of `lookup`/`list` — so out of the catalogue, `Skill`, triggers, agent preloads and evals — and a reviewed skill whose tree hash changes is unreviewed again. Enabling needs a person: `DecisionGate.checkHuman` (desktop host grant via `human/grant` on the private port; web UI key / client nonce); the model and the bare token are refused. | `skills/provenance.ts`, `skills/registry.ts`, `skills/manage.ts`, `server/decision-gate.ts`, `server/api-system.ts`, `desktop/engine/entry.ts`, `desktop/electron/protocol.ts` |
+| Catalogue budget | min(1% of window, 2,000 tokens); unchanged when it fits; over it, 250-character entries in built-in → user → project → name order until 70%, then one `+N more` line. Byte-stable. | `tools/skill.ts`, `agent.ts` |
+| Export | Claude `.skill` written by our zip writer, validated first, AICO keys under `metadata` as `aico-*`, `package_skill.py` exclusions, optional evals, deterministic bytes; refuses to overwrite a non-archive file. | `skills/import.ts` `exportSkill` |
+| UI | Shared review screen (`web/src/components/settings/SkillReview.tsx`, logic in `web/src/skill-review.ts`); desktop Settings → Skills import menu (file / SKILL.md / folder / pack / plugin), review modal, trust and provenance on rows, "Review and enable", engine-side export; web Settings pane the same by upload/path, with download export. Terminal: `aico skill import|review|export`. | desktop `SkillsAgents.tsx`, web `SkillsPane.tsx`, `skills/cli-import.ts` |
+
+Deviations, stated plainly:
+
+- **"Most relevant first."** The catalogue's order is fixed (§4.5: never by usage), because it sits in the cached prefix; relevance acts in the per-turn tail, where a skill whose trigger matches is named with its full description even when the catalogue clipped it. Imported Claude skills rarely carry a trigger, so for them overflow means name-only until opened.
+- **Entries are clipped to 250 characters only when the catalogue is over budget.** Clipping always would have cut the "Use when…" half of three built-in descriptions and changed every stock prompt; within budget the catalogue is byte-identical to 0.33.0.
+- **A name that does not match its folder is a warning, not an error.** Import installs under the name, so the mismatch cannot persist.
+- **The model's `enable` is refused rather than routed to a permission card.** The person enables from the review screen (or `aico skill review` at a TTY). Honest limit: the review record is a file in the user's store; a process running as the user (including the agent's Bash in `auto`) could rewrite it, and the agent can still write a skill itself through create → register (`authored`, by design §5.1 item 5). The gate makes review the default path and the API token insufficient; it is not a sandbox.
+- **Plugin agents and MCP servers are listed, not imported** (agents are Phase 3's format; MCP needs Phase 6's trust step).
+- **No "fix it" action** for installed skills with name warnings yet; the warnings are shown on the row.
+- **Live:** `desktop/scripts/skills-import-live.mjs` (paid, on request) drove the desktop with Playwright `_electron` against an isolated `AICO_HOME`: a generated three-skill pack with scripts → review screen (findings with file:line, nothing installed) → Install and enable → rows show reviewed + provenance; a fourth skill installed unreviewed could not be enabled with the API token or a forged grant, and could from the window; a real turn opened `ticket-triage` and answered in its format (17/17, $0.019). The turn ran on `deepseek-v4-pro`, not `deepseek-flash`: on 2026-10-02 the flash model hung or was rejected for the copied settings on 0.33.0 too (checked against a HEAD build), so it is a provider/config issue outside this change. `test:skills:live` and the economy bench were not run (paid).
 
 ### Phase 2 — Custom tools
 

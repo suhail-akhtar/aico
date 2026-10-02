@@ -1248,7 +1248,12 @@ export async function handleSlashCommand(
       if (!args) return { handled: true, output: 'Usage: /skill-install <url>' };
       try {
         const skill = await skillRegistry.install(args);
-        return { handled: true, output: `Installed skill: ${skill.frontmatter.name}` };
+        // Fetched from the internet, so installed unreviewed (design §5.1).
+        return {
+          handled: true,
+          output: `Downloaded skill "${skill.frontmatter.name}" — installed as UNREVIEWED, so it is not usable yet.\n`
+            + `Review it with \`aico skill review ${skill.frontmatter.name}\` in a terminal, or in Settings → Skills.`,
+        };
       } catch (err) {
         return { handled: true, output: `Failed to install skill: ${err instanceof Error ? err.message : String(err)}` };
       }

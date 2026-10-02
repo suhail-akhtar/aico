@@ -4,9 +4,19 @@
  * **Skills** follow Claude's format, which is the one people actually have: a
  * folder whose `SKILL.md` carries `name` and `description` in frontmatter, with
  * the scripts, references and templates it mentions beside it. They come in as
- * a `.skill`/`.zip` archive, a bare `SKILL.md`, or a folder (the engine's
- * importer reads all three and runs nothing), and go out as a `.skill` archive
- * of that folder — so a skill exported here installs in Claude, and back.
+ * a `.skill`/`.zip` archive, a bare `SKILL.md`, a folder, a pack (a folder of
+ * skills) or a Claude plugin folder, and go out as Claude's `.skill` archive
+ * (the engine packs and validates it) — so a skill exported here installs in
+ * Claude, and back.
+ *
+ * **Every import is reviewed first** (design §5.1, §7.2): the engine stages it,
+ * scans every file and validates it to the spec, and the review screen
+ * (web/src/components/settings/SkillReview, shared with the web client) shows
+ * files, scripts, findings and provenance. "Install and enable" is the
+ * person's yes — main attaches a one-time grant to that request
+ * (protocol.ts HUMAN_ROUTES), so the engine can tell it from the API token.
+ * Anything else installs unreviewed: on disk, out of the catalogue, marked
+ * "needs review" here.
  *
  * **Agents** are specialists the orchestrator hands work to: a description it
  * selects on, a role, goals, the tools it may use and the skills it reaches for.
@@ -23,7 +33,10 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, type SkillSummary, type AgentSpec } from '@web/api';
+import { api, type SkillSummary, type AgentSpec, type ImportReview, type ReviewedSkill, type SkillProvenance } from '@web/api';
+import { InstalledSkillReview, SkillImportReview } from '@web/components/settings/SkillReview';
+import { sourceLabel, trustLabel } from '@web/skill-review';
+import { Modal } from '@/shell/Modal';
 import { PANES } from '@web/settings-schema';
 import { useStore } from '@web/store';
 import { toast, useDesk } from '@/state/desk';
@@ -69,57 +82,110 @@ function skillFile(s: SkillSummary): string {
   return /\.md$/i.test(s.path) ? s.path : `${s.path}/SKILL.md`;
 }
 
+/** One line saying where an imported skill came from and what its scan found. */
+function provenanceLine(s: SkillSummary): string | null {
+  const p = s.provenance;
+  if (!p) return null;
+  const from = p.source.split(/[\\/]/).slice(-2).join('/');
+  const f = p.findings;
+  const scan = !f ? '' : f.high ? ` · ${f.high} high scan finding${f.high === 1 ? '' : 's'}` : f.warn ? ` · ${f.warn} scan finding${f.warn === 1 ? '' : 's'} to check` : ' · scan: nothing flagged';
+  return `${sourceLabel(p.sourceKind)} from ${from}${scan} · sha256 ${p.sha256.slice(0, 12)}…`;
+}
+
 export function SkillsSection(): React.ReactElement {
   const [skills, setSkills] = useState<SkillSummary[] | null>(null);
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  /** The import on the review screen; nothing is installed while it is open. */
+  const [review, setReview] = useState<ImportReview | null>(null);
+  /** An installed skill on the review screen (to enable it, or to look). */
+  const [installed, setInstalled] = useState<{ skill: ReviewedSkill & { provenance?: SkillProvenance }; trust: string; trustReason?: string } | null>(null);
   const load = useCallback(async () => {
     try { setSkills((await api.skills()).skills); }
     catch (e) { toast.error('Could not load skills', (e as Error).message); setSkills([]); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const toggle = async (s: SkillSummary): Promise<void> => {
-    try { await api.manage('skills', { action: s.enabled ? 'disable' : 'enable', name: s.name }); await load(); }
-    catch (e) { toast.error('Could not change the skill', (e as Error).message); }
+  /** An installed skill's review screen. */
+  const openReview = async (s: SkillSummary): Promise<void> => {
+    try {
+      const r = await api.reviewInstalledSkill(s.name);
+      setInstalled({ skill: r.skill, trust: r.trust, ...(r.trustReason ? { trustReason: r.trustReason } : {}) });
+    } catch (e) { toast.error('Could not review the skill', (e as Error).message); }
   };
 
-  /** Runs an import, and asks before replacing a skill that already exists. */
-  const install = async (label: string, run: (overwrite: boolean) => Promise<{ ok: boolean; name?: string; error?: string; resources?: string[]; replaced?: boolean }>): Promise<void> => {
-    setBusy(label);
+  const toggle = async (s: SkillSummary): Promise<void> => {
+    // An unreviewed import is enabled from its review screen, never by a bare switch.
+    if (s.trust === 'unreviewed') { await openReview(s); return; }
     try {
-      let r = await run(false);
-      if (!r.ok && /exist/i.test(r.error ?? '')) {
-        const ok = await desktop.dialog.confirm({ title: 'Replace skill', message: r.error ?? 'A skill with this name exists.', detail: 'Replace it with the one being imported?', ok: 'Replace' });
-        if (!ok) return;
-        r = await run(true);
-      }
-      if (!r.ok) { toast.error('Import failed', r.error); return; }
-      toast.success(`Skill “${r.name}” ${r.replaced ? 'replaced' : 'installed'}`, r.resources?.length ? `${r.resources.length} file${r.resources.length === 1 ? '' : 's'} came with it. Nothing was run.` : undefined);
+      const r = await api.setSkillEnabled(s.name, !s.enabled);
+      if (!r.ok) toast.error('Could not change the skill', r.result ?? r.error);
       await load();
-    } catch (e) { toast.error('Import failed', (e as Error).message); }
+    } catch (e) { toast.error('Could not change the skill', (e as Error).message); }
+  };
+
+  /** Stage an import in the engine and open the review screen. Nothing is installed yet. */
+  const stage = async (source: string): Promise<void> => {
+    setBusy(source);
+    try {
+      const r = await api.reviewSkillImport({ source });
+      if (!r.review) { toast.error('Not imported', r.error); return; }
+      setReview(r.review);
+    } catch (e) { toast.error('Not imported', (e as Error).message); }
     finally { setBusy(null); }
   };
 
-  const importArchiveOrMd = async (): Promise<void> => {
-    const picked = await desktop.dialog.pickFiles({ title: 'Import a skill', filters: [{ name: 'Skill', extensions: ['skill', 'zip', 'md'] }] });
-    for (const p of picked) await install(p.name, overwrite => api.importSkill(p.path, overwrite));
-  };
-  const importFolder = async (): Promise<void> => {
-    const dir = await desktop.dialog.pickFolder('Import a skill folder (the one with SKILL.md)');
-    if (dir) await install(dir, overwrite => api.importSkill(dir, overwrite));
+  /** The review screen's answer. `enable` is the person's "Install and enable". */
+  const installReviewed = async (select: string[], enable: boolean, overwrite: boolean): Promise<void> => {
+    if (!review) return;
+    setBusy('install');
+    try {
+      const out = await api.installSkillImport({ id: review.id, select, enable, overwrite });
+      const names = out.installed.map(x => x.name);
+      if (names.length) {
+        toast.success(
+          enable ? `${names.length === 1 ? `Skill “${names[0]}”` : `${names.length} skills`} installed and enabled` : `Installed without enabling: ${names.join(', ')}`,
+          enable ? `Try it: ask the agent to use ${names[0]}. Nothing was run.` : 'Review and enable it from the list when you are ready.',
+        );
+      }
+      for (const x of out.skipped) toast.warning(`Skipped ${x.name}`, x.reason);
+      if (!names.length && !out.skipped.length) toast.error('Nothing was installed', out.error);
+      setReview(null);
+      await load();
+    } catch (e) { toast.error('Install failed', (e as Error).message); }
+    finally { setBusy(null); }
   };
 
+  const cancelReview = (): void => {
+    if (review) void api.discardSkillImport(review.id).catch(() => undefined);
+    setReview(null);
+  };
+
+  const importFile = async (kind: 'archive' | 'markdown'): Promise<void> => {
+    const picked = await desktop.dialog.pickFiles(kind === 'archive'
+      ? { title: 'Import a .skill or .zip', filters: [{ name: 'Skill archive', extensions: ['skill', 'zip'] }] }
+      : { title: 'Import a SKILL.md', filters: [{ name: 'Markdown', extensions: ['md'] }] });
+    if (picked[0]) await stage(picked[0].path);
+  };
+  const importFolder = async (kind: 'skill' | 'pack' | 'plugin'): Promise<void> => {
+    const title = kind === 'skill' ? 'Import a skill folder (the one with SKILL.md)'
+      : kind === 'pack' ? 'Import a pack (a folder of skill folders)'
+        : 'Import a Claude plugin (the folder with .claude-plugin/)';
+    const dir = await desktop.dialog.pickFolder(title);
+    if (dir) await stage(dir);
+  };
+
+  /** Claude's `.skill`, packed and validated by the engine. */
   const exportSkill = async (s: SkillSummary): Promise<void> => {
-    const dir = skillDir(s);
-    if (!dir) { toast.info('A single-file skill has no folder to archive', skillFile(s)); return; }
+    if (!skillDir(s)) { toast.info('A single-file skill has no folder to archive', skillFile(s)); return; }
     const dest = await desktop.dialog.saveFile({ defaultName: `${s.name}.skill`, content: '', filters: [{ name: 'Skill archive', extensions: ['skill', 'zip'] }] });
     if (!dest) return;
     try {
-      await invoke('fs:zipDir', dir, dest, s.name);
-      toast.success(`Exported “${s.name}”`, dest);
-    } catch (e) { toast.error('Export failed', (e as Error).message); }
+      const r = await api.exportSkill(s.name, { dest });
+      if (!r.ok) { toast.error('Not exported', r.error); return; }
+      toast.success(`Exported “${s.name}”`, `${r.path ?? dest}${r.warnings?.length ? ` — ${r.warnings[0]}` : ''}`);
+    } catch (e) { toast.error('Not exported', (e as Error).message); }
   };
   const exportAll = async (): Promise<void> => {
     const mine = (skills ?? []).filter(s => !s.builtin);
@@ -128,10 +194,11 @@ export function SkillsSection(): React.ReactElement {
     if (!folder) return;
     let n = 0;
     for (const s of mine) {
-      const dir = skillDir(s);
-      if (!dir) continue;
-      try { await invoke('fs:zipDir', dir, `${folder}/${s.name}.skill`, s.name); n++; }
-      catch (e) { toast.error(`Could not export ${s.name}`, (e as Error).message); }
+      if (!skillDir(s)) continue;
+      try {
+        const r = await api.exportSkill(s.name, { dest: `${folder}/${s.name}.skill` });
+        if (r.ok) n++; else toast.error(`Could not export ${s.name}`, r.error);
+      } catch (e) { toast.error(`Could not export ${s.name}`, (e as Error).message); }
     }
     toast.success(`Exported ${n} skill${n === 1 ? '' : 's'}`, folder);
   };
@@ -150,12 +217,21 @@ export function SkillsSection(): React.ReactElement {
 
   const row = (s: SkillSummary): React.ReactElement => (
     <Row key={s.name}
-      title={<span className="flex items-center gap-2">{s.name}{s.builtin && <span className="badge bg-aico-hover text-aico-muted">built in</span>}{s.resources.length > 0 && <span className="badge bg-aico-hover text-aico-muted" title={s.resources.join('\n')}>{s.resources.length} file{s.resources.length === 1 ? '' : 's'}</span>}</span>}
-      desc={<span className="line-clamp-2">{s.description}</span>}>
+      title={<span className="flex flex-wrap items-center gap-2">{s.name}
+        {s.builtin && <span className="badge bg-aico-hover text-aico-muted">built in</span>}
+        {s.trust === 'unreviewed' && <span className="badge bg-aico-warning/15 text-aico-warning" title={s.trustReason}><Icon name="alert" size={11} />{trustLabel(s.trust)}</span>}
+        {s.trust === 'reviewed' && <span className="badge bg-aico-hover text-aico-muted" title={s.provenance?.reviewedAt ? `Reviewed ${new Date(s.provenance.reviewedAt).toLocaleString()}` : undefined}>{trustLabel(s.trust)}</span>}
+        {(s.provenance?.findings?.high ?? 0) > 0 && <span className="badge bg-aico-danger/10 text-aico-danger">{s.provenance!.findings!.high} high finding{s.provenance!.findings!.high === 1 ? '' : 's'}</span>}
+        {s.resources.length > 0 && <span className="badge bg-aico-hover text-aico-muted" title={s.resources.join('\n')}>{s.resources.length} file{s.resources.length === 1 ? '' : 's'}</span>}
+        {(s.warnings?.length ?? 0) > 0 && <span className="badge bg-aico-hover text-aico-muted" title={s.warnings!.join('\n')}>{s.warnings!.length} spec warning{s.warnings!.length === 1 ? '' : 's'}</span>}
+      </span>}
+      desc={<span className="block"><span className="line-clamp-2">{s.description}</span>{provenanceLine(s) && <span className="mt-0.5 block truncate text-[11.5px] text-aico-muted" title={s.provenance?.source}>{provenanceLine(s)}</span>}</span>}>
       <div className="flex items-center gap-1">
+        {s.trust === 'unreviewed' && <button className="btn-outline btn-sm" onClick={() => void openReview(s)}>Review and enable</button>}
         <MenuButton className="icon-btn-sm" title="More" placement="bottom-end" width={220} button={<Icon name="more" size={15} />}>
           {close => (
             <>
+              {!s.builtin && skillDir(s) && <MenuItem icon="shield" label={s.trust === 'unreviewed' ? 'Review and enable…' : 'Files and scan findings…'} onClick={() => { close(); void openReview(s); }} />}
               <MenuItem icon="file-text" label="Open SKILL.md" onClick={() => { close(); useDesk.getState().closeSettings(); useDesk.getState().navigate({ view: 'files', params: { root: skillDir(s) ?? s.path.replace(/[\\/][^\\/]+$/, ''), open: skillFile(s) } }); }} />
               <MenuItem icon="folder" label="Show in folder" onClick={() => { close(); void desktop.shell.showItemInFolder(s.path); }} />
               <MenuItem icon="download" label="Export as .skill…" onClick={() => { close(); void exportSkill(s); }} />
@@ -169,17 +245,22 @@ export function SkillsSection(): React.ReactElement {
     </Row>
   );
 
+  const unreviewed = (skills ?? []).filter(s => s.trust === 'unreviewed').length;
+
   return (
     <div>
       <p className="-mt-2 mb-4 text-[13px] text-aico-muted">Procedures the agent reaches for when a task matches their description. Claude-compatible: a folder with <code>SKILL.md</code> and whatever scripts, references and templates it uses.</p>
       <div className="flex flex-wrap items-center gap-2">
         <input className="input min-w-[200px] flex-1" placeholder={`Search ${skills?.length ?? ''} skills`} value={q} onChange={e => setQ(e.target.value)} />
-        <MenuButton className="btn-outline btn-sm" title="Import a skill" placement="bottom-end" width={290}
+        <MenuButton className="btn-outline btn-sm" title="Import skills" placement="bottom-end" width={300}
           button={<>{busy ? <span className="spinner h-3 w-3" /> : <Icon name="upload" size={13} />}Import</>}>
           {close => (
             <>
-              <MenuItem icon="file" label="From a .skill, .zip or SKILL.md…" onClick={() => { close(); void importArchiveOrMd(); }} />
-              <MenuItem icon="folder" label="From a folder…" hint="with SKILL.md" onClick={() => { close(); void importFolder(); }} />
+              <MenuItem icon="file" label="From a .skill or .zip file…" onClick={() => { close(); void importFile('archive'); }} />
+              <MenuItem icon="file-text" label="From a SKILL.md…" onClick={() => { close(); void importFile('markdown'); }} />
+              <MenuItem icon="folder" label="From a skill folder…" hint="with SKILL.md" onClick={() => { close(); void importFolder('skill'); }} />
+              <MenuItem icon="folder" label="From a pack…" hint="a folder of skills" onClick={() => { close(); void importFolder('pack'); }} />
+              <MenuItem icon="plug" label="From a Claude plugin…" hint=".claude-plugin/" onClick={() => { close(); void importFolder('plugin'); }} />
             </>
           )}
         </MenuButton>
@@ -199,6 +280,40 @@ export function SkillsSection(): React.ReactElement {
       </div>
 
       {creating && <SkillEditor onDone={async (saved) => { setCreating(false); if (saved) await load(); }} />}
+
+      {unreviewed > 0 && (
+        <p className="mt-3 rounded-lg bg-aico-warning/10 px-3 py-2 text-[12.5px] text-aico-warning">
+          <span className="font-semibold">{unreviewed} skill{unreviewed === 1 ? '' : 's'} need{unreviewed === 1 ? 's' : ''} review.</span> Imported skills reach the agent only after you look at their files and scan findings and enable them.
+        </p>
+      )}
+
+      <Modal open={!!review} onClose={cancelReview} width={720} title="Review before installing" className="max-h-[86vh]">
+        {review && (
+          <div className="flex min-h-0 flex-1 flex-col px-5 pb-4 pt-1">
+            <SkillImportReview review={review} busy={busy === 'install'} onInstall={(sel, en, ow) => void installReviewed(sel, en, ow)} onCancel={cancelReview} />
+          </div>
+        )}
+      </Modal>
+      <Modal open={!!installed} onClose={() => setInstalled(null)} width={720} title={installed ? `${installed.skill.name} — files and scan findings` : ''} className="max-h-[86vh]">
+        {installed && (
+          <div className="flex min-h-0 flex-1 flex-col px-5 pb-4 pt-1">
+            <InstalledSkillReview skill={installed.skill} trust={installed.trust} {...(installed.trustReason ? { trustReason: installed.trustReason } : {})}
+              busy={busy === 'enable'} onCancel={() => setInstalled(null)}
+              {...(installed.trust === 'unreviewed' ? {
+                onEnable: async () => {
+                  setBusy('enable');
+                  try {
+                    const r = await api.setSkillEnabled(installed.skill.name, true);
+                    if (r.ok) { toast.success(`“${installed.skill.name}” reviewed and enabled`, 'It is in the agent\'s catalogue now.'); setInstalled(null); }
+                    else toast.error('Not enabled', r.result ?? r.error);
+                    await load();
+                  } catch (e) { toast.error('Not enabled', (e as Error).message); }
+                  finally { setBusy(null); }
+                },
+              } : {})} />
+          </div>
+        )}
+      </Modal>
 
       {mine.length > 0 && <h3 className="set-heading">Yours</h3>}
       {mine.length > 0 && <div className="set-group">{mine.map(row)}</div>}
@@ -230,7 +345,8 @@ function SkillEditor({ onDone }: { onDone: (saved: boolean) => void | Promise<vo
     setSaving(true);
     try {
       const md = `---\nname: ${n}\ndescription: ${description.trim().replace(/\n+/g, ' ')}\n---\n\n${body.trim()}\n`;
-      const r = await api.uploadSkill({ files: [{ path: 'SKILL.md', base64: btoa(unescape(encodeURIComponent(md))) }, ...await toUpload(files)] });
+      // Written here by the person, so it installs as theirs — no review needed.
+      const r = await api.saveAuthoredSkill([{ path: 'SKILL.md', base64: btoa(unescape(encodeURIComponent(md))) }, ...await toUpload(files)]);
       if (!r.ok) { toast.error('Not saved', r.error); return; }
       toast.success(`Skill “${r.name}” created`);
       await onDone(true);
@@ -431,7 +547,7 @@ function AgentEditor({ initial, existing, onDone, act }: {
           ...(refs.length ? ['## Reference knowledge', '', 'Read the relevant file before answering; cite it by path.', '', ...refs, ''] : []),
           ...(scripts.length ? ['## Scripts', '', 'Run these rather than reimplementing them. Read a script before running it the first time.', '', ...scripts, ''] : []),
         ].join('\n');
-        const r = await api.uploadSkill({ overwrite: true, files: [{ path: 'SKILL.md', base64: btoa(unescape(encodeURIComponent(md))) }, ...await toUpload(d.knowledge)] });
+        const r = await api.saveAuthoredSkill([{ path: 'SKILL.md', base64: btoa(unescape(encodeURIComponent(md))) }, ...await toUpload(d.knowledge)], true);
         if (!r.ok) { toast.error('Knowledge not saved', r.error); return; }
         skillsFor = [...new Set([...skillsFor, r.name ?? kit])];
       }

@@ -1196,8 +1196,20 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     // Settings, provider onboarding, and system state. Consulted before the
     // POST guard because several of these are reads.
-    const systemBody = req.method === 'POST' ? await readJson(req, route === 'attachments/upload' ? UPLOAD_BODY_MAX : undefined) : {};
-    const handled = await handleSystemRoute(route, req.method ?? 'GET', systemBody as Record<string, unknown>, url.searchParams);
+    // A skill pack arrives as base64 in the body, so the skill upload routes
+    // get the attachment limit (an archive's own cap is 50 MB, checked again
+    // by skills/archive).
+    const bigBody = route === 'attachments/upload' || route === 'skills/review' || route === 'skills/upload';
+    const systemBody = req.method === 'POST' ? await readJson(req, bigBody ? UPLOAD_BODY_MAX : undefined) : {};
+    // Whether a person is behind this request, for the few settings actions
+    // that need one (enabling an imported skill). Lazy: most routes never ask.
+    const human = (): Promise<{ ok: boolean; reason?: string }> => gate.checkHuman({
+      grant: req.headers['x-aico-grant'],
+      client: (systemBody as { client?: unknown }).client ?? req.headers['x-aico-client'],
+      uiKey: req.headers['x-aico-ui-key'],
+      fetchSite: typeof req.headers['sec-fetch-site'] === 'string' ? req.headers['sec-fetch-site'] : undefined,
+    });
+    const handled = await handleSystemRoute(route, req.method ?? 'GET', systemBody as Record<string, unknown>, url.searchParams, human);
     if (handled) {
       // A settings write can turn the Mini Apps host on, off, or move it. Doing
       // that here rather than asking the reader to restart is the difference

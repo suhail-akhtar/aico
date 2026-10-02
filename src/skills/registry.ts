@@ -24,6 +24,15 @@ function projectKey(dir: string): string {
 
 type SubscriberFn = (skills: Skill[]) => void;
 
+function find(skills: Skill[], commandName: string): Skill | undefined {
+  const lower = commandName.toLowerCase();
+  return skills.find(
+    (s) =>
+      s.frontmatter.name.toLowerCase() === lower ||
+      s.frontmatter.aliases?.some((a) => a.toLowerCase() === lower),
+  );
+}
+
 /**
  * A skill name reduced to something that can only be a filename.
  *
@@ -155,23 +164,40 @@ export class SkillRegistry {
     return [...this._skills.filter(s => !names.has(s.frontmatter.name.trim().toLowerCase())), ...project];
   }
 
-  /** Look up a skill by exact name or alias */
+  /**
+   * Look up a skill the agent may use, by exact name or alias.
+   *
+   * An `unreviewed` skill is not found here — not by `Skill`, not by a slash
+   * command, not by an agent's preloaded skills, not by an eval. That is the
+   * whole review gate (design §5.1): one place every use path goes through.
+   * Management paths use `lookupAny`.
+   */
   lookup(commandName: string): Skill | undefined {
-    const lower = commandName.toLowerCase();
-    return this.visible().find(
-      (s) =>
-        s.frontmatter.name.toLowerCase() === lower ||
-        s.frontmatter.aliases?.some((a) => a.toLowerCase() === lower),
-    );
+    return find(this.usable(), commandName);
+  }
+
+  /** Any installed skill by name or alias, including unreviewed ones — for managing, never for using. */
+  lookupAny(commandName: string): Skill | undefined {
+    return find(this.visible(), commandName);
   }
 
   /** Check if user input auto-dispatches to a skill via its trigger pattern */
   matchTrigger(userInput: string): Skill | undefined {
-    return this.visible().find(skill => triggerMatches(skill, userInput));
+    return this.usable().find(skill => triggerMatches(skill, userInput));
   }
 
+  /** The skills the agent may use (everything but `unreviewed`). */
   list(): Skill[] {
+    return [...this.usable()];
+  }
+
+  /** Every installed skill, unreviewed ones included — for Settings and `SkillManage list`. */
+  listAll(): Skill[] {
     return [...this.visible()];
+  }
+
+  private usable(): Skill[] {
+    return this.visible().filter(s => s.trust !== 'unreviewed');
   }
 
   subscribe(fn: SubscriberFn): () => void {
@@ -189,33 +215,35 @@ export class SkillRegistry {
   }
 
   /**
-   * Install a skill from a URL (raw markdown).
-   * Saves to ~/.aico/skills/<name>.md
+   * Install a skill from a URL (raw markdown), as `unreviewed`.
+   *
+   * Saves to ~/.aico/skills/<name>/SKILL.md with a provenance record naming
+   * the URL. A file fetched from the internet is the textbook case for the
+   * review gate (design §5.1): it lands on disk and stays out of the catalogue
+   * until a person reviews and enables it.
    */
   async install(url: string): Promise<Skill> {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}`);
     const content = await resp.text();
+    if (content.length > 1024 * 1024) throw new Error('That file is over 1 MB — not a SKILL.md.');
 
     const skill = parseSkillFile(content, url, false);
     if (!skill) throw new Error('Invalid skill file — missing or invalid frontmatter');
 
-    const dir = path.join(aicoHome(), 'skills');
-    await mkdir(dir, { recursive: true });
     // The name comes out of a file fetched from a URL, so it is exactly as
     // trustworthy as the URL. Sanitised for the same reason addSkill's is.
-    const filePath = path.join(dir, `${safeSkillFile(skill.frontmatter.name)}.md`);
+    const dir = path.join(aicoHome(), 'skills', safeSkillFile(skill.frontmatter.name));
+    await mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, 'SKILL.md');
     await writeFile(filePath, content, 'utf8');
-
-    skill.filePath = filePath;
-    // Merge into registry
-    this._skills = this._skills.filter(
-      (s) => s.frontmatter.name !== skill.frontmatter.name,
-    );
-    this._skills.push(skill);
-    this._emit();
-
-    return skill;
+    const { writeMeta, treeHash, fileHash } = await import('./provenance.js');
+    writeMeta(dir, {
+      source: url, sourceKind: 'url', sha256: treeHash(dir), sourceSha256: fileHash(filePath),
+      importedAt: new Date().toISOString(), trust: 'unreviewed',
+    });
+    await this.reload();
+    return this.lookupAny(skill.frontmatter.name) ?? skill;
   }
 
   /**

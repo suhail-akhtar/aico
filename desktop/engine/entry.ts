@@ -12,6 +12,9 @@
  *   ← { type: 'shutdown' }              close cleanly, then exit
  *   ← { type: 'permission/decide', sessionId, id, allow }   a person's answer to a tool-permission prompt
  *   → { type: 'permission/decided', sessionId, id, ok }
+ *   ← { type: 'human/grant', nonce }    a one-time "a person clicked this" for a settings action
+ *                                        with no chat (enabling an imported skill); the request
+ *                                        carries the nonce in x-aico-grant (decision-gate.ts)
  *   ↔ `vault/*`                          the credential vault's channel (src/vault/host-channel.ts)
  *
  * @module desktop/engine/entry
@@ -52,7 +55,11 @@ async function main(): Promise<void> {
       const gate = decisionGate();
       gate.setHostAttached(true);
       parent.on('message', (e) => {
-        const m = e.data as { type?: string; sessionId?: unknown; id?: unknown; allow?: unknown } | undefined;
+        const m = e.data as { type?: string; sessionId?: unknown; id?: unknown; allow?: unknown; nonce?: unknown } | undefined;
+        if (m?.type === 'human/grant') {
+          if (typeof m.nonce === 'string') gate.registerHostGrant(m.nonce);
+          return;
+        }
         if (m?.type !== 'permission/decide') return;
         if (typeof m.sessionId !== 'string' || typeof m.id !== 'string' || typeof m.allow !== 'boolean') return;
         const ok = gate.decideFromHost(m.sessionId, m.id, m.allow);

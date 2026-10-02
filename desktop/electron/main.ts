@@ -14,6 +14,7 @@ import { session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { EngineHost } from './engine-host';
 import { attachEmbedReferer, handleProtocol, registerSchemePrivileges, APP_ORIGIN } from './protocol';
 import { PrefsStore } from './prefs';
@@ -234,6 +235,12 @@ app.whenReady().then(async () => {
     rendererDir: path.join(distDir, 'renderer'), pluginDir: () => pluginsDir, engine,
     // A person's Allow on a tool-permission prompt travels over the private port (vault-host.ts).
     decidePermission: (sessionId, id, allow) => ctx.services.vaultHost?.decidePermission(sessionId, id, allow) ?? Promise.resolve(false),
+    // A person's "Install and enable" on a skill review, the same way (decision-gate.ts checkHuman).
+    mintHumanGrant: () => {
+      const nonce = crypto.randomBytes(24).toString('base64url');
+      engine.post({ type: 'human/grant', nonce });
+      return nonce;
+    },
   });
   attachEmbedReferer(session.defaultSession);
   registerCoreIpc(ctx);

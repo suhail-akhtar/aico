@@ -32,6 +32,7 @@ import { transportFetch } from './transport';
 import type { HostAnswer, HostCall, HostToolName } from '../../shared/host-tools';
 import type { CanvasDoc, CanvasSummary, CanvasWriteResult, DocSettings, ExportFormat } from '../../shared/ui/canvas/host';
 import type { CanvasComment, CommentAnchor } from '../../shared/ui/canvas/comments';
+import type { ImportReview, ReviewedSkill, SkillProvenance } from './skill-review';
 
 const TOKEN_KEY = 'aico.token';
 
@@ -167,6 +168,27 @@ const post = <T,>(path: string, body: unknown): Promise<T> =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
 const get = <T,>(path: string): Promise<T> => request<T>(path, { method: 'GET' });
+
+/**
+ * A POST that needs a person, not just the token (server/decision-gate
+ * `checkHuman`): enabling an imported skill after its review. Carries this
+ * window's client nonce; a nonce the server has forgotten (it restarted, or
+ * the tab sat idle) is traded again once before giving up. In the desktop
+ * and the VS Code panel there is no nonce to send — their hosts prove the
+ * person themselves.
+ */
+async function postAsPerson<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const send = async (): Promise<T> => post<T>(path, { ...body, client: await ensureUiClient() ?? undefined });
+  try {
+    return await send();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403 && (err.body as { code?: string } | undefined)?.code === 'human-required' && clientNonce) {
+      clientNonce = null;
+      return send();
+    }
+    throw err;
+  }
+}
 
 // ── credential vault (engine: src/vault/human.ts) ────────────────────
 
@@ -410,6 +432,34 @@ export const api = {
   ) =>
     post<{ ok: boolean; name?: string; resources?: string[]; replaced?: boolean; error?: string }>(
       'skills/upload', payload),
+
+  /**
+   * Stage an import and get its review back — every skill found, its files,
+   * scripts, scan findings and provenance. Nothing is installed.
+   */
+  reviewSkillImport: (input: { source?: string; files?: Array<{ path: string; base64: string }>; markdown?: string; label?: string }) =>
+    post<{ ok: boolean; review?: ImportReview; error?: string }>('skills/review', input),
+  /** An installed skill's own review (for "Review and enable"). */
+  reviewInstalledSkill: (name: string) =>
+    post<{ installed: true; trust: string; trustReason?: string; skill: ReviewedSkill & { provenance?: SkillProvenance } }>('skills/review', { name }),
+  /**
+   * Install a staged review. `enable: true` is the person's "Install and
+   * enable": it needs proof of the person, which this call carries.
+   */
+  installSkillImport: (input: { id: string; select?: string[]; overwrite?: boolean; enable?: boolean }) =>
+    (input.enable ? postAsPerson : post)<SkillInstallOutcome>('skills/install', input),
+  discardSkillImport: (id: string) => post<{ ok: boolean }>('skills/discard', { id }),
+  /** Enable (or disable) a skill; enabling an unreviewed one is the review, so it goes as the person. */
+  setSkillEnabled: (name: string, enabled: boolean) =>
+    (enabled ? postAsPerson : post)<ManageResult>('manage', { registry: 'skills', action: enabled ? 'enable' : 'disable', name }),
+  /** A skill as Claude's `.skill`: written to `dest` when given, else returned as base64 to download. */
+  exportSkill: (name: string, opts: { dest?: string; includeEvals?: boolean } = {}) =>
+    post<{ ok: boolean; name?: string; files?: number; path?: string; filename?: string; base64?: string; warnings?: string[]; rewritten?: boolean; error?: string }>(
+      'skills/export', { name, ...opts }),
+  /** The person's own skill, written in the editor: installed as theirs, without a review. */
+  saveAuthoredSkill: (files: Array<{ path: string; base64: string }>, overwrite = false) =>
+    postAsPerson<{ ok: boolean; name?: string; resources?: string[]; replaced?: boolean; error?: string }>(
+      'skills/upload', { files, overwrite, authored: true }),
 
   createSkill: (name: string, description: string, body: string) =>
     post<{ ok: boolean; name?: string; error?: string }>('skills/create', { name, description, body }),
@@ -1197,6 +1247,17 @@ export interface SkillSummary {
   /** The sentence the agent selects on. */
   description: string;
   builtin: boolean;
+  /**
+   * Whether it may reach the model: `unreviewed` imports are on disk but out
+   * of the catalogue until a person reviews and enables them.
+   */
+  trust?: 'builtin' | 'authored' | 'reviewed' | 'unreviewed';
+  trustReason?: string;
+  /** Where an imported skill came from, its hash, and its scan totals. */
+  provenance?: SkillProvenance;
+  /** Spec problems found on load; shown, never blocking. */
+  warnings?: string[];
+  compatibility?: string;
   aliases: string[];
   allowedTools: string[];
   license?: string;
@@ -1223,6 +1284,13 @@ export interface McpConfigCheck {
 }
 
 /** Every registry verb answers the same way: did it work, and what happened. */
+export interface SkillInstallOutcome {
+  ok: boolean;
+  installed: Array<{ name: string; installedAt: string; replaced: boolean; trust: 'reviewed' | 'unreviewed' }>;
+  skipped: Array<{ name: string; reason: string }>;
+  error?: string;
+}
+
 export interface ManageResult {
   ok: boolean;
   result?: string;
@@ -1320,6 +1388,7 @@ export interface PermissionRequest {
 /** A file write the client was asked to apply itself. */
 /** Re-exported so a client can name the type without a second import path. */
 export type { HostAnswer, HostCall, HostToolName };
+export type { ImportReview, ReviewedSkill, SkillProvenance };
 
 /** Where a context-window figure came from. Mirrors the server's `WindowSource`. */
 export type WindowSource = 'user' | 'api' | 'learned' | 'observed' | 'table' | 'assumed';

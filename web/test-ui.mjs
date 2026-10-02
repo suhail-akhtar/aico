@@ -44,6 +44,7 @@ import {
   collectVersionGroups, applyVersions, editMarker, stripEditMarker, seqOf,
 } from './dist-test/message-versions.mjs';
 import { checksFrom } from './dist-test/checks.mjs';
+import * as skillReview from './dist-test/skill-review.mjs';
 import { shouldClearBusy } from './dist-test/turn-state.mjs';
 import { searchAgents, splitAgents, mentionAt } from './dist-test/agents.mjs';
 import { effortDisplay, tuningPatch, tuningChoice, FAMILY_REASONING, reasoningFor } from './dist-test/reasoning.mjs';
@@ -2347,6 +2348,43 @@ console.log('\n-- Rich answer blocks: parsing, links, arithmetic --');
   test('startLabel: this week is a weekday', () => assert.equal(rich.startLabel('2026-10-02T18:30:00Z', Date.parse('2026-09-29T09:00:00Z'), 'en-US', 'UTC'), 'Fri 6:30 PM'));
   test('startLabel: later is a date', () => assert.equal(rich.startLabel('2026-10-10T11:30:00Z', Date.parse('2026-09-29T09:00:00Z'), 'en-US', 'UTC'), 'Oct 10 11:30 AM'));
   test('startLabel: in the reader\'s zone, not UTC', () => assert.equal(rich.startLabel('2026-09-29T20:00:00Z', Date.parse('2026-09-29T09:00:00Z'), 'en-US', 'Asia/Karachi'), 'Tomorrow 1:00 AM'));
+}
+
+// ── skill import review (design §7.2) ─────────────────────────────────
+{
+  section('Skill review screen: what starts selected, what is shown first');
+  const sk = (name, extra = {}) => ({
+    name, description: 'd', at: name, errors: [], warnings: [], files: [{ path: 'SKILL.md', size: 10 }],
+    findings: [], totals: { high: 0, warn: 0, info: 0 }, scripts: [], tokens: { catalogue: 20, body: 100 }, sha256: 'a'.repeat(64), ...extra,
+  });
+  const review = { skills: [sk('ok'), sk('broken', { errors: ['name is missing'] }), sk('clash', { exists: { builtin: false, trust: 'authored' } })] };
+  test('valid, non-clashing skills start selected; broken and replacing ones do not', () =>
+    assert.deepEqual(skillReview.defaultSelection(review), ['ok']));
+  test('a skill with errors cannot be selected', () => assert.equal(skillReview.selectable(review.skills[1]), false));
+  test('findings sort worst first, then by file and line', () => {
+    const sorted = skillReview.sortFindings([
+      { kind: 'script', severity: 'info', file: 'a.py', message: '' },
+      { kind: 'network', severity: 'warn', file: 'b.py', line: 9, message: '' },
+      { kind: 'injection', severity: 'high', file: 'SKILL.md', line: 7, message: '' },
+      { kind: 'network', severity: 'warn', file: 'b.py', line: 2, message: '' },
+    ]);
+    assert.deepEqual(sorted.map(f => `${f.severity}:${f.file}:${f.line ?? ''}`), ['high:SKILL.md:7', 'warn:b.py:2', 'warn:b.py:9', 'info:a.py:']);
+  });
+  test('severity is a word, never only a colour', () =>
+    assert.deepEqual(['high', 'warn', 'info'].map(skillReview.severityLabel), ['High', 'Check', 'Info']));
+  test('the button reads "Install and enable", and says when it replaces', () => {
+    assert.equal(skillReview.installLabel(1, 0), 'Install and enable');
+    assert.equal(skillReview.installLabel(3, 0), 'Install and enable 3 skills');
+    assert.equal(skillReview.installLabel(2, 1), 'Install and enable 2 skills (replaces 1)');
+    assert.equal(skillReview.installLabel(0, 0), 'Select a skill to install');
+  });
+  test('the summary line counts files, scripts and findings', () => {
+    assert.equal(skillReview.summaryLine({ files: [1, 2, 3], scripts: [1], totals: { high: 2, warn: 1, info: 4 } }), '3 files · 1 script · 2 high findings · 1 to check');
+    assert.equal(skillReview.summaryLine({ files: [1], scripts: [], totals: { high: 0, warn: 0, info: 1 } }), '1 file · nothing flagged');
+  });
+  test('trust badges in words', () =>
+    assert.deepEqual(['unreviewed', 'reviewed', 'builtin', 'authored', undefined].map(skillReview.trustLabel), ['needs review', 'reviewed', 'built in', 'yours', 'yours']));
+  test('sizes for people', () => assert.deepEqual([12, 2048, 3 * 1048576].map(skillReview.formatBytes), ['12 B', '2.0 KB', '3.0 MB']));
 }
 
 console.log(`\n  WEB UI: ${pass} passed, ${fail} failed\n`);

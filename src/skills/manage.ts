@@ -29,7 +29,13 @@ import path from 'path';
 import { aicoHome } from '../home.js';
 import { skillRegistry } from './registry.js';
 import { parseSkillFile, loadSkillsFromDir } from './loader.js';
-import { importSkill, exportSkill, removeSkill, userSkillsDir, safeName } from './import.js';
+import {
+  importSkill, exportSkill, removeSkill, safeName, stageImport, installStaged, reviewInstalled,
+  type ImportReview, type ReviewedSkill,
+} from './import.js';
+import { parseFrontmatter, updateFrontmatter, type FmValue } from './frontmatter.js';
+import { validateFrontmatter } from './validate.js';
+import { markReviewed } from './provenance.js';
 import { disabledIn, isDisabled, setEnabled, forget } from '../registry-state.js';
 import { currentCwd } from '../run-context.js';
 import type { Skill } from './types.js';
@@ -42,8 +48,8 @@ export function draftsDir(): string {
 export interface SkillResource { path: string; content: string }
 
 export interface SkillManageInput {
-  action: 'list' | 'read' | 'create' | 'verify' | 'register'
-    | 'update' | 'delete' | 'enable' | 'disable' | 'import' | 'export';
+  action: 'list' | 'read' | 'create' | 'verify' | 'validate' | 'register'
+    | 'update' | 'delete' | 'enable' | 'disable' | 'import' | 'review' | 'install' | 'export';
   name?: string;
   description?: string;
   /** The procedure itself — the body below the frontmatter. */
@@ -54,9 +60,17 @@ export interface SkillManageInput {
   antiTrigger?: string;
   allowedTools?: string[];
   resources?: SkillResource[];
-  /** For import: a folder, .zip/.skill, or SKILL.md. For export: where to write. */
+  /** For import/review: a folder, pack, plugin, .zip/.skill, or SKILL.md. For export: where to write. */
   path?: string;
   overwrite?: boolean;
+  /** For install: the staged import's id (from review). */
+  id?: string;
+  /** For install: which of the staged skills, by name (default: every valid one). */
+  select?: string[];
+  /** For install/import: enable as reviewed. Honoured only with a person's yes (`ctx.human`). */
+  enable?: boolean;
+  /** For export: keep a root-level evals/ folder (AICO users can run them; Claude ignores it). */
+  includeEvals?: boolean;
   /**
    * Where `register` installs: the user's skills (default) or the current
    * run's project (`<project>/.aico/skills`). `create` records it in the draft,
@@ -161,6 +175,13 @@ export function verifySkillDir(dir: string): VerifyReport {
     };
   }
 
+  // The spec's own rules (name, lengths, XML, metadata), held to the letter:
+  // what `verify` passes, Claude's validator should pass too.
+  const fm = parseFrontmatter(raw);
+  const spec = validateFrontmatter(fm.data, { dirName: path.basename(dir), body: fm.body, strict: true });
+  problems.push(...fm.errors.map(e => `frontmatter ${e}`), ...spec.errors);
+  notes.push(...spec.warnings.filter(w => !/^the folder is/.test(w) || !/skill-drafts/.test(dir)));
+
   const { name, description } = parsed.frontmatter;
   if (!name?.trim()) problems.push('No name in the frontmatter.');
   if (!description?.trim()) {
@@ -209,13 +230,55 @@ export function verifySkillDir(dir: string): VerifyReport {
   return { ok: problems.length === 0, problems, notes };
 }
 
+/**
+ * Who is asking. `human` is true only when the caller proved a person is
+ * behind this request — the decision gate on the HTTP route (a desktop host
+ * grant, the web UI key or its client nonce). The model's own tool calls
+ * never carry it, and neither does the API token alone.
+ */
+export interface SkillManageContext { human?: boolean }
+
+/** A review, in words, for the model or the terminal. */
+export function describeReview(review: ImportReview): string {
+  const lines = [
+    `Staged import ${review.id} — ${review.sourceKind} from ${review.source}`
+      + (review.sourceSha256 ? ` (sha256 ${review.sourceSha256.slice(0, 16)}…)` : ''),
+    `${review.skills.length} skill(s) found. Nothing is installed yet and nothing was run.`,
+  ];
+  for (const s of review.skills) lines.push('', ...describeReviewed(s));
+  if (review.notes.length) lines.push('', ...review.notes.map(n => `note: ${n}`));
+  return lines.join('\n');
+}
+
+export function describeReviewed(s: ReviewedSkill): string[] {
+  const out = [`■ ${s.name}${s.exists ? (s.exists.builtin ? ' (replaces a built-in skill)' : ' (a skill with this name is installed)') : ''}`,
+    `  ${s.description || '(no description)'}`,
+    `  ${s.files.length} file(s); ~${s.tokens.catalogue} tokens in the catalogue, ~${s.tokens.body} when opened; sha256 ${s.sha256.slice(0, 16)}…`];
+  if (s.scripts.length) out.push(`  scripts: ${s.scripts.map(x => `${x.file} (${x.interpreter})`).join(', ')}`);
+  for (const e of s.errors) out.push(`  ERROR: ${e}`);
+  for (const w of s.warnings) out.push(`  warning: ${w}`);
+  const notable = s.findings.filter(f => f.severity !== 'info');
+  for (const f of notable.slice(0, 15)) out.push(`  ${f.severity === 'high' ? 'HIGH' : 'check'}: ${f.file}${f.line ? `:${f.line}` : ''} ${f.message}`);
+  if (notable.length > 15) out.push(`  …and ${notable.length - 15} more finding(s).`);
+  return out;
+}
+
+/** The refusal the model gets when it tries to enable what a person has not reviewed. */
+function needsPerson(name: string, reason?: string): string {
+  return `Not enabled: "${name}" was imported and ${reason ?? 'has not been reviewed'}. `
+    + 'An imported skill reaches the model only after a person reviews it: ask them to open '
+    + 'Settings → Skills, look at its files and scan findings, and choose "Review and enable". '
+    + 'You cannot enable it yourself, and the API token cannot either.';
+}
+
 /** One line about a skill, for `list`. */
 function describe(skill: Skill, disabled: Set<string>): string {
   const off = disabled.has(skill.frontmatter.name.toLowerCase()) ? ' [disabled]' : '';
+  const unreviewed = skill.trust === 'unreviewed' ? ` [unreviewed — ${skill.trustReason ?? 'needs a person to review it'}; not usable]` : '';
   const kind = skill.isBuiltin ? ' (built in)' : '';
   const ships = skill.resources?.length ? ` — ships ${skill.resources.length} file(s)` : '';
   const aliases = skill.frontmatter.aliases?.length ? ` — also /${skill.frontmatter.aliases.join(', /')}` : '';
-  return `- ${skill.frontmatter.name}${kind}${off}: ${skill.frontmatter.description}${ships}${aliases}`;
+  return `- ${skill.frontmatter.name}${kind}${off}${unreviewed}: ${skill.frontmatter.description}${ships}${aliases}`;
 }
 
 /** Where an installed skill lives, whichever shape it has. */
@@ -223,14 +286,14 @@ function installedDir(skill: Skill): string | null {
   return skill.dir ?? null;
 }
 
-export async function executeSkillManage(input: SkillManageInput): Promise<string> {
-  const action = input.action;
+export async function executeSkillManage(input: SkillManageInput, ctx: SkillManageContext = {}): Promise<string> {
+  const action = input.action === 'validate' ? 'verify' : input.action;
   const name = input.name?.trim() ?? '';
 
   switch (action) {
     case 'list': {
       const disabled = disabledIn('skills');
-      const all = skillRegistry.list();
+      const all = skillRegistry.listAll();
       if (all.length === 0) return 'No skills installed.';
       const drafts = fs.existsSync(draftsDir())
         ? fs.readdirSync(draftsDir(), { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name)
@@ -245,7 +308,7 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
     }
 
     case 'read': {
-      const skill = skillRegistry.lookup(name);
+      const skill = skillRegistry.lookupAny(name);
       if (!skill) return `There is no skill called "${name}". Use action:"list" to see what there is.`;
       const dir = installedDir(skill);
       return [
@@ -255,6 +318,9 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
         skill.frontmatter.trigger ? `trigger: ${skill.frontmatter.trigger}` : '',
         skill.frontmatter.allowedTools?.length ? `allowed-tools: ${skill.frontmatter.allowedTools.join(', ')}` : '',
         `enabled: ${!isDisabled('skills', skill.frontmatter.name)}`,
+        `trust: ${skill.trust ?? 'authored'}${skill.trustReason ? ` (${skill.trustReason})` : ''}`,
+        skill.provenance ? `source: ${skill.provenance.source} (${skill.provenance.sourceKind}, imported ${skill.provenance.importedAt})` : '',
+        ...(skill.warnings ?? []).map(w => `warning: ${w}`),
         dir ? `directory: ${dir}` : `file: ${skill.filePath}`,
         skill.resources?.length ? `ships: ${skill.resources.join(', ')}` : '',
         '', '--- body ---', skill.promptTemplate,
@@ -298,7 +364,7 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
       if (!name) return 'A name is required.';
       const safe = safeName(name);
       const draft = path.join(draftsDir(), safe);
-      const target = fs.existsSync(draft) ? draft : installedDir(skillRegistry.lookup(name) ?? ({} as Skill));
+      const target = fs.existsSync(draft) ? draft : installedDir(skillRegistry.lookupAny(name) ?? ({} as Skill));
       if (!target || !fs.existsSync(target)) {
         return `No draft or installed directory skill called "${name}".`;
       }
@@ -354,7 +420,7 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
     }
 
     case 'update': {
-      const skill = skillRegistry.lookup(name);
+      const skill = skillRegistry.lookupAny(name);
       if (!skill) return `There is no skill called "${name}".`;
       if (skill.isBuiltin) return `"${name}" is built in and cannot be edited. Create your own with the same name to override it.`;
 
@@ -363,18 +429,24 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
         return `"${name}" is a single-file skill. Use action:"create" then "register" with overwrite `
           + 'to replace it, which also lets it ship files.';
       }
-      // Only the parts named are replaced; the rest of the skill stands.
-      const merged: SkillManageInput = {
-        action: 'update',
-        name: skill.frontmatter.name,
-        description: input.description ?? skill.frontmatter.description,
-        prompt: input.prompt ?? skill.promptTemplate,
-        aliases: input.aliases ?? skill.frontmatter.aliases,
-        trigger: input.trigger ?? skill.frontmatter.trigger,
-        antiTrigger: skill.frontmatter.antiTrigger,
-        allowedTools: input.allowedTools ?? skill.frontmatter.allowedTools,
-      };
-      fs.writeFileSync(path.join(dir, 'SKILL.md'), composeMarkdown(merged), 'utf8');
+      // Only the parts named are replaced; the rest of the skill — including
+      // keys AICO does not use, comments, and the body — stands as written.
+      const file = path.join(dir, 'SKILL.md');
+      const current = fs.readFileSync(file, 'utf8');
+      const patch: Record<string, FmValue | undefined> = {};
+      if (input.description !== undefined) patch.description = input.description.replace(/\r?\n/g, ' ').trim();
+      if (input.aliases !== undefined) patch.aliases = input.aliases;
+      if (input.trigger !== undefined) patch.trigger = input.trigger;
+      if (input.allowedTools !== undefined) {
+        const existing = parseFrontmatter(current).data;
+        patch[existing.allowedTools !== undefined ? 'allowedTools' : 'allowed-tools'] = input.allowedTools;
+      }
+      let text = updateFrontmatter(current, patch);
+      if (input.prompt !== undefined) {
+        const head = /^---\n[\s\S]*?\n---/.exec(text)![0];
+        text = `${head}\n${input.prompt}`;
+      }
+      fs.writeFileSync(file, text, 'utf8');
       for (const resource of input.resources ?? []) {
         const target = safeResource(dir, resource.path);
         if (!target) continue;
@@ -390,7 +462,7 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
     }
 
     case 'delete': {
-      const skill = skillRegistry.lookup(name);
+      const skill = skillRegistry.lookupAny(name);
       if (skill?.isBuiltin) return `"${name}" is built in and cannot be deleted. Disable it instead.`;
       // Wherever it is installed — a project skill lives in its project.
       const root = skill?.dir ? path.dirname(skill.dir) : skill?.filePath ? path.dirname(skill.filePath) : undefined;
@@ -403,9 +475,18 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
 
     case 'enable':
     case 'disable': {
-      const skill = skillRegistry.lookup(name);
+      const skill = skillRegistry.lookupAny(name);
       if (!skill) return `There is no skill called "${name}".`;
       const wanted = action === 'enable';
+      if (wanted && skill.trust === 'unreviewed') {
+        // The review gate (design §5.1): enabling an imported skill is the
+        // human review. Only a caller that proved a person is present may.
+        if (!ctx.human || !skill.dir) return needsPerson(skill.frontmatter.name, skill.trustReason);
+        markReviewed(skill.dir);
+        setEnabled('skills', skill.frontmatter.name, true);
+        await skillRegistry.reload();
+        return `"${skill.frontmatter.name}" is reviewed and enabled. It is in the catalogue now.`;
+      }
       const changed = setEnabled('skills', skill.frontmatter.name, wanted);
       return changed
         ? `"${skill.frontmatter.name}" is now ${wanted ? 'enabled' : 'disabled'}.`
@@ -413,28 +494,80 @@ export async function executeSkillManage(input: SkillManageInput): Promise<strin
         : `"${skill.frontmatter.name}" was already ${wanted ? 'enabled' : 'disabled'}.`;
     }
 
-    case 'import': {
-      if (!input.path) return 'A path is required — a folder, a .zip/.skill, or a SKILL.md.';
-      const result = await importSkill(input.path, { overwrite: input.overwrite ?? false });
-      if (!result.ok) return `Not imported: ${result.error}`;
+    case 'review': {
+      // Read-only: a staged import, or an installed skill's own review.
+      if (input.path) {
+        const review = await stageImport({ path: input.path });
+        if ('error' in review) return `Not staged: ${review.error}`;
+        return `${describeReview(review)}\n\nTo install: action:"install" with id:"${review.id}". `
+          + 'It installs as unreviewed — a person enables it after reading this review.';
+      }
+      if (!name) return 'A path (to stage an import) or a name (to review an installed skill) is required.';
+      const skill = skillRegistry.lookupAny(name);
+      if (!skill?.dir) return `There is no installed directory skill called "${name}".`;
+      const r = reviewInstalled(skill.dir);
+      return [`${skill.frontmatter.name} — trust: ${skill.trust ?? 'authored'}${skill.trustReason ? ` (${skill.trustReason})` : ''}`,
+        r.provenance ? `source: ${r.provenance.source}` : '', ...describeReviewed(r)].filter(Boolean).join('\n');
+    }
+
+    case 'install': {
+      if (!input.id) return 'An id is required — the one action:"review" returned.';
+      const trust = input.enable && ctx.human ? 'reviewed' : 'unreviewed';
+      const out = installStaged(input.id, {
+        trust, overwrite: input.overwrite ?? false,
+        ...(input.select?.length ? { select: input.select } : {}),
+      });
+      if (out.error) return `Not installed: ${out.error}`;
       await skillRegistry.reload();
+      if (trust === 'reviewed') for (const s of out.installed) setEnabled('skills', s.name, true);
       return [
-        `Imported "${result.name}"${result.replaced ? ' (replaced the previous one)' : ''}.`,
-        `Installed at ${result.installedAt}.`,
-        result.resources?.length ? `Ships: ${result.resources.join(', ')}` : '',
+        out.installed.length
+          ? `Installed ${out.installed.map(s => `"${s.name}"${s.replaced ? ' (replaced)' : ''}`).join(', ')} as ${trust}.`
+          : 'Not installed: nothing was installed.',
+        ...out.skipped.map(s => `  skipped ${s.name}: ${s.reason}`),
+        trust === 'unreviewed' && out.installed.length
+          ? 'They are on disk but not usable until a person reviews and enables them in Settings → Skills.'
+          : '',
       ].filter(Boolean).join('\n');
     }
 
+    case 'import': {
+      // The model's import: staged, reviewed in words, installed unreviewed.
+      // Enabling is a person's decision (design §5.1 import, item 4).
+      if (!input.path) return 'A path is required — a folder, a pack, a plugin, a .skill/.zip, or a SKILL.md.';
+      const review = await stageImport({ path: input.path });
+      if ('error' in review) return `Not imported: ${review.error}`;
+      const trust = input.enable && ctx.human ? 'reviewed' : 'unreviewed';
+      const out = installStaged(review.id, { trust, overwrite: input.overwrite ?? false });
+      await skillRegistry.reload();
+      if (trust === 'reviewed') for (const s of out.installed) setEnabled('skills', s.name, true);
+      if (!out.installed.length) {
+        return `Not imported: ${out.skipped.map(s => `${s.name} — ${s.reason}`).join('; ') || 'nothing installable was found'}`;
+      }
+      return [
+        `Imported ${out.installed.map(s => `"${s.name}"${s.replaced ? ' (replaced the previous one)' : ''}`).join(', ')}.`,
+        ...out.installed.map(s => `Installed at ${s.installedAt}.`),
+        ...out.skipped.map(s => `  skipped ${s.name}: ${s.reason}`),
+        trust === 'unreviewed'
+          ? 'Installed as UNREVIEWED: not in the catalogue, and Skill refuses it, until a person reviews and enables it in Settings → Skills.'
+          : '',
+        '', describeReview(review),
+      ].join('\n');
+    }
+
     case 'export': {
-      const skill = skillRegistry.lookup(name);
+      const skill = skillRegistry.lookupAny(name);
       if (!skill) return `There is no skill called "${name}".`;
       const dir = installedDir(skill);
       if (!dir) return `"${name}" is a single file, not a directory skill: ${skill.filePath}. Copy it directly.`;
-      if (!input.path) return 'A path is required — where to write the .zip.';
-      const result = await exportSkill(dir, input.path);
-      return result.ok
-        ? `Exported "${skill.frontmatter.name}" to ${result.path}. That file imports on any AICO install.`
-        : `Not exported: ${result.error}`;
+      if (!input.path) return 'A path is required — a folder, or a file ending .skill.';
+      const result = await exportSkill(dir, input.path, { includeEvals: input.includeEvals ?? false });
+      if (!result.ok) return result.error?.startsWith('Not ') ? result.error : `Not exported: ${result.error}`;
+      return [
+        `Exported "${skill.frontmatter.name}" to ${result.path} (${result.files} file(s)) in Claude's .skill format — it imports into Claude and into AICO.`,
+        result.rewritten ? "AICO's own keys (trigger, aliases, …) were moved under metadata as aico-* so Claude's validator accepts the file." : '',
+        ...(result.warnings ?? []).map(w => `warning: ${w}`),
+      ].filter(Boolean).join('\n');
     }
 
     default:
@@ -446,8 +579,9 @@ export const skillManageToolDefinition = {
   name: 'SkillManage',
   description: [
     'Manage the skill library: list, read, create, verify, register, update, delete, enable, disable,',
-    'import and export. Use this whenever someone asks what skills exist, or asks to make, change,',
-    'remove, switch off, or share one.',
+    'review, import, install and export. Use this whenever someone asks what skills exist, or asks to make, change,',
+    'remove, switch off, bring in or share one.',
+    'Imported skills install UNREVIEWED and stay unusable until a person reviews and enables them in Settings; you cannot enable them.',
     'Creating writes a DRAFT and does not register it — write it, actually try it, then register it.',
     'To *use* an existing skill, call Skill instead; this tool is for managing them.',
   ].join(' '),
@@ -456,12 +590,14 @@ export const skillManageToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'read', 'create', 'verify', 'register', 'update', 'delete', 'enable', 'disable', 'import', 'export'],
+        enum: ['list', 'read', 'create', 'verify', 'validate', 'register', 'update', 'delete', 'enable', 'disable', 'review', 'import', 'install', 'export'],
         description:
           'list: every skill and whether it is enabled. read: one skill in full. create: write an '
-          + 'unregistered draft. verify: check a draft or skill. register: install a draft that passes. '
+          + 'unregistered draft. verify/validate: check a draft or skill against the spec. register: install a draft that passes. '
           + 'update: change an installed skill. delete: remove it. enable/disable: toggle without '
-          + 'deleting. import: install from a folder/.zip/SKILL.md. export: pack one into a .zip.',
+          + 'deleting. review: stage a folder/pack/plugin/.skill/SKILL.md (path) and report files, scripts and scan findings without installing, or review an installed skill (name). '
+          + 'install: install a staged review (id, select) as unreviewed. import: review + install in one step. '
+          + "export: pack one into Claude's .skill format.",
       },
       name: { type: 'string', description: 'Which skill. Required for everything except list and import.' },
       description: {
@@ -488,7 +624,10 @@ export const skillManageToolDefinition = {
           required: ['path', 'content'],
         },
       },
-      path: { type: 'string', description: 'For import: what to install. For export: where to write the .zip.' },
+      path: { type: 'string', description: 'For review/import: what to bring in. For export: a folder, or a file ending .skill.' },
+      id: { type: 'string', description: 'For install: the staged import id that review returned.' },
+      select: { type: 'array', items: { type: 'string' }, description: 'For install: which skills of a pack to install (default all valid ones).' },
+      includeEvals: { type: 'boolean', description: 'For export: keep the evals/ folder (Claude ignores it).' },
       overwrite: { type: 'boolean', description: 'Replace an existing skill of the same name.' },
       scope: { type: 'string', enum: ['user', 'project'], description: 'create/register: for you everywhere (default), or for this project only.' },
     },

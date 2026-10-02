@@ -132,7 +132,22 @@ export interface ProtocolOptions {
    * is attached (decision-gate.ts), so this is the only way one lands.
    */
   decidePermission?: (sessionId: string, id: string, allow: boolean) => Promise<boolean>;
+  /**
+   * Mint a one-time "a person did this" grant over the engine's private port
+   * and return it. Attached to the settings actions the token alone may not
+   * take (HUMAN_ROUTES); the engine spends it once (decision-gate.ts).
+   */
+  mintHumanGrant?: () => string;
 }
+
+/**
+ * Settings actions that need a person, not just the token: installing and
+ * enabling an imported skill after its review screen (design §5.1), and the
+ * person's own skill saved from the editor. The renderer is the AICO window —
+ * a request from it is the person's click — so main attaches a grant here;
+ * plugin frames are sandboxed with `connect-src 'none'` and cannot reach it.
+ */
+const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import']);
 
 /**
  * Vault routes the interface may never call: they return a value, or mint
@@ -163,7 +178,7 @@ export function attachEmbedReferer(ses: Electron.Session): void {
   onRequestHeaders(ses, EMBED_HOSTS, (_details, headers) => (headers.Referer || headers.referer ? undefined : { ...headers, Referer: EMBED_REFERER }));
 }
 
-export function handleProtocol({ rendererDir, pluginDir, engine, decidePermission }: ProtocolOptions): void {
+export function handleProtocol({ rendererDir, pluginDir, engine, decidePermission, mintHumanGrant }: ProtocolOptions): void {
   protocol.handle(SCHEME, async (request) => {
     const url = new URL(request.url);
     const pathname = decodeURIComponent(url.pathname);
@@ -181,7 +196,10 @@ export function handleProtocol({ rendererDir, pluginDir, engine, decidePermissio
       }
       return json(200, { ok: await decidePermission(body.sessionId, body.id, body.allow) });
     }
-    if (pathname.startsWith('/api/')) return proxy(request, url, engine);
+    if (pathname.startsWith('/api/')) {
+      const grant = request.method === 'POST' && mintHumanGrant && HUMAN_ROUTES.has(pathname) ? mintHumanGrant() : undefined;
+      return proxy(request, url, engine, grant);
+    }
 
     if (pathname.startsWith('/plugins/')) {
       const rel = pathname.slice('/plugins/'.length);
@@ -203,7 +221,7 @@ export function handleProtocol({ rendererDir, pluginDir, engine, decidePermissio
   });
 }
 
-async function proxy(request: Request, url: URL, engine: EngineHost): Promise<Response> {
+async function proxy(request: Request, url: URL, engine: EngineHost, grant?: string): Promise<Response> {
   let endpoint;
   try {
     endpoint = await engine.ready(60_000);
@@ -215,6 +233,9 @@ async function proxy(request: Request, url: URL, engine: EngineHost): Promise<Re
   target.searchParams.delete('token');
   const headers = new Headers(request.headers);
   headers.set('x-aico-token', endpoint.token);
+  // Only main sets this; whatever the renderer sent is dropped.
+  headers.delete('x-aico-grant');
+  if (grant) headers.set('x-aico-grant', grant);
   headers.set('origin', endpoint.origin);
   headers.delete('host');
   headers.delete('referer');

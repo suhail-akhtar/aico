@@ -24,6 +24,7 @@ import { assignSplits, corpusFor } from './corpus.js';
 import { evalSkill } from './run.js';
 import { optimizeSkill } from './optimize.js';
 import type { EvalReport, TaskResult } from './types.js';
+import { registerSkillImportCommands } from '../cli-import.js';
 
 export interface SkillCommandDeps {
   /** The CLI's own model resolution, so `--model` means what it means everywhere else. */
@@ -54,7 +55,9 @@ function splitFrontmatter(raw: string): { frontmatter: string; body: string } {
 export function registerSkillCommands(program: Command, deps: SkillCommandDeps): void {
   const skill = program
     .command('skill')
-    .description('measure and improve a skill against tasks with known answers');
+    .description('import, review, export, measure and improve skills');
+
+  registerSkillImportCommands(skill);
 
   skill
     .command('eval <name>')

@@ -5,9 +5,15 @@
  * working it out again — which means the cost of *getting* one has to be near
  * zero, or people retype the knowledge instead of installing it.
  *
- * So: paste a path. A folder, a `.zip` someone published, a bare `SKILL.md`.
- * The name comes from the skill's own frontmatter rather than the filename,
- * because `download (2).zip` is not a skill name.
+ * So: paste a path. A folder, a `.zip` someone published, a bare `SKILL.md`,
+ * a pack of many, a Claude plugin. The name comes from the skill's own
+ * frontmatter rather than the filename, because `download (2).zip` is not a
+ * skill name.
+ *
+ * **Review before it reaches the model (design §5.1, §7.2).** Every import
+ * opens the review screen first — files, scripts, scan findings, provenance —
+ * and only "Install and enable" puts it in the catalogue. An unreviewed skill
+ * shows here with "needs review" until someone does.
  *
  * **The description is shown as prominently as the name**, because it is the
  * whole of the selection decision. It is the only part the agent sees before
@@ -19,8 +25,10 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type SkillSummary } from '../../api';
+import { api, ApiError, type ImportReview, type ReviewedSkill, type SkillProvenance, type SkillSummary } from '../../api';
 import { SkillLab } from './SkillLab';
+import { InstalledSkillReview, SkillImportReview } from './SkillReview';
+import { sourceLabel, trustLabel } from '../../skill-review';
 import { useStore } from '../../store';
 
 /** What a SKILL.md looks like, for the paste box. */
@@ -41,8 +49,27 @@ function Extras({ skill }: { skill: SkillSummary }): React.ReactElement | null {
   }
   if (skill.allowedTools.length > 0) bits.push(`expects ${skill.allowedTools.join(', ')}`);
   if (skill.aliases.length > 0) bits.push(`also ${skill.aliases.map(a => `/${a}`).join(' ')}`);
+  const p = skill.provenance;
+  if (p) {
+    bits.push(`${sourceLabel(p.sourceKind).toLowerCase()} from ${p.source.split(/[\\/]/).slice(-2).join('/')}`);
+    const f = p.findings;
+    if (f) bits.push(f.high ? `${f.high} high scan finding${f.high === 1 ? '' : 's'}` : f.warn ? `${f.warn} scan finding${f.warn === 1 ? '' : 's'} to check` : 'scan: nothing flagged');
+    bits.push(`sha256 ${p.sha256.slice(0, 12)}…`);
+  }
+  if (skill.warnings?.length) bits.push(`${skill.warnings.length} spec warning${skill.warnings.length === 1 ? '' : 's'}`);
   if (bits.length === 0) return null;
-  return <p className="mt-0.5 text-[11px] text-aico-muted">{bits.join(' · ')}</p>;
+  return <p className="mt-0.5 text-[11px] text-aico-muted" title={skill.warnings?.join('\n')}>{bits.join(' · ')}</p>;
+}
+
+/** Start a browser download of base64 bytes. */
+function download(filename: string, base64: string): void {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactElement {
@@ -60,6 +87,10 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
   const folderInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const askAgentFor = useStore(s => s.askAgentFor);
+  /** The import being reviewed, before anything is installed. */
+  const [review, setReview] = useState<ImportReview | null>(null);
+  /** An installed skill being reviewed (to enable it, or just to look). */
+  const [installedReview, setInstalledReview] = useState<{ skill: ReviewedSkill & { provenance?: SkillProvenance }; trust: string; trustReason?: string } | null>(null);
 
   const refresh = useCallback(async () => {
     try { setSkills((await api.skills()).skills); }
@@ -68,32 +99,65 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  /** One place that turns an import result into something readable. */
-  const report = async (
-    result: { ok: boolean; name?: string; resources?: string[]; replaced?: boolean; error?: string },
-  ): Promise<void> => {
-    if (result.ok) {
-      setNote({
-        tone: 'good',
-        text: `Installed ${result.name}${result.replaced ? ' (replaced the previous one)' : ''}`
-          + `${result.resources?.length ? ` with ${result.resources.length} bundled file(s)` : ''}.`,
-      });
-      await refresh();
-    } else {
-      setNote({ tone: 'bad', text: result.error ?? 'import failed' });
-    }
+  /** Stage an import and open its review; nothing is installed yet. */
+  const stage = async (input: Parameters<typeof api.reviewSkillImport>[0]): Promise<boolean> => {
+    const r = await api.reviewSkillImport(input).catch((err: unknown) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    if (!('review' in r) || !r.review) { setNote({ tone: 'bad', text: r.error ?? 'could not read that' }); return false; }
+    setReview(r.review);
+    return true;
   };
 
-  const install = async (overwrite = false): Promise<void> => {
+  /** The review screen's answer: install the selection, enabled only on a person's "Install and enable". */
+  const installReviewed = async (select: string[], enable: boolean, overwrite: boolean): Promise<void> => {
+    if (!review) return;
+    setBusy(true);
+    try {
+      const out = await api.installSkillImport({ id: review.id, select, enable, overwrite });
+      const done = out.installed.map(s => s.name);
+      setNote(done.length
+        ? { tone: 'good', text: `Installed ${done.join(', ')}${enable ? ' and enabled — try it: ask the agent to use it' : ' without enabling: review and enable it below when you are ready'}.`
+            + (out.skipped.length ? ` Skipped: ${out.skipped.map(x => `${x.name} (${x.reason})`).join('; ')}` : '') }
+        : { tone: 'bad', text: out.error ?? (out.skipped.map(x => `${x.name}: ${x.reason}`).join('; ') || 'nothing was installed') });
+      setReview(null);
+      await refresh();
+    } catch (err) {
+      setNote({ tone: 'bad', text: err instanceof ApiError ? err.message : String(err) });
+    } finally { setBusy(false); }
+  };
+
+  const cancelReview = (): void => {
+    if (review) void api.discardSkillImport(review.id).catch(() => undefined);
+    setReview(null);
+  };
+
+  const install = async (): Promise<void> => {
     const path = source.trim();
     if (!path || busy) return;
     setBusy(true);
     setNote(null);
     try {
-      const result = await api.importSkill(path, overwrite);
-      if (result.ok) setSource('');
-      await report(result);
+      if (await stage({ source: path })) setSource('');
     } finally { setBusy(false); }
+  };
+
+  const openInstalledReview = async (name: string): Promise<void> => {
+    try {
+      const r = await api.reviewInstalledSkill(name);
+      setInstalledReview({ skill: r.skill, trust: r.trust, ...(r.trustReason ? { trustReason: r.trustReason } : {}) });
+    } catch (err) {
+      setNote({ tone: 'bad', text: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  const exportOne = async (name: string): Promise<void> => {
+    try {
+      const r = await api.exportSkill(name);
+      if (!r.ok || !r.base64 || !r.filename) { setNote({ tone: 'bad', text: r.error ?? 'not exported' }); return; }
+      download(r.filename, r.base64);
+      setNote({ tone: 'good', text: `Exported ${r.filename} in Claude's .skill format${r.warnings?.length ? ` — ${r.warnings.join(' ')}` : ''}.` });
+    } catch (err) {
+      setNote({ tone: 'bad', text: err instanceof Error ? err.message : String(err) });
+    }
   };
 
   const show = async (name: string): Promise<void> => {
@@ -106,10 +170,11 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
 
   /** Switch a skill off without losing it — it leaves the catalogue, not the disk. */
   const toggle = async (skill: SkillSummary): Promise<void> => {
-    const result = await api.manage('skills', {
-      action: skill.enabled === false ? 'enable' : 'disable',
-      name: skill.name,
-    });
+    // An unreviewed skill is enabled only from its review screen.
+    if (skill.trust === 'unreviewed') { await openInstalledReview(skill.name); return; }
+    const result = await api.setSkillEnabled(skill.name, skill.enabled === false).catch((err: unknown) => ({
+      ok: false, error: err instanceof Error ? err.message : String(err), result: undefined,
+    }));
     setNote({
       tone: result.ok ? 'good' : 'bad',
       text: result.result ?? result.error ?? 'nothing came back',
@@ -176,8 +241,7 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
       const files = await Promise.all(
         chosen.map(async entry => ({ path: entry.path, base64: await encode(entry.file) })),
       );
-      const result = await api.uploadSkill({ files });
-      report(result);
+      await stage({ files, label: chosen.length === 1 ? chosen[0]!.path : chosen[0]!.path.split('/')[0] });
     } catch (err) {
       setNote({ tone: 'bad', text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -193,9 +257,10 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
     setBusy(true);
     setNote(null);
     try {
-      report(await api.uploadSkill({ markdown: pasted }));
-      setPasted('');
-      setPasting(false);
+      if (await stage({ markdown: pasted })) {
+        setPasted('');
+        setPasting(false);
+      }
     } finally { setBusy(false); }
   };
 
@@ -214,9 +279,11 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
         <h3 className="text-[13px] font-medium text-aico-primary">Install a skill</h3>
         <p className="mt-0.5 text-[12px] text-aico-muted">
           A folder, a <code className="font-mono">.zip</code> or{' '}
-          <code className="font-mono">.skill</code>, or a single{' '}
-          <code className="font-mono">SKILL.md</code>. Claude skills work exactly as they are — the
-          scripts and references beside the markdown come with them, and nothing is run on import.
+          <code className="font-mono">.skill</code>, a single{' '}
+          <code className="font-mono">SKILL.md</code>, a folder of many (a pack), or a Claude plugin.
+          Claude skills work exactly as they are — the scripts and references beside the markdown come
+          with them, and nothing is run on import. You see every file and what the scan found before
+          anything is installed.
         </p>
 
         {/*
@@ -232,7 +299,7 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
             className="rounded-lg border border-aico-border px-3 py-1.5 text-[12px] text-aico-primary
                        transition-colors hover:bg-aico-hover disabled:opacity-40"
           >
-            Choose a folder…
+            Choose a folder, pack or plugin…
           </button>
           <button
             onClick={() => fileInput.current?.click()}
@@ -309,23 +376,23 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
             className="shrink-0 rounded-lg bg-aico-accent px-3 py-1.5 text-[12px] font-medium text-white
                        transition-opacity hover:opacity-90 disabled:opacity-40"
           >
-            Install
+            Review
           </button>
         </div>
+
+        {review && (
+          <div className="mt-3 rounded-xl border border-aico-accent/40 bg-aico-bg p-3" role="region" aria-label="Review the import">
+            <h4 className="mb-2 text-[13px] font-medium text-aico-primary">Review before installing</h4>
+            <SkillImportReview review={review} busy={busy} onInstall={(sel, en, ow) => void installReviewed(sel, en, ow)} onCancel={cancelReview} />
+          </div>
+        )}
 
         {note && (
           <div className={`mt-2 rounded-lg px-2.5 py-1.5 text-[12px] ${
             note.tone === 'good' ? 'bg-aico-success/10 text-aico-success' : 'bg-aico-danger/10 text-aico-danger'
           }`}>
             {note.text}
-            {note.tone === 'bad' && /already installed/.test(note.text) && (
-              <button
-                onClick={() => void install(true)}
-                className="ml-2 underline underline-offset-2 hover:opacity-80"
-              >
-                Replace it
-              </button>
-            )}
+
           </div>
         )}
 
@@ -375,7 +442,14 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
                         built in
                       </span>
                     )}
-                    {skill.enabled === false && (
+                    {skill.trust === 'unreviewed' ? (
+                      <span className="rounded bg-aico-warning/15 px-1.5 py-0.5 text-[10px] text-aico-warning" title={skill.trustReason}>
+                        {trustLabel(skill.trust)}
+                      </span>
+                    ) : skill.trust === 'reviewed' ? (
+                      <span className="rounded bg-aico-hover px-1.5 py-0.5 text-[10px] text-aico-muted">{trustLabel(skill.trust)}</span>
+                    ) : null}
+                    {skill.enabled === false && skill.trust !== 'unreviewed' && (
                       <span className="rounded bg-aico-warning/15 px-1.5 py-0.5 text-[10px] text-aico-warning">
                         off
                       </span>
@@ -403,12 +477,24 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
                   >
                     Measure
                   </button>
+                  {!skill.builtin && (
+                    <button
+                      onClick={() => void exportOne(skill.name)}
+                      title="Download as Claude's .skill format"
+                      className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
+                                 hover:bg-aico-hover hover:text-aico-primary"
+                    >
+                      Export
+                    </button>
+                  )}
                   <button
                     onClick={() => void toggle(skill)}
-                    className="rounded-lg px-2 py-1 text-[11px] text-aico-muted transition-colors
-                               hover:bg-aico-hover hover:text-aico-primary"
+                    className={`rounded-lg px-2 py-1 text-[11px] transition-colors ${
+                      skill.trust === 'unreviewed'
+                        ? 'bg-aico-accent-soft text-aico-accent hover:opacity-90'
+                        : 'text-aico-muted hover:bg-aico-hover hover:text-aico-primary'}`}
                   >
-                    {skill.enabled === false ? 'Enable' : 'Disable'}
+                    {skill.trust === 'unreviewed' ? 'Review and enable' : skill.enabled === false ? 'Enable' : 'Disable'}
                   </button>
                   {!skill.builtin && (
                     <button
@@ -455,6 +541,30 @@ export function SkillsPane({ onClose }: { onClose?: () => void }): React.ReactEl
 
               {lab === skill.name && (
                 <SkillLab skill={skill.name} onAdopted={() => void refresh()} />
+              )}
+
+              {installedReview?.skill.name === skill.name && (
+                <div className="border-t border-aico-border p-3">
+                  <InstalledSkillReview
+                    skill={installedReview.skill} trust={installedReview.trust}
+                    {...(installedReview.trustReason ? { trustReason: installedReview.trustReason } : {})}
+                    busy={busy}
+                    onCancel={() => setInstalledReview(null)}
+                    {...(installedReview.trust === 'unreviewed' ? {
+                      onEnable: async () => {
+                        setBusy(true);
+                        try {
+                          const r = await api.setSkillEnabled(skill.name, true);
+                          setNote({ tone: r.ok ? 'good' : 'bad', text: r.result ?? r.error ?? '' });
+                          if (r.ok) setInstalledReview(null);
+                          await refresh();
+                        } catch (err) {
+                          setNote({ tone: 'bad', text: err instanceof Error ? err.message : String(err) });
+                        } finally { setBusy(false); }
+                      },
+                    } : {})}
+                  />
+                </div>
               )}
             </li>
           ))}

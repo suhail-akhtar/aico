@@ -34,8 +34,17 @@ import { runProviderSetup, isProviderConfigured, listConfiguredProviders } from 
 import { ensureWorkspace, setWorkspaceRuntime } from './workspace.js';
 import { Inbox, maybeCompactSession, openSession, seedFromLegacyHistory } from './session/index.js';
 
-/** Resolve model aliases and short names to full model IDs */
-function resolveModel(model: string, settings?: { providers?: { openrouter?: { defaultModel?: string }; anthropic?: { defaultModel?: string }; openai?: { defaultModel?: string }; gemini?: { defaultModel?: string }; ollama?: { defaultModel?: string } } }): string {
+/**
+ * Resolve model aliases and short names to full model IDs.
+ *
+ * A name a configured provider actually lists is never rewritten: the alias
+ * table predates providers renaming their own models, and DeepSeek's API now
+ * calls its model `deepseek-flash` — rewriting that to the OpenRouter id
+ * `deepseek/deepseek-v4-flash` made every terminal run fail with a 400.
+ */
+function resolveModel(model: string, settings?: { providerInstances?: Array<{ defaultModel?: string; models?: string[] }> }): string {
+  const known = new Set((settings?.providerInstances ?? []).flatMap(i => [i.defaultModel, ...(i.models ?? [])]).filter(Boolean).map(m => String(m).toLowerCase()));
+  if (known.has(model.toLowerCase())) return model;
   const aliases: Record<string, string> = {
     // Claude aliases
     haiku:      'claude-haiku-4.5',
@@ -250,8 +259,8 @@ program
 
     // Resolve model: CLI flag → settings → auto-detect from provider
     const rawModel = opts.model || settings.model || defaultModel();
-    opts.model = resolveModel(rawModel);
-    if (settings.model) settings.model = resolveModel(settings.model);
+    opts.model = resolveModel(rawModel, settings);
+    if (settings.model) settings.model = resolveModel(settings.model, settings);
 
     // Resolve --agent flag: prepend the agent's system prompt to the task
     // so the user chats directly with that agent persona.
@@ -304,8 +313,8 @@ program
     const opts = program.opts<CLIOptions>();
     const settings = await loadSettings();
     const rawModel = opts.model || settings.model || defaultModel();
-    opts.model = resolveModel(rawModel);
-    if (settings.model) settings.model = resolveModel(settings.model);
+    opts.model = resolveModel(rawModel, settings);
+    if (settings.model) settings.model = resolveModel(settings.model, settings);
     await runSingleTask(task, opts, settings);
   });
 

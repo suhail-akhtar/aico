@@ -25,7 +25,8 @@
 import fs from 'fs';
 import path from 'path';
 import { skillRegistry } from '../skills/index.js';
-import { triggerMatches } from '../skills/registry.js';
+import { triggerMatches, projectSkillDirs } from '../skills/registry.js';
+import { currentCwd } from '../run-context.js';
 import { disabledIn } from '../registry-state.js';
 import { runScoped } from '../run-scoped.js';
 import { aicoHome } from '../home.js';
@@ -56,22 +57,93 @@ const INLINE_LIMIT = 4000;
  */
 const shownSkills = runScoped<Set<string>>(() => new Set());
 
+/** The catalogue's ceiling when the model's window is unknown, in tokens (design §4.5). */
+export const CATALOGUE_MAX_TOKENS = 2000;
+/** One entry's ceiling once the catalogue is over budget, in characters. */
+export const CATALOGUE_ENTRY_MAX = 250;
+/** Characters per token, the estimate the economy probe uses too. */
+const CHARS_PER_TOKEN = 4;
+
+/** The catalogue budget for a model: 1% of its window, never more than 2,000 tokens. */
+export function catalogueBudgetTokens(contextWindow?: number): number {
+  if (!contextWindow || !Number.isFinite(contextWindow) || contextWindow <= 0) return CATALOGUE_MAX_TOKENS;
+  return Math.max(200, Math.min(CATALOGUE_MAX_TOKENS, Math.floor(contextWindow / 100)));
+}
+
+/** Built-in → yours → this project's, then by name: an order nothing at run time can change. */
+function catalogueOrder(skills: Skill[]): Skill[] {
+  const projectRoots = projectSkillDirs(currentCwd()).map(d => path.resolve(d).toLowerCase() + path.sep);
+  const tier = (s: Skill): number => {
+    if (s.isBuiltin) return 0;
+    const where = path.resolve(s.dir ?? s.filePath).toLowerCase();
+    return projectRoots.some(r => where.startsWith(r)) ? 2 : 1;
+  };
+  return [...skills].sort((a, b) => tier(a) - tier(b) || a.frontmatter.name.localeCompare(b.frontmatter.name));
+}
+
+function clip(line: string, max: number): string {
+  return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`;
+}
+
 /**
- * One line per skill, for the prompt.
+ * One line per skill, for the prompt — inside a hard budget.
  *
  * Disabled skills are left out entirely rather than listed as unavailable.
  * Offering something and then refusing it wastes a turn and reads as a bug; a
  * switched-off skill should simply not be part of the decision. They stay
  * visible in `SkillManage list`, which is where someone looking for the switch
- * would look.
+ * would look. Unreviewed imports are left out too (the registry never lists
+ * them as usable).
+ *
+ * **The budget (design §4.5).** Fifty imported skills at the spec's 1,024
+ * characters each would add ~12K tokens to every request. So the catalogue
+ * is held to min(1% of the context window, 2,000 tokens). Within budget it
+ * is exactly what it always was. Over it, each entry is clipped to 250
+ * characters, entries are kept in a fixed order until 70% of the budget is
+ * used, and the rest are named in one `+N more` line (names only, then a
+ * count). The order is built-in → yours → project, then by name — never by
+ * usage or by the current request, because this text sits in the cached
+ * prefix and an order that moved would re-bill the transcript every turn.
+ *
+ * Relevance still wins where it can act: a skill whose trigger matches the
+ * request is named *with its description* in the volatile tail
+ * (`skillsToSuggest` → agent.ts `matching_skills`), whether or not it fit
+ * in the catalogue.
  */
-export function skillCatalogue(): string {
+export function skillCatalogue(opts: { contextWindow?: number; budgetTokens?: number } = {}): string {
   const off = disabledIn('skills');
-  const skills = skillRegistry.list().filter(s => !off.has(s.frontmatter.name.toLowerCase()));
+  const skills = catalogueOrder(skillRegistry.list().filter(s => !off.has(s.frontmatter.name.toLowerCase())));
   if (skills.length === 0) return '';
-  return skills
-    .map(s => `- ${s.frontmatter.name}: ${s.frontmatter.description}`)
-    .join('\n');
+  const budget = (opts.budgetTokens ?? catalogueBudgetTokens(opts.contextWindow)) * CHARS_PER_TOKEN;
+  const lines = skills.map(s => `- ${s.frontmatter.name}: ${s.frontmatter.description.replace(/\s+/g, ' ').trim()}`);
+  const whole = lines.join('\n');
+  if (whole.length <= budget) return whole;
+
+  const kept: string[] = [];
+  let used = 0;
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const line = clip(lines[i]!, CATALOGUE_ENTRY_MAX);
+    if (used + line.length + 1 > budget * 0.7) break;
+    kept.push(line);
+    used += line.length + 1;
+  }
+  const rest = skills.slice(i).map(s => s.frontmatter.name);
+  if (rest.length === 0) return kept.join('\n');
+  const head = `- +${rest.length} more (open by name with Skill; SkillManage list describes them): `;
+  let tail = '';
+  let named = 0;
+  for (const name of rest) {
+    const next = named === 0 ? name : `${tail}, ${name}`;
+    const left = rest.length - named - 1;
+    const suffix = left > 0 ? ` … and ${left} others` : '';
+    if (used + head.length + next.length + suffix.length > budget) break;
+    tail = next;
+    named++;
+  }
+  const others = rest.length - named;
+  kept.push(`${head}${tail}${others > 0 ? `${named ? ' ' : ''}… and ${others} others` : ''}`);
+  return kept.join('\n');
 }
 
 /**
@@ -155,6 +227,14 @@ export async function useSkill(input: SkillInput): Promise<string> {
 
   const skill = skillRegistry.lookup(name);
   if (!skill) {
+    // Installed but not reviewed: refused by name, so the model tells the
+    // person what to do instead of hunting for a near miss (design §5.1).
+    const held = skillRegistry.lookupAny(name);
+    if (held?.trust === 'unreviewed') {
+      return `"${held.frontmatter.name}" is installed but ${held.trustReason ?? 'has not been reviewed'}, so it cannot be used. `
+        + 'Imported skills reach you only after a person reviews and enables them (Settings → Skills → Review and enable). '
+        + 'Carry on without it, and tell the person it is waiting for their review.';
+    }
     const known = skillRegistry.list().map(s => s.frontmatter.name);
     // Named alternatives rather than "not found": the usual cause is a near
     // miss, and a list is the fix.

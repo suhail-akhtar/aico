@@ -153,6 +153,60 @@ export class DecisionGate {
     return { ok: false, reason: 'Allowing a tool call needs the AICO window that shows the prompt; the API token alone cannot allow it. Refusing needs nothing.' };
   }
 
+  // ── a person's yes outside a chat ──────────────────────────────────
+  //
+  // Some decisions belong to no session: "Install and enable" on a skill's
+  // review screen (design §5.1 — an imported skill reaches the model only
+  // after a person reviewed it). The same rule applies — the token alone is
+  // never enough — with the session check replaced by "this window is live":
+  //
+  //  - desktop: a one-time grant main mints for the click and passes over the
+  //    private port (`human/grant`), which the request then carries in
+  //    `x-aico-grant`. Spent on use, two minutes to live.
+  //  - web / VS Code: the UI key, or a client nonce traded for it that is
+  //    streaming now or was within the last ten minutes.
+
+  private readonly hostGrants = new Map<string, number>();
+
+  /** A grant minted by the host (desktop main) for one human action. */
+  registerHostGrant(nonce: string, ttlMs = 2 * 60_000): void {
+    if (typeof nonce !== 'string' || nonce.length < 16) return;
+    const t = this.now();
+    for (const [k, exp] of this.hostGrants) if (exp < t) this.hostGrants.delete(k);
+    if (this.hostGrants.size > 256) return;
+    this.hostGrants.set(nonce, t + Math.min(ttlMs, 10 * 60_000));
+  }
+
+  private spendHostGrant(nonce: unknown): boolean {
+    if (typeof nonce !== 'string' || !nonce) return false;
+    const exp = this.hostGrants.get(nonce);
+    if (exp === undefined) return false;
+    this.hostGrants.delete(nonce);
+    return exp >= this.now();
+  }
+
+  /**
+   * Is a person behind this request? For decisions that belong to no chat.
+   * The host grant can arrive a moment after the request it is for (two
+   * channels), so a missing one is waited for briefly before refusing.
+   */
+  async checkHuman(req: { grant?: unknown; client?: unknown; uiKey?: unknown; fetchSite?: string | undefined }): Promise<AllowVerdict> {
+    if (req.fetchSite === 'cross-site') return { ok: false, reason: 'cross-site request refused' };
+    if (typeof req.grant === 'string' && req.grant) {
+      for (let i = 0; i < 40 && !this.hostGrants.has(req.grant); i++) await new Promise(r => setTimeout(r, 25));
+      if (this.spendHostGrant(req.grant)) return { ok: true, via: 'host' };
+    }
+    if (this.hostAttached) {
+      return { ok: false, reason: 'In AICO Desktop this is done from the AICO window itself; the API token cannot do it.' };
+    }
+    if (typeof req.uiKey === 'string' && req.uiKey && sameSecret(req.uiKey, this.uiKey)) return { ok: true, via: 'ui-key' };
+    if (typeof req.client === 'string' && req.client) {
+      const c = this.clients.get(req.client);
+      if (c && (c.open.size > 0 || this.now() - Math.max(c.lastClosedAt, c.issuedAt) < 10 * 60_000)) return { ok: true, via: 'client' };
+    }
+    return { ok: false, reason: 'This needs a person in the AICO window; the API token alone cannot do it. Reload the page from the link AICO printed and try again.' };
+  }
+
   private prune(): void {
     const t = this.now();
     for (const [k, c] of this.clients) {

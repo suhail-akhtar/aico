@@ -3,6 +3,86 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+Claude skill compatibility: import single skills, packs and plugin folders
+through a security scan and a review screen; export in Claude's `.skill` format.
+
+### Fixed
+
+- The terminal (`aico -p`, `aico run`) rewrote `deepseek-flash` to the OpenRouter
+  id `deepseek/deepseek-v4-flash`, which DeepSeek's own API rejects with a 400.
+  A model name a configured provider lists is no longer alias-rewritten.
+
+Skills, compatible with Claude's: a real frontmatter parser, import of packs
+and Claude plugins with a review screen before anything reaches the agent,
+export Claude takes back, and a skill catalogue that cannot crowd the prompt.
+
+### Added
+
+- **Import reviews before it installs.** Settings → Skills → Import (desktop:
+  a `.skill`/`.zip` file, a `SKILL.md`, a skill folder, a pack of skills, or a
+  Claude Code plugin folder; web: the same by upload or path) unpacks into a
+  private staging folder and opens a **review screen**: every skill found, its
+  files and which are scripts (with their interpreter), what the static scan
+  found with file and line — network calls, shell-outs and `eval`, credential
+  paths, base64 blobs, compiled binaries, very large files, hidden Unicode, and
+  text aimed at the AI ("ignore your instructions…", scored by the same
+  injection guard WebFetch and the browser use) — the spec's verdict (errors
+  block a skill, warnings never do), token costs, and provenance (source path,
+  sha256). Nothing is installed or run until **Install and enable**. A plugin's
+  agents, slash commands and MCP servers are listed but not imported.
+- **Imported skills are unusable until a person reviews them.** Anything not
+  enabled from the review screen installs `unreviewed`: on disk, marked "needs
+  review", absent from the catalogue, refused by `Skill`, not suggested by its
+  trigger, not assignable to an agent and not evaluated. Enabling one needs a
+  person — the desktop's main process attaches a one-time grant to that click,
+  the web client its UI nonce — so `SkillManage enable` from the model, or any
+  request with only the API token, is refused. Provenance (source, sha256 of
+  the tree, import time, scan totals, trust) is kept in `.aico-meta.json`
+  beside the skill and shown on each row; a reviewed skill whose files change
+  goes back to "needs review". `aico skill import|review` do the same in a
+  terminal (the yes is read from an interactive TTY only).
+- **Export in Claude's `.skill` format**, packed and validated by the engine:
+  one top-level folder named after the skill, scripts kept executable, without
+  `__pycache__`, `*.pyc`, `node_modules`, `.DS_Store`, `.aico-meta.json` or a
+  root-level `evals/` (opt back in with "include evals"). AICO's own keys
+  (`trigger`, `antiTrigger`, `aliases`, `author`, `version`) move under
+  `metadata` as `aico-*` so claude.ai's validator accepts the file and AICO
+  reads them back; a skill without them ships its `SKILL.md` byte for byte.
+  Export → import → export is byte-identical. `aico skill export` too.
+- **SkillManage `review`, `install` and `validate`** — the model can stage an
+  import and read its review, and install it unreviewed; it cannot enable it.
+
+### Changed
+
+- **Skill frontmatter is read as YAML** (an in-house subset reader; no new
+  dependency): `|`/`>` block scalars (a `description: >-` used to import as
+  ">-"), block and flow lists, nested `metadata` maps, quoted strings with
+  escapes, comments. Keys AICO does not use are kept verbatim when a skill is
+  updated. The spec's rules are checked with errors that name the fix — name
+  1–64 characters of `a-z0-9-`, description ≤ 1,024 (warning over claude.ai's
+  200), no XML tags, no "anthropic"/"claude" in the name, `compatibility` ≤ 500
+  — strictly on import and export, as warnings for skills already installed.
+  Every built-in skill parses exactly as before.
+- **Archives are checked before anything is extracted** — `../` and absolute
+  paths, symbolic links, device files, encrypted entries, more than 2,000
+  entries, more than 50 MB unpacked, and zip-bomb ratios are refused outright,
+  and each entry is inflated with a hard size cap. A folder containing a link
+  is refused too. Import no longer shells out to tar / Expand-Archive / unzip.
+- **The skill catalogue has a budget**: min(1% of the model's context window,
+  2,000 tokens). Within it nothing changes (a stock install's prompt is
+  byte-identical); over it, entries are clipped to 250 characters in a fixed
+  order (built-in → yours → project, then name — never by usage, so the cached
+  prefix does not move) and the rest are named on one `+N more` line. A skill
+  whose trigger matches the request is still suggested with its description in
+  the per-turn tail.
+- `/skill-install <url>` installs the downloaded skill unreviewed.
+- `SkillManage import` (the model's) installs unreviewed; the older
+  one-step `skills/import` and `skills/upload` routes do too unless the request
+  proves a person (`enable: true`, or `authored: true` for the desktop editor's
+  own skills).
+
 ## 0.33.0 — 2026-10-02
 
 Security first: MCP tools, sub-agents and cloned projects now go through the

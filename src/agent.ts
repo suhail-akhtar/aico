@@ -34,7 +34,7 @@ import {
 import type { AicoSettings } from './settings.js';
 import { selectProvider } from './providers/index.js';
 import { detectProviderType } from './providers/index.js';
-import { ensureContextWindow } from './context-window.js';
+import { ensureContextWindow, getContextWindow } from './context-window.js';
 import { resolveInstance } from './providers/instances.js';
 import type { ToolDef, ToolCall, FinishReason, ReasoningTrace } from './providers/types.js';
 import type { Inbox, Session, TurnEndReason, Usage } from './session/index.js';
@@ -1492,7 +1492,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // the resolved provider's vendor documents as best (XML for Anthropic,
   // Markdown for the rest). The content is authored once regardless.
   const promptDoc = await buildSystemPrompt(
-    model, opts.effort, opts.projectInstructions, opts.goal, skillCatalogue(), opts.planMode,
+    model, opts.effort, opts.projectInstructions, opts.goal,
+    // Held to 1% of the model's window, at most 2,000 tokens (design §4.5).
+    skillCatalogue({ contextWindow: getContextWindow(model, settings) }), opts.planMode,
   );
 
   // Added after the base prompt so it reads as a narrowing of the role rather

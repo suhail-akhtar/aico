@@ -8188,8 +8188,9 @@ console.log('  -- Creating a skill does not register it --');
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-export-'));
   const exported = await executeSkillManage({ action: 'export', name: NAME, path: outDir });
   assert(/Exported/.test(exported), `export produces an archive: ${exported.slice(0, 120)}`);
-  const archive = fs.readdirSync(outDir).find(f => /\.zip$/i.test(f));
-  assert(archive, `and it is a .zip on disk (${fs.readdirSync(outDir).join(', ')})`);
+  // Claude's format since 0.34: a `.skill` zip with the folder at its root.
+  const archive = fs.readdirSync(outDir).find(f => /\.skill$/i.test(f));
+  assert(archive, `and it is a .skill on disk (${fs.readdirSync(outDir).join(', ')})`);
 
   await executeSkillManage({ action: 'delete', name: NAME });
   await skillRegistry.load({});
@@ -8197,11 +8198,14 @@ console.log('  -- Creating a skill does not register it --');
   assert(!fs.existsSync(path.join(home, NAME)), 'from disk as well');
 
   const reimported = await executeSkillManage({ action: 'import', path: path.join(outDir, archive) });
-  assert(/Imported/.test(reimported), `the exported zip imports back: ${reimported.slice(0, 120)}`);
+  assert(/Imported/.test(reimported), `the exported archive imports back: ${reimported.slice(0, 120)}`);
   await skillRegistry.load({});
-  const round = skillRegistry.lookup(NAME);
+  // An import from a file is somebody else's text until a person reviews it
+  // (design §5.1): on disk and whole, but not usable yet.
+  const round = skillRegistry.lookupAny(NAME);
   assert(round, 'and the skill is whole again');
   assert(round.resources?.includes('references/tone.md'), 'with the files it shipped');
+  assert(round.trust === 'unreviewed' && !skillRegistry.lookup(NAME), 'installed unreviewed, so not usable until a person enables it');
 
   fs.rmSync(outDir, { recursive: true, force: true });
   clean();

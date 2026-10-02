@@ -507,3 +507,19 @@ export {
 } from './agents/effective.js';
 export { isMcpToolName, isReadOnlyMcpTool, parseMcpToolName, HOST_READ_TOOLS } from './mcp/policy.js';
 export { mcpToolAllowed } from './agent.js';
+
+// -- Phase 1 of the agents/skills/tools design (scripts/phase1-skills-test.mjs) --
+export {
+  parseFrontmatter, parseYamlSubset, splitFrontmatter, updateFrontmatter, stringifyFrontmatter,
+  composeMarkdown as composeSkillMarkdown, asList as fmList, asText as fmText,
+} from './skills/frontmatter.js';
+export { validateFrontmatter, referenceWarnings } from './skills/validate.js';
+export {
+  stageImport, installStaged, readStaged, discardStaged, reviewInstalled, reviewSkillFolder,
+  claudeSkillMarkdown, stagingDir,
+} from './skills/import.js';
+export { readDirectory, extractArchive, packZip, ArchiveRefused, LIMITS as ARCHIVE_LIMITS } from './skills/archive.js';
+export { scanSkillDir } from './skills/scan.js';
+export { treeHash, readMeta, writeMeta, effectiveTrust, markReviewed, META_FILE } from './skills/provenance.js';
+export { frontmatterOf } from './skills/loader.js';
+export { catalogueBudgetTokens, CATALOGUE_MAX_TOKENS, CATALOGUE_ENTRY_MAX } from './tools/skill.js';

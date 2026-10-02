@@ -3,15 +3,81 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Skill, SkillFrontmatter } from './types.js';
+import { parseFrontmatter, asList, asText, type FmMap, type FmValue } from './frontmatter.js';
+import { AICO_KEYS, validateFrontmatter } from './validate.js';
+import { effectiveTrust } from './provenance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/** A frontmatter key in any of its spellings: `allowed-tools`, `allowedTools`, `anti-trigger`. */
+function field(data: FmMap, name: string): FmValue | undefined {
+  if (data[name] !== undefined) return data[name];
+  const kebab = name.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`);
+  if (data[kebab] !== undefined) return data[kebab];
+  const camel = name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+  return data[camel];
+}
+
+/** The spec's `metadata`, as the string map it is defined to be. */
+function metadataOf(data: FmMap): Record<string, string> | undefined {
+  const m = data.metadata;
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(m)) {
+    const t = asText(v);
+    if (t !== undefined) out[k] = t;
+  }
+  return out;
+}
+
 /**
- * Parse a skill markdown file with YAML frontmatter.
- * Uses regex-based parsing — no extra dependencies.
+ * The frontmatter a skill file declares, read with the spec's parser.
  *
- * Format:
+ * AICO's own keys (`trigger`, `antiTrigger`, `aliases`, `author`, `version`)
+ * are read at the top level, where AICO's skills have always had them, and
+ * from `metadata` as `aico-*`, where export puts them so the archive passes
+ * Claude's validator (design §5.1). Top level wins when both are present.
+ */
+export function frontmatterOf(data: FmMap): SkillFrontmatter | null {
+  const name = asText(data.name)?.trim();
+  const description = asText(data.description)?.trim();
+  if (!name || !description) return null;
+  const meta = metadataOf(data);
+  const aico = (key: keyof typeof AICO_KEYS): FmValue | undefined => field(data, key) ?? meta?.[AICO_KEYS[key]!];
+  const aliases = asList(aico('aliases'));
+  const extra: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data)) extra[k] = v;
+  return {
+    name,
+    description,
+    trigger: asText(aico('trigger')) || undefined,
+    antiTrigger: asText(aico('antiTrigger')) || undefined,
+    aliases: aliases?.length ? aliases : undefined,
+    author: asText(aico('author')) || meta?.author || undefined,
+    version: asText(aico('version')) || meta?.version || undefined,
+    // Claude's fields. Carried rather than dropped: a skill that says it
+    // expects Bash is telling the reader something true about itself, and
+    // silently discarding it on import is how "compatible" becomes "parses".
+    // `allowed-tools` arrives as a YAML list, a space-separated line (the
+    // spec) or a comma-separated one (AICO's older files).
+    allowedTools: asList(field(data, 'allowed-tools')),
+    license: asText(data.license) || undefined,
+    compatibility: asText(data.compatibility) || undefined,
+    metadata: meta,
+    extra,
+  };
+}
+
+/**
+ * Parse a skill markdown file with YAML frontmatter (skills/frontmatter.ts —
+ * block scalars, lists, nested `metadata`).
+ *
+ * Lenient where the spec says to be (agentskills.io/integrate-skills): a
+ * skill with no description is skipped, because it can never be chosen; a
+ * name that breaks the spec's rules loads with a warning, because refusing a
+ * skill someone already uses would be a worse surprise than the rule.
+ *
  * ```markdown
  * ---
  * name: commit
@@ -22,63 +88,15 @@ const __dirname = path.dirname(__filename);
  * ```
  */
 export function parseSkillFile(content: string, filePath: string, isBuiltin: boolean): Skill | null {
-  // Normalize CRLF → LF so the frontmatter regex works regardless of the
-  // file's line endings (Windows checkout converts LF to CRLF via git).
-  const normalized = content.replace(/\r\n/g, '\n');
-  const fmMatch = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!fmMatch) return null;
-
-  const fmRaw = fmMatch[1];
-  const promptTemplate = fmMatch[2].trim();
-
-  // Parse simple YAML key: value pairs
-  const fm: Record<string, unknown> = {};
-  for (const line of fmRaw.split('\n')) {
-    const colonIdx = line.indexOf(':');
-    if (colonIdx === -1) continue;
-    // `allowed-tools` is Claude's spelling; ours is camelCase. Normalised here
-    // so a skill written for either reads the same once loaded.
-    const key = line.slice(0, colonIdx).trim().replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-    const value = line.slice(colonIdx + 1).trim();
-
-    if (!key) continue;
-
-    // Handle YAML inline arrays: [a, b, c]
-    if (value.startsWith('[') && value.endsWith(']')) {
-      fm[key] = value
-        .slice(1, -1)
-        .split(',')
-        .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
-        .filter(Boolean);
-    } else {
-      // Strip surrounding quotes if present
-      fm[key] = value.replace(/^['"]|['"]$/g, '');
-    }
-  }
-
-  if (!fm['name'] || !fm['description']) return null;
-
-  const frontmatter: SkillFrontmatter = {
-    name: String(fm['name']),
-    description: String(fm['description']),
-    trigger: fm['trigger'] ? String(fm['trigger']) : undefined,
-    antiTrigger: fm['antiTrigger'] ? String(fm['antiTrigger']) : undefined,
-    aliases: Array.isArray(fm['aliases']) ? (fm['aliases'] as string[]) : undefined,
-    author: fm['author'] ? String(fm['author']) : undefined,
-    version: fm['version'] ? String(fm['version']) : undefined,
-    // Claude's fields. Carried rather than dropped: a skill that says it
-    // expects Bash is telling the reader something true about itself, and
-    // silently discarding it on import is how "compatible" becomes "parses".
-    // `allowed-tools` arrives as a bare list as often as a bracketed one.
-    allowedTools: Array.isArray(fm['allowedTools'])
-      ? (fm['allowedTools'] as string[])
-      : fm['allowedTools']
-        ? String(fm['allowedTools']).split(',').map(t => t.trim()).filter(Boolean)
-        : undefined,
-    license: fm['license'] ? String(fm['license']) : undefined,
-  };
-
-  return { frontmatter, promptTemplate, filePath, isBuiltin };
+  const parsed = parseFrontmatter(content);
+  if (!parsed.hasBlock) return null;
+  const frontmatter = frontmatterOf(parsed.data);
+  if (!frontmatter) return null;
+  const promptTemplate = parsed.body.trim();
+  const own = /^skill\.md$/i.test(path.basename(filePath)) ? path.basename(path.dirname(filePath)) : undefined;
+  const check = validateFrontmatter(parsed.data, { ...(own ? { dirName: own } : {}), body: parsed.body });
+  const warnings = [...parsed.errors, ...check.errors, ...check.warnings];
+  return { frontmatter, promptTemplate, filePath, isBuiltin, ...(warnings.length && !isBuiltin ? { warnings } : {}) };
 }
 
 /**
@@ -172,6 +190,12 @@ export async function loadSkillsFromDir(dir: string, isBuiltin: boolean): Promis
           skill.dir = own;
           skill.resources = await bundledFiles(own);
         }
+        // Whether it may reach the model: an imported skill nobody reviewed,
+        // or one whose files changed since, may not (skills/provenance).
+        const trust = effectiveTrust(skill.dir, isBuiltin);
+        skill.trust = trust.trust;
+        if (trust.reason) skill.trustReason = trust.reason;
+        if (trust.provenance) skill.provenance = trust.provenance;
         skills.push(skill);
       }
     } catch {

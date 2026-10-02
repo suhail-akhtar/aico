@@ -178,7 +178,18 @@ export async function handleSystemRoute(
    * being asked for.
    */
   query: URLSearchParams = new URLSearchParams(),
+  /**
+   * Whether a person is behind this request (server/decision-gate
+   * `checkHuman`): a desktop host grant, the web UI key, or its live client
+   * nonce. Asked only by the few actions the token alone may not take —
+   * enabling an imported skill (design §5.1). Absent means "no".
+   */
+  human: () => Promise<{ ok: boolean; reason?: string }> = async () => ({ ok: false, reason: 'no person attached to this request' }),
 ): Promise<{ status: number; body: unknown } | undefined> {
+  /** 403 with the gate's reason, in the shape the clients already read. */
+  const needsHuman = (reason?: string): { status: number; body: unknown } => ({
+    status: 403, body: { ok: false, code: 'human-required', error: reason ?? 'This needs a person in the AICO window.' },
+  });
   switch (route) {
     // ── project profile ──────────────────────────────────────────────
     //
@@ -416,15 +427,24 @@ export async function handleSystemRoute(
       const { skillRegistry } = await import('../skills/registry.js');
       const { disabledIn } = await import('../registry-state.js');
       await skillRegistry.load({});
+      await skillRegistry.ensureProject().catch(() => undefined);
       const offSkills = disabledIn('skills');
       return {
         status: 200,
         body: {
-          skills: skillRegistry.list().map(s => ({
+          // Every installed skill, unreviewed ones included: this is where a
+          // person finds them to review.
+          skills: skillRegistry.listAll().map(s => ({
             name: s.frontmatter.name,
             description: s.frontmatter.description,
             builtin: s.isBuiltin,
-            enabled: !offSkills.has(s.frontmatter.name.toLowerCase()),
+            // An unreviewed skill is never "enabled", whatever its switch says.
+            enabled: s.trust !== 'unreviewed' && !offSkills.has(s.frontmatter.name.toLowerCase()),
+            trust: s.trust ?? 'authored',
+            ...(s.trustReason ? { trustReason: s.trustReason } : {}),
+            ...(s.provenance ? { provenance: s.provenance } : {}),
+            warnings: s.warnings ?? [],
+            compatibility: s.frontmatter.compatibility,
             trigger: s.frontmatter.trigger,
             aliases: s.frontmatter.aliases ?? [],
             allowedTools: s.frontmatter.allowedTools ?? [],
@@ -504,22 +524,105 @@ export async function handleSystemRoute(
       const name = String(query.get('name') ?? body.name ?? '');
       const { skillRegistry } = await import('../skills/registry.js');
       await skillRegistry.load({});
-      const found = skillRegistry.lookup(name);
+      // Any installed skill: reading an unreviewed one is how it gets reviewed.
+      const found = skillRegistry.lookupAny(name);
       if (!found) return { status: 404, body: { error: `no skill called "${name}"` } };
       return { status: 200, body: { name: found.frontmatter.name, body: found.promptTemplate } };
+    }
+
+    // ── importing a skill: review first, then install ───────────────
+    //
+    // `skills/review` stages an import (a path on this machine, uploaded
+    // files, or pasted markdown — or an installed skill by name) and returns
+    // the review: every skill found, its files, scripts, scan findings with
+    // file and line, validation, provenance. Nothing is installed.
+    // `skills/install` installs a staged review. With `enable: true` it needs
+    // a person (the decision gate) and installs as reviewed; without, the
+    // skills land unreviewed — on disk, out of the catalogue.
+    case 'skills/review': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { stageImport, reviewInstalled } = await import('../skills/import.js');
+      if (typeof body.name === 'string' && body.name) {
+        const { skillRegistry } = await import('../skills/registry.js');
+        await skillRegistry.load({});
+        const found = skillRegistry.lookupAny(body.name);
+        if (!found?.dir) return { status: 404, body: { error: `no installed directory skill called "${body.name}"` } };
+        const r = reviewInstalled(found.dir);
+        return { status: 200, body: { installed: true, trust: found.trust ?? 'authored', ...(found.trustReason ? { trustReason: found.trustReason } : {}), skill: r } };
+      }
+      const label = typeof body.label === 'string' ? body.label : undefined;
+      const input = typeof body.source === 'string' && body.source.trim()
+        ? { path: body.source.trim(), ...(label ? { label } : {}) }
+        : typeof body.markdown === 'string' && body.markdown.trim()
+          ? { markdown: body.markdown, ...(label ? { label } : {}) }
+          : Array.isArray(body.files) && body.files.length
+            ? { files: (body.files as Array<{ path?: unknown; base64?: unknown }>).map(f => ({ path: String(f.path ?? ''), base64: String(f.base64 ?? '') })), ...(label ? { label } : {}) }
+            : undefined;
+      if (!input) return { status: 400, body: { error: 'Give a source path, files, or markdown to review.' } };
+      const review = await stageImport(input);
+      return 'error' in review ? { status: 400, body: { ok: false, error: review.error } } : { status: 200, body: { ok: true, review } };
+    }
+
+    case 'skills/install': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const id = String(body.id ?? '');
+      if (!id) return { status: 400, body: { error: 'id required — from skills/review' } };
+      const enable = body.enable === true;
+      if (enable) {
+        const verdict = await human();
+        if (!verdict.ok) return needsHuman(verdict.reason);
+      }
+      const { installStaged } = await import('../skills/import.js');
+      const { setEnabled } = await import('../registry-state.js');
+      const out = installStaged(id, {
+        trust: enable ? 'reviewed' : 'unreviewed',
+        overwrite: body.overwrite === true,
+        ...(Array.isArray(body.select) ? { select: (body.select as unknown[]).map(String) } : {}),
+      });
+      if (enable) for (const sk of out.installed) setEnabled('skills', sk.name, true);
+      const { skillRegistry } = await import('../skills/registry.js');
+      await skillRegistry.reload();
+      return { status: out.error ? 400 : 200, body: out };
+    }
+
+    case 'skills/discard': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { discardStaged } = await import('../skills/import.js');
+      return { status: 200, body: { ok: discardStaged(String(body.id ?? '')) } };
+    }
+
+    /**
+     * A skill as Claude's `.skill` archive. With `dest` (a path the person
+     * chose in a save dialog) it is written there; without, the bytes come
+     * back as base64 for the browser to download.
+     */
+    case 'skills/export': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const { skillRegistry } = await import('../skills/registry.js');
+      await skillRegistry.load({});
+      await skillRegistry.ensureProject().catch(() => undefined);
+      const found = skillRegistry.lookupAny(String(body.name ?? ''));
+      if (!found) return { status: 404, body: { ok: false, error: `no skill called "${String(body.name ?? '')}"` } };
+      if (!found.dir) return { status: 400, body: { ok: false, error: 'A single-file skill has no folder to archive.' } };
+      const { exportSkill } = await import('../skills/import.js');
+      const dest = typeof body.dest === 'string' && body.dest.trim() ? body.dest.trim() : undefined;
+      const result = await exportSkill(found.dir, dest, { includeEvals: body.includeEvals === true });
+      if (!result.ok) return { status: 400, body: { ok: false, error: result.error } };
+      return {
+        status: 200,
+        body: {
+          ok: true, name: result.name, files: result.files, rewritten: result.rewritten, warnings: result.warnings ?? [],
+          ...(result.path ? { path: result.path } : {}),
+          ...(result.data ? { filename: `${result.name}.skill`, base64: result.data.toString('base64') } : {}),
+        },
+      };
     }
 
     case 'skills/import': {
       if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
       const source = String(body.source ?? '').trim();
       if (!source) return { status: 400, body: { error: 'source required' } };
-      const { importSkill } = await import('../skills/import.js');
-      const result = await importSkill(source, { overwrite: body.overwrite === true });
-      if (result.ok) {
-        const { skillRegistry } = await import('../skills/registry.js');
-        await skillRegistry.load({});
-      }
-      return { status: result.ok ? 200 : 400, body: result };
+      return importLegacy({ path: source }, body, human, needsHuman);
     }
 
     /**
@@ -542,51 +645,10 @@ export async function handleSystemRoute(
      */
     case 'skills/upload': {
       if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
-      const fsMod = await import('fs');
-      const pathMod = await import('path');
-      const osMod = await import('os');
-      const { importSkill } = await import('../skills/import.js');
-
-      const staging = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'aico-upload-'));
-      try {
-        let source = staging;
-        const markdown = typeof body.markdown === 'string' ? body.markdown : '';
-        const files = Array.isArray(body.files) ? body.files as Array<{ path?: string; base64?: string }> : [];
-
-        if (markdown.trim()) {
-          fsMod.writeFileSync(pathMod.join(staging, 'SKILL.md'), markdown, 'utf8');
-        } else if (files.length > 0) {
-          for (const file of files) {
-            const relative = String(file.path ?? '').split('\\').join('/');
-            if (!relative) continue;
-            // The uploaded name decides where it lands, so it is checked the
-            // same way a skill's own resources are.
-            const target = pathMod.resolve(staging, relative);
-            if (!target.startsWith(pathMod.resolve(staging) + pathMod.sep)) continue;
-            fsMod.mkdirSync(pathMod.dirname(target), { recursive: true });
-            fsMod.writeFileSync(target, Buffer.from(String(file.base64 ?? ''), 'base64'));
-          }
-          // A single archive is handed to importSkill as the archive, which
-          // already knows how to unpack one on this platform.
-          const written = files.map(f => String(f.path ?? '')).filter(Boolean);
-          if (written.length === 1 && /\.(zip|skill)$/i.test(written[0]!)) {
-            source = pathMod.join(staging, written[0]!);
-          }
-        } else {
-          return { status: 400, body: { ok: false, error: 'Nothing uploaded.' } };
-        }
-
-        const result = await importSkill(source, { overwrite: body.overwrite === true });
-        if (result.ok) {
-          const { skillRegistry } = await import('../skills/registry.js');
-          await skillRegistry.load({});
-        }
-        return { status: result.ok ? 200 : 400, body: result };
-      } catch (err) {
-        return { status: 400, body: { ok: false, error: err instanceof Error ? err.message : String(err) } };
-      } finally {
-        fsMod.rmSync(staging, { recursive: true, force: true });
-      }
+      const markdown = typeof body.markdown === 'string' ? body.markdown : '';
+      const files = Array.isArray(body.files) ? (body.files as Array<{ path?: unknown; base64?: unknown }>).map(f => ({ path: String(f.path ?? ''), base64: String(f.base64 ?? '') })) : [];
+      if (!markdown.trim() && files.length === 0) return { status: 400, body: { ok: false, error: 'Nothing uploaded.' } };
+      return importLegacy(markdown.trim() ? { markdown } : { files }, body, human, needsHuman);
     }
 
     case 'skills/create': {
@@ -696,7 +758,11 @@ ${content || 'Describe the procedure here.'}
         switch (registry) {
           case 'skills': {
             const { executeSkillManage } = await import('../skills/manage.js');
-            result = await executeSkillManage(input as never);
+            // Enabling an imported skill is the human review (design §5.1):
+            // the gate is asked only for that, and only a proven person passes.
+            const wantsHuman = input.action === 'enable' || input.enable === true;
+            const person = wantsHuman ? (await human()).ok : false;
+            result = await executeSkillManage(input as never, { human: person });
             break;
           }
           case 'agents': {
@@ -1222,4 +1288,59 @@ function describeCapabilities(
   const out: Record<string, ModelCapabilities> = {};
   for (const model of models) out[model] = getModelCapabilities(model, settings);
   return out;
+}
+
+/**
+ * The older one-step import routes (`skills/import`, `skills/upload`), kept
+ * for clients that have not moved to review → install. They stage and
+ * install in one call, and land `unreviewed` unless the request proves a
+ * person is present and asks to enable (`enable: true` → reviewed) or says
+ * the person wrote it themselves in the editor (`authored: true`). The
+ * response keeps the old `{ ok, name, installedAt, resources, replaced }` shape.
+ */
+async function importLegacy(
+  input: { path: string } | { files: Array<{ path: string; base64: string }> } | { markdown: string },
+  body: Record<string, unknown>,
+  human: () => Promise<{ ok: boolean; reason?: string }>,
+  needsHuman: (reason?: string) => { status: number; body: unknown },
+): Promise<{ status: number; body: unknown }> {
+  const authored = body.authored === true;
+  const enable = body.enable === true || authored;
+  if (enable) {
+    const verdict = await human();
+    if (!verdict.ok) return needsHuman(verdict.reason);
+  }
+  const { stageImport, installStaged } = await import('../skills/import.js');
+  const { writeMeta, readMeta, treeHash } = await import('../skills/provenance.js');
+  const { setEnabled } = await import('../registry-state.js');
+  const review = await stageImport(input);
+  if ('error' in review) return { status: 400, body: { ok: false, error: review.error } };
+  const out = installStaged(review.id, { trust: enable ? 'reviewed' : 'unreviewed', overwrite: body.overwrite === true });
+  for (const sk of out.installed) {
+    if (enable) setEnabled('skills', sk.name, true);
+    // The person's own skill from the editor: authored, so editing it later
+    // does not send it back for review.
+    if (authored) {
+      const meta = readMeta(sk.installedAt);
+      if (meta) writeMeta(sk.installedAt, { ...meta, trust: 'authored', sha256: treeHash(sk.installedAt) });
+    }
+  }
+  const { skillRegistry } = await import('../skills/registry.js');
+  await skillRegistry.reload();
+  const first = out.installed[0];
+  if (!first) {
+    const why = out.skipped[0]?.reason ?? 'nothing installable was found';
+    return { status: 400, body: { ok: false, error: /already installed/.test(why) ? why.replace(/ — choose replace.*$/, '. Import again with overwrite to replace it.') : why } };
+  }
+  const reviewed = review.skills.find(r => r.name === first.name);
+  return {
+    status: 200,
+    body: {
+      ok: true, name: first.name, installedAt: first.installedAt,
+      resources: (reviewed?.files ?? []).map(f => f.path).filter(f => !/^skill\.md$/i.test(f)),
+      ...(first.replaced ? { replaced: true } : {}),
+      trust: authored ? 'authored' : first.trust,
+      installed: out.installed, skipped: out.skipped,
+    },
+  };
 }
