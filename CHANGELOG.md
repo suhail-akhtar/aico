@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.36.0 — 2026-10-03
 
 Always on, safer, and learning: long-run jobs that ask before they start, a
 Sentinel that reviews high-risk actions, a morning brief with monitors, AICO

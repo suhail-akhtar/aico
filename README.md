@@ -49,10 +49,10 @@ their limits — none of these is an official leaderboard submission.</sub>
 
 | | Get it | Notes |
 |---|---|---|
-| **Windows** (10/11, x64) | [**AICO-Setup-0.35.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.35.0/AICO-Setup-0.35.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
-| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.35.0/AICO-0.35.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.35.0/AICO-0.35.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
-| **VS Code** | [**aico-vscode-0.6.34.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.35.0/aico-vscode-0.6.34.vsix) | `code --install-extension aico-vscode-0.6.34.vsix` |
-| **Web portal + terminal** | `npx github:suhail-akhtar/aico#v0.35.0 serve` | Node 22.5+; nothing else to install |
+| **Windows** (10/11, x64) | [**AICO-Setup-0.36.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.36.0/AICO-Setup-0.36.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
+| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.36.0/AICO-0.36.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.36.0/AICO-0.36.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
+| **VS Code** | [**aico-vscode-0.6.35.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.36.0/aico-vscode-0.6.35.vsix) | `code --install-extension aico-vscode-0.6.35.vsix` |
+| **Web portal + terminal** | `npx github:suhail-akhtar/aico#v0.36.0 serve` | Node 22.5+; nothing else to install |
 
 Every build: **[latest release](https://github.com/suhail-akhtar/aico/releases/latest)**.
 The desktop app needs no Node install — the engine runs inside it — and shares
@@ -382,8 +382,8 @@ flowchart TB
 ## 🚀 Install & quick start
 
 ```sh
-npx github:suhail-akhtar/aico#v0.35.0 serve     # web portal, nothing to install
-npm install -g github:suhail-akhtar/aico#v0.35.0 # `aico` on your PATH (VS Code needs this)
+npx github:suhail-akhtar/aico#v0.36.0 serve     # web portal, nothing to install
+npm install -g github:suhail-akhtar/aico#v0.36.0 # `aico` on your PATH (VS Code needs this)
 ```
 
 ```sh
@@ -394,7 +394,7 @@ aico -c                                # continue the last session
 aico --agent review -p "review my diff"
 ```
 
-`#v0.35.0` pins a release, `#release/v0.35` follows its fixes, `#main` is the
+`#v0.36.0` pins a release, `#release/v0.36` follows its fixes, `#main` is the
 trunk. From source: `git clone … && npm install && npm run build && npm run build:web`.
 Requires **Node 22.5+** (built-in SQLite).
 
