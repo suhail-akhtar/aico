@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.34.0 — 2026-10-02
 
 Claude skill compatibility: import single skills, packs and plugin folders
 through a security scan and a review screen; export in Claude's `.skill` format.
