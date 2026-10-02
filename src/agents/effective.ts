@@ -24,6 +24,11 @@
  * tool lists — a spec's list naming `Task` was never what turned it on, and a
  * child inherits its parent's "no".
  *
+ * Custom tools (custom-tools/) are named in an allow-list as `custom:<name>`
+ * (or by their bare name); either spelling admits exactly that tool. A list
+ * that names none admits none — a restricted agent never picks up a tool a
+ * person installed later.
+ *
  * What it does not do: decide permission prompts (that is the permission
  * stage), or validate names at save time (the design's Phase 3). Unknown names
  * simply match nothing.
@@ -89,6 +94,7 @@ export function mcpEntryMatches(entry: string, name: string): boolean {
 
 /** Whether a name-list entry (settings `disabledTools`, an allow-list) covers a tool. */
 export function entryMatches(entry: string, name: string): boolean {
+  if (entry.startsWith('custom:')) return entry.slice('custom:'.length) === name;
   return isMcpEntry(entry) ? mcpEntryMatches(entry, name) : entry === name;
 }
 
@@ -109,6 +115,7 @@ export function layerFor(label: string, allow: ToolAllow | undefined, readonlyTo
     const entry = String(raw).trim();
     if (!entry) continue;
     if (isMcpEntry(entry)) mcp.push(entry);
+    else if (entry.startsWith('custom:')) tools.add(entry.slice('custom:'.length));
     else tools.add(entry);
   }
   return { label, tools, mcp };

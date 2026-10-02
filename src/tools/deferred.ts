@@ -42,6 +42,16 @@
  * - Apply to an explicit tool whitelist (an agent type's set, an agent spec's
  *   array, a composed registry). Someone chose those tools by name.
  *
+ * ## Custom tool packs
+ *
+ * Each pack of custom tools (custom-tools/store.ts) is a group too, with the
+ * id `tools:<pack>`, passed in as `extra` by the run that loaded them — the
+ * set depends on the run's project, so it cannot be a constant here. A pack
+ * costs one line in the `LoadTools` description until it is loaded. A loaded
+ * `tools:` id is kept from the log even when the pack is gone (it then loads
+ * nothing), so the rule stays "derived from the log" without knowing which
+ * packs exist.
+ *
  * @module tools/deferred
  */
 
@@ -136,15 +146,18 @@ const SKILL_LOADS: Record<string, readonly string[]> = {
   'server-ops': ['remote', 'credentials'],
 };
 
+/** A custom tool pack's group id. */
+export const CUSTOM_GROUP_RE = /^tools:[a-z0-9][a-z0-9-]{0,39}$/;
+
 /** Groups one tool call loads, if any. Pure; the caller accumulates. */
-export function groupsLoadedBy(name: string, input: Record<string, unknown> | undefined): string[] {
+export function groupsLoadedBy(name: string, input: Record<string, unknown> | undefined, extra: readonly ToolGroup[] = []): string[] {
   if (name === LOAD_TOOLS) {
     const raw = input?.groups;
     const names = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
-    return names.map(String).filter(g => TOOL_GROUPS.some(t => t.id === g));
+    return names.map(String).filter(g => TOOL_GROUPS.some(t => t.id === g) || CUSTOM_GROUP_RE.test(g));
   }
   if (name === 'Skill') return [...(SKILL_LOADS[String(input?.name ?? '')] ?? [])];
-  const own = groupOf(name);
+  const own = groupOf(name) ?? extra.find(g => g.tools.includes(name))?.id;
   return own ? [own] : [];
 }
 
@@ -154,7 +167,7 @@ export function groupsLoadedBy(name: string, input: Record<string, unknown> | un
  * Reads `tool/call` events only, and parses their arguments defensively: a
  * malformed call in an old log must not stop the next turn from starting.
  */
-export function loadedGroupsFromLog(events: readonly SessionEvent[] | undefined): Set<string> {
+export function loadedGroupsFromLog(events: readonly SessionEvent[] | undefined, extra: readonly ToolGroup[] = []): Set<string> {
   const loaded = new Set<string>();
   for (const event of events ?? []) {
     if (event.type !== 'tool/call') continue;
@@ -164,7 +177,7 @@ export function loadedGroupsFromLog(events: readonly SessionEvent[] | undefined)
     if (data.name === LOAD_TOOLS || data.name === 'Skill') {
       try { input = JSON.parse(data.arguments ?? '{}') as Record<string, unknown>; } catch { input = undefined; }
     }
-    for (const g of groupsLoadedBy(data.name, input)) loaded.add(g);
+    for (const g of groupsLoadedBy(data.name, input, extra)) loaded.add(g);
   }
   return loaded;
 }
@@ -184,8 +197,8 @@ export function isDeferred(tool: string, loaded: ReadonlySet<string>): boolean {
  * Undefined when nothing is left to load, in which case the tool is not
  * offered.
  */
-export function loadToolsDefinition(available: ReadonlySet<string>, loaded: ReadonlySet<string>) {
-  const offered = TOOL_GROUPS
+export function loadToolsDefinition(available: ReadonlySet<string>, loaded: ReadonlySet<string>, extra: readonly ToolGroup[] = []) {
+  const offered = [...TOOL_GROUPS, ...extra]
     .filter(g => !loaded.has(g.id))
     .map(g => ({ ...g, tools: g.tools.filter(t => available.has(t)) }))
     .filter(g => g.tools.length > 0);
@@ -207,15 +220,16 @@ export function loadToolsDefinition(available: ReadonlySet<string>, loaded: Read
 }
 
 /** What a `LoadTools` call answers. The loading itself is read from the call. */
-export function executeLoadTools(input: { groups?: unknown }): string {
+export function executeLoadTools(input: { groups?: unknown }, extra: readonly ToolGroup[] = []): string {
+  const all = [...TOOL_GROUPS, ...extra];
   const raw = Array.isArray(input.groups) ? input.groups.map(String) : [];
-  const known = raw.filter(g => TOOL_GROUPS.some(t => t.id === g));
+  const known = raw.filter(g => all.some(t => t.id === g));
   const unknown = raw.filter(g => !known.includes(g));
   if (known.length === 0) {
     return `No such group${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ') || '(none given)'}. `
-      + `Groups: ${TOOL_GROUPS.map(g => g.id).join(', ')}.`;
+      + `Groups: ${all.map(g => g.id).join(', ')}.`;
   }
-  const lines = known.map(id => `${id}: ${TOOL_GROUPS.find(g => g.id === id)!.tools.join(', ')}`);
+  const lines = known.map(id => `${id}: ${all.find(g => g.id === id)!.tools.join(', ')}`);
   return `Loaded — callable from your next step:\n${lines.join('\n')}`
     + (unknown.length ? `\nIgnored unknown: ${unknown.join(', ')}.` : '');
 }

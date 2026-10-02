@@ -171,8 +171,14 @@ export function dockerBackend(image = 'alpine:3.22') {
  * `env` is mutable: the next exec sees its current values (NOPASSWD, FAKE_SUDO_SHA256).
  */
 export async function startSshServer({ backend, users, hostKey, port = 0 }) {
-  const keys = hostKey ?? utils.generateKeyPairSync('ed25519');
-  const parsedHost = utils.parseKey(keys.public);
+  // ssh2 cannot always parse the ed25519 key it generates (seen on Node 22 under Linux: parseKey returns an
+  // Error), so fall back to ECDSA rather than crash the suite.
+  let keys = hostKey ?? utils.generateKeyPairSync('ed25519');
+  let parsedHost = utils.parseKey(keys.public);
+  if (!hostKey && (parsedHost instanceof Error || typeof parsedHost?.getPublicSSH !== 'function')) {
+    keys = utils.generateKeyPairSync('ecdsa', { bits: 256 });
+    parsedHost = utils.parseKey(keys.public);
+  }
   const hostBlob = parsedHost.getPublicSSH();
   const state = {
     execs: [],

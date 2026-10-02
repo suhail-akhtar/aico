@@ -29,6 +29,12 @@
  * from the API token alone" rule of `server/decision-gate.ts` holds). Headless
  * and unattended runs never ask — they skip the entries and say so once.
  *
+ * A project's custom tools (`.aico/tools/<pack>/<name>.tool.json`, design
+ * §5.2) are part of the same approval: each file's content hash joins the
+ * hash, and the summary shows each tool's effect and exact command, so a
+ * changed tool asks again like a changed MCP command does. A project without
+ * tools hashes exactly as before.
+ *
  * Not covered, deliberately: project skills and agents (instructions, the same
  * tier as AICO.md — design §4.4), and settings that redirect credentials rather
  * than run code (provider base URLs) — recorded as a follow-up in the design.
@@ -40,6 +46,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { aicoHome } from './home.js';
+import { projectToolsDir, toolFilesIn } from './custom-tools/files.js';
 
 /** Settings sections that make AICO execute something, and so need trust from a project file. */
 export const TRUST_GATED_SECTIONS = ['mcpServers', 'hooks', 'env'] as const;
@@ -86,9 +93,13 @@ function shown(arg: string): string {
 }
 
 /** One line per thing that would run. Env and header *values* are never shown (they may be secrets). */
-function describe(gated: Layer[]): { summary: string; names: string[] } {
+function describe(gated: Layer[], tools: ProjectTool[] = []): { summary: string; names: string[] } {
   const lines: string[] = [];
   const names: string[] = [];
+  for (const tool of tools) {
+    names.push(`custom tool "${tool.name}"`);
+    lines.push(`custom tool "${tool.name}" (${tool.effect}): ${tool.runs}`);
+  }
   for (const layer of gated) {
     const servers = (layer.mcpServers ?? {}) as Record<string, { type?: string; command?: string; args?: unknown[]; url?: string; env?: object; headers?: object }>;
     for (const [name, cfg] of Object.entries(servers)) {
@@ -143,17 +154,43 @@ function isApproved(root: string, hash: string): boolean {
   return readStore().projects[projectKey(root)]?.hash === hash;
 }
 
+interface ProjectTool { file: string; sha256: string; name: string; effect: string; runs: string }
+
+/** The project's custom tool files, each with its hash and what it runs. Never throws. */
+export function projectToolFiles(root: string): ProjectTool[] {
+  return toolFilesIn(projectToolsDir(root)).map(({ pack, file }) => {
+    let text = '';
+    try { text = fs.readFileSync(file, 'utf8'); } catch { /* an unreadable file hashes as empty and loads as invalid */ }
+    let parsed: { name?: unknown; effect?: unknown; run?: { argv?: unknown }; http?: { method?: unknown; url?: unknown } } = {};
+    try { parsed = JSON.parse(text) as typeof parsed; } catch { /* shown as unreadable below */ }
+    const argv = Array.isArray(parsed.run?.argv) ? parsed.run!.argv.map(String).map(shown).join(' ') : undefined;
+    const runs = argv ?? (parsed.http ? `${String(parsed.http.method ?? 'GET')} ${String(parsed.http.url ?? '')}` : '(unreadable definition)');
+    return {
+      file: path.relative(root, file).split(path.sep).join('/'),
+      sha256: crypto.createHash('sha256').update(text).digest('hex'),
+      name: typeof parsed.name === 'string' ? parsed.name : `${pack}/${path.basename(file)}`,
+      effect: typeof parsed.effect === 'string' ? parsed.effect : 'unknown effect',
+      runs,
+    };
+  });
+}
+
 /**
- * Judge a project's two settings layers. Pure apart from reading the store,
- * so `loadSettings` can call it on the layers it has already read.
+ * Judge a project's two settings layers, and its custom tool files. Pure
+ * apart from reading the store and the tool files, so `loadSettings` can call
+ * it on the layers it has already read.
  */
 export function evaluateProjectLayers(root: string, project: Layer, local: Layer): ProjectTrustStatus {
   const layers = [gatedOf(project), gatedOf(local)];
-  if (layers.every(l => Object.keys(l).length === 0)) {
+  const tools = projectToolFiles(root);
+  if (layers.every(l => Object.keys(l).length === 0) && tools.length === 0) {
     return { state: 'none', root: path.resolve(root), hash: '', summary: '', names: [] };
   }
-  const hash = `sha256:${crypto.createHash('sha256').update(stable(layers)).digest('hex')}`;
-  const { summary, names } = describe(layers);
+  // Tools join the hashed value only when there are some, so every existing
+  // approval of a project without tools stays valid.
+  const hashed: unknown[] = tools.length ? [...layers, { tools: tools.map(t => [t.file, t.sha256]) }] : layers;
+  const hash = `sha256:${crypto.createHash('sha256').update(stable(hashed)).digest('hex')}`;
+  const { summary, names } = describe(layers, tools);
   return { state: isApproved(root, hash) ? 'trusted' : 'untrusted', root: path.resolve(root), hash, summary, names };
 }
 

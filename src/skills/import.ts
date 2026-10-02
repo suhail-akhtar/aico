@@ -741,7 +741,9 @@ export async function exportSkill(
     const isEntry = path.resolve(abs) === path.resolve(markdown);
     const data = isEntry ? Buffer.from(out.text, 'utf8') : fs.readFileSync(abs);
     const st = fs.statSync(abs);
-    const execBit = process.platform !== 'win32' ? (st.mode & 0o111) !== 0 : data.subarray(0, 2).toString() === '#!';
+    // A script is executable in the archive if the file is, or if it starts with a shebang (Windows has no exec bit,
+    // and a checkout or copy can drop it on POSIX).
+    const execBit = (process.platform !== 'win32' && (st.mode & 0o111) !== 0) || data.subarray(0, 2).toString() === '#!';
     entries.push({ name: `${name}/${isEntry ? 'SKILL.md' : rel}`, data, mode: execBit ? 0o755 : 0o644 });
   }
   const zip = packZip(entries);
