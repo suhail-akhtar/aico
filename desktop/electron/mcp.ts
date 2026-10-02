@@ -88,7 +88,7 @@ const TAB_SCOPED = new Set([
   'browser_open', 'browser_read', 'browser_snapshot', 'browser_forms', 'browser_fill', 'browser_autofill', 'browser_extract', 'browser_insights',
   'browser_find', 'browser_click', 'browser_type', 'browser_select', 'browser_press', 'browser_hover', 'browser_scroll', 'browser_scroll_to',
   'browser_wait', 'browser_text', 'browser_evaluate', 'browser_screenshot', 'browser_console', 'browser_network', 'browser_navigate',
-  'browser_dialog', 'browser_upload', 'browser_login', 'browser_handoff',
+  'browser_dialog', 'browser_upload', 'browser_login', 'browser_handoff', 'browser_run_procedure',
 ]);
 const TAB_ID_PROP = { type: 'string', description: 'The tab to act on (an id from browser_tabs). Default: your own most recent tab (the browser copilot: the tab in front).' };
 
@@ -548,6 +548,39 @@ export function createTools(ctx: DesktopContext): Tool[] {
       },
     },
 
+    // ── Teach AICO: procedures the user taught by demonstration (browser-teach.ts) ──
+    {
+      name: 'browser_procedures',
+      description: 'List the browser procedures the user taught AICO by demonstration (Teach in the browser toolbar): name, goal, the site (origin) it runs on, its parameters (required, or with a default) and how many steps. When the user asks for a task one of them does, run it with browser_run_procedure rather than redoing it by hand.',
+      inputSchema: { type: 'object', properties: {} },
+      run: async () => {
+        const t = ctx.services.browserTeach;
+        if (!t) throw new Error('Taught procedures are not available in this version.');
+        const all = t.list();
+        if (!all.length) return 'No taught procedures yet. The user can teach one with the Teach button in the browser toolbar.';
+        return json(all.map(p => ({ name: p.name, goal: p.goal, origin: p.origin, steps: p.steps, params: p.params.map(x => ({ name: x.name, label: x.label, kind: x.kind, required: x.required, ...(x.default !== undefined ? { hasDefault: true } : {}) })) })));
+      },
+    },
+    {
+      name: 'browser_run_procedure',
+      description: 'Run a taught browser procedure in your own tab: name (from browser_procedures) and params ({ name: value } — file params take absolute paths; a "secret" param takes the NAME of a stored credential, never a password). It finds each recorded element again by its description, waits for the page, checks each step’s outcome and reports per step. Buying/sending/deleting waits for the user’s Allow, human checks and secrets go to the user. Returns within ~20 s; if still running, call again with only runId to follow it. A step it cannot find with confidence stops the run with the step’s intent: do that step yourself, then call again with startAt = the next step.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          params: { type: 'object', additionalProperties: { type: 'string' } },
+          startAt: { type: 'number', description: 'Step to start from (1-based), to continue after a step you did yourself.' },
+          runId: { type: 'string', description: 'Follow a run that is still going.' },
+        },
+      },
+      run: async (a) => {
+        const t = ctx.services.browserTeach;
+        if (!t) throw new Error('Taught procedures are not available in this version.');
+        await browser();
+        return t.run(a);
+      },
+    },
+
     // ── What AICO has learned about the user's browsing (browser-learn.ts) — on this device, read only when asked ──
     {
       name: 'browser_profile',
@@ -620,7 +653,7 @@ const handoffs = new Map<string, { done: boolean; answer?: string }>();
  * (hidden passages counted by the page script, instruction-like passages
  * wrapped, a notice first — shared/injection-guard.ts via browser.ts).
  */
-const NOT_PAGE_CONTENT = new Set(['browser_profile', 'browser_organize_tabs', 'browser_import', 'browser_handoff', 'browser_handoff_wait', 'browser_downloads', 'browser_upload_wait', 'browser_login', 'browser_autofill',
+const NOT_PAGE_CONTENT = new Set(['browser_procedures', 'browser_profile', 'browser_organize_tabs', 'browser_import', 'browser_handoff', 'browser_handoff_wait', 'browser_downloads', 'browser_upload_wait', 'browser_login', 'browser_autofill',
   // Text from other pages, guarded where it is built (browser-tab-summary.ts, browser-memory.ts): guarding it
   // again here would neutralise those markers and count it against the page in front.
   'browser_tabs_overview', 'browser_memory_search']);

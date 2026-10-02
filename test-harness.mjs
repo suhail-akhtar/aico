@@ -15022,7 +15022,7 @@ console.log('\n══ Canvas documents (store, Canvas tool, /api/canvas/*) ═�
       'list: newest first, summaries without content');
     msg = '';
     try { await createCanvas(ctx, { title: 't', kind: 'slides', content: 'x' }); } catch (e) { msg = e.message; }
-    assert(/kind must be "document" or "code"/.test(msg), 'an unknown kind is refused');
+    assert(/kind must be "document", "code" or "sheet"/.test(msg), 'an unknown kind is refused');
 
     // ── find/replace ──
     const fr = applyFindReplace('one two one', 'two', '2');
@@ -15387,8 +15387,92 @@ console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
     const merged = X.mergeSettings({ toc: true, header: 'x' }, { header: null, pageNumbers: false });
     assert(merged.toc === true && !('header' in merged) && merged.pageNumbers === false, 'settings: merge, null clears');
     assert(X.resolveSettings(undefined).pageSize === 'A4' && X.resolveSettings(undefined).pageNumbers === true, 'settings: defaults');
-    assert(X.TEMPLATES.length === 10 && ['report', 'proposal', 'project-brief', 'memo', 'letter', 'meeting-minutes', 'spec', 'policy', 'one-pager', 'research-summary']
-      .every(t => X.templateById(t)) && X.templateById('PRD').id === 'spec' && X.templateById('SOP').id === 'policy', 'templates: all ten, with aliases');
+    assert(['report', 'proposal', 'project-brief', 'memo', 'letter', 'meeting-minutes', 'spec', 'policy', 'one-pager', 'research-summary']
+      .every(t => X.docTypeById(t)?.id === t) && X.docTypeById('PRD').id === 'spec' && X.docTypeById('SOP').id === 'sop'
+      && X.docTypeById('Résumé').id === 'cv' && X.docTypeById('statement of work').id === 'sow' && X.docTypeById('minutes').id === 'meeting-minutes',
+    'doc types: the ten round-2 template ids still resolve, with aliases');
+
+    // ── The document-type catalogue: every type valid, its theme and blocks known to the contract ──
+    {
+      const contract = fs.readFileSync(new URL('./docs/engineering/canvas-docs-contract.md', import.meta.url), 'utf8');
+      const ids = new Set(); const names = new Set(); const problems = [];
+      for (const t of X.DOC_TYPES) {
+        if (ids.has(t.id)) problems.push(`${t.id}: duplicate id`);
+        ids.add(t.id);
+        for (const a of [t.id, ...t.aliases]) { if (names.has(a)) problems.push(`${t.id}: "${a}" names two types`); names.add(a); }
+        if (!t.title || !t.description || !t.sections.length) problems.push(`${t.id}: needs a title, description and sections`);
+        if (!(t.words[0] > 0 && t.words[1] > t.words[0])) problems.push(`${t.id}: bad length range`);
+        const sids = new Set();
+        for (const s of t.sections) {
+          if (!X.SECTION_ID.test(s.id) || sids.has(s.id)) problems.push(`${t.id}: section id ${s.id}`);
+          sids.add(s.id);
+          if (!s.heading || !s.intent) problems.push(`${t.id}/${s.id}: heading and intent`);
+          for (const v of s.visuals ?? []) {
+            if (!X.VISUAL_BLOCKS.includes(v) || !X.BLOCK_SYNTAX[v]) problems.push(`${t.id}/${s.id}: unknown block ${v}`);
+            if (!['table', 'mermaid', 'chart', 'math'].includes(v) && !contract.includes('```' + v)) problems.push(`${t.id}: block ${v} is not in the contract`);
+          }
+        }
+        const theme = t.docSettings.theme;
+        if (!theme || X.cleanSettings({ theme }).theme !== theme || !contract.includes(theme)) problems.push(`${t.id}: theme ${theme} is not a contract theme`);
+        const cleaned = X.mergeSettings(undefined, t.docSettings);
+        for (const k of Object.keys(t.docSettings)) if (!(k in cleaned)) problems.push(`${t.id}: docSettings.${k} does not survive cleaning`);
+        if (!t.match.test(t.title.split(' / ')[0]) && t.id !== 'email') problems.push(`${t.id}: its own title does not pick it`);
+      }
+      assert(X.DOC_TYPES.length >= 40 && problems.length === 0, `doc types: ${X.DOC_TYPES.length} types, all valid (${problems.slice(0, 6).join('; ')})`);
+      problems.length = 0;
+      for (const want of ['report', 'whitepaper', 'research-paper', 'letter', 'email', 'memo', 'meeting-minutes', 'press-release', 'sop', 'nda', 'contract',
+        'spec', 'user-stories', 'api-docs', 'release-notes', 'user-manual', 'technical-writeup', 'architecture-design', 'flow-diagram', 'technical-proposal',
+        'sow', 'rfp', 'risk-assessment', 'case-study', 'marketing-brief', 'pitch-outline', 'cv', 'cover-letter', 'invoice', 'quote', 'boq',
+        'financial-report', 'confidential']) if (!ids.has(want)) problems.push(want);
+      assert(problems.length === 0, `doc types: every type the owner asked for exists (${problems.join(', ')})`);
+      const arch = X.docTypeById('architecture-design');
+      assert(arch.sections.filter(s => s.visuals?.includes('mermaid')).length >= 2 && arch.sections.some(s => s.heading === 'Decisions' && s.visuals.includes('table'))
+        && X.docTypeById('invoice').sections.some(s => s.visuals?.includes('lineitems')) && X.docTypeById('cv').sections.some(s => s.visuals?.includes('columns'))
+        && X.docTypeById('risk-assessment').sections.some(s => s.visuals?.includes('riskmatrix'))
+        && X.docTypeById('meeting-minutes').sections.some(s => s.visuals?.includes('actions')),
+      'doc types: the visuals fit the type (architecture diagrams + decision table, invoice line items, CV sidebar, risk matrix, minutes actions)');
+    }
+
+    // Auto-pick: only when the title is obvious.
+    const pick = (t) => X.pickDocType(t)?.id;
+    assert(pick('Invoice INV-2026-0142') === 'invoice' && pick('Priya Raman — CV') === 'cv' && pick('Shrtn architecture design') === 'architecture-design'
+      && pick('Remote work: a research summary') === 'research-summary' && pick('Cover letter for Acme') === 'cover-letter'
+      && pick('Technical proposal: data platform') === 'technical-proposal' && pick('Mutual non-disclosure agreement') === 'nda'
+      && pick('Q3 incident report') === 'postmortem' && pick('Board meeting minutes') === 'meeting-minutes',
+    'pickDocType: an obvious title picks its type, the more specific match winning');
+    assert(pick('Notes') === undefined && pick('') === undefined && pick('Invoice process policy') === undefined
+      && pick('Confidential: Q3 board memo') === 'memo' && pick('Project Falcon — confidential') === 'confidential'
+      && X.classificationOf('Confidential: Q3 board memo') === 'CONFIDENTIAL',
+    'pickDocType: nothing, or two unrelated matches, picks nothing; a marking is not a type unless it is all there is');
+
+    // outline per type: every type lays down its sections, its theme and a brief that names its blocks and length.
+    {
+      const bad = [];
+      for (const t of X.DOC_TYPES) {
+        const out = await tool({ action: 'outline', title: `Doc ${t.id}`, template: t.id });
+        const d = await X.getCanvas(ctx, JSON.parse(/```canvas\n(.*)\n```/.exec(out)[1]).id);
+        const visuals = [...new Set(t.sections.flatMap(s => s.visuals ?? []))].filter(v => v !== 'table');
+        if (X.pendingBlocks(d.tabs[0].content).length !== t.sections.length) bad.push(`${t.id}: sections`);
+        if (d.docSettings.theme !== t.docSettings.theme) bad.push(`${t.id}: theme`);
+        if (!out.includes(`${t.words[0]}–${t.words[1]} words`) || !/never invent numbers/.test(out)) bad.push(`${t.id}: brief`);
+        for (const v of visuals) if (!out.includes(X.BLOCK_SYNTAX[v])) bad.push(`${t.id}: syntax of ${v}`);
+      }
+      assert(bad.length === 0, `outline {template} for all ${X.DOC_TYPES.length} types: sections, theme, brief with length and block syntax (${bad.slice(0, 5).join('; ')})`);
+    }
+    const auto = await tool({ action: 'outline', title: 'Invoice INV-7', sections: [{ id: 'a', intent: 'Everything', heading: 'Invoice' }] });
+    const autoDoc = await X.getCanvas(ctx, JSON.parse(/```canvas\n(.*)\n```/.exec(auto)[1]).id);
+    assert(autoDoc.docSettings.theme === 'invoice' && /Picked document type "invoice" from the title/.test(auto) && /Visuals that suit it: keyvalue, columns, lineitems/.test(auto)
+      && X.pendingBlocks(autoDoc.content).map(p => p.id).join() === 'a',
+    'outline: a title that names a type gets its look and brief, but keeps the agent\'s own sections');
+    const named = await tool({ action: 'outline', title: 'Shrtn', template: 'Architecture Design', settings: { theme: 'report' } });
+    const namedDoc = await X.getCanvas(ctx, JSON.parse(/```canvas\n(.*)\n```/.exec(named)[1]).id);
+    assert(namedDoc.docSettings.theme === 'report' && /s3 Key Flows → mermaid/.test(named), 'outline: a template by name resolves; explicit settings win over the type\'s');
+    const plainOut = await tool({ action: 'outline', title: 'Thoughts on Tuesday', sections: [{ id: 's1', intent: 'x' }] });
+    assert(/Writing brief: keep to the length/.test(plainOut) && !/Writing brief \(/.test(plainOut), 'outline with no type: the general brief only');
+    const secret = await tool({ action: 'create', title: 'Confidential: Q3 board memo', content: '# Memo' });
+    const secretDoc = await X.getCanvas(ctx, JSON.parse(/```canvas\n(.*)\n```/.exec(secret)[1]).id);
+    assert(secretDoc.docSettings.theme === 'memo' && secretDoc.docSettings.classification === 'CONFIDENTIAL' && /Styled as Memo/.test(secret),
+      'create: a title naming a type and a marking gets that look and the classification');
     const tpl = await tool({ action: 'outline', title: 'Annual review', template: 'report' });
     const tplId = JSON.parse(/```canvas\n(.*)\n```/.exec(tpl)[1]).id;
     const tplDoc = await X.getCanvas(ctx, tplId);
@@ -15458,6 +15542,74 @@ console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
       assert(dx.warnings.length > 0 && x3.includes('not rendered'), `without a browser/renderer the visuals are placeholders with their source (${dx.warnings[0]})`);
     }
 
+    // ── Docs 2: themes and document blocks in every export (contract round 3) ──
+    assert(JSON.stringify(X.cleanSettings({ theme: 'NDA', accent: 'abcdef', classification: 'SECRET', pageWidth: 'wide' }))
+      === JSON.stringify({ classification: 'SECRET', theme: 'legal', accent: '#ABCDEF', pageWidth: 'wide' })
+      && X.cleanSettings({ theme: 'bogus', accent: 'red', pageWidth: 'huge' }).theme === undefined
+      && X.cleanSettings({ theme: '' }).theme === null && X.cleanSettings({ watermark: '' }).watermark === '', 'settings: theme (aliases), accent, classification, pageWidth are cleaned');
+    const confS = X.resolveSettings({ theme: 'confidential' });
+    const letterS = X.resolveSettings({ theme: 'letter' }, { margins: 'narrow' });
+    assert(confS.watermark === 'CONFIDENTIAL' && confS.classification === 'CONFIDENTIAL' && X.resolveSettings({ theme: 'confidential', watermark: '' }).watermark === undefined
+      && letterS.font === 'serif' && letterS.margins.left === 12.7 && X.resolveSettings({ theme: 'letter' }).margins.left === 50.8,
+      'a theme supplies defaults (watermark, banner, serif, wide margins) under what the document stores');
+    const docs2 = [
+      '```cover', '{"kicker":"Proposal","title":"Portal Proposal","subtitle":"Sub","meta":["For Contoso"]}', '```', '',
+      '## Summary', '', 'Body text.', '', '| A | B |', '|---|---|', '| 1 | 2 |', '| 3 | 4 |', '',
+      '```stats', '{"items":[{"value":"$100/mo","label":"Hosting"},{"value":"Desktop","label":"Platform"},{"value":"12 weeks","label":"Delivery"},{"value":"34%","label":"Fewer"},{"value":"Internationalisation","label":"Scope"}]}', '```', '',
+      '```lineitems', '{"currency":"GBP","taxRate":20,"taxLabel":"VAT","discount":"10%","items":[{"section":"Phase 1"},{"item":"Workshop","qty":2,"unit":"day","rate":650},{"item":"Build","qty":30,"unit":"day","rate":600}]}', '```', '',
+      '```riskmatrix', '{"risks":[{"id":"R1","title":"Outage","likelihood":3,"impact":5,"owner":"Ops"}]}', '```', '',
+      '```actions', '{"items":[{"action":"Ship it","owner":"Sam","due":"Fri","status":"done"}]}', '```', '',
+      '````columns sidebar', '**Skills**', '', '+++', '', '## Experience', '', 'Lead Designer', '````', '',
+      '```callout warn icon=shield', '**Careful**', 'Handle with care.', '```', '',
+      '```references', '["Smith (2024). A paper."]', '```', '',
+      '```signature', '{"parties":[{"label":"For the Client","name":"Jane Doe","title":"CEO"},{"label":"For Us","name":"Sam Patel"}]}', '```',
+    ].join('\n');
+    const d4 = await X.createCanvas(ctx, { title: 'Portal Proposal', content: docs2, docSettings: { theme: 'proposal', classification: 'INTERNAL', header: 'Northwind' } });
+    const z4 = unzipSync(new Uint8Array((await X.exportCanvas(d4, { format: 'docx', resolveImage: imgs })).bytes));
+    const x4 = strFromU8(z4['word/document.xml']);
+    const s4 = strFromU8(z4['word/styles.xml']);
+    const h4 = strFromU8(z4['word/header1.xml']);
+    const f4 = strFromU8(z4['word/footer1.xml']);
+    const text4 = x4.replace(/<[^>]+>/g, '');
+    assert(text4.includes('£1,300.00') && text4.includes('£18,000.00') && text4.includes('£19,300.00') && text4.includes('−£1,930.00')
+      && text4.includes('VAT (20%)') && text4.includes('£3,474.00') && text4.includes('£20,844.00') && /<w:gridSpan w:val="4"\/>/.test(x4),
+      'docx: line items with computed subtotal, discount, VAT and total; section and total rows span the table');
+    assert(text4.includes('Jane Doe') && text4.includes('FOR THE CLIENT') && /<w:top w:val="nil"\/>|w:sz="8" w:space="1" w:color="1A1A1A"/.test(x4)
+      && text4.includes('High · 15') && x4.includes('FFEDD5') && text4.includes('Done') && text4.includes('Smith (2024). A paper.') && text4.includes('[1]')
+      && text4.includes('Experience') && text4.includes('⛨') && text4.includes('Careful'), 'docx: signature lines, risk matrix + register, actions, columns, references, icon callout');
+    assert(!/<w:pStyle w:val="Title"\/><\/w:pPr><w:r><w:t xml:space="preserve">Portal Proposal/.test(x4) && (text4.match(/Portal Proposal/g) ?? []).length === 1,
+      'docx: a document opening with a cover block is not given a second title');
+    const tiles4 = x4.split('<w:tbl>').slice(1).map(t => t.split('</w:tbl>')[0]).filter(t => t.includes('$100/mo') || t.includes('Internationalisation'));
+    assert(tiles4.length === 2 && !tiles4.some(t => t.includes('$100/mo') && t.includes('Internationalisation'))
+      && /<w:sz w:val="22"\/><w:szCs w:val="22"\/><\/w:rPr><w:t xml:space="preserve">Internationalisation/.test(x4),
+      'docx: KPI tiles wrap to more rows, and a long value is set smaller instead of splitting');
+    assert(s4.includes('w:ascii="Georgia"') && s4.includes('w:color w:val="3730A3"') && /Heading2.*<w:bottom w:val="single" w:sz="4"/.test(s4)
+      && x4.includes('w:fill="3730A3"'), 'docx: the proposal theme — serif headings, indigo accent, ruled H2, banded table header');
+    assert(h4.includes('INTERNAL') && f4.includes('INTERNAL') && h4.includes('Northwind'), 'docx: the classification banner in the header and footer');
+    const d5 = await X.createCanvas(ctx, { title: 'Paper', content: '# Paper\n\n## Intro\n\nText.\n\n### Detail\n\nMore.\n\n## Method\n\nx', docSettings: { theme: 'research' } });
+    const x5 = strFromU8(unzipSync(new Uint8Array((await X.exportCanvas(d5, { format: 'docx', resolveImage: imgs })).bytes))['word/document.xml']).replace(/<[^>]+>/g, '');
+    assert(x5.includes('1.  Intro') && x5.includes('1.1  Detail') && x5.includes('2.  Method'), 'docx: numbered sections for the research theme');
+    const d6 = await X.createCanvas(ctx, { title: 'To Acme', content: 'Dear Sir,\n\nBody.', docSettings: { theme: 'letter', header: 'Northwind Studio' } });
+    const z6 = unzipSync(new Uint8Array((await X.exportCanvas(d6, { format: 'docx', resolveImage: imgs })).bytes));
+    assert(/<w:titlePg\/>/.test(strFromU8(z6['word/document.xml'])) && strFromU8(z6['word/header2.xml']).includes('Northwind Studio')
+      && !(z6['word/header1.xml'] ? strFromU8(z6['word/header1.xml']) : '').includes('Northwind Studio'), 'docx: a letter has its letterhead on the first page only');
+    const html4 = (await X.exportCanvas(d4, { format: 'html', resolveImage: imgs })).bytes.toString();
+    assert(html4.includes('data-dt="proposal"') && html4.includes('--dt-accent: #3730A3') && html4.includes('class="db-li"') && html4.includes('£20,844.00')
+      && html4.includes('class="db-rm"') && html4.includes('class="db-sign"') && html4.includes('class="db-cols db-cols-sidebar"') && html4.includes('<h2>Experience</h2>')
+      && html4.includes('class="classification top"') && html4.includes('class="db-icon"') && !/<h1>Portal Proposal<\/h1>/.test(html4),
+      'html: the theme attributes and variables, every block, the banner, icon, and no duplicate title');
+    assert(/class="ig-stats" style="grid-template-columns: repeat\(auto-fit, minmax\(min\(\d+px, 100%\), 1fr\)\); grid-auto-rows: 1fr"/.test(html4)
+      && html4.includes('overflow-wrap: normal'), 'html: KPI tiles in an auto-fit grid whose values never break mid-word');
+    if (pdf) {
+      const pdf4 = await X.exportCanvas(d4, { format: 'pdf', resolveImage: imgs });
+      const { PDFParse } = await import('pdf-parse');
+      const parser = new PDFParse({ data: new Uint8Array(pdf4.bytes) });
+      const ptext = (await parser.getText()).text;
+      await parser.destroy();
+      assert(pdf4.bytes.toString('latin1').startsWith('%PDF-') && ptext.includes('£20,844.00') && ptext.replace(/\s+/g, '').includes('INTERNAL') && ptext.includes('Jane Doe')
+        && (ptext.match(/Subtotal/g) ?? []).length === 1, 'pdf: the themed document prints — totals once, banner, signature');
+    }
+
     // ── Routes ──
     const server = await X.serve({ port: 0, cwd: project, project, open: false });
     const controller = new AbortController();
@@ -15507,7 +15659,8 @@ console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
       assert((await api(`canvas/${edoc.id}/export?session=${sid}&format=exe`)).status === 400, 'an unknown export format is 400');
       assert((await fetch(`${u.origin}/api/canvas/${edoc.id}/export?session=${sid}&format=md`)).status === 401, 'export needs the token');
       const tplRes = await (await api('canvas/templates')).json();
-      assert(tplRes.templates?.length === 10 && tplRes.templates[0].sections.length > 0, 'GET canvas/templates lists the templates');
+      assert(tplRes.templates?.length >= 40 && tplRes.templates.every(t => t.sections.length > 0 && t.docSettings.theme && t.words?.length === 2 && Array.isArray(t.visuals))
+        && tplRes.templates.find(t => t.id === 'invoice').visuals.includes('lineitems'), 'GET canvas/templates lists every document type with its look, length and visuals');
       const made = await (await post('canvas/create', { session: sid, template: 'memo', title: 'Staff memo' })).json();
       assert(made.canvas?.title === 'Staff memo' && made.canvas.versions[0].author === 'user' && /aico:pending id="s1"/.test(made.canvas.content)
         && made.canvas.docSettings?.pageNumbers === false, 'POST canvas/create from a template: its outline, by the user, with its setup');

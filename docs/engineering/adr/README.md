@@ -39,6 +39,10 @@ in the module header of the code they govern.
 | [0010](0010-secret-file-sink.md) | Amend 0006: a temp-file secret sink for custom tools, deleted after one call | Accepted |
 | [0011](0011-approve-later-inbox.md) | The approve-later inbox: unattended (L4) runs park calls that need a person; approval replays the exact call once | Accepted |
 | [0012](0012-agent-certification.md) | Agent certification: a hash-bound certificate gates unattended (L4) runs | Accepted |
+| [0013](0013-refactor-tools-ast-grep.md) | Wide refactors as one planned, checked step: ast-grep (optional dependency) and the TypeScript language service | Accepted |
+| [0014](0014-long-jobs.md) | Long jobs: work estimated over a few hours runs only after a person approves its proposal; milestones gated by checks and acceptance | Accepted |
+| [0015](0015-sentinel-reviewer.md) | The Sentinel: an independent model reviews high-risk calls and can only deny or escalate to a person | Accepted |
+| [0016](0016-learning-preferences.md) | Learn how the user works as reviewed, scoped rules injected in the request tail | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

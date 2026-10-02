@@ -14,8 +14,15 @@
  * numbers become strings) and strict where it matters (a block that yields no
  * items is an error, shown in the export as the source with the reason).
  *
+ * Round 3: KPI tiles, steps and comparison columns lay out with auto-fit over
+ * a minimum width that fits the longest unbroken word of a value
+ * (`statsMinWidth` in `shared/ui/canvas/doc-blocks`), so "Desktop" never
+ * splits into "Deskto / p"; callouts take an optional `icon=<name>`.
+ *
  * @module canvas/infographics
  */
+
+import { autoGrid, iconFromInfo, iconSvg, isIcon, statsMinWidth, statValueSize, type IconName } from '../../shared/ui/canvas/doc-blocks.js';
 
 export type InfographicKind = 'stats' | 'timeline' | 'steps' | 'comparison' | 'callout';
 
@@ -23,7 +30,7 @@ export interface StatItem { value: string; label: string; delta?: string; trend:
 export interface TimelineItem { date: string; title: string; text?: string }
 export interface StepItem { title: string; text?: string }
 export interface ComparisonColumn { title: string; items: string[]; highlight: boolean; footer?: string }
-export interface Callout { type: 'info' | 'warn' | 'success'; title?: string; body: string }
+export interface Callout { type: 'info' | 'warn' | 'success'; title?: string; body: string; icon?: IconName }
 
 export type Infographic =
   | { kind: 'stats'; items: StatItem[] }
@@ -111,13 +118,15 @@ export function parseInfographic(kind: InfographicKind, source: string, meta?: s
         if (trimmed.startsWith('{')) {
           const o = JSON.parse(trimmed) as Record<string, unknown>;
           const title = str(o.title);
-          return { ok: true, value: { kind, callout: { type: calloutType(str(o.type ?? meta)), ...(title ? { title } : {}), body: str(o.text ?? o.body) } } };
+          const icon = isIcon(o.icon) ? o.icon : iconFromInfo(meta);
+          return { ok: true, value: { kind, callout: { type: calloutType(str(o.type ?? meta).split(/\s+/)[0] ?? ''), ...(title ? { title } : {}), body: str(o.text ?? o.body), ...(icon ? { icon } : {}) } } };
         }
         const lines = trimmed.split('\n');
         const m = /^\*\*(.+?)\*\*\s*$/.exec(lines[0] ?? '');
         const title = m ? m[1]!.trim() : undefined;
         const body = (m ? lines.slice(1) : lines).join('\n').trim();
-        return { ok: true, value: { kind, callout: { type: calloutType(str(meta).split(/\s+/)[0] ?? ''), ...(title ? { title } : {}), body } } };
+        const icon = iconFromInfo(meta);
+        return { ok: true, value: { kind, callout: { type: calloutType(str(meta).split(/\s+/)[0] ?? ''), ...(title ? { title } : {}), body, ...(icon ? { icon } : {}) } } };
       }
     }
   } catch (err) {
@@ -141,48 +150,49 @@ function esc(v: string): string {
 export function infographicHtml(g: Infographic, md: (source: string) => string): string {
   switch (g.kind) {
     case 'stats':
-      return `<div class="ig-stats">${g.items.map(i => `<div class="ig-stat"><div class="ig-value">${esc(i.value)}</div>`
+      return `<div class="ig-stats" style="${autoGrid(statsMinWidth(g.items.map(i => i.value)))}">${g.items.map(i => `<div class="ig-stat"><div class="ig-value" style="font-size:${statValueSize(i.value)}px">${esc(i.value)}</div>`
         + `<div class="ig-label">${esc(i.label)}</div>${i.delta ? `<div class="ig-delta ig-${i.trend}">${i.trend === 'up' ? '▲' : i.trend === 'down' ? '▼' : '■'} ${esc(i.delta)}</div>` : ''}</div>`).join('')}</div>`;
     case 'timeline':
       return `<ol class="ig-timeline">${g.items.map(i => `<li><div class="ig-date">${esc(i.date)}</div><div class="ig-body"><strong>${esc(i.title)}</strong>`
         + `${i.text ? `<div>${esc(i.text)}</div>` : ''}</div></li>`).join('')}</ol>`;
     case 'steps':
-      return `<ol class="ig-steps">${g.items.map((i, n) => `<li><span class="ig-num">${n + 1}</span><div><strong>${esc(i.title)}</strong>`
+      return `<ol class="ig-steps" style="${autoGrid(190)}">${g.items.map((i, n) => `<li><span class="ig-num">${n + 1}</span><div><strong>${esc(i.title)}</strong>`
         + `${i.text ? `<div>${esc(i.text)}</div>` : ''}</div></li>`).join('')}</ol>`;
     case 'comparison':
-      return `<div class="ig-compare" style="grid-template-columns:repeat(${g.columns.length},1fr)">${g.columns.map(c =>
+      return `<div class="ig-compare" style="${autoGrid(g.columns.length > 3 ? 160 : 200)}">${g.columns.map(c =>
         `<div class="ig-col${c.highlight ? ' ig-hl' : ''}"><div class="ig-col-title">${esc(c.title)}</div><ul>${c.items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`
         + `${c.footer ? `<div class="ig-col-foot">${esc(c.footer)}</div>` : ''}</div>`).join('')}</div>`;
     case 'callout': {
       const c = CALLOUT_COLORS[g.callout.type];
       return `<div class="ig-callout" style="background:#${c.fill};border-left-color:#${c.border};color:#${c.ink}">`
-        + `<div class="ig-callout-title">${esc(g.callout.title ?? c.label)}</div>${md(g.callout.body)}</div>`;
+        + `<div class="ig-callout-title">${g.callout.icon ? `${iconSvg(g.callout.icon, 16)} ` : ''}${esc(g.callout.title ?? c.label)}</div>${md(g.callout.body)}</div>`;
     }
   }
 }
 
 export const INFOGRAPHIC_CSS = `
-  .ig-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 0 0 1.2em; break-inside: avoid; }
-  .ig-stat { border: 1px solid #e4e4e7; border-radius: 10px; padding: 14px 16px; background: #fafafa; }
-  .ig-value { font-size: 1.7em; font-weight: 700; line-height: 1.15; }
+  .ig-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 10px; margin: 0 0 1.2em; break-inside: avoid; }
+  .ig-stat { border: 1px solid #e4e4e7; border-top: 3px solid var(--dt-accent-ui, #2563eb); border-radius: 10px; padding: 13px 14px; background: #fafafa; min-width: 0; }
+  /* Values wrap only at spaces: the grid's minimum tile width already fits the longest word. */
+  .ig-value { font-size: 1.7em; font-weight: 700; line-height: 1.15; overflow-wrap: normal; word-break: normal; hyphens: manual; font-variant-numeric: tabular-nums; }
   .ig-label { color: #52525b; font-size: 0.9em; margin-top: 2px; }
   .ig-delta { font-size: 0.85em; margin-top: 6px; font-weight: 600; }
   .ig-up { color: #15803d; } .ig-down { color: #b91c1c; } .ig-flat { color: #71717a; }
   .ig-timeline { list-style: none; padding: 0; margin: 0 0 1.2em; border-left: 2px solid #d4d4d8; break-inside: avoid; }
   .ig-timeline li { position: relative; padding: 0 0 12px 18px; display: flex; gap: 12px; }
-  .ig-timeline li::before { content: ''; position: absolute; left: -6px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: #2563eb; }
-  .ig-date { min-width: 90px; color: #2563eb; font-weight: 600; }
-  .ig-steps { list-style: none; padding: 0; margin: 0 0 1.2em; break-inside: avoid; }
-  .ig-steps li { display: flex; gap: 12px; margin-bottom: 10px; align-items: flex-start; }
-  .ig-num { flex: none; width: 26px; height: 26px; border-radius: 50%; background: #2563eb; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85em; }
+  .ig-timeline li::before { content: ''; position: absolute; left: -6px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--dt-accent-ui, #2563eb); }
+  .ig-date { min-width: 90px; color: var(--dt-accent-ui, #2563eb); font-weight: 600; white-space: nowrap; }
+  .ig-steps { list-style: none; padding: 0; margin: 0 0 1.2em; break-inside: avoid; display: grid; gap: 10px; }
+  .ig-steps li { display: flex; gap: 12px; align-items: flex-start; border: 1px solid #e4e4e7; border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .ig-num { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--dt-accent-ui, #2563eb); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85em; }
   .ig-compare { display: grid; gap: 12px; margin: 0 0 1.2em; break-inside: avoid; }
-  .ig-col { border: 1px solid #e4e4e7; border-radius: 10px; padding: 12px 14px; }
-  .ig-col.ig-hl { border-color: #2563eb; box-shadow: 0 0 0 1px #2563eb inset; }
+  .ig-col { border: 1px solid #e4e4e7; border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .ig-col.ig-hl { border-color: var(--dt-accent-ui, #2563eb); box-shadow: 0 0 0 1px var(--dt-accent-ui, #2563eb) inset; }
   .ig-col-title { font-weight: 700; margin-bottom: 6px; }
   .ig-col ul { margin: 0; padding-left: 1.1em; }
   .ig-col-foot { margin-top: 8px; font-size: 0.9em; color: #52525b; border-top: 1px solid #e4e4e7; padding-top: 6px; }
   .ig-callout { border-left: 4px solid; border-radius: 6px; padding: 10px 14px; margin: 0 0 1.2em; break-inside: avoid; }
-  .ig-callout-title { font-weight: 700; margin-bottom: 4px; }
+  .ig-callout-title { font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
   .ig-callout p:last-child { margin-bottom: 0; }
 `;
 

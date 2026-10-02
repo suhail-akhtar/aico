@@ -232,6 +232,8 @@ export function installCustomToolGuards(pipeline: ToolPipeline, opts: CustomTool
     let yes = false;
     try { yes = await opts.ask(tool.name, detail); } catch { yes = false; }
     if (!yes) return { kind: 'deny', reason: `The person did not approve ${tool.name}; it was not run. Do not try to do the same thing another way.` };
+    // A person saw this exact call: the Sentinel does not ask them again (sentinel `HUMAN_APPROVED`).
+    ctx.state.set('human-approved', true);
     if (decision.mode === 'first-use') {
       if (!firstUse.has(opts.sessionKey)) firstUse.set(opts.sessionKey, new Set());
       firstUse.get(opts.sessionKey)!.add(tool.name);

@@ -344,7 +344,15 @@ export { knowledgeTool } from './tools/knowledge.js';
 export {
   beginCheckpoint, commitCheckpoint, listCheckpoints, restoreCheckpoint,
   recordBeforeWrite, recordAfterWrite, resetCheckpoints, isRecording,
+  snapshotFiles, sealSnapshot,
 } from './checkpoint/index.js';
+export {
+  applyPlan, makePlan, planKey, rememberPlan, shownPlan, plannedWriteTargets, isApplyCall, renderPlan,
+  rollbackLastApply, resetRefactorPlans,
+} from './refactor/plan.js';
+export { findAstGrep, rewriteChanges, codeSearch, resetAstGrepCache } from './refactor/ast-grep.js';
+export { ProjectService, renameChanges, findReferences as tsFindReferences, organizeImportsChanges, moveFileChanges, loadTypeScript } from './refactor/ts-service.js';
+export { executeCodeSearch, executeCodeRewrite, executeRefactor } from './tools/refactor.js';
 export { investigate, investigateDefinition, findDuplicateAngles } from './tools/investigate.js';
 export { getWidgetSpec, widgetSpecDefinition } from './tools/widget-spec.js';
 export {
@@ -426,17 +434,27 @@ export {
   onCanvasActivity, onCanvasComments, setDocSettings,
 } from './canvas/store.js';
 export {
-  listSections, findSection, replaceSection, pendingBlocks, pendingLine, parsePendingLine, stripPending, sectionAt,
+  SECTION_ID, listSections, findSection, replaceSection, pendingBlocks, pendingLine, parsePendingLine, stripPending, sectionAt,
 } from './canvas/sections.js';
 export { locate as locateAnchor, reanchor, project as projectMarkdown, addressesAgent } from './canvas/comments.js';
 export { exportCanvas, exportSource, toHtml, buildHtml, headingPages } from './canvas/export.js';
-export { cleanSettings, mergeSettings, resolveSettings, templateById, TEMPLATES } from './canvas/doc-settings.js';
+export { cleanSettings, mergeSettings, resolveSettings } from './canvas/doc-settings.js';
+export {
+  DOC_TYPES, VISUAL_BLOCKS, docTypeById, pickDocType, classificationOf, writingNote, docTypeSummary, BLOCK_SYNTAX,
+} from './canvas/doc-types.js';
 export { parseInfographic, parseImageAttrs, normalizeAlternateSyntax } from './canvas/infographics.js';
 export { collectVisuals, renderVisuals, chartSvg, launchExportBrowser, rendererRoot, clearVisualCache } from './canvas/visuals.js';
 export { collectHeadings } from './canvas/doc-model.js';
 export { workspaceImages, decodeDataUrl, parseMarkdown } from './canvas/markdown.js';
 export { commentPrompt } from './server/canvas-routes.js';
 export { canvasTool, canvasDefinition } from './tools/canvas.js';
+// -- AICO Sheets --
+export { renameCanvas } from './canvas/store.js';
+export { bookToXlsx, xlsxToBook, csvToBook, importSheetFile, exportSheet, numFmtCode } from './canvas/sheet-xlsx.js';
+export { listArtifacts, handleArtifactRoute } from './server/artifact-routes.js';
+export { handleCanvasRoute } from './server/canvas-routes.js';
+export * as SheetModel from '../shared/ui/canvas/sheet-model.js';
+export * as SheetFormula from '../shared/ui/canvas/sheet-formula.js';
 // -- Credential vault & broker --
 export {
   getVault, configureVault, resolve as vaultResolve, redactor as vaultRedactor, redact as vaultRedact,
@@ -568,7 +586,7 @@ export { validateAgentDef, validationContext, validateAgent } from './agents/val
 export { summarizeAgent } from './agents/summary.js';
 export { boundsOf } from './agents/resolve.js';
 export { applyAutonomyCeiling } from './agents/ceiling.js';
-export { globToRegExp, writeRefusal } from './agents/paths-guard.js';
+export { globToRegExp, writeRefusal, installWritePathsGuard } from './agents/paths-guard.js';
 export { listAgentSpecs, getAgentSpec } from './agents/registry.js';
 export { BUILTIN_AGENT_FILES } from './agents/builtin.js';
 export { agentRunScope } from './agent.js';
@@ -584,3 +602,40 @@ export {
   dependencyHash, statusOfSpec, certificationStatus, isCertified, listCertificates, writeCertificate, certificatesDir,
 } from './evals/certificate.js';
 export { spawnBackgroundAgent, getBackgroundAgents } from './background/index.js';
+
+// Long jobs (longjob/, tools/long-job.ts).
+export {
+  propose as proposeLongJob, decide as decideLongJob, control as controlLongJob, afterTurn as afterLongJobTurn,
+  listJobs as listLongJobs, getJob as getLongJob, pendingJob, activeJob, isLongEstimate, thresholdHours,
+  recordMilestone, resumeAfterRestart, setLongJobHost, renderReport as renderLongJobReport, reportFile as longJobReportFile,
+  longJobsDir, NO_PROGRESS_TURNS, subAgentMaxMs,
+} from './longjob/index.js';
+export { longJobTool, longJobDefinition } from './tools/long-job.js';
+
+// The Sentinel (sentinel/, ADR 0015): scripts/sentinel-test.mjs and scripts/sentinel-eval.mjs.
+export {
+  sentinelTrigger, sentinelActive, tightenOnlySentinel, defaultSentinelModel, buildReviewInput, parseSentinelReply,
+  redactForReview, SENTINEL_SYSTEM, DEFAULT_SENTINEL_TIMEOUT_MS, installSentinel, reviewCall, listSentinelVerdicts,
+  sentinelFile, userRequestsOf, recentCallsOf, untrustedSourcesOf, HUMAN_APPROVED, setSentinelReviewerForTest,
+} from './sentinel/index.js';
+
+// The morning brief and monitors (brief/): scripts/brief-test.mjs.
+export * as brief from './brief/core.js';
+export * as briefCollect from './brief/collect.js';
+export * as briefService from './brief/service.js';
+
+// Preference learning (learning/signals, preferences, distill; ADR 0016): scripts/preferences-test.mjs.
+export {
+  detectCorrections, detectChoices, summariseEdit, signalsFromTurn, feedbackSignal, rememberAgentWrites, userEditSignals,
+  canvasEditSignal, queueSignals, readPendingSignals, consumeSignals, tallyChoices, scrub as scrubSignal, languageOf, makeSignal,
+  signalsFile, EDIT_WINDOW_MS,
+} from './learning/signals.js';
+export {
+  loadStore as loadPreferenceStore, saveStore as savePreferenceStore, listRules as listPreferenceRules, mergeCandidates,
+  applyRuleAction, selectRules, renderRules, preferencesForTask, sanitiseRuleText, isLowRiskStyle, topicOf, normaliseScope,
+  contextLanguages, sameRule, rulesFile as preferenceRulesFile, RULES_TOKEN_BUDGET,
+} from './learning/preferences.js';
+export {
+  parseDistillReply, buildDistillRequest, fallbackCandidates, distillPending, DISTILL_SYSTEM, modelCompleter,
+  afterTurn as preferencesAfterTurn, afterFeedback as preferencesAfterFeedback, beforeTurn as preferencesBeforeTurn,
+} from './learning/distill.js';

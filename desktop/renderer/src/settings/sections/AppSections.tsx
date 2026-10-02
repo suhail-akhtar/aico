@@ -50,7 +50,7 @@ export function GeneralSection(): React.ReactElement {
         <Row title="When the agent needs you" desc="A permission to grant, a question, a plan to approve, a browser hand-over.">
           <Switch checked={prefs.notifications.attention} onChange={v => void set({ notifications: { ...prefs.notifications, attention: v } })} label="Notify when the agent needs you" />
         </Row>
-        <Row title="Background work" desc="Scheduled jobs and background agents finishing.">
+        <Row title="Background work" desc="Scheduled jobs and background agents finishing, the morning brief being ready, and monitor alerts.">
           <Switch checked={prefs.notifications.background} onChange={v => void set({ notifications: { ...prefs.notifications, background: v } })} label="Notify about background work" />
         </Row>
         <Row title="Sound">

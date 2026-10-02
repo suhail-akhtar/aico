@@ -16,6 +16,7 @@ import { getCanvasHost, onCanvasEvent, type CanvasAuthor, type CanvasDoc, type C
 import { authorLabel, parseCanvasRef, previewLines, relativeTime } from './core';
 import { CanvasEditor } from './CanvasEditor';
 import { CvIcon } from './icons';
+import { sheetPreview } from './sheet-model';
 import './canvas.css';
 
 export function Canvas({ source, streaming = false }: { source: string; streaming?: boolean }): React.ReactElement {
@@ -66,7 +67,7 @@ function CanvasCard({ canvas }: { canvas: CanvasRef }): React.ReactElement {
   const kind = doc?.kind ?? canvas.kind ?? 'document';
   const language = doc?.language ?? canvas.language;
   const title = meta?.title || doc?.title || canvas.title || 'Canvas';
-  const lines = useMemo(() => (doc ? previewLines(doc.content, kind, 3) : []), [doc, kind]);
+  const lines = useMemo(() => (!doc ? [] : kind === 'sheet' ? sheetPreview(doc.content, 3) : previewLines(doc.content, kind, 3)), [doc, kind]);
 
   if (expanded) {
     return (
@@ -92,11 +93,11 @@ function CanvasCard({ canvas }: { canvas: CanvasRef }): React.ReactElement {
       onClick={open}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
     >
-      <span className="acv-card-icon"><CvIcon name={kind === 'code' ? 'code' : 'doc'} size={20} /></span>
+      <span className="acv-card-icon"><CvIcon name={kind === 'code' ? 'code' : kind === 'sheet' ? 'table' : 'doc'} size={20} /></span>
       <span className="acv-card-main">
         <span className="acv-card-title">
           <span>{title}</span>
-          <span className="acv-badge">{kind === 'code' ? (language ?? 'code') : 'document'}</span>
+          <span className="acv-badge">{kind === 'code' ? (language ?? 'code') : kind === 'sheet' ? 'sheet' : 'document'}</span>
         </span>
         <span className="acv-card-meta" style={{ display: 'block' }}>
           {!host ? 'Canvas — open it in the AICO app'

@@ -17,7 +17,7 @@
     "start": "node scripts/build.mjs && electron .",
     "dev": "electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p renderer/tsconfig.json",
-    "test": "node scripts/test-unit.mjs && node scripts/test-browser-bookmarks.mjs && node scripts/test-browser-overlay.mjs && node scripts/test-browser-shield.mjs && node scripts/test-browser-tabs.mjs && node scripts/test-browser-import.mjs && node scripts/test-browser-window.mjs && node scripts/test-browser-learn.mjs && node scripts/test-browser-memory.mjs && node scripts/test-browser-vault.mjs && node scripts/test-browser-owners.mjs",
+    "test": "node scripts/test-unit.mjs && node scripts/test-browser-bookmarks.mjs && node scripts/test-browser-overlay.mjs && node scripts/test-browser-shield.mjs && node scripts/test-browser-tabs.mjs && node scripts/test-browser-import.mjs && node scripts/test-browser-window.mjs && node scripts/test-browser-learn.mjs && node scripts/test-browser-memory.mjs && node scripts/test-browser-vault.mjs && node scripts/test-browser-owners.mjs && node scripts/test-browser-teach.mjs",
     "package": "node scripts/build.mjs && node scripts/icons.mjs && electron-builder --publish never",
     "package:win": "node scripts/build.mjs && node scripts/icons.mjs && electron-builder --win --publish never",
     "package:linux": "node scripts/build.mjs && node scripts/icons.mjs && electron-builder --linux --publish never"

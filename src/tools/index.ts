@@ -140,6 +140,11 @@ import { cronScheduler } from '../cron/scheduler.js';
 import { getBackgroundAgents } from '../background/index.js';
 import { getAgentRegistry } from './task.js';
 import { spillResult } from './spill.js';
+import {
+  codeSearchDefinition, codeRewriteDefinition, refactorDefinition,
+  executeCodeSearch, executeCodeRewrite, executeRefactor,
+  type CodeSearchInput, type CodeRewriteInput, type RefactorInput,
+} from './refactor.js';
 
 export interface ToolDefinition {
   name: string;
@@ -291,6 +296,12 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...vsCodeReferencesDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   { ...vsCodeRenameDefinition, isConcurrencySafe: false, maxResultSizeChars: 10_000 },
   { ...vsCodeFormatDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
+  // The deferred `refactor` group (tools/refactor). The search only reads; the
+  // other two rewrite many files and then run the project's checks, so they are
+  // exclusive for the same reasons Write and RunChecks are.
+  { ...codeSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
+  { ...codeRewriteDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
+  { ...refactorDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...contextWindowToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 5_000 },
   { ...agentCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
@@ -421,6 +432,8 @@ const WRITE_TOOLS = new Set([
   'Edit',
   'Bash',
   'NotebookEdit',
+  'CodeRewrite',
+  'Refactor',
   'McpAddServer',
   'McpRemoveServer',
   'McpReloadServers',
@@ -777,6 +790,15 @@ export async function executeTool(
       break;
     case 'VSCodeFormat':
       result = await vsCodeFormat(args as unknown as Parameters<typeof vsCodeFormat>[0]);
+      break;
+    case 'CodeSearch':
+      result = await executeCodeSearch(args as unknown as CodeSearchInput, signal);
+      break;
+    case 'CodeRewrite':
+      result = await executeCodeRewrite(args as unknown as CodeRewriteInput, signal);
+      break;
+    case 'Refactor':
+      result = await executeRefactor(args as unknown as RefactorInput);
       break;
     case 'WorkspaceInfo':
       result = await executeWorkspaceInfo();

@@ -229,6 +229,22 @@ export async function readStoredAttachment(input: {
   return { bytes, contentType, name: entry.name, image: Boolean(image) };
 }
 
+/**
+ * Every stored file of a session, for the Artifacts panel: what was uploaded
+ * and what a tool produced (a generated image). Descriptors only — the bytes
+ * are served by id through {@link readStoredAttachment}.
+ */
+export async function listAttachments(input: {
+  settings: AicoSettings; cwd: string; sessionId: string;
+}): Promise<Array<AttachmentDescriptor & { origin: 'upload' | 'tool'; image: boolean; at: number }>> {
+  const dir = directory(input.settings, input.cwd, input.sessionId);
+  const index = await load(dir);
+  return Promise.all(index.attachments.map(async item => ({
+    ...descriptor(item), origin: item.origin ?? 'upload', image: isImage(item.extension),
+    at: await stat(path.join(dir, item.file)).then(s => s.mtimeMs, () => 0),
+  })));
+}
+
 /** Types for the non-image attachments, which are served as downloads. */
 const SERVED_TYPES: Record<string, string> = {
   '.pdf': 'application/pdf',

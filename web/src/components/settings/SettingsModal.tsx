@@ -42,6 +42,7 @@ import { McpPane } from './McpPane';
 import { ToolsPane } from './ToolsPane';
 import { AgentsPane } from './AgentsPane';
 import { MemoryPane } from './MemoryPane';
+import { LearnedPane } from './LearnedPane';
 
 export interface SettingsModalProps {
   onClose: () => void;
@@ -285,7 +286,8 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
                     : pane.custom === 'mcp' ? <McpPane />
                     : pane.custom === 'tools' ? <ToolsPane />
                     : pane.custom === 'agents' ? <AgentsPane onClose={onClose} />
-                    : pane.custom === 'memory' ? <MemoryPane /> : null}
+                    : pane.custom === 'memory' ? <MemoryPane />
+                    : pane.custom === 'learned' ? <LearnedPane onClose={onClose} /> : null}
 
                   {pane.groups.length > 0 && (
                     <div className={pane.custom ? 'mt-7 border-t border-aico-border-subtle pt-6' : ''}>

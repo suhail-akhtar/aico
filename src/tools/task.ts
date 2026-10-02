@@ -364,7 +364,7 @@ export interface TaskBrief {
 }
 
 /** Tools that can change the working tree. Bash counts: it can write anywhere. */
-const WRITING_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit', 'Bash', 'Terminal', 'MultiEdit']);
+const WRITING_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit', 'Bash', 'Terminal', 'MultiEdit', 'CodeRewrite', 'Refactor']);
 
 /** Agent types whose tool set cannot change files (Bash there is for running scanners and tests). */
 const READ_ONLY_TYPES = new Set<SubAgentType>(['explore', 'plan', 'verification', 'security-audit', 'devsecops', 'review']);
@@ -443,6 +443,12 @@ export interface RunTaskOpts {
   depth: number;
   /** Sub-agent timeout in ms (default: 120_000 = 2 min) */
   subagentTimeout?: number;
+  /**
+   * Raises the absolute ceiling below, never lowers it. Set only inside an
+   * approved long job (`longJobs.subAgentMaxMinutes`), whose milestones can
+   * need a child that works longer than everyday delegation should.
+   */
+  subagentMaxMs?: number;
   settings?: AicoSettings;
   /**
    * Capability context to compose the child from.
@@ -739,6 +745,7 @@ export async function runTask(
     const absoluteMaxMs = Math.max(
       isStudioAgent ? 1_800_000 : 900_000,  // 30 min studio, 15 min others
       args.timeout ? args.timeout * 1000 * 3 : 0,
+      opts.subagentMaxMs ?? 0,
     );
 
     let lastActivity = Date.now();

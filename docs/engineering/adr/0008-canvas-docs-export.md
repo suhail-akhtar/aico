@@ -104,3 +104,18 @@ and mailto become Word hyperlinks).
 `npm test` (AICO Docs block) — docx structure, images inside vs outside the
 project, PDF pages (or the no-browser message), md round-trip; live: a real
 model turn exporting docx/pdf/md through the tool and the HTTP route.
+
+## Addendum (2026-10-03) — AICO Sheets: .xlsx by hand too
+
+The same decision for spreadsheets: `src/canvas/sheet-xlsx.ts` writes
+SpreadsheetML with `fflate` (no new dependency; ExcelJS was removed earlier
+for its deprecated dependencies, see `tools/xlsx-lite`). Inline strings, one
+styles part (custom `numFmt`s, two fonts, solid fills, alignment, `dxf`s for
+conditional formatting), formulas with cached values and `fullCalcOnLoad`,
+`_xlfn.` prefixes for post-2007 functions, frozen panes, column widths and an
+autoFilter with its hidden `_FilterDatabase` name. Import reuses xlsx-lite,
+extended with a `cells()` read that keeps types and formulas (shared formulas
+translated by the formula engine). Not written: charts (DrawingML), merged
+cells, borders, fonts beyond bold. Verified by unzipping and re-reading in
+`scripts/sheets-test.mjs`, and by opening the files in Microsoft Excel through
+its COM API (no repair prompt; formulas recalculated, formats applied).

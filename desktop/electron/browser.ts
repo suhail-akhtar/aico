@@ -88,6 +88,7 @@ import { isRealPasswordField, isUsernameField, loginFormJs, passwordOf, type Log
 import { isPrivateOrigin, loginOrigin } from './browser-vault-core';
 import { PAGE_SIGNALS_JS, type PageSignals } from '../shared/page-signals';
 import { busyMessage, ownerHue, personTookOver, TabLeases, TabOwners, type Caller, type Intent, type World } from './browser-owners';
+import { registerTeach, teachPageJs } from './browser-teach';
 
 /** The profile's older home (Electron's partition); it now lives in <AICO_HOME>/desktop/browser/profile — see browser-session.ts. */
 export const BROWSER_PARTITION = 'persist:aico-browser';
@@ -215,6 +216,14 @@ export interface BrowserService {
   guardText(text: string): string;
   /** The browser moved to another window (browser-window.ts): its tabs leave the old one now; the new one's page area places them. */
   rehost(): void;
+  /**
+   * Teach AICO's replay (browser-teach.ts): run its read-only page script on
+   * this call's tab — the element list it re-finds targets in, one field's
+   * value (never a secret field's), or the address.
+   */
+  procedurePage<T>(op: 'candidates' | 'value' | 'url', args?: Record<string, unknown>): Promise<T>;
+  /** For the rest of this tool call (and what it started): wait this long for the person's Allow at the purchase/send gate. */
+  setApprovalWait(ms: number): void;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
@@ -417,10 +426,12 @@ export function registerBrowser(ctx: DesktopContext): void {
     const q = commitQuestion(v, origin);
     agentEvent(t, 'confirm', 'blocked', q.title);
     const c = confirm({ kind: 'commit', origin, title: q.title, detail: q.detail, okLabel: q.okLabel, cancelLabel: 'Don’t allow', danger: true });
-    const answer = await Promise.race([c.done, sleep(22_000).then(() => null)]);
+    // A taught procedure running in the background may wait longer than one tool call (browser-teach.ts).
+    const waitMs = Math.min(10 * 60_000, Math.max(22_000, calls.getStore()?.approvalWaitMs ?? 22_000));
+    const answer = await Promise.race([c.done, sleep(waitMs).then(() => null)]);
     if (answer === null) {
       c.cancel();
-      throw new Error(`Refused: nothing was pressed. “${v.label || 'That action'}” would ${v.kind === 'purchase' ? 'buy or pay for something' : v.kind === 'send' ? 'send or publish something' : v.kind === 'delete' ? 'delete something' : v.kind === 'booking' ? 'make a booking' : 'start a payment'}, which needs the user's approval in AICO, and they did not answer within 20 seconds. Tell the user what you are about to do and ask them to approve; then try again.`);
+      throw new Error(`Refused: nothing was pressed. “${v.label || 'That action'}” would ${v.kind === 'purchase' ? 'buy or pay for something' : v.kind === 'send' ? 'send or publish something' : v.kind === 'delete' ? 'delete something' : v.kind === 'booking' ? 'make a booking' : 'start a payment'}, which needs the user's approval in AICO, and they did not answer within ${Math.round(waitMs / 1000)} seconds. Tell the user what you are about to do and ask them to approve; then try again.`);
     }
     if (!answer) throw new Error(`Refused: the user did not allow “${v.label || 'that action'}”. Nothing was pressed. Do not retry; ask the user how to proceed.`);
   };
@@ -440,7 +451,7 @@ export function registerBrowser(ctx: DesktopContext): void {
   };
 
   // ── Whose tab (browser-owners.ts): the copilot works on the tab in front, every other chat in its own ──
-  interface CallScope { caller: Caller | null; tabId?: string; used?: string }
+  interface CallScope { caller: Caller | null; tabId?: string; used?: string; approvalWaitMs?: number }
   /** The tool call in progress, through every await of it (two chats call at once). */
   const calls = new AsyncLocalStorage<CallScope>();
   const owners = new TabOwners();
@@ -1756,6 +1767,8 @@ export function registerBrowser(ctx: DesktopContext): void {
       if (mine && mine.id !== activeId) selectTabImpl(mine.id);
       ctx.emit('browser:handoff', { id, message });
       const t = activeId ? tabs.get(activeId) : undefined;
+      // The page is the person's now: their input here is the hand-over being done, not them taking the tab back.
+      if (t) t.agentUntil = 0;
       if (t) ctx.emit('browser:agent', { tabId: t.id, action: 'handoff', status: 'blocked', label: message.slice(0, 120) } satisfies AgentEvent);
       ctx.revealBrowser();
       return new Promise<string>((resolve) => {
@@ -1970,6 +1983,16 @@ export function registerBrowser(ctx: DesktopContext): void {
       visible = false;
       layout();
       pushState();
+    },
+    procedurePage<T>(op: 'candidates' | 'value' | 'url', args?: Record<string, unknown>): Promise<T> {
+      return agentCall('act', async (t) => {
+        if (op !== 'url') await waitLoad(t.view.webContents, 8000);
+        return evaluate<T>(t.view.webContents, teachPageJs(op, args), 10_000);
+      });
+    },
+    setApprovalWait(ms) {
+      const scope = calls.getStore();
+      if (scope) scope.approvalWaitMs = ms;
     },
     guardText(text) {
       if (!privacy.injectionGuard()) return text;
@@ -2294,5 +2317,11 @@ export function registerBrowser(ctx: DesktopContext): void {
     bookmarks,
     addresses: () => autofillService,
     vault,
+  });
+  // Teach AICO (browser-teach.ts): record a task on the tab in front; procedures replay through the service above.
+  ctx.services.browserTeach = registerTeach(ctx, {
+    front: () => { const t = activeId ? tabs.get(activeId) : undefined; return t && !t.view.webContents.isDestroyed() ? { id: t.id, wc: t.view.webContents } : null; },
+    cdp: (wc, method, params) => cdp(wc, method, params),
+    agentDriving: (id) => agentDriving(tabs.get(id)),
   });
 }

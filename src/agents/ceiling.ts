@@ -37,7 +37,7 @@ export interface CeilingInput {
 }
 
 /** File writers that L2 (`edits`) lets through, as the server's `edits` mode does. */
-export const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+export const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'CodeRewrite', 'Refactor']);
 
 /** The effective level, or undefined when nothing bounds the run. */
 export function ceilingLevel(o: { requested: AutonomyLevel; ceiling?: unknown; parent?: AutonomyLevel }): AutonomyLevel | undefined {

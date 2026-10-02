@@ -77,6 +77,12 @@ const TIMEOUTS: Record<string, number> = {
   // A high-quality picture takes a minute or more; Gemini draws one per request.
   GenerateImage: 6 * 60 * 1000,
 
+  // A refactor apply rewrites many files and then runs the project's checks
+  // (RunChecks allows 600 s per check), so it gets a check run's room.
+  CodeSearch: 2 * 60 * 1000,
+  CodeRewrite: 31 * 60 * 1000,
+  Refactor: 31 * 60 * 1000,
+
   // Local and fast. A minute here means something is wrong, not slow.
   Read: 60 * 1000,
   Write: 60 * 1000,

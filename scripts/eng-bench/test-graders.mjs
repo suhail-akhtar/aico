@@ -62,6 +62,58 @@ for (const [id, mustFail] of Object.entries(CODE_TASKS)) {
   for (const f of after.failed) console.log(`        reference failed: ${f}`);
 }
 
+// The large refactor's repository and reference are generated, not checked
+// in, so its reference is applied by the task itself; its mutants are the
+// three mistakes a rename at scale actually makes.
+if (!only || only === 'large-refactor') {
+  console.log('\nlarge-refactor');
+  const task = await load('large-refactor');
+  const run = async (mutate) => {
+    const project = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'eng-bench-grader-large-refactor-'));
+    task.setup(project);
+    if (mutate) mutate(project);
+    const checks = createChecks(quiet);
+    await task.grade({ project, check: checks.check, log: quiet });
+    const s = checks.summary();
+    try { fs.rmSync(project, { recursive: true, force: true }); } catch { /* Windows file locks; temp dir */ }
+    return { ...s, failed: s.checks.filter((c) => !c.ok).map((c) => c.id) };
+  };
+  const edit = (project, rel, from, to) => {
+    const file = path.join(project, rel);
+    const text = readText(file);
+    expect(text.includes(from), `mutation applies to ${rel}`);
+    fs.writeFileSync(file, text.replace(from, to));
+  };
+  const before = await run(null);
+  expect(before.passed < before.total, `fixture alone fails (${before.passed}/${before.total})`);
+  for (const c of ['hidden: formatMoney formats USD by default, EUR, GBP and other codes', 'no formatPrice identifier remains']) {
+    expect(before.failed.some((f) => f.startsWith(c)), `fixture alone fails "${c}"`);
+  }
+  const after = await run((p) => task.applyReference(p));
+  expect(after.passed === after.total, `reference solution scores 100% (${after.passed}/${after.total})`);
+  for (const f of after.failed) console.log(`        reference failed: ${f}`);
+  const sed = await run((p) => {
+    task.applyReference(p);
+    edit(p, 'src/util/u005.ts', 'formatPriceRange', 'formatMoneyRange');
+  });
+  expect(sed.failed.some((f) => f.startsWith('files that never used formatPrice are byte-identical')), 'mutant (text replace hit formatPriceRange) loses "byte-identical"');
+  const alias = await run((p) => {
+    task.applyReference(p);
+    edit(p, 'src/core/index.ts', 'export { formatMoney,', 'export { formatMoney, formatMoney as formatPrice,');
+  });
+  expect(alias.failed.some((f) => f.startsWith('hidden: the barrel exports formatMoney and not formatPrice')), 'mutant (old name kept as an alias) loses the barrel check');
+  const missedEu = await run((p) => {
+    task.applyReference(p);
+    edit(p, 'src/features/eu/e01.ts', "(line.unit, 'EUR')", '(line.unit)');
+  });
+  expect(missedEu.failed.some((f) => f.startsWith('hidden: EU features price in euros')), 'mutant (one EU call site missed) loses the EU check');
+  const addedTest = await run((p) => {
+    task.applyReference(p);
+    edit(p, 'test/money.test.ts', "test('formats a price band'", "test('formats euros', () => {\n  assert.equal(formatMoney(1, 'EUR'), '€1.00');\n});\n\ntest('formats a price band'");
+  });
+  expect(addedTest.passed === addedTest.total, `acceptable: a test added for the new parameter still scores 100% (${addedTest.passed}/${addedTest.total})${addedTest.failed.length ? `: ${addedTest.failed.join('; ')}` : ''}`);
+}
+
 // Plausible-but-wrong solutions: the tempting fix, a missed scope, an early
 // rounding. Each must lose the named check — proof that the hidden tests
 // test the property, not just "something changed".

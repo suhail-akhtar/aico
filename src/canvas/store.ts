@@ -37,6 +37,14 @@
  * context, re-anchored after every content write of their tab
  * (`canvas/comments`).
  *
+ * ## Sheets (AICO Sheets)
+ *
+ * A `sheet` canvas is a workbook: its one tab holds the workbook as JSON
+ * (`shared/ui/canvas/sheet-model`), versioned and conflict-checked exactly
+ * like a document's Markdown. Every write of a sheet's tab must parse as a
+ * workbook — checked here, so neither the agent nor a client can save text
+ * that would leave the grid unable to open it.
+ *
  * ## Concurrency
  *
  * The server and the tool run in one process, so a per-file promise chain is
@@ -53,13 +61,14 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises';
 import type { AicoSettings } from '../settings.js';
 import { getWorkspaceInfo } from '../workspace.js';
 import { mergeSettings, type DocSettings } from './doc-settings.js';
+import { emptyBook, parseBook, serializeBook } from '../../shared/ui/canvas/sheet-model.js';
 import {
   addressesAgent, anchorFor, reanchor, type CanvasComment, type CommentAnchor, type CommentReply,
 } from './comments.js';
 
 export type { CanvasComment, CommentAnchor, CommentReply } from './comments.js';
 
-export type CanvasKind = 'document' | 'code';
+export type CanvasKind = 'document' | 'code' | 'sheet';
 export type CanvasAuthor = 'agent' | 'user';
 
 export interface CanvasVersion {
@@ -136,7 +145,7 @@ export interface CanvasChange {
   tabId: string;
   tabVersion: number;
   author: CanvasAuthor;
-  action: 'create' | 'update' | 'restore' | 'tabs' | 'settings';
+  action: 'create' | 'update' | 'restore' | 'tabs' | 'settings' | 'rename';
   at: number;
 }
 
@@ -327,6 +336,12 @@ function checkContent(content: unknown): string {
   return content;
 }
 
+/** A sheet's text must be a workbook; the error says what is wrong. */
+function checkSheet(content: string): string {
+  try { parseBook(content); } catch (err) { throw new Error(`not a workbook: ${(err as Error).message}`); }
+  return content;
+}
+
 function cleanTitle(title: unknown, fallback = 'Untitled'): string {
   const t = typeof title === 'string' ? title.replace(/\s+/g, ' ').trim() : '';
   return (t || fallback).slice(0, MAX_TITLE);
@@ -442,13 +457,17 @@ export async function createCanvas(ctx: CanvasContext, input: {
   firstTabTitle?: string;
   docSettings?: unknown;
 }): Promise<CanvasDoc> {
-  const content = checkContent(input.content);
-  if (input.kind !== undefined && input.kind !== 'document' && input.kind !== 'code') {
-    throw new Error('kind must be "document" or "code"');
+  if (input.kind !== undefined && input.kind !== 'document' && input.kind !== 'code' && input.kind !== 'sheet') {
+    throw new Error('kind must be "document", "code" or "sheet"');
   }
+  if (input.kind === 'sheet' && input.tabs?.length) throw new Error('a sheet keeps its sheets inside its one workbook — add sheets with add_sheet, not tabs');
+  // A sheet starts as an empty workbook, and whatever it is given must be one.
+  const content = checkContent(input.kind === 'sheet'
+    ? (input.content.trim() ? checkSheet(input.content) : serializeBook(emptyBook()))
+    : input.content);
   const extra = input.tabs ?? [];
   if (extra.length + 1 > CANVAS_MAX_TABS) throw new Error(`a canvas holds at most ${CANVAS_MAX_TABS} tabs`);
-  const kind: CanvasKind = input.kind === 'code' ? 'code' : 'document';
+  const kind: CanvasKind = input.kind === 'code' || input.kind === 'sheet' ? input.kind : 'document';
   const language = kind === 'code' ? cleanLanguage(input.language) : undefined;
   const author = input.author ?? 'agent';
   const now = stamp();
@@ -500,6 +519,7 @@ export async function writeCanvas(ctx: CanvasContext, id: string, input: {
     if (!Number.isInteger(input.baseVersion) || input.baseVersion !== tab.version) {
       return { ok: false, conflict: true, canvas: doc };
     }
+    if (doc.kind === 'sheet') checkSheet(content);
     const title = input.title !== undefined ? cleanTitle(input.title) : doc.title;
     if (content === tab.content && title === doc.title) return { ok: true, canvas: doc, changed: false };
     let next = content === tab.content
@@ -571,6 +591,7 @@ export async function addTab(ctx: CanvasContext, id: string, input: {
   const content = checkContent(input.content ?? '');
   let made: CanvasTab | undefined;
   const { doc } = await mutate(ctx, id, (doc) => {
+    if (doc.kind === 'sheet') throw new Error('a sheet canvas keeps its sheets inside its workbook — add a sheet instead of a tab');
     if (doc.tabs.length >= CANVAS_MAX_TABS) throw new Error(`a canvas holds at most ${CANVAS_MAX_TABS} tabs`);
     const n = Math.max(0, ...doc.tabs.map(t => Number(t.id.slice(1)) || 0)) + 1;
     made = { id: `t${n}`, title: cleanTitle(input.title, `Tab ${n}`), content, version: 1 };
@@ -614,6 +635,17 @@ export async function deleteTab(ctx: CanvasContext, id: string, tab: string): Pr
   });
   // The deleted tab no longer exists to name; the frame carries the first tab.
   announce(ctx, doc, 'tabs');
+  return doc;
+}
+
+/** Rename a canvas (title only — no content version; the revision moves). */
+export async function renameCanvas(ctx: CanvasContext, id: string, title: string): Promise<CanvasDoc> {
+  const { doc, changed } = await mutate(ctx, id, (doc) => {
+    const clean = cleanTitle(title, doc.title);
+    if (clean === doc.title) return undefined;
+    return { ...doc, title: clean, revision: doc.revision + 1, updatedAt: Math.max(stamp(), doc.updatedAt + 1) };
+  });
+  if (changed) announce(ctx, doc, 'rename');
   return doc;
 }
 

@@ -64,6 +64,15 @@ export function App(): React.ReactElement {
       };
     } catch { return DEFAULT_ROUTE; }
   });
+  // A card deep in the page (the morning brief's "Review in inbox") asks for a destination by event.
+  useEffect(() => {
+    const go = (e: Event): void => {
+      const dest = (e as CustomEvent<unknown>).detail;
+      if (dest === 'inbox') setRoute(r => ({ ...r, destination: 'inbox' }));
+    };
+    window.addEventListener('aico:navigate', go);
+    return () => window.removeEventListener('aico:navigate', go);
+  }, []);
   const onSessions = route.destination === 'sessions';
   const view = onSessions ? route.tab : route.destination;
   const [sidebarOpen, setSidebarOpen] = useState(false);

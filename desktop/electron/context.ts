@@ -39,6 +39,8 @@ export interface DesktopServices {
   browserMemory?: import('./browser-memory').MemoryService;
   /** One-line summaries of the open tabs (browser-tab-summary.ts). */
   browserTabs?: import('./browser-tab-summary').TabAwareness;
+  /** Teach AICO (browser-teach.ts): procedures the person taught by demonstration, for browser_procedures / browser_run_procedure. */
+  browserTeach?: import('./browser-teach').TeachService;
   /** The floating copilot's view over the page (browser-overlay.ts): kept above tabs as they are attached, and moved with the browser. */
   browserOverlay?: { raise(): void; rehost(): void };
   /** The browser's own window (browser-window.ts): null while the browser is in the AICO window. */

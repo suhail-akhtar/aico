@@ -1,0 +1,99 @@
+/*
+ * AICO Sheets — the grid. Plain CSS under `.aw` on the same tokens as
+ * canvas.css (light, dark and VS Code themes apply unchanged); a file of its
+ * own so the document editor's stylesheet stays the document editor's.
+ */
+
+.aw.ash {
+  position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  background: var(--aw-card); color: var(--aico-text-primary); font-size: 13px;
+}
+.aw.ash[data-variant='panel'] { height: 100%; }
+.aw.ash[data-variant='inline'] {
+  height: min(70vh, 720px); min-height: 380px; border: 1px solid var(--aw-line); border-radius: 14px; overflow: hidden; box-shadow: var(--aw-shadow);
+}
+.aw .ash-empty { padding: 18px; color: var(--aico-text-muted); font-size: 12.5px; }
+
+.aw .ash-head { display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 6px 10px 6px 14px; border-bottom: 1px solid var(--aw-soft); }
+.aw .ash-kind { color: #15803d; flex: none; }
+.aw .ash-title { min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 650; background: none; border: 0; padding: 2px 4px; border-radius: 6px; color: inherit; cursor: text; }
+.aw .ash-title:hover { background: var(--aw-raised); }
+.aw .ash-title-input { font-size: 14px; font-weight: 600; padding: 2px 6px; border: 1px solid var(--aico-accent); border-radius: 6px; background: var(--aw-card); color: inherit; min-width: 160px; }
+.aw .ash-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--aico-text-muted); }
+.aw .ash-spacer { flex: 1; }
+.aw .ash-btn.aw-btn { height: 26px; padding: 0 9px; font-size: 12px; border-radius: 7px; gap: 4px; white-space: nowrap; }
+.aw .ash-btn.is-on { background: var(--aico-accent-soft); color: var(--aico-accent); }
+
+.aw .ash-toolbar { display: flex; align-items: center; gap: 2px; padding: 5px 8px; border-bottom: 1px solid var(--aw-soft); flex-wrap: wrap; }
+.aw .ash-toolbar .aw-icon-btn { min-width: 26px; height: 26px; font-size: 11.5px; font-weight: 600; }
+.aw .ash-toolbar .aw-icon-btn.is-on { background: var(--aico-accent-soft); color: var(--aico-accent); }
+.aw .ash-select { height: 26px; border: 1px solid var(--aw-line); border-radius: 7px; background: var(--aw-card); color: inherit; font-size: 12px; padding: 0 4px; }
+.aw .ash-sep { width: 1px; height: 18px; background: var(--aw-soft); margin: 0 4px; }
+.aw .ash-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--aw-line); vertical-align: middle; }
+
+.aw .ash-menu-wrap { position: relative; }
+.aw .ash-menu {
+  position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; min-width: 190px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--aw-card); border: 1px solid var(--aw-line); border-radius: 10px; box-shadow: var(--aw-shadow);
+}
+.aw .ash-toolbar .ash-menu { left: 0; right: auto; }
+.aw .ash-menu > button { text-align: left; padding: 6px 8px; border: 0; background: none; color: inherit; border-radius: 6px; font-size: 12.5px; cursor: pointer; }
+.aw .ash-menu > button:hover { background: var(--aw-raised); }
+.aw .ash-fills { display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.aw .ash-menu.ash-fills { width: 172px; }
+.aw .ash-fills > button { width: 22px; height: 22px; padding: 0; border: 1px solid var(--aw-line); border-radius: 5px; cursor: pointer; }
+.aw .ash-fills > button.is-on { outline: 2px solid var(--aico-accent); }
+.aw .ash-menu.ash-fills > button:last-child { width: auto; padding: 0 8px; font-size: 12px; background: var(--aw-card); }
+.aw .ash-cond { width: 320px; }
+.aw .ash-cond ul { list-style: none; margin: 0 0 6px; padding: 0; font-size: 12px; }
+.aw .ash-cond li { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.aw .ash-cond-new { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.aw .ash-cond-new input, .aw .ash-cond-new select { height: 26px; border: 1px solid var(--aw-line); border-radius: 6px; background: var(--aw-card); color: inherit; padding: 0 6px; font-size: 12px; max-width: 120px; }
+
+.aw .ash-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--aw-soft); }
+.aw .ash-namebox { min-width: 64px; padding: 2px 6px; border: 1px solid var(--aw-line); border-radius: 6px; font-family: var(--aico-font-mono); font-size: 12px; text-align: center; }
+.aw .ash-fx { font-style: italic; color: var(--aico-text-muted); font-size: 12px; }
+.aw .ash-formula { flex: 1; min-width: 0; height: 26px; border: 1px solid var(--aw-line); border-radius: 6px; padding: 0 8px; background: var(--aw-card); color: inherit; font-family: var(--aico-font-mono); font-size: 12.5px; }
+.aw .ash-formula:focus { outline: none; border-color: var(--aico-accent); }
+.aw .ash-errnote { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b91c1c; font-size: 11.5px; }
+
+.aw .ash-grid { position: relative; flex: 1; min-height: 0; overflow: auto; outline: none; background: var(--aw-card); }
+.aw .ash-grid:focus-visible { box-shadow: inset 0 0 0 1px var(--aico-accent); }
+.aw .ash-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; user-select: none; }
+.aw .ash-table th, .aw .ash-table td {
+  height: 26px; padding: 0 6px; border-right: 1px solid var(--aw-soft); border-bottom: 1px solid var(--aw-soft);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; box-sizing: border-box;
+}
+.aw .ash-table thead th { position: sticky; top: 0; z-index: 3; background: var(--aw-raised); color: var(--aico-text-secondary); font-size: 11.5px; font-weight: 600; text-align: center; }
+.aw .ash-colhead { position: relative; cursor: default; }
+.aw .ash-colhead.is-sel, .aw .ash-rownum.is-sel { background: var(--aico-accent-soft) !important; color: var(--aico-accent); }
+.aw .ash-resize { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 4; }
+.aw .ash-resize:hover { background: var(--aico-accent); opacity: 0.4; }
+.aw .ash-corner { left: 0; z-index: 5 !important; }
+.aw .ash-rownum { position: sticky; left: 0; z-index: 2; background: var(--aw-raised); color: var(--aico-text-muted); font-size: 11px; font-weight: 500; text-align: center !important; cursor: default; }
+.aw .ash-rownum.is-frozen { z-index: 4; }
+.aw .ash-cell { background: var(--aw-card); cursor: cell; }
+.aw .ash-cell.is-frozen { position: sticky; z-index: 1; background: var(--aw-raised); border-bottom-color: var(--aw-line); }
+.aw .ash-cell.is-bold { font-weight: 650; }
+.aw .ash-cell.is-sel { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--aico-accent) 12%, transparent); }
+.aw .ash-cell.is-active { outline: 2px solid var(--aico-accent); outline-offset: -2px; }
+.aw .ash-cell.is-error { color: #b91c1c; font-weight: 600; }
+.aw .ash-input { width: calc(100% + 12px); height: 100%; margin: 0 -6px; padding: 0 5px; border: 0; outline: 2px solid var(--aico-accent); outline-offset: -2px; background: var(--aw-card); color: inherit; font: inherit; text-align: left; }
+.aw .ash-filter-row th { position: sticky; z-index: 3; background: var(--aw-raised); padding: 2px 3px; }
+.aw .ash-filter input { width: 100%; height: 20px; border: 1px solid var(--aw-line); border-radius: 4px; padding: 0 4px; font-size: 11.5px; background: var(--aw-card); color: inherit; }
+
+.aw .ash-charts { display: flex; gap: 10px; padding: 8px; overflow-x: auto; border-top: 1px solid var(--aw-soft); max-height: 46%; }
+.aw .ash-chart { flex: 0 0 min(460px, 92%); margin: 0; border: 1px solid var(--aw-soft); border-radius: 10px; padding: 6px; background: var(--aw-card); }
+.aw .ash-chart figcaption { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.aw .ash-chart figcaption input { flex: 1; min-width: 0; border: 0; background: none; color: inherit; font-weight: 600; font-size: 12.5px; }
+.aw .ash-chart figcaption select { height: 24px; border: 1px solid var(--aw-line); border-radius: 6px; background: var(--aw-card); color: inherit; font-size: 11.5px; }
+.aw .ash-chart-range { font-family: var(--aico-font-mono); font-size: 11px; color: var(--aico-text-muted); }
+
+.aw .ash-foot { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 8px; border-top: 1px solid var(--aw-soft); background: var(--aw-raised); }
+.aw .ash-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; }
+.aw .ash-tab { height: 24px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--aico-text-secondary); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.aw .ash-tab:hover { background: var(--aw-card); }
+.aw .ash-tab.is-on { background: var(--aw-card); border-color: var(--aw-line); color: var(--aico-text-primary); font-weight: 600; }
+.aw .ash-tab-add { padding: 0 8px; font-size: 15px; }
+.aw .ash-tab-input { height: 24px; width: 120px; border: 1px solid var(--aico-accent); border-radius: 6px; padding: 0 6px; font-size: 12px; background: var(--aw-card); color: inherit; }
+.aw .ash-stats { margin-left: auto; font-size: 11.5px; color: var(--aico-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

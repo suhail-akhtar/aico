@@ -12,6 +12,7 @@
 import { useStore } from '@web/store';
 import { api } from '@web/api';
 import { newlyPending, originLabel, type ParkedAction } from '@web/inbox';
+import { freshNotices } from '@web/brief';
 import { toast, useDesk } from '@/state/desk';
 import { desktop } from '@/desktop';
 import { markSeen } from '@/lib/local';
@@ -24,7 +25,11 @@ export function installNotifications(): void {
   desktop.onNotificationClick((data) => {
     const d = data as { sessionId?: string; view?: string } | null;
     if (d?.sessionId) void openChat(d.sessionId);
-    else if (d?.view) useDesk.getState().navigate({ view: d.view });
+    else if (d?.view) {
+      // Home is an empty chat: the brief card lives there, under a fresh composer.
+      if (d.view === 'home' && useStore.getState().logged.size > 0) useStore.getState().newSession();
+      useDesk.getState().navigate({ view: d.view });
+    }
   });
 
   let unseen = 0;
@@ -76,6 +81,7 @@ export function installNotifications(): void {
   });
 
   watchInbox(bump);
+  watchBrief(bump);
 }
 
 /**
@@ -102,4 +108,44 @@ function watchInbox(bump: () => void): void {
   };
   void poll();
   setInterval(() => void poll(), 30_000);
+}
+
+/**
+ * The morning brief and the monitors (engine: brief/). Polled like the inbox:
+ * the brief is made by a timer in the engine, not in any chat. A new brief is
+ * announced once (unless the engine says it is quiet hours or the brief's
+ * notification is off); a monitor alert as soon as the engine releases it —
+ * held alerts arrive when quiet hours end. Both obey the Background work
+ * switch. The first poll is a baseline, so starting the app announces only a
+ * brief made in the last few minutes.
+ */
+function watchBrief(bump: () => void): void {
+  let lastBrief: string | undefined;
+  let lastNotice = 0;
+  let first = true;
+  const poll = async (): Promise<void> => {
+    try {
+      const r = await api.brief();
+      const enabled = useDesk.getState().prefs.notifications.background;
+      const b = r.brief;
+      const isNew = b && b.id !== lastBrief && (!first || Date.now() - b.createdAt < 5 * 60_000);
+      if (b) lastBrief = b.id;
+      const notices = first ? [] : freshNotices(r.notices, lastNotice);
+      for (const n of r.notices) lastNotice = Math.max(lastNotice, n.releasedAt ?? 0);
+      first = false;
+      if (!enabled) return;
+      if (isNew && r.settings.notify && !r.quietNow) {
+        const urgent = b.items.filter(i => i.urgency === 'urgent').length;
+        const title = urgent ? `Your brief: ${urgent} urgent` : 'Your brief is ready';
+        if (focused) toast.info(title, b.summary);
+        else { void desktop.notify({ title, body: b.summary.slice(0, 180), data: { view: 'home' }, onlyWhenUnfocused: true }); bump(); }
+      }
+      for (const n of notices.slice(0, 3)) {
+        if (focused) toast.warning(n.title, n.body);
+        else { void desktop.notify({ title: n.title, body: n.body.slice(0, 180), data: { view: 'home' }, onlyWhenUnfocused: true }); bump(); }
+      }
+    } catch { /* the engine is starting or restarting, or predates the brief; the next poll catches up */ }
+  };
+  void poll();
+  setInterval(() => void poll(), 60_000);
 }

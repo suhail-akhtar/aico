@@ -7,13 +7,16 @@
  *   POST /api/canvas/restore {session,id,tab?,version,baseVersion?}
  *   POST /api/canvas/tabs    {session,id,op:'add'|'rename'|'delete',tab?,title?,content?}
  *   POST /api/canvas/settings {session,id,settings}   export setup (merged; null clears a key)
- *   GET  /api/canvas/templates                   document templates for "New from template"
+ *   GET  /api/canvas/templates                   the document types (canvas/doc-types) for "New from template"
  *   POST /api/canvas/create  {session,title,kind?,content?,tabs?,template?,settings?}  a document the person starts
  *   GET  /api/canvas/:id/comments?session=
  *   POST /api/canvas/:id/comments               {session,tabId,anchor,body,askAgent?}
  *   POST /api/canvas/:id/comments/:cid/replies  {session,body}
  *   POST /api/canvas/:id/comments/:cid/resolve  {session,resolved?}
  *   GET  /api/canvas/:id/export?session=&format=md|html|docx|pdf&tab=&toc=1&settings=<json>
+ *                                                (a sheet: format=xlsx|csv&sheet=)
+ *   POST /api/canvas/import  {session,name,data(base64),title?}   a .xlsx/.csv as a new sheet canvas
+ *   POST /api/canvas/rename  {session,id,title}
  *
  * A save based on a stale version of its tab is a 409 carrying the current
  * document, so the editor can offer "keep mine" or "take the agent's" instead
@@ -33,13 +36,20 @@ import type http from 'http';
 import { loadSettings } from '../settings.js';
 import {
   CanvasNotFound, CanvasTabNotFound, CommentNotFound, addComment, addTab, createCanvas, deleteTab, getCanvas, isCanvasId,
-  listCanvases, listComments, renameTab, replyToComment, resolveComment, restoreCanvas, setDocSettings, writeCanvas,
+  listCanvases, listComments, renameCanvas, renameTab, replyToComment, resolveComment, restoreCanvas, setDocSettings, writeCanvas,
   type CanvasComment, type CanvasContext,
 } from '../canvas/store.js';
 import { EXPORT_FORMATS, exportCanvas, type ExportFormat } from '../canvas/export.js';
 import { workspaceImages } from '../canvas/markdown.js';
-import { TEMPLATES, mergeSettings, templateById } from '../canvas/doc-settings.js';
+import { mergeSettings } from '../canvas/doc-settings.js';
+import { DOC_TYPES, docTypeById, docTypeSummary } from '../canvas/doc-types.js';
 import { pendingLine } from '../canvas/sections.js';
+import { SHEET_EXPORT_FORMATS, SHEET_MEDIA, exportSheet, importSheetFile, type SheetExportFormat } from '../canvas/sheet-xlsx.js';
+import { parseBook, serializeBook } from '../../shared/ui/canvas/sheet-model.js';
+import { fileBase } from '../canvas/markdown.js';
+
+/** Largest file `canvas/import` takes (the body is base64, a third larger). */
+export const SHEET_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 
 export interface CanvasRouteDeps {
   resolveCwd: (sessionId: string) => Promise<string>;
@@ -77,7 +87,7 @@ export async function handleCanvasRoute(
 
   try {
     if (route === 'canvas/templates' && method === 'GET') {
-      send(res, 200, { templates: TEMPLATES });
+      send(res, 200, { templates: DOC_TYPES.map(docTypeSummary) });
       return true;
     }
 
@@ -88,9 +98,9 @@ export async function handleCanvasRoute(
       };
       const sessionId = body.session ?? body.sessionId ?? '';
       if (!SESSION.test(sessionId)) { send(res, 400, { error: 'session required' }); return true; }
-      const template = body.template !== undefined ? templateById(body.template) : undefined;
+      const template = body.template !== undefined ? docTypeById(body.template) : undefined;
       if (body.template !== undefined && !template) {
-        send(res, 400, { error: `unknown template; one of ${TEMPLATES.map(t => t.id).join(', ')}` });
+        send(res, 400, { error: `unknown template; one of ${DOC_TYPES.map(t => t.id).join(', ')}` });
         return true;
       }
       const docSettings = mergeSettings(template?.docSettings, body.settings ?? body.docSettings ?? {});
@@ -104,12 +114,40 @@ export async function handleCanvasRoute(
         : undefined;
       const canvas = await createCanvas(await ctxFor(sessionId), {
         title: typeof body.title === 'string' && body.title.trim() ? body.title : template?.title ?? 'Untitled',
-        kind: body.kind === 'code' ? 'code' : 'document', content, author: 'user',
+        kind: body.kind === 'code' || body.kind === 'sheet' ? body.kind : 'document', content, author: 'user',
         ...(typeof body.language === 'string' ? { language: body.language } : {}),
         ...(tabs?.length ? { tabs } : {}),
         ...(Object.keys(docSettings).length ? { docSettings } : {}),
       });
       send(res, 200, { canvas });
+      return true;
+    }
+
+    if (route === 'canvas/import' && method === 'POST') {
+      const body = await deps.readJson(req) as { session?: string; sessionId?: string; name?: unknown; data?: unknown; title?: unknown };
+      const sessionId = body.session ?? body.sessionId ?? '';
+      if (!SESSION.test(sessionId)) { send(res, 400, { error: 'session required' }); return true; }
+      if (typeof body.name !== 'string' || typeof body.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(body.data)) {
+        send(res, 400, { error: 'name and base64 data required' });
+        return true;
+      }
+      const bytes = Buffer.from(body.data, 'base64');
+      if (!bytes.length || bytes.length > SHEET_IMPORT_MAX_BYTES) { send(res, 400, { error: 'import a file of 1 byte to 25 MB' }); return true; }
+      const book = importSheetFile(body.name, new Uint8Array(bytes));
+      const canvas = await createCanvas(await ctxFor(sessionId), {
+        title: typeof body.title === 'string' && body.title.trim() ? body.title : body.name.replace(/\.[^.]+$/, ''),
+        kind: 'sheet', content: serializeBook(book), author: 'user', note: `Imported ${body.name.slice(0, 80)}`,
+      });
+      send(res, 200, { canvas });
+      return true;
+    }
+
+    if (route === 'canvas/rename' && method === 'POST') {
+      const body = await deps.readJson(req) as { session?: string; sessionId?: string; id?: unknown; title?: unknown };
+      const sessionId = body.session ?? body.sessionId ?? '';
+      if (!SESSION.test(sessionId) || !isCanvasId(body.id)) { send(res, 400, { error: 'session and id required' }); return true; }
+      if (typeof body.title !== 'string' || !body.title.trim()) { send(res, 400, { error: 'title required' }); return true; }
+      send(res, 200, { canvas: await renameCanvas(await ctxFor(sessionId), body.id, body.title) });
       return true;
     }
 
@@ -207,6 +245,24 @@ export async function handleCanvasRoute(
       const ctx = await ctxFor(sessionId);
 
       if (kind === 'export' && method === 'GET' && !cid) {
+        const sheetDoc = await getCanvas(ctx, id);
+        if (sheetDoc?.kind === 'sheet') {
+          const sf = String(url.searchParams.get('format') ?? 'xlsx').toLowerCase() as SheetExportFormat;
+          if (!SHEET_EXPORT_FORMATS.includes(sf)) { send(res, 400, { error: `a sheet exports as ${SHEET_EXPORT_FORMATS.join(' or ')}` }); return true; }
+          const sheet = url.searchParams.get('sheet') || undefined;
+          const bytes = exportSheet(parseBook(sheetDoc.tabs[0]!.content), sf, { title: sheetDoc.title, ...(sheet ? { sheet } : {}) });
+          const fileName = `${fileBase(sheetDoc.title)}.${sf}`;
+          res.writeHead(200, {
+            'Content-Type': SHEET_MEDIA[sf],
+            'Content-Length': bytes.length,
+            'Content-Disposition': `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': 'no-store',
+            'X-AICO-Export-Warnings': '0',
+          });
+          res.end(bytes);
+          return true;
+        }
         const format = String(url.searchParams.get('format') ?? '').toLowerCase() as ExportFormat;
         if (!EXPORT_FORMATS.includes(format)) { send(res, 400, { error: `format must be one of ${EXPORT_FORMATS.join(', ')}` }); return true; }
         const doc = await getCanvas(ctx, id);

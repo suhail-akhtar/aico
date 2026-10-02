@@ -26,7 +26,7 @@ import type {
   HandoffPrompt, LegacyTab, PermissionPrompt, ReadResult, TabError, TabState,
 } from './types';
 
-export type InternalPage = 'history' | 'bookmarks' | 'downloads' | 'insights' | 'privacy' | 'passwords';
+export type InternalPage = 'history' | 'bookmarks' | 'downloads' | 'insights' | 'privacy' | 'passwords' | 'teach';
 
 interface BrowserStore {
   state: BrowserState;

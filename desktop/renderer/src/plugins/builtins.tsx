@@ -23,6 +23,7 @@ import { ChatView } from '@/chat/ChatView';
 import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection, BrowserSection, AboutSection } from '@/settings/sections/AppSections';
 import { CredentialManager } from '@/settings/CredentialManager';
 import { ToolsPane } from '@web/components/settings/ToolsPane';
+import { LearnedPane } from '@web/components/settings/LearnedPane';
 
 import { ModelsSection, SkillsSection, McpSection, AgentsSection, enginePaneSection } from '@/settings/sections/AgentSections';
 
@@ -30,6 +31,9 @@ import { ModelsSection, SkillsSection, McpSection, AgentsSection, enginePaneSect
 const CredentialsSection = (): React.ReactElement => <CredentialManager />;
 // Settings → Custom tools: the engine's shared panel (web ToolsPane) — list, read, enable, test.
 const ToolsSection = (): React.ReactElement => <ToolsPane />;
+// Settings → What AICO learned: the engine's shared page (web LearnedPane) plus its two switches (ADR 0016).
+const LearnedPaneSettings = enginePaneSection('learned');
+const LearnedSection = (): React.ReactElement => <><LearnedPane /><div className="mt-6"><LearnedPaneSettings /></div></>;
 
 const lazyPage = <T extends string>(load: () => Promise<Record<T, React.ComponentType<{ params?: Record<string, string> }>>>, name: T) =>
   lazy(() => load().then(m => ({ default: m[name] })));
@@ -93,6 +97,7 @@ export const BUILTINS: BuiltinPlugin[] = [
       { id: 'about', title: 'About', icon: 'info', group: 'app', order: 99, component: AboutSection },
       { id: 'models', title: 'Models', icon: 'sparkles', group: 'agent', order: 10, component: ModelsSection },
       { id: 'personalization', title: 'Personalization', icon: 'brain', group: 'agent', order: 11, component: enginePaneSection('memory') },
+      { id: 'learned', title: 'What AICO learned', icon: 'sparkles', group: 'agent', order: 11.5, component: LearnedSection },
       { id: 'permissions', title: 'Permissions', icon: 'shield', group: 'agent', order: 12, component: enginePaneSection('agent') },
       { id: 'context', title: 'Context & long runs', icon: 'layers', group: 'agent', order: 13, component: enginePaneSection('context') },
       { id: 'limits', title: 'Limits & spend', icon: 'activity', group: 'agent', order: 14, component: enginePaneSection('limits') },

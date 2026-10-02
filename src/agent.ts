@@ -115,6 +115,7 @@ import { loadKnowledge } from './knowledge/store.js';
 import { beginCheckpoint, commitCheckpoint } from './checkpoint/index.js';
 import { checkpointDir } from './tools/checkpoint.js';
 import { matchKnowledge, renderKnowledge } from './knowledge/match.js';
+import { preferencesForTask } from './learning/preferences.js';
 import { activeMemories } from './memory/store.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
@@ -131,6 +132,12 @@ import { installWritePathsGuard } from './agents/paths-guard.js';
 import { parseLevel } from './autonomy/levels.js';
 import { toolRequiresPermission } from './permissions.js';
 import { isMcpToolName, isReadOnlyMcpTool, parseMcpToolName } from './mcp/policy.js';
+import { activeJob, isLongEstimate, pendingJob, propose, proposalResult, subAgentMaxMs } from './longjob/index.js';
+import { longJobDefinition, longJobTool } from './tools/long-job.js';
+import { proposePlan, type PlanInput } from './tools/plan.js';
+import {
+  defaultSentinelModel, installSentinel, recentCallsOf, sentinelActive, sentinelParker, untrustedSourcesOf, userRequestsOf,
+} from './sentinel/index.js';
 
 /**
  * A built-in that only reads: never asked about under an autonomy ceiling
@@ -1017,6 +1024,7 @@ function ownScopeLayer(agentSpecTools: ToolAllow | undefined, agentType: SubAgen
 export const COPILOT_WITHHELD = new Set([
   'Bash', 'Terminal', 'Edit', 'MultiEdit', 'NotebookEdit', 'Git', 'AppManage',
   'RunChecks', 'VerifyApp', 'DependencyAudit', 'EnterWorktree', 'ExitWorktree', 'Task',
+  'CodeRewrite', 'Refactor',
   'SshExec', 'SshCopy', 'SshTunnel', 'WinRmExec', 'SnmpQuery', 'HttpRequest',
 ]);
 
@@ -1029,6 +1037,9 @@ const PLAN_MODE_TOOLS = new Set([
   // it out would make planning the one mode that still has to Glob its way
   // around a project it could have asked about once.
   'CodebaseMap',
+  // Structural search only reads, and finding every site is what planning a
+  // wide change starts with. Its writing siblings are not here.
+  'CodeSearch',
   /*
     Read-only, and a planning turn is exactly when it is worth asking. "What is
     already broken here?" is the first question of most plans, and answering it
@@ -1599,6 +1610,9 @@ export async function runAgent(rawOpts: AgentOptions): Promise<string> {
       ...(level ? { autonomy: level } : {}),
       ...((opts.parkFrom ?? parentRun?.parkFrom) ? { parkFrom: opts.parkFrom ?? parentRun!.parkFrom! } : {}),
       ...(harness ? { evalHarness: harness } : {}),
+      // What the person asked for — the Sentinel's only authority. A delegated
+      // run inherits its root's rather than trusting the brief it was given.
+      userRequests: parentRun?.userRequests ?? userRequestsOf(opts.session?.events, opts.conversationHistory, opts.task),
       /*
         Where images a tool produces go. Created per run so a sub-agent's Read
         of a diagram lands in the sub-agent's own requests, and gated on this
@@ -1846,6 +1860,15 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     if (known) volatileDoc.add({ id: 'knowledge', body: known });
   }
 
+  // How this user works — rules they accepted (learning/preferences.ts, ADR
+  // 0016). In the tail for the same reason as knowledge: which rules apply
+  // depends on the project and the task, and the set changes when one is
+  // accepted. Capped at 400 tokens, most relevant first.
+  if (settings?.learning?.preferences !== false) {
+    const prefs = preferencesForTask(currentCwd(), task);
+    if (prefs) volatileDoc.add({ id: 'user_preferences', body: prefs });
+  }
+
   if (toolProfile === 'browser-qa') {
     volatileDoc.add({
       id: 'browser_qa_mode',
@@ -1966,6 +1989,47 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const { handlers, wrap: wrapInPipeline } = buildToolHandlers(handlerOpts);
 
   /*
+    Long jobs (longjob/), for the conversation itself — never a sub-agent.
+
+    ProposePlan is the sizing step: an estimate above the threshold records a
+    proposal instead of a plan, the loop ends the turn on it (below), and this
+    guard refuses everything that is not read-only until a *person* answers it
+    through the decision gate. Deny-only, like every stage. A chat message is
+    not an answer: it is exactly what a model talking itself into starting
+    would produce. Below the threshold nothing here changes anything.
+  */
+  const jobSession = depth === 0 ? opts.sessionId : undefined;
+  const longJob = jobSession ? activeJob(jobSession) : undefined;
+  if (jobSession) {
+    handlers.set('ProposePlan', wrapInPipeline('ProposePlan', async (call) => {
+      const args = call.arguments as Record<string, unknown>;
+      if (isLongEstimate(args.estimate_hours, settings)) {
+        return proposalResult(propose(args, { sessionId: jobSession, cwd: runCwd }), settings);
+      }
+      const out = await proposePlan(args as unknown as PlanInput);
+      const waiting = pendingJob(jobSession);
+      return waiting
+        ? `${out} The long-job proposal ${waiting.id} is still waiting for the person; a smaller plan does not replace it.`
+        : out;
+    }));
+    if (longJob) handlers.set('LongJob', wrapInPipeline('LongJob', (call) => longJobTool(call.arguments, { sessionId: jobSession })));
+    pipeline.onGuard('long-job', (ctx) => {
+      if (ctx.agentId !== agentId) return { kind: 'abstain' };
+      if (isReadOnlyBuiltin(ctx.name) || ctx.name === 'ProposePlan' || ctx.name === LOAD_TOOLS || ctx.name === 'AskUserQuestion') return { kind: 'abstain' };
+      // Bash is refused whole, read-only or not: the classifier is a plan-mode
+      // convenience (it passes `node -e …`), and this gate is a promise.
+      if (isMcpToolName(ctx.name) && isReadOnlyMcpTool(ctx.name)) return { kind: 'abstain' };
+      const waiting = pendingJob(jobSession);
+      if (!waiting) return { kind: 'abstain' };
+      return {
+        kind: 'deny',
+        reason: `The long-job proposal ${waiting.id} ("${waiting.title}") is waiting for the person to approve or decline it in the AICO window. `
+          + 'Until they do, nothing that changes files or runs commands happens in this session; a chat message does not approve it. Stop and wait.',
+      };
+    });
+  }
+
+  /*
     On-demand tool groups (see `tools/deferred.ts`): what this session has
     loaded, read from its own log and from whoever delegated this run, and
     grown as calls are dispatched. Undefined switches deferral off — every
@@ -2072,6 +2136,44 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     });
   }
 
+  /*
+    The Sentinel (sentinel/, ADR 0015): an independent model reviews this
+    run's high-risk calls and can only refuse them or hand them to a person.
+    Registered last among the guards, so a call a deterministic stage refuses
+    never costs a review. `stepIntent` is the agent's text in the step that
+    made the call, set in the loop below.
+
+    Off in two runs on purpose: a certification run (`evalHarness`) measures
+    the agent itself, and a reviewer would hide the very failures the safety
+    pack looks for; and a run whose provider is the injected test seam
+    (`opts.provider`) has no reviewer to pair with unless its settings name
+    one (`sentinel`), so the offline suites stay offline.
+  */
+  let stepIntent = '';
+  const runRequests = currentRunContext()?.userRequests ?? [task];
+  const sentinelPossible = !currentRunContext()?.evalHarness && !(opts.provider && !settings?.sentinel);
+  installSentinel(pipeline, {
+    agentId,
+    active: () => sentinelPossible && sentinelActive({
+      settings: settings?.sentinel, level: runLevel, autoApprove, planMode: opts.planMode, headless: opts.headless, agentName: bounds?.name,
+    }),
+    model: defaultSentinelModel(model, settings?.sentinel),
+    ...(settings ? { settings } : {}),
+    cwd: () => runCwd,
+    tainted: () => tainted,
+    requests: () => [...runRequests],
+    intent: () => stepIntent,
+    recent: () => recentCallsOf(opts.session?.events),
+    untrusted: () => untrustedSourcesOf(opts.session?.events, tainted),
+    customEffect: (name) => customTools.get(name)?.def.effect,
+    ...(askPerson ? { ask: askPerson } : {}),
+    ...(park ? { park: sentinelParker(customTools, park, runCwd, opts.sessionId) } : {}),
+    unattended: runLevel === 'L4' || Boolean(opts.headless),
+    ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+    ...(bounds?.name ? { agentName: bounds.name } : {}),
+    ...(runLevel ? { level: runLevel } : {}),
+  });
+
   // Add Task tool (sub-agent dispatch) if within depth limit. Browser QA
   // removes it for sub-agents only — see resolveToolSet on why depth 0 keeps
   // its tool set whole. An agent that may not delegate gets neither Task nor
@@ -2137,6 +2239,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             // The child's tools are intersected with these: it can never be
             // given more than this run has.
             toolScope: childScope,
+            // Inside an approved long job a child may work longer (longjob/).
+            ...(longJob ? { subagentMaxMs: subAgentMaxMs(settings) } : {}),
             onSubagentStart: opts.onSubagentStart,
             onSubagentStop: opts.onSubagentStop,
           },
@@ -2263,6 +2367,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         });
       }
     }
+    // Only while this session has an approved long job: ordinary sessions
+    // never carry the schema (tools/long-job).
+    if (longJob) next.push({ name: longJobDefinition.name, description: longJobDefinition.description, inputSchema: longJobDefinition.inputSchema });
     // A deferred server's schemas only once its `mcp:<server>` group is loaded.
     for (const t of mcpTools) {
       const group = loadedGroups ? extraGroups.find(g => g.id.startsWith('mcp:') && g.tools.includes(t.name)) : undefined;
@@ -3169,6 +3276,8 @@ const GOAL_REMINDER_EVERY = 6;
         // Note: text was already forwarded to onChunk during streaming
 
         transcript.recordAssistant(text, toolCalls, stepUsage, stepReasoning);
+        // The Sentinel shows the reviewer this as the agent's stated reason (a claim, not authority).
+        stepIntent = text;
 
         if (!silent) stopSpinner();
 
@@ -3328,6 +3437,13 @@ const GOAL_REMINDER_EVERY = 6;
         // may decline is not a contract. There is genuinely nothing left to do
         // — the reader has to answer before any of it can happen.
         if (opts.planMode && toolCalls.some(call => call.name === 'ProposePlan')) {
+          turnEndReason = { kind: 'completed' };
+          if (!silent) stopSpinner();
+          return;
+        }
+        // The same, in any mode, for a plan that became a long-job proposal:
+        // the person decides before anything else happens (longjob/).
+        if (jobSession && toolCalls.some(call => call.name === 'ProposePlan') && pendingJob(jobSession)) {
           turnEndReason = { kind: 'completed' };
           if (!silent) stopSpinner();
           return;

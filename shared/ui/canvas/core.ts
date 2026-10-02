@@ -20,7 +20,7 @@ export function parseCanvasRef(source: string): CanvasRef {
   if (!o || typeof o !== 'object' || typeof o.id !== 'string' || !ID.test(o.id)) {
     throw new Error('a canvas block needs the "id" the Canvas tool returned');
   }
-  const kind: CanvasKind | undefined = o.kind === 'code' ? 'code' : o.kind === 'document' ? 'document' : undefined;
+  const kind: CanvasKind | undefined = o.kind === 'code' || o.kind === 'document' || o.kind === 'sheet' ? o.kind : undefined;
   return {
     id: o.id,
     ...(typeof o.title === 'string' && o.title.trim() ? { title: o.title.trim().slice(0, 120) } : {}),
@@ -44,6 +44,7 @@ const EXTENSIONS: Record<string, string> = {
 /** The extension a canvas downloads with: .md for a document, the language's own for code. */
 export function canvasExtension(kind: CanvasKind, language?: string): string {
   if (kind === 'document') return 'md';
+  if (kind === 'sheet') return 'xlsx';
   return EXTENSIONS[(language ?? '').toLowerCase()] ?? 'txt';
 }
 

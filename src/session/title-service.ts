@@ -184,7 +184,7 @@ export async function generateModelTitle(
  * a thinking model can spend the entire allowance reasoning and return an empty
  * string — a silent failure that looks exactly like the feature being broken.
  */
-function withoutReasoning(settings: AicoSettings): AicoSettings {
+export function withoutReasoning(settings: AicoSettings): AicoSettings {
   const providers = (settings.providers ?? {}) as Record<string, Record<string, unknown>>;
   return {
     ...settings,

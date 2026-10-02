@@ -144,11 +144,13 @@ export interface ProtocolOptions {
  * Settings actions that need a person, not just the token: installing and
  * enabling an imported skill after its review screen (design §5.1), and the
  * person's own skill saved from the editor, and approving a call parked in
- * the inbox (Phase 7). The renderer is the AICO window —
+ * the inbox (Phase 7), and approving or resuming a long job (longjob/), and
+ * putting a learned preference rule in force (learning/preferences.ts).
+ * The renderer is the AICO window —
  * a request from it is the person's click — so main attaches a grant here;
  * plugin frames are sandboxed with `connect-src 'none'` and cannot reach it.
  */
-const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide']);
+const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act']);
 
 /**
  * Vault routes the interface may never call: they return a value, or mint

@@ -151,6 +151,14 @@ export interface RunContext {
   /** Where a call parked by this run (or a child) says it came from. */
   parkFrom?: { origin: import('./autonomy/inbox.js').ActionOrigin; label?: string };
   /**
+   * What the person asked for in the conversation this run serves, oldest
+   * first — the Sentinel's only source of authority (sentinel/). Set by the
+   * top-level run from its session and task and inherited by delegated runs,
+   * so a sub-agent's call is judged against the user's words, not against a
+   * brief the (possibly misled) parent wrote.
+   */
+  userRequests?: readonly string[];
+  /**
    * Evaluation only (`evals/run`, design §6.2): answers calls whose real
    * effect must not happen during a certification run, and records every
    * call after the guards. On the context so a delegated child is mocked

@@ -13,6 +13,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore, type PlanAnswer } from '@web/store';
 import { planFrom } from '@web/plans';
+import { LongJobCard, useLongJob } from '@web/components/LongJobCard';
 import { todosFrom } from '@web/todos';
 import { Icon } from '@/lib/icons';
 import { cls, duration } from '@/lib/util';
@@ -109,6 +110,9 @@ function PlanApproval(): React.ReactElement | null {
   const busy = useStore(s => s.busy);
   const [sending, setSending] = useState(false);
   const { plan, decision } = useMemo(() => planFrom(messages), [messages]);
+  // A plan over the long-job threshold is answered on its own card, as a person (engine: longjob/).
+  const [longJob, refreshLongJob] = useLongJob(plan?.title, `${messages.length}:${busy}`);
+  if (plan && longJob && ['pending', 'running', 'paused'].includes(longJob.status)) return <LongJobCard job={longJob} onChange={refreshLongJob} />;
   if (!plan || decision !== undefined) return null;
   const act = async (d: PlanAnswer): Promise<void> => { setSending(true); try { await answerPlan(d); } finally { setSending(false); } };
   return (

@@ -8,7 +8,10 @@
  * it can refuse a write, never allow one another stage refused.
  *
  * What it binds, honestly: Write, Edit, MultiEdit and NotebookEdit, by their
- * path argument, resolved against the run's directory. A write-capable call
+ * path argument, resolved against the run's directory; and an apply of
+ * CodeRewrite or Refactor, by every file of the plan it would land
+ * (`refactor/plan` — an apply only ever writes a plan already shown, so the
+ * targets are known before it runs). A write-capable call
  * whose path argument is missing is refused (an unrecognised shape is the one
  * not to permit). It does **not** bind Bash, Terminal, Git, the editor's
  * rename/format, or any process the agent starts — a command line is not a
@@ -26,6 +29,7 @@
 import path from 'path';
 import type { ToolPipeline } from '../tools/pipeline.js';
 import type { WriteBound } from './effective.js';
+import { plannedWriteTargets } from '../refactor/plan.js';
 
 /** Tools whose writes this guard governs, and the argument naming the target. */
 export const WRITE_PATH_ARGUMENTS: Readonly<Record<string, string>> = {
@@ -86,6 +90,14 @@ export function installWritePathsGuard(pipeline: ToolPipeline, opts: {
 }): () => void {
   return pipeline.onGuard('agent-paths', (ctx) => {
     if (ctx.agentId !== opts.agentId) return { kind: 'abstain' };
+    const planned = plannedWriteTargets(ctx.name, ctx.arguments);
+    if (planned) {
+      for (const target of planned) {
+        const refused = writeRefusal(opts.bounds, target, opts.cwd());
+        if (refused) return { kind: 'deny', reason: `${ctx.name} would change files outside this agent's write paths. ${refused}` };
+      }
+      return { kind: 'abstain' };
+    }
     const key = WRITE_PATH_ARGUMENTS[ctx.name];
     if (!key) return { kind: 'abstain' };
     const target = ctx.arguments?.[key];

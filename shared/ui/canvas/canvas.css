@@ -184,7 +184,8 @@
 .aw .acv-empty { display: grid; place-items: center; flex: 1; padding: 24px; font-size: 13px; color: var(--aico-text-muted); text-align: center; }
 
 /* ══ AICO Docs — the page view ════════════════════════════════════════
- * A document page beside the chat: a comfortable measure (~720px), serif
+ * A document page beside the chat: a width the document chooses (Narrow /
+ * Normal / Wide / Full, `--adoc-page-w`, always centred), serif
  * headings, generous spacing, the agent's live work marked in the accent
  * colour. Everything is built on the same tokens, so light, dark and the
  * VS Code themes apply unchanged; container queries (not the viewport)
@@ -260,20 +261,82 @@
   background: var(--aw-raised);
 }
 .aw .adoc-scroll.is-dropping { outline: 2px dashed var(--aico-accent); outline-offset: -8px; }
-.aw .adoc-sheet { position: relative; display: grid; grid-template-columns: minmax(0, 760px); justify-content: center; padding: 28px 24px 96px; gap: 28px; }
-.aw .adoc-sheet.is-wide { grid-template-columns: minmax(0, 760px) 290px; }
+.aw .adoc-sheet {
+  position: relative; display: grid; grid-template-columns: minmax(0, var(--adoc-page-w, 816px)); justify-content: center;
+  padding: 28px 24px 96px; gap: 28px;
+}
+/* Gutter · page · gutter: the comment margin takes the right gutter, so the page stays centred. */
+.aw .adoc-sheet.is-wide { grid-template-columns: minmax(0, 1fr) minmax(0, var(--adoc-page-w, 816px)) minmax(0, 1fr); justify-content: stretch; }
+.aw .adoc-sheet.is-wide > .adoc-page { grid-column: 2; grid-row: 1; }
+.aw .adoc-sheet.is-wide > .adoc-margin { grid-column: 3; grid-row: 1; width: 290px; max-width: 100%; justify-self: start; }
+.aw .adoc-sheet[data-width='full'] { padding-left: 16px; padding-right: 16px; }
 .aw .adoc-page {
   position: relative; min-width: 0; padding: 48px 64px 72px; border: 1px solid var(--aw-soft); border-radius: 6px;
   background: var(--aw-card); box-shadow: 0 1px 3px rgba(15, 17, 21, 0.06); min-height: 70vh;
 }
 @container (max-width: 700px) {
-  .aw .adoc-sheet { padding: 0; gap: 0; }
+  .aw .adoc-sheet, .aw .adoc-sheet[data-width='full'] { padding: 0; gap: 0; }
   .aw .adoc-page { padding: 28px 24px 64px; border: 0; border-radius: 0; box-shadow: none; }
 }
 @container (max-width: 420px) {
   .aw .adoc-page { padding: 20px 16px 56px; }
 }
 .aw.acv[data-focus='1'] .adoc-page { min-height: calc(100vh - 160px); }
+
+/* The document's look (round 3). Every page gets the --dt-* variables the block styles and the
+   theme rules (doc-themes.ts, injected by DocPage) read; a themed page brings its accent and faces,
+   lightened in dark mode so a dark accent still reads. */
+.aw .adoc-page {
+  --dt-ink: var(--aico-text-primary); --dt-muted: var(--aico-text-secondary); --dt-rule: var(--aw-line);
+  --dt-accent: var(--aico-accent); --dt-accent-ui: var(--aico-accent); --dt-accent-fill: var(--aico-accent);
+  --dt-tint: color-mix(in srgb, var(--aico-accent) 7%, var(--aw-card));
+}
+.aw .adoc-page[data-dt] {
+  --dt-accent-ui: var(--dt-accent); --dt-accent-fill: var(--dt-accent);
+  --dt-tint: color-mix(in srgb, var(--dt-accent) 8%, var(--aw-card));
+}
+:root[data-theme='dark'] .aw .adoc-page[data-dt], .dark .aw .adoc-page[data-dt] {
+  --dt-accent-ui: color-mix(in srgb, var(--dt-accent) 45%, #ffffff);
+  --dt-accent-fill: color-mix(in srgb, var(--dt-accent) 80%, #000000);
+  --dt-tint: color-mix(in srgb, var(--dt-accent) 20%, var(--aw-card));
+}
+.aw .adoc-page[data-dt] .adoc-body.markdown-body { font-family: var(--dt-body); }
+.aw .adoc-page[data-dt] .adoc-stat-value, .aw .adoc-page[data-dt] .adoc-compare-title { font-family: var(--dt-head); }
+.aw .adoc-page[data-dt] .adoc-stat { border-top: 3px solid var(--dt-accent-ui); }
+.aw .adoc-page[data-dt] .adoc-step-n { background: var(--dt-accent-fill); }
+.aw .adoc-page[data-dt] .adoc-tl-when, .aw .adoc-page[data-dt] .adoc-compare-note { color: var(--dt-accent-ui); }
+.aw .adoc-page[data-dt] .adoc-tl-dot { border-color: var(--dt-accent-ui); }
+.aw .adoc-classification {
+  margin: -24px 0 24px; padding: 3px 8px; border: 1px solid rgba(220, 38, 38, 0.35); border-radius: 4px; background: rgba(220, 38, 38, 0.07);
+  color: #dc2626; font: 700 11px/1.5 var(--aico-font); letter-spacing: 0.16em; text-align: center; text-transform: uppercase;
+}
+.aw .adoc-classification.is-bottom { margin: 28px 0 -36px; }
+.aw .adoc-watermark {
+  position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; pointer-events: none; z-index: 0;
+  font: 800 clamp(40px, 9vw, 110px)/1 var(--aico-font); letter-spacing: 0.08em; color: color-mix(in srgb, var(--aico-text-muted) 13%, transparent);
+}
+/* Only the text turns: a rotated box would overflow the page and scroll it sideways. */
+.aw .adoc-watermark > span { transform: rotate(-32deg); white-space: nowrap; }
+.aw .adoc-letterhead { display: flex; align-items: flex-end; padding-bottom: 10px; margin-bottom: 26px; border-bottom: 2px solid var(--dt-accent-ui); }
+.aw .adoc-lh-name { font: 700 24px/1.2 var(--dt-head, Georgia, serif); color: var(--dt-accent-ui); }
+.aw .adoc-docblock-error { padding: 8px 12px; border: 1px dashed var(--aw-line); border-radius: 8px; font: 13px var(--aico-font); color: #c2410c; }
+.aw .adoc-docblock-name { font-size: 12.5px; font-weight: 700; }
+.aw .adoc-docblock-top { display: flex; flex-wrap: wrap; gap: 8px 10px; }
+.aw .adoc-docblock-top > .adoc-field { flex: 1 1 120px; }
+.aw .adoc-docblock-top > .adoc-field.is-check { flex: 0 0 auto; flex-direction: row-reverse; align-items: center; justify-content: flex-end; }
+.aw .adoc-docblock-top textarea { min-height: 60px; }
+.aw .adoc-docblock-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 10px; align-items: start; }
+.aw .adoc-docblock-cols .adoc-field > span { display: flex; align-items: center; justify-content: space-between; }
+.aw .adoc-grid-edit tr.is-section td { background: var(--aw-raised); }
+.aw .adoc-grid-edit select.adoc-cell { padding: 0 4px; }
+.aw .adoc-icon-pick { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid var(--aw-soft); border-radius: 9px; background: var(--aw-raised); }
+.aw .adoc-icon-pick button {
+  display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 5px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--aico-text-secondary); font-size: 11.5px; font-weight: 600;
+}
+.aw .adoc-icon-pick button.is-on { background: var(--aw-card); color: var(--aico-accent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.aw .adoc-callout-icon { display: inline-flex; }
+.aw .adoc-page .db-cols .markdown-body { font-size: inherit; line-height: inherit; }
 
 /* Document typography */
 .aw .adoc-body.markdown-body { font-size: 16px; line-height: 1.72; }
@@ -412,7 +475,7 @@
 .aw .adoc-new-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .aw .adoc-ask-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--aico-text-secondary); cursor: pointer; }
 .aw .adoc-ask-check input { accent-color: var(--aico-accent); }
-.aw .adoc-orphans { grid-column: 1 / -1; max-width: 760px; width: 100%; justify-self: center; }
+.aw .adoc-orphans { grid-column: 1 / -1; max-width: var(--adoc-page-w, 816px); width: 100%; justify-self: center; }
 .aw .adoc-orphans-head { margin: 4px 0 8px; font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--aico-text-muted); }
 .aw .adoc-orphans-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-bottom: 10px; }
 .aw .adoc-drawer {
@@ -503,10 +566,13 @@
 
 /* Infographics */
 .aw .adoc-inline-md .markdown-body, .aw .adoc-inline-md .markdown-body p { display: inline; margin: 0; font-size: inherit; line-height: inherit; color: inherit; }
-.aw .adoc-stats { display: grid; gap: 12px; }
-@container (max-width: 560px) { .aw .adoc-stats, .aw .adoc-compare { grid-template-columns: minmax(0, 1fr) !important; } }
-.aw .adoc-stat { padding: 16px 18px; border: 1px solid var(--aw-soft); border-radius: 12px; background: var(--aw-raised); font-family: var(--aico-font); }
-.aw .adoc-stat-value { font: 700 28px/1.15 Georgia, 'Source Serif 4', serif; color: var(--aico-text-primary); font-variant-numeric: tabular-nums; }
+.aw .adoc-stats { display: grid; gap: 10px; }
+.aw .adoc-stat { min-width: 0; padding: 13px 14px; border: 1px solid var(--aw-soft); border-radius: 12px; background: var(--aw-raised); font-family: var(--aico-font); }
+/* A value wraps only at a space (the grid's minimum tile width fits its longest word); its size comes from its length. */
+.aw .adoc-stat-value {
+  font: 700 28px/1.15 Georgia, 'Source Serif 4', serif; color: var(--aico-text-primary); font-variant-numeric: tabular-nums;
+  overflow-wrap: normal; word-break: normal; hyphens: manual;
+}
 .aw .adoc-stat-label { margin-top: 4px; font-size: 12.5px; font-weight: 600; color: var(--aico-text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
 .aw .adoc-stat-note { margin-top: 6px; font-size: 12.5px; color: var(--aico-text-muted); }
 .aw .adoc-stat-note.is-up { color: #16a34a; }
@@ -519,12 +585,12 @@
 .aw .adoc-tl-title { font-size: 15.5px; font-weight: 650; color: var(--aico-text-primary); }
 .aw .adoc-tl-detail { font-size: 14px; color: var(--aico-text-secondary); line-height: 1.5; }
 .aw .adoc-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-family: var(--aico-font); }
-.aw .adoc-steps li { display: flex; gap: 12px; align-items: flex-start; margin: 0; list-style: none; }
+.aw .adoc-steps li { display: flex; gap: 12px; align-items: flex-start; margin: 0; list-style: none; min-width: 0; padding: 12px 14px; border: 1px solid var(--aw-soft); border-radius: 12px; background: var(--aw-raised); }
 .aw .adoc-step-n { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--aico-accent); color: #fff; font-weight: 700; font-size: 13px; }
 .aw .adoc-step-title { font-size: 15.5px; font-weight: 650; color: var(--aico-text-primary); line-height: 28px; }
 .aw .adoc-step-detail { font-size: 14px; color: var(--aico-text-secondary); line-height: 1.5; }
 .aw .adoc-compare { display: grid; gap: 12px; font-family: var(--aico-font); }
-.aw .adoc-compare-col { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--aw-soft); border-radius: 12px; background: var(--aw-raised); }
+.aw .adoc-compare-col { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--aw-soft); border-radius: 12px; background: var(--aw-raised); }
 .aw .adoc-compare-title { font: 650 17px/1.3 Georgia, 'Source Serif 4', serif; color: var(--aico-text-primary); }
 .aw .adoc-compare-note { font-size: 12.5px; font-weight: 600; color: var(--aico-accent); }
 .aw .adoc-compare-col.is-highlight { border-color: var(--aico-accent); box-shadow: 0 0 0 1px var(--aico-accent); background: color-mix(in srgb, var(--aico-accent-soft) 60%, var(--aw-raised)); }
@@ -601,3 +667,6 @@
 .aw .adoc-template-name { font-size: 13.5px; font-weight: 650; color: var(--aico-text-primary); }
 .aw .adoc-template-desc { font-size: 11.5px; line-height: 1.4; color: var(--aico-text-muted); }
 .aw .adoc-new-fields { display: flex; flex-direction: column; gap: 10px; padding: 10px 16px 14px; }
+.aw .adoc-accent-row { display: inline-flex; align-items: center; gap: 6px; }
+.aw .adoc-field .adoc-accent-row input[type='color'] { width: 44px; padding: 2px; }
+.aw .adoc-theme-desc { margin: -2px 0 0; font-size: 12px; line-height: 1.45; color: var(--aico-text-muted); }

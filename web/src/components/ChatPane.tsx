@@ -34,6 +34,7 @@ import { SelectionAsk, quoteForComposer } from './SelectionAsk';
 import { composeMessages } from '../reduce';
 import { TurnSummary } from './TurnSummary';
 import { MessageActions } from './MessageActions';
+import { BriefCard } from './BriefCard';
 
 /** How close to the bottom still counts as "following the stream". */
 const FOLLOW_THRESHOLD_PX = 140;
@@ -553,6 +554,7 @@ function EmptyState(): React.ReactElement {
       <p className="mx-auto mt-2 max-w-md text-[15px] text-aico-secondary">
         Ask for something. Steer it while it runs. Close the tab and come back — the run keeps going.
       </p>
+      <BriefCard />
     </div>
   );
 }

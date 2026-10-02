@@ -485,7 +485,8 @@ export function detectEcosystems(root: string): string[] {
   return list;
 }
 
-async function auditOne(eco: string, root: string, signal?: AbortSignal): Promise<EcosystemAudit> {
+/** One ecosystem's audit, structured. Exported for the morning brief's daily advisory check (brief/service). */
+export async function auditOne(eco: string, root: string, signal?: AbortSignal): Promise<EcosystemAudit> {
   const base = (tool: string): EcosystemAudit => ({ ecosystem: eco, tool, status: 'ok', advisories: [], counts: {} });
   const missing = (tool: string, install: string): EcosystemAudit => ({ ...base(tool), status: 'missing', message: `${tool} is not installed; ${install} to audit these dependencies.` });
   const failed = (tool: string, r: Ran): EcosystemAudit => ({ ...base(tool), status: 'error', message: (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 300) || `exit ${r.code}` });

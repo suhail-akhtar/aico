@@ -3,6 +3,271 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+Always on, safer, and learning: long-run jobs that ask before they start, a
+Sentinel that reviews high-risk actions, a morning brief with monitors, AICO
+learning how you work from your feedback, Teach AICO by demonstration in the
+browser, spreadsheets and an Artifacts panel, refactoring tools, and documents
+designed per type.
+
+### Added
+
+- **AICO Sheets: a spreadsheet canvas** (`kind: "sheet"`). A workbook the
+  agent builds and the person edits in a grid beside the chat: several sheets,
+  values or Excel-syntax formulas, number formats (number / currency /
+  percent / date / text), bold, fills, alignment, column widths, a frozen
+  header, conditional fills, a filter row, and charts from a range (the chat's
+  ECharts block). A formula engine of our own (`shared/ui/canvas/sheet-formula.ts`)
+  follows Excel's answers — precedence (`-2^2` is 4), coercion, blanks,
+  criteria, ROUND half away from zero, the 1900 date system — for SUM,
+  AVERAGE, MIN, MAX, COUNT(A), COUNTIF, SUMIF, SUMPRODUCT, IF, IFERROR, AND,
+  OR, NOT, ROUND, ABS, INT, MOD, VLOOKUP, XLOOKUP, TEXT, DATE, TODAY, CONCAT,
+  LEN, UPPER, LOWER; cross-sheet refs; Excel's error codes; circular
+  references are `#REF!` naming the loop; evaluated in dependency order (no
+  recursion limit). The grid: keyboard navigation and editing, paste from
+  Excel/CSV, fill down, insert/delete rows and columns (formulas follow),
+  sort, filter, freeze, undo, live recompute, row virtualisation; unsaved
+  edits replay on top of the agent's newer version. Canvas tool actions
+  `create {kind:"sheet"}`, `read` (a compact `D2: =B2*C2 → 55` table),
+  `set_cells`, `format_cells`, `add_sheet`, `grid_op`, `import`, `export
+  {format: xlsx|csv}` — version-checked like documents, sending only the
+  changed cells; each write reports the computed values and any formula
+  errors. **Export .xlsx** written by hand with fflate (ADR 0008 addendum):
+  real formulas with cached values, `_xlfn.` for newer functions, number
+  formats, fills, widths, frozen pane, autoFilter, live conditional
+  formatting; verified opening in Microsoft Excel. **Import** .xlsx (values,
+  formulas incl. shared formulas, dates — via `tools/xlsx-lite`'s new
+  `cells()`) and .csv (a leading `=` stays text). Routes `POST
+  canvas/import`, `POST canvas/rename`; `canvas/:id/export?format=xlsx|csv`.
+  Tests: `scripts/sheets-test.mjs` (91, in `npm test`), `web/test-canvas.mjs`.
+- **Artifacts panel**: per chat, everything it produced or opened —
+  documents, sheets, code canvases, exported and generated files, images,
+  attachments — grouped by type or by topic, from `GET artifacts/list`
+  (`server/artifact-routes.ts`; also `artifacts/file`, `artifacts/rename`,
+  confined to the session's artifacts folder). Desktop: open, **open beside**
+  (two canvases split side by side), rename, export/download, show in chat.
+  Web: the list in the side rail.
+
+- **Continuous learning from feedback: what AICO learned about how you work**
+  ([ADR 0016](docs/engineering/adr/0016-learning-preferences.md)). Signals —
+  👍/👎 with a note, corrections in your messages ("no, use X", "always…",
+  "never…"), a diff *summary* of hand edits to files or canvases the agent wrote
+  in the last 30 minutes, and choices you repeat (pnpm, tabs, tests first) —
+  are redacted (vault redactor + secret scanner) and queued. A few seconds
+  after a turn or rating that left signals, and in a 6-hourly batch, one call to
+  the family's cheapest model (reasoning off) proposes short scoped rules
+  (global / project / language) with evidence; a deterministic fallback keeps
+  only your own standing statements. Duplicates merge, contradictions replace
+  (an active rule only once you accept its replacement), secrets/personal
+  data/"agree with me" rules are refused, forgotten rules stay forgotten.
+  Rules start **proposed**; accept, decline, edit, disable, forget, add and
+  export them in **Settings → What AICO learned** (web and desktop). Putting a
+  rule in force needs a person, not the API token. Opt-in
+  `learning.autoAcceptStyle` (default off) auto-accepts formatting-only rules,
+  judged in code. Active rules that fit the project/task ride in the request
+  tail, ≤400 tokens, most relevant first — never the cached prefix.
+  `learning.preferences: false` turns it all off. Routes
+  `/api/learning/preferences`, `/act`, `/export`; files under
+  `AICO_HOME/learning/preferences/`. Tests: `scripts/preferences-test.mjs`
+  (55 assertions, in `npm test`, including an offline eval through `runAgent`);
+  `npm run test:preferences:live` (~$0.01) shows a "use pnpm, not npm" rule
+  turning `npm install lodash` into `pnpm add lodash` on the next task.
+
+- **Morning brief and monitors** (`src/brief/`). A daily brief at
+  `brief.time` (08:00 local; off with `brief.enabled: false`) on desktop Home
+  and the web home, with a desktop notification when ready and a history.
+  Gathered without a model: inbox approvals, long jobs, failed/finished
+  background and scheduled runs since the last brief, and — through `gh` when
+  signed in — PRs awaiting your review, your PRs with failing checks or changes
+  requested, new assigned issues and failed Actions on the default branch; new
+  high/critical advisories (`DependencyAudit`'s runners, cached, at most daily);
+  stale branches and uncommitted work; calendar/email only from MCP tools named
+  in `brief.mcp`. Then one call to the family's cheapest model (reasoning off,
+  ≤40 one-line items, titles only, vault-redacted) orders it urgent-first and
+  summarises; it cannot add, drop or demote an urgent item, and an unusable
+  reply falls back to rule order. Every item carries click-only actions (open
+  PR/run, open chat, review in inbox, start a fix in a new chat with the prompt
+  prefilled, not sent). Per-project **monitors** (opt-in: CI on the default
+  branch, review requests, critical advisories) poll with backoff (5 → 30 min
+  idle, up to 60 min on errors), use no model, notify only on change and hold
+  alerts through quiet hours (`brief.quietHours`, 22:00–07:00). A fresh store
+  arms and waits for the next slot; `AICO_BRIEF=off` disables the service.
+  Routes `/api/brief/latest|history|run|monitors`; files under
+  `AICO_HOME/brief/`. Tests: `scripts/brief-test.mjs` (104 assertions with
+  recorded `gh` fixtures, in `npm test`).
+
+- **The Sentinel: a second model that can only say no** ([ADR 0015](docs/engineering/adr/0015-sentinel-reviewer.md)).
+  At L3/L4 and in unattended runs (default `sentinel.mode: auto`), high-risk
+  tool calls — exec/external/destructive custom tools, MCP tools not marked
+  read-only, the ops tools, risky/deploy/push/data-out shell commands, the
+  desktop browser's buy/send/delete clicks and logins, any `{{secret:…}}`,
+  writes to AICO's own settings, and commands or out-of-workspace writes after
+  the session read web/MCP content — are reviewed by an independent cheap
+  model (default `deepseek-v4-pro`, thinking off, when a DeepSeek/OpenRouter
+  key exists). It sees the user's own requests, the call with secrets
+  redacted, the agent's stated reason and recent activity through the
+  injection guard, and answers allow/deny/escalate. It can never approve:
+  allow is "no objection"; deny refuses the call with its reason; escalate goes
+  to your approval card, or at L4 parks a custom tool in the inbox and refuses
+  anything else. Timeouts and unreadable replies escalate, never allow. Reads
+  and ordinary workspace edits are never reviewed. A project's settings may
+  turn it on but not off. Settings → Permissions → Safety reviewer; recent
+  verdicts with cost in Activity → Sentinel (`/api/system/sentinel/list`,
+  `AICO_HOME/sentinel/verdicts.jsonl`). Red-team eval
+  (`scripts/sentinel-eval.mjs`, paid): 10 scenarios, precision/recall 1.00/1.00,
+  0 false stops on requested actions, ~$0.0003 and ~1.2 s per review.
+  Tests: `scripts/sentinel-test.mjs` (82 assertions, in `npm test`).
+
+- **Long jobs, only with your yes** ([ADR 0014](docs/engineering/adr/0014-long-jobs.md)).
+  Not a mode: normal work is unchanged. `ProposePlan` now takes
+  `estimate_hours`; above `longJobs.thresholdHours` (default 3) the plan
+  becomes a proposal — research and requirements, design, milestones with
+  acceptance criteria, time and cost estimate, budget cap — the turn ends, and
+  nothing that writes or runs commands happens in that session until a person
+  approves or declines it on the proposal card (decision gate; the API token
+  and chat messages cannot approve). Once approved it runs milestone by
+  milestone across turns, each turn bounded as before with the session cost
+  breaker set to the remaining budget; a milestone closes only through the new
+  `LongJob` tool, with the project's checks green and evidence for every
+  criterion. It stops at done or the budget/time cap, pauses on cancel, failure
+  or four turns without progress, and resumes after a restart from its
+  append-only journal (`AICO_HOME/long-jobs/<project>/`). Pause/resume/stop on
+  the card; Activity shows the job's milestone and spend; a report is written
+  from the journal. Inside a job sub-agents may run up to
+  `longJobs.subAgentMaxMinutes` (default 60). Always-sent cost: ~165 tokens on
+  the ProposePlan schema; `LongJob` is offered only in a session with an
+  approved job. Tests: `scripts/long-job-test.mjs` (in `npm test`).
+
+- **Wide refactors as one planned, checked step** — a new deferred `refactor`
+  tool group ([ADR 0013](docs/engineering/adr/0013-refactor-tools-ast-grep.md)).
+  `CodeSearch` and `CodeRewrite` match code structurally with ast-grep
+  (`formatPrice($A)` → `formatPrice($A, 'EUR')`; comments, strings and lookalike
+  names untouched); `Refactor` drives the TypeScript language service with no
+  editor — rename (through barrels, re-exports and `import * as`; shorthand keys
+  kept), find references, organize imports, move file (importers updated) and
+  rollback. Every write is a dry run first (files, counts, first hunks), and
+  only the plan that was shown can be applied, by digest; an apply is one
+  checkpoint, then the project's checks run, and on red the failures are shown
+  with a one-call rollback (or it rolls back itself with `onFail: "rollback"`).
+  Effect class `write`; `paths.write` and the sandbox check every file of the
+  plan before an apply runs; plan mode offers only `CodeSearch`. Always-sent
+  prompt cost: one `LoadTools` line. `@ast-grep/cli` is a new **optional**
+  dependency (MIT; a 50–100 MB platform binary); `typescript` is taken from
+  the project first. Measured on a new eng-bench task, `large-refactor` (rename
+  an API used in 151 source files of a generated 210-file TS repo, add a
+  defaulted parameter, pass `'EUR'` in one directory): the tools solve it in
+  four calls, about a second each. With deepseek-flash, one run each, tools
+  hidden vs available: both 10/10; 100 s / 20 steps / $0.023 vs 68 s / 15
+  steps / $0.016 — but the model did not load the group in the "available" run
+  (both runs wrote a word-boundary regex script), so that difference is
+  run-to-run variance, not the tools.
+- **Document themes in AICO Docs.** Sixteen designed looks, one per kind of
+  document — Report/Whitepaper, Research paper, Letter, Memo, CV/Résumé,
+  Proposal/SOW/RFP, Invoice/Quote/BOQ, SOP, Legal/NDA, PRD/Technical spec,
+  Release notes, Meeting minutes, Case study, Press release, Risk assessment,
+  Confidential — each a typography pair, a restrained accent, a heading style
+  (numbered sections for research, legal, SOP and specs), a table style, and
+  header/footer and cover variants (a letterhead for letters, a classification
+  banner and watermark for confidential documents). Chosen in the Export dialog
+  (with an accent override and a classification banner), stored with the
+  document (`docSettings.theme`), and applied on the page you edit and in the
+  PDF, HTML and Word exports alike (`shared/ui/canvas/doc-themes.ts`).
+- **Document blocks**: signature lines, a key-value details box, line items /
+  BOQ with subtotal, discount, tax and total computed exactly in the currency's
+  minor unit (never typed), a likelihood × impact risk matrix with its register,
+  action items with status, two- or three-column layouts (a shaded CV sidebar),
+  a cover band, a meta (author/date) line, numbered references, and callouts
+  with a small built-in icon set (`icon=shield`). Each is edited with a form on
+  the page and exported faithfully to PDF, HTML and Word; the syntax is round 3
+  of `docs/engineering/canvas-docs-contract.md` (`shared/ui/canvas/doc-blocks.ts`).
+- **Page width**: Narrow / Normal / Wide / Full from the page toolbar,
+  remembered per document; Normal beside the chat and Wide in full screen by
+  default.
+- **AICO Docs: 41 document types** (`src/canvas/doc-types.ts`) — report,
+  whitepaper, research paper/summary, letter, cover letter, email, memo,
+  minutes, press release, policy, SOP, NDA, contract, confidential, PRD, user
+  stories, API docs, release notes, user manual, technical write-up,
+  architecture design, flow diagram, test plan, proposal, technical proposal,
+  SOW, RFP, invoice, quote, BOQ, financial report, case study, risk
+  assessment, postmortem, marketing brief, pitch outline, business plan,
+  project brief, one-pager and CV. Each is data: sections with intents, a
+  theme and page setup, which blocks go where (architecture → component and
+  sequence diagrams and a decision table; invoice → computed line items; CV →
+  sidebar columns; risk assessment → risk matrix; minutes → action items) and
+  a length range. `outline {template}` takes any of them by id or name, a
+  title that obviously names a type picks it ("Invoice INV-0142", "Cover
+  letter for Acme"), and a "Confidential: …" title adds the classification
+  banner and watermark. `GET /api/canvas/templates` lists them with their
+  look, length and blocks for the picker.
+- The `outline` result carries the type's **writing brief**: the length range,
+  which block goes in which section with its one-line syntax, and the rules —
+  visuals only where they carry information, no invented numbers, missing
+  details marked `[To confirm: …]`. It is not in the system prompt, and the
+  always-sent Canvas definition got 55 characters shorter (the template enum
+  went; names resolve).
+- `scripts/doc-quality-eval.mjs` — a paid, opt-in measurement of four document
+  types (architecture design, invoice, CV, research summary): model-free checks
+  (sections, blocks valid, length, placeholder leakage, given facts, DOCX/PDF
+  export) plus a fixed-rubric judge. First result on `deepseek-flash`: the
+  architecture design went from 14,086 words to 3,157 and the writers' spend
+  for the four from $0.118 to $0.072; the invoice and CV now use the computed
+  line-item and sidebar blocks. Not better yet: a research summary whose title
+  did not name its type got no brief and had 3 of 6 expected sections (5 of 6
+  before).
+
+
+- **Teach AICO: show the desktop browser a task once, and chats can repeat
+  it.** A Teach control in the browser toolbar records the person's own
+  actions on the tab in front — navigation, clicks, typed text, selects, file
+  uploads (as a file-path parameter) — with a small screenshot per step, and
+  nothing else: not the screen, not other apps. The recorder runs in an
+  isolated world and reports trusted input through a DevTools binding only
+  that world can call, so the page cannot see it or forge steps. Each element
+  is remembered as a description (role, accessible name, label, nearby
+  heading, form; CSS/XPath only as tie-breakers). **Secrets are never
+  recorded:** password, card, CVV and one-time-code fields (the browser's own
+  classifier) keep no value — a password step replays from a stored
+  credential named at run time or hands the page to the person; cards and
+  codes always go to the person. Stop opens a review page: rename, delete or
+  merge steps, choose which typed values are parameters (`{{full_name}}`,
+  what was typed kept as the default) and give the goal; Save goes through
+  the skills' own create → verify → register, as a skill with a
+  `procedure.json`, scoped to the site's origin. New tools
+  `browser_procedures` and `browser_run_procedure {name, params, startAt,
+  runId}` run it in the chat's own tab through the ordinary agent methods, so
+  the purchase/send/delete gate (waiting up to 5 minutes for the person's
+  Allow during a procedure), the secret-field refusal, human-check hand-overs
+  and Stop / Take over all apply. Every target is found again by scoring the
+  page's elements against its description, waiting up to 8 s for it to
+  appear; when no element fits clearly the run stops and hands that step,
+  with its intent, back to the model — never a guessed click. Each step's
+  outcome is checked (the value is in the field, the box is ticked, the next
+  page was reached) and reported per step; a run longer than one tool call
+  continues and is followed by runId. The browser hand-over now stops
+  counting the agent as driving the tab, so the person's input while doing a
+  hand-over is not read as taking the tab back. Proved by
+  `desktop/scripts/test-browser-teach.mjs` (62) and the live
+  `desktop/scripts/teach-live.mjs` (15/15: a two-page form taught with
+  injected trusted input, saved from the review page, replayed by a real
+  model with new parameters — the server received them, and the PIN the
+  person typed at the hand-over, never the recorded one — and replayed again
+  after "Continue" was renamed "Next step" and moved).
+
+### Fixed
+
+- In full screen the document page stayed ~720px wide and sat off-centre when
+  the comment margin was shown; it is now centred at the chosen width, and the
+  comment margin takes the right gutter only when both gutters have room.
+- KPI tiles split values mid-word ("Deskto / p", "$100/" "mo") in a fixed
+  four-column grid. Tiles, steps and comparison columns now use auto-fit grids
+  whose minimum width fits the longest word of a value (sized down for long
+  values), with equal-height, balanced rows (2 + 2, not 3 + 1); Word exports
+  wrap tiles to more rows instead of squeezing them.
+- A settings change made elsewhere (the agent's `settings`, another window)
+  now refreshes an open document, which matters now that settings change how
+  the page looks.
+
 ## 0.35.0 — 2026-10-03
 
 Agents you can build, verify and trust: custom tools with risk classes, Claude-

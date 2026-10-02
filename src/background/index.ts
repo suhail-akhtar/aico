@@ -98,6 +98,7 @@ export type BackgroundPermissions = 'inherit' | 'readonly' | 'full';
 const GATED_TOOLS = new Set([
   'Bash', 'Write', 'Edit', 'MultiEdit', 'McpAddServer', 'McpRemoveServer',
   'McpReloadServers', 'WorkspaceSetPath', 'WorkspaceWrite', 'AgentCreate',
+  'CodeRewrite', 'Refactor',
 ]);
 
 /**

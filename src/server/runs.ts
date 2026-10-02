@@ -41,7 +41,7 @@ import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../sessi
 import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
 import { currentMiniApp } from '../session/projections.js';
 import { appStateLine, miniAppContext } from '../miniapps/context.js';
-import { learnFromTurn } from '../learning/index.js';
+import { learnFromTurn, preferencesAfterTurn, preferencesAfterFeedback, preferencesBeforeTurn } from '../learning/index.js';
 import { backlogProgress, effectiveKind, hasProcess } from '../miniapps/store.js';
 import { appState } from '../miniapps/process.js';
 import type { PromptSection } from '../prompt/types.js';
@@ -83,6 +83,7 @@ import { getMiniApp, miniAppDir } from '../miniapps/store.js';
 import { maybeCompactSession } from '../session/compact.js';
 import { readTodos } from '../tools/todo.js';
 import { quarantineIfEnabled } from '../vault/agent-hooks.js';
+import { activeJob, afterTurn as afterLongJobTurn, remainingUsd } from '../longjob/index.js';
 import {
   hostToolsFrom, type HostAnswer, type HostCall, type HostToolName,
 } from '../../shared/host-tools.js';
@@ -268,6 +269,8 @@ export type ApprovalMode = 'auto' | 'edits' | 'ask';
  */
 const EDIT_TOOLS = new Set([
   'Edit', 'Write', 'MultiEdit', 'NotebookEdit',
+  // File writers too (effect class `write`): many files per call, checkpointed.
+  'CodeRewrite', 'Refactor',
 ]);
 
 /**
@@ -478,6 +481,9 @@ export class RunManager {
     // Remembered so the turn's deliverables can be scoped to this turn rather
     // than reporting everything the session has ever written.
     const seqBeforeTurn = run.session.length;
+    // Hand edits to what the agent wrote last turn, read before this turn can
+    // touch the same files (learning/signals.ts). In memory, best effort.
+    preferencesBeforeTurn(sessionId);
 
     // Said out loud. A session addressed to an agent that has since been
     // deleted or switched off used to run as the orchestrator with nothing on
@@ -704,10 +710,20 @@ export class RunManager {
       releaseAgents = undefined;
     };
 
+    // What this turn spends, for a long job's budget (longjob/).
+    const jobTurn = { usd: run.tokenTracker.estimateCost(model, settings), at: Date.now(), error: undefined as string | undefined, id: activeJob(sessionId)?.id };
     try {
       // A project config that wants to run commands is asked about first, on
       // the ordinary permission card, and applies to this turn if allowed.
       if (await this.trustGate(run, emit)) settings = await this.currentSettings();
+      // Inside an approved long job the session's cost breaker is the job's
+      // remaining budget, so the cap holds within a turn, not just between them.
+      const job = activeJob(sessionId);
+      if (job?.status === 'running' && job.budget.usd > 0) {
+        const ceiling = jobTurn.usd + remainingUsd(job);
+        const own = settings.safetyLimits?.maxCostPerSession;
+        settings = { ...settings, safetyLimits: { ...settings.safetyLimits, maxCostPerSession: own && own > 0 ? Math.min(own, ceiling) : ceiling } };
+      }
       // What the meter was drawn against when the turn began, so a window
       // that grows from use is announced once, not on every token event.
       let windowAtStart = getContextWindow(model, settings);
@@ -974,6 +990,11 @@ export class RunManager {
       // Filed with the project the turn was about: for a session bound to an
       // app, the app, not the workspace every app session shares.
       const proposals = await learnFromTurn(run.session, boundAppOpt?.dir ?? run.cwd);
+      // How the person works: corrections and repeated choices in this turn
+      // queue as signals, and a cheap distil runs a few seconds later, off the
+      // critical path (learning/distill.ts, ADR 0016). Nothing is in force
+      // until the person accepts it.
+      preferencesAfterTurn(run.session, boundAppOpt?.dir ?? run.cwd, settings, () => this.currentSettings(), model);
       emit('turn-end', {
         result,
         seq: run.session.length,
@@ -996,6 +1017,7 @@ export class RunManager {
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      jobTurn.error = message;
       // Cancellation is an outcome, not a failure — a client that treats every
       // non-success as an error shows a red banner for a button the user pressed.
       emit('turn-end', {
@@ -1075,6 +1097,18 @@ export class RunManager {
       // was cancelled or threw must still hand back what the reader queued
       // behind it, and awaiting here would make one turn's duration depend on
       // every turn queued after it.
+      // A long job carries on milestone by milestone: its next turn is
+      // queued behind anything the reader queued, or it settles (done, at
+      // budget, paused) and says so. Best effort — the journal is the record.
+      try {
+        const next = afterLongJobTurn(sessionId, {
+          usd: run.tokenTracker.estimateCost(model, settings) - jobTurn.usd,
+          ms: Date.now() - jobTurn.at,
+          cancelled: run.abort.signal.aborted,
+          ...(jobTurn.error && !run.abort.signal.aborted ? { failed: jobTurn.error } : {}),
+        }, jobTurn.id);
+        if (next) run.inbox.followup(next, { kind: 'plugin', plugin: 'long-job' });
+      } catch { /* a journal write failed; the turn itself is unaffected */ }
       this.drainQueued(sessionId, cwd, model, opts);
     }
   }
@@ -1329,6 +1363,10 @@ export class RunManager {
       targetSeq, rating, ...(note ? { note } : {}),
     });
     this.hub.publish({ type: 'feedback', sessionId, data: { targetSeq, rating, note } });
+    // A rating with a note is a preference signal (learning/distill.ts); the
+    // distil it schedules is debounced and never blocks the rating.
+    void this.currentSettings().then(settings =>
+      preferencesAfterFeedback(run.session, run.cwd, targetSeq, rating, note, settings, () => this.currentSettings()));
     return true;
   }
 

@@ -18,6 +18,7 @@ import { MenuButton, MenuItem, MenuSep } from './Popover';
 import { exportChat } from '@/chat/actions';
 import { desktop } from '@/desktop';
 import { snapshotNode, standaloneHtml } from '@/lib/rich';
+import { useArtifactsPanel } from '@/chat/ArtifactsPanel';
 
 export function TopBar(): React.ReactElement {
   const route = useDesk(s => s.route);
@@ -118,6 +119,7 @@ function ChatMenu(): React.ReactElement | null {
   const archiveSession = useStore(s => s.archiveSession);
   const forkSession = useStore(s => s.forkSession);
   const deleteSessions = useStore(s => s.deleteSessions);
+  const artifactsOpen = useArtifactsPanel(s => s.open);
   const mode = useDesk(s => s.mode);
   const jump = useDesk(s => s.prefs.jumpToAnswer);
   if (logged.size === 0) return null;
@@ -143,6 +145,10 @@ function ChatMenu(): React.ReactElement | null {
 
   return (
     <>
+      <button className={cls('btn-ghost btn-sm', artifactsOpen && 'bg-aico-hover text-aico-primary')} onClick={() => useArtifactsPanel.getState().toggle()}
+        title="Everything this chat made or opened" aria-pressed={artifactsOpen} data-artifacts-toggle="">
+        <Icon name="layers" size={15} />Artifacts
+      </button>
       <MenuButton className="btn-ghost btn-sm" title="Share and export" placement="bottom-end" width={260}
         button={<><Icon name="share" size={15} />Share</>}>
         {close => (

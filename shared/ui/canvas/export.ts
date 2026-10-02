@@ -24,6 +24,8 @@ export const EXPORT_TYPES: Record<ExportFormat, { label: string; ext: string; mi
   docx: { label: 'Word document', ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
   pdf: { label: 'PDF', ext: 'pdf', mime: 'application/pdf' },
   html: { label: 'Web page', ext: 'html', mime: 'text/html' },
+  xlsx: { label: 'Excel workbook', ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+  csv: { label: 'CSV', ext: 'csv', mime: 'text/csv' },
 };
 
 function base64(bytes: Uint8Array): string {

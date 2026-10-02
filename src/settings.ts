@@ -7,6 +7,8 @@ import {
 } from './workspace-trust.js';
 
 import type { ProviderInstance } from './providers/instances.js';
+import { tightenOnlySentinel, type SentinelSettings } from './sentinel/policy.js';
+import type { BriefSettings } from './brief/core.js';
 
 export interface AicoSettings {
   model?: string;
@@ -152,6 +154,19 @@ export interface AicoSettings {
     /** Off keeps the deterministic first-prompt title and makes no model call. */
     enabled?: boolean;
     /** Override the naming model. Defaults to the cheapest in the same family. */
+    model?: string;
+  };
+
+  /**
+   * Learning how the user works (`src/learning/preferences.ts`, ADR 0016):
+   * signals → proposed rules → the user accepts → injected in the tail.
+   */
+  learning?: {
+    /** Off stops capturing signals, distilling, and injecting rules. Default: on. */
+    preferences?: boolean;
+    /** Put low-risk style rules (formatting only, decided in code) in force without a click. Default: off. */
+    autoAcceptStyle?: boolean;
+    /** The distilling model. Defaults to the cheapest in the work model's family. */
     model?: string;
   };
 
@@ -601,6 +616,30 @@ export interface AicoSettings {
     exclude?: string[];             // patterns transparent to the chain
     argumentsPreviewChars?: number; // default: 500 (bounds the reminder only)
   };
+  /**
+   * Long jobs (src/longjob). A plan whose `estimate_hours` is above
+   * `thresholdHours` (default 3) becomes a proposal a person must approve
+   * before anything runs; below it nothing changes. `subAgentMaxMinutes`
+   * (default 60) is the sub-agent ceiling inside an approved job only.
+   */
+  longJobs?: {
+    thresholdHours?: number;
+    subAgentMaxMinutes?: number;
+  };
+  /**
+   * The Sentinel (src/sentinel, ADR 0015): an independent model reviews
+   * high-risk tool calls and can only refuse or hand them to a person. On by
+   * default at L3/L4 and for unattended runs (`mode: auto`). A project's own
+   * settings may turn it on, never off or weaker (`tightenOnlySentinel`).
+   */
+  sentinel?: SentinelSettings;
+  /**
+   * The morning brief and monitors (src/brief). The brief runs daily at
+   * `time` (08:00) unless `enabled: false`; one cheap model call ranks it
+   * (`useModel: false` for none). Monitors poll only the projects listed in
+   * `monitors`; calendar/email only from the MCP tools named in `mcp`.
+   */
+  brief?: BriefSettings;
 }
 
 async function tryReadJson(filePath: string): Promise<AicoSettings> {
@@ -628,6 +667,7 @@ const MERGED_SECTIONS = [
   'modelPricing',
   'agentModels',
   'completionGate', 'safetyLimits', 'repeatGuard', 'sandbox', 'sessionTitles', 'imageGeneration',
+  'longJobs', 'sentinel', 'learning',
 ] as const satisfies ReadonlyArray<keyof AicoSettings>;
 
 /**
@@ -784,6 +824,10 @@ export async function loadSettings(): Promise<AicoSettings> {
     stripGated(local as Record<string, unknown>);
     warnOnce(`trust:${trust.root}:${trust.hash}`, `  ⚠ ${untrustedNotice(trust)}`);
   }
+  // The safety reviewer may be tightened by a project, never loosened: the
+  // agent can write these files, and a cloned repository brings its own.
+  tightenOnlySentinel(project as Record<string, unknown>);
+  tightenOnlySentinel(local as Record<string, unknown>);
   if ([global_, project, local].some(layer => layer.mcpSecurity !== undefined)) {
     warnOnce('mcpSecurity', '  ⚠ Settings warning: mcpSecurity is no longer used (it was never enforced). '
       + 'A project\'s MCP servers and hooks now run only after you trust the project; mark a server that '

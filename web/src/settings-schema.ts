@@ -86,7 +86,7 @@ export interface Pane {
   blurb?: string;
   groups: Group[];
   /** Panes that render their own thing rather than a list of fields. */
-  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools';
+  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools' | 'learned';
 }
 
 /* ── The schema ───────────────────────────────────────────────────── */
@@ -314,6 +314,37 @@ export const PANES: Pane[] = [
     ],
   },
   {
+    id: 'learned',
+    label: 'What AICO learned',
+    icon: 'bookmark',
+    blurb: 'What AICO learned about how you work — rules distilled from your feedback, corrections and edits. '
+      + 'Nothing is in force until you accept it.',
+    custom: 'learned',
+    groups: [
+      {
+        title: 'Learning',
+        fields: [
+          {
+            path: 'learning.preferences',
+            label: 'Learn how I work',
+            hint: 'Off stops capturing signals, the small distilling call, and adding rules to requests.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'learn preferences feedback rules personalise personalize',
+          },
+          {
+            path: 'learning.autoAcceptStyle',
+            label: 'Auto-accept low-risk style rules',
+            hint: 'Formatting-only rules (indentation, quotes, naming) go into force without a click. Anything about tools, commands or permissions still waits for you.',
+            kind: 'toggle',
+            fallback: false,
+            keywords: 'learn preferences style auto accept',
+          },
+        ],
+      },
+    ],
+  },
+  {
     id: 'agent',
     // Not "Agent": beside the "Agents" pane the two read as the same thing.
     label: 'Permissions',
@@ -358,6 +389,44 @@ export const PANES: Pane[] = [
             kind: 'toggle',
             fallback: false,
             keywords: 'confirm prompt ask permission',
+          },
+        ],
+      },
+      {
+        title: 'Safety reviewer (Sentinel)',
+        hint: 'A second, cheap model reviews high-risk calls — commands that deploy, delete, send data out, buy or use a credential — and can only refuse them or ask you. About $0.001 per review; recent reviews and their cost are under Activity.',
+        fields: [
+          {
+            path: 'sentinel.mode',
+            label: 'When to review',
+            kind: 'segmented',
+            fallback: 'auto',
+            keywords: 'sentinel safety reviewer monitor guardian classifier',
+            options: [
+              { value: 'auto', label: 'Automatic', hint: 'When tools run without asking (auto, unattended).', icon: 'shield' },
+              { value: 'always', label: 'Always', hint: 'Also when you approve tools yourself.', icon: 'lock' },
+              { value: 'off', label: 'Off', hint: 'Only the fixed rules apply.', icon: 'globe' },
+            ],
+          },
+          {
+            path: 'sentinel.model',
+            label: 'Reviewer model',
+            hint: 'Defaults to deepseek-v4-pro (thinking off) when a DeepSeek or OpenRouter key is set, else the chat\'s own model.',
+            kind: 'text',
+            placeholder: 'deepseek-v4-pro',
+            keywords: 'sentinel reviewer model',
+          },
+          {
+            path: 'sentinel.timeoutMs',
+            label: 'Give up and ask you after',
+            hint: 'A review that takes longer is handed to you (or refused when nobody is there) — never let through.',
+            kind: 'number',
+            fallback: 25000,
+            scale: 1000,
+            min: 1,
+            max: 120,
+            unit: 's',
+            keywords: 'sentinel timeout',
           },
         ],
       },
@@ -701,6 +770,62 @@ export const PANES: Pane[] = [
             max: 20,
             unit: 'jobs',
             keywords: 'cron concurrency',
+          },
+        ],
+      },
+      {
+        title: 'Morning brief',
+        hint: 'Approvals waiting, long jobs, background runs, your PRs, issues and CI (through gh), new advisories and stale branches — gathered without a model, then ranked by one cheap call. It only reads; every action is a click.',
+        fields: [
+          {
+            path: 'brief.enabled',
+            label: 'Prepare a daily brief',
+            hint: 'Shown on Home, with a notification when it is ready. Monitors are switched on per project from the card.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'morning brief daily digest summary',
+          },
+          {
+            path: 'brief.time',
+            label: 'Time',
+            hint: 'Local time, HH:MM. Missed while the computer was off? It is made when AICO next starts, within 12 hours.',
+            kind: 'text',
+            fallback: '08:00',
+            placeholder: '08:00',
+            keywords: 'morning brief schedule',
+          },
+          {
+            path: 'brief.quietHours',
+            label: 'Quiet hours',
+            hint: 'HH:MM-HH:MM, or off. Monitor alerts wait until they end.',
+            kind: 'text',
+            fallback: '22:00-07:00',
+            placeholder: '22:00-07:00',
+            keywords: 'do not disturb quiet night notifications monitors',
+          },
+          {
+            path: 'brief.useModel',
+            label: 'Rank with a small model',
+            hint: 'One call to the cheapest model of your provider, titles only, secrets redacted. Off: rule order and a counted summary, no call.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'brief cost privacy model',
+          },
+          {
+            path: 'brief.github',
+            label: 'Include GitHub',
+            hint: 'Through the gh CLI and its own sign-in; AICO never holds a GitHub token.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'gh pull requests reviews issues actions ci',
+          },
+          {
+            path: 'brief.advisories',
+            label: 'Check dependency advisories',
+            hint: 'At most once a day per project, with the ecosystem\'s own auditor (npm audit, pip-audit…).',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'security vulnerabilities audit cve',
           },
         ],
       },

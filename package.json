@@ -46,7 +46,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node --input-type=commonjs -e \"const fs=require('fs');fs.cpSync('src/skills/builtin','dist-test/builtin',{recursive:true})\" && node test-harness.mjs && node scripts/vault-test.mjs && node scripts/credential-ux-test.mjs && node scripts/ops-test.mjs && node scripts/injection-guard-test.mjs && node scripts/checks-tooling-test.mjs && node scripts/phase0-security-test.mjs && node scripts/phase1-skills-test.mjs && node scripts/phase2-custom-tools-test.mjs && node scripts/phase3-agents-test.mjs && node scripts/phase4-certify-test.mjs && node scripts/phase6-mcp-test.mjs && node scripts/phase5-skill-author-test.mjs && node scripts/phase7-autonomy-test.mjs && node scripts/title-sanitizer-probe.mjs && npm run test:miniapps",
+    "test": "npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node --input-type=commonjs -e \"const fs=require('fs');fs.cpSync('src/skills/builtin','dist-test/builtin',{recursive:true})\" && node test-harness.mjs && node scripts/sheets-test.mjs && node scripts/vault-test.mjs && node scripts/credential-ux-test.mjs && node scripts/ops-test.mjs && node scripts/injection-guard-test.mjs && node scripts/checks-tooling-test.mjs && node scripts/refactor-tools-test.mjs && node scripts/phase0-security-test.mjs && node scripts/phase1-skills-test.mjs && node scripts/phase2-custom-tools-test.mjs && node scripts/phase3-agents-test.mjs && node scripts/phase4-certify-test.mjs && node scripts/phase6-mcp-test.mjs && node scripts/phase5-skill-author-test.mjs && node scripts/phase7-autonomy-test.mjs && node scripts/sentinel-test.mjs && node scripts/long-job-test.mjs && node scripts/preferences-test.mjs && node scripts/brief-test.mjs && node scripts/title-sanitizer-probe.mjs && npm run test:miniapps",
     "bench": "npm run build && npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node --input-type=commonjs -e \"const fs=require('fs');fs.cpSync('src/skills/builtin','dist-test/builtin',{recursive:true})\" && node bench.mjs",
     "bench:eng": "npm run build && node scripts/eng-bench.mjs",
     "test:bench:graders": "node scripts/eng-bench/test-graders.mjs",
@@ -82,6 +82,7 @@
     "build:vscode": "cd vscode-extension && npm install && npm run build && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository",
     "test:panel": "npm run build && npx esbuild scripts/panel-tunnel-entry/index.ts --bundle --format=esm --outfile=dist-test/panel-tunnel.mjs --target=node22 --platform=neutral --log-level=warning && node scripts/panel-tunnel-live.mjs",
     "test:shell": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/shell-live.mjs",
+    "test:preferences:live": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/preferences-live.mjs",
     "test:reasoning": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node22 --silent && node scripts/reasoning-live.mjs",
     "check:standards": "node scripts/check-standards.mjs",
     "test:standards": "node scripts/test-check-standards.mjs",
@@ -146,5 +147,8 @@
   "overrides": {
     "uuid": "^11.1.1",
     "esbuild": "^0.28.1"
+  },
+  "optionalDependencies": {
+    "@ast-grep/cli": "^0.45.3"
   }
 }

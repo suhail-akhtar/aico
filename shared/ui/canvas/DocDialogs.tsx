@@ -11,6 +11,11 @@
  * in this browser's storage until then, so a report's cover page does not
  * have to be typed again for every export.
  *
+ * The **theme** (round 3) is chosen here too: picking one moves the font,
+ * margins, watermark and classification to that theme's defaults unless the
+ * person had set their own, and the preview — the engine's export — shows
+ * the result at once.
+ *
  * @module shared/ui/canvas/DocDialogs
  */
 
@@ -19,6 +24,7 @@ import type { DocSettings, ExportFormat } from './host';
 import { EXPORT_TYPES, imageDataUrl, pickImage } from './export';
 import { DOC_TEMPLATES, longDate } from './templates';
 import { CvIcon } from './icons';
+import { DOC_THEMES, themeById } from './doc-themes';
 
 const SETTINGS_KEY = (id: string): string => `aico.docs.settings.${id}`;
 
@@ -79,7 +85,12 @@ export function ExportDialog({ title, coverTitle, initial, preview, onExport, on
 }): React.ReactElement {
   const [s, setS] = useState<DocSettings>(() => {
     const base = defaultSettings(coverTitle ?? title);
-    return { ...base, ...initial, margins: marginPreset(initial.margins), cover: { ...base.cover!, ...(initial.cover ?? {}) } };
+    const theme = themeById(initial.theme);
+    return {
+      ...base, ...initial, margins: marginPreset(initial.margins), cover: { ...base.cover!, ...(initial.cover ?? {}) },
+      // A theme's watermark/banner shows in the field (so saving keeps it); '' stored means the person removed it.
+      watermark: initial.watermark ?? theme?.defaults.watermark ?? '', classification: initial.classification ?? theme?.defaults.classification ?? '',
+    };
   });
   const [format, setFormat] = useState<ExportFormat>('pdf');
   const [busy, setBusy] = useState(false);
@@ -87,6 +98,24 @@ export function ExportDialog({ title, coverTitle, initial, preview, onExport, on
   const [previewError, setPreviewError] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
   const set = (p: Partial<DocSettings>): void => setS(x => ({ ...x, ...p }));
+  /** Switch theme: settings still at the old theme's defaults follow the new one; the person's own values stay. */
+  const chooseTheme = (id: string): void => setS((x) => {
+    const was = themeById(x.theme);
+    const next = themeById(id);
+    const follow = <K extends 'watermark' | 'classification'>(k: K): string => {
+      const cur = x[k] ?? '';
+      return cur === '' || cur === (was?.defaults[k] ?? '') ? next?.defaults[k] ?? '' : cur;
+    };
+    return {
+      ...x, theme: next?.id ?? '', font: next?.font ?? x.font,
+      margins: next?.defaults.margins ?? (was?.defaults.margins ? 'normal' : x.margins),
+      ...(next?.defaults.pageNumbers !== undefined ? { pageNumbers: next.defaults.pageNumbers } : {}),
+      ...(next?.defaults.toc ? { toc: true } : {}),
+      ...(next?.defaults.footer && !x.footer ? { footer: next.defaults.footer } : {}),
+      watermark: follow('watermark'), classification: follow('classification'),
+    };
+  });
+  const theme = themeById(s.theme);
   const setCover = (p: Partial<NonNullable<DocSettings['cover']>>): void => setS(x => ({ ...x, cover: { ...x.cover!, ...p } }));
   const key = useMemo(() => JSON.stringify(s), [s]);
 
@@ -127,6 +156,25 @@ export function ExportDialog({ title, coverTitle, initial, preview, onExport, on
               ))}
             </div>
           </Field>
+          <fieldset disabled={format === 'md'} className="adoc-fieldset">
+            <legend>Theme</legend>
+            <div className="adoc-row">
+              <Field label="Document type">
+                <select value={theme?.id ?? ''} onChange={e => chooseTheme(e.target.value)} aria-label="Theme">
+                  <option value="">Plain</option>
+                  {DOC_THEMES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Accent">
+                <span className="adoc-accent-row">
+                  <input type="color" aria-label="Accent colour" value={s.accent || theme?.accent || '#2563EB'} onChange={e => set({ accent: e.target.value.toUpperCase() })} />
+                  {s.accent && <button type="button" className="aw-btn adoc-mini" onClick={() => set({ accent: '' })}>Reset</button>}
+                </span>
+              </Field>
+            </div>
+            {theme && <p className="adoc-theme-desc">{theme.description}</p>}
+            <Field label="Classification banner"><input value={s.classification ?? ''} placeholder="e.g. CONFIDENTIAL, INTERNAL" onChange={e => set({ classification: e.target.value })} /></Field>
+          </fieldset>
           <fieldset disabled={!paged} className="adoc-fieldset">
             <legend>Page</legend>
             <div className="adoc-row">

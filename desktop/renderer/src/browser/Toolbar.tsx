@@ -1,7 +1,7 @@
 /**
  * The browser's toolbar: back / forward / reload, the site button and the
- * address bar, then bookmark, reader, downloads, the AI copilot and the
- * browser menu.
+ * address bar, then Teach (browser/Teach.tsx), bookmark, reader, downloads,
+ * the AI copilot and the browser menu.
  *
  * @module desktop/renderer/browser/Toolbar
  */
@@ -28,6 +28,7 @@ import { inBrowserWindow, openAicoWindow, toggleBrowserWindow } from './host';
 import { ShieldButton } from './Shields';
 import { PasswordKey } from './PasswordsBar';
 import { openImportWizard } from './ImportWizard';
+import { TeachButton } from './Teach';
 import type { DownloadItem, PermissionValue, SiteInfo, TabState } from './types';
 
 export function Toolbar({ compact }: { compact?: boolean }): React.ReactElement {
@@ -51,6 +52,7 @@ export function Toolbar({ compact }: { compact?: boolean }): React.ReactElement 
       <ShieldButton tab={tab} />
       {!compact && <PageKindChip />}
       {!compact && <AutofillButton />}
+      {!compact && <TeachButton disabled={blank} />}
       {tab && tab.zoom !== 1 && (
         <button className="chip h-7 py-0 tabular-nums" onClick={() => fire('browser:zoom', 0)} title="Reset zoom (Ctrl+0)">{Math.round(tab.zoom * 100)}%</button>
       )}

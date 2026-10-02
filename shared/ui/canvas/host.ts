@@ -24,7 +24,8 @@
 import type React from 'react';
 import type { CanvasComment, CommentAnchor } from './comments';
 
-export type CanvasKind = 'document' | 'code';
+/** `sheet`: an AICO Sheets workbook (`sheet-model.ts`), its one tab holding the workbook JSON. */
+export type CanvasKind = 'document' | 'code' | 'sheet';
 export type CanvasAuthor = 'agent' | 'user';
 
 export interface CanvasVersion {
@@ -78,6 +79,14 @@ export interface DocSettings {
   toc?: boolean;
   watermark?: string;
   font?: 'sans' | 'serif';
+  /** A document theme (`doc-themes.ts`, round 3 of the contract). */
+  theme?: string;
+  /** `#RRGGBB`, overriding the theme's accent. */
+  accent?: string;
+  /** A banner on every page, e.g. CONFIDENTIAL. */
+  classification?: string;
+  /** The editor's page width. */
+  pageWidth?: 'narrow' | 'normal' | 'wide' | 'full';
 }
 
 /** The tabs of a document — one synthesised from `content` for an engine that has none. */
@@ -113,7 +122,7 @@ export interface CanvasChange {
   kind: CanvasKind;
   version: number;
   author: CanvasAuthor;
-  action: 'create' | 'update' | 'restore' | 'tabs';
+  action: 'create' | 'update' | 'restore' | 'tabs' | 'rename';
   at: number;
   tabId?: string;
   tabVersion?: number;
@@ -131,7 +140,8 @@ export interface CanvasActivity {
   by: 'agent';
 }
 
-export type ExportFormat = 'md' | 'html' | 'docx' | 'pdf';
+/** `xlsx` and `csv` are a sheet's formats; the others a document's. */
+export type ExportFormat = 'md' | 'html' | 'docx' | 'pdf' | 'xlsx' | 'csv';
 
 export type CanvasWriteResult =
   | { ok: true; canvas: CanvasDoc; changed: boolean }
@@ -171,8 +181,12 @@ export interface CanvasHost {
   exportFile?: (id: string, format: ExportFormat, tab?: string, settings?: DocSettings) => Promise<{ blob: Blob; name: string }>;
   /** Remember export settings with the document. */
   saveSettings?: (id: string, settings: DocSettings) => Promise<CanvasDoc>;
-  /** Create a document from the editor (a template). */
-  create?: (input: { title: string; content: string }) => Promise<CanvasDoc>;
+  /** Create a document from the editor (a template), or an empty sheet (`kind: 'sheet'`, content ''). */
+  create?: (input: { title: string; content: string; kind?: CanvasKind }) => Promise<CanvasDoc>;
+  /** Rename a canvas (title only). */
+  rename?: (id: string, title: string) => Promise<CanvasDoc>;
+  /** A .xlsx/.csv file as a new sheet canvas. */
+  importSheet?: (file: { name: string; data: string /* base64 */ }) => Promise<CanvasDoc>;
   /** Whether a turn is running in this chat, and a way to hear when that changes. */
   turnBusy?: () => boolean;
   onTurn?: (listener: (busy: boolean) => void) => () => void;
@@ -206,10 +220,10 @@ export function emitCanvasEvent(data: unknown): void {
     sessionId: String(d.sessionId ?? ''),
     id: d.id,
     title: String(d.title ?? ''),
-    kind: d.kind === 'code' ? 'code' : 'document',
+    kind: d.kind === 'code' || d.kind === 'sheet' ? d.kind : 'document',
     version: d.version,
     author: d.author === 'user' ? 'user' : 'agent',
-    action: d.action === 'create' || d.action === 'restore' || d.action === 'tabs' ? d.action : 'update',
+    action: d.action === 'create' || d.action === 'restore' || d.action === 'tabs' || d.action === 'rename' ? d.action : 'update',
     at: typeof d.at === 'number' ? d.at : Date.now(),
     ...(typeof d.tabId === 'string' ? { tabId: d.tabId } : {}),
     ...(typeof d.tabVersion === 'number' ? { tabVersion: d.tabVersion } : {}),

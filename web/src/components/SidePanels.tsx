@@ -36,6 +36,8 @@ import { checksFrom } from '../checks';
 import type { PlanAnswer } from '../store';
 import { composeMessages } from '../reduce';
 import { AgentsCard } from './AgentsCard';
+import { LongJobCard, useLongJob } from './LongJobCard';
+import { ArtifactsCard } from './ArtifactsCard';
 
 /**
  * The same view the conversation renders, live entries included.
@@ -340,7 +342,10 @@ function PlanCard(): React.ReactElement | null {
   const [sending, setSending] = useState(false);
 
   const { plan, decision } = useMemo(() => planFrom(messages), [messages]);
+  // A plan over the long-job threshold is answered on its own card, as a person (LongJobCard).
+  const [longJob, refreshLongJob] = useLongJob(plan?.title, `${messages.length}:${busy}`);
   if (!plan) return null;
+  if (longJob) return <LongJobCard job={longJob} onChange={refreshLongJob} />;
 
   const identity = `${plan.seq}:${plan.title}`;
   if (dismissed.plan === identity) return null;
@@ -555,6 +560,7 @@ export function SidePanels(): React.ReactElement {
       */}
       <AgentsCard />
       <TaskCard />
+      <ArtifactsCard />
     </div>
   );
 }

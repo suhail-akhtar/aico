@@ -225,6 +225,7 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 
 - **Ask AICO about any page.** The copilot, docked or floating over the live page, knows what you are looking at and suggests what fits it — *Compare prices* on a product, *Summarize reviews*, *Fact-check* an article, *Scale this recipe*, *Match this job to my skills*, *Draft a reply* in your mail, *Review this order before I pay* at a checkout. Right-click any link, image or selection to ask about it.
 - **Let it do the work.** The agent reads pages as clean Markdown, fills whole forms (with your saved profile when you ask), answers dialogs, compares tabs, and reports what changed after every action — the element it is about to touch is highlighted and **Stop** / **Take over** are one click away. Ask *"what was I researching last week?"* or *"clean up my idle tabs"* and it uses what the browser learned — and asks before closing anything.
+- **Teach it once.** Press **Teach**, do a task on a site the way you always do, press Stop — AICO turns it into a procedure: you review the steps (with screenshots), mark what varies as parameters (`{{customer_name}}`) and say what it is for. Any chat can then run it with new values in its own tab; it finds each button and field again by what it is called (a renamed or moved button still works), stops for your OK before buying, sending or deleting, and never records a password, card number or code — those are filled from a stored credential or handed to you.
 - **Private by default.** Trackers and third-party cookies blocked, HTTPS-first, Global Privacy Control sent, a Chrome-standard identity with no "Electron" fingerprint, and **everything it learns stays on this computer** — no telemetry, no account.
 - **Knows what you have open — and what you read.** The copilot always has a one-line picture of every open tab (page type, price, rating), so *"which of my open tabs is cheapest?"* needs no clicking around. Switch on **memory by meaning** and it remembers the pages you actually read, encrypted on this computer: *"where was that red leather jacket I looked at last week?"* finds it even after the tab is closed.
 - **Can't be talked into things.** Pages can hide instructions for AI in invisible text. AICO strips text a person cannot see and marks instructions aimed at the AI as untrusted page content before the model reads anything — and the shields panel shows what it caught.
@@ -240,6 +241,16 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **Claude skills, both ways.** Import a `.skill`, a folder, a pack or a Claude plugin through a security scan and a review screen; export in Claude's format. The built-in `skill-author` drafts a skill with evals and must show it beats no skill before it is registered.
 - **MCP on the current spec**, with each approved tool pinned (a changed description switches it off), secrets moved into the vault, and tools loaded only when needed.
 - **Autonomy you can leave running.** Levels L0–L4; an unattended run parks anything that needs a person in a "Waiting for you" inbox, and on approval AICO runs exactly that call — or refuses if anything changed.
+
+### 🌙 Always on — and it asks before anything big
+
+- **Long jobs, with your go-ahead.** When AICO estimates more than ~3 hours of work, it stops and shows a proposal — research, design, milestones with acceptance criteria, time and cost — and runs only after you approve, milestone by milestone, resumable after a restart, within the budget you set.
+- **A Sentinel watches the risky moves.** An independent model reviews high-risk actions (deploys, pushes, deletions, purchases, anything after reading untrusted pages) and can only stop or escalate them — never approve. 10/10 on its red-team set, ~$0.0003 a review.
+- **A morning brief.** Failed CI, PRs waiting for you, new security advisories, approvals in your inbox and overnight long jobs — ranked, urgent first, with one-click actions. Opt-in monitors notify you the moment CI breaks.
+- **It learns how you work.** From 👍/👎, corrections and your edits it proposes rules ("use pnpm, not npm"); you accept, edit or forget them, and accepted ones guide the next task.
+- **Teach it once.** Record a workflow in the AICO browser on any internal site; AICO replays it with new values — secrets never recorded, approvals and hand-offs intact, even after the page's buttons move.
+- **Spreadsheets and artifacts.** A real sheet with Excel formulas and `.xlsx` export, documents designed per type (41 types, 16 themes), and an Artifacts panel to work side by side.
+- **Refactor at scale.** Structural search & replace (ast-grep) and TypeScript rename/move across a codebase — previewed, checkpointed, checked, rolled back if red.
 
 ### 🔐 Credentials the agent uses but never sees
 

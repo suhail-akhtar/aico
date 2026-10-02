@@ -25,6 +25,7 @@
 
 import type { GuardVerdict, ToolCallContext, ToolPipeline } from '../tools/pipeline.js';
 import type { SandboxCapability, SandboxPolicy } from './types.js';
+import { plannedWriteTargets } from '../refactor/plan.js';
 
 /**
  * Tools that write, and the argument naming their target.
@@ -106,6 +107,17 @@ export function installSandboxGuard(
       return decision.allowed
         ? { kind: 'abstain' }
         : { kind: 'deny', reason: `sandbox: ${decision.reason ?? 'write denied'}` };
+    }
+
+    // A refactor apply writes every file of the plan it was shown
+    // (refactor/plan), so each is checked like a Write to it.
+    const planned = plannedWriteTargets(ctx.name, ctx.arguments);
+    if (planned) {
+      for (const target of planned) {
+        const decision = sandbox.check(target, 'write', policy);
+        if (!decision.allowed) return { kind: 'deny', reason: `sandbox: ${decision.reason ?? 'write denied'} (${target})` };
+      }
+      return { kind: 'abstain' };
     }
 
     const readArg = READ_PATH_ARGUMENTS[ctx.name];

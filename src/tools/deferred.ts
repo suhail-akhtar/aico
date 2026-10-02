@@ -123,6 +123,13 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ['GenerateImage'],
   },
   {
+    // Loaded for a change too wide for one Edit at a time; the summary says so,
+    // because the alternative it replaces (many Edits) never asks to be replaced.
+    id: 'refactor',
+    summary: 'one-step changes across many files instead of many Edits: AST search/rewrite, TS/JS rename, references, move file',
+    tools: ['CodeSearch', 'CodeRewrite', 'Refactor'],
+  },
+  {
     id: 'audit',
     summary: 'dependency vulnerabilities and licences',
     tools: ['DependencyAudit'],

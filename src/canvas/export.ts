@@ -30,6 +30,14 @@
  * A document with several tabs exports whole (each tab under its own
  * top-level heading) unless one tab is named.
  *
+ * **Themes and document blocks (round 3).** `settings.theme` switches on the
+ * generated rules of `shared/ui/canvas/doc-themes` (fonts, accent, heading,
+ * table and cover style) — the same rules the editor page uses — plus a
+ * classification banner on every page and, for a letter, a letterhead on the
+ * first page instead of a running header. The document blocks (signature,
+ * line items, risk matrix, …) are drawn by `shared/ui/canvas/doc-blocks`,
+ * the very HTML the editor shows.
+ *
  * @module canvas/export
  */
 
@@ -47,6 +55,8 @@ import {
   collectVisuals, launchExportBrowser, renderVisuals, visualForCode, visualKey,
   type ExportBrowser, type RenderedVisual,
 } from './visuals.js';
+import { DOC_BLOCK_CSS, docBlockHtml, docBlockKind, parseDocBlock } from '../../shared/ui/canvas/doc-blocks.js';
+import { resolveLook, styleText, themeAttrs, themeRules, type ResolvedLook } from '../../shared/ui/canvas/doc-themes.js';
 
 export type ExportFormat = 'md' | 'html' | 'docx' | 'pdf';
 export const EXPORT_FORMATS: readonly ExportFormat[] = ['md', 'html', 'docx', 'pdf'];
@@ -86,10 +96,12 @@ export function exportSource(doc: CanvasDoc, tab?: string): { title: string; mar
  * Does the text already open with the title as its level-1 heading (so adding
  * it would repeat)? Only the same words count: a document opening with
  * "# 1. Summary" still needs its title above it — the first live export lost
- * the title that way.
+ * the title that way. A document that opens with a `cover` block has its title.
  */
 function opensWithH1(tree: Root, title: string): boolean {
   const first = tree.children.find(n => n.type !== 'html' && n.type !== 'definition');
+  // A cover band (round 3) is the document's title.
+  if (first?.type === 'code' && docBlockKind(first.lang) === 'cover') return true;
   if (first?.type !== 'heading' || first.depth !== 1) return false;
   const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   return norm(plainText(first as never)) === norm(title);
@@ -231,6 +243,12 @@ function blockHtml(n: RootContent | Nodes, ctx: HtmlCtx): string {
         if (parsed.ok) return infographicHtml(parsed.value, md => markdownToHtmlFragment(md, ctx));
         return `<div class="visual-missing"><div>${esc(parsed.error)}. Source:</div><pre><code>${esc(n.value)}</code></pre></div>`;
       }
+      const db = docBlockKind(n.lang);
+      if (db) {
+        const parsed = parseDocBlock(db, n.value, `${n.lang ?? ''} ${n.meta ?? ''}`);
+        if (parsed.ok) return `<div class="db-block">${docBlockHtml(parsed.value, md => markdownToHtmlFragment(md, ctx))}</div>`;
+        return `<div class="visual-missing"><div>${esc(parsed.error)}. Source:</div><pre><code>${esc(n.value)}</code></pre></div>`;
+      }
       return `<pre><code${n.lang ? ` class="language-${esc(n.lang)}"` : ''}>${esc(n.value)}</code></pre>`;
     }
     case 'list': {
@@ -323,15 +341,37 @@ const CSS = `
   .watermark { position: fixed; top: 42%; left: 0; right: 0; text-align: center; transform: rotate(-35deg); font-weight: 700;
     color: rgba(160, 160, 160, 0.18); white-space: nowrap; pointer-events: none; z-index: 0; letter-spacing: 3px; }
   ${INFOGRAPHIC_CSS}
+  .db-block { margin: 0 0 1.2em; }
+  ${DOC_BLOCK_CSS}
+  :root { --dt-ink: #1a1a1a; --dt-muted: #52525b; --dt-rule: #e4e4e7; --dt-accent: #2563eb; --dt-accent-ui: var(--dt-accent);
+    --dt-accent-fill: var(--dt-accent); --dt-tint: color-mix(in srgb, var(--dt-accent) 7%, #fff); }
+  body[data-dt] { --dt-accent-ui: var(--dt-accent); --dt-accent-fill: var(--dt-accent); --dt-tint: color-mix(in srgb, var(--dt-accent) 7%, #fff); }
+  ${themeRules('body')}
+  body[data-dt] h1 { font-size: 2.1em; }
+  .classification { text-align: center; font: 700 11px/1.4 -apple-system, "Segoe UI", sans-serif; letter-spacing: 0.14em; color: #b91c1c;
+    border: 1px solid #fca5a5; background: #fef2f2; padding: 3px 8px; margin: 0 0 1.5em; }
+  .classification.bottom { margin: 2em 0 0; }
+  .letterhead { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding-bottom: 12px; margin-bottom: 2em;
+    border-bottom: 2px solid var(--dt-accent-ui); }
+  .letterhead .lh-name { font-family: var(--dt-head, inherit); font-size: 1.6em; font-weight: 700; color: var(--dt-accent-ui); letter-spacing: 0.01em; }
+  .letterhead .lh-date { color: var(--dt-muted); font-size: 0.9em; }
+  .cover.cover-band { justify-content: flex-end; padding: 48px 40px; background: var(--dt-accent-fill); color: #fff; border-radius: 4px; }
+  .cover.cover-band .subtitle, .cover.cover-band .meta { color: rgba(255,255,255,0.85); }
+  .cover.cover-band .rule { border-top-color: rgba(255,255,255,0.7); }
+  .cover.cover-band h1.cover-title { color: #fff; border: 0; }
+  .cover.cover-minimal { justify-content: flex-start; padding-top: 18vh; }
+  .cover.cover-minimal h1.cover-title { border: 0; }
+  .cover .rule { border-top-color: var(--dt-accent-ui); }
 `;
 
-function printCss(s: DocSettings): string {
+function printCss(s: DocSettings, look: ResolvedLook): string {
   const page = PAGE_MM[s.pageSize] ?? PAGE_MM.A4;
   const [w, h] = s.orientation === 'landscape' ? [page.h, page.w] : [page.w, page.h];
   return `@page { size: ${w}mm ${h}mm; margin: ${s.margins.top}mm ${s.margins.right}mm ${s.margins.bottom}mm ${s.margins.left}mm; }
   @media print { main { padding: 0; max-width: none; }
     /* A picture taller than the page is clipped by the printer; scale it to fit instead (the live check's flowchart was). */
-    figure.visual svg, figure.visual img, figure img { max-height: ${Math.round(h - s.margins.top - s.margins.bottom - 20)}mm; width: auto; } .cover { min-height: 0; height: ${h - s.margins.top - s.margins.bottom - 8}mm; margin: 0; break-after: page; }
+    figure.visual svg, figure.visual img, figure img { max-height: ${Math.round(h - s.margins.top - s.margins.bottom - 20)}mm; width: auto; } .cover { min-height: 0; height: ${h - s.margins.top - s.margins.bottom - 8}mm; margin: 0; break-after: page; box-sizing: border-box; }
+    ${look.classification ? '.classification { display: none; }' : ''}
     nav.toc { break-after: page; } pre, table, img, svg, figure { break-inside: avoid; } }`;
 }
 
@@ -368,24 +408,34 @@ export async function buildHtml(input: HtmlBuild): Promise<string> {
   const ctx: HtmlCtx = { images, visuals: input.visuals, headingIds: new Map(headings.map(h => [h.node, h])), tocHtml: toc };
   const body = tree.children.map(n => blockHtml(n, ctx)).filter(Boolean).join('\n');
   const date = (input.date ?? new Date()).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const look = resolveLook(s);
+  const { attrs, vars } = themeAttrs(look);
+  const letterhead = look.theme?.header === 'letterhead';
   let top = '';
+  if (letterhead && s.header) {
+    top += `<header class="letterhead"><div class="lh-name">${esc(expandFields(s.header, { title: input.title, date }).replace(/\{page\}|\{pages\}/gi, ''))}</div>`
+      + `<div class="lh-date">${esc(date)}</div></header>\n`;
+  }
   if (cover) {
     const c = s.cover!;
     const logo = c.logo ? images.get(c.logo) : undefined;
-    top = `<section class="cover">${logo ? `<img class="logo" src="${esc(logo)}" alt="Logo">` : ''}`
+    top = `<section class="cover${look.theme ? ` cover-${look.theme.cover}` : ''}">${logo ? `<img class="logo" src="${esc(logo)}" alt="Logo">` : ''}`
       + `<h1 class="cover-title">${esc(c.title ?? input.title)}</h1>${c.subtitle ? `<div class="subtitle">${esc(c.subtitle)}</div>` : ''}`
       + `<div class="rule"></div>${c.author ? `<div class="meta">${esc(c.author)}</div>` : ''}<div class="meta">${esc(c.date ?? date)}</div></section>\n`;
   } else if (!opensWithH1(tree, input.title) && input.title) {
-    top = `<h1>${esc(input.title)}</h1>\n`;
+    top += `<h1>${esc(input.title)}</h1>\n`;
   }
   if (s.toc && !hasTocMarker(tree)) top += toc;
   // Outside print, the running header/footer has nowhere to go; show them once, top and bottom.
   const values = { title: input.title, date };
-  const screenHeader = !input.print && s.header ? `<div class="running">${esc(expandFields(s.header, values).replace(/\{page\}|\{pages\}/gi, ''))}</div>` : '';
+  const screenHeader = !input.print && s.header && !letterhead ? `<div class="running">${esc(expandFields(s.header, values).replace(/\{page\}|\{pages\}/gi, ''))}</div>` : '';
+  const banner = (where: string): string => (look.classification ? `<div class="classification ${where}">${esc(look.classification)}</div>` : '');
   const screenFooter = !input.print && s.footer ? `<div class="running">${esc(expandFields(s.footer, values).replace(/\{page\}|\{pages\}/gi, ''))}</div>` : '';
   // Sized to the text so a long mark still fits the page diagonally.
   const watermark = s.watermark
     ? `<div class="watermark" style="font-size:${Math.max(28, Math.min(96, Math.round(760 / s.watermark.length)))}px">${esc(s.watermark)}</div>` : '';
+  const bodyAttrs = [s.font === 'serif' ? ' class="serif"' : '', ...Object.entries(attrs).map(([k, v]) => ` ${k}="${esc(v)}"`),
+    look.theme || s.accent ? ` style="${esc(styleText(vars))}"` : ''].join('');
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -394,13 +444,13 @@ export async function buildHtml(input: HtmlBuild): Promise<string> {
 <title>${esc(input.title)}</title>
 <style>${CSS}
   .running { color: #71717a; font-size: 0.85em; margin: 0 0 1.5em; }
-  ${input.print ? printCss(s) : ''}</style>
+  ${input.print ? printCss(s, look) : ''}</style>
 </head>
-<body${s.font === 'serif' ? ' class="serif"' : ''}>
+<body${bodyAttrs}>
 ${watermark}
 <main>
-${screenHeader}${top}${body}
-${screenFooter}
+${banner('top')}${screenHeader}${top}${body}
+${screenFooter}${banner('bottom')}
 </main>
 </body>
 </html>
@@ -414,14 +464,21 @@ export async function toHtml(title: string, markdown: string, resolve: ImageReso
 
 // ── PDF ─────────────────────────────────────────────────────────────
 
-function hfTemplate(text: string | undefined, values: { title: string; date: string }, pageNumbers: boolean, isFooter: boolean): string {
+function hfTemplate(text: string | undefined, values: { title: string; date: string }, pageNumbers: boolean, isFooter: boolean,
+  look?: ResolvedLook): string {
   const expand = (t: string): string => esc(expandFields(t, values))
     .replace(/\{page\}/gi, '<span class="pageNumber"></span>').replace(/\{pages\}/gi, '<span class="totalPages"></span>');
   const left = text ? expand(text) : '';
   const right = isFooter && pageNumbers && !/\{page\}/i.test(text ?? '')
     ? 'Page <span class="pageNumber"></span> of <span class="totalPages"></span>' : '';
-  return `<div style="font: 8.5px -apple-system, 'Segoe UI', sans-serif; color: #71717a; width: 100%; padding: 0 14mm; display: flex; justify-content: space-between;">`
-    + `<span>${left}</span><span>${right}</span></div>`;
+  // A themed running header/footer takes the theme's face; a "rule" header sits on a hairline.
+  const font = look?.theme ? (look.faces.body === 'serif' ? 'Georgia, serif' : "'Segoe UI', sans-serif") : "-apple-system, 'Segoe UI', sans-serif";
+  const rule = look?.theme?.header === 'rule' && (left || right) ? `border-${isFooter ? 'top' : 'bottom'}: 0.5px solid #d4d4d8; padding-${isFooter ? 'top' : 'bottom'}: 2mm;` : '';
+  const banner = look?.classification
+    ? `<div style="text-align: center; font: 700 8px ${font}; letter-spacing: 1.6px; color: #b91c1c; margin: ${isFooter ? '1.5mm 0 0' : '0 0 1.5mm'};">${esc(look.classification)}</div>` : '';
+  const row = left || right
+    ? `<div style="display: flex; justify-content: space-between; ${rule}"><span>${left}</span><span>${right}</span></div>` : '';
+  return `<div style="font: 8.5px ${font}; color: #71717a; width: 100%; padding: 0 14mm;">${isFooter ? row + banner : banner + row}</div>`;
 }
 
 async function printPdf(browser: ExportBrowser, html: string, s: DocSettings, values: { title: string; date: string }, timeout: number): Promise<Buffer> {
@@ -429,13 +486,16 @@ async function printPdf(browser: ExportBrowser, html: string, s: DocSettings, va
   try {
     await page.route('**/*', route => (route.request().url().startsWith('data:') ? route.continue() : route.abort()));
     await page.setContent(html, { waitUntil: 'load', timeout });
-    const header = Boolean(s.header);
-    const footer = Boolean(s.footer) || s.pageNumbers;
+    const look = resolveLook(s);
+    // A letter's header text is its letterhead (drawn once, in the page), not a running header.
+    const headerText = look.theme?.header === 'letterhead' ? undefined : s.header;
+    const header = Boolean(headerText) || Boolean(look.classification);
+    const footer = Boolean(s.footer) || s.pageNumbers || Boolean(look.classification);
     const pdf = await page.pdf({
       preferCSSPageSize: true, printBackground: true,
       displayHeaderFooter: header || footer,
-      headerTemplate: header ? hfTemplate(s.header, values, false, false) : '<span></span>',
-      footerTemplate: footer ? hfTemplate(s.footer, values, s.pageNumbers, true) : '<span></span>',
+      headerTemplate: header ? hfTemplate(headerText, values, false, false, look) : '<span></span>',
+      footerTemplate: footer ? hfTemplate(s.footer, values, s.pageNumbers, true, look) : '<span></span>',
     });
     return Buffer.from(pdf);
   } finally {

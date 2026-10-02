@@ -229,6 +229,50 @@ export async function restoreCheckpoint(
   return report;
 }
 
+/**
+ * A checkpoint of its own for one bulk change, beside the turn's.
+ *
+ * A refactor apply (`refactor/plan`) rewrites tens or hundreds of files in one
+ * call and may need to be undone on its own — the turn's checkpoint also holds
+ * every edit made before it, and restoring that would throw the earlier work
+ * away with the refactor. So the apply snapshots exactly the files it is about
+ * to touch, in the same shape and under the same restore rule, and `seal`
+ * records what it left so a later outside edit is still detected.
+ */
+export async function snapshotFiles(label: string, files: readonly string[]): Promise<Checkpoint> {
+  const checkpoint: Checkpoint = {
+    // `-r` so it cannot collide with a turn checkpoint opened in the same millisecond.
+    id: `cp-${Date.now().toString(36)}-r`,
+    label: label.slice(0, 120),
+    createdAt: Date.now(),
+    files: [],
+  };
+  for (const file of new Set(files)) {
+    let before: string | null;
+    try { before = await readFile(file, 'utf8'); } catch { before = null; }
+    checkpoint.files.push({ file, before });
+  }
+  return checkpoint;
+}
+
+/** Record what the change left, file by file (see {@link recordAfterWrite}). */
+export async function sealSnapshot(checkpoint: Checkpoint): Promise<void> {
+  for (const entry of checkpoint.files) {
+    try { entry.after = digest(await readFile(entry.file, 'utf8')); } catch { delete entry.after; }
+  }
+}
+
+/** Persist a standalone checkpoint where the `Checkpoint` tool lists them. */
+export async function storeCheckpoint(checkpoint: Checkpoint, directory: string): Promise<boolean> {
+  try {
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, `${checkpoint.id}.json`), JSON.stringify(checkpoint), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** For tests, and for a process that should stop recording. */
 export function resetCheckpoints(): void {
   active = undefined;

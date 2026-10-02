@@ -15,6 +15,11 @@
  * Sheets and LibreOffice write, and treats anything else as empty rather than
  * throwing on a file a person cannot fix.
  *
+ * `cells()` (added for AICO Sheets' import) reads the same scan with each
+ * cell's type and formula kept — `<f>` text, and Excel's shared formulas
+ * (`t="shared"` with `si`, the text only on the first cell) reported as such
+ * for the caller to translate. `rows()` is unchanged.
+ *
  * @module tools/xlsx-lite
  */
 
@@ -25,6 +30,23 @@ export interface Workbook {
   sheets: string[];
   /** Rows of one sheet, keyed by row number (1-based); each row is cell text by column index (0-based). */
   rows(sheet: string): Map<number, string[]>;
+  /** Every non-empty cell of one sheet with its type and formula, in file order. */
+  cells(sheet: string): RawCell[];
+}
+
+/** One cell as stored: `text` is what `rows()` shows; `type` says how to read it. */
+export interface RawCell {
+  /** "B7". */
+  ref: string;
+  text: string;
+  /** n number, s text, b boolean, e error, d a number in a date format. */
+  type: 'n' | 's' | 'b' | 'e' | 'd';
+  /** The formula text (no `=`); absent for a dependent shared-formula cell. */
+  formula?: string;
+  /** Shared-formula group id, when the formula is shared. */
+  shared?: number;
+  /** The raw number for n and d cells. */
+  number?: number;
 }
 
 /** Built-in number formats Excel treats as dates or times. */
@@ -55,6 +77,12 @@ export function columnIndex(ref: string): number {
   let n = 0;
   for (const ch of ref.replace(/\d+$/, '')) n = n * 26 + (ch.toUpperCase().charCodeAt(0) - 64);
   return n - 1;
+}
+
+function colLetters(c: number): string {
+  let s = '';
+  for (let n = c + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  return s;
 }
 
 /** An Excel serial date as an ISO day. The 1900 system, with Excel's phantom 29 February 1900. */
@@ -111,6 +139,62 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     styleIndex++;
   }
 
+  const emptyRows = new Map<string, number[]>();
+  const scans = new Map<string, Array<{ row: number; col: number; cell: RawCell }>>();
+  const scan = (sheet: string): Array<{ row: number; col: number; cell: RawCell }> => {
+    const hit = scans.get(sheet);
+    if (hit) return hit;
+    const out: Array<{ row: number; col: number; cell: RawCell }> = [];
+    const empty: number[] = [];
+    const part = sheets.find(s => s.name === sheet)?.part;
+    const xml = part ? text(part) : undefined;
+    if (xml) {
+      for (const rowMatch of xml.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
+        const rowNumber = Number(attr(`<row${rowMatch[1]}>`, 'r') ?? '0');
+        if (rowMatch[2] === undefined) { if (rowNumber > 0) empty.push(rowNumber); continue; }
+        let next = 0;
+        let any = false;
+        for (const cellMatch of rowMatch[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+          const open = `<c${cellMatch[1]}>`;
+          const ref = attr(open, 'r') ?? '';
+          const type = attr(open, 't');
+          const style = Number(attr(open, 's') ?? '-1');
+          const body = cellMatch[2] ?? '';
+          const value = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+          let out1 = '';
+          let kind: RawCell['type'] = 's';
+          let number: number | undefined;
+          if (type === 's') out1 = shared[Number(value)] ?? '';
+          else if (type === 'inlineStr') out1 = textRuns(body);
+          else if (type === 'str') out1 = value === undefined ? '' : decodeEntities(value);
+          else if (type === 'e') { out1 = value === undefined ? '' : decodeEntities(value); kind = 'e'; }
+          else if (type === 'b') { out1 = value === '1' ? 'TRUE' : 'FALSE'; kind = 'b'; }
+          else if (value !== undefined) {
+            const n = Number(value);
+            const isDate = Number.isFinite(n) && dateStyles.has(style) && n > 0;
+            out1 = isDate ? serialToIso(n) : decodeEntities(value);
+            if (Number.isFinite(n)) { kind = isDate ? 'd' : 'n'; number = n; }
+          }
+          const col = ref ? columnIndex(ref) : next;
+          next = col + 1;
+          const fTag = /<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/.exec(body);
+          const cell: RawCell = { ref: ref || `${colLetters(col)}${rowNumber}`, text: out1, type: kind, ...(number !== undefined ? { number } : {}) };
+          if (fTag) {
+            const fOpen = `<f${fTag[1]}>`;
+            if (fTag[2] !== undefined && fTag[2] !== '') cell.formula = decodeEntities(fTag[2]);
+            if (attr(fOpen, 't') === 'shared' && attr(fOpen, 'si') !== undefined) cell.shared = Number(attr(fOpen, 'si'));
+          }
+          out.push({ row: rowNumber, col, cell });
+          any = true;
+        }
+        if (!any && rowNumber > 0) empty.push(rowNumber);
+      }
+    }
+    emptyRows.set(sheet, empty);
+    scans.set(sheet, out);
+    return out;
+  };
+
   const cache = new Map<string, Map<number, string[]>>();
   return {
     sheets: sheets.map(s => s.name),
@@ -118,39 +202,22 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       const hit = cache.get(sheet);
       if (hit) return hit;
       const rows = new Map<number, string[]>();
-      const part = sheets.find(s => s.name === sheet)?.part;
-      const xml = part ? text(part) : undefined;
-      if (xml) {
-        // Both spellings: a row with cells, and the self-closing `<row r="3"/>`
-        // Excel writes for a row that once had content and no longer does.
-        for (const rowMatch of xml.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
-          const rowNumber = Number(attr(`<row${rowMatch[1]}>`, 'r') ?? '0');
-          const cells: string[] = [];
-          for (const cellMatch of (rowMatch[2] ?? '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
-            const open = `<c${cellMatch[1]}>`;
-            const ref = attr(open, 'r') ?? '';
-            const type = attr(open, 't');
-            const style = Number(attr(open, 's') ?? '-1');
-            const body = cellMatch[2] ?? '';
-            const value = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
-            let out = '';
-            if (type === 's') out = shared[Number(value)] ?? '';
-            else if (type === 'inlineStr') out = textRuns(body);
-            else if (type === 'str' || type === 'e') out = value === undefined ? '' : decodeEntities(value);
-            else if (type === 'b') out = value === '1' ? 'TRUE' : 'FALSE';
-            else if (value !== undefined) {
-              const n = Number(value);
-              out = Number.isFinite(n) && dateStyles.has(style) && n > 0 ? serialToIso(n) : decodeEntities(value);
-            }
-            const col = ref ? columnIndex(ref) : cells.length;
-            while (cells.length < col) cells.push('');
-            cells[col] = out;
-          }
-          if (rowNumber > 0) rows.set(rowNumber, cells);
-        }
+      for (const { row, col, cell } of scan(sheet)) {
+        if (row <= 0) continue;
+        let cells = rows.get(row);
+        if (!cells) { cells = []; rows.set(row, cells); }
+        while (cells.length < col) cells.push('');
+        cells[col] = cell.text;
       }
-      cache.set(sheet, rows);
-      return rows;
+      // Both spellings: a row with cells, and the self-closing `<row r="3"/>`
+      // Excel writes for a row that once had content and no longer does.
+      for (const r of emptyRows.get(sheet) ?? []) if (!rows.has(r)) rows.set(r, []);
+      const sorted = new Map([...rows].sort((a, b) => a[0] - b[0]));
+      cache.set(sheet, sorted);
+      return sorted;
+    },
+    cells(sheet) {
+      return scan(sheet).map(x => x.cell).filter(c => c.text !== '' || c.formula !== undefined || c.shared !== undefined);
     },
   };
 }

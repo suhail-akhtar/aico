@@ -67,6 +67,11 @@ export async function judge(o: {
   const provider = o.provider ?? (await import('../providers/index.js')).selectProvider(o.model, o.settings);
   const tracker = createTokenTracker();
   let text = '';
+  // Thinking off and room to answer: on a thinking model (deepseek-v4-pro) reasoning tokens come out of
+  // maxTokens, and at 300 the judge spent them all thinking and returned no verdict — every judged check failed.
+  const { runInContext, currentRunContext } = await import('../run-context.js');
+  const ctx = currentRunContext();
+  await runInContext({ ...(ctx ?? {}), cwd: ctx?.cwd ?? process.cwd(), effort: 'off' }, async () => {
   for await (const event of provider.chat({
     model: o.model,
     systemPrompt: SYSTEM,
@@ -75,11 +80,12 @@ export async function judge(o: {
       content: `Rubric:\n${o.rubric}\n\nThe request the answer responds to:\n${o.task}\n\nThe answer:\n${o.answer.slice(0, 12_000)}`,
     }],
     tools: [],
-    maxTokens: 300,
+    maxTokens: 1500,
     ...(o.signal ? { signal: o.signal } : {}),
   })) {
     if (event.type === 'text') text += event.content;
     else if (event.type === 'usage') tracker.add(event.inputTokens, event.outputTokens, event.cacheReadTokens ?? 0, event.cacheWriteTokens ?? 0);
   }
+  });
   return { ...parseVerdict(text), costUsd: tracker.estimateCost(o.model, o.settings) };
 }

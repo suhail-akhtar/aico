@@ -165,7 +165,32 @@ function safeParse(text: string): unknown {
 }
 
 import type { ParkedAction } from './inbox';
+import type { BriefLatest, Brief, BriefSummaryRow } from './brief';
 export type { ParkedAction } from './inbox';
+
+/** One Sentinel review as the audit file records it (engine: sentinel/ `SentinelRecord`). */
+export interface SentinelVerdictRow {
+  at: number;
+  sessionId?: string;
+  agentName?: string;
+  level?: string;
+  tool: string;
+  effect: string;
+  why: string;
+  verdict: 'allow' | 'deny' | 'escalate';
+  reason: string;
+  outcome: 'no-objection' | 'refused' | 'person-allowed' | 'person-refused' | 'parked' | 'refused-unattended';
+  model: string;
+  costUsd: number;
+  ms: number;
+  failure?: string;
+  call: string;
+}
+
+export interface SentinelList {
+  verdicts: SentinelVerdictRow[];
+  totals: { reviews: number; denied: number; escalated: number; costUsd: number };
+}
 
 /** One custom tool as Settings → Tools shows it (engine: custom-tools/manage `toolsForPanel`). */
 export interface CustomToolRow {
@@ -195,6 +220,41 @@ const get = <T,>(path: string): Promise<T> => request<T>(path, { method: 'GET' }
  * and the VS Code panel there is no nonce to send — their hosts prove the
  * person themselves.
  */
+/** One thing a chat made or opened, as `artifacts/list` returns it (engine: `server/artifact-routes`). */
+export interface ArtifactItem {
+  key: string;
+  kind: 'document' | 'sheet' | 'code' | 'image' | 'file' | 'export';
+  source: 'canvas' | 'file' | 'attachment';
+  /** Canvas id, path inside the chat's artifacts folder, or attachment id. */
+  id: string;
+  title: string;
+  ext?: string;
+  language?: string;
+  bytes?: number;
+  updatedAt: number;
+  topic: string;
+  uploaded?: boolean;
+}
+
+/** A long job as `longjob/list` returns it (engine: longjob `LongJob`). */
+export interface LongJob {
+  id: string;
+  sessionId: string;
+  title: string;
+  research: string;
+  design: string;
+  milestones: Array<{ title: string; detail?: string; acceptance: string[]; doneAt?: number; evidence?: string[] }>;
+  estimateHours: number;
+  costUsd?: number;
+  budget: { usd: number; hours: number };
+  missing: string[];
+  status: 'pending' | 'declined' | 'superseded' | 'running' | 'paused' | 'done' | 'stopped' | 'budget';
+  note?: string;
+  spentUsd: number;
+  activeMs: number;
+  createdAt: number;
+}
+
 async function postAsPerson<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const send = async (): Promise<T> => post<T>(path, { ...body, client: await ensureUiClient() ?? undefined });
   try {
@@ -556,6 +616,29 @@ export const api = {
   dismissProposal: (cwd: string | undefined, id: string) =>
     post<{ ok: true; id: string }>('learning/dismiss', { cwd, id }),
 
+  /** What AICO learned about how you work (ADR 0016): every rule, and which apply to `cwd`. */
+  preferences: (cwd?: string) =>
+    get<{ cwd: string; rules: PreferenceRule[]; applying: string[]; pending: number }>(
+      `learning/preferences${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''}`),
+  /**
+   * Change one rule. Putting a rule in force (accept, enable, edit, add) is
+   * sent as a person — the engine refuses it on the API token alone;
+   * disabling and forgetting are always allowed.
+   */
+  preferenceAct: (body: { action: 'accept' | 'enable' | 'disable' | 'forget' | 'edit' | 'add'; id?: string; text?: string; scope?: string; cwd?: string }) =>
+    (body.action === 'disable' || body.action === 'forget' ? post : postAsPerson)<{ ok: true; rule?: PreferenceRule }>(
+      'learning/preferences/act', body as Record<string, unknown>),
+  preferencesExport: () =>
+    get<{ exportedAt: string; format: string; rules: PreferenceRule[] }>('learning/preferences/export'),
+
+  /** The morning brief and monitors (engine: brief/). Reads, a manual run, per-project monitor switches. */
+  brief: () => get<BriefLatest>('brief/latest'),
+  briefHistory: (limit = 14) => get<{ briefs: BriefSummaryRow[] }>(`brief/history?limit=${limit}`),
+  briefById: (id: string) => get<{ brief: Brief }>(`brief/history?id=${encodeURIComponent(id)}`),
+  runBrief: () => post<{ ok: boolean; started?: boolean; error?: string }>('brief/run', {}),
+  setBriefMonitor: (path: string, flags: { ci?: boolean; reviews?: boolean; advisories?: boolean }) =>
+    post<{ ok: boolean }>('brief/monitors', { path, ...flags }),
+
   /** The approve-later inbox: calls unattended runs parked for a person (engine: autonomy/inbox). */
   inbox: (status: 'pending' | 'all' = 'all') =>
     get<{ actions: ParkedAction[]; pending: number }>(`inbox/list?status=${status}`),
@@ -563,6 +646,19 @@ export const api = {
   decideParked: (id: string, decision: 'approve' | 'deny', note?: string) =>
     (decision === 'approve' ? postAsPerson : post)<{ ok: boolean; message: string; action?: ParkedAction }>(
       'inbox/decide', { id, decision, ...(note ? { note } : {}) }),
+
+  /** The Sentinel's recent verdicts and totals (engine: sentinel/, ADR 0015). Read-only. */
+  sentinel: (limit = 30) => get<SentinelList>(`sentinel/list?limit=${limit}`),
+
+  /** Long jobs (engine: longjob/): proposals over the size threshold and the jobs they became. */
+  longJobs: (sessionId: string) =>
+    get<{ jobs: LongJob[] }>(`longjob/list?sessionId=${encodeURIComponent(sessionId)}`),
+  /** Approving starts paid work across turns, so it is sent as a person; declining needs no proof. */
+  decideLongJob: (id: string, decision: 'approve' | 'decline') =>
+    (decision === 'approve' ? postAsPerson : post)<{ ok: boolean; message: string; job?: LongJob }>('longjob/decide', { id, decision }),
+  /** Resuming spends again, so it goes as a person; pausing and stopping are always safe. */
+  controlLongJob: (id: string, action: 'pause' | 'resume' | 'stop') =>
+    (action === 'resume' ? postAsPerson : post)<{ ok: boolean; message: string; job?: LongJob }>('longjob/control', { id, action }),
 
   /** Which cheap model the read-only sub-agent roles could run on, for the model in use. */
   agentRecommendation: (model?: string) =>
@@ -824,8 +920,27 @@ export const api = {
     post<{ canvas: CanvasDoc }>('canvas/tabs', { session: sessionId, id, ...op }),
   canvasSettings: (sessionId: string, id: string, docSettings: DocSettings) =>
     post<{ canvas: CanvasDoc }>('canvas/settings', { session: sessionId, id, settings: docSettings }),
-  canvasCreate: (sessionId: string, input: { title: string; content: string }) =>
+  canvasCreate: (sessionId: string, input: { title: string; content: string; kind?: 'document' | 'code' | 'sheet' }) =>
     post<{ canvas: CanvasDoc }>('canvas/create', { session: sessionId, kind: 'document', ...input }),
+  canvasRename: (sessionId: string, id: string, title: string) =>
+    post<{ canvas: CanvasDoc }>('canvas/rename', { session: sessionId, id, title }),
+  /** A .xlsx/.csv as a new sheet canvas; `data` is base64. */
+  canvasImport: (sessionId: string, file: { name: string; data: string }) =>
+    post<{ canvas: CanvasDoc }>('canvas/import', { session: sessionId, ...file }),
+  // ── Artifacts (server/artifact-routes): what this chat made or opened ──
+  artifactsList: (sessionId: string) =>
+    get<{ artifacts: ArtifactItem[] }>(`artifacts/list?session=${encodeURIComponent(sessionId)}`),
+  artifactRename: (sessionId: string, path: string, name: string) =>
+    post<{ path: string }>('artifacts/rename', { session: sessionId, path, name }),
+  /** A file from the chat's artifacts folder (`path`) or its attachments (`attachment` id), as a blob. */
+  artifactFile: async (sessionId: string, ref: { path?: string; attachment?: string }): Promise<Blob> => {
+    const q = ref.attachment
+      ? `attachments/file?session=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(ref.attachment)}`
+      : `artifacts/file?session=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(ref.path ?? '')}`;
+    const res = await transportFetch(`/api/${q}`, { headers: { 'x-aico-token': getToken() } });
+    if (!res.ok) throw new Error(`could not fetch the file (${res.status})`);
+    return res.blob();
+  },
   canvasComments: (sessionId: string, id: string) =>
     get<{ comments: CanvasComment[] }>(`canvas/${encodeURIComponent(id)}/comments?session=${encodeURIComponent(sessionId)}`),
   canvasComment: (sessionId: string, id: string, input: { tabId: string; anchor: CommentAnchor; body: string; askAgent?: boolean }) =>
@@ -1142,6 +1257,25 @@ export interface AppTemplate {
 }
 
 /** A lesson the log proposed, waiting for a person. Mirrors `learning/extract` on the server. */
+/** A rule about how the user works (engine: learning/preferences.ts). */
+export interface PreferenceRule {
+  id: string;
+  text: string;
+  topic: string;
+  /** `global`, `project:<root>` or `language:<name>`. */
+  scope: string;
+  category: 'style' | 'tooling' | 'workflow' | 'communication';
+  status: 'proposed' | 'active' | 'disabled' | 'superseded';
+  evidence: Array<{ sessionId: string; seq?: number; kind: 'feedback' | 'correction' | 'edit' | 'choice'; excerpt: string; at: number }>;
+  createdAt: number;
+  updatedAt: number;
+  acceptedAt?: number;
+  autoAccepted?: boolean;
+  replaces?: string[];
+  supersededBy?: string;
+  byUser?: boolean;
+}
+
 export interface Proposal {
   id: string;
   kind: 'knowledge' | 'profile' | 'user';

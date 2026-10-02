@@ -20,6 +20,11 @@
  * it is how the agent stops planning and hands over — which is why it takes the
  * whole plan at once rather than being built up across calls.
  *
+ * **It is also the sizing step.** `estimate_hours` above the long-job
+ * threshold turns the plan into a proposal only a person can approve; the
+ * conversation's handler for that lives in agent.ts and `longjob/`, because
+ * this function knows no session. Below the threshold nothing changes.
+ *
  * @module tools/plan
  */
 
@@ -30,6 +35,8 @@ export interface PlanStep {
   detail?: string;
   /** Files or areas this step touches, so the blast radius is visible. */
   touches?: string[];
+  /** Long jobs: the checks that prove this milestone done (longjob/). */
+  acceptance?: string[];
 }
 
 export interface PlanInput {
@@ -40,6 +47,13 @@ export interface PlanInput {
   risks?: string[];
   /** What the agent could not determine and had to assume. */
   open_questions?: string[];
+  /**
+   * The sizing step. Above `longJobs.thresholdHours` the plan becomes a
+   * long-job proposal that only a person can approve (agent.ts, longjob/).
+   */
+  estimate_hours?: number;
+  /** The rest of a long-job proposal; ignored at or below the threshold. */
+  long_job?: { research?: string; design?: string; cost_usd?: number; budget_usd?: number; budget_hours?: number };
 }
 
 /**
@@ -78,7 +92,7 @@ export const proposePlanDefinition = {
     + 'can only be read, while this one can be answered. '
     + 'State the open questions honestly: a plan built on a guess is the expensive kind of '
     + 'wrong, and before anything runs is the only cheap moment to catch it. '
-    + 'Call it once, with the whole plan, and then stop.',
+    + 'Call it once, with the whole plan, and then stop. Before work of more than a few hours, call it first.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -96,6 +110,7 @@ export const proposePlanDefinition = {
               items: { type: 'string' },
               description: 'Files or areas this step changes, so the blast radius is visible.',
             },
+            acceptance: { type: 'array', items: { type: 'string' } },
           },
           required: ['title'],
         },
@@ -111,6 +126,18 @@ export const proposePlanDefinition = {
         description:
           'What you could not determine and had to assume. Say these plainly — an assumption '
           + 'the reader would have corrected is the cheapest bug there is.',
+      },
+      estimate_hours: {
+        type: 'number',
+        description: 'Honest hours of work. Over the long-job threshold (default 3h) a person must approve first: then fill long_job, and give each step (a milestone) acceptance; the last step is end-to-end verification and docs.',
+      },
+      long_job: {
+        type: 'object',
+        description: 'Over the threshold only. Research = findings and requirements; budget = the cap to approve.',
+        properties: {
+          research: { type: 'string' }, design: { type: 'string' },
+          cost_usd: { type: 'number' }, budget_usd: { type: 'number' }, budget_hours: { type: 'number' },
+        },
       },
     },
     required: ['title', 'steps'],

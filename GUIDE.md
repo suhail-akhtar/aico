@@ -112,6 +112,25 @@ Then answer it:
 The card collapses to a single line once you have answered, and remembers what
 you decided. Reopen the session tomorrow and it still says *approved*.
 
+### Long jobs
+
+When the agent estimates a request at more than three hours of work (in any
+mode; `longJobs.thresholdHours` changes the line), it stops before doing any of
+it and shows a **Long job** card instead: research and requirements, the
+design, milestones with acceptance criteria, the time and cost estimate, and a
+budget cap. Nothing that writes or runs commands happens in that chat until you
+press **Approve and start** or **Decline** on the card — typing "go ahead" does
+not approve it.
+
+Once approved it works milestone by milestone across turns. A milestone closes
+only when the project's checks pass and each acceptance criterion has its
+evidence. It stops when every milestone is done or the budget or time cap is
+reached, and pauses if you cancel a turn, a turn fails, or four turns pass
+without progress. **Pause**, **Resume** and **Stop** are on the card; Activity
+shows the current milestone and spend. A restart resumes the job from its
+journal under `~/.aico/long-jobs/`, and a report with the evidence is written
+next to it when the job ends.
+
 ---
 
 ## When it pushes back
@@ -221,6 +240,33 @@ a watcher and stop:
 Watchers cover files, processes, HTTP endpoints, commands, log patterns and
 other work. The wake arrives at the next step boundary, so nothing the turn has
 already learned is thrown away.
+
+### The morning brief and monitors
+
+Every morning (08:00 local by default; Settings → General → Morning brief)
+AICO prepares a short brief on Home — desktop and web — with what needs you
+first: calls waiting in the inbox, long jobs, background and scheduled runs
+that failed or finished overnight, and, through the `gh` CLI if you are signed
+in, PRs waiting for your review, your PRs with failing checks or changes
+requested, new issues assigned to you and failed Actions on the default branch.
+New high/critical dependency advisories (audited at most once a day), stale
+branches and uncommitted work come after. Gathering uses no model; one call to
+the cheapest model of your provider ranks the items and writes two sentences
+(titles only, secrets redacted; turn `brief.useModel` off for none). Nothing
+to say means no call. Calendar and email are read only from MCP tools you name
+in `brief.mcp` (for example `[{ "server": "calendar", "tool": "list_events" }]`).
+
+Each item has one-click actions — open the PR or run, open the chat, review in
+the inbox, or **Start a fix**, which opens a new chat in that project with the
+prompt filled in and *not sent*. The brief only reads; nothing acts until you
+click. Earlier briefs are under **History**.
+
+**Monitors** are opt-in per project (the card's **Monitors** table): CI on the
+default branch, new review requests, new critical advisories. They poll
+quietly — every 5 minutes, stretching to 30 when nothing changes and backing
+off to an hour when `gh` is unreachable — use no model, and notify only when
+something changed. Alerts during quiet hours (`brief.quietHours`, 22:00–07:00)
+wait until they end.
 
 ---
 
@@ -371,6 +417,49 @@ because those are different outcomes and one of them means nothing got built.
 
 ---
 
+## Wide refactors
+
+Renaming an API used in two hundred files, adding an argument at every call
+site, or moving a module and fixing its importers is one planned step rather
+than hundreds of edits. The agent loads the `refactor` tools when a change is
+that wide: `CodeSearch` and `CodeRewrite` match code structurally with
+[ast-grep](https://ast-grep.github.io/) (so comments, strings and lookalike
+names are left alone), and `Refactor` uses the TypeScript language service for
+TS/JS rename, references, organize imports and move file — no editor needed.
+
+Every change is shown as a plan first (files, counts, the first hunks) and only
+the plan that was shown can be applied. Applying it is one checkpoint, then
+your project's checks run; if they fail you see why, and one call
+(`Refactor` rollback) undoes the whole change. ast-grep is an optional
+dependency: if your platform skipped it, install it in the project
+(`npm i -D @ast-grep/cli`) or put `ast-grep` on PATH.
+
+## Sheets, and everything a chat made
+
+Ask for a spreadsheet ("make a BOQ sheet with quantities × rates and
+totals") and the agent builds a **sheet** beside the chat: a live grid with
+Excel formulas (SUM, AVERAGE, COUNTIF, SUMIF, IF, ROUND, VLOOKUP, XLOOKUP,
+TEXT, DATE, TODAY and more, across sheets too), number formats (number,
+currency, percent, date), a frozen header, fills and conditional fills, and
+charts drawn from a range. Edit it like Excel: type, F2, Enter/Tab, arrows,
+paste straight from Excel or a CSV, Ctrl+D to fill down, insert and delete
+rows and columns, sort, filter, undo. Every formula recomputes as you type;
+an error shows Excel's code with the reason (a circular reference names the
+loop). The agent changes only the cells it means to, and if you are editing
+at the same time your edits are kept on top of its.
+
+**Export** gives a real `.xlsx` (formulas with their values, formats, widths,
+the frozen header and conditional fills — it opens in Excel) or a CSV;
+**Import** turns a `.xlsx` or `.csv` into a new sheet. Charts stay in AICO —
+they are not written into the `.xlsx`.
+
+**Artifacts** (desktop: the button beside Share) lists what the chat made or
+opened — documents, sheets, code, exports, generated images and attachments —
+grouped by type or by topic (an export sits under the document it came from).
+Open a canvas, **Open beside** to put a document and a sheet side by side,
+rename, export or download, and **Show in chat** to jump to where it came
+from. The web client shows the same list in the side rail.
+
 ## In VS Code
 
 aico is a tab of its own in the Secondary Side Bar, beside Chat — a native
@@ -444,6 +533,26 @@ knowledge, a project fact such as "this project uses npm", or a line in
 work. Design decisions the agent settles while building go to
 `.aico/decisions.md`, and a session that compacts keeps that file and writes the
 dropped detail to a report it names in the summary.
+
+### What AICO learned about how you work
+
+Some corrections are not about a task but about you: "no, use pnpm", "never use
+`var`", the file you re-indent with tabs a minute after the agent wrote it, the
+package manager you pick every time. aico notices these — a rating with a note,
+a correction in your message, a hand edit to something it just wrote (kept as a
+short diff summary, never the file), a choice you repeat — and a small, cheap
+model call turns them into short **rules** such as *Use pnpm, not npm.*, each
+scoped to everywhere, one project, or one language, with the evidence linked.
+
+Every rule starts **proposed** and does nothing until you accept it under
+**Settings → What AICO learned** (desktop and web). There you can edit, disable,
+forget (it will not be proposed again), add your own, or export them all. A rule
+that contradicts an accepted one says what it would replace; the old one stays
+in force until you accept the new one. Accepted rules that fit the current
+project are added to each request — at most about 400 tokens, most relevant
+first. Turn on *Auto-accept low-risk style rules* to skip the click for
+formatting-only rules; anything about tools, commands or permissions still waits
+for you. *Learn how I work* off stops all of it.
 
 ## Choosing a model
 

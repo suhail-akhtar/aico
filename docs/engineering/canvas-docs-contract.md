@@ -7,6 +7,150 @@ the code changes**, so the other side can read them.
 
 ## Contract changes
 
+**Engine + UI, 2026-10-03 (AICO Sheets and the Artifacts list).** Additive.
+
+1. **`kind: 'sheet'`.** A sheet canvas has exactly one tab whose `content` is
+   the workbook as JSON — `{"aicoSheet":1,"sheets":[{id, name, cells:{"A1":
+   {v?|f?, s?}}, cols?:{"A":px}, freeze?:{rows,cols}, cond?:[…], charts?:[…],
+   filter?}]}` — written by `serializeBook` one cell per line
+   (`shared/ui/canvas/sheet-model.ts`, DOM-free, imported by the engine).
+   `f` is an Excel formula without `=`; `v` a number/text/boolean (dates are
+   Excel serials with `s.num:'date'`); `s` = `{num:'number'|'currency'|
+   'percent'|'date'|'text', dp, cur (ISO), b, fill:'#rrggbb', align}`. Every
+   write of a sheet's tab must parse as a workbook (the store refuses
+   otherwise); tabs cannot be added to a sheet (its sheets live inside).
+   Versions, 409-with-latest, history and `canvas` frames are unchanged —
+   frames carry `kind:'sheet'`.
+2. **Formulas** are evaluated by `shared/ui/canvas/sheet-formula.ts` in the
+   UI (live) and the engine (tool results, cached values in .xlsx/.csv);
+   error values are Excel's (`#DIV/0! #VALUE! #REF! #NAME? #N/A #NUM!`) plus
+   `#ERROR!` for a formula that does not parse; a cycle is `#REF!` with
+   `detail` naming it.
+3. **Routes:** `POST canvas/create {kind:'sheet'}` (empty workbook when no
+   content); `POST canvas/import {session, name, data(base64), title?}` →
+   `{canvas}` (.xlsx/.csv/.tsv, ≤ 25 MB); `POST canvas/rename {session, id,
+   title}` → `{canvas}` (frame `action:'rename'`); `GET canvas/:id/export?
+   format=xlsx|csv&sheet=` for a sheet (other formats 400).
+4. **Tool `Canvas`:** `create {kind:'sheet', tabs?, range?, values?|cells?}`,
+   `read {id, sheet?, range?}` (compact table, not the JSON), `set_cells`,
+   `format_cells {range, style, layout:{widths, freeze, filter, conditional,
+   chart}}`, `add_sheet` (also `add_tab` on a sheet), `grid_op {operation:
+   {type: insert_rows|delete_rows|insert_cols|delete_cols|sort|fill_down}}`,
+   `import {path}`, `export {format: xlsx|csv}`; `update/edit/write_section`
+   on a sheet are refused with the right action.
+5. **Host (UI):** `CanvasKind` gains `'sheet'`, `ExportFormat` gains
+   `'xlsx'|'csv'`; optional `host.rename(id, title)` and
+   `host.importSheet({name, data})`; `host.create` takes `kind`. A sheet opens
+   in `SheetEditor` (the card shows a row preview and a "sheet" badge).
+6. **Artifacts:** `GET artifacts/list?session=` → `{artifacts:[{key, kind:
+   'document'|'sheet'|'code'|'image'|'file'|'export', source:'canvas'|'file'|
+   'attachment', id, title, ext?, bytes?, updatedAt, topic, uploaded?}]}`
+   newest first (an export whose name is a canvas's file name gets
+   `kind:'export'` and that canvas's title as `topic`); `GET artifacts/file?
+   session=&path=` (inside the session's artifacts folder only); `POST
+   artifacts/rename {session, path, name}`.
+
+**Engine, 2026-10-03 (round 3 — document types).** Additive; uses the UI's
+round-3 theme and block names below as written.
+
+1. **Templates are now document types** (`src/canvas/doc-types.ts`, data):
+   the ten round-2 ids keep working, joined by `whitepaper`, `research-paper`,
+   `technical-writeup`, `financial-report`, `case-study`, `risk-assessment`,
+   `postmortem`, `cover-letter`, `email`, `press-release`, `sop`, `nda`,
+   `contract`, `confidential`, `user-stories`, `api-docs`, `release-notes`,
+   `user-manual`, `architecture-design`, `flow-diagram`, `test-plan`,
+   `technical-proposal`, `sow`, `rfp`, `invoice`, `quote`, `boq`,
+   `marketing-brief`, `pitch-outline`, `business-plan`, `cv` (aliases such as
+   `resume`, `prd`, `minutes`, `statement-of-work` resolve). Each sets
+   `docSettings.theme` (a round-3 theme id) and its page setup.
+2. **`GET canvas/templates`** → `{templates:[{id, title, description, aliases,
+   sections:[{id, heading, intent, visuals?}], docSettings, words:[min,max],
+   visuals}]}` — `visuals` are block names (`table`, `mermaid`, `chart`,
+   round-2 infographics, round-3 document blocks). `POST canvas/create
+   {template}` accepts any id or alias.
+3. **`outline` picks the type from the title when it is obvious** (one type
+   matches, or one match contains the others — "Cover letter" over "letter")
+   and applies its look; `create` does the same for the look only. A title
+   naming a marking ("Confidential: …") adds `classification` + `watermark`.
+4. **The `outline` result carries a short writing brief** for the type
+   (length range, which block goes in which section with its one-line syntax,
+   no invented numbers, `[To confirm: …]` for missing details). It is not in
+   the system prompt. The tool's `template` field lost its enum (ids or names
+   are resolved; an unknown one lists the ids).
+
+**UI + exports, 2026-10-03 (round 3 — "Docs 2": page width, document themes,
+document blocks).** Additive; nothing above changes meaning. Parsers,
+serialisers, totals maths, theme tables and the HTML for every block below live
+in **`shared/ui/canvas/doc-blocks.ts`** and **`shared/ui/canvas/doc-themes.ts`**
+(DOM-free; the engine's HTML/PDF/DOCX writers import them, so the app and every
+export read one syntax). Engine-side document types / templates / agent
+guidance: please use these names; a template may set `docSettings.theme`.
+
+1. **`docSettings` gains** (all optional; cleaned by `src/canvas/doc-settings.ts`):
+   - `theme`: `report | research | letter | memo | cv | proposal | invoice | sop |
+     legal | spec | release-notes | minutes | case-study | press-release | risk |
+     confidential` (absent = the plain default look). A theme sets typography,
+     accent, heading style, header/footer/cover variant and table style, and
+     supplies *defaults* for other settings (e.g. `confidential` → watermark +
+     classification; `research` → serif; `letter` → wide margins). Stored
+     values always win over a theme's defaults. Aliases accepted on write:
+     `whitepaper→report`, `academic|paper→research`, `resume→cv`,
+     `sow|rfp→proposal`, `quote|boq→invoice`, `nda|contract→legal`,
+     `prd|api|technical→spec`, `changelog→release-notes`,
+     `meeting-minutes→minutes`, `press→press-release`, `risk-assessment→risk`.
+   - `accent`: `#RRGGBB` — overrides the theme's accent colour.
+   - `classification`: text (≤ 40 chars) for a banner at the top and bottom of
+     every page (e.g. `CONFIDENTIAL`, `INTERNAL`).
+   - `pageWidth`: `narrow | normal | wide | full` — the editor's page width
+     only (exports use the page size). Absent = Normal in the side panel,
+     Wide in full screen.
+2. **New fenced blocks** (JSON bodies unless noted, lenient like round 2: an
+   array alone means the list field; unknown keys ignored):
+   - ```` ```signature ```` — `{"parties":[{"label":"For the Client",
+     "name":"Jane Doe","title":"CEO","date":""}]}` → signature lines, 1–4
+     side by side.
+   - ```` ```keyvalue ```` (aliases `kv`, `info`, `details`) — `{"title":"optional",
+     "items":[{"key":"Invoice no.","value":"INV-0042"}]}`; a plain object
+     `{"Invoice no.":"INV-0042"}` is also read.
+   - ```` ```lineitems ```` (aliases `boq`, `invoice`, `quote`, `pricing`) —
+     `{"currency":"GBP","taxRate":20,"taxLabel":"VAT","discount":"10%"|50,
+     "items":[{"item":"Design","description":"optional","qty":2,"unit":"day",
+     "rate":650}, {"section":"Phase 2"}]}`. Amount = qty × rate per row
+     (rounded to the currency's minor unit); subtotal, discount, tax on the
+     discounted subtotal, total — **computed, never typed**. A row with only
+     `section` is a group heading. `qty` defaults to 1.
+   - ```` ```riskmatrix ```` (alias `risks`) — `{"risks":[{"id":"R1",
+     "title":"Supplier delay","likelihood":4,"impact":3,"owner":"",
+     "mitigation":""}]}`; likelihood/impact 1–5 or words (`rare … almost
+     certain`, `insignificant … severe`, `low|medium|high`). Score = L × I;
+     rating Low ≤ 4, Medium ≤ 9, High ≤ 16, Critical above. Renders a 5×5 heat
+     map with the ids placed, then the register sorted by score.
+   - ```` ```actions ```` (alias `action-items`) — `{"items":[{"action":"…",
+     "owner":"…","due":"…","status":"open|in progress|done|blocked"}]}`.
+   - ```` ````columns ```` — **Markdown body**, columns separated by a line
+     `+++`; info string `columns sidebar` (narrow shaded left column, for a CV),
+     `columns sidebar-right`, or `columns` (equal). Use four backticks so the
+     columns may contain fenced blocks.
+   - ```` ```cover ```` (alias `hero`) — `{"kicker":"PROPOSAL","title":"…",
+     "subtitle":"…","meta":["Prepared for Acme","3 October 2026"],
+     "pageBreak":true}` → a title band in the text (unlike `docSettings.cover`,
+     which is its own page).
+   - ```` ```meta ```` (alias `byline`) — `{"items":["Jane Doe","3 October 2026",
+     "v1.2"]}` or `{"author":"…","date":"…","version":"…","status":"Draft"}`
+     → one muted line under the title.
+   - ```` ```references ```` (aliases `footnotes`, `bibliography`) —
+     `{"items":[{"text":"Smith, J. (2024). Title. Journal.","url":"optional"}]}`
+     or an array of strings → a numbered list `[1] …`.
+   - **Icon callouts**: the callout info string takes `icon=<name>` —
+     ```` ```callout warn icon=shield ````. Names: `info, warning, check, tip,
+     shield, lock, clock, flag, star, money, user, calendar, doc, link, alert`.
+     An icon-less callout keeps its type's icon.
+3. **Card grids** (stats, comparison, steps) lay out with auto-fit and a
+   minimum tile width wide enough for the longest unbroken word of a value —
+   values wrap only at spaces, never mid-word, in the app and every export.
+4. Plain text inside block fields may use inline Markdown (`**bold**`,
+   `*italic*`, `` `code` ``, `[link](https://…)`); nothing else is interpreted.
+
 **Engine, 2026-09-30 (round 2 — Docs parity: visuals, TOC, document setup,
 infographics, templates).** Additive. The UI renders the new blocks in the app;
 the engine renders them in every export.

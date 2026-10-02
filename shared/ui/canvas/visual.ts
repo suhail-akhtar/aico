@@ -33,6 +33,7 @@
  */
 
 import { headingText, type Block } from './blocks';
+import { iconFromInfo, isIcon, type IconName } from './doc-blocks';
 
 // ── Images ───────────────────────────────────────────────────────────
 
@@ -107,7 +108,7 @@ export const CALLOUTS: ReadonlyArray<{ type: CalloutType; label: string }> = [
   { type: 'info', label: 'Info' }, { type: 'success', label: 'Success' }, { type: 'warn', label: 'Warning' },
 ];
 
-export interface CalloutModel { type: CalloutType; title?: string; body: string }
+export interface CalloutModel { type: CalloutType; title?: string; body: string; /** `icon=<name>` in the info string (round 3). */ icon?: IconName }
 
 const ALERT_TYPE: Record<string, CalloutType> = { NOTE: 'info', IMPORTANT: 'info', TIP: 'success', WARNING: 'warn', CAUTION: 'warn' };
 
@@ -117,16 +118,18 @@ export function parseCallout(text: string): CalloutModel | null {
   if (f && f.lang === 'callout') {
     const info = /^\S*\s+(\w+)/.exec(f.info)?.[1]?.toLowerCase();
     const type: CalloutType = info === 'warn' || info === 'warning' || info === 'danger' ? 'warn' : info === 'success' || info === 'tip' ? 'success' : 'info';
+    const fromInfo = iconFromInfo(f.info);
+    const icon = fromInfo ? { icon: fromInfo } : {};
     const body = f.body.trim();
     if (body.startsWith('{')) {
       try {
-        const o = JSON.parse(body) as { type?: string; title?: string; text?: string };
+        const o = JSON.parse(body) as { type?: string; title?: string; text?: string; icon?: string };
         const t = o.type === 'warn' || o.type === 'success' ? o.type : type;
-        return { type: t, ...(o.title ? { title: o.title } : {}), body: o.text ?? '' };
+        return { type: t, ...(o.title ? { title: o.title } : {}), body: o.text ?? '', ...(isIcon(o.icon) ? { icon: o.icon } : icon) };
       } catch { /* Markdown after all */ }
     }
     const title = /^\*\*(.+?)\*\*\s*$/m.exec(body.split('\n')[0] ?? '');
-    return title ? { type, title: title[1]!, body: body.split('\n').slice(1).join('\n').trim() } : { type, body };
+    return title ? { type, title: title[1]!, body: body.split('\n').slice(1).join('\n').trim(), ...icon } : { type, body, ...icon };
   }
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const m = /^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$/i.exec(lines[0] ?? '');
@@ -136,7 +139,7 @@ export function parseCallout(text: string): CalloutModel | null {
 
 export function calloutMarkdown(c: CalloutModel): string {
   const title = c.title?.trim() ? `**${c.title.trim()}**\n` : '';
-  return fenced(`callout ${c.type}`, `${title}${c.body.trim()}`);
+  return fenced(`callout ${c.type}${c.icon ? ` icon=${c.icon}` : ''}`, `${title}${c.body.trim()}`);
 }
 
 // ── Tables ───────────────────────────────────────────────────────────

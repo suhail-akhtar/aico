@@ -286,7 +286,9 @@ export function useCanvasDoc(host: CanvasHost, id: string, opts: { paused?: bool
     if (change.id !== id) return;
     const sid = host.sessionId();
     if (change.sessionId && sid && change.sessionId !== sid) return;
-    if (change.tabId && change.tabId === tabRef.current && typeof change.tabVersion === 'number' && change.tabVersion <= baseRef.current) return;
+    // A newer revision with no new text is a settings/theme change (round 3): refresh the chrome, which now draws the theme.
+    const newerRevision = typeof change.revision === 'number' && change.revision > (docRef.current?.revision ?? Infinity);
+    if (!newerRevision && change.tabId && change.tabId === tabRef.current && typeof change.tabVersion === 'number' && change.tabVersion <= baseRef.current) return;
     if (!change.tabId && change.action !== 'tabs' && !docRef.current?.tabs && change.version <= baseRef.current) return;
     if (savingRef.current) { recheckRef.current = true; return; }
     void recheck();

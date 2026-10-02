@@ -48,6 +48,7 @@ import { createGroup, deleteGroup, listGroups, updateGroup } from './groups.js';
 import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { handleCanvasRoute } from './canvas-routes.js';
+import { handleArtifactRoute } from './artifact-routes.js';
 import { onCanvasActivity, onCanvasChange, onCanvasComments } from '../canvas/store.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
@@ -115,11 +116,13 @@ async function listAppFiles(dir: string): Promise<Array<{ path: string; dir: boo
 }
 import { deployApp, deployState } from '../apps/deploy.js';
 import { markAdoptedByContent } from '../learning/proposals.js';
-import { proposeUserSignals } from '../learning/index.js';
+import { proposeUserSignals, startPreferenceBatch, watchCanvasEdits } from '../learning/index.js';
 import { createMiniApp, slugify } from '../miniapps/store.js';
 import { cp } from 'fs/promises';
 import { closeDatabase } from '../miniapps/data.js';
 import { setWakeDelivery } from '../work/watchers.js';
+import { setLongJobHost, resumeAfterRestart } from '../longjob/index.js';
+import { startBriefService, stopBriefService } from '../brief/service.js';
 import { parseLevel } from '../autonomy/levels.js';
 import { getVault } from '../vault/index.js';
 import { handleVaultRoute } from '../vault/http.js';
@@ -1177,7 +1180,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     // Canvas documents: reads and writes, each with its own body handling.
     if (await handleCanvasRoute(route, req, res, url, {
-      resolveCwd: id => resolveCwd(id), readJson, send,
+      resolveCwd: id => resolveCwd(id), send,
+      // A spreadsheet import arrives as base64 in the body: the attachment limit, not the default.
+      readJson: r => readJson(r, route === 'canvas/import' ? UPLOAD_BODY_MAX : undefined),
       /*
         A comment addressed to AICO becomes a turn in the canvas's session.
         Behind a running turn it is queued as a followup (its own turn next),
@@ -1194,6 +1199,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           .catch(() => { /* already reported on the stream as turn-end */ });
       },
     })) return;
+
+    // The Artifacts panel: everything this chat made or opened (server/artifact-routes).
+    if (await handleArtifactRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;
 
     // Settings, provider onboarding, and system state. Consulted before the
     // POST guard because several of these are reads.
@@ -1832,9 +1840,37 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   // it to a server, and it is the one thing that lets that window say yes.
   const url = `http://127.0.0.1:${boundPort}/?token=${token}#ui=${gate.uiKey}`;
 
+  /*
+    How an approved long job reaches its chat (longjob/): a turn now, or
+    queued behind the running one — attributed to the job, not the person.
+    Then any job the last process left running resumes from its journal.
+  */
+  setLongJobHost({
+    start: (sessionId, message) => {
+      void (async () => {
+        const live = runs.get(sessionId);
+        if (live?.busy) { live.inbox.followup(message, { kind: 'plugin', plugin: 'long-job' }); return; }
+        const runCwd = await resolveCwd(sessionId);
+        await runs.ensure(sessionId, runCwd);
+        const chosen = runs.modelOf(sessionId) ?? await currentDefaultModel();
+        await runs.submit(sessionId, runCwd, message, chosen, { approval: live?.approval ?? 'auto' });
+      })().catch(() => { /* reported on the chat's stream as turn-end; the journal keeps the job */ });
+    },
+    cancel: (sessionId) => { runs.cancel(sessionId); },
+  });
+  const resumed = resumeAfterRestart();
+  if (resumed) console.log(`  Resuming ${resumed} long job(s) from their journals.`);
+
+  // The morning brief and monitors: a quiet minute timer (brief/service).
+  startBriefService({ launchCwd: cwd });
+
   await reconcileMiniApps(boundPort);
   // Once per start: what repeats across projects becomes a global proposal.
   proposeUserSignals(await loadSettings(), cwd);
+  // Preference learning (ADR 0016): the periodic distil of pending signals,
+  // and hand edits to agent-written canvases as signals. Both best effort.
+  const stopPreferenceBatch = startPreferenceBatch(loadSettings);
+  const stopCanvasEdits = await watchCanvasEdits(id => resolveCwd(id), loadSettings);
 
   if (opts.open) openBrowser(url);
 
@@ -1842,7 +1878,13 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     url,
     close: async () => {
       clearInterval(heartbeat);
+      // Before the runs close: a turn ended by shutdown leaves its long job
+      // running in the journal, to resume on the next start, not paused.
+      setLongJobHost(undefined);
+      stopBriefService();
       stopCanvasEvents();
+      stopPreferenceBatch();
+      stopCanvasEdits();
       hub.closeAll();
       await runs.closeAll();
       await miniApps?.close();

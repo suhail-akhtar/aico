@@ -1,0 +1,4 @@
+[
+  {"number":88,"title":"Refund total off by one cent for JPY","url":"https://github.com/acme/payments-api/issues/88","createdAt":"2026-10-02T15:00:00Z","updatedAt":"2026-10-02T15:30:00Z"},
+  {"number":51,"title":"Document the settlement cron","url":"https://github.com/acme/payments-api/issues/51","createdAt":"2026-08-01T10:00:00Z","updatedAt":"2026-08-03T10:00:00Z"}
+]

@@ -22,6 +22,16 @@
  * answers with `reply_comment`) and `export` (md/html/docx/pdf) complete it.
  * Contract: `docs/engineering/canvas-docs-contract.md`.
  *
+ * Document types (`canvas/doc-types`): `outline {template}` — or a title that
+ * obviously names a type — sets the type's sections and look, and the result
+ * carries that type's short writing brief. The brief is here, not in the
+ * system prompt, so it costs nothing on turns that write no document.
+ *
+ * Sheets (`kind: "sheet"`, AICO Sheets): a workbook the agent changes by
+ * cells — `set_cells`, `format_cells`, `add_sheet`, `grid_op`, `import` —
+ * each version-checked like a document write, never resending the workbook
+ * (`canvas/sheet-tool`). `read` and `export` (xlsx/csv) dispatch on the kind.
+ *
  * @module tools/canvas
  */
 
@@ -38,16 +48,21 @@ import {
   SECTION_ID, findSection, pendingBlocks, pendingLine, replaceSection, sectionAt,
 } from '../canvas/sections.js';
 import { EXPORT_FORMATS, exportCanvas, type ExportFormat } from '../canvas/export.js';
-import { TEMPLATES, mergeSettings, resolveSettings, templateById, type DocSettings } from '../canvas/doc-settings.js';
+import { mergeSettings, resolveSettings, type DocSettings } from '../canvas/doc-settings.js';
+import { DOC_TYPES, classificationOf, docTypeById, pickDocType, writingNote, type DocType } from '../canvas/doc-types.js';
 import { workspaceImages } from '../canvas/markdown.js';
 import { resolveInsideWorkspace } from './path.js';
+import { SHEET_TOOL_HELP, createSheet, importSheet, readSheet, sheetAction, bookOf, type SheetInput } from '../canvas/sheet-tool.js';
+import { SHEET_EXPORT_FORMATS, SHEET_MEDIA, exportSheet, type SheetExportFormat } from '../canvas/sheet-xlsx.js';
+import { fileBase } from '../canvas/markdown.js';
 
 export interface CanvasInput {
   action?: 'create' | 'read' | 'update' | 'edit' | 'list' | 'outline' | 'write_section' | 'add_tab' | 'rename_tab'
-    | 'comments' | 'reply_comment' | 'export' | 'settings';
+    | 'comments' | 'reply_comment' | 'export' | 'settings'
+    | 'set_cells' | 'format_cells' | 'add_sheet' | 'grid_op' | 'import';
   id?: string;
   title?: string;
-  kind?: 'document' | 'code';
+  kind?: 'document' | 'code' | 'sheet';
   language?: string;
   content?: string;
   version?: number;
@@ -67,6 +82,14 @@ export interface CanvasInput {
   settings?: Record<string, unknown>;
   toc?: boolean;
   path?: string;
+  // Sheets (canvas/sheet-tool).
+  sheet?: string;
+  range?: string;
+  cells?: SheetInput['cells'];
+  values?: SheetInput['values'];
+  style?: SheetInput['style'];
+  layout?: SheetInput['layout'];
+  operation?: SheetInput['operation'];
 }
 
 function context(): CanvasContext {
@@ -166,6 +189,28 @@ function describeSettings(stored: Partial<DocSettings> | undefined): string {
   ].join(', ');
 }
 
+/**
+ * The type a new document is for: the template it names (by id, alias, or a
+ * name like "risk assessment"), else the one its title obviously names. A
+ * template that names nothing is an error the model can fix; a title that
+ * names nothing is simply a plain document.
+ */
+function docTypeFor(template: string | undefined, title: string): { type?: DocType; picked: boolean } {
+  if (template?.trim()) {
+    const type = docTypeById(template) ?? pickDocType(template);
+    if (!type) throw new Error(`Unknown template "${template}". Document types: ${DOC_TYPES.map(t => t.id).join(', ')}.`);
+    return { type, picked: false };
+  }
+  const type = pickDocType(title);
+  return type ? { type, picked: true } : { picked: false };
+}
+
+/** A type's page setup, plus the classification marking a title names ("Confidential: …"). */
+function docTypeSettings(type: DocType | undefined, title: string): Partial<DocSettings> {
+  const marking = classificationOf(title);
+  return mergeSettings(type?.docSettings, marking && !type?.docSettings.classification ? { classification: marking, watermark: marking } : {});
+}
+
 function cleanSections(input: CanvasInput['sections']): { id: string; intent: string; heading?: string; tab?: string }[] {
   if (!Array.isArray(input) || input.length === 0) {
     throw new Error('`sections` is required for outline: [{id: "s1", intent: "what this section will say", heading?: "Its heading"}, …].');
@@ -202,6 +247,7 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
 
     case 'read': {
       const doc = await load(ctx, input.id);
+      if (doc.kind === 'sheet') return readSheet(doc, input);
       const tab = tabFor(doc, input.tab);
       const open = doc.comments.filter(c => !c.resolved).length;
       return `${describe(doc, tab)}\nPass version: ${tab.version}${doc.tabs.length > 1 ? ` (and tab: "${tab.id}")` : ''} when you update, edit or write_section.`
@@ -209,24 +255,28 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
     }
 
     case 'create': {
+      if (input.kind === 'sheet') return createSheet(ctx, input);
       if (typeof input.content !== 'string') throw new Error('`content` is required to create a canvas (Markdown for a document, source for code). For a long document use outline instead.');
       if (!input.title?.trim()) throw new Error('`title` is required to create a canvas.');
+      // A document whose title names its type gets that type's look, as an outline would.
+      const kind = input.kind ?? 'document';
+      const type = kind === 'document' ? pickDocType(input.title) : undefined;
+      const docSettings = kind === 'document' ? docTypeSettings(type, input.title) : {};
       const doc = await createCanvas(ctx, {
-        title: input.title, kind: input.kind ?? 'document', content: input.content, author: 'agent',
+        title: input.title, kind, content: input.content, author: 'agent',
         ...(input.language ? { language: input.language } : {}),
+        ...(Object.keys(docSettings).length ? { docSettings } : {}),
       });
-      return `Created canvas ${doc.id} "${doc.title}" (${doc.kind}), version 1. The user can now edit it directly.\n${card(doc)}`;
+      return `Created canvas ${doc.id} "${doc.title}" (${doc.kind}), version 1.${type ? ` Styled as ${type.title}.` : ''} The user can now edit it directly.\n${card(doc)}`;
     }
 
     case 'outline': {
       if (!input.title?.trim()) throw new Error('`title` is required for outline.');
       if (input.kind && input.kind !== 'document') throw new Error('outline makes documents; for code use create with kind "code".');
-      const template = input.template ? templateById(input.template) : undefined;
-      if (input.template && !template) {
-        throw new Error(`Unknown template "${input.template}". Templates: ${TEMPLATES.map(t => t.id).join(', ')}.`);
-      }
-      const sections = cleanSections(input.sections?.length ? input.sections : template?.sections);
-      const docSettings = mergeSettings(template?.docSettings, input.settings ?? {});
+      const { type: template, picked } = docTypeFor(input.template, input.title);
+      const ownSections = Boolean(input.sections?.length);
+      const sections = cleanSections(ownSections ? input.sections : template?.sections);
+      const docSettings = mergeSettings(docTypeSettings(template, input.title), input.settings ?? {});
       const tabTitles = (Array.isArray(input.tabs) ? input.tabs : [])
         .map((t, i) => (typeof t?.title === 'string' && t.title.trim() ? t.title.trim() : `Tab ${i + 1}`));
       if (tabTitles.length === 0) tabTitles.push('Tab 1');
@@ -251,10 +301,13 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
       });
       const order = sections.map(s => `${s.id}${s.heading ? ` "${s.heading}"` : ''}${doc.tabs.length > 1 ? ` (tab ${`t${tabIndex(s.tab) + 1}`})` : ''}`);
       return `Outlined canvas ${doc.id} "${doc.title}" with ${sections.length} pending section${sections.length === 1 ? '' : 's'}: ${order.join(', ')}. `
-        + `Every tab is at version 1.${template ? ` Template "${template.id}" set up the export (${describeSettings(doc.docSettings)}).` : ''}\n`
+        + `Every tab is at version 1.${template
+          ? ` ${picked ? `Picked document type "${template.id}" from the title (pass template to choose another); it` : `Template "${template.id}"`} set up the export (${describeSettings(doc.docSettings)}).`
+          : ''}\n`
         + 'Next: tell the user in ONE short line what you are writing (e.g. "Drafting the brief now — 5 sections."), do any research you need, '
         + 'then call write_section once per section, in order, with the section id, its Markdown (starting with its heading), and the '
         + 'version each result gives you. Do not paste the document into the chat.\n'
+        + `${writingNote(template, ownSections)}\n`
         + card(doc);
     }
 
@@ -262,6 +315,7 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
     case 'update':
     case 'edit': {
       const doc = await load(ctx, input.id);
+      if (doc.kind === 'sheet') throw new Error(`Canvas ${doc.id} is a sheet — change it with set_cells {id, version, cells:{"B2":…}} (formulas as "=…"), format_cells or grid_op, not ${action}.`);
       const tab = tabFor(doc, input.tab);
       if (typeof input.version !== 'number' || input.version !== tab.version) throw stale(doc, tab, input.version);
       let content: string;
@@ -316,6 +370,7 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
 
     case 'add_tab': {
       const doc = await load(ctx, input.id);
+      if (doc.kind === 'sheet') return sheetAction(ctx, doc, 'add_sheet', input);
       const { canvas, tab } = await addTab(ctx, doc.id, {
         ...(input.title ? { title: input.title } : {}), content: input.content ?? '', author: 'agent',
       });
@@ -351,8 +406,40 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
       return `Replied to comment ${comment.id} on canvas ${doc.id}${comment.resolved ? ' and resolved it' : ''}.`;
     }
 
+    case 'set_cells':
+    case 'format_cells':
+    case 'add_sheet':
+    case 'grid_op': {
+      const doc = await load(ctx, input.id);
+      if (doc.kind !== 'sheet') throw new Error(`Canvas ${doc.id} is a ${doc.kind}, not a sheet — ${action} is for sheets (create one with kind "sheet").`);
+      return sheetAction(ctx, doc, action, input);
+    }
+
+    case 'import': {
+      if (!input.path?.trim()) throw new Error('`path` is required for import: a .xlsx or .csv file in the project or workspace.');
+      return importSheet(ctx, resolveInsideWorkspace(input.path.trim(), 'path'), input.title);
+    }
+
     case 'export': {
       const doc = await load(ctx, input.id);
+      if (doc.kind === 'sheet') {
+        const sf = String(input.format ?? 'xlsx').toLowerCase().replace(/^\./, '') as SheetExportFormat;
+        if (!SHEET_EXPORT_FORMATS.includes(sf)) throw new Error(`A sheet exports as ${SHEET_EXPORT_FORMATS.join(' or ')}.`);
+        const bytes = exportSheet(bookOf(doc), sf, { title: doc.title, ...(input.sheet ? { sheet: input.sheet } : {}) });
+        const fileName = `${fileBase(doc.title)}.${sf}`;
+        let out: string;
+        if (input.path?.trim()) {
+          out = resolveInsideWorkspace(input.path.trim(), 'path');
+          if (!path.extname(out)) out = path.join(out, fileName);
+        } else {
+          const info = getWorkspaceInfo({ settings: ctx.settings, cwd: ctx.cwd, sessionId: ctx.sessionId });
+          out = path.join(info.artifactsDir ?? path.join(ctx.cwd, 'exports'), fileName);
+        }
+        await mkdir(path.dirname(out), { recursive: true });
+        await writeFile(out, bytes);
+        return `Exported sheet ${doc.id} "${doc.title}" as ${sf} (${bytes.length.toLocaleString()} bytes, ${SHEET_MEDIA[sf].split(';')[0]}): ${out}\n`
+          + `${sf === 'xlsx' ? 'Formulas are real Excel formulas with their computed values cached. ' : ''}Tell the user the path; the sheet editor can also download it.`;
+      }
       const format = String(input.format ?? '').toLowerCase().replace(/^\./, '') as ExportFormat;
       if (!EXPORT_FORMATS.includes(format)) throw new Error(`\`format\` must be one of ${EXPORT_FORMATS.join(', ')}.`);
       const result = await exportCanvas(doc, {
@@ -385,7 +472,7 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
     }
 
     default:
-      throw new Error(`Unknown action "${String(action)}". Use create, outline, read, write_section, update, edit, list, add_tab, rename_tab, comments, reply_comment, settings or export.`);
+      throw new Error(`Unknown action "${String(action)}". Use create, outline, read, write_section, update, edit, list, add_tab, rename_tab, comments, reply_comment, settings or export — and for sheets set_cells, format_cells, add_sheet, grid_op, import.`);
   }
 }
 
@@ -397,8 +484,9 @@ export const canvasDefinition = {
     + 'pasting long text into the chat. NEVER paste a canvas\'s content into the chat.\n'
     + 'Long documents (more than a few paragraphs): 1) outline {title, sections:[{id, intent, heading}]} — the user sees the '
     + 'skeleton at once; 2) send the user ONE short progress line (what you are writing); 3) research if needed; 4) write_section '
-    + 'once per section, in order. Short pieces: create. For a known kind of document pass outline {template} — '
-    + `${TEMPLATES.map(t => t.id).join(', ')} — which supplies the sections (when you give none) and the page setup.\n`
+    + 'once per section, in order. Short notes: create. Any recognisable kind of document, even a short one (invoice, CV, letter, '
+    + 'email, minutes, report, PRD, architecture design, NDA, SOW, risk assessment…): outline {template: "<type>"} — it supplies the '
+    + 'sections, the look and a writing brief with the blocks that type uses.\n'
     + 'Rich blocks render in the app and in every export: ```chart (ECharts JSON), ```mermaid, $$maths$$, tables, '
     + '```stats {"items":[{"value","label","delta"}]}, ```timeline {"items":[{"date","title","text"}]}, ```steps {"items":[{"title","text"}]}, '
     + '```comparison {"columns":[{"title","items":[…],"highlight"}]}, ```callout info|warn|success (Markdown body), '
@@ -422,17 +510,19 @@ export const canvasDefinition = {
     + '`version` is the tab\'s version your last read/write returned (each tab has its own; the first tab is the default). '
     + 'If it changed since, the write is refused and the result carries the latest content — re-apply your change to it. '
     + 'After create/outline, put the ```canvas block from the result in your reply: it is only a reference card that opens '
-    + 'the canvas. A message like "Edit canvas <id> — …" means: read that canvas, then edit it.',
+    + 'the canvas. A message like "Edit canvas <id> — …" means: read that canvas, then edit it.\n'
+    + SHEET_TOOL_HELP,
   inputSchema: {
     type: 'object',
     properties: {
       action: {
         type: 'string',
-        enum: ['create', 'read', 'update', 'edit', 'list', 'outline', 'write_section', 'add_tab', 'rename_tab', 'comments', 'reply_comment', 'export', 'settings'],
+        enum: ['create', 'read', 'update', 'edit', 'list', 'outline', 'write_section', 'add_tab', 'rename_tab', 'comments', 'reply_comment', 'export', 'settings',
+          'set_cells', 'format_cells', 'add_sheet', 'grid_op', 'import'],
       },
       id: { type: 'string', description: 'The canvas id (from create/outline or list).' },
       title: { type: 'string', description: 'create/outline: the title. update/edit: optionally rename. add_tab/rename_tab: the tab name.' },
-      kind: { type: 'string', enum: ['document', 'code'], description: 'create: document (Markdown) or code.' },
+      kind: { type: 'string', enum: ['document', 'code', 'sheet'], description: 'create: document (Markdown), code, or sheet (a spreadsheet).' },
       language: { type: 'string', description: 'create, kind code: the language, e.g. "typescript", "python".' },
       content: { type: 'string', description: 'create/update: the full text. write_section: the section\'s Markdown incl. its heading. add_tab: optional initial text.' },
       version: { type: 'number', description: 'update/edit/write_section: the tab version you last read or wrote.' },
@@ -460,11 +550,19 @@ export const canvasDefinition = {
       commentId: { type: 'string', description: 'reply_comment: the comment id (from comments).' },
       body: { type: 'string', description: 'reply_comment: your reply.' },
       resolve: { type: 'boolean', description: 'reply_comment: also mark the comment resolved.' },
-      format: { type: 'string', enum: ['md', 'docx', 'pdf', 'html'], description: 'export: the file format.' },
+      format: { type: 'string', enum: ['md', 'docx', 'pdf', 'html', 'xlsx', 'csv'], description: 'export: the file format (sheets: xlsx or csv).' },
       path: { type: 'string', description: 'export: where to write (inside the project or workspace); default the session\'s artifacts folder.' },
-      template: { type: 'string', enum: TEMPLATES.map(t => t.id), description: 'outline: a document template (sections + page setup).' },
+      // No enum: forty-odd ids would ride on every request; a name resolves ("risk assessment"), an unknown one lists them.
+      template: { type: 'string', description: 'outline: the document type, by id or name (e.g. "invoice", "architecture design").' },
       settings: { type: 'object', description: 'settings/outline: export setup to store; export: for this file only.' },
       toc: { type: 'boolean', description: 'export: include a table of contents.' },
+      sheet: { type: 'string', description: 'Sheets: which sheet (name); default the first.' },
+      range: { type: 'string', description: 'Sheets: a cell or range, e.g. "A2" (where values start) or "D2:D20".' },
+      cells: { type: 'object', description: 'set_cells/create: {"B2": 10, "D2": "=B2*C2"}.' },
+      values: { type: 'array', items: { type: 'array', items: {} }, description: 'set_cells/create: rows of cells starting at range.' },
+      style: { type: 'object', description: 'format_cells: {num, dp, cur, bold, fill, align} for range.' },
+      layout: { type: 'object', description: 'format_cells: {widths, freeze, filter, conditional, chart}.' },
+      operation: { type: 'object', description: 'grid_op: {type, at, count, column, desc, header}.' },
     },
     required: ['action'],
   },

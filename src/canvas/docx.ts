@@ -29,6 +29,18 @@
  *   pre-filled entries carry the headings but no numbers, since only a layout
  *   engine knows them.
  *
+ * - Themes (round 3, `shared/ui/canvas/doc-themes`): body and heading faces,
+ *   accent, heading style (classic / rule / bar / caps, numbered 1 · 1.1),
+ *   table style (grid / lined / banded / minimal), cover variant (classic /
+ *   band / minimal), a letterhead on the first page for letters, and a
+ *   classification banner in every header and footer.
+ * - Document blocks (`shared/ui/canvas/doc-blocks`): signature lines,
+ *   key-value boxes, line items with computed subtotal/tax/total, the risk
+ *   matrix and register, action items, two/three columns, cover band, meta
+ *   line and references — the same parsed values the app and HTML show.
+ * - KPI tiles wrap to more rows rather than squeeze: each row holds as many
+ *   tiles as fit the longest word of a value at its size.
+ *
  * Element order inside `pPr`/`rPr`/`sectPr` follows the schema's sequence:
  * Word opens out-of-order files, but stricter readers do not always.
  *
@@ -46,6 +58,11 @@ import type { HeadingInfo } from './doc-model.js';
 import { isTocMarker } from './doc-model.js';
 import { CALLOUT_COLORS, infographicKind, parseImageAttrs, parseInfographic, type ImageAttrs, type Infographic } from './infographics.js';
 import { visualForCode, visualKey, type RenderedVisual } from './visuals.js';
+import {
+  ICON_GLYPHS, RATING_COLORS, computeTotals, docBlockKind, formatMoney, formatQty, parseDocBlock, plainInline, riskRating,
+  statValueSize, type DocBlock, type DocBlockKind,
+} from '../../shared/ui/canvas/doc-blocks.js';
+import { DOCX_FONTS, resolveLook, tint, type ResolvedLook } from '../../shared/ui/canvas/doc-themes.js';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -89,10 +106,21 @@ class Builder {
   readonly textWidth: number;
   /** Text height in twips (a picture taller than this is scaled down to fit a page). */
   readonly textHeight: number;
+  /** The document's theme, accent and faces. */
+  readonly look: ResolvedLook;
+  /** Accent without `#`; the plain look keeps the historical blue. */
+  readonly accent: string;
+  /** A light tint of the accent for fills. */
+  readonly tintFill: string;
+  /** H2/H3 counters for numbered themes. */
+  readonly counters = { h2: 0, h3: 0 };
 
   constructor(private readonly resolveImage: ImageResolver, readonly settings: DocSettings,
     readonly visuals: Map<string, RenderedVisual>, headings: HeadingInfo[]) {
     for (const h of headings) this.headingIds.set(h.node, h);
+    this.look = resolveLook(settings);
+    this.accent = this.look.accent.slice(1).toUpperCase();
+    this.tintFill = this.look.theme ? tint(this.look.accent, 0.08) : 'F4F4F5';
     const page = pageTwips(settings);
     this.textWidth = page.w - twips(settings.margins.left) - twips(settings.margins.right);
     this.textHeight = page.h - twips(settings.margins.top) - twips(settings.margins.bottom) - 720;
@@ -349,7 +377,12 @@ function block(b: Builder, n: RootContent, ctx: Ctx): void {
   switch (n.type) {
     case 'heading': {
       const info = b.headingIds.get(n);
-      const content = inline(b, n.children);
+      let content = inline(b, n.children);
+      if (b.look.theme?.numbered && (n.depth === 2 || n.depth === 3)) {
+        if (n.depth === 2) { b.counters.h2++; b.counters.h3 = 0; } else b.counters.h3++;
+        const label = n.depth === 2 ? `${b.counters.h2}.` : `${b.counters.h2}.${b.counters.h3}`;
+        content = run(`${label}\u00a0\u00a0`, { color: b.accent }) + content;
+      }
       if (info) {
         const id = b.bookmarkId();
         b.body.push(para(`<w:bookmarkStart w:id="${id}" w:name="${bookmarkName(info.id)}"/>${content}<w:bookmarkEnd w:id="${id}"/>`,
@@ -378,6 +411,8 @@ function block(b: Builder, n: RootContent, ctx: Ctx): void {
       if (visual && visual.kind !== 'math-inline') { visualBlock(b, visual.kind, visual.source, ctx); return; }
       const ig = infographicKind(n.lang);
       if (ig) { infographic(b, n, ig, ctx); return; }
+      const db = docBlockKind(n.lang);
+      if (db) { docBlock(b, n, db, ctx); return; }
       codeBlock(b, n.value, ctx);
       return;
     }
@@ -469,20 +504,46 @@ function tableXml(b: Builder, rows: string[][], opts: {
     + para('', '<w:spacing w:after="120"/>');
 }
 
+/** Borders, header fill and banding for a theme's table style (the plain look: light grid, grey header). */
+function tableLook(b: Builder): {
+  borders: string; header: RunStyle; shade: (r: number) => string | undefined; cell?: (r: number, last: boolean) => string | undefined;
+} {
+  const style = b.look.theme?.table;
+  const line = (side: string, sz: number, color: string): string => `<w:${side} w:val="single" w:sz="${sz}" w:space="0" w:color="${color}"/>`;
+  const nil = (...sides: string[]): string => sides.map(x => `<w:${x} w:val="nil"/>`).join('');
+  switch (style) {
+    case 'banded': return {
+      borders: nil('top', 'left', 'right', 'insideV') + line('bottom', 4, 'E4E4E7') + line('insideH', 4, 'E4E4E7'),
+      header: { bold: true, color: 'FFFFFF' }, shade: r => (r === 0 ? b.accent : r % 2 === 0 ? b.tintFill : undefined),
+    };
+    case 'lined': return {
+      borders: line('top', 12, '1A1A1A') + line('bottom', 12, '1A1A1A') + nil('left', 'right', 'insideV') + line('insideH', 4, 'E4E4E7'),
+      header: { bold: true }, shade: () => undefined, cell: r => (r === 0 ? line('bottom', 6, '1A1A1A') : undefined),
+    };
+    case 'minimal': return {
+      borders: nil('top', 'left', 'right', 'insideV') + line('bottom', 4, 'E4E4E7') + line('insideH', 4, 'E4E4E7'),
+      header: { bold: true }, shade: () => undefined, cell: r => (r === 0 ? line('bottom', 12, b.accent) : undefined),
+    };
+    case 'grid': return { borders: BORDER(), header: { bold: true }, shade: r => (r === 0 ? b.tintFill : undefined) };
+    default: return { borders: BORDER(), header: { bold: true }, shade: r => (r === 0 ? 'F4F4F5' : undefined) };
+  }
+}
+
 function table(b: Builder, n: Table, ctx: Ctx): void {
   const cols = Math.max(1, ...n.children.map(r => r.children.length));
   const total = b.textWidth - 720 * ctx.depth;
   const width = Math.floor(total / cols);
   const align = n.align ?? [];
+  const tl = tableLook(b);
   const rows = n.children.map((row, ri) => Array.from({ length: cols }, (_, ci) => {
     const cell = row.children[ci];
     const jc = align[ci] === 'center' ? '<w:jc w:val="center"/>' : align[ci] === 'right' ? '<w:jc w:val="right"/>' : '';
-    const content = cell ? inline(b, cell.children, ri === 0 ? { bold: true } : {}) : '';
+    const content = cell ? inline(b, cell.children, ri === 0 ? tl.header : {}) : '';
     return para(content, `<w:spacing w:before="0" w:after="0"/>${jc}`);
   }));
   b.body.push(tableXml(b, rows, {
     widths: Array(cols).fill(width), header: true, indent: ctx.depth > 0 ? 720 * ctx.depth : 0,
-    shade: (r) => (r === 0 ? 'F4F4F5' : undefined),
+    borders: tl.borders, shade: r => tl.shade(r), ...(tl.cell ? { cellBorders: (r: number) => tl.cell!(r, r === rows.length - 1) } : {}),
   }));
 }
 
@@ -504,28 +565,39 @@ function renderInfographic(b: Builder, g: Infographic): void {
   const W = b.textWidth;
   switch (g.kind) {
     case 'stats': {
-      const n = g.items.length;
-      const gap = 120;
-      const w = Math.floor((W - gap * (n - 1)) / n);
-      const cells = g.items.map(i => tight(run(i.value, { bold: true, size: 36 }))
-        + tight(run(i.label, { color: '52525B', size: 18 }))
-        + (i.delta ? tight(run(`${i.trend === 'up' ? '▲' : i.trend === 'down' ? '▼' : '■'} ${i.delta}`,
-          { bold: true, size: 18, color: i.trend === 'up' ? '15803D' : i.trend === 'down' ? 'B91C1C' : '71717A' })) : ''));
-      // Tiles: shaded cells separated by white borders.
-      b.body.push(tableXml(b, [cells], {
-        widths: Array(n).fill(w), borders: BORDER('FFFFFF', 24), shade: () => 'F4F4F5',
+      // Half-points per value, by length (as the app's px sizes); a row holds as many tiles as fit
+      // the longest unbroken word at that size, so Word never splits "Desktop" or "$100/mo".
+      const sizeOf = (v: string): number => Math.round(statValueSize(v) * 1.3);
+      const need = Math.max(2160, ...g.items.map((i) => {
+        const longest = Math.max(0, ...i.value.split(/\s+/).map(t => t.length));
+        return Math.ceil(longest * (sizeOf(i.value) / 2) * 0.66 * 20) + 2 * 120 + 96;
       }));
+      const perRow = Math.max(1, Math.min(g.items.length, Math.floor(W / need)));
+      for (let at = 0; at < g.items.length; at += perRow) {
+        const chunk = g.items.slice(at, at + perRow);
+        const n = chunk.length;
+        const w = Math.floor(W / perRow);
+        const cells = chunk.map(i => tight(run(i.value, { bold: true, size: sizeOf(i.value) }))
+          + tight(run(i.label, { color: '52525B', size: 18 }))
+          + (i.delta ? tight(run(`${i.trend === 'up' ? '▲' : i.trend === 'down' ? '▼' : '■'} ${i.delta}`,
+            { bold: true, size: 18, color: i.trend === 'up' ? '15803D' : i.trend === 'down' ? 'B91C1C' : '71717A' })) : ''));
+        // Tiles: shaded cells separated by white borders; a short last row keeps the tile width.
+        b.body.push(tableXml(b, [cells], {
+          widths: Array(n).fill(w), borders: BORDER('FFFFFF', 24), shade: () => b.tintFill,
+          ...(b.look.theme ? { cellBorders: () => `<w:top w:val="single" w:sz="24" w:space="0" w:color="${b.accent}"/>` } : {}),
+        }));
+      }
       return;
     }
     case 'timeline': {
       const rows = g.items.map(i => [
-        tight(run(i.date, { bold: true, color: '2563EB' })),
+        tight(run(i.date, { bold: true, color: b.accent })),
         tight(run(i.title, { bold: true })) + (i.text ? tight(run(i.text, { color: '3F3F46' })) : ''),
       ]);
       const left = Math.round(W * 0.24);
       b.body.push(tableXml(b, rows, {
         widths: [left, W - left], borders: NO_BORDER,
-        cellBorders: (_r, c) => (c === 1 ? '<w:left w:val="single" w:sz="16" w:space="0" w:color="2563EB"/>' : undefined),
+        cellBorders: (_r, c) => (c === 1 ? `<w:left w:val="single" w:sz="16" w:space="0" w:color="${b.accent}"/>` : undefined),
       }));
       return;
     }
@@ -535,7 +607,7 @@ function renderInfographic(b: Builder, g: Infographic): void {
         tight(run(i.title, { bold: true })) + (i.text ? tight(run(i.text, { color: '3F3F46' })) : ''),
       ]);
       b.body.push(tableXml(b, rows, {
-        widths: [600, W - 600], borders: BORDER('FFFFFF', 12), shade: (_r, c) => (c === 0 ? '2563EB' : 'F8FAFC'),
+        widths: [600, W - 600], borders: BORDER('FFFFFF', 12), shade: (_r, c) => (c === 0 ? b.accent : b.look.theme ? b.tintFill : 'F8FAFC'),
       }));
       return;
     }
@@ -548,14 +620,16 @@ function renderInfographic(b: Builder, g: Infographic): void {
       if (g.columns.some(c => c.footer)) rows.push(g.columns.map(c => tight(run(c.footer ?? '', { italic: true, color: '52525B' }))));
       b.body.push(tableXml(b, rows, {
         widths: Array(n).fill(w), header: true,
-        shade: (r, c) => (r === 0 ? (g.columns[c]!.highlight ? '2563EB' : 'F4F4F5') : g.columns[c]!.highlight ? 'EFF6FF' : undefined),
+        shade: (r, c) => (r === 0 ? (g.columns[c]!.highlight ? b.accent : 'F4F4F5') : g.columns[c]!.highlight ? (b.look.theme ? b.tintFill : 'EFF6FF') : undefined),
       }));
       return;
     }
     case 'callout': {
       const c = CALLOUT_COLORS[g.callout.type];
       const inner = b.capture(() => {
-        b.body.push(tight(run(g.callout.title ?? c.label, { bold: true, color: c.ink })));
+        const glyph = g.callout.icon ? `${ICON_GLYPHS[g.callout.icon]}  ` : '';
+        b.body.push(tight((glyph ? `<w:r><w:rPr><w:rFonts w:ascii="Segoe UI Symbol" w:hAnsi="Segoe UI Symbol"/><w:color w:val="${c.border}"/></w:rPr><w:t xml:space="preserve">${xmlEscape(glyph)}</w:t></w:r>` : '')
+          + run(g.callout.title ?? c.label, { bold: true, color: c.ink })));
         blocks(b, parseMarkdown(g.callout.body).children, { depth: 0, quote: false });
       });
       b.body.push(tableXml(b, [[inner]], {
@@ -564,6 +638,212 @@ function renderInfographic(b: Builder, g: Infographic): void {
       }));
       return;
     }
+  }
+}
+
+// ── Document blocks (round 3) ───────────────────────────────────────
+
+/** Inline Markdown in a block field, as runs. */
+function mdRuns(b: Builder, text: string, style: RunStyle = {}): string {
+  const first = parseMarkdown(text).children[0];
+  return first?.type === 'paragraph' ? inline(b, first.children, style) : run(plainInline(text), style);
+}
+
+interface GridCell { xml: string; span?: number; fill?: string; borders?: string }
+
+/** A table whose cells may span columns (line-item sections and totals, the risk matrix). */
+function gridTable(widths: number[], rows: Array<{ cells: GridCell[]; header?: boolean }>, opts: { borders?: string; jc?: 'left' | 'right' | 'center' } = {}): string {
+  const trs = rows.map((r) => {
+    let col = 0;
+    const tcs = r.cells.map((c) => {
+      const span = c.span ?? 1;
+      const w = widths.slice(col, col + span).reduce((a, x) => a + x, 0);
+      col += span;
+      return `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${span > 1 ? `<w:gridSpan w:val="${span}"/>` : ''}`
+        + `${c.borders ? `<w:tcBorders>${c.borders}</w:tcBorders>` : ''}${c.fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${c.fill}"/>` : ''}`
+        + '<w:vAlign w:val="center"/></w:tcPr>'
+        + `${c.xml || para('')}</w:tc>`;
+    }).join('');
+    return `<w:tr>${r.header ? '<w:trPr><w:tblHeader/></w:trPr>' : '<w:trPr><w:cantSplit/></w:trPr>'}${tcs}</w:tr>`;
+  }).join('');
+  const total = widths.reduce((a, w) => a + w, 0);
+  return `<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="${total}" w:type="dxa"/>${opts.jc ? `<w:jc w:val="${opts.jc}"/>` : ''}`
+    + `<w:tblBorders>${opts.borders ?? BORDER()}</w:tblBorders><w:tblLayout w:type="fixed"/>`
+    + '<w:tblCellMar><w:top w:w="70" w:type="dxa"/><w:left w:w="110" w:type="dxa"/><w:bottom w:w="70" w:type="dxa"/><w:right w:w="110" w:type="dxa"/></w:tblCellMar>'
+    + '<w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr>'
+    + `<w:tblGrid>${widths.map(w => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>${trs}</w:tbl>`
+    + para('', '<w:spacing w:after="120"/>');
+}
+
+const RIGHT = '<w:jc w:val="right"/>';
+const CENTER = '<w:jc w:val="center"/>';
+const LINES = (color = 'E4E4E7'): string => `<w:top w:val="nil"/><w:left w:val="nil"/><w:right w:val="nil"/><w:insideV w:val="nil"/>`
+  + `<w:bottom w:val="single" w:sz="4" w:space="0" w:color="${color}"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="${color}"/>`;
+
+function docBlock(b: Builder, n: Code, kind: DocBlockKind, ctx: Ctx): void {
+  const parsed = parseDocBlock(kind, n.value, `${n.lang ?? ''} ${n.meta ?? ''}`);
+  if (!parsed.ok) {
+    b.body.push(para(placeholderRuns(`[${parsed.error}. Source:]`)));
+    codeBlock(b, n.value, ctx);
+    return;
+  }
+  renderDocBlock(b, parsed.value);
+}
+
+function renderDocBlock(b: Builder, d: DocBlock): void {
+  const W = b.textWidth;
+  const A = b.accent;
+  const muted = { color: '52525B', size: 19 };
+  const headCell = (text: string, right = false): GridCell => ({
+    xml: tight(run(text, { bold: true }), right ? RIGHT : ''), borders: `<w:bottom w:val="single" w:sz="12" w:space="0" w:color="${A}"/>`,
+  });
+  switch (d.kind) {
+    case 'signature': {
+      const n = d.parties.length;
+      const w = Math.floor(W / n);
+      const cells = d.parties.map(p => (p.label ? tight(run(p.label.toUpperCase(), { bold: true, color: '52525B', size: 16 })) : '')
+        + para('', '<w:pBdr><w:bottom w:val="single" w:sz="8" w:space="1" w:color="1A1A1A"/></w:pBdr><w:spacing w:before="720" w:after="60"/><w:ind w:right="360"/>')
+        + tight(mdRuns(b, p.name || 'Name', { bold: true }))
+        + (p.title ? tight(mdRuns(b, p.title, muted)) : '')
+        + tight(run(`Date: ${p.date || '____________________'}`, muted)));
+      b.body.push(tableXml(b, [cells], { widths: Array(n).fill(w), borders: NO_BORDER }));
+      return;
+    }
+    case 'keyvalue': {
+      if (d.title) b.body.push(tight(run(d.title.toUpperCase(), { bold: true, color: A, size: 17 }), '<w:keepNext/>'));
+      const kw = Math.round(W * 0.32);
+      const rows = d.items.map(i => [tight(mdRuns(b, i.key, { bold: true, color: '52525B' })), tight(mdRuns(b, i.value))]);
+      b.body.push(tableXml(b, rows, {
+        widths: [kw, W - kw], borders: LINES(), shade: (_r, c) => (c === 0 ? b.tintFill : undefined),
+        cellBorders: (_r, c) => (c === 0 ? `<w:left w:val="single" w:sz="18" w:space="0" w:color="${A}"/>` : undefined),
+      }));
+      return;
+    }
+    case 'lineitems': {
+      const t = computeTotals(d);
+      const money = (x: number): string => formatMoney(x, d.currency);
+      const units = d.items.some(r => r.unit);
+      const fixed = [800, ...(units ? [900] : []), 1500, 1700];
+      const widths = [W - fixed.reduce((a, x) => a + x, 0), ...fixed];
+      const cols = widths.length;
+      const rows: Array<{ cells: GridCell[]; header?: boolean }> = [{
+        header: true,
+        cells: [headCell('Item'), headCell('Qty', true), ...(units ? [headCell('Unit')] : []), headCell('Rate', true), headCell('Amount', true)],
+      }];
+      d.items.forEach((r, i) => {
+        if (r.section !== undefined) {
+          rows.push({ cells: [{ xml: tight(run(r.section.toUpperCase(), { bold: true, color: A, size: 17 })), span: cols, fill: b.tintFill }] });
+          return;
+        }
+        rows.push({ cells: [
+          { xml: (r.item ? tight(mdRuns(b, r.item, { bold: true })) : '') + (r.description ? tight(mdRuns(b, r.description, muted)) : '') },
+          { xml: tight(run(formatQty(r.qty ?? 1), {}), RIGHT) },
+          ...(units ? [{ xml: tight(run(r.unit ?? '', {})) }] : []),
+          { xml: tight(run(money(r.rate ?? 0), {}), RIGHT) },
+          { xml: tight(run(money(t.lines[i] ?? 0), {}), RIGHT) },
+        ] });
+      });
+      const sum = (label: string, value: string, total = false): { cells: GridCell[] } => ({ cells: [
+        { xml: tight(run(label, total ? { bold: true } : { color: '52525B' }), RIGHT), span: cols - 1, borders: '<w:top w:val="nil"/><w:bottom w:val="nil"/>' },
+        { xml: tight(run(value, total ? { bold: true, size: 24 } : {}), RIGHT),
+          borders: total ? '<w:top w:val="single" w:sz="12" w:space="0" w:color="1A1A1A"/><w:bottom w:val="nil"/>' : '<w:top w:val="nil"/><w:bottom w:val="nil"/>' },
+      ] });
+      rows.push(sum('Subtotal', money(t.subtotal)));
+      if (t.discount) rows.push(sum(`Discount${t.discountLabel && /%/.test(t.discountLabel) ? ` (${t.discountLabel})` : ''}`, `−${money(t.discount)}`));
+      if (d.taxRate) rows.push(sum(`${d.taxLabel || 'Tax'} (${formatQty(d.taxRate)}%)`, money(t.tax)));
+      rows.push(sum('Total', money(t.total), true));
+      b.body.push(gridTable(widths, rows, { borders: LINES() }));
+      if (d.notes) b.body.push(para(mdRuns(b, d.notes, muted)));
+      return;
+    }
+    case 'riskmatrix': {
+      const axis = 560;
+      const cw = Math.min(1100, Math.floor((Math.min(W, 6200) - axis) / 5));
+      const rows: Array<{ cells: GridCell[] }> = [];
+      for (let l = 5; l >= 1; l--) {
+        rows.push({ cells: [
+          { xml: tight(run(String(l), { bold: true, color: '52525B' }), CENTER) },
+          ...[1, 2, 3, 4, 5].map((i) => {
+            const r = riskRating(l * i);
+            const ids = d.risks.filter(x => x.likelihood === l && x.impact === i).map(x => x.id).join(' ');
+            return { xml: tight(run(ids || ' ', { bold: true, color: RATING_COLORS[r].ink, size: 18 }), CENTER), fill: RATING_COLORS[r].fill };
+          }),
+        ] });
+      }
+      rows.push({ cells: [{ xml: '' }, ...[1, 2, 3, 4, 5].map(i => ({ xml: tight(run(String(i), { bold: true, color: '52525B' }), CENTER) }))] });
+      b.body.push(tight(run('RISK MATRIX — LIKELIHOOD × IMPACT', { bold: true, color: A, size: 17 }), '<w:keepNext/>'));
+      b.body.push(gridTable([axis, ...Array(5).fill(cw)], rows, { borders: BORDER('FFFFFF', 18) }));
+      const sorted = [...d.risks].sort((x, y) => y.likelihood * y.impact - x.likelihood * x.impact);
+      const fixed = [700, 450, 450, 1500, 1300];
+      const rest = W - fixed.reduce((a, x) => a + x, 0);
+      const widths = [700, Math.round(rest * 0.45), 450, 450, 1500, 1300, rest - Math.round(rest * 0.45)];
+      const reg: Array<{ cells: GridCell[]; header?: boolean }> = [{ header: true, cells: ['ID', 'Risk', 'L', 'I', 'Rating', 'Owner', 'Mitigation'].map(h => headCell(h, h === 'L' || h === 'I')) }];
+      for (const x of sorted) {
+        const r = riskRating(x.likelihood * x.impact);
+        reg.push({ cells: [
+          { xml: tight(run(x.id, { bold: true })) }, { xml: tight(mdRuns(b, x.title)) },
+          { xml: tight(run(String(x.likelihood), {}), RIGHT) }, { xml: tight(run(String(x.impact), {}), RIGHT) },
+          { xml: tight(run(`${r} · ${x.likelihood * x.impact}`, { bold: true, color: RATING_COLORS[r].ink, size: 18 })), fill: RATING_COLORS[r].fill },
+          { xml: tight(mdRuns(b, x.owner ?? '')) }, { xml: tight(mdRuns(b, x.mitigation ?? '', { size: 19 })) },
+        ] });
+      }
+      b.body.push(gridTable(widths, reg, { borders: LINES() }));
+      return;
+    }
+    case 'actions': {
+      const STATUS: Record<string, { label: string; color: string; fill: string }> = {
+        open: { label: 'Open', color: '1E40AF', fill: 'DBEAFE' }, 'in progress': { label: 'In progress', color: '92400E', fill: 'FEF3C7' },
+        done: { label: 'Done', color: '166534', fill: 'DCFCE7' }, blocked: { label: 'Blocked', color: '991B1B', fill: 'FEE2E2' },
+      };
+      const fixed = [450, 1700, 1400, 1400];
+      const widths = [450, W - fixed.reduce((a, x) => a + x, 0), 1700, 1400, 1400];
+      const rows: Array<{ cells: GridCell[]; header?: boolean }> = [{ header: true, cells: ['#', 'Action', 'Owner', 'Due', 'Status'].map(h => headCell(h, h === '#')) }];
+      d.items.forEach((i, k) => {
+        const st = STATUS[i.status]!;
+        rows.push({ cells: [
+          { xml: tight(run(String(k + 1), { color: '71717A' }), RIGHT) }, { xml: tight(mdRuns(b, i.action)) },
+          { xml: tight(mdRuns(b, i.owner ?? '')) }, { xml: tight(mdRuns(b, i.due ?? '')) },
+          { xml: tight(run(st.label, { bold: true, color: st.color, size: 18 })), fill: st.fill },
+        ] });
+      });
+      b.body.push(gridTable(widths, rows, { borders: LINES() }));
+      return;
+    }
+    case 'columns': {
+      const n = d.columns.length;
+      const sideAt = d.layout === 'sidebar' ? 0 : d.layout === 'sidebar-right' ? n - 1 : -1;
+      // The sidebar is about a third of a main column's width, as in the app (1 : 2.1).
+      const weight = d.columns.map((_, i) => (sideAt < 0 || i === sideAt ? 1 : 2.1));
+      const sum = weight.reduce((a, x) => a + x, 0);
+      const widths = weight.map(x => Math.floor(W * x / sum));
+      const cells = d.columns.map(c => b.capture(() => blocks(b, parseMarkdown(c).children, { depth: 0, quote: false })));
+      b.body.push(tableXml(b, [cells], {
+        widths, borders: NO_BORDER, shade: (_r, c) => (c === sideAt ? b.tintFill : undefined),
+      }));
+      return;
+    }
+    case 'cover': {
+      if (d.kicker) b.body.push(para(run(d.kicker.toUpperCase(), { bold: true, color: A, size: 18 }), '<w:spacing w:before="240" w:after="60"/>'));
+      b.body.push(para(mdRuns(b, d.title), `<w:pStyle w:val="Title"/><w:pBdr><w:left w:val="single" w:sz="36" w:space="12" w:color="${A}"/></w:pBdr>`));
+      if (d.subtitle) b.body.push(para(mdRuns(b, d.subtitle), '<w:pStyle w:val="Subtitle"/>'));
+      if (d.meta.length) b.body.push(para(d.meta.map(m => mdRuns(b, m, muted)).join(run('    ', muted)), '<w:spacing w:after="360"/>'));
+      if (d.pageBreak) b.body.push(para('<w:r><w:br w:type="page"/></w:r>'));
+      return;
+    }
+    case 'meta':
+      b.body.push(para(d.items.map(m => mdRuns(b, m, muted)).join(run('  ·  ', { color: 'A1A1AA', size: 19 })), '<w:spacing w:after="240"/>'));
+      return;
+    case 'references':
+      d.items.forEach((r, i) => {
+        let link = '';
+        if (r.url && /^https?:/i.test(r.url)) {
+          const rid = b.rel(`${R_NS}/hyperlink`, r.url, true);
+          link = `${run(' ', {})}<w:hyperlink r:id="${rid}" w:history="1">${run(r.url, { link: true, size: 19 })}</w:hyperlink>`;
+        }
+        b.body.push(para(`${run(`[${i + 1}]`, { color: '71717A' })}<w:r><w:tab/></w:r>${mdRuns(b, r.text)}${link}`,
+          '<w:spacing w:after="80"/><w:ind w:left="567" w:hanging="567"/>'));
+      });
+      return;
   }
 }
 
@@ -597,7 +877,22 @@ function tocXml(b: Builder, headings: HeadingInfo[]): string {
 function coverXml(b: Builder, title: string, s: DocSettings, dateText: string): string {
   const c = s.cover!;
   const parts: string[] = [];
-  parts.push(para('', '<w:spacing w:before="2400" w:after="0"/>'));
+  const variant = b.look.theme?.cover ?? 'classic';
+  if (variant === 'band') {
+    // A full-width band in the accent, white type — the report/proposal cover.
+    const logo = c.logo ? b.image(c.logo) : undefined;
+    const lf = logo ? b.fit(logo.width, logo.height, `${Math.min(logo.width, 160)}px`) : undefined;
+    const inner = (logo && lf ? para(b.drawing(logo, lf.cx, lf.cy, 'Logo'), '<w:spacing w:after="360"/>') : '')
+      + para(run(c.title ?? title, { bold: true, color: 'FFFFFF', size: 56 }), '<w:spacing w:before="1600" w:after="200"/>')
+      + (c.subtitle ? para(run(c.subtitle, { color: 'FFFFFF', size: 30 }), '<w:spacing w:after="480"/>') : '')
+      + (c.author ? para(run(c.author, { color: 'FFFFFF', size: 24 }), '<w:spacing w:after="60"/>') : '')
+      + para(run(c.date ?? dateText, { color: 'FFFFFF', size: 22 }), '<w:spacing w:after="600"/>');
+    parts.push(para('', '<w:spacing w:before="600" w:after="0"/>'));
+    parts.push(tableXml(b, [[inner]], { widths: [b.textWidth], borders: NO_BORDER, shade: () => b.accent }));
+    parts.push(para('<w:r><w:br w:type="page"/></w:r>'));
+    return parts.join('');
+  }
+  parts.push(para('', `<w:spacing w:before="${variant === 'minimal' ? 1200 : 2400}" w:after="0"/>`));
   const logo = c.logo ? b.image(c.logo) : undefined;
   if (logo) {
     const { cx, cy } = b.fit(logo.width, logo.height, `${Math.min(logo.width, 180)}px`);
@@ -605,7 +900,7 @@ function coverXml(b: Builder, title: string, s: DocSettings, dateText: string): 
   }
   parts.push(para(run(c.title ?? title, {}), '<w:pStyle w:val="Title"/>'));
   if (c.subtitle) parts.push(para(run(c.subtitle, {}), '<w:pStyle w:val="Subtitle"/>'));
-  parts.push(para('', '<w:pBdr><w:bottom w:val="single" w:sz="12" w:space="1" w:color="2563EB"/></w:pBdr><w:spacing w:after="360"/>'));
+  parts.push(para('', `<w:pBdr><w:bottom w:val="single" w:sz="${variant === 'minimal' ? 6 : 12}" w:space="1" w:color="${b.accent}"/></w:pBdr><w:spacing w:after="360"/>`));
   if (c.author) parts.push(para(run(c.author, { size: 26 })));
   parts.push(para(run(c.date ?? dateText, { color: '52525B', size: 24 })));
   parts.push(para('<w:r><w:br w:type="page"/></w:r>'));
@@ -665,12 +960,39 @@ function numberingXml(nums: Builder['nums']): string {
 
 const HEADING_SIZES = [36, 30, 26, 24, 22, 22];
 
-function stylesXml(font: string, textWidth: number): string {
+/** Paragraph borders, colour, size and case for a heading level under a theme (undefined = the plain look). */
+function headingLook(look: ResolvedLook | undefined, l: number, accent: string): { bdr: string; color: string; size: number; caps: boolean; font?: string } {
+  const plain = { bdr: '', color: '1A1A1A', size: HEADING_SIZES[l - 1]!, caps: false };
+  const t = look?.theme;
+  if (!t) return plain;
+  const font = DOCX_FONTS[look!.faces.heading];
+  const base = { ...plain, font, size: l === 1 ? 40 : plain.size };
+  switch (t.headingStyle) {
+    case 'classic':
+      if (l === 1) return { ...base, bdr: `<w:pBdr><w:bottom w:val="single" w:sz="12" w:space="4" w:color="${accent}"/></w:pBdr>` };
+      return l === 2 ? { ...base, color: accent } : base;
+    case 'rule':
+      return l === 2 ? { ...base, color: accent, bdr: '<w:pBdr><w:bottom w:val="single" w:sz="4" w:space="3" w:color="D4D4D8"/></w:pBdr>' } : base;
+    case 'bar':
+      if (l === 1) return { ...base, color: accent };
+      return l === 2 ? { ...base, bdr: `<w:pBdr><w:left w:val="single" w:sz="30" w:space="8" w:color="${accent}"/></w:pBdr>` } : base;
+    case 'caps':
+      return l === 2 ? { ...base, color: accent, size: 22, caps: true, bdr: `<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="2" w:color="${accent}"/></w:pBdr>` } : base;
+  }
+}
+
+function stylesXml(font: string, textWidth: number, look?: ResolvedLook, accent = '2563EB'): string {
   const f = xmlEscape(font);
-  const heading = (l: number): string => `<w:style w:type="paragraph" w:styleId="Heading${l}"><w:name w:val="heading ${l}"/>`
-    + '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/>'
-    + `<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="${l <= 2 ? 360 : 240}" w:after="120"/><w:outlineLvl w:val="${l - 1}"/></w:pPr>`
-    + `<w:rPr><w:b/><w:bCs/><w:color w:val="1A1A1A"/><w:sz w:val="${HEADING_SIZES[l - 1]}"/><w:szCs w:val="${HEADING_SIZES[l - 1]}"/></w:rPr></w:style>`;
+  const justify = look?.theme?.justify ? '<w:jc w:val="both"/>' : '';
+  const heading = (l: number): string => {
+    const hl = headingLook(look, l, accent);
+    const hf = hl.font ? `<w:rFonts w:ascii="${xmlEscape(hl.font)}" w:hAnsi="${xmlEscape(hl.font)}" w:cs="${xmlEscape(hl.font)}"/>` : '';
+    const center = l === 1 && look?.theme?.centerTitle ? '<w:jc w:val="center"/>' : '';
+    return `<w:style w:type="paragraph" w:styleId="Heading${l}"><w:name w:val="heading ${l}"/>`
+      + '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/>'
+      + `<w:pPr><w:keepNext/><w:keepLines/>${hl.bdr}<w:spacing w:before="${l <= 2 ? 360 : 240}" w:after="120"/>${center}<w:outlineLvl w:val="${l - 1}"/></w:pPr>`
+      + `<w:rPr>${hf}<w:b/><w:bCs/>${hl.caps ? '<w:caps/>' : ''}<w:color w:val="${hl.color}"/><w:sz w:val="${hl.size}"/><w:szCs w:val="${hl.size}"/></w:rPr></w:style>`;
+  };
   const toc = (l: number): string => `<w:style w:type="paragraph" w:styleId="TOC${l}"><w:name w:val="toc ${l}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>`
     + `<w:uiPriority w:val="39"/><w:unhideWhenUsed/><w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="${textWidth}"/></w:tabs>`
     + `<w:spacing w:after="60"/><w:ind w:left="${(l - 1) * 240}"/></w:pPr>${l === 1 ? '<w:rPr><w:b/></w:rPr>' : ''}</w:style>`;
@@ -678,9 +1000,11 @@ function stylesXml(font: string, textWidth: number): string {
     + `<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${f}" w:eastAsia="${f}" w:hAnsi="${f}" w:cs="${f}"/>`
     + '<w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault>'
     + '<w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>'
-    + '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:rPr><w:color w:val="1A1A1A"/></w:rPr></w:style>'
+    + `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/>${justify ? `<w:pPr>${justify}</w:pPr>` : ''}<w:rPr><w:color w:val="1A1A1A"/></w:rPr></w:style>`
     + '<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>'
-    + '<w:pPr><w:spacing w:after="240"/></w:pPr><w:rPr><w:b/><w:sz w:val="48"/><w:szCs w:val="48"/></w:rPr></w:style>'
+    + `<w:pPr><w:spacing w:after="240"/>${look?.theme?.centerTitle ? '<w:jc w:val="center"/>' : ''}</w:pPr><w:rPr>`
+    + `${look?.theme ? `<w:rFonts w:ascii="${xmlEscape(DOCX_FONTS[look.faces.heading])}" w:hAnsi="${xmlEscape(DOCX_FONTS[look.faces.heading])}" w:cs="${xmlEscape(DOCX_FONTS[look.faces.heading])}"/>` : ''}`
+    + '<w:b/><w:sz w:val="48"/><w:szCs w:val="48"/></w:rPr></w:style>'
     + '<w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>'
     + '<w:pPr><w:spacing w:after="240"/></w:pPr><w:rPr><w:color w:val="52525B"/><w:sz w:val="30"/><w:szCs w:val="30"/></w:rPr></w:style>'
     + [1, 2, 3, 4, 5, 6].map(heading).join('')
@@ -701,7 +1025,7 @@ function stylesXml(font: string, textWidth: number): string {
     + '<w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:cs="Consolas"/><w:sz w:val="19"/><w:szCs w:val="19"/></w:rPr></w:style>'
     + '<w:style w:type="character" w:styleId="CodeChar"><w:name w:val="Code Char"/>'
     + '<w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:cs="Consolas"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:shd w:val="clear" w:color="auto" w:fill="F4F4F5"/></w:rPr></w:style>'
-    + '<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="2563EB"/><w:u w:val="single"/></w:rPr></w:style>'
+    + `<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="${accent}"/><w:u w:val="single"/></w:rPr></w:style>`
     + '<w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/>'
     + '<w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>'
     + '<w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:basedOn w:val="TableNormal"/><w:tblPr><w:tblBorders>'
@@ -745,7 +1069,7 @@ export interface DocxInput {
 export async function toDocx(input: DocxInput): Promise<Uint8Array> {
   const s = input.settings ?? DEFAULT_SETTINGS;
   const headings = input.headings ?? [];
-  const font = s.font === 'serif' ? 'Georgia' : 'Calibri';
+  const font = DOCX_FONTS[s.font === 'serif' ? 'serif' : 'sans'];
   const date = input.date ?? new Date();
   const dateText = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   const b = new Builder(input.resolveImage, s, input.visuals ?? new Map(), headings);
@@ -764,10 +1088,17 @@ export async function toDocx(input: DocxInput): Promise<Uint8Array> {
   const hfRefs: string[] = [];
   const values = { title: input.title, date: dateText };
   const right = b.textWidth;
-  const hfPara = (content: string, style: string): string =>
-    para(content, `<w:pStyle w:val="${style}"/><w:tabs><w:tab w:val="right" w:pos="${right}"/></w:tabs>`);
+  const hfPara = (content: string, style: string, rule = false): string =>
+    para(content, `<w:pStyle w:val="${style}"/>${rule ? `<w:pBdr><w:${style === 'Header' ? 'bottom' : 'top'} w:val="single" w:sz="4" w:space="4" w:color="D4D4D8"/></w:pBdr>` : ''}`
+      + `<w:tabs><w:tab w:val="right" w:pos="${right}"/></w:tabs>`);
   const watermark = s.watermark ? watermarkXml(s.watermark, font) : '';
-  const headerText = s.header ? hfText(s.header, values) : '';
+  const look = b.look;
+  // A letter's header text is its letterhead, on the first page only.
+  const letterhead = look.theme?.header === 'letterhead' && Boolean(s.header);
+  const banner = look.classification
+    ? para(run(look.classification, { bold: true, color: 'B91C1C', size: 16 }), '<w:pStyle w:val="Header"/><w:spacing w:after="60"/><w:jc w:val="center"/>') : '';
+  const ruled = look.theme?.header === 'rule';
+  const headerText = s.header && !letterhead ? hfText(s.header, values) : '';
   let footerText = s.footer ? hfText(s.footer, values) : '';
   if (s.pageNumbers && !/\{page\}/i.test(s.footer ?? '')) {
     footerText += `<w:r><w:tab/></w:r>${run('Page ', { color: '71717A', size: 18 })}${field('PAGE', '1', { color: '71717A', size: 18 })}`
@@ -778,12 +1109,20 @@ export async function toDocx(input: DocxInput): Promise<Uint8Array> {
     const rid = b.rel(`${R_NS}/${tag === 'hdr' ? 'header' : 'footer'}`, name);
     hfRefs.push(`<w:${tag === 'hdr' ? 'headerReference' : 'footerReference'} w:type="${type}" r:id="${rid}"/>`);
   };
-  if (headerText || watermark) addPart('header1.xml', 'hdr', hfPara(watermark + headerText, 'Header'), 'default');
-  if (footerText) addPart('footer1.xml', 'ftr', hfPara(footerText, 'Footer'), 'default');
+  const footerBanner = banner.replace('w:val="Header"', 'w:val="Footer"').replace('<w:spacing w:after="60"/>', '<w:spacing w:before="60" w:after="0"/>');
+  if (headerText || watermark || banner) addPart('header1.xml', 'hdr', banner + hfPara(watermark + headerText, 'Header', ruled && Boolean(headerText)), 'default');
+  if (footerText || banner) addPart('footer1.xml', 'ftr', hfPara(footerText, 'Footer', ruled && Boolean(footerText)) + footerBanner, 'default');
   if (cover) {
-    // The cover is its own first page: no header text, no footer — only the watermark.
-    addPart('header2.xml', 'hdr', hfPara(watermark, 'Header'), 'first');
-    addPart('footer2.xml', 'ftr', hfPara('', 'Footer'), 'first');
+    // The cover is its own first page: no header text, no footer — only the watermark (and a classification).
+    addPart('header2.xml', 'hdr', banner + hfPara(watermark, 'Header'), 'first');
+    addPart('footer2.xml', 'ftr', hfPara('', 'Footer') + footerBanner, 'first');
+  } else if (letterhead) {
+    const name = expandFields(s.header!, values).replace(/\{page\}|\{pages\}/gi, '');
+    const lh = para(`${watermark}${run(name, { bold: true, color: b.accent, size: 36 })}<w:r><w:tab/></w:r>${run(dateText, { color: '71717A', size: 18 })}`,
+      `<w:pStyle w:val="Header"/><w:pBdr><w:bottom w:val="single" w:sz="12" w:space="6" w:color="${b.accent}"/></w:pBdr>`
+      + `<w:tabs><w:tab w:val="right" w:pos="${right}"/></w:tabs><w:spacing w:after="240"/>`);
+    addPart('header2.xml', 'hdr', banner + lh, 'first');
+    addPart('footer2.xml', 'ftr', hfPara(footerText, 'Footer') + footerBanner, 'first');
   }
   // headerReference elements precede footerReference ones in sectPr.
   hfRefs.sort((x, y) => Number(y.startsWith('<w:headerReference')) - Number(x.startsWith('<w:headerReference')));
@@ -792,7 +1131,7 @@ export async function toDocx(input: DocxInput): Promise<Uint8Array> {
   const m = s.margins;
   const sectPr = `<w:sectPr>${hfRefs.join('')}<w:pgSz w:w="${page.w}" w:h="${page.h}"${s.orientation === 'landscape' ? ' w:orient="landscape"' : ''}/>`
     + `<w:pgMar w:top="${twips(m.top)}" w:right="${twips(m.right)}" w:bottom="${twips(m.bottom)}" w:left="${twips(m.left)}" w:header="567" w:footer="567" w:gutter="0"/>`
-    + `${cover ? '<w:titlePg/>' : ''}</w:sectPr>`;
+    + `${cover || letterhead ? '<w:titlePg/>' : ''}</w:sectPr>`;
 
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}" `
     + 'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
@@ -830,7 +1169,7 @@ export async function toDocx(input: DocxInput): Promise<Uint8Array> {
     '_rels/.rels': strToU8(rootRels),
     'docProps/core.xml': strToU8(core),
     'word/document.xml': strToU8(document),
-    'word/styles.xml': strToU8(stylesXml(font, b.textWidth)),
+    'word/styles.xml': strToU8(stylesXml(font, b.textWidth, look.theme ? look : undefined, b.accent)),
     'word/numbering.xml': strToU8(numberingXml(b.nums)),
     'word/settings.xml': strToU8(settingsXml),
     'word/_rels/document.xml.rels': strToU8(docRels),

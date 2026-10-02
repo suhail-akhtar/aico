@@ -29,7 +29,7 @@ export const AUTO_ANSWER = 'No one is available to answer. Make the most reasona
 
 /** The settings keys the bench reports, so a later run can see if they moved. Never secrets. */
 export const REPORTED_SETTINGS = ['model', 'agentModels', 'maxIterations', 'safetyLimits', 'autoApprove',
-  'autoCompact', 'promptCaching', 'maxParallelToolCalls', 'bashTimeout', 'activeProvider', 'completionGate', 'repeatGuard'];
+  'autoCompact', 'promptCaching', 'maxParallelToolCalls', 'bashTimeout', 'activeProvider', 'completionGate', 'repeatGuard', 'disabledTools'];
 
 /**
  * Where provider settings are copied from: the process's own isolated store

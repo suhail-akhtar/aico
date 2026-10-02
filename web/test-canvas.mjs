@@ -583,5 +583,180 @@ test('templates: every one builds a document whose sections are pending placehol
   assert.equal(T.templateById('nope').id, 'blank');
 });
 
+// ── Docs 2: document blocks, totals, themes, page widths (round 3 of the contract) ──
+const D = await load('doc-blocks');
+const TH = await load('doc-themes');
+const F3 = '```';
+
+test('doc blocks: every template parses, and parse → serialise → parse is stable', () => {
+  for (const k of D.DOC_BLOCK_KINDS) {
+    const md = D.docBlockTemplate(k);
+    const [blk] = B.splitBlocks(md);
+    assert.equal(blk.kind, 'code', `${k} is one fenced block`);
+    const f = V.parseFence(md);
+    assert.equal(D.docBlockKind(f.lang), k);
+    const a = D.parseDocBlock(k, f.body, f.info);
+    assert.ok(a.ok, `${k}: ${a.error}`);
+    const again = V.parseFence(D.docBlockMarkdown(a.value));
+    const b = D.parseDocBlock(k, again.body, again.info);
+    assert.deepEqual(b.value, a.value, `${k} round-trips`);
+  }
+});
+
+test('doc blocks: aliases and lenient input', () => {
+  assert.equal(D.docBlockKind('BOQ'), 'lineitems');
+  assert.equal(D.docBlockKind('kv'), 'keyvalue');
+  assert.equal(D.docBlockKind('bibliography'), 'references');
+  assert.equal(D.docBlockKind('python'), undefined);
+  const kv = D.parseDocBlock('keyvalue', '{"title":"Invoice","Invoice no.":"INV-1","Due":"Friday"}');
+  assert.deepEqual(kv.value.items, [{ key: 'Invoice no.', value: 'INV-1' }, { key: 'Due', value: 'Friday' }], 'a plain object is read as rows');
+  assert.equal(kv.value.title, 'Invoice');
+  assert.deepEqual(D.parseDocBlock('references', '["One","Two"]').value.items.map(r => r.text), ['One', 'Two'], 'an array of strings');
+  assert.deepEqual(D.parseDocBlock('meta', '{"date":"3 Oct","author":"Ann","status":"Draft"}').value.items, ['Ann', '3 Oct', 'Draft'], 'meta keys in a fixed order');
+  const sig = D.parseDocBlock('signature', '["Ann","Bo","Cy","Di","Ed"]').value;
+  assert.equal(sig.parties.length, 4, 'at most four signatories');
+  const act = D.parseDocBlock('actions', '[{"action":"Ship","status":"WIP"},{"task":"Test","status":"Closed"},{"text":"Wait","status":"on-hold"}]').value;
+  assert.deepEqual(act.items.map(i => i.status), ['in progress', 'done', 'blocked']);
+  assert.ok(!D.parseDocBlock('lineitems', '{"items":[]}').ok && !D.parseDocBlock('cover', '{}').ok && !D.parseDocBlock('actions', 'not json').ok, 'empty/invalid blocks are errors');
+});
+
+test('columns: split on +++, layout from the info string, Markdown kept', () => {
+  const md = '````columns sidebar\n**Skills**\n\n- a\n\n+++\n\n## Experience\n\n```js\nx()\n```\n````';
+  const [blk] = B.splitBlocks(md);
+  assert.equal(blk.kind, 'code', 'a four-backtick fence holds an inner fence');
+  const f = V.parseFence(md);
+  const c = D.parseDocBlock('columns', f.body, f.info).value;
+  assert.equal(c.layout, 'sidebar');
+  assert.equal(c.columns.length, 2);
+  assert.ok(c.columns[1].includes('```js'), 'the inner fence survives');
+  assert.ok(D.docBlockMarkdown(c).startsWith('````columns sidebar\n'), 'written back with four backticks and its layout');
+  assert.equal(D.columnsLayout('columns'), 'even');
+  assert.equal(D.columnsLayout('columns sidebar-right'), 'sidebar-right');
+});
+
+test('line items: totals are computed exactly in minor units', () => {
+  const li = (o) => D.parseDocBlock('lineitems', JSON.stringify(o)).value;
+  const t1 = D.computeTotals(li({ currency: 'GBP', taxRate: 20, items: [{ item: 'a', qty: 3, rate: 0.1 }, { item: 'b', qty: 1, rate: 1.005 }] }));
+  assert.deepEqual(t1.lines, [0.3, 1.01], '0.1 × 3 is 0.30; 1.005 rounds half up');
+  assert.equal(t1.subtotal, 1.31);
+  assert.equal(t1.tax, 0.26);
+  assert.equal(t1.total, 1.57);
+  const t2 = D.computeTotals(li({ currency: 'GBP', taxRate: 20, discount: '10%', items: [{ section: 'Phase 1' }, { item: 'Workshop', qty: 2, rate: 650 }, { item: 'Build', qty: 30, rate: 600 }, { item: 'Hosting', qty: 12, rate: 100 }] }));
+  assert.equal(t2.lines[0], undefined, 'a section row has no amount');
+  assert.deepEqual([t2.subtotal, t2.discount, t2.tax, t2.total], [20500, 2050, 3690, 22140], 'discount before tax');
+  const t3 = D.computeTotals(li({ currency: 'JPY', items: [{ item: 'x', qty: 3, rate: 333.4 }] }));
+  assert.equal(t3.digits, 0);
+  assert.equal(t3.total, 1000, 'yen has no minor unit');
+  const t4 = D.computeTotals(li({ currency: 'USD', discount: 500, items: [{ item: 'x', rate: 100 }] }));
+  assert.equal(t4.discount, 100, 'a fixed discount never exceeds the subtotal');
+  assert.equal(t4.total, 0);
+  const t5 = D.computeTotals(li({ items: [{ item: 'x', qty: '2', rate: '£1,250.50' }], total: 999 }));
+  assert.equal(t5.total, 2501, 'numbers read from text; a typed total is ignored');
+  assert.equal(D.currencyCode('$'), 'USD');
+  assert.equal(D.currencyCode('nope'), 'GBP');
+  assert.equal(D.formatMoney(22140, 'GBP'), '£22,140.00');
+  const html = D.docBlockHtml(li({ currency: 'GBP', taxRate: 20, taxLabel: 'VAT', items: [{ item: 'a', qty: 2, rate: 10 }] }));
+  assert.ok(html.includes('VAT (20%)') && html.includes('£24.00') && html.includes('db-li-total'), 'the HTML shows tax and total');
+  assert.ok(!html.includes('<tfoot'), 'totals are not a tfoot (it would repeat on every printed page)');
+});
+
+test('risk matrix: levels from numbers or words, score and rating', () => {
+  const r = D.parseDocBlock('riskmatrix', JSON.stringify({ risks: [
+    { title: 'A', likelihood: 'almost certain', impact: 'severe' }, { title: 'B', likelihood: 9, impact: 0 }, { title: 'C', likelihood: 'possible', impact: 'minor' },
+  ] })).value;
+  assert.deepEqual(r.risks.map(x => [x.id, x.likelihood, x.impact]), [['R1', 5, 5], ['R2', 5, 1], ['R3', 3, 2]], 'ids default, levels clamp to 1–5');
+  assert.deepEqual([4, 5, 9, 10, 16, 17, 25].map(D.riskRating), ['Low', 'Medium', 'Medium', 'High', 'High', 'Critical', 'Critical']);
+  const html = D.docBlockHtml(r);
+  assert.equal((html.match(/class="db-rm-cell"/g) ?? []).length, 25, 'a 5×5 heat map');
+  assert.ok(html.indexOf('>R1<') < html.indexOf('>R2<', html.indexOf('db-rm-register')), 'the register is sorted by score');
+});
+
+test('block HTML escapes everything and allows only inline Markdown', () => {
+  const kv = D.parseDocBlock('keyvalue', JSON.stringify({ items: [{ key: '<img src=x onerror=alert(1)>', value: '**bold** [l](javascript:alert(1)) [ok](https://a.b)' }] })).value;
+  const html = D.docBlockHtml(kv);
+  assert.ok(!html.includes('<img') && html.includes('&lt;img'), 'raw HTML is escaped');
+  assert.ok(html.includes('<strong>bold</strong>') && html.includes('<a href="https://a.b">ok</a>') && !html.includes('href="javascript'), 'bold and http links only');
+  assert.equal(D.plainInline('**a** _b_ `c` [d](https://e)'), 'a b c d');
+});
+
+test('callout icons: icon=<name> in the info string, written back', () => {
+  const c = V.parseCallout('```callout warn icon=shield\n**Careful**\nText\n```');
+  assert.deepEqual(c, { type: 'warn', title: 'Careful', body: 'Text', icon: 'shield' });
+  assert.equal(V.calloutMarkdown(c).split('\n')[0], '```callout warn icon=shield');
+  assert.equal(V.parseCallout('```callout info icon=nope\nx\n```').icon, undefined, 'unknown icons are ignored');
+  assert.ok(D.iconSvg('lock').startsWith('<svg') && D.ICON_NAMES.length >= 12);
+});
+
+test('KPI tiles: values never break mid-word', () => {
+  assert.ok(D.statValueSize('34%') > D.statValueSize('$100/mo') && D.statValueSize('$100/mo') > D.statValueSize('Desktop and mobile apps'));
+  const min = D.statsMinWidth(['$100/mo', 'Desktop', '12 weeks', '34%']);
+  assert.ok(min >= 136 && min <= 150, `four short tiles fit an A4 column (${min}px)`);
+  const longWord = D.statsMinWidth(['Internationalisation']);
+  assert.ok(longWord > 200, `the tile grows for a long word (${longWord}px) rather than splitting it`);
+  assert.deepEqual([[4, 3], [4, 4], [5, 4], [6, 4], [3, 2], [1, 5], [6, 5.9]].map(([n, f]) => D.balancedColumns(n, f)), [2, 4, 3, 3, 2, 1, 3], 'balanced rows: 2 + 2, not 3 + 1');
+  assert.ok(D.autoGrid(140).includes('auto-fit') && D.autoGrid(140).includes('grid-auto-rows: 1fr'), 'auto-fit with equal-height rows');
+});
+
+test('themes: every type exists, aliases resolve, defaults sit under stored values', () => {
+  const want = ['report', 'research', 'letter', 'memo', 'cv', 'proposal', 'invoice', 'sop', 'legal', 'spec', 'release-notes', 'minutes', 'case-study', 'press-release', 'risk', 'confidential'];
+  assert.deepEqual(TH.DOC_THEMES.map(t => t.id), want);
+  for (const t of TH.DOC_THEMES) assert.ok(/^#[0-9A-F]{6}$/.test(t.accent), `${t.id} accent`);
+  assert.equal(TH.themeById('NDA').id, 'legal');
+  assert.equal(TH.themeById('resume').id, 'cv');
+  assert.equal(TH.themeById('whitepaper').id, 'report');
+  assert.equal(TH.themeById('nope'), undefined);
+  const conf = TH.resolveLook({ theme: 'confidential' });
+  assert.equal(conf.classification, 'CONFIDENTIAL');
+  assert.equal(conf.watermark, 'CONFIDENTIAL');
+  assert.equal(TH.resolveLook({ theme: 'confidential', watermark: '' }).watermark, undefined, 'an emptied watermark stays off');
+  assert.equal(TH.resolveLook({ theme: 'confidential', classification: 'SECRET' }).classification, 'SECRET');
+  assert.equal(TH.resolveLook({ theme: 'report', accent: '#abcdef' }).accent, '#ABCDEF');
+  assert.deepEqual(TH.resolveLook({ theme: 'report' }).faces, { body: 'sans', heading: 'serif' });
+  assert.deepEqual(TH.resolveLook({ theme: 'report', font: 'serif' }).faces, { body: 'serif', heading: 'serif' });
+  const { attrs, vars } = TH.themeAttrs(TH.resolveLook({ theme: 'research' }));
+  assert.equal(attrs['data-dt'], 'research');
+  assert.equal(attrs['data-dt-numbered'], '1');
+  assert.equal(vars['--dt-accent'], '#7F1D1D');
+  const css = TH.themeRules('body');
+  assert.ok(css.includes('body[data-dt-numbered] h2::before') && css.includes('body[data-dt-table="banded"] th'), 'rules are scoped');
+  assert.equal(TH.tint('#000000', 0.1), 'E6E6E6');
+});
+
+test('page widths: the stored choice, else Normal beside the chat and Wide in full screen', () => {
+  assert.equal(TH.pageWidthFor(undefined, false), 'normal');
+  assert.equal(TH.pageWidthFor(undefined, true), 'wide');
+  assert.equal(TH.pageWidthFor('narrow', true), 'narrow');
+  assert.equal(TH.pageWidthFor('huge', false), 'normal');
+  assert.equal(TH.pageWidthPx('full'), null);
+  assert.ok(TH.pageWidthPx('wide') > TH.pageWidthPx('normal') && TH.pageWidthPx('normal') > TH.pageWidthPx('narrow'));
+});
+
+// ── AICO Sheets in the browser bundle (the engine-side suite is scripts/sheets-test.mjs) ──
+const SM = await load('sheet-model');
+console.log('\n══ AICO Sheets (UI) ══');
+
+test('a sheet card: parsed kind, .xlsx download name, a preview of the first rows', () => {
+  assert.deepEqual(c.parseCanvasRef('{"id":"cv-1234567890","title":"BOQ","kind":"sheet"}'), { id: 'cv-1234567890', title: 'BOQ', kind: 'sheet' });
+  assert.equal(c.canvasFileName('Bill of quantities', 'sheet'), 'bill-of-quantities.xlsx');
+  let b = SM.emptyBook('BOQ');
+  b = SM.applyOp(b, { op: 'set', sheet: 'BOQ', cells: SM.gridCells([['Item', 'Qty', 'Rate', 'Amount'], ['Cement', 10, '£5.50', '=B2*C2']], { r: 0, c: 0 }) });
+  b = SM.applyOp(b, { op: 'style', sheet: 'BOQ', range: 'D2', style: { num: 'currency', cur: 'GBP' } });
+  assert.deepEqual(SM.sheetPreview(SM.serializeBook(b), 3), ['Item · Qty · Rate · Amount', 'Cement · 10 · £5.50 · £55.00', '2 rows']);
+  assert.deepEqual(SM.sheetPreview('# not a sheet'), []);
+});
+
+test('the grid\'s edit cycle: pending ops replay on the agent\'s newer version, undo is a snapshot', () => {
+  let base = SM.applyOp(SM.emptyBook(), { op: 'set', sheet: 'Sheet1', cells: { A1: 1, A2: 2, A3: '=SUM(A1:A2)' } });
+  const pending = [{ op: 'set', sheet: 'Sheet1', cells: { A2: 5 } }, { op: 'style', sheet: 'Sheet1', range: 'A3', style: { b: true } }];
+  const agent = SM.applyOp(base, { op: 'insert', sheet: 'Sheet1', axis: 'row', at: 0, count: 1 });
+  const { book } = SM.replay(agent, pending);
+  // Replay is by address: the agent's inserted row moved everything down, and the person's pending A2 edit
+  // lands on what is now A2 (the old A1). Documented limit — the grid only sees the agent's result, not its ops.
+  assert.equal(SM.computeBook(book).get('s1', 'A4'), 7);
+  assert.equal(book.sheets[0].cells.A3.s.b, true);
+  const undone = SM.replay(book, [{ op: 'replace', book: base }]).book;
+  assert.equal(SM.computeBook(undone).get('s1', 'A3'), 3);
+});
+
 console.log(`\n  CANVAS: ${pass} passed, ${fail} failed\n`);
 process.exit(fail > 0 ? 1 : 0);

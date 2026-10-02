@@ -941,7 +941,7 @@ When an L4 run hits an ask or a destructive call:
 | Pre-approving tools because a skill's `allowed-tools` says so | Imported skill text is untrusted; the recorded decision (`skills/types.ts`) stands. |
 | Running anything on import (skills, packs, plugins, MCP) | "Try this skill" must not mean "run a stranger's code". |
 | In-process JavaScript tool plugins | That would load untrusted code into the engine process. The routes are argv/HTTP tools or an MCP server in its own process. |
-| An LLM safety classifier (Claude Code's auto-mode style) | It is a large, measured system (17% false negatives on real overeager actions even there). Effect classes plus previews plus taint are deterministic and auditable. Revisit with evidence (Q10). |
+| An LLM safety classifier (Claude Code's auto-mode style) | It is a large, measured system (17% false negatives on real overeager actions even there). Effect classes plus previews plus taint are deterministic and auditable. Revisit with evidence (Q10). **Reopened by the owner 2026-10-03:** built as the Sentinel, a deny-or-escalate-only reviewer behind the deterministic guards ([ADR 0015](../adr/0015-sentinel-reviewer.md)). |
 | A marketplace, registry browsing, or install from a URL/git | Download-from-untrusted-source risk and a moderation burden. Import from a local file or folder is enough. |
 | MCPB support, HTTP `mcp-serve`, OAuth (without approval) | Not needed for the scenarios; new surfaces need ADRs (Q6, Q9; work-ledger phase 5 still not authorised). |
 | An OS sandbox claim on Windows | There is no native jail. `paths.write` and Bash prefixes are labelled partial. Codex's Windows sandbox is the reference if this is ever reopened. |

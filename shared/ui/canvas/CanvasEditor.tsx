@@ -3,7 +3,8 @@
  * edits, beside the chat (desktop) or in place of its card (browser, VS Code).
  * Documents open as **AICO Docs**: a page drawn block by block, edited in
  * place, with tabs, comments and the agent's live writing shown where it
- * happens; the Markdown source stays one click away.
+ * happens; the Markdown source stays one click away. A `sheet` canvas opens
+ * in the grid instead (`SheetEditor`, AICO Sheets).
  *
  * ## Why the document stays Markdown, edited by exact spans
  *
@@ -42,7 +43,7 @@
  * @module shared/ui/canvas/CanvasEditor
  */
 
-import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { MarkdownRenderer } from '../MarkdownRenderer';
@@ -69,7 +70,11 @@ import { useComments } from './DocComments';
 import type { EditOp } from './BlockEditors';
 import { desktopPdf, EXPORT_TYPES, pickImage, saveBlob } from './export';
 import { CodeArea } from './CodeArea';
+import { SheetEditor } from './SheetEditor';
 import { CvIcon, type CanvasIconName } from './icons';
+import { DOC_BLOCK_KINDS, docBlockTemplate } from './doc-blocks';
+import { SCHEMAS } from './DocBlocks';
+import { PAGE_WIDTHS, pageWidthFor, resolveLook, type PageWidth } from './doc-themes';
 import './canvas.css';
 
 export interface CanvasEditorProps {
@@ -134,6 +139,21 @@ function Switchable(props: CanvasEditorProps & { host: CanvasHost }): React.Reac
     if (props.host.openPanel) props.host.openPanel(ref);
     else setCurrent({ id: ref.id, initial: ref });
   };
+  // A sheet opens in the grid (AICO Sheets). A reference without a kind is looked up first, so a
+  // sheet never flashes up in the document editor.
+  const [kind, setKind] = useState<string | undefined>(current.initial?.kind);
+  useEffect(() => {
+    if (current.initial?.kind) { setKind(current.initial.kind); return; }
+    let live = true;
+    setKind(undefined);
+    props.host.get(current.id, { light: true }).then(d => { if (live) setKind(d.kind); }, () => { if (live) setKind('document'); });
+    return () => { live = false; };
+  }, [props.host, current.id, current.initial?.kind]);
+  if (kind === undefined) return <div className="aw acv" data-variant={props.variant ?? 'panel'}><div className="acv-empty">Opening…</div></div>;
+  if (kind === 'sheet') {
+    return <SheetEditor key={current.id} host={props.host} id={current.id} {...(current.initial ? { initial: current.initial } : {})}
+      variant={props.variant ?? 'panel'} {...(props.onClose ? { onClose: props.onClose } : {})} openOther={openOther} />;
+  }
   return <Editor key={current.id} {...props} id={current.id} {...(current.initial ? { initial: current.initial } : {})} openOther={openOther} />;
 }
 
@@ -152,6 +172,8 @@ function Editor({ host, id, initial, variant = 'panel', onClose, openOther }: Ca
   const [view, setView] = useState<View>(() => stored(VIEW_KEY, ['page', 'source'] as const) ?? 'page');
   const [follow, setFollow] = useState(() => stored(FOLLOW_KEY, ['on', 'off'] as const) !== 'off');
   const [focusMode, setFocusMode] = useState(false);
+  /** Settings changed here (page width, the export dialog) before the stored copy catches up. */
+  const [settingsPatch, setSettingsPatch] = useState<DocSettings>({});
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [wide, setWide] = useState(false);
   const [selection, setSelection] = useState('');
@@ -469,13 +491,25 @@ function Editor({ host, id, initial, variant = 'panel', onClose, openOther }: Ca
     showFlash(where === 'downloaded' || !where ? `Downloaded ${EXPORT_TYPES[format].label}` : `Saved to ${where}`);
   };
 
-  /** The document's export settings: stored with it, else remembered here, else none. */
-  const currentSettings = (): DocSettings | undefined => doc?.docSettings ?? storedSettings(id) ?? undefined;
+  /** The document's export settings: stored with it, else remembered here, else none — plus changes made here since. */
+  const currentSettings = (): DocSettings | undefined => {
+    const base = doc?.docSettings ?? storedSettings(id) ?? undefined;
+    return Object.keys(settingsPatch).length ? { ...(base ?? {}), ...settingsPatch } : base;
+  };
   const saveSettings = (settings: DocSettings): void => {
-    rememberSettings(id, settings);
+    setSettingsPatch(p => ({ ...p, ...settings }));
+    rememberSettings(id, { ...(currentSettings() ?? {}), ...settings });
     // Stored with the document where the engine can; this browser's copy covers the rest.
     void host.saveSettings?.(id, settings).catch(() => undefined);
   };
+  const docSettingsNow = currentSettings();
+  const settingsKey = JSON.stringify(docSettingsNow ?? {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the settings' content, not their identity
+  const look = useMemo(() => resolveLook(docSettingsNow ?? {}), [settingsKey]);
+  const pageWidth = pageWidthFor(docSettingsNow?.pageWidth, focusMode);
+  const letterhead = look.theme?.header === 'letterhead' && docSettingsNow?.header
+    ? docSettingsNow.header.replace(/\{title\}/gi, title).replace(/\{date\}/gi, longDate()).replace(/\{pages?\}/gi, '').trim() || undefined : undefined;
+  const setPageWidth = (w: PageWidth): void => saveSettings({ pageWidth: w });
   const previewExport = host.exportFile
     ? async (settings: DocSettings): Promise<string | null> => {
       const f = await host.exportFile!(id, 'html', doc?.tabs ? ctl.tabId : undefined, settings);
@@ -679,6 +713,13 @@ function Editor({ host, id, initial, variant = 'panel', onClose, openOther }: Ca
           )}
           <span className="aw-grow" />
           {isPage && (
+            <Menu icon="page" label={`Page width: ${PAGE_WIDTHS.find(w => w.id === pageWidth)?.label ?? ''}`} items={[
+              ...PAGE_WIDTHS.map(w => ({ label: `${w.id === pageWidth ? '✓ ' : '    '}${w.label}`, run: () => setPageWidth(w.id) })),
+              { separator: true as const },
+              { label: `Theme: ${look.theme?.label ?? 'Plain'}…`, run: () => setExportOpen(true) },
+            ]} />
+          )}
+          {isPage && (
             <button type="button" className={`acv-tb${outlineOpen ? ' is-on' : ''}`} aria-pressed={outlineOpen} title="Outline" aria-label="Outline"
               onMouseDown={e => e.preventDefault()} onClick={() => setOutlineOpen(v => !v)}>
               <CvIcon name="number" size={15} />
@@ -775,7 +816,8 @@ function Editor({ host, id, initial, variant = 'panel', onClose, openOther }: Ca
             activity={activity} follow={follow} comments={comments} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen}
             onEditorChange={setEditorKind} onLinkRequest={() => run('link')}
             onAsk={(sel, at) => openAsk({ x: at.x, y: at.y + 40 }, sel)} onError={showFlash} instance={instance}
-            agentBusy={turnBusy} outlineOpen={outlineOpen} onCloseOutline={() => setOutlineOpen(false)} />
+            agentBusy={turnBusy} outlineOpen={outlineOpen} onCloseOutline={() => setOutlineOpen(false)}
+            look={look} pageWidth={pageWidth} {...(letterhead ? { letterhead } : {})} />
         ) : (
           <>
             {showSource && (
@@ -1038,6 +1080,7 @@ const VISUALS: Array<{ group: string; items: Array<{ label: string; icon: Canvas
   { group: 'Chart', items: (['bar', 'line', 'area', 'pie'] as ChartType[]).map(t => ({ label: `${t[0]!.toUpperCase()}${t.slice(1)} chart`, icon: 'chart' as CanvasIconName, md: () => chartTemplate(t) })) },
   { group: 'Diagram', items: MERMAID_TEMPLATES.map(t => ({ label: t.label, icon: 'diagram' as CanvasIconName, md: () => mermaidTemplate(t.id) })) },
   { group: 'Infographic', items: ([['stats', 'KPI stats'], ['timeline', 'Timeline'], ['steps', 'Steps / process'], ['comparison', 'Comparison']] as Array<[InfographicKind, string]>).map(([k, label]) => ({ label, icon: 'chart' as CanvasIconName, md: () => infographicTemplate(k) })) },
+  { group: 'Document', items: DOC_BLOCK_KINDS.map(k => ({ label: SCHEMAS[k].label, icon: 'doc' as CanvasIconName, md: () => docBlockTemplate(k) })) },
 ];
 
 function InsertMenu({ onInsert, onMarkdown, onImage }: { onInsert: (kind: InsertKind) => void; onMarkdown: (md: string) => void; onImage: () => void }): React.ReactElement {

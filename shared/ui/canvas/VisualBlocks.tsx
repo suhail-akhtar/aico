@@ -10,6 +10,10 @@
  * Previews are the chat's own renderer, so a chart looks here exactly as it
  * does in the transcript and the export.
  *
+ * KPI tiles, steps and comparison columns use auto-fit grids whose minimum
+ * tile width fits the longest word of a value (`statsMinWidth`, shared with
+ * the exports), so a value wraps only at a space — never "Deskto / p".
+ *
  * Deliberately plain: inputs and small grids rather than a spreadsheet
  * engine or a diagram canvas. The source of every block is one click away
  * ("Edit source") for anything these forms do not cover.
@@ -26,9 +30,15 @@ import {
   type InfoItem, type InfographicKind, type TableModel, type TocEntry,
 } from './visual';
 import { CvIcon, type CanvasIconName } from './icons';
+import { balancedColumns, ICON_NAMES, iconSvg, statsMinWidth, statValueSize, type IconName } from './doc-blocks';
+
+/** `grid-template-columns` that wraps tiles to new rows instead of squeezing them. */
+function fitColumns(minPx: number): React.CSSProperties {
+  return { gridTemplateColumns: `repeat(auto-fit, minmax(min(${minPx}px, 100%), 1fr))`, gridAutoRows: '1fr' };
+}
 
 /** Close an editor when focus leaves it (for somewhere other than the toolbar). */
-function useFinishOnLeave(onDone: () => void): { ref: React.RefObject<HTMLDivElement | null>; onBlur: (e: React.FocusEvent) => void } {
+export function useFinishOnLeave(onDone: () => void): { ref: React.RefObject<HTMLDivElement | null>; onBlur: (e: React.FocusEvent) => void } {
   const ref = useRef<HTMLDivElement | null>(null);
   const done = useRef(false);
   const onBlur = (e: React.FocusEvent): void => {
@@ -41,13 +51,13 @@ function useFinishOnLeave(onDone: () => void): { ref: React.RefObject<HTMLDivEle
   return { ref, onBlur };
 }
 
-function useEscape(onDone: () => void): (e: React.KeyboardEvent) => void {
+export function useEscape(onDone: () => void): (e: React.KeyboardEvent) => void {
   return (e) => {
     if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) { e.preventDefault(); e.stopPropagation(); onDone(); }
   };
 }
 
-function Seg<T extends string>({ value, options, onChange, label }: {
+export function Seg<T extends string>({ value, options, onChange, label }: {
   value: T; options: ReadonlyArray<{ value: T; label: string; icon?: CanvasIconName }>; onChange: (v: T) => void; label: string;
 }): React.ReactElement {
   return (
@@ -154,7 +164,10 @@ export function CalloutView({ text }: { text: string }): React.ReactElement | nu
   const label = CALLOUTS.find(x => x.type === c.type)?.label ?? c.type;
   return (
     <div className={`adoc-callout is-${c.type}`}>
-      <div className="adoc-callout-head"><CvIcon name={CALLOUT_ICON[c.type]} size={14} /> {c.title || label}</div>
+      <div className="adoc-callout-head">
+        {/* eslint-disable-next-line react/no-danger -- a fixed SVG from the built-in icon set */}
+        {c.icon ? <span className="adoc-callout-icon" dangerouslySetInnerHTML={{ __html: iconSvg(c.icon, 15) }} /> : <CvIcon name={CALLOUT_ICON[c.type]} size={14} />} {c.title || label}
+      </div>
       {c.body && <MarkdownRenderer content={c.body} />}
     </div>
   );
@@ -165,21 +178,33 @@ export function CalloutEditor({ initial, onChange, onDone }: { initial: string; 
   const [type, setType] = useState<CalloutType>(start.type);
   const [title, setTitle] = useState(start.title ?? '');
   const [body, setBody] = useState(start.body);
+  const [icon, setIcon] = useState<IconName | ''>(start.icon ?? '');
   const { ref, onBlur } = useFinishOnLeave(onDone);
   const area = useRef<HTMLTextAreaElement | null>(null);
   useLayoutEffect(() => { area.current?.focus({ preventScroll: true }); ref.current?.scrollIntoView({ block: 'nearest' }); }, [ref]);
-  const emit = (t: CalloutType, ti: string, b: string): void => { onChange(calloutMarkdown({ type: t, ...(ti.trim() ? { title: ti } : {}), body: b })); };
+  const model = (t: CalloutType, ti: string, b: string, ic: IconName | ''): Parameters<typeof calloutMarkdown>[0] =>
+    ({ type: t, ...(ti.trim() ? { title: ti } : {}), body: b, ...(ic ? { icon: ic } : {}) });
+  const emit = (t: CalloutType, ti: string, b: string, ic: IconName | ''): void => { onChange(calloutMarkdown(model(t, ti, b, ic))); };
   return (
     <div ref={ref} className="adoc-visual-edit" onBlur={onBlur} onKeyDown={useEscape(onDone)}>
       <div className="adoc-visual-bar">
-        <Seg<CalloutType> label="Callout type" value={type} onChange={(t) => { setType(t); emit(t, title, body); }}
+        <Seg<CalloutType> label="Callout type" value={type} onChange={(t) => { setType(t); emit(t, title, body, icon); }}
           options={CALLOUTS.map(c => ({ value: c.type, label: c.label }))} />
+        <div className="adoc-icon-pick" role="group" aria-label="Icon">
+          <button type="button" className={icon === '' ? 'is-on' : ''} aria-pressed={icon === ''} title="The type's own icon"
+            onClick={() => { setIcon(''); emit(type, title, body, ''); }}>Auto</button>
+          {ICON_NAMES.map(n => (
+            // eslint-disable-next-line react/no-danger -- a fixed SVG from the built-in icon set
+            <button key={n} type="button" className={icon === n ? 'is-on' : ''} aria-pressed={icon === n} title={n} aria-label={`Icon ${n}`}
+              onClick={() => { setIcon(n); emit(type, title, body, n); }} dangerouslySetInnerHTML={{ __html: iconSvg(n, 14) }} />
+          ))}
+        </div>
       </div>
       <input className="adoc-title-input" value={title} placeholder="Title (optional)" aria-label="Callout title"
-        onChange={(e) => { setTitle(e.target.value); emit(type, e.target.value, body); }} />
+        onChange={(e) => { setTitle(e.target.value); emit(type, e.target.value, body, icon); }} />
       <textarea ref={area} className="adoc-source-area is-prose" value={body} rows={3} aria-label="Callout text"
-        onChange={(e) => { setBody(e.target.value); emit(type, title, e.target.value); }} />
-      <CalloutView text={calloutMarkdown({ type, ...(title.trim() ? { title } : {}), body })} />
+        onChange={(e) => { setBody(e.target.value); emit(type, title, e.target.value, icon); }} />
+      <CalloutView text={calloutMarkdown(model(type, title, body, icon))} />
     </div>
   );
 }
@@ -396,21 +421,40 @@ function Inline({ text }: { text: string }): React.ReactElement {
   return <span className="adoc-inline-md"><MarkdownRenderer content={text} /></span>;
 }
 
+/**
+ * KPI tiles: auto-fit over a minimum that fits each value's longest word, and —
+ * where the grid's own width is known — balanced rows (2 + 2 rather than 3 + 1).
+ */
+function StatsGrid({ items }: { items: InfoItem[] }): React.ReactElement {
+  const min = statsMinWidth(items.map(r => r.value ?? ''));
+  const box = useRef<HTMLDivElement | null>(null);
+  const [cols, setCols] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const gap = 10;
+    const measure = (): void => setCols(balancedColumns(items.length, (el.clientWidth + gap) / (min + gap)));
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [items.length, min]);
+  const style: React.CSSProperties = cols ? { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: '1fr' } : fitColumns(min);
+  return (
+    <div ref={box} className="adoc-stats" style={style}>
+      {items.map((r, i) => (
+        <div key={i} className="adoc-stat">
+          <div className="adoc-stat-value" style={{ fontSize: `${statValueSize(r.value ?? '')}px` }}>{r.value}</div>
+          <div className="adoc-stat-label">{r.label}</div>
+          {r.delta && <div className={`adoc-stat-note is-${trendOf(r)}`}>{r.delta}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function InfographicView({ kind, body }: { kind: InfographicKind; body: string }): React.ReactElement {
-  if (kind === 'stats') {
-    const items = infographicItems('stats', body);
-    return (
-      <div className="adoc-stats" style={{ gridTemplateColumns: `repeat(${Math.min(4, Math.max(1, items.length))}, minmax(0, 1fr))` }}>
-        {items.map((r, i) => (
-          <div key={i} className="adoc-stat">
-            <div className="adoc-stat-value">{r.value}</div>
-            <div className="adoc-stat-label">{r.label}</div>
-            {r.delta && <div className={`adoc-stat-note is-${trendOf(r)}`}>{r.delta}</div>}
-          </div>
-        ))}
-      </div>
-    );
-  }
+  if (kind === 'stats') return <StatsGrid items={infographicItems('stats', body)} />;
   if (kind === 'timeline') {
     const items = infographicItems('timeline', body);
     return (
@@ -429,7 +473,7 @@ export function InfographicView({ kind, body }: { kind: InfographicKind; body: s
   if (kind === 'steps') {
     const items = infographicItems('steps', body);
     return (
-      <ol className="adoc-steps">
+      <ol className="adoc-steps" style={fitColumns(190)}>
         {items.map((r, i) => (
           <li key={i}>
             <span className="adoc-step-n">{i + 1}</span>
@@ -441,7 +485,7 @@ export function InfographicView({ kind, body }: { kind: InfographicKind; body: s
   }
   const cols = parseComparison(body);
   return (
-    <div className="adoc-compare" style={{ gridTemplateColumns: `repeat(${Math.min(4, Math.max(1, cols.length))}, minmax(0, 1fr))` }}>
+    <div className="adoc-compare" style={fitColumns(cols.length > 3 ? 160 : 200)}>
       {cols.map((c, i) => (
         <div key={i} className={`adoc-compare-col${c.highlight ? ' is-highlight' : ''}`}>
           <div className="adoc-compare-title">{c.title}</div>

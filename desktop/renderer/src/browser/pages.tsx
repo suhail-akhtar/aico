@@ -24,6 +24,7 @@ import { InsightsPage } from './Insights';
 import { ForYouCards } from './ForYou';
 import { PrivacyPage } from './PrivacyPage';
 import { PasswordsPage } from './PasswordsPage';
+import { TeachReview } from './Teach';
 import { openImportWizard } from './ImportWizard';
 import type { HistoryEntry, TabError, TabState } from './types';
 
@@ -154,6 +155,7 @@ export function InternalPageView({ page }: { page: InternalPage }): React.ReactE
   if (page === 'insights') return <InsightsPage />;
   if (page === 'privacy') return <PrivacyPage />;
   if (page === 'passwords') return <PasswordsPage />;
+  if (page === 'teach') return <TeachReview />;
   return (
     <PageFrame title="Downloads" icon="download" actions={<button className="btn-outline btn-sm" onClick={() => { void call('browser:downloads:clear').catch(() => {}); }}>Clear finished</button>}>
       <DownloadsPanel full />

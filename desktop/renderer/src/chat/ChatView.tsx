@@ -3,7 +3,8 @@
  *
  * An empty chat is the home screen: "Where should we begin?" over a centred
  * composer, the folder it will work in just above it (Antigravity), and quick
- * prompts from plugins below. Once anything is said, the same chat becomes a
+ * prompts from plugins below, then the morning brief (`@web/components/BriefCard`,
+ * engine brief/). Once anything is said, the same chat becomes a
  * transcript with the composer pinned to the bottom.
  *
  * @module desktop/renderer/chat/ChatView
@@ -21,8 +22,19 @@ import { Transcript } from './Transcript';
 import { Attention } from './Attention';
 import { SourcesPanel, useSourcesPanel } from './SourcesPanel';
 import { CanvasPanel, useCanvasPanel } from './CanvasPanel';
+import { ArtifactsPanel, useArtifactsPanel } from './ArtifactsPanel';
 import { onCanvasEvent } from '@aico/ui';
-import { openChat } from './actions';
+import { newChat, openChat } from './actions';
+import { BriefCard, type BriefHost } from '@web/components/BriefCard';
+import { desktop } from '@/desktop';
+
+/** How the brief's one-click actions open things here: the OS browser, the Inbox page, the chat. */
+const BRIEF_HOST: BriefHost = {
+  openUrl: (url) => { void desktop.shell.openExternal(url); },
+  openInbox: () => useDesk.getState().navigate({ view: 'inbox' }),
+  openChat: (id) => { void openChat(id); },
+  startFix: (cwd, prompt) => newChat({ ...(cwd ? { project: cwd } : {}), prompt }),
+};
 
 function greeting(name: string | undefined): string {
   const h = new Date().getHours();
@@ -47,10 +59,18 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
 
   useEffect(() => { if (!busy) markSeen(sessionId); }, [busy, sessionId, logged.size]);
   // Sources and canvases belong to the chat they came from.
-  useEffect(() => { useSourcesPanel.getState().close(); useCanvasPanel.getState().close(); }, [sessionId]);
+  useEffect(() => { useSourcesPanel.getState().close(); useCanvasPanel.getState().close(); useArtifactsPanel.getState().close(); }, [sessionId]);
   // One right panel at a time: showing Sources puts the canvas away.
   useEffect(() => useSourcesPanel.subscribe((s, prev) => {
-    if (s.sources && !prev.sources) useCanvasPanel.getState().close();
+    if (s.sources && !prev.sources) { useCanvasPanel.getState().close(); useArtifactsPanel.getState().close(); }
+  }), []);
+  // Artifacts take the slot while open (the canvas stays open behind them, for "Open beside");
+  // opening a canvas puts the list away.
+  useEffect(() => useArtifactsPanel.subscribe((s, prev) => {
+    if (s.open && !prev.open) useSourcesPanel.getState().close();
+  }), []);
+  useEffect(() => useCanvasPanel.subscribe((s, prev) => {
+    if ((s.open && s.open !== prev.open) || (s.second && s.second !== prev.second)) useArtifactsPanel.getState().close();
   }), []);
   // A canvas the agent has just created in this chat opens beside it, the way
   // ChatGPT's does — the card in the reply reopens it later.
@@ -60,6 +80,7 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
     useCanvasPanel.getState().show({ id: c.id, title: c.title, kind: c.kind });
   }), []);
   const canvasOpen = useCanvasPanel(s => s.open !== null);
+  const artifactsOpen = useArtifactsPanel(s => s.open);
 
   const empty = logged.size === 0 && !busy;
   if (empty) return <Home />;
@@ -76,7 +97,7 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
           <p className="mt-1.5 text-center text-[11px] text-aico-muted">AICO runs on this computer. The agent can make mistakes — check important work.</p>
         </div>
       </div>
-      {canvasOpen ? <CanvasPanel /> : <SourcesPanel />}
+      {artifactsOpen ? <ArtifactsPanel /> : canvasOpen ? <CanvasPanel /> : <SourcesPanel />}
     </div>
   );
 }
@@ -108,6 +129,7 @@ function Home(): React.ReactElement {
             ))}
           </div>
         )}
+        <BriefCard host={BRIEF_HOST} />
         {latest.length > 0 && (
           <div className="mx-auto mt-10 max-w-[560px]">
             <div className="mb-2 text-center text-[12px] text-aico-muted">{greeting(info?.user)} — pick up where you left off</div>

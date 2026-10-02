@@ -25,6 +25,17 @@
  * closes (their text is kept in the edit record) and the conflict banner
  * offers to keep theirs or take the agent's.
  *
+ * ## Page width, centring and the document's theme (round 3)
+ *
+ * The page is drawn at the document's chosen width (Narrow / Normal / Wide /
+ * Full, `doc-themes.PAGE_WIDTHS`) and always centred: the sheet is a
+ * three-column grid (gutter · page · gutter) and the comment margin lives in
+ * the right gutter only when both gutters can hold it — so opening comments
+ * never pushes the page off-centre (the owner's full-screen screenshot showed
+ * exactly that). The document's theme (`doc-themes`) sets the page's data
+ * attributes and variables; the generated rules and the block styles are
+ * injected once, the same rules the exports print with.
+ *
  * @module shared/ui/canvas/DocPage
  */
 
@@ -46,6 +57,16 @@ import { altFromName, imageDataUrl } from './export';
 import type { CanvasActivity, CanvasHost } from './host';
 import type { CanvasDocController } from './useCanvasDoc';
 import { CvIcon } from './icons';
+import { DocBlockEditor, DocBlockView, docBlockOf } from './DocBlocks';
+import { DOC_BLOCK_CSS } from './doc-blocks';
+import { pageWidthPx, themeAttrs, themeRules, type PageWidth, type ResolvedLook } from './doc-themes';
+
+/** The generated theme rules and block styles, scoped to the page (one string for every page). */
+const PAGE_CSS = `${DOC_BLOCK_CSS}
+${themeRules('.aw article.adoc-page')}`;
+/** The comment margin's width and the gap beside it (keep in step with canvas.css). */
+const MARGIN_W = 290;
+const MARGIN_GAP = 28;
 
 export interface DocPageHandle {
   insert(kind: InsertKind, template?: string): void;
@@ -70,7 +91,7 @@ interface Region {
   lang?: string;
 }
 
-type EditMode = 'rich' | 'source' | 'table' | 'chart' | 'callout' | 'infographic';
+type EditMode = 'rich' | 'source' | 'table' | 'chart' | 'callout' | 'infographic' | 'docblock';
 
 /** Which editor a block opens in: the visual one when its Markdown is a shape that editor reads back. */
 function modeFor(b: Pick<Block, 'kind' | 'text' | 'lang'>): EditMode | null {
@@ -79,6 +100,7 @@ function modeFor(b: Pick<Block, 'kind' | 'text' | 'lang'>): EditMode | null {
   if ((b.kind === 'quote' || (b.kind === 'code' && b.lang === 'callout')) && parseCallout(b.text)) return 'callout';
   if (b.kind === 'table' && parseTable(b.text)) return 'table';
   if (b.kind === 'code' && b.lang === 'chart' && chartModelOf(b.text)) return 'chart';
+  if (b.kind === 'code' && docBlockOf(b.text)?.parsed.ok) return 'docblock';
   if (b.kind === 'code' && infographicOf(b.text)) return 'infographic';
   if (PROSE.has(b.kind) && richEditable(b.text)) return 'rich';
   return 'source';
@@ -112,12 +134,19 @@ export interface DocPageProps {
   agentBusy?: boolean;
   outlineOpen?: boolean;
   onCloseOutline?: () => void;
+  /** The document's look (theme, accent, classification, watermark); absent = the plain page. */
+  look?: ResolvedLook;
+  /** The page width to draw (the document's choice, or the default for this view). */
+  pageWidth?: PageWidth;
+  /** A letter's letterhead text (the theme's header style). */
+  letterhead?: string;
 }
 
 let regionSeq = 0;
 
 export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function DocPage(props, ref) {
-  const { host, canvasId, ctl, readOnlyText, activity, follow, comments, drawerOpen, setDrawerOpen, onEditorChange, onLinkRequest, onAsk, onError, instance, agentBusy = false, outlineOpen = false, onCloseOutline } = props;
+  const { host, canvasId, ctl, readOnlyText, activity, follow, comments, drawerOpen, setDrawerOpen, onEditorChange, onLinkRequest, onAsk, onError, instance, agentBusy = false, outlineOpen = false, onCloseOutline, look, pageWidth = 'normal', letterhead } = props;
+  const pagePx = pageWidthPx(pageWidth);
   const readOnly = readOnlyText !== undefined;
   const text = readOnly ? readOnlyText : ctl.text;
   const blocks = useMemo(() => splitBlocks(text), [text]);
@@ -145,16 +174,16 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
     onEditorChange(r ? (r.mode === 'rich' ? 'rich' : 'source') : null);
   }, [onEditorChange]);
 
-  // ── Layout: a comment margin when there is room for one ──
+  // ── Layout: a comment margin when there is room for one on BOTH sides (the page stays centred) ──
   useLayoutEffect(() => {
     const el = scroll.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const measure = (): void => setWide(el.clientWidth >= 1040);
+    const measure = (): void => setWide(pagePx !== null && el.clientWidth >= pagePx + 2 * (MARGIN_W + MARGIN_GAP) + 48);
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     measure();
     return () => ro.disconnect();
-  }, []);
+  }, [pagePx]);
 
   // ── The region follows its text when the document changes around it ──
   useLayoutEffect(() => {
@@ -293,6 +322,12 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
   }), [insertText, insertImage, commentOnSelection, close]);
 
   const toc = useMemo(() => tocEntries(blocks), [blocks]);
+  const themed = useMemo(() => {
+    if (!look) return { attrs: {}, style: undefined };
+    const t = themeAttrs(look);
+    // Unthemed, the page keeps the app's own accent (canvas.css); a theme brings its accent and faces.
+    return { attrs: t.attrs, style: (look.theme ? t.vars : undefined) as React.CSSProperties | undefined };
+  }, [look]);
 
   // ── The agent at work ──
   const writing = activity && activity.status === 'writing' && (!activity.tabId || activity.tabId === ctl.tabId) ? activity : null;
@@ -437,6 +472,8 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
         <CalloutEditor initial={region.text} onChange={commit} onDone={close} />
       ) : region.mode === 'infographic' ? (
         <InfographicEditor initial={region.text} onChange={commit} onDone={close} />
+      ) : region.mode === 'docblock' ? (
+        <DocBlockEditor initial={region.text} onChange={commit} onDone={close} />
       ) : (
         <SourceBlockEditor ref={editorApi} initial={region.text} lang={region.lang}
           side={SIDE_LANGS.has(region.lang ?? '') || /^\s*\$\$/.test(region.text)} onChange={commit} onDone={close}
@@ -488,6 +525,7 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
     }
     const img = b.kind === 'paragraph' ? parseImageLine(b.text) : null;
     const infographic = b.kind === 'code' ? infographicOf(b.text) : null;
+    const docBlock = b.kind === 'code' && !infographic ? docBlockOf(b.text) : null;
     const callout = (b.kind === 'quote' || (b.kind === 'code' && b.lang === 'callout')) && parseCallout(b.text);
     const tocHere = b.kind === 'html' && isToc(b.text);
     const mode = modeFor(b);
@@ -495,7 +533,7 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
     const clickToEdit = mode === 'rich';
     rendered.push(
       <div key={key} className={cls} data-block={i} data-block-key={key} data-kind={b.kind}
-        data-visual={img ? 'image' : infographic ? infographic.kind : callout ? 'callout' : tocHere ? 'toc' : b.lang || undefined}
+        data-visual={img ? 'image' : infographic ? infographic.kind : docBlock ? docBlock.kind : callout ? 'callout' : tocHere ? 'toc' : b.lang || undefined}
         data-click-edit={clickToEdit ? '1' : undefined}
         tabIndex={readOnly ? undefined : 0}
         onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); open(key); } }}
@@ -522,6 +560,8 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
           <ImageBlock img={img} readOnly={readOnly} onChange={(next) => replaceWhole(key, imageLine(next))} />
         ) : infographic ? (
           <InfographicView kind={infographic.kind} body={infographic.body} />
+        ) : docBlock ? (
+          <DocBlockView text={b.text} />
         ) : callout ? (
           <CalloutView text={b.text} />
         ) : tocHere ? (
@@ -562,8 +602,14 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
       onDragLeave={() => setDropping(false)}
       onDrop={onDrop}
       onPaste={onPaste}>
-      <div ref={sheet} className={`adoc-sheet${wide ? ' is-wide' : ''}${outlineOpen ? ' has-outline' : ''}`}>
-        <article ref={page} className="adoc-page" onMouseUp={onPageMouseUp} onClick={onPageClick} aria-label="Document">
+      <style>{PAGE_CSS}</style>
+      <div ref={sheet} className={`adoc-sheet${wide ? ' is-wide' : ''}${outlineOpen ? ' has-outline' : ''}`} data-width={pageWidth}
+        style={{ '--adoc-page-w': pagePx === null ? '100%' : `${pagePx}px` } as React.CSSProperties}>
+        <article ref={page} className="adoc-page" onMouseUp={onPageMouseUp} onClick={onPageClick} aria-label="Document"
+          {...themed.attrs} style={themed.style}>
+          {look?.watermark && <div className="adoc-watermark" aria-hidden="true" data-adoc-ui><span>{look.watermark}</span></div>}
+          {look?.classification && <div className="adoc-classification" data-adoc-ui>{look.classification}</div>}
+          {letterhead && <div className="adoc-letterhead" data-adoc-ui><span className="adoc-lh-name">{letterhead}</span></div>}
           {writing && !section && <div className="adoc-writing-top" data-adoc-ui><AgentLabel inline /> AICO is editing this tab…</div>}
           {blocks.length === 0 && !region ? (
             <button type="button" className="adoc-empty-page" data-adoc-ui disabled={readOnly}
@@ -573,6 +619,7 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
           ) : (
             <div className="markdown-body adoc-body">{rendered}</div>
           )}
+          {look?.classification && <div className="adoc-classification is-bottom" data-adoc-ui>{look.classification}</div>}
         </article>
         {!readOnly && (
           <CommentLayer state={comments} page={page.current} sheet={sheet.current} tabId={ctl.tabId} text={text}

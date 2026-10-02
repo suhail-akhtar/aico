@@ -8,7 +8,7 @@
  * possibly-memorised repositories; the custom-app probe
  * (scripts/apps-build-custom-live.mjs) grades with the agent's own checks
  * plus a human spot-check. Neither is a fixed suite that can be re-run
- * after a change to see a delta. This is: six fixed tasks, fixed prompts,
+ * after a change to see a delta. This is: seven fixed tasks, fixed prompts,
  * seeded hidden tests, and graders that never read the agent's report.
  *
  *   1 enterprise-api       build a multi-tenant orders API from an empty folder (black-box HTTP grader)
@@ -17,6 +17,7 @@
  *   4 architecture-doc     design doc for an offline + real-time + reporting system (SOFT: rubric + LLM judge)
  *   5 fullstack-comments   DB + API + UI + tests in an existing app (API checks + Playwright)
  *   6 delegation-security  five independent security fixes; records how sub-agents were briefed
+ *   7 large-refactor       rename an API + add a defaulted parameter across a generated ~200-file TS repo
  *
  * Each task runs in a fresh temp project with its own AICO_HOME (the real
  * ~/.aico/settings.json is copied for provider keys, never written), through
@@ -38,7 +39,9 @@
  *
  * Options: --model (deepseek-flash) --judge-model (deepseek-v4-pro)
  * --max-iterations (80) --max-usd (1.0 per task session) --max-usd-subagent
- * (0.3) --soft-minutes (25) --hard-minutes (40) --work <dir> --label <name>.
+ * (0.3) --soft-minutes (25) --hard-minutes (40) --work <dir> --label <name>
+ * --disable-tools <A,B> (written into the bench settings' disabledTools: a
+ * before/after for a tool, e.g. CodeSearch,CodeRewrite,Refactor).
  */
 // A store of this process's own; must stay first. Each task then gets a fresh
 // store of its own, seeded from this one's copy of settings.json.
@@ -61,7 +64,7 @@ const arg = (name, fallback) => {
   return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : fallback;
 };
 
-const TASK_ORDER = ['enterprise-api', 'bugfix-export', 'refactor-shipping', 'architecture-doc', 'fullstack-comments', 'delegation-security'];
+const TASK_ORDER = ['enterprise-api', 'bugfix-export', 'refactor-shipping', 'architecture-doc', 'fullstack-comments', 'delegation-security', 'large-refactor'];
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const opts = {
   entry: path.resolve(arg('aico', path.join(repoRoot, 'dist', 'index.js'))),
@@ -78,6 +81,7 @@ const opts = {
   work: path.resolve(arg('work', path.join(fs.realpathSync.native(os.tmpdir()), `aico-eng-bench-${stamp}`))),
   label: arg('label', null),
   compare: arg('compare', null),
+  disableTools: (arg('disable-tools', '') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
 };
 
 const unknown = opts.tasks.filter((t) => !TASK_ORDER.includes(t));
@@ -116,6 +120,7 @@ const overlay = {
   maxIterations: opts.maxIterations,
   safetyLimits: { maxCostPerSession: opts.maxUsd, maxCostPerSubagent: opts.maxUsdSub },
   miniApps: { enabled: false },
+  ...(opts.disableTools.length ? { disabledTools: opts.disableTools } : {}),
 };
 
 const version = spawnSync(process.execPath, [opts.entry, '--version'], { encoding: 'utf8', env: { ...process.env, AICO_HOME: path.join(opts.work, 'version-home', '.aico') } }).stdout?.trim();

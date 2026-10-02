@@ -10,7 +10,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useStore } from '@web/store';
-import { api, type WorkRow } from '@web/api';
+import { api, type SentinelList, type WorkRow } from '@web/api';
 import { invoke } from '@/desktop';
 import { useDesk, toast } from '@/state/desk';
 import { Icon } from '@/lib/icons';
@@ -18,6 +18,10 @@ import { ago, cls, duration } from '@/lib/util';
 import { openChat } from '@/chat/actions';
 
 const KIND_ICON: Record<string, string> = { agent: 'user', run: 'play', process: 'terminal', watcher: 'eye', schedule: 'clock', remote: 'cloud' };
+const SENTINEL_OUTCOME: Record<string, string> = {
+  'no-objection': 'no objection', refused: 'refused', 'person-allowed': 'flagged, you allowed it', 'person-refused': 'flagged, you refused it',
+  parked: 'flagged, parked in the inbox', 'refused-unattended': 'flagged, nobody to ask — not run',
+};
 const STATE_TONE: Record<string, string> = { running: 'text-aico-accent', queued: 'text-aico-warning', blocked: 'text-aico-warning', done: 'text-aico-success', failed: 'text-aico-danger', cancelled: 'text-aico-muted', lost: 'text-aico-danger' };
 
 export function ActivityPage(): React.ReactElement {
@@ -28,10 +32,16 @@ export function ActivityPage(): React.ReactElement {
   const feed = useDesk(s => s.activity);
   const clear = useDesk(s => s.clearFinishedActivity);
   const [terms, setTerms] = useState<Array<{ id: string; title: string; cwd: string; exited: boolean }>>([]);
+  const [sentinel, setSentinel] = useState<SentinelList | null>(null);
   const [, tick] = useState(0);
 
   useEffect(() => {
-    const load = (): void => { void refreshSystem(); void refreshSessions(); void invoke<typeof terms>('term:list').then(setTerms).catch(() => {}); tick(t => t + 1); };
+    const load = (): void => {
+      void refreshSystem(); void refreshSessions(); void invoke<typeof terms>('term:list').then(setTerms).catch(() => {});
+      // The safety reviewer's audit file (engine sentinel/). An older engine has no route: the section stays empty.
+      void api.sentinel(20).then(setSentinel).catch(() => {});
+      tick(t => t + 1);
+    };
     load();
     const t = setInterval(load, 2500);
     return () => clearInterval(t);
@@ -74,8 +84,18 @@ export function ActivityPage(): React.ReactElement {
         <Section title="Background work" empty="Nothing is running in the background.">
           {live.map(w => (
             <Row key={w.id} icon={KIND_ICON[w.kind] ?? 'activity'} title={w.title} tone={STATE_TONE[w.state]} spinning={w.state === 'running'}
-              sub={`${w.kind} · ${w.state} · ${duration(Date.now() - w.startedAt)}${w.lastTool ? ` · ${w.lastTool}` : ''}${w.steps ? ` · ${w.steps} steps` : ''}${w.costUsd ? ` · $${w.costUsd.toFixed(3)}` : ''}`}
+              sub={`${w.kind} · ${w.state} · ${duration(Date.now() - w.startedAt)}${w.lastTool ? ` · ${w.lastTool}` : ''}${w.steps ? ` · ${w.steps} steps` : ''}${w.costUsd ? ` · $${w.costUsd.toFixed(3)}` : ''}${w.note ? ` · ${w.note}` : ''}`}
               action={<button className="btn-danger btn-sm" onClick={() => void stop(w)}><Icon name="stop" size={12} />Stop</button>} />
+          ))}
+        </Section>
+
+        <Section
+          title={`Sentinel — safety reviews${sentinel?.totals.reviews ? ` · ${sentinel.totals.reviews} reviewed, ${sentinel.totals.denied} refused, ${sentinel.totals.escalated} to a person · $${sentinel.totals.costUsd.toFixed(4)}` : ''}`}
+          empty="No high-risk call has been reviewed yet.">
+          {(sentinel?.verdicts ?? []).map(v => (
+            <Row key={`${v.at}-${v.tool}-${v.call.length}`} icon="shield" title={`${v.tool} — ${SENTINEL_OUTCOME[v.outcome] ?? v.outcome}`}
+              tone={v.verdict === 'deny' ? 'text-aico-danger' : v.verdict === 'escalate' ? 'text-aico-warning' : 'text-aico-success'}
+              sub={`${ago(v.at)} ago · ${v.effect} · ${v.reason}${v.agentName ? ` · ${v.agentName}` : ''}${v.level ? ` · ${v.level}` : ''} · ${v.model} · $${v.costUsd.toFixed(4)} · ${(v.ms / 1000).toFixed(1)} s`} />
           ))}
         </Section>
 

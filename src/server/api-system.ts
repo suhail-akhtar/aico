@@ -190,6 +190,11 @@ export async function handleSystemRoute(
   const needsHuman = (reason?: string): { status: number; body: unknown } => ({
     status: 403, body: { ok: false, code: 'human-required', error: reason ?? 'This needs a person in the AICO window.' },
   });
+  // The morning brief and monitors (brief/service): reads, a manual run, monitor switches.
+  if (route.startsWith('brief/')) {
+    const { handleBriefRoute } = await import('../brief/service.js');
+    return handleBriefRoute(route, method, body, query);
+  }
   switch (route) {
     // ── the approve-later inbox (Phase 7, autonomy/inbox.ts) ─────────
     //
@@ -219,6 +224,46 @@ export async function handleSystemRoute(
       if (!person.ok) return needsHuman(person.reason);
       const r = await inbox.approveAction(id, (person as { via?: string }).via ?? 'person');
       return { status: r.action ? 200 : 404, body: r };
+    }
+    // ── the Sentinel's recent verdicts (sentinel/, ADR 0015) ─────────
+    // A read of the audit file: arguments are already redacted there.
+    case 'sentinel/list': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { listSentinelVerdicts } = await import('../sentinel/index.js');
+      return { status: 200, body: listSentinelVerdicts(Math.min(200, Number(query.get('limit')) || 50)) };
+    }
+    // ── long jobs (longjob/) ─────────────────────────────────────────
+    //
+    // A proposal for work estimated above the long-job threshold. Approving
+    // starts paid work that runs across turns, and resuming restarts it, so
+    // both need a person (`checkHuman`) — never the API token alone, which
+    // the model may hold. Declining, pausing and stopping need nothing.
+    case 'longjob/list': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { listJobs } = await import('../longjob/index.js');
+      const sessionId = query.get('sessionId') || undefined;
+      return { status: 200, body: { jobs: listJobs(sessionId ? { sessionId } : {}).slice(0, 50) } };
+    }
+    case 'longjob/decide':
+    case 'longjob/control': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const id = typeof body.id === 'string' ? body.id : '';
+      const what = route === 'longjob/decide' ? body.decision : body.action;
+      const allowed = route === 'longjob/decide' ? ['approve', 'decline'] : ['pause', 'resume', 'stop'];
+      if (!id || typeof what !== 'string' || !allowed.includes(what)) {
+        return { status: 400, body: { error: `id and ${route === 'longjob/decide' ? 'decision' : 'action'} (${allowed.join(', ')}) required` } };
+      }
+      let via = 'api';
+      if (what === 'approve' || what === 'resume') {
+        const person = await human();
+        if (!person.ok) return needsHuman(person.reason);
+        via = (person as { via?: string }).via ?? 'person';
+      }
+      const longjob = await import('../longjob/index.js');
+      const r = route === 'longjob/decide'
+        ? longjob.decide(id, what as 'approve' | 'decline', via)
+        : longjob.control(id, what as 'pause' | 'resume' | 'stop', via);
+      return { status: r.job ? (r.ok ? 200 : 409) : 404, body: r };
     }
     // ── project profile ──────────────────────────────────────────────
     //
@@ -276,6 +321,62 @@ export async function handleSystemRoute(
       const inProject = fs.existsSync(proposalsFile(cwd)) && setProposalStatus(cwd, id, 'dismissed');
       const found = inProject || setProposalStatus('global', id, 'dismissed');
       return found ? { status: 200, body: { ok: true, id } } : { status: 404, body: { error: `no proposal "${id}"` } };
+    }
+    // ── what AICO learned about how you work (ADR 0016) ──────────────
+    //
+    // Preference rules: `preferences` lists them (all scopes; the page shows
+    // which apply to `?cwd=`) and the pending-signal count; `preferences/act`
+    // changes one. Putting a rule in force — accept, enable, edit, add —
+    // needs a person (`human()`), because an active rule is prompt text the
+    // model would otherwise be able to write for itself with the API token.
+    // Disable and forget need nothing: switching a rule off is always safe.
+    case 'learning/preferences': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { listRules, selectRules } = await import('../learning/preferences.js');
+      const { readPendingSignals } = await import('../learning/signals.js');
+      const { default: path } = await import('path');
+      const cwd = path.resolve(query.get('cwd') || process.cwd());
+      const rules = listRules();
+      const applying = selectRules(rules, { projectRoot: cwd, task: '' }).map(r => r.id);
+      return { status: 200, body: { cwd, rules, applying, pending: readPendingSignals().length } };
+    }
+    case 'learning/preferences/act': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const P = await import('../learning/preferences.js');
+      const action = String(body.action ?? '');
+      const id = typeof body.id === 'string' ? body.id : '';
+      const text = typeof body.text === 'string' ? body.text : undefined;
+      const rawScope = typeof body.scope === 'string' ? body.scope : undefined;
+      // A scope of "project" means the project the page is showing.
+      const { default: path } = await import('path');
+      const scope = rawScope === 'project' ? `project:${path.resolve(typeof body.cwd === 'string' && body.cwd ? body.cwd : process.cwd())}` : rawScope;
+      let act: import('../learning/preferences.js').RuleAction;
+      if (action === 'add') {
+        if (!text) return { status: 400, body: { error: 'text required' } };
+        act = { action: 'add', text, ...(scope ? { scope } : {}), ...(body.category === 'style' || body.category === 'tooling' || body.category === 'communication' ? { category: body.category } : {}) };
+      } else if (action === 'edit') {
+        if (!id) return { status: 400, body: { error: 'id required' } };
+        act = { action: 'edit', id, ...(text !== undefined ? { text } : {}), ...(scope ? { scope } : {}) };
+      } else if (action === 'accept' || action === 'enable' || action === 'disable' || action === 'forget') {
+        if (!id) return { status: 400, body: { error: 'id required' } };
+        act = { action, id };
+      } else {
+        return { status: 400, body: { error: 'action must be accept, enable, disable, forget, edit or add' } };
+      }
+      if (action === 'accept' || action === 'enable' || action === 'edit' || action === 'add') {
+        const verdict = await human();
+        if (!verdict.ok) return needsHuman(verdict.reason);
+      }
+      const store = P.loadStore();
+      const result = P.applyRuleAction(store, act);
+      if (!result.ok) return { status: 400, body: { error: result.error } };
+      P.saveStore(store);
+      return { status: 200, body: result };
+    }
+    case 'learning/preferences/export': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { listRules } = await import('../learning/preferences.js');
+      return { status: 200, body: { exportedAt: new Date().toISOString(), format: 'aico-preferences/1', rules: listRules() } };
     }
 
     // ── sub-agent economy ────────────────────────────────────────────
