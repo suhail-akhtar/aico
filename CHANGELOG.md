@@ -3,7 +3,7 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
-## Unreleased
+## 0.35.0 — 2026-10-03
 
 Agents you can build, verify and trust: custom tools with risk classes, Claude-
 compatible agents with enforced limits, certification before unattended runs,
