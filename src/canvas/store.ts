@@ -62,13 +62,15 @@ import type { AicoSettings } from '../settings.js';
 import { getWorkspaceInfo } from '../workspace.js';
 import { mergeSettings, type DocSettings } from './doc-settings.js';
 import { emptyBook, parseBook, serializeBook } from '../../shared/ui/canvas/sheet-model.js';
+import { emptyDeck, parseDeck, serializeDeck } from '../../shared/ui/canvas/deck-model.js';
 import {
   addressesAgent, anchorFor, reanchor, type CanvasComment, type CommentAnchor, type CommentReply,
 } from './comments.js';
 
 export type { CanvasComment, CommentAnchor, CommentReply } from './comments.js';
 
-export type CanvasKind = 'document' | 'code' | 'sheet';
+/** `deck`: an AICO Slides presentation — like a sheet, one tab holding the deck as JSON (`shared/ui/canvas/deck-model`, ADR 0023). */
+export type CanvasKind = 'document' | 'code' | 'sheet' | 'deck';
 export type CanvasAuthor = 'agent' | 'user';
 
 export interface CanvasVersion {
@@ -342,6 +344,12 @@ function checkSheet(content: string): string {
   return content;
 }
 
+/** A deck's text must be a deck. */
+function checkDeck(content: string): string {
+  try { parseDeck(content); } catch (err) { throw new Error(`not a deck: ${(err as Error).message}`); }
+  return content;
+}
+
 function cleanTitle(title: unknown, fallback = 'Untitled'): string {
   const t = typeof title === 'string' ? title.replace(/\s+/g, ' ').trim() : '';
   return (t || fallback).slice(0, MAX_TITLE);
@@ -457,17 +465,19 @@ export async function createCanvas(ctx: CanvasContext, input: {
   firstTabTitle?: string;
   docSettings?: unknown;
 }): Promise<CanvasDoc> {
-  if (input.kind !== undefined && input.kind !== 'document' && input.kind !== 'code' && input.kind !== 'sheet') {
-    throw new Error('kind must be "document", "code" or "sheet"');
+  if (input.kind !== undefined && input.kind !== 'document' && input.kind !== 'code' && input.kind !== 'sheet' && input.kind !== 'deck') {
+    throw new Error('kind must be "document", "code", "sheet" or "deck"');
   }
   if (input.kind === 'sheet' && input.tabs?.length) throw new Error('a sheet keeps its sheets inside its one workbook — add sheets with add_sheet, not tabs');
-  // A sheet starts as an empty workbook, and whatever it is given must be one.
+  if (input.kind === 'deck' && input.tabs?.length) throw new Error('a deck keeps its slides inside its one tab — add slides, not tabs');
+  // A sheet starts as an empty workbook (a deck as an empty deck), and whatever it is given must be one.
   const content = checkContent(input.kind === 'sheet'
     ? (input.content.trim() ? checkSheet(input.content) : serializeBook(emptyBook()))
-    : input.content);
+    : input.kind === 'deck' ? (input.content.trim() ? checkDeck(input.content) : serializeDeck(emptyDeck()))
+      : input.content);
   const extra = input.tabs ?? [];
   if (extra.length + 1 > CANVAS_MAX_TABS) throw new Error(`a canvas holds at most ${CANVAS_MAX_TABS} tabs`);
-  const kind: CanvasKind = input.kind === 'code' || input.kind === 'sheet' ? input.kind : 'document';
+  const kind: CanvasKind = input.kind === 'code' || input.kind === 'sheet' || input.kind === 'deck' ? input.kind : 'document';
   const language = kind === 'code' ? cleanLanguage(input.language) : undefined;
   const author = input.author ?? 'agent';
   const now = stamp();
@@ -520,6 +530,7 @@ export async function writeCanvas(ctx: CanvasContext, id: string, input: {
       return { ok: false, conflict: true, canvas: doc };
     }
     if (doc.kind === 'sheet') checkSheet(content);
+    if (doc.kind === 'deck') checkDeck(content);
     const title = input.title !== undefined ? cleanTitle(input.title) : doc.title;
     if (content === tab.content && title === doc.title) return { ok: true, canvas: doc, changed: false };
     let next = content === tab.content
@@ -592,6 +603,7 @@ export async function addTab(ctx: CanvasContext, id: string, input: {
   let made: CanvasTab | undefined;
   const { doc } = await mutate(ctx, id, (doc) => {
     if (doc.kind === 'sheet') throw new Error('a sheet canvas keeps its sheets inside its workbook — add a sheet instead of a tab');
+    if (doc.kind === 'deck') throw new Error('a deck keeps its slides inside its one tab — add a slide instead of a tab');
     if (doc.tabs.length >= CANVAS_MAX_TABS) throw new Error(`a canvas holds at most ${CANVAS_MAX_TABS} tabs`);
     const n = Math.max(0, ...doc.tabs.map(t => Number(t.id.slice(1)) || 0)) + 1;
     made = { id: `t${n}`, title: cleanTitle(input.title, `Tab ${n}`), content, version: 1 };

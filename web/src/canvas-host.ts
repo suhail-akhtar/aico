@@ -34,6 +34,7 @@ export function installCanvasHost(extra: Partial<Pick<CanvasHost, 'openPanel' | 
     saveSettings: async (id, settings) => (await api.canvasSettings(sessionId(), id, settings)).canvas,
     create: async input => (await api.canvasCreate(sessionId(), input)).canvas,
     rename: async (id, title) => (await api.canvasRename(sessionId(), id, title)).canvas,
+    editPart: (id, req, signal) => api.canvasEditPart(sessionId(), id, req, signal),
     importSheet: async file => (await api.canvasImport(sessionId(), file)).canvas,
     turnBusy: () => useStore.getState().busy,
     onTurn: listener => useStore.subscribe((s, prev) => { if (s.busy !== prev.busy) listener(s.busy); }),

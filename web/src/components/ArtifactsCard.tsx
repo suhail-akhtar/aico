@@ -17,7 +17,7 @@ import { useStore } from '../store';
 import { api, type ArtifactItem } from '../api';
 
 const LABEL: Record<ArtifactItem['kind'], string> = {
-  document: 'Document', sheet: 'Sheet', code: 'Code', image: 'Image', file: 'File', export: 'Export',
+  document: 'Document', sheet: 'Sheet', deck: 'Presentation', code: 'Code', image: 'Image', file: 'File', export: 'Export',
 };
 
 function download(name: string, blob: Blob): void {

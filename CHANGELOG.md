@@ -3,6 +3,74 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Documents are laid out by kind, in Word and in PDF** (ADR 0022). Eleven
+  families — proposal, technical design, report, policy/SOP, correspondence,
+  academic, CV, marketing, legal, manual, invoice — each with its own cover
+  (full-bleed band, title block, masthead, centred paper title or none),
+  front matter (a document-control page with document information, revision
+  history, approvals to sign and distribution; or a control box on page one),
+  a deliberate typeface pairing from Office's own fonts, real Word outline
+  numbering (1 · 1.1, or 1. · 1.1 · (a) for contracts, Appendix A), running
+  header and footer (title, client, reference, version, classification,
+  "Page X of Y" counting the body; roman numbers for front matter). Sections
+  are now Heading 1 in Word, numbers typed into headings are replaced by real
+  numbering, `Table: …` / `Figure: …` lines become numbered captions (SEQ
+  fields), tables get widths from their content (ID columns narrow, prose
+  wide; a number never wraps), a style by kind (data grid, key-value, RACI
+  matrix, total row) and repeating headers; the contents' page numbers are
+  read from a printed layout instead of all saying "1". The PDF has the same
+  design (no header on the cover, headings kept with their tables). The
+  writing brief now asks each kind for its own structure and visuals (a
+  technical design: architecture, topology and sequence diagrams; a proposal:
+  Gantt, RACI, pricing). Settings gain `control` (client, reference,
+  version, status…). Fixed: every diagram in a .docx was a 300 px thumbnail.
+  Live: a technical proposal, an SOP, a campaign brief and a report exported
+  and rendered by Microsoft Word and Chrome; the proposal's pre-filled
+  contents matched Word's own page numbers on 21 of 22 entries.
+- **Ask AICO edits just the part you point at — and shows you first** (desktop
+  and web, ADR 0024). Select words, hover a block's ✦, right-click (a table
+  cell offers the cell, its row, its column or the whole table), or press
+  Ctrl+K / Ctrl+I while reading: a small panel opens under that part —
+  paragraph, list, heading, callout, table or cells, chart, diagram, image
+  caption, a section or several blocks — with quick actions for it (Fix
+  grammar, Shorten, Translate…, Add a column…, Sort…, Line chart, Add data
+  series…, Add a node…, Simplify diagram…) and a box for your own words. The
+  proposal appears in the part's place (words struck and inserted, cells
+  marked, before and after for charts and diagrams); Accept applies it as one
+  version noted "AICO edit: …" with Undo, Try again re-asks, and follow-ups
+  ("shorter still") refine the same part. What reaches the page is checked in
+  code first: nothing outside the part can change; type, table shape, figures,
+  links, citations and cross-references are kept unless you ask; charts must
+  draw and diagrams must parse. The agent gets the same gate as Canvas
+  `edit_part`. New model role "Inline edits" (default: your main model, low
+  reasoning effort). Live: 15/15 edits on a technical proposal with
+  deepseek-v4-flash, every other block byte-identical, $0.004.
+- **Presentations (AICO Slides)** — a new canvas kind, `deck` (ADR 0023). A
+  slide is one of 15 layouts (title, section, bullets, two columns,
+  comparison, image and text, full-bleed image, chart, diagram, table, big
+  numbers, quote, timeline, agenda, closing) filled with content, never
+  coordinates; one layout engine places everything on a 16:9 or 4:3 grid and
+  fits the text from measured font metrics, so the app, the PDF and PowerPoint
+  show the same slide. 12 themes (font pair, palette, title/section
+  treatment, accent motif, chart colours) and 7 deck types (pitch, technical
+  briefing, project status, training, sales proposal, board update,
+  conference talk) that plan the storyline. The agent uses Canvas
+  `create {kind: "deck", template}` and `set_slides`; every write returns the
+  layout check (text that will not fit, too many bullets, missing titles,
+  empty charts, tables too big) to fix. The editor: slide sorter (drag to
+  reorder, duplicate, delete, add from a layout gallery), the slide with its
+  problems outlined, an inspector, speaker notes, a theme gallery, and present
+  mode with a presenter view (notes, next slide, timer). Export: `.pptx` with
+  editable text in title/body placeholders, native tables and charts (with an
+  embedded workbook, so Edit Data works), the theme's colours and fonts in the
+  theme part (Design tab variants restyle it), speaker notes and fade
+  transitions; PDF and PNG per slide through the installed Chrome/Edge.
+  Verified by opening the exports in PowerPoint.
+
 ## 0.37.1 — 2026-10-03
 
 ### Added

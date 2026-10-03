@@ -38,7 +38,8 @@ mermaid.initialize({
   themeCSS: diagramCss(false),
   flowchart: { curve: 'basis', htmlLabels: false, nodeSpacing: 44, rankSpacing: 54 },
   sequence: { actorMargin: 56, mirrorActors: false },
-  gantt: { barHeight: 22, barGap: 6, topPadding: 46 },
+  // A Gantt is drawn page-wide in a document, so its labels are set larger than the chat's to stay readable at print size.
+  gantt: { barHeight: 24, barGap: 6, topPadding: 46, fontSize: 13, sectionFontSize: 13 },
 });
 
 // Kept identical to MathBlock's list.
@@ -61,6 +62,17 @@ async function renderAll(jobs: Job[]): Promise<Done[]> {
       if (job.kind === 'diagram') {
         const { svg } = await mermaid.render(`m${job.id}`, job.source);
         box.innerHTML = svg;
+        // Mermaid's SVG is width="100%" with its natural size as max-width. In this fit-content box a
+        // percentage width resolves to the 300px default of a replaced element, so every diagram in a
+        // .docx was a 300px thumbnail with unreadable labels. Pin it to its natural size instead.
+        const el = box.querySelector('svg');
+        const vb = el?.viewBox?.baseVal;
+        if (el && vb && vb.width > 0) {
+          const w = Math.round(Math.min(1280, vb.width));
+          el.setAttribute('width', String(w));
+          el.setAttribute('height', String(Math.round(vb.height * (w / vb.width))));
+          el.style.maxWidth = 'none';
+        }
         out.push({ id: job.id, ok: true, svg });
       } else {
         box.innerHTML = katex.renderToString(job.source.trim(), {

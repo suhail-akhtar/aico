@@ -59,7 +59,7 @@ export interface ArtifactRouteDeps {
   send: (res: http.ServerResponse, status: number, body: unknown) => void;
 }
 
-export type ArtifactKind = 'document' | 'sheet' | 'code' | 'image' | 'file' | 'export';
+export type ArtifactKind = 'document' | 'sheet' | 'deck' | 'code' | 'image' | 'file' | 'export';
 
 export interface Artifact {
   /** Unique in the list: `canvas:<id>`, `file:<relative path>`, `attachment:<id>`. */

@@ -28,6 +28,11 @@
  * worse than the plain default; two matches mean the title is ambiguous and
  * the agent (which saw the whole request) should name the template.
  *
+ * Each type belongs to a layout family (`shared/ui/canvas/doc-blueprints`,
+ * ADR 0022) — cover, front matter, numbering, captions — and the brief carries
+ * that family's structure and expected visuals, so a technical design is
+ * *written* with its architecture and topology diagrams, not just painted.
+ *
  * Theme ids and block names come from the UI side's round-3 contract
  * (`docs/engineering/canvas-docs-contract.md`, `shared/ui/canvas/doc-themes`,
  * `shared/ui/canvas/doc-blocks`); the tests check every name here exists there.
@@ -38,6 +43,7 @@
 import type { ThemeId } from '../../shared/ui/canvas/doc-themes.js';
 import { DOC_BLOCK_KINDS, type DocBlockKind } from '../../shared/ui/canvas/doc-blocks.js';
 import type { DocSettings } from './doc-settings.js';
+import { blueprintForType, CAPTION_RULE } from '../../shared/ui/canvas/doc-blueprints.js';
 
 const BUILTIN_VISUALS = ['table', 'mermaid', 'chart', 'math', 'stats', 'timeline', 'steps', 'comparison', 'callout'] as const;
 
@@ -101,7 +107,8 @@ export const BLOCK_SYNTAX: Record<VisualBlock, string> = {
 const s = (id: string, heading: string, intent: string, ...visuals: VisualBlock[]): DocTypeSection =>
   ({ id, heading, intent, ...(visuals.length ? { visuals } : {}) });
 
-const T = (t: Omit<DocType, 'aliases'> & { aliases?: string[] }): DocType => ({ aliases: [], ...t });
+// Every type stores its own id, so an export finds the type's layout family (ADR 0022) even after the theme is changed.
+const T = (t: Omit<DocType, 'aliases'> & { aliases?: string[] }): DocType => ({ aliases: [], ...t, docSettings: { docType: t.id, ...t.docSettings } });
 
 const CONFIDENTIAL = 'CONFIDENTIAL';
 
@@ -485,15 +492,16 @@ export const DOC_TYPES: readonly DocType[] = [
   }),
   T({
     id: 'technical-proposal', title: 'Technical proposal', description: 'Proposed technical solution with architecture, plan, cost and risks.',
-    aliases: ['solution-proposal'], match: /technical proposal|solution proposal/i, words: [1000, 3000],
+    aliases: ['solution-proposal'], match: /technical proposal|solution proposal/i, words: [1200, 4000],
     sections: [
-      s('s1', 'Executive Summary', 'The problem, the solution and the ask'),
-      s('s2', 'Requirements', 'What the solution must do', 'table'),
-      s('s3', 'Proposed Architecture', 'Components and flows', 'mermaid'),
-      s('s4', 'Options Considered', 'Alternatives and why this one', 'comparison'),
-      s('s5', 'Delivery Plan', 'Phases and milestones', 'timeline'),
-      s('s6', 'Cost', 'Cost breakdown', 'lineitems'),
-      s('s7', 'Risks', 'Risks with mitigations', 'riskmatrix'),
+      s('s1', 'Executive Summary', 'The problem, the solution, the price and the ask — one page'),
+      s('s2', 'Requirements', 'What the solution must do: functional and non-functional, each with an ID', 'table'),
+      s('s3', 'Proposed Architecture', 'The logical architecture diagram, then the components and why each is there', 'mermaid', 'table'),
+      s('s4', 'Infrastructure and Topology', 'The physical/network topology diagram (sites, zones, load balancing), then the server inventory', 'mermaid', 'table'),
+      s('s5', 'Options Considered', 'Alternatives and why this one', 'comparison'),
+      s('s6', 'Delivery Plan', 'Phases and milestones as a Gantt chart, then who does what (RACI)', 'mermaid', 'table'),
+      s('s7', 'Cost', 'Cost breakdown', 'lineitems'),
+      s('s8', 'Risks', 'Risks with mitigations', 'riskmatrix'),
     ],
     docSettings: { theme: 'proposal', cover: { enabled: true }, toc: true, pageNumbers: true },
   }),
@@ -696,6 +704,13 @@ export function writingNote(t: DocType | undefined, ownSections = false): string
     }
     const used = all.filter(v => v !== 'table');
     if (used.length) lines.push(...used.map(v => `- ${BLOCK_SYNTAX[v]}`));
+    // The family's layout drives the content too: its structure, the visuals its reader expects, captions.
+    const bp = blueprintForType(t.id);
+    if (bp) {
+      lines.push(`Layout (${bp.label}): ${bp.structure}`);
+      if (bp.visuals.length) lines.push(`A reader of this kind of document expects: ${bp.visuals.join('; ')}.`);
+      if (bp.captions) lines.push(CAPTION_RULE);
+    }
     if (t.note) lines.push(t.note);
   } else {
     lines.push('Writing brief: keep to the length the request needs.');

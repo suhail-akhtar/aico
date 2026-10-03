@@ -28,10 +28,16 @@
  * gets a watermark and a classification banner; a letter wide margins);
  * values stored on the document always win.
  *
+ * Layout — cover, front matter, typeface pairing, numbering, running
+ * header/footer, captions — is the *blueprint's* (`doc-blueprints`, ADR 0022);
+ * `resolveLook` carries both, so every reader of a look gets the family too.
+ *
  * DOM-free and Node-importable (the engine imports it).
  *
  * @module shared/ui/canvas/doc-themes
  */
+
+import { resolveBlueprint, type Blueprint, type Face } from './doc-blueprints';
 
 export type ThemeId =
   | 'report' | 'research' | 'letter' | 'memo' | 'cv' | 'proposal' | 'invoice' | 'sop'
@@ -140,6 +146,21 @@ export const FONT_STACKS = {
 /** Word's faces for the same choices (installed with Office). */
 export const DOCX_FONTS = { sans: 'Calibri', serif: 'Georgia', mono: 'Consolas' } as const;
 
+const SERIF_WORD = new Set(['Cambria', 'Georgia', 'Palatino Linotype', 'Times New Roman', 'Garamond']);
+
+/**
+ * The faces a page is set in. A blueprint's pairing is used when the document's
+ * body class (sans/serif) is the pairing's own; a document that chose the other
+ * class — or a family with no pairing — gets the round-3 faces (Calibri or
+ * Georgia in Word, the app's stacks in HTML), so an owner's font choice still wins.
+ */
+export function blueprintFonts(bp: Blueprint, faces: { body: 'sans' | 'serif'; heading: 'sans' | 'serif' }): { heading: Face; body: Face } {
+  const legacy = (c: 'sans' | 'serif'): Face => ({ word: DOCX_FONTS[c], css: FONT_STACKS[c] });
+  if (!bp.fonts) return { heading: legacy(faces.heading), body: legacy(faces.body) };
+  const cls = SERIF_WORD.has(bp.fonts.body.word) ? 'serif' : 'sans';
+  return cls === faces.body ? bp.fonts : { heading: legacy(faces.heading), body: legacy(faces.body) };
+}
+
 /** Body and heading faces for a theme and the document's font choice. */
 export function themeFaces(theme: DocTheme | undefined, font: 'sans' | 'serif' | undefined): { body: 'sans' | 'serif'; heading: 'sans' | 'serif' } {
   const body = font ?? theme?.font ?? 'sans';
@@ -191,6 +212,9 @@ export interface ThemeInput {
   font?: 'sans' | 'serif';
   classification?: unknown;
   watermark?: unknown;
+  /** The document type and an explicit blueprint, which pick the layout family (`doc-blueprints`). */
+  docType?: unknown;
+  blueprint?: unknown;
 }
 
 export interface ResolvedLook {
@@ -199,6 +223,10 @@ export interface ResolvedLook {
   faces: { body: 'sans' | 'serif'; heading: 'sans' | 'serif' };
   classification?: string;
   watermark?: string;
+  /** The layout family (ADR 0022). */
+  blueprint: Blueprint;
+  /** The concrete faces the page is set in: the blueprint's pairing, unless the document chose the other body class. */
+  fonts: { heading: Face; body: Face };
 }
 
 /**
@@ -208,12 +236,17 @@ export interface ResolvedLook {
  * whose owner removed the watermark keeps it removed).
  */
 export function resolveLook(s: ThemeInput, fallbackAccent = '#2563EB'): ResolvedLook {
-  const theme = themeById(s.theme);
+  const blueprint = resolveBlueprint(s);
+  // A document with a type but no theme takes its family's theme.
+  const theme = themeById(s.theme) ?? themeById(blueprint.theme);
   const str = (v: unknown, d: string | undefined): string | undefined => (typeof v === 'string' ? (v.trim() || undefined) : d);
+  const faces = themeFaces(theme, s.font);
   return {
     ...(theme ? { theme } : {}),
+    blueprint,
+    fonts: blueprintFonts(blueprint, faces),
     accent: cleanHex(s.accent) ?? theme?.accent ?? fallbackAccent,
-    faces: themeFaces(theme, s.font),
+    faces,
     ...(str(s.classification, theme?.defaults.classification) ? { classification: str(s.classification, theme?.defaults.classification)! } : {}),
     ...(str(s.watermark, theme?.defaults.watermark) ? { watermark: str(s.watermark, theme?.defaults.watermark)! } : {}),
   };
@@ -233,12 +266,16 @@ export function themeAttrs(look: ResolvedLook): { attrs: Record<string, string>;
     if (t.centerTitle) attrs['data-dt-center'] = '1';
     if (t.labelH3) attrs['data-dt-label3'] = '1';
   }
+  // The family's numbering shows in the editor as it will in Word.
+  if (look.blueprint.numbering !== 'none' && t) attrs['data-dt-numbered'] = '1';
+  if (look.blueprint.id !== 'general') attrs['data-dt-bp'] = look.blueprint.id;
   return {
     attrs,
     vars: {
       '--dt-accent': look.accent,
-      '--dt-body': FONT_STACKS[look.faces.body],
-      '--dt-head': FONT_STACKS[look.faces.heading],
+      '--dt-body': look.fonts.body.css,
+      '--dt-head': look.fonts.heading.css,
+      '--dt-head-weight': String(look.fonts.heading.weight ?? 700),
     },
   };
 }
@@ -261,7 +298,7 @@ export function themeRules(scope: string): string {
   const h = (sel: string, tags: string[]): string => tags.map(t => `${sel} ${t}`).join(', ');
   return `
 ${on('data-dt')} { font-family: var(--dt-body); }
-${h(on('data-dt'), ['h1', 'h2', 'h3', 'h4'])} { font-family: var(--dt-head); color: var(--dt-ink); }
+${h(on('data-dt'), ['h1', 'h2', 'h3', 'h4'])} { font-family: var(--dt-head); font-weight: var(--dt-head-weight, 700); color: var(--dt-ink); }
 ${h(on('data-dt'), ['code', 'pre', 'kbd'])} { font-family: ${FONT_STACKS.mono}; }
 ${on('data-dt')} a { color: var(--dt-accent-ui); }
 ${on('data-dt-justify')} p { text-align: justify; hyphens: auto; }

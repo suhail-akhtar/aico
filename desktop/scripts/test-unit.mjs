@@ -1097,6 +1097,13 @@ function makeFakeDom(p5) {
   ok(ac.groupEntries(timed, 'time', now).map(g => g.name).join() === 'Today,Previous 30 days', 'artifacts/group: by day');
   const topics = ac.groupEntries(es, 'topic');
   ok(topics.find(g => g.name === 'Notes').entries[0].kind === 'canvas', 'artifacts/group: by topic, the canvas leads its exports');
+  const decks = ac.buildEntries([
+    { key: 'canvas:d1', kind: 'deck', source: 'canvas', id: 'd1', title: 'Board update', updatedAt: 9, topic: 'Board update' },
+    { key: 'file:board-update.pptx', kind: 'export', source: 'file', id: 'board-update.pptx', title: 'board-update.pptx', ext: 'pptx', bytes: 9, updatedAt: 8, topic: 'Board update' },
+  ]);
+  const deckGroups = ac.groupEntries(decks, 'type');
+  ok(deckGroups.length === 1 && deckGroups[0].name === 'Presentations' && deckGroups[0].entries.length === 2 && ac.typeLabel(decks.find(e => e.kind === 'canvas')) === 'Presentation',
+    'artifacts/group: a deck canvas and its .pptx export are Presentations', deckGroups.map(g => [g.name, g.entries.length]));
 
   ok(ac.matchesQuery(loads[0], 'load png') && ac.matchesQuery(es.find(e => e.ext === 'html'), 'html') && !ac.matchesQuery(loads[0], 'chart'),
     'artifacts/search: every word must match the name, file name, type or topic');

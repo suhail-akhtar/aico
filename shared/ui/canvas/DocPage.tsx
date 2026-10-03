@@ -25,6 +25,15 @@
  * closes (their text is kept in the edit record) and the conflict banner
  * offers to keep theirs or take the agent's.
  *
+ * ## Ask AICO on a part (ADR 0024)
+ *
+ * A selection's pill, a block's sparkle button, a right-click or Ctrl+K /
+ * Ctrl+I open the inline panel (`InlineEdit`) under the part — a selection,
+ * a block, a table's cell/row/column, a chart, a diagram, a section. While a
+ * proposal is reviewed the part is drawn as its diff in place; Accept goes
+ * through `applyPart` (nothing outside the part may change) as one block
+ * edit, saved as one version with a note, with an Undo on the page.
+ *
  * ## Page width, centring and the document's theme (round 3)
  *
  * The page is drawn at the document's chosen width (Narrow / Normal / Wide /
@@ -58,8 +67,11 @@ import type { CanvasActivity, CanvasHost } from './host';
 import type { CanvasDocController } from './useCanvasDoc';
 import { CvIcon } from './icons';
 import { DocBlockEditor, DocBlockView, docBlockOf } from './DocBlocks';
+import { InlineEdit, type InlineAccept, type InlineScope } from './InlineEdit';
+import { applyPart, locateSelection, resolveTarget } from './scoped-edit';
 import { DOC_BLOCK_CSS } from './doc-blocks';
 import { pageWidthPx, themeAttrs, themeRules, type PageWidth, type ResolvedLook } from './doc-themes';
+import { typedNumbering } from './doc-layout';
 
 /** The generated theme rules and block styles, scoped to the page (one string for every page). */
 const PAGE_CSS = `${DOC_BLOCK_CSS}
@@ -76,8 +88,13 @@ export interface DocPageHandle {
   editor(): BlockEditorApi | null;
   /** Comment on the current selection. False when there is none. */
   commentOnSelection(): boolean;
+  /** Ask AICO to edit the selection, or the block last clicked (ADR 0024). False when there is neither, or no engine route. */
+  inlineEdit(): boolean;
   closeEditor(): void;
 }
+
+interface InlineState { scopes: InlineScope[]; scope: InlineScope; reviewing: boolean; seq: number; autoRun?: string }
+interface Applied { before: string; after: string; at: number; index: number; label: string }
 
 interface Region {
   key: string;
@@ -167,6 +184,9 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
   const [showResolved, setShowResolved] = useState(false);
   const [wide, setWide] = useState(false);
   const [dropping, setDropping] = useState(false);
+  const [inline, setInline] = useState<InlineState | null>(null);
+  const [applied, setApplied] = useState<Applied | null>(null);
+  const canInline = Boolean(host.editPart) && !readOnly;
 
   const setRegion = useCallback((r: Region | null) => {
     regionRef.current = r;
@@ -245,6 +265,7 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
     const mode = asSource ? 'source' : modeFor(b);
     if (!mode) return;
     setPill(null);
+    setInline(null);
     setRegion({ key: `r${++regionSeq}`, start: b.start, text: b.text, original: b.text, index: i, mode, ...(caret ? { caret } : {}), ...(b.lang ? { lang: b.lang } : {}) });
   }, [readOnly, close, ctl, setRegion]);
 
@@ -305,6 +326,167 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
     return true;
   }, [readOnly, wide, setDrawerOpen]);
 
+  // ── Ask AICO on a part (ADR 0024) ──
+  const openInline = useCallback((scopes: InlineScope[], autoRun?: string): boolean => {
+    if (!canInline || !scopes.length) return false;
+    if (regionRef.current) close();
+    setPill(null);
+    setApplied(null);
+    setInline(cur => ({ scopes, scope: scopes[0]!, reviewing: false, seq: (cur?.seq ?? 0) + 1, ...(autoRun ? { autoRun } : {}) }));
+    return true;
+  }, [canInline, close]);
+
+  /** The ways to scope an edit that starts at one block (and maybe one table cell). */
+  const blockScopes = useCallback((key: string, cell?: { r: number; c: number }): InlineScope[] => {
+    const all = splitBlocks(ctl.getText());
+    const i = blockKeys(all).indexOf(key);
+    const b = all[i];
+    if (!b) return [];
+    const one = { blockIds: [key] };
+    if (b.kind === 'heading') return [{ label: 'Heading', target: one }, { label: 'Whole section', target: { ...one, part: 'section' } }];
+    if (b.kind === 'table' && cell) {
+      const t = parseTable(b.text);
+      if (t) {
+        const last = t.rows.length - 1;
+        const n = t.header.length - 1;
+        return [
+          ...(cell.r >= 0 ? [{ label: 'This cell', target: { ...one, cells: { r0: cell.r, r1: cell.r, c0: cell.c, c1: cell.c } } }] : []),
+          ...(cell.r >= 0 ? [{ label: 'Row', target: { ...one, cells: { r0: cell.r, r1: cell.r, c0: 0, c1: n } } }] : []),
+          { label: 'Column', target: { ...one, cells: { r0: 0, r1: last, c0: cell.c, c1: cell.c } } },
+          { label: 'Whole table', target: one },
+        ];
+      }
+    }
+    return [{ label: b.kind === 'paragraph' && parseImageLine(b.text) ? 'Caption' : 'This block', target: one }];
+  }, [ctl]);
+
+  /** Scopes for the page's current selection: the passage itself, then its block(s). */
+  const selectionScopes = useCallback((): InlineScope[] => {
+    const sel = window.getSelection();
+    const p = page.current;
+    if (!sel || sel.isCollapsed || !p || !sel.anchorNode || !p.contains(sel.anchorNode)) return [];
+    const range = sel.getRangeAt(0);
+    const elOf = (n: Node): HTMLElement | null => (n.nodeType === 1 ? n as HTMLElement : n.parentElement);
+    const from = elOf(range.startContainer)?.closest<HTMLElement>('[data-block-key]');
+    const to = elOf(range.endContainer)?.closest<HTMLElement>('[data-block-key]');
+    if (!from || !to) return [];
+    const all = splitBlocks(ctl.getText());
+    const k = blockKeys(all);
+    let i0 = k.indexOf(from.dataset.blockKey!);
+    let i1 = k.indexOf(to.dataset.blockKey!);
+    if (i0 < 0 || i1 < 0) return [];
+    if (i0 > i1) [i0, i1] = [i1, i0];
+    if (i0 !== i1) return [{ label: `${i1 - i0 + 1} blocks`, target: { blockIds: k.slice(i0, i1 + 1) } }];
+    const b = all[i0]!;
+    const key = k[i0]!;
+    if (b.kind === 'table') {
+      const cellOf = (n: Node): { r: number; c: number } | null => {
+        const td = elOf(n)?.closest<HTMLTableCellElement>('td, th');
+        const tr = td?.parentElement as HTMLTableRowElement | null;
+        if (!td || !tr) return null;
+        const head = tr.parentElement?.tagName === 'THEAD';
+        const body = tr.closest('table')?.tBodies[0];
+        return { r: head ? -1 : body ? Array.from(body.rows).indexOf(tr) : -1, c: td.cellIndex };
+      };
+      const a = cellOf(range.startContainer);
+      const z = cellOf(range.endContainer);
+      if (a && z) {
+        const cells = { r0: Math.min(a.r, z.r), r1: Math.max(a.r, z.r), c0: Math.min(a.c, z.c), c1: Math.max(a.c, z.c) };
+        return [{ label: 'Selected cells', target: { blockIds: [key], cells } }, { label: 'Whole table', target: { blockIds: [key] } }];
+      }
+      return blockScopes(key);
+    }
+    const whole = blockScopes(key);
+    const found = locateSelection(b.text, sel.toString());
+    if (!found || (found.start === 0 && found.end === b.text.length)) return whole;
+    // A selection that cannot be edited on its own (a chart, a caption) falls back to the block.
+    const r = resolveTarget(ctl.getText(), { blockIds: [key], range: found });
+    return r.ok ? [{ label: 'Selection', target: { blockIds: [key], range: found } }, ...whole] : whole;
+  }, [ctl, blockScopes]);
+
+  const inlineFromSelection = useCallback((): boolean => {
+    const scopes = selectionScopes();
+    if (scopes.length) return openInline(scopes);
+    const key = lastTouched.current;
+    return key ? openInline(blockScopes(key)) : false;
+  }, [selectionScopes, openInline, blockScopes]);
+
+  const acceptInline = useCallback((a: InlineAccept): string | null => {
+    const cur = ctl.getText();
+    const r = applyPart(cur, a.part, a.after);
+    if (!r.ok) return r.error;
+    ctl.setText(r.text, { key: `ai${++regionSeq}`, before: a.part.before, after: a.after, index: a.part.blocks.from });
+    void ctl.save(`AICO edit: ${a.instruction.slice(0, 120)}`);
+    setApplied({ before: a.part.before, after: a.after, at: r.start, index: a.part.blocks.from, label: a.part.label });
+    setInline(null);
+    // What changed glows, as the agent's writes do.
+    const now = splitBlocks(r.text);
+    const nk = blockKeys(now);
+    setFresh(new Set(now.map((b, n) => ({ b, n })).filter(({ b }) => b.start >= r.start && b.end <= r.start + a.after.length).map(({ n }) => nk[n]!)));
+    window.setTimeout(() => setFresh(new Set()), 2600);
+    return null;
+  }, [ctl]);
+
+  const undoInline = useCallback((): void => {
+    if (!applied) return;
+    const cur = ctl.getText();
+    const r = applyPart(cur, { span: { start: applied.at, end: applied.at + applied.after.length }, before: applied.after }, applied.before);
+    setApplied(null);
+    if (!r.ok || !applied.after) { onError('Could not undo — that part changed since. The version history still has it.'); return; }
+    ctl.setText(r.text, { key: `ai${++regionSeq}`, before: applied.after, after: applied.before, index: applied.index });
+    void ctl.save('Undid an AICO edit');
+  }, [applied, ctl, onError]);
+
+  useEffect(() => {
+    if (!applied) return;
+    const t = window.setTimeout(() => setApplied(null), 15_000);
+    return () => window.clearTimeout(t);
+  }, [applied]);
+
+  // A cell-range edit marks its cells in the page's table, so "This cell" is visible.
+  useLayoutEffect(() => {
+    const p = page.current;
+    if (!p) return;
+    p.querySelectorAll('[data-ai-cell]').forEach(el => el.removeAttribute('data-ai-cell'));
+    const t = inline && !inline.reviewing ? inline.scope.target : null;
+    if (!t?.cells || !t.blockIds?.[0]) return;
+    const table = p.querySelector(`[data-block-key="${CSS.escape(t.blockIds[0])}"] table`) as HTMLTableElement | null;
+    if (!table) return;
+    const c = t.cells;
+    const rows = [...(table.tHead ? Array.from(table.tHead.rows).slice(0, 1) : []), ...Array.from(table.tBodies[0]?.rows ?? [])];
+    rows.forEach((tr, i) => {
+      const r = table.tHead ? i - 1 : i;
+      if (r < c.r0 || r > c.r1) return;
+      Array.from(tr.cells).forEach((cell, ci) => { if (ci >= c.c0 && ci <= c.c1) cell.setAttribute('data-ai-cell', ''); });
+    });
+  });
+
+  // A part that is no longer in the document (the agent rewrote it) closes its panel.
+  useEffect(() => {
+    if (!inline || inline.reviewing) return;
+    if (!resolveTarget(text, inline.scope.target).ok && !inline.scope.target.range) setInline(null);
+  }, [text, inline]);
+
+  const onPageContextMenu = (e: React.MouseEvent): void => {
+    if (!canInline || e.shiftKey) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-adoc-ui], .adoc-editing, .adoc-pending, a, input, textarea')) return;
+    const blockEl = target.closest<HTMLElement>('[data-block-key]');
+    if (!blockEl) return;
+    const fromSel = selectionScopes();
+    let scopes = fromSel;
+    if (!scopes.length) {
+      const td = target.closest<HTMLTableCellElement>('td, th');
+      const tr = td?.parentElement as HTMLTableRowElement | null;
+      const cell = td && tr ? { r: tr.parentElement?.tagName === 'THEAD' ? -1 : Array.from(tr.closest('table')?.tBodies[0]?.rows ?? []).indexOf(tr), c: td.cellIndex } : undefined;
+      scopes = blockScopes(blockEl.dataset.blockKey!, cell);
+    }
+    if (!scopes.length) return;
+    e.preventDefault();
+    lastTouched.current = blockEl.dataset.blockKey!;
+    openInline(scopes);
+  };
+
   useImperativeHandle(ref, () => ({
     insert: (kind, template) => {
       const t = template ?? insertTemplate(kind);
@@ -318,16 +500,23 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
     insertImage,
     editor: () => editorApi.current,
     commentOnSelection,
+    inlineEdit: inlineFromSelection,
     closeEditor: close,
-  }), [insertText, insertImage, commentOnSelection, close]);
+  }), [insertText, insertImage, commentOnSelection, inlineFromSelection, close]);
 
   const toc = useMemo(() => tocEntries(blocks), [blocks]);
+  // Headings the author numbered by hand: the page shows their numbers, not a second set (the export replaces them, ADR 0022).
+  const typedNumbers = useMemo(() => {
+    const top = Math.min(...toc.map(e => e.level));
+    return typedNumbering(toc.filter(e => e.level === top).map(e => e.text));
+  }, [toc]);
   const themed = useMemo(() => {
     if (!look) return { attrs: {}, style: undefined };
     const t = themeAttrs(look);
+    if (typedNumbers) delete t.attrs['data-dt-numbered'];
     // Unthemed, the page keeps the app's own accent (canvas.css); a theme brings its accent and faces.
     return { attrs: t.attrs, style: (look.theme ? t.vars : undefined) as React.CSSProperties | undefined };
-  }, [look]);
+  }, [look, typedNumbers]);
 
   // ── The agent at work ──
   const writing = activity && activity.status === 'writing' && (!activity.tabId || activity.tabId === ctl.tabId) ? activity : null;
@@ -482,6 +671,19 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
     </div>
   ) : null;
 
+  const inlineRange = inline && !readOnly ? (() => {
+    const r = resolveTarget(text, inline.scope.target);
+    return r.ok ? r.part.blocks : null;
+  })() : null;
+  const inlinePanel = inline && inlineRange ? (
+    <InlineEdit key={`aie${inline.seq}`} host={host} canvasId={canvasId} {...(ctl.doc?.tabs ? { tabId: ctl.tabId } : {})} getText={ctl.getText}
+      scopes={inline.scopes} {...(inline.autoRun ? { autoRun: inline.autoRun } : {})}
+      saveFirst={() => ctl.save()} onAccept={acceptInline}
+      onReviewing={(reviewing) => setInline(cur => (cur && cur.reviewing !== reviewing ? { ...cur, reviewing } : cur))}
+      onScope={(scope) => setInline(cur => (cur ? { ...cur, scope } : cur))}
+      onClose={() => setInline(null)} />
+  ) : null;
+
   const rendered: React.ReactNode[] = [];
   let placed = false;
   const rs = region?.start ?? -1;
@@ -495,9 +697,15 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
       if (!placed && b.start >= re) { rendered.push(editorEl); placed = true; }
     }
     const key = keys[i]!;
+    const aiTarget = inlineRange && i >= inlineRange.from && i < inlineRange.to;
+    if (aiTarget && inline!.reviewing) {
+      // Under review, the part is drawn as its proposal (inside the panel), not twice.
+      if (i === inlineRange!.to - 1) rendered.push(<React.Fragment key={`aie-${key}`}>{inlinePanel}</React.Fragment>);
+      return;
+    }
     const inSection = section && i >= section.from && i < section.to;
     const labelHere = (section && i === section.from) || (!writing && fresh.size > 0 && fresh.has(key) && keys.findIndex(k => fresh.has(k)) === i);
-    const cls = `adoc-block is-${b.kind}${inSection ? ' is-agent' : ''}${fresh.has(key) ? ' is-fresh' : ''}${lastTouched.current === key && !region ? ' is-touched' : ''}`;
+    const cls = `adoc-block is-${b.kind}${inSection ? ' is-agent' : ''}${fresh.has(key) ? ' is-fresh' : ''}${lastTouched.current === key && !region ? ' is-touched' : ''}${aiTarget ? ' is-ai-target' : ''}`;
     if (b.kind === 'pending' && b.pending) {
       const busy = Boolean(inSection);
       rendered.push(
@@ -539,8 +747,20 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
         onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); open(key); } }}
         onDoubleClick={() => { if (!clickToEdit && mode) open(key); }}>
         {labelHere && <AgentLabel />}
+        {canInline && clickToEdit && !aiTarget && (
+          <span className="adoc-block-edit" data-adoc-ui>
+            <button type="button" className="adoc-ai-btn" onClick={() => openInline(blockScopes(key))} title="Ask AICO to edit this (Ctrl+K)" aria-label="Ask AICO to edit this block">
+              <CvIcon name="sparkle" size={12} />
+            </button>
+          </span>
+        )}
         {!readOnly && !clickToEdit && (mode || tocHere) && (
           <span className="adoc-block-edit" data-adoc-ui>
+            {canInline && mode && !aiTarget && (
+              <button type="button" className="adoc-ai-btn" onClick={() => openInline(blockScopes(key))} title="Ask AICO to edit this (Ctrl+K)" aria-label="Ask AICO to edit this block">
+                <CvIcon name="sparkle" size={12} /> Ask AICO
+              </button>
+            )}
             {mode && mode !== 'source' && (
               <button type="button" onClick={() => open(key)} title="Edit" aria-label="Edit block"><CvIcon name="pencil" size={12} /> Edit</button>
             )}
@@ -571,6 +791,7 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
         )}
       </div>,
     );
+    if (aiTarget && i === inlineRange!.to - 1) rendered.push(<React.Fragment key={`aie-${key}`}>{inlinePanel}</React.Fragment>);
   });
   if (region && !readOnly && !placed) rendered.push(editorEl);
 
@@ -605,7 +826,7 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
       <style>{PAGE_CSS}</style>
       <div ref={sheet} className={`adoc-sheet${wide ? ' is-wide' : ''}${outlineOpen ? ' has-outline' : ''}`} data-width={pageWidth}
         style={{ '--adoc-page-w': pagePx === null ? '100%' : `${pagePx}px` } as React.CSSProperties}>
-        <article ref={page} className="adoc-page" onMouseUp={onPageMouseUp} onClick={onPageClick} aria-label="Document"
+        <article ref={page} className="adoc-page" onMouseUp={onPageMouseUp} onClick={onPageClick} onContextMenu={onPageContextMenu} aria-label="Document"
           {...themed.attrs} style={themed.style}>
           {look?.watermark && <div className="adoc-watermark" aria-hidden="true" data-adoc-ui><span>{look.watermark}</span></div>}
           {look?.classification && <div className="adoc-classification" data-adoc-ui>{look.classification}</div>}
@@ -620,6 +841,13 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
             <div className="markdown-body adoc-body">{rendered}</div>
           )}
           {look?.classification && <div className="adoc-classification is-bottom" data-adoc-ui>{look.classification}</div>}
+          {applied && (
+            <div className="aie-toast" role="status" data-adoc-ui>
+              <CvIcon name="sparkle" size={13} /> AICO edited the {applied.label.toLowerCase().replace(/ ·.*$/, '')}
+              <button type="button" className="aw-btn adoc-mini" onClick={undoInline}><CvIcon name="undo" size={12} /> Undo</button>
+              <button type="button" className="aw-icon-btn" onClick={() => setApplied(null)} aria-label="Dismiss"><CvIcon name="close" size={12} /></button>
+            </div>
+          )}
         </article>
         {!readOnly && (
           <CommentLayer state={comments} page={page.current} sheet={sheet.current} tabId={ctl.tabId} text={text}
@@ -635,7 +863,10 @@ export const DocPage = React.forwardRef<DocPageHandle, DocPageProps>(function Do
                 <CvIcon name="comment" size={13} /> Comment
               </button>
             )}
-            <button type="button" className="acv-pill" onClick={() => { onAsk(pill.selection, pill.at); setPill(null); }}>
+            <button type="button" className="acv-pill" onClick={() => {
+              if (!inlineFromSelection()) onAsk(pill.selection, pill.at);
+              setPill(null);
+            }}>
               <CvIcon name="sparkle" size={13} /> Ask AICO
             </button>
           </div>

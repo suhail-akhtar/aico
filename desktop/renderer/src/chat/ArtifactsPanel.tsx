@@ -203,7 +203,7 @@ export function ArtifactsPanel(): React.ReactElement | null {
 
   const setGroup = (g: Grouping): void => { setGrouping(g); remember(GROUP_KEY, g); };
   const setView = (l: 'list' | 'grid'): void => { setLayout(l); remember(LAYOUT_KEY, l); };
-  const ref = (a: ArtifactItem) => ({ id: a.id, title: a.title, kind: a.kind as 'document' | 'sheet' | 'code', ...(a.language ? { language: a.language } : {}) });
+  const ref = (a: ArtifactItem) => ({ id: a.id, title: a.title, kind: a.kind as 'document' | 'sheet' | 'deck' | 'code', ...(a.language ? { language: a.language } : {}) });
   const openCanvas = (a: ArtifactItem, beside = false): void => {
     if (beside) useCanvasPanel.getState().showBeside(ref(a)); else useCanvasPanel.getState().show(ref(a));
     close();

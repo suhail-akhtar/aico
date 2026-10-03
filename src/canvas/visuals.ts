@@ -217,7 +217,7 @@ export async function renderVisuals(jobs: VisualJob[], getBrowser: () => Promise
   }
 
   const root = rendererRoot();
-  const context = await (browser as ExportBrowser).browser.newContext({ deviceScaleFactor: 2, viewport: { width: 1000, height: 1400 } });
+  const context = await (browser as ExportBrowser).browser.newContext({ deviceScaleFactor: 2, viewport: { width: 1400, height: 1400 } });
   try {
     const page = await context.newPage();
     await containPage(page, root);

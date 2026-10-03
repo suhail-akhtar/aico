@@ -1281,6 +1281,8 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         void runs.submit(sessionId, runCwd, text, chosen, { approval: live?.approval ?? 'auto' })
           .catch(() => { /* already reported on the stream as turn-end */ });
       },
+      // An inline AI edit (ADR 0024) defaults to the model this chat runs on.
+      modelFor: async sessionId => runs.modelOf(sessionId) ?? await currentDefaultModel(),
     })) return;
 
     // The Artifacts panel: everything this chat made or opened (server/artifact-routes).

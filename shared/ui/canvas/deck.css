@@ -1,0 +1,141 @@
+/*
+ * AICO Slides — the deck editor and present mode. Plain CSS under `.aw` on
+ * the canvas tokens (light, dark and VS Code themes apply unchanged). The
+ * slides themselves are styled inline by deck-render.ts (they must look the
+ * same in an exported PDF), so nothing here reaches inside `.dk-slide`.
+ */
+
+.aw.adk {
+  position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  background: var(--aw-card); color: var(--aico-text-primary); font-size: 13px;
+}
+.aw.adk[data-variant='panel'] { height: 100%; }
+.aw.adk[data-variant='inline'] {
+  height: min(80vh, 860px); min-height: 460px; border: 1px solid var(--aw-line); border-radius: 14px; overflow: hidden; box-shadow: var(--aw-shadow);
+}
+.aw .adk-empty { padding: 18px; color: var(--aico-text-muted); font-size: 12.5px; }
+
+/* Head */
+.aw .adk-head { display: flex; align-items: center; gap: 6px; min-height: 46px; padding: 6px 10px 6px 14px; border-bottom: 1px solid var(--aw-soft); flex-wrap: wrap; }
+.aw .adk-kind { color: #c2410c; flex: none; }
+.aw .adk-title { min-width: 0; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 650; background: none; border: 0; padding: 2px 4px; border-radius: 6px; color: inherit; cursor: text; }
+.aw .adk-title:hover { background: var(--aw-raised); }
+.aw .adk-title-input { font-size: 14px; font-weight: 600; padding: 2px 6px; border: 1px solid var(--aico-accent); border-radius: 6px; background: var(--aw-card); color: inherit; min-width: 180px; }
+.aw .adk-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--aico-text-muted); }
+.aw .adk-badge-err { flex: none; font-size: 11px; font-weight: 650; color: #b91c1c; background: rgba(220, 38, 38, 0.1); border-radius: 999px; padding: 2px 8px; cursor: help; }
+.aw .adk-spacer { flex: 1; }
+.aw .adk-btn.aw-btn { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 8px; gap: 5px; white-space: nowrap; }
+
+/* Pop-overs */
+.aw .adk-menu-wrap { position: relative; }
+.aw .adk-pop {
+  position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; padding: 10px;
+  background: var(--aw-card); border: 1px solid var(--aw-line); border-radius: 12px; box-shadow: var(--aw-shadow);
+}
+.aw .adk-menu { display: flex; flex-direction: column; gap: 2px; min-width: 240px; padding: 6px; }
+.aw .adk-menu > button { text-align: left; padding: 7px 9px; border: 0; background: none; color: inherit; border-radius: 7px; font-size: 12.5px; cursor: pointer; }
+.aw .adk-menu > button:hover { background: var(--aw-raised); }
+.aw .adk-pop-title { font-weight: 650; font-size: 13.5px; margin-bottom: 8px; }
+.aw .adk-pop-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; }
+.aw .adk-pop-row label { display: flex; gap: 6px; align-items: center; }
+.aw .adk-pop-row input:not([type]), .aw .adk-pop-row select { height: 26px; border: 1px solid var(--aw-line); border-radius: 6px; background: var(--aw-card); color: inherit; padding: 0 6px; font-size: 12px; }
+.aw .adk-themes { width: min(700px, 86vw); }
+.aw .adk-theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 10px; max-height: 60vh; overflow: auto; }
+.aw .adk-theme, .aw .adk-layout {
+  display: flex; flex-direction: column; gap: 5px; align-items: center; padding: 4px; border: 2px solid transparent; border-radius: 10px;
+  background: none; color: inherit; cursor: pointer; font-size: 12px;
+}
+.aw .adk-theme:hover, .aw .adk-layout:hover { border-color: var(--aw-line); }
+.aw .adk-theme.is-on { border-color: var(--aico-accent); }
+.aw .adk-layouts { left: 0; right: auto; width: min(620px, 86vw); display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 8px; max-height: 66vh; overflow: auto; }
+.aw .adk-new { width: 360px; }
+.aw .adk-row { display: flex; gap: 6px; align-items: center; }
+.aw .adk-error { color: #b91c1c; font-size: 12px; }
+
+/* Body */
+.aw .adk-body { flex: 1; min-height: 0; display: flex; }
+.aw .adk-sorter {
+  flex: none; width: 184px; overflow-y: auto; padding: 10px 10px 16px 6px; border-right: 1px solid var(--aw-soft);
+  display: flex; flex-direction: column; gap: 10px; outline: none; background: var(--aw-raised);
+}
+.aw .adk-sorter:focus-visible { box-shadow: inset 0 0 0 2px var(--aico-accent); }
+.aw .adk-thumb { position: relative; display: flex; gap: 4px; align-items: flex-start; cursor: pointer; border-radius: 6px; padding: 2px; }
+.aw .adk-thumb .adk-slidebox { border-radius: 4px; box-shadow: 0 0 0 1px var(--aw-line); }
+.aw .adk-thumb.is-on .adk-slidebox { box-shadow: 0 0 0 2.5px var(--aico-accent); }
+.aw .adk-thumb.drop-before::before, .aw .adk-thumb.drop-after::after {
+  content: ''; position: absolute; left: 20px; right: 0; height: 3px; border-radius: 2px; background: var(--aico-accent);
+}
+.aw .adk-thumb.drop-before::before { top: -7px; }
+.aw .adk-thumb.drop-after::after { bottom: -7px; }
+.aw .adk-thumb-n { width: 16px; flex: none; text-align: right; font-size: 11px; color: var(--aico-text-muted); padding-top: 2px; font-variant-numeric: tabular-nums; }
+.aw .adk-thumb-err { position: absolute; left: 24px; top: 6px; width: 16px; height: 16px; border-radius: 50%; background: #dc2626; color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+.aw .adk-thumb-plan { position: absolute; left: 24px; bottom: 6px; font-size: 9.5px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; background: rgba(0, 0, 0, 0.6); color: #fff; padding: 1px 5px; border-radius: 4px; }
+.aw .adk-thumb-tools { position: absolute; right: 4px; top: 4px; display: none; gap: 2px; }
+.aw .adk-thumb:hover .adk-thumb-tools, .aw .adk-thumb.is-on .adk-thumb-tools { display: flex; }
+.aw .adk-thumb-tools .aw-icon-btn { width: 22px; height: 22px; min-width: 22px; background: var(--aw-card); border-radius: 6px; box-shadow: var(--aw-shadow); }
+.aw .adk-add-wrap { padding-left: 20px; }
+.aw .adk-add.aw-btn { width: 100%; justify-content: center; height: 30px; font-size: 12px; border-style: dashed; }
+
+.aw .adk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.aw .adk-stage { flex: 1; min-height: 200px; display: flex; align-items: center; justify-content: center; padding: 12px 16px; overflow: hidden; background: var(--aw-raised); }
+.aw .adk-stage-slide { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--aw-line); border-radius: 3px; }
+.aw .adk-stage-slide [data-field] { cursor: text; }
+.aw .adk-stage-slide [data-field]:hover { outline: 1.5px dashed rgba(37, 99, 235, 0.55); outline-offset: 2px; }
+.aw .adk-problems { margin: 0; padding: 6px 16px 6px 34px; border-top: 1px solid var(--aw-soft); font-size: 12px; max-height: 92px; overflow: auto; }
+.aw .adk-problems li.is-err { color: #b91c1c; }
+.aw .adk-problems li.is-warn { color: #a16207; }
+.aw .adk-notes { border-top: 1px solid var(--aw-soft); padding: 4px 12px 8px; }
+.aw .adk-notes.is-closed { padding-bottom: 4px; }
+.aw .adk-notes-toggle { border: 0; background: none; color: var(--aico-text-muted); font-size: 11.5px; font-weight: 650; cursor: pointer; padding: 2px 0; }
+.aw .adk-notes .adk-field-label { display: none; }
+
+.aw .adk-slidebox { position: relative; overflow: hidden; flex: none; background: #fff; }
+.aw .adk-slidescale { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+/* Inspector */
+.aw .adk-inspector { flex: none; width: 300px; overflow-y: auto; padding: 10px 12px 18px; border-left: 1px solid var(--aw-soft); display: flex; flex-direction: column; gap: 9px; }
+.aw .adk-layout-btn.aw-btn { width: 100%; justify-content: space-between; height: 30px; font-size: 12.5px; }
+.aw .adk-plan { font-size: 12px; color: var(--aico-text-muted); background: var(--aw-raised); border-radius: 8px; padding: 6px 8px; font-style: italic; }
+.aw .adk-field { display: flex; flex-direction: column; gap: 3px; }
+.aw .adk-field-label { font-size: 11.5px; font-weight: 650; color: var(--aico-text-muted); }
+.aw .adk-hint { font-weight: 400; font-size: 11px; color: var(--aico-text-muted); }
+.aw .adk-field input, .aw .adk-field textarea, .aw .adk-field select, .aw .adk-group select, .aw .adk-unit {
+  width: 100%; box-sizing: border-box; border: 1px solid var(--aw-line); border-radius: 7px; background: var(--aw-card); color: inherit;
+  font: inherit; font-size: 12.5px; padding: 5px 7px; resize: vertical;
+}
+.aw .adk-field textarea { line-height: 1.45; }
+.aw .adk-field input:focus, .aw .adk-field textarea:focus { outline: none; border-color: var(--aico-accent); box-shadow: 0 0 0 2px var(--aico-accent-soft); }
+.aw .adk-group { border: 1px solid var(--aw-soft); border-radius: 9px; padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 7px; margin: 0; }
+.aw .adk-group legend { font-size: 11.5px; font-weight: 650; padding: 0 4px; }
+.aw .adk-unit { width: 120px; }
+.aw .adk-check { gap: 4px; }
+
+/* Narrow: the inspector goes under the slide, the sorter slims down. */
+.aw.adk[data-narrow] .adk-body { flex-wrap: wrap; overflow-y: auto; }
+.aw.adk[data-narrow] .adk-sorter { width: 136px; }
+.aw.adk[data-narrow] .adk-main { min-height: 360px; flex-basis: calc(100% - 140px); }
+.aw.adk[data-narrow] .adk-inspector { width: 100%; border-left: 0; border-top: 1px solid var(--aw-soft); }
+
+/* Present mode (fixed over everything, outside .aw on purpose: it is the slide, full screen) */
+.adk-present {
+  position: fixed; inset: 0; z-index: 2147483000; background: #000; display: flex; align-items: center; justify-content: center; outline: none;
+  color: #e5e7eb; font: 14px -apple-system, "Segoe UI", sans-serif;
+}
+.adk-present .adk-slidebox { position: relative; overflow: hidden; background: #fff; }
+.adk-present .adk-slidescale { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.adk-present-main { display: flex; align-items: center; justify-content: center; cursor: none; }
+.adk-present.is-presenter { justify-content: flex-start; gap: 24px; padding: 24px; box-sizing: border-box; background: #111318; }
+.adk-present.is-presenter .adk-present-main { cursor: pointer; }
+.adk-black { background: #000; }
+.adk-fade { animation: adk-fade 0.45s ease-out; }
+@keyframes adk-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .adk-fade { animation: none; } }
+.adk-present-hint { position: fixed; bottom: 10px; right: 14px; font-size: 12px; color: rgba(255, 255, 255, 0.35); pointer-events: none; }
+.adk-presenter-side { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; gap: 10px; }
+.adk-presenter-top { display: flex; align-items: center; gap: 16px; }
+.adk-timer { font-size: 34px; font-weight: 300; font-variant-numeric: tabular-nums; color: #fff; }
+.adk-counter { font-size: 15px; color: #9ca3af; }
+.adk-presenter-top .aw-btn { margin-left: auto; height: 30px; padding: 0 14px; border-radius: 8px; border: 1px solid #374151; background: #1f2937; color: #e5e7eb; cursor: pointer; }
+.adk-presenter-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin-top: 6px; }
+.adk-presenter-end { padding: 20px; border: 1px dashed #374151; border-radius: 8px; color: #6b7280; }
+.adk-notes-view { flex: 1; min-height: 0; overflow: auto; font-size: 20px; line-height: 1.5; color: #f3f4f6; white-space: pre-wrap; }

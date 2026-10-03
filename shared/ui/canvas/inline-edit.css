@@ -1,0 +1,86 @@
+/* Inline "Ask AICO" (ADR 0024): the panel under a part, its proposal drawn in
+ * the part's place, and the Undo toast. Built on the canvas tokens so light,
+ * dark and the VS Code themes apply unchanged. */
+
+.aw .adoc-block.is-ai-target {
+  box-shadow: inset 2px 0 0 var(--aico-accent);
+  background: color-mix(in srgb, var(--aico-accent-soft) 40%, transparent);
+}
+.aw .adoc-block-edit .adoc-ai-btn { color: var(--aico-accent); }
+
+.aw .aie { position: relative; margin: 10px -12px 14px; display: flex; flex-direction: column; gap: 8px; font-family: var(--aico-font); }
+.aw .aie-card {
+  padding: 10px 10px 9px; border: 1px solid var(--aw-line); border-radius: 12px; background: var(--aw-card);
+  box-shadow: var(--aw-shadow-strong); font-size: 13px; color: var(--aico-text-primary);
+}
+.aw .aie.is-review .aie-card { box-shadow: var(--aw-shadow); }
+.aw .aie-head { display: flex; align-items: center; gap: 6px; min-height: 26px; margin-bottom: 8px; font-size: 12.5px; }
+.aw .aie-spark { color: var(--aico-accent); flex: none; }
+.aw .aie-label { font-weight: 650; color: var(--aico-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aw .aie-meta { font-size: 11.5px; color: var(--aico-text-muted); white-space: nowrap; }
+.aw .aie-x { width: 24px; height: 24px; }
+.aw .aie-scopes { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 8px; background: var(--aw-raised); border: 1px solid var(--aw-soft); }
+.aw .aie-scopes button {
+  height: 22px; padding: 0 9px; border: 0; border-radius: 6px; background: none; color: var(--aico-text-secondary);
+  font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+}
+.aw .aie-scopes button.is-on { background: var(--aw-card); color: var(--aico-text-primary); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.aw .aie-row { margin-top: 2px; }
+.aw .aie-chips { margin-top: 7px; }
+.aw .aie-thread { margin: 0 0 8px; padding: 0 0 0 18px; font-size: 12px; color: var(--aico-text-secondary); }
+.aw .aie-thread li { margin: 1px 0; }
+.aw .aie-thread li.is-now { color: var(--aico-accent); }
+.aw .aie-note { margin: 0 0 8px; font-size: 12.5px; color: var(--aico-text-secondary); }
+.aw .aie-warn { list-style: none; margin: 0 0 8px; padding: 6px 9px; border-radius: 8px; background: color-mix(in srgb, #d97706 12%, transparent); font-size: 12px; color: var(--aico-text-primary); }
+.aw .aie-warn li { display: flex; gap: 6px; align-items: baseline; }
+.aw .aie-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.aw .aie-actions .aw-btn { gap: 5px; }
+.aw .aie-error { margin: 0 0 6px; font-size: 12.5px; color: var(--aico-text-primary); }
+.aw .aie-error p { display: flex; gap: 6px; align-items: baseline; margin: 0 0 6px; }
+.aw .aie-error ul { margin: 0 0 8px; padding-left: 22px; font-size: 12px; color: var(--aico-text-secondary); }
+.aw .aie-busy { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 0 2px 6px; font-size: 12.5px; color: var(--aico-text-secondary); }
+.aw .aie-dots { display: inline-flex; gap: 3px; }
+.aw .aie-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--aico-accent); animation: aie-dot 1.1s infinite ease-in-out; }
+.aw .aie-dots i:nth-child(2) { animation-delay: 0.15s; }
+.aw .aie-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes aie-dot { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .aw .aie-dots i { animation: none; opacity: 0.7; } }
+
+/* The proposal, in the part's place */
+.aw .aie-proposal {
+  position: relative; padding: 10px 12px; border: 1px dashed color-mix(in srgb, var(--aico-accent) 60%, transparent); border-radius: 8px;
+  background: color-mix(in srgb, var(--aico-accent-soft) 30%, var(--aw-card));
+}
+.aw .aie-tabs { position: absolute; top: -11px; right: 10px; display: inline-flex; padding: 1px; border-radius: 7px; background: var(--aw-card); border: 1px solid var(--aw-line); }
+.aw .aie-tabs button { height: 20px; padding: 0 8px; border: 0; border-radius: 5px; background: none; color: var(--aico-text-muted); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.aw .aie-tabs button.is-on { background: var(--aico-accent-soft); color: var(--aico-accent); }
+.aw .aie-words { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.65; color: var(--aico-text-primary); }
+.aw .aie-del { background: color-mix(in srgb, #dc2626 14%, transparent); color: inherit; opacity: 0.75; text-decoration: line-through; text-decoration-color: #dc2626; border-radius: 3px; }
+.aw .aie-ins { background: color-mix(in srgb, #16a34a 18%, transparent); color: inherit; text-decoration: none; border-radius: 3px; box-shadow: inset 0 -1px 0 color-mix(in srgb, #16a34a 55%, transparent); }
+.aw .aie-result { font-size: 15px; }
+.aw .aie-table-wrap { overflow-x: auto; }
+.aw .aie-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.aw .aie-table th, .aw .aie-table td { padding: 6px 9px; border: 1px solid var(--aw-line); text-align: left; vertical-align: top; }
+.aw .aie-table th { background: var(--aw-raised); font-weight: 650; }
+/* !important: a change mark must win over the document theme's zebra rows and header fill. */
+.aw .aie-table td.is-changed, .aw .aie-table th.is-changed { background: color-mix(in srgb, #d97706 16%, var(--aw-card)) !important; }
+.aw .aie-table td.is-added, .aw .aie-table th.is-added, .aw .aie-table tr.is-added td { background: color-mix(in srgb, #16a34a 16%, var(--aw-card)) !important; }
+.aw .aie-table th.is-added, .aw .aie-table th.is-changed { color: var(--aico-text-primary) !important; }
+.aw .aie-table tr.is-moved td:first-child { box-shadow: inset 3px 0 0 var(--aico-accent); }
+.aw .aie-table tr.is-removed td { background: color-mix(in srgb, #dc2626 12%, var(--aw-card)) !important; }
+/* The cells a cell-range edit targets, marked in the page's own table. */
+.aw .adoc-block [data-ai-cell] { outline: 2px solid var(--aico-accent); outline-offset: -2px; background: color-mix(in srgb, var(--aico-accent-soft) 60%, transparent) !important; }
+.aw .aie-quote { margin-bottom: 8px; }
+.aw .aie-proposal.is-drawn { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.aw .aie-side { min-width: 0; }
+.aw .aie-side-head { margin-bottom: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--aico-text-muted); }
+.aw .aie-side.is-after .aie-side-head { color: var(--aico-accent); }
+@container (max-width: 640px) { .aw .aie-proposal.is-drawn { grid-template-columns: 1fr; } }
+
+/* Undo after an accepted edit */
+.aw .aie-toast {
+  position: sticky; bottom: 14px; z-index: 32; display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 32px);
+  margin: 0 auto; padding: 6px 8px 6px 12px; border: 1px solid var(--aw-line); border-radius: 999px; background: var(--aw-card);
+  box-shadow: var(--aw-shadow-strong); font-size: 12.5px; color: var(--aico-text-primary);
+}
+.aw .aie-toast .aw-btn { height: 26px; }

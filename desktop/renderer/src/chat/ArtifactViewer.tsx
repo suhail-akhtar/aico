@@ -57,6 +57,7 @@ export function typeStyle(e: Pick<ArtifactEntry, 'kind' | 'item'>): { icon: stri
   switch (k) {
     case 'sheet': case 'csv': case 'xlsx': return { icon: 'table', tint: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' };
     case 'html': return { icon: 'globe', tint: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' };
+    case 'deck': return { icon: 'monitor', tint: 'bg-orange-500/10 text-orange-600 dark:text-orange-400' };
     case 'code': return { icon: 'code', tint: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' };
     case 'pdf': return { icon: 'file-text', tint: 'bg-rose-500/10 text-rose-600 dark:text-rose-400' };
     case 'image': case 'svg': return { icon: 'image', tint: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' };
@@ -115,7 +116,7 @@ export function ArtifactViewer({ sessionId, entry, actions }: {
 }): React.ReactElement {
   if (entry.kind === 'canvas') {
     return (
-      <Placeholder entry={entry} title="A live canvas" body="Documents, sheets and code canvases open in the editor beside the chat, where you and the agent can both change them.">
+      <Placeholder entry={entry} title="A live canvas" body="Documents, sheets, presentations and code canvases open in the editor beside the chat, where you and the agent can both change them.">
         <button className="btn-accent btn-sm" onClick={actions.openCanvas}><Icon name="panel-right" size={14} />Open beside the chat</button>
       </Placeholder>
     );

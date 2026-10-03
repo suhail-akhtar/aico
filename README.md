@@ -252,6 +252,13 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **Spreadsheets and artifacts.** A real sheet with Excel formulas and `.xlsx` export, documents designed per type (41 types, 16 themes), and an Artifacts panel to work side by side.
 - **Refactor at scale.** Structural search & replace (ast-grep) and TypeScript rename/move across a codebase — previewed, checkpointed, checked, rolled back if red.
 
+### 📄 Documents and presentations that look designed
+
+- **Each kind of document has its own design**: proposals, technical designs, reports, SOPs and policies, letters, papers, CVs, marketing briefs, contracts and manuals each get their own cover, front matter (document control, revisions, approvals), fonts, heading numbering, running headers, table styles and the visuals that kind needs — architecture diagrams for a design, Gantt, RACI and pricing for a proposal.
+- **Word and PDF exports you can send**: real Word styles and numbering, a full cover page, contents with real page numbers, numbered captions, table headers that repeat, columns sized to their content, diagrams and charts at print resolution.
+- **Presentations**: decks with real layouts (title, section, bullets, two-column, chart, diagram, table, big numbers, timeline, quote…), 12 themes and deck types (pitch, technical briefing, status, training…), slide sorter, present mode with speaker notes — exported to editable PowerPoint (native text, tables and charts), PDF or images.
+- **Ask AICO about just one part.** Select a sentence, a paragraph, table cells, a chart, a diagram or a section and ask for a change: AICO knows the document's type, style and outline, shows a before/after, and changes nothing else — checked in code, undoable in one step.
+
 ### 🧠 It knows you — and you control what it knows
 
 - **Recall: memory by meaning.** A local index of your memories, knowledge and every past session — search by words, and by meaning once you pick an embeddings model. *"What did we decide about auth last week?"* just works. Duplicates update instead of piling up, a changed fact supersedes the old one (kept, restorable), and only memories relevant to the request are sent.

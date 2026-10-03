@@ -26,6 +26,8 @@ export const EXPORT_TYPES: Record<ExportFormat, { label: string; ext: string; mi
   html: { label: 'Web page', ext: 'html', mime: 'text/html' },
   xlsx: { label: 'Excel workbook', ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
   csv: { label: 'CSV', ext: 'csv', mime: 'text/csv' },
+  pptx: { label: 'PowerPoint presentation', ext: 'pptx', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' },
+  png: { label: 'Slide images (zip)', ext: 'zip', mime: 'application/zip' },
 };
 
 function base64(bytes: Uint8Array): string {

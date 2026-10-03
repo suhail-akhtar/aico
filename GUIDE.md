@@ -472,6 +472,17 @@ the frozen header and conditional fills — it opens in Excel) or a CSV;
 **Import** turns a `.xlsx` or `.csv` into a new sheet. Charts stay in AICO —
 they are not written into the `.xlsx`.
 
+Ask for a **presentation** ("a 10-slide pitch deck for…", "a status deck for
+the steering committee") and the agent plans the slides for that kind of deck,
+then fills them: titles, bullets, two columns, comparisons, charts, Mermaid
+diagrams, tables, big numbers, timelines, quotes and speaker notes. You edit
+the content — the layout, spacing and text size are worked out for you, and
+anything that will not fit is outlined in red with the reason. Pick one of 12
+themes, drag slides to reorder, **Present** (F5; arrows, B for black, S for
+the presenter view with notes, next slide and a timer), and **Export** a
+`.pptx` whose text, tables and charts stay editable in PowerPoint, a PDF, or a
+PNG per slide.
+
 **Artifacts** (desktop: the button beside Share) lists what the chat made or
 opened — documents, sheets, code, exports, generated images and attachments —
 grouped by type or by topic (an export sits under the document it came from).

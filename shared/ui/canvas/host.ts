@@ -23,9 +23,10 @@
 
 import type React from 'react';
 import type { CanvasComment, CommentAnchor } from './comments';
+import type { PartEditRequest, PartEditResponse } from './scoped-edit';
 
-/** `sheet`: an AICO Sheets workbook (`sheet-model.ts`), its one tab holding the workbook JSON. */
-export type CanvasKind = 'document' | 'code' | 'sheet';
+/** `sheet`: an AICO Sheets workbook (`sheet-model.ts`), its one tab holding the workbook JSON. `deck`: an AICO Slides presentation (`deck-model.ts`), likewise. */
+export type CanvasKind = 'document' | 'code' | 'sheet' | 'deck';
 export type CanvasAuthor = 'agent' | 'user';
 
 export interface CanvasVersion {
@@ -140,8 +141,8 @@ export interface CanvasActivity {
   by: 'agent';
 }
 
-/** `xlsx` and `csv` are a sheet's formats; the others a document's. */
-export type ExportFormat = 'md' | 'html' | 'docx' | 'pdf' | 'xlsx' | 'csv';
+/** `xlsx` and `csv` are a sheet's formats; `pptx`, `pdf` and `png` (a zip of slides) a deck's; the others a document's. */
+export type ExportFormat = 'md' | 'html' | 'docx' | 'pdf' | 'xlsx' | 'csv' | 'pptx' | 'png';
 
 export type CanvasWriteResult =
   | { ok: true; canvas: CanvasDoc; changed: boolean }
@@ -183,6 +184,12 @@ export interface CanvasHost {
   saveSettings?: (id: string, settings: DocSettings) => Promise<CanvasDoc>;
   /** Create a document from the editor (a template), or an empty sheet (`kind: 'sheet'`, content ''). */
   create?: (input: { title: string; content: string; kind?: CanvasKind }) => Promise<CanvasDoc>;
+  /**
+   * A scoped AI edit of one part of a tab (ADR 0024): the engine answers with
+   * a validated proposal and writes nothing. Absent on an engine without the
+   * route: "Ask AICO" then falls back to a chat message.
+   */
+  editPart?: (id: string, req: PartEditRequest, signal?: AbortSignal) => Promise<PartEditResponse>;
   /** Rename a canvas (title only). */
   rename?: (id: string, title: string) => Promise<CanvasDoc>;
   /** A .xlsx/.csv file as a new sheet canvas. */
@@ -220,7 +227,7 @@ export function emitCanvasEvent(data: unknown): void {
     sessionId: String(d.sessionId ?? ''),
     id: d.id,
     title: String(d.title ?? ''),
-    kind: d.kind === 'code' || d.kind === 'sheet' ? d.kind : 'document',
+    kind: d.kind === 'code' || d.kind === 'sheet' || d.kind === 'deck' ? d.kind : 'document',
     version: d.version,
     author: d.author === 'user' ? 'user' : 'agent',
     action: d.action === 'create' || d.action === 'restore' || d.action === 'tabs' || d.action === 'rename' ? d.action : 'update',

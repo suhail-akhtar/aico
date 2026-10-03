@@ -71,6 +71,21 @@ function loadMermaid(): Promise<typeof import('mermaid').default> {
 }
 
 /**
+ * The real Mermaid parser's verdict on a source: null when it parses, else the
+ * error. Used by the canvas's inline AI edit (ADR 0024) to refuse a proposed
+ * diagram before it can be accepted — the engine's own check is syntax-only.
+ */
+export async function mermaidParseError(source: string): Promise<string | null> {
+  try {
+    const mermaid = await loadMermaid();
+    await mermaid.parse(source);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+/**
  * Rendered SVG, keyed by source.
  *
  * Module-level rather than component state on purpose: it must survive the

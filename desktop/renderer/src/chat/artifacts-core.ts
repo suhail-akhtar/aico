@@ -183,6 +183,7 @@ export type Grouping = 'type' | 'time' | 'topic';
 const TYPE_ORDER: Array<{ name: string; test: (e: ArtifactEntry) => boolean }> = [
   { name: 'Documents', test: e => (e.kind === 'canvas' && e.item.kind === 'document') || ['markdown', 'docx', 'pdf', 'text'].includes(e.kind) },
   { name: 'Sheets', test: e => (e.kind === 'canvas' && e.item.kind === 'sheet') || e.kind === 'csv' || e.kind === 'xlsx' },
+  { name: 'Presentations', test: e => (e.kind === 'canvas' && e.item.kind === 'deck') || e.ext === 'pptx' },
   { name: 'Web pages', test: e => e.kind === 'html' },
   { name: 'Code', test: e => (e.kind === 'canvas' && e.item.kind === 'code') || e.kind === 'code' },
   { name: 'Images', test: e => e.kind === 'image' || e.kind === 'svg' },
@@ -223,7 +224,7 @@ export function matchesQuery(e: ArtifactEntry, query: string): boolean {
 
 /** Short label for the type tile and the meta line: "PNG", "Sheet", "Web page". */
 export function typeLabel(e: Pick<ArtifactEntry, 'kind' | 'ext' | 'item'>): string {
-  if (e.kind === 'canvas') return e.item.kind === 'sheet' ? 'Sheet' : e.item.kind === 'code' ? 'Code' : 'Document';
+  if (e.kind === 'canvas') return e.item.kind === 'sheet' ? 'Sheet' : e.item.kind === 'deck' ? 'Presentation' : e.item.kind === 'code' ? 'Code' : 'Document';
   return e.ext ? e.ext.toUpperCase() : 'File';
 }
 

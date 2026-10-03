@@ -42,7 +42,7 @@ import { costFor, createTokenTracker } from '../tokens.js';
 
 export type ModelRole =
   | 'main' | 'coding' | 'explore' | 'review' | 'background'
-  | 'sentinel' | 'judge' | 'vision' | 'image' | 'embed' | 'compact';
+  | 'sentinel' | 'judge' | 'vision' | 'image' | 'embed' | 'compact' | 'edit';
 
 export type RolePreset = 'balanced' | 'economy' | 'quality' | 'private';
 
@@ -78,6 +78,8 @@ export const ROLES: readonly RoleInfo[] = [
   { role: 'image', label: 'Image generation', does: 'Makes pictures (GenerateImage).', personal: false, needs: 'image-out' },
   { role: 'embed', label: 'Embeddings', does: 'Finds memories by meaning. Off means search by words only.', personal: true, needs: 'embedding' },
   { role: 'compact', label: 'Summaries', does: 'Summarises long conversations. Same as Main keeps the prompt cache.', personal: false, needs: 'chat' },
+  // ADR 0024: "Ask AICO" on one part of a document. Main by default — the person reads every word it changes.
+  { role: 'edit', label: 'Inline edits', does: 'Rewrites one selected part of a document in place (Ask AICO on a selection).', personal: false, needs: 'chat' },
 ];
 
 export const ROLE_IDS = ROLES.map(r => r.role);
@@ -187,6 +189,7 @@ function presetChoice(role: ModelRole, preset: RolePreset, o: ResolveOptions, ha
   switch (role) {
     case 'main': case 'coding': return main;
     case 'compact': return main;
+    case 'edit': return preset === 'economy' ? cheap : main;
     case 'explore': case 'review': return preset === 'economy' ? cheap : main;
     case 'background': return preset === 'quality' ? main : cheap;
     case 'sentinel': {

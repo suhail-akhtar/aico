@@ -71,6 +71,7 @@ import type { EditOp } from './BlockEditors';
 import { desktopPdf, EXPORT_TYPES, pickImage, saveBlob } from './export';
 import { CodeArea } from './CodeArea';
 import { SheetEditor } from './SheetEditor';
+import { DeckEditor } from './DeckEditor';
 import { CvIcon, type CanvasIconName } from './icons';
 import { DOC_BLOCK_KINDS, docBlockTemplate } from './doc-blocks';
 import { SCHEMAS } from './DocBlocks';
@@ -150,6 +151,10 @@ function Switchable(props: CanvasEditorProps & { host: CanvasHost }): React.Reac
     return () => { live = false; };
   }, [props.host, current.id, current.initial?.kind]);
   if (kind === undefined) return <div className="aw acv" data-variant={props.variant ?? 'panel'}><div className="acv-empty">Opening…</div></div>;
+  if (kind === 'deck') {
+    return <DeckEditor key={current.id} host={props.host} id={current.id} {...(current.initial ? { initial: current.initial } : {})}
+      variant={props.variant ?? 'panel'} {...(props.onClose ? { onClose: props.onClose } : {})} openOther={openOther} />;
+  }
   if (kind === 'sheet') {
     return <SheetEditor key={current.id} host={props.host} id={current.id} {...(current.initial ? { initial: current.initial } : {})}
       variant={props.variant ?? 'panel'} {...(props.onClose ? { onClose: props.onClose } : {})} openOther={openOther} />;
@@ -368,6 +373,8 @@ function Editor({ host, id, initial, variant = 'panel', onClose, openOther }: Ca
 
   const askFromToolbar = (): void => {
     const sel = window.getSelection();
+    // A selection on the page is edited in place (ADR 0024); without one the whole tab goes to the chat.
+    if (isPage && sel && !sel.isCollapsed && docPage.current?.inlineEdit()) return;
     const s = isPage && sel && !sel.isCollapsed ? sel.toString() : selection;
     openAsk({ x: Math.max(8, (root.current?.clientWidth ?? 440) - 440), y: 90 }, s);
   };
@@ -448,6 +455,13 @@ function Editor({ host, id, initial, variant = 'panel', onClose, openOther }: Ca
   const onRootKey = (e: React.KeyboardEvent): void => {
     const mod = e.ctrlKey || e.metaKey;
     if (!isPage || !mod) return;
+    // Ctrl+K / Ctrl+I while reading (no block open, where they would mean link / italic): Ask AICO on the selection or the block.
+    if (!e.shiftKey && !e.altKey && (e.code === 'KeyK' || e.code === 'KeyI') && !editorKind && !viewing
+      && !(e.target as HTMLElement).closest?.('input, textarea, [contenteditable="true"]')) {
+      e.preventDefault();
+      if (!docPage.current?.inlineEdit()) showFlash('Select some text or click a block, then press Ctrl+K to ask AICO');
+      return;
+    }
     if (e.shiftKey && !e.altKey && e.code === 'KeyA') { e.preventDefault(); askFromToolbar(); }
     else if (e.altKey && !e.shiftKey && e.code === 'KeyM') { e.preventDefault(); comment(); }
   };
@@ -728,7 +742,7 @@ function Editor({ host, id, initial, variant = 'panel', onClose, openOther }: Ca
           {isPage && !viewing && (
             <>
               {comments.supported !== false && <Tb icon="comment" label="Comment on the selection (Ctrl+Alt+M)" onClick={comment} />}
-              <button type="button" className="acv-tb adoc-ask" title="Ask AICO to edit (Ctrl+Shift+A) — the selection, or the whole tab"
+              <button type="button" className="acv-tb adoc-ask" title="Ask AICO to edit — a selection in place (Ctrl+K), or the whole tab in the chat (Ctrl+Shift+A)"
                 onMouseDown={e => e.preventDefault()} onClick={askFromToolbar}>
                 <CvIcon name="sparkle" size={14} /> <span className="aw-hide-narrow">Ask AICO</span>
               </button>

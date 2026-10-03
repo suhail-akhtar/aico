@@ -7,6 +7,51 @@ the code changes**, so the other side can read them.
 
 ## Contract changes
 
+**Engine + UI, 2026-10-03 (document design blueprints).** Additive. ADR 0022.
+
+1. **Settings** gain `docType` (the type id; every template stores it),
+   `blueprint` (a family id, overriding the type's) and `control: {client,
+   reference, version, status, owner, preparedBy, revisions[], approvals[],
+   distribution[]}` (merged field by field). `cover: false` is now kept as
+   `{enabled:false}` so it can switch off a family's cover.
+2. **`resolveLook`** (`doc-themes`) returns `blueprint` and `fonts` (the
+   family's Word-safe pairing) besides the theme; `themeAttrs` sets
+   `--dt-body`/`--dt-head` from them, `--dt-head-weight`, `data-dt-bp`, and
+   `data-dt-numbered` for numbered families. The page drops the numbering when
+   the author typed numbers into the headings (`doc-layout` `typedNumbering`).
+3. **Authoring conventions** the exports read: a paragraph `Table: …` beside a
+   table and `Figure: …` beside a diagram, chart or picture become numbered
+   captions; `## Appendix A — …` is lettered; never type section numbers into
+   headings (an export removes "2.4 " and numbers with real Word numbering).
+
+**Engine + UI, 2026-10-03 (AICO Slides).** Additive. ADR 0023.
+
+1. **`kind: 'deck'`.** One tab whose `content` is the deck as JSON —
+   `{"v":1,"aspect":"16:9"|"4:3","theme","type?","footer?","slideNumbers?",
+   "slides":[{id, layout, title?, subtitle?, bullets?:[{text, level?}], body?,
+   left?/right?:{heading, bullets, body}, image?:{src, alt, fit}, chart?:{type,
+   categories, series:[{name, values}], unit?, echarts?}, diagram? (Mermaid),
+   table?:{header, rows}, kpis?, quote?, attribution?, timeline?, source?,
+   notes?, transition?:'none'|'fade', intent?}]}` (`shared/ui/canvas/
+   deck-model.ts`, DOM-free). Every write must parse as a deck (the store
+   refuses otherwise); no tabs. Versions, 409, history and `canvas` frames are
+   unchanged — frames carry `kind:'deck'`.
+2. **Layout** is computed, never stored: `deck-layout.ts` turns a slide into
+   positioned frames and problems; the editor, the PDF/PNG export
+   (`deck-render.ts`) and the .pptx writer draw the same frames.
+3. **Routes:** `POST canvas/create {kind:'deck', content}` (empty deck when no
+   content); `GET canvas/:id/export?format=pptx|pdf|png` (png = a zip of
+   slide images; other formats 400).
+4. **Tool `Canvas`:** `create {kind:'deck', template?, theme?, aspect?,
+   footer?, slides?}`, `set_slides {id, version, slides?, remove?, order?,
+   theme?, footer?, aspect?, template?}`, `read {id, slides?:[ids]}`,
+   `export {format: pptx|pdf|png}`; document actions on a deck are refused
+   naming `set_slides`. Every write returns the layout check.
+5. **Host (UI):** `CanvasKind` gains `'deck'`, `ExportFormat` gains
+   `'pptx'|'png'`; a deck opens in `DeckEditor` (card: "presentation" badge,
+   slide count and titles). Artifacts lists decks (and .pptx files) under
+   Presentations.
+
 **Engine + UI, 2026-10-03 (AICO Sheets and the Artifacts list).** Additive.
 
 1. **`kind: 'sheet'`.** A sheet canvas has exactly one tab whose `content` is

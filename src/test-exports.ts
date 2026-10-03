@@ -451,8 +451,13 @@ export {
   SECTION_ID, listSections, findSection, replaceSection, pendingBlocks, pendingLine, parsePendingLine, stripPending, sectionAt,
 } from './canvas/sections.js';
 export { locate as locateAnchor, reanchor, project as projectMarkdown, addressesAgent } from './canvas/comments.js';
-export { exportCanvas, exportSource, toHtml, buildHtml, headingPages } from './canvas/export.js';
-export { cleanSettings, mergeSettings, resolveSettings } from './canvas/doc-settings.js';
+export { exportCanvas, exportSource, toHtml, buildHtml, headingPages, pdfLayout, runningText } from './canvas/export.js';
+export { cleanSettings, mergeSettings, resolveSettings, controlValues, expandRunning } from './canvas/doc-settings.js';
+// -- Document design (ADR 0022) --
+export { planDocument, frontModel } from './canvas/doc-plan.js';
+export { toDocx, tableCapacity } from './canvas/docx.js';
+export * as DocBlueprints from '../shared/ui/canvas/doc-blueprints.js';
+export * as DocLayout from '../shared/ui/canvas/doc-layout.js';
 export {
   DOC_TYPES, VISUAL_BLOCKS, docTypeById, pickDocType, classificationOf, writingNote, docTypeSummary, BLOCK_SYNTAX,
 } from './canvas/doc-types.js';
@@ -469,6 +474,10 @@ export { listArtifacts, handleArtifactRoute } from './server/artifact-routes.js'
 export { handleCanvasRoute } from './server/canvas-routes.js';
 export * as SheetModel from '../shared/ui/canvas/sheet-model.js';
 export * as SheetFormula from '../shared/ui/canvas/sheet-formula.js';
+// -- Inline (scoped) AI edits, ADR 0024 --
+export { editPart, editDocPart, editPrompt, docInfo, EDIT_SYSTEM, EDIT_EFFORT } from './canvas/inline-edit.js';
+export * as ScopedEdit from '../shared/ui/canvas/scoped-edit.js';
+export * as ScopedDiff from '../shared/ui/canvas/scoped-diff.js';
 // -- Credential vault & broker --
 export {
   getVault, configureVault, resolve as vaultResolve, redactor as vaultRedactor, redact as vaultRedact,
@@ -692,3 +701,13 @@ export { worktreeManager, describeWorktreeFinish } from './worktree/index.js';
 export { executeEnterWorktree, executeExitWorktree } from './worktree/tools.js';
 export { backgroundExitNotice } from './tools/bash.js';
 export { isSubAgentSessionId } from './session/persistence.js';
+// -- AICO Slides (decks), ADR 0023 --
+export * as DeckModel from '../shared/ui/canvas/deck-model.js';
+export * as DeckLayout from '../shared/ui/canvas/deck-layout.js';
+export * as DeckThemes from '../shared/ui/canvas/deck-themes.js';
+export * as DeckTypes from '../shared/ui/canvas/deck-types.js';
+export * as DeckRender from '../shared/ui/canvas/deck-render.js';
+export { textWidth as deckTextWidth } from '../shared/ui/canvas/deck-fonts.js';
+export { toPptx, chartXml as deckChartXml, imageSize, nativeChart } from './canvas/deck-pptx.js';
+export { exportDeck, deckHtml, deckChartSvg, DECK_EXPORT_FORMATS } from './canvas/deck-export.js';
+export { createDeck, setSlides, readDeck, DECK_TOOL_HELP } from './canvas/deck-tool.js';

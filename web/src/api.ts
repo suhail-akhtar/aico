@@ -31,6 +31,7 @@
 import { transportFetch } from './transport';
 import type { HostAnswer, HostCall, HostToolName } from '../../shared/host-tools';
 import type { CanvasDoc, CanvasSummary, CanvasWriteResult, DocSettings, ExportFormat } from '../../shared/ui/canvas/host';
+import type { PartEditRequest, PartEditResponse } from '../../shared/ui/canvas/scoped-edit';
 import type { CanvasComment, CommentAnchor } from '../../shared/ui/canvas/comments';
 import type { ImportReview, ReviewedSkill, SkillProvenance } from './skill-review';
 
@@ -223,7 +224,7 @@ const get = <T,>(path: string): Promise<T> => request<T>(path, { method: 'GET' }
 /** One thing a chat made or opened, as `artifacts/list` returns it (engine: `server/artifact-routes`). */
 export interface ArtifactItem {
   key: string;
-  kind: 'document' | 'sheet' | 'code' | 'image' | 'file' | 'export';
+  kind: 'document' | 'sheet' | 'deck' | 'code' | 'image' | 'file' | 'export';
   source: 'canvas' | 'file' | 'attachment';
   /** Canvas id, path inside the chat's artifacts folder, or attachment id. */
   id: string;
@@ -942,10 +943,13 @@ export const api = {
     post<{ canvas: CanvasDoc }>('canvas/tabs', { session: sessionId, id, ...op }),
   canvasSettings: (sessionId: string, id: string, docSettings: DocSettings) =>
     post<{ canvas: CanvasDoc }>('canvas/settings', { session: sessionId, id, settings: docSettings }),
-  canvasCreate: (sessionId: string, input: { title: string; content: string; kind?: 'document' | 'code' | 'sheet' }) =>
+  canvasCreate: (sessionId: string, input: { title: string; content: string; kind?: 'document' | 'code' | 'sheet' | 'deck' }) =>
     post<{ canvas: CanvasDoc }>('canvas/create', { session: sessionId, kind: 'document', ...input }),
   canvasRename: (sessionId: string, id: string, title: string) =>
     post<{ canvas: CanvasDoc }>('canvas/rename', { session: sessionId, id, title }),
+  /** A scoped AI edit (ADR 0024): a validated proposal for one part; nothing is written. Cancelled by `signal`. */
+  canvasEditPart: (sessionId: string, id: string, body: PartEditRequest, signal?: AbortSignal) =>
+    request<PartEditResponse>('canvas/edit-part', { method: 'POST', body: JSON.stringify({ session: sessionId, id, ...body }), ...(signal ? { signal } : {}) }),
   /** A .xlsx/.csv as a new sheet canvas; `data` is base64. */
   canvasImport: (sessionId: string, file: { name: string; data: string }) =>
     post<{ canvas: CanvasDoc }>('canvas/import', { session: sessionId, ...file }),

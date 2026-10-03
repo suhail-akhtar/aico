@@ -722,6 +722,21 @@ test('themes: every type exists, aliases resolve, defaults sit under stored valu
   assert.equal(TH.tint('#000000', 0.1), 'E6E6E6');
 });
 
+test('blueprints (ADR 0022): the page is set in the family\'s faces and numbers as the export will', () => {
+  const look = TH.resolveLook({ docType: 'technical-proposal' });
+  assert.equal(look.blueprint.id, 'proposal');
+  assert.equal(look.theme.id, 'proposal', 'a type with no stored theme takes its family\'s');
+  assert.equal(look.fonts.body.word, 'Segoe UI');
+  const { attrs, vars } = TH.themeAttrs(look);
+  assert.equal(attrs['data-dt-bp'], 'proposal');
+  assert.equal(attrs['data-dt-numbered'], '1');
+  assert.ok(vars['--dt-body'].startsWith("'Segoe UI'") && vars['--dt-head-weight'] === '600');
+  // A document that chose the other body class keeps the round-3 faces.
+  assert.equal(TH.resolveLook({ theme: 'report', font: 'serif' }).fonts.body.word, 'Georgia');
+  assert.equal(TH.resolveLook({}).blueprint.id, 'general');
+  assert.ok(TH.themeRules('body').includes('font-weight: var(--dt-head-weight, 700)'));
+});
+
 test('page widths: the stored choice, else Normal beside the chat and Wide in full screen', () => {
   assert.equal(TH.pageWidthFor(undefined, false), 'normal');
   assert.equal(TH.pageWidthFor(undefined, true), 'wide');

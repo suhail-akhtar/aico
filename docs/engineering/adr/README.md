@@ -46,6 +46,9 @@ in the module header of the code they govern.
 | [0019](0019-terminal-integration.md) | Terminals: OSC 133 shell integration, read-only agent access to user tabs, vault SSH shells from main | Accepted |
 | [0020](0020-scripted-html-previews.md) | Run HTML previews from their own origin (`aico://preview`), sandboxed, with no network | Accepted |
 | [0021](0021-background-agents-that-report-back.md) | Background agents report back, inherit their parent's bounds, resume (also after a restart), isolate in worktrees without discarding work, and share a per-session concurrency cap | Accepted |
+| [0022](0022-document-design-system.md) | Lay documents out by family: blueprints (cover, front matter, faces, numbering, running text, captions, expected visuals) drive the writing brief, the .docx and the PDF | Accepted |
+| [0023](0023-presentations.md) | Presentations: slides as layouts plus fields, one layout engine that fits text for the app, PDF and a hand-written .pptx (native text, tables, charts, notes) | Accepted |
+| [0024](0024-inline-scoped-edits.md) | Ask AICO edits one part of a document: a typed patch for that part, validated in code (scope, shape, figures, references), reviewed as a diff, accepted as one version | Proposed |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

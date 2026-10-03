@@ -15034,7 +15034,7 @@ console.log('\n══ Canvas documents (store, Canvas tool, /api/canvas/*) ═�
       'list: newest first, summaries without content');
     msg = '';
     try { await createCanvas(ctx, { title: 't', kind: 'slides', content: 'x' }); } catch (e) { msg = e.message; }
-    assert(/kind must be "document", "code" or "sheet"/.test(msg), 'an unknown kind is refused');
+    assert(/kind must be "document", "code", "sheet" or "deck"/.test(msg), 'an unknown kind is refused');
 
     // ── find/replace ──
     const fr = applyFindReplace('one two one', 'two', '2');
@@ -15342,8 +15342,9 @@ console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
     const rels = strFromU8(zip['word/_rels/document.xml.rels']);
     assert(docx.fileName === 'export-test.docx' && docx.bytes[0] === 0x50 && docx.bytes[1] === 0x4b, 'docx: a zip named after the title');
     assert(['[Content_Types].xml', 'word/styles.xml', 'word/numbering.xml', 'docProps/core.xml'].every(f => zip[f]), 'docx: the package parts are present');
-    assert(/<w:pStyle w:val="Title"\/>.*Export test/.test(xml) && /<w:pStyle w:val="Heading2"\/><\/w:pPr><w:bookmarkStart w:id="\d+" w:name="_Toc_overview"\/><w:r><w:t xml:space="preserve">Overview/.test(xml),
-      'docx: title and headings use Word heading styles');
+    // ADR 0022: the top section level is Heading 1 (a "##" section under the title), so Word's outline and TOC start there.
+    assert(/<w:pStyle w:val="Title"\/>.*Export test/.test(xml) && /<w:pStyle w:val="Heading1"\/><\/w:pPr><w:bookmarkStart w:id="\d+" w:name="_Toc_overview"\/><w:r><w:t xml:space="preserve">Overview/.test(xml),
+      'docx: title and headings use Word heading styles, the top section as Heading 1');
     assert(/<w:b\/><w:bCs\/><\/w:rPr><w:t xml:space="preserve">bold/.test(xml) && /<w:i\/><w:iCs\/><\/w:rPr><w:t xml:space="preserve">italic/.test(xml)
       && /CodeChar.*code</.test(xml) && /<w:strike\/>.*gone/.test(xml), 'docx: bold, italic, inline code and strikethrough runs');
     assert(/<w:hyperlink r:id="(rId\d+)"/.test(xml) && rels.includes('Target="https://example.com" TargetMode="External"'), 'docx: links are real hyperlinks');
@@ -15368,7 +15369,7 @@ console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
     assert(round === X.listSections(X.stripPending(rich)).map(s => s.heading).join().replace(/^/, 'Export test,'), 'md: round-trips to the same sections');
     const html = (await X.exportCanvas(edoc, { format: 'html', resolveImage: imgs })).bytes.toString('utf8');
     assert(html.startsWith('<!doctype html>') && html.includes('<style>') && /<img src="data:image\/png;base64,/.test(html)
-      && html.includes('<table>') && html.includes('type="checkbox" disabled checked') && !html.includes('aico:pending')
+      && /<table class="fit tv-grid"><colgroup>/.test(html) && html.includes('type="checkbox" disabled checked') && !html.includes('aico:pending')
       && html.includes('<em>[outside]</em>'), 'html: standalone, inline CSS, images inlined, placeholders stripped');
     const multi = X.exportSource(d2);
     assert(multi.markdown.startsWith('# Plan') && multi.markdown.includes('# Notes') && X.exportSource(d2, 't2').title === 'Two tabs — Notes',
@@ -15524,11 +15525,12 @@ console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
     const x3 = strFromU8(z3['word/document.xml']);
     const hdr = strFromU8(z3['word/header1.xml']);
     const ftr = strFromU8(z3['word/footer1.xml']);
-    assert(/<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"\/>/.test(x3) && /<w:titlePg\/>/.test(x3)
-      && /w:type="first"/.test(x3) && strFromU8(z3['word/styles.xml']).includes('w:ascii="Georgia"'), 'docx: Letter landscape, serif, a separate cover page');
-    assert(hdr.includes('Rich') && hdr.includes('v:textpath') && hdr.includes('string="CONFIDENTIAL"') && / PAGE /.test(ftr) && / NUMPAGES /.test(ftr)
-      && !/Page .* of/.test(ftr.replace(/<[^>]+>/g, '')), 'docx: header text, watermark, and a footer with live PAGE/NUMPAGES fields where the template put them');
-    assert(/ TOC \\o "1-4" \\h \\z \\u /.test(x3) && /<w:hyperlink w:anchor="_Toc_one"/.test(x3) && /w:name="_Toc_two"/.test(x3)
+    // ADR 0022: the cover is a section of its own (no running header), and the body counts its own pages (SECTIONPAGES).
+    assert(/<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"\/>/.test(x3) && (x3.match(/<w:sectPr>/g) ?? []).length >= 2
+      && /<w:pgNumType w:start="1"\/>/.test(x3) && strFromU8(z3['word/styles.xml']).includes('w:ascii="Georgia"'), 'docx: Letter landscape, serif, a separate cover page');
+    assert(hdr.includes('Rich') && hdr.includes('v:textpath') && hdr.includes('string="CONFIDENTIAL"') && / PAGE /.test(ftr) && / SECTIONPAGES /.test(ftr)
+      && !/Page .* of/.test(ftr.replace(/<[^>]+>/g, '')), 'docx: header text, watermark, and a footer with live PAGE/SECTIONPAGES fields where the template put them');
+    assert(/ TOC \\o "1-3" \\h \\z \\u /.test(x3) && /<w:hyperlink w:anchor="_Toc_one"/.test(x3) && /w:name="_Toc_two"/.test(x3)
       && strFromU8(z3['word/settings.xml']).includes('<w:updateFields w:val="true"/>'), 'docx: a real TOC field over bookmarked headings, refreshed on open');
     assert(x3.includes('Sub') && x3.includes('Me') && /<w:pStyle w:val="Title"\/>.*Rich/.test(x3), 'docx: the cover page');
     assert(/<w:shd w:val="clear" w:color="auto" w:fill="F4F4F5"\/>.*\$1M/.test(x3) && x3.includes('F0FDF4') && x3.includes('22C55E') && x3.includes('worked')
@@ -15542,7 +15544,7 @@ console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
       assert(dx.warnings.length === 0 && media3.length >= 5
         && media3.every(k => { const b = z3[k]; return b[0] === 0x89 && b[1] === 0x50; }), `docx: chart, diagram, display + inline maths and the picture are PNGs in word/media (${media3.length})`);
       const html3 = (await X.exportCanvas(d3, { format: 'html', resolveImage: imgs })).bytes.toString();
-      assert((html3.match(/<figure class="visual visual-(chart|diagram)"><svg/g) ?? []).length === 2 && /class="visual visual-math"><img src="data:image\/png/.test(html3)
+      assert((html3.match(/<figure class="visual visual-(chart|diagram)"( style="--vw: \d+px")?><svg/g) ?? []).length === 2 && /class="visual visual-math"><img src="data:image\/png/.test(html3)
         && html3.includes('class="ig-stats"') && html3.includes('<nav class="toc">') && html3.includes('class="watermark"') && html3.includes('class="cover"'),
         'html: charts and diagrams inline as SVG, maths as PNG, infographics, TOC, cover and watermark');
       const pdf3 = await X.exportCanvas(d3, { format: 'pdf', resolveImage: imgs });
@@ -15595,12 +15597,18 @@ console.log('\n══ AICO Docs (tabs, sections, comments, exports) ══');
     assert(tiles4.length === 2 && !tiles4.some(t => t.includes('$100/mo') && t.includes('Internationalisation'))
       && /<w:sz w:val="22"\/><w:szCs w:val="22"\/><\/w:rPr><w:t xml:space="preserve">Internationalisation/.test(x4),
       'docx: KPI tiles wrap to more rows, and a long value is set smaller instead of splitting');
-    assert(s4.includes('w:ascii="Georgia"') && s4.includes('w:color w:val="3730A3"') && /Heading2.*<w:bottom w:val="single" w:sz="4"/.test(s4)
-      && x4.includes('w:fill="3730A3"'), 'docx: the proposal theme — serif headings, indigo accent, ruled H2, banded table header');
+    // ADR 0022: the proposal family's faces (Segoe UI, semibold headings), the theme's ruled section heading — now Heading 1.
+    assert(s4.includes('w:ascii="Segoe UI Semibold"') && s4.includes('w:ascii="Segoe UI"') && s4.includes('w:color w:val="3730A3"')
+      && /styleId="Heading1">.*?<w:bottom w:val="single" w:sz="4"/.test(s4) && x4.includes('w:fill="3730A3"'),
+    'docx: the proposal theme and family — Segoe UI pairing, indigo accent, ruled top headings, banded table header');
     assert(h4.includes('INTERNAL') && f4.includes('INTERNAL') && h4.includes('Northwind'), 'docx: the classification banner in the header and footer');
     const d5 = await X.createCanvas(ctx, { title: 'Paper', content: '# Paper\n\n## Intro\n\nText.\n\n### Detail\n\nMore.\n\n## Method\n\nx', docSettings: { theme: 'research' } });
-    const x5 = strFromU8(unzipSync(new Uint8Array((await X.exportCanvas(d5, { format: 'docx', resolveImage: imgs })).bytes))['word/document.xml']).replace(/<[^>]+>/g, '');
-    assert(x5.includes('1.  Intro') && x5.includes('1.1  Detail') && x5.includes('2.  Method'), 'docx: numbered sections for the research theme');
+    // ADR 0022: real Word outline numbering (Heading 1–4 linked to a multilevel list), not numbers typed into the text.
+    const z5 = unzipSync(new Uint8Array((await X.exportCanvas(d5, { format: 'docx', resolveImage: imgs })).bytes));
+    const x5 = strFromU8(z5['word/document.xml']);
+    assert(/<w:pStyle w:val="Heading1"\/>.*Intro/.test(x5) && /<w:pStyle w:val="Heading2"\/>.*Detail/.test(x5) && !/\d\.\s+Intro/.test(x5.replace(/<[^>]+>/g, ''))
+      && /<w:abstractNum w:abstractNumId="10">.*<w:pStyle w:val="Heading1"\/><w:lvlText w:val="%1"\/>.*<w:lvlText w:val="%1\.%2"\/>/.test(strFromU8(z5['word/numbering.xml']))
+      && /styleId="Heading1">.*?<w:numPr><w:numId w:val="900"\/><\/w:numPr>/.test(strFromU8(z5['word/styles.xml'])), 'docx: numbered sections for the research theme');
     const d6 = await X.createCanvas(ctx, { title: 'To Acme', content: 'Dear Sir,\n\nBody.', docSettings: { theme: 'letter', header: 'Northwind Studio' } });
     const z6 = unzipSync(new Uint8Array((await X.exportCanvas(d6, { format: 'docx', resolveImage: imgs })).bytes));
     assert(/<w:titlePg\/>/.test(strFromU8(z6['word/document.xml'])) && strFromU8(z6['word/header2.xml']).includes('Northwind Studio')
