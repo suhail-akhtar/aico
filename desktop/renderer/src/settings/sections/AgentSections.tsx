@@ -11,6 +11,7 @@ import { api, type ProviderInstance, type ProviderTypeInfo } from '@web/api';
 import { ModelCombobox } from '@/shell/ModelCombobox';
 import { useStore } from '@web/store';
 import { PANES } from '@web/settings-schema';
+import { RolesPane } from '@web/components/settings/RolesPane';
 import { toast } from '@/state/desk';
 import { Icon } from '@/lib/icons';
 import { cls } from '@/lib/util';
@@ -138,6 +139,9 @@ export function ModelsSection(): React.ReactElement {
           </div>
         </div>
       )}
+
+      {/* Which model does which job (ADR 0017): the engine's shared page. */}
+      <RolesPane />
     </div>
   );
 }

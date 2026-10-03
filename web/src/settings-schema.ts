@@ -86,7 +86,7 @@ export interface Pane {
   blurb?: string;
   groups: Group[];
   /** Panes that render their own thing rather than a list of fields. */
-  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools' | 'learned';
+  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools' | 'learned' | 'about';
 }
 
 /* ── The schema ───────────────────────────────────────────────────── */
@@ -343,6 +343,15 @@ export const PANES: Pane[] = [
         ],
       },
     ],
+  },
+  {
+    id: 'about',
+    label: 'About you',
+    icon: 'bookmark',
+    blurb: 'What AICO has learned about you from your work and browsing — interests, stack, how you work. '
+      + 'Every fact shows its evidence; confirm, edit, hide or forget it. Learned and kept on this computer.',
+    custom: 'about',
+    groups: [],
   },
   {
     id: 'agent',

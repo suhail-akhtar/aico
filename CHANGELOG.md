@@ -3,6 +3,215 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Tasks panel: everything running beside your chats, live, in one list.**
+  Sub-agents (nested under whoever delegated them), Investigate fan-outs
+  (named by their angle), background agents, long jobs, scheduled firings,
+  backgrounded shell commands, terminal tabs running a command and browser
+  procedures — each with its agent, model, live elapsed time, tokens, cost,
+  tool uses, what it is doing in words ("Editing src/app.ts"), its todo
+  progress (3/7) and, for commands, the redacted output tail. A "Waiting for
+  you" section lists parked inbox calls and long-job proposals (Approve /
+  Deny, still checked by the decision gate), permission prompts (Deny here,
+  allow in the chat) and questions. Filters for this chat or all chats, kind
+  chips and search; Stop, Pause/Resume, Retry, View transcript, Open chat,
+  Copy command; a collapsible Finished section with Clear; toasts and
+  notifications when work finishes or needs you. In the desktop it opens from
+  the status bar's "N running", the "N running tasks" chip under a chat, the
+  palette or Ctrl+Shift+Y, and expands to a page; the web client has the same
+  panel in a drawer. Engine: `GET /api/tasks` and the `tasks/events` stream
+  (src/work/tasks.ts, shared/tasks.ts).
+- **Model roles: one table decides which model does which job** (ADR 0017).
+  Settings → Models now lists every job — main, coding, research and review
+  helpers, background (titles, brief, learning), the Sentinel, the judge,
+  vision, image generation, embeddings and summaries — with its model,
+  provider, local or cloud, price per million tokens, where the choice came
+  from and why it fell back. Pick a preset (Balanced, the default and today's
+  behaviour; Economy; Best quality; Private) or set a model per job. The older
+  per-feature keys (`sessionTitles.model`, `learning.model`, `brief.model`,
+  `sentinel.model`, `agentModels`, `imageGeneration.model`) keep working.
+  "Keep personal data on this machine" makes the background jobs use only a
+  local model, and run without one rather than fall back to the cloud. A
+  project's `.aico/settings*.json` can no longer choose models. `/doctor`
+  lists roles that fell back or cannot run, and `GET /api/models/roles`
+  answers the same table.
+- **Vision fallback.** When the chat model cannot read images and you have
+  set a vision model, each attached image is described once by that model and
+  the description goes to the chat model as marked text, instead of a note
+  that the image could not be sent.
+- **Recall: memory by relevance, and past sessions you can search** (ADR 0018).
+  A local index (`~/.aico/recall/recall.db`, rebuilt from your memory files,
+  knowledge and session logs whenever it is missing) searches by words, and
+  also by meaning when you set an Embeddings model. The new `Recall` tool
+  finds what was asked, decided and changed in earlier sessions, and loads by
+  itself when you ask things like "what did we do last week". Memories are
+  kept tidy: saying the same thing again updates the entry instead of adding
+  a copy, and a new value for the same subject ("Package manager: npm") marks
+  the old one superseded (kept, and restorable with enable). With more than
+  30 memories, only pinned and global ones are sent on every request. The rest
+  are sent when they are relevant to the request. Pin a memory to keep it
+  always. With 30 or fewer, nothing changes. A nightly check merges
+  duplicates and archives old unused session records; it never deletes
+  anything.
+- **About you: AICO learns who you are, and you see and control all of it**
+  (ADR 0018). Every few hours, while nothing else is running, AICO reads your
+  recent work (the languages, frameworks and tools in your projects, when you
+  work, which models you pick, the working rules you accepted) and, in the
+  desktop, a summary the built-in browser keeps for it (kinds of sites and
+  time spent, research topics, search words, reading habits — never
+  addresses, pages or whole searches). From these it writes short facts about
+  your interests, stack, way of working, likes and dislikes. The new About
+  you page (desktop sidebar → More, and Settings → About you on the web)
+  shows each fact with why it was learned; confirm, edit, hide or forget it,
+  add your own, pause, run now, export or erase everything. Confirmed facts,
+  and learned ones AICO is fairly sure of, are given to the agent as
+  background with each request (at most about 250 tokens). They are never
+  given to helper agents or to work another program sends over MCP. AICO
+  never infers health, religion, politics, sexuality, ethnicity, finances,
+  where you live, or family and relationships: a filter in code drops them
+  from both the browser summary and the learned facts. Phrasing uses one small call to
+  the Background model, capped at $0.02 a day (`profile.dailyBudgetUsd`).
+  With no usable model, or with "keep personal data on this machine" and no
+  local model, facts keep their plain wording and nothing is sent. Settings:
+  `profile.enabled`, `profile.work`, `profile.browsing` (your own settings
+  file only; a project cannot turn them on), and in the desktop browser
+  "Let About you use my browsing".
+- **Terminals that follow the work** (desktop, ADR 0019). Each tab shows the
+  project it runs in (the full path on hover); when the chat's project has no
+  terminal the panel offers one there, a chat without a project says "Scratch
+  workspace" with "Choose a project…", and "Open terminal here" on a closed
+  panel now opens in the folder you clicked (the request used to be lost while
+  the panel loaded). Shells AICO starts load a generated integration script
+  (OSC 133 marks; your profile files are never touched), so a command that
+  exits non-zero gets a chip — **Explain · Fix with AICO** — that sends the
+  command, directory, exit code and a secret-masked output tail to the chat,
+  only when you click. **Watch with AICO** (per tab) suggests help on errors,
+  at most once per 30 seconds and never for the same error twice, without
+  calling a model. An **Agent** tab mirrors the chat's own shell commands
+  live, read-only, with Stop. **History → Save as…** turns commands (never
+  output) into a script file, a custom tool draft (typed parameters, effect
+  class you choose, enabled only by you) or a request to schedule them.
+  **New SSH terminal…** signs in with a vault credential by name: an unknown
+  host key is shown in a native dialog for you to accept, a changed one is
+  refused, and the secret never reaches the window. The agent can read any
+  tab with `ide_terminal_list` / `ide_terminal_read` (redacted, bounded,
+  untrusted — it taints the session for the Sentinel) but can type only into
+  tabs it started, and never at a password or sudo prompt.
+- **Background agents report back** (ADR 0021). When a `BackgroundTask` or a
+  detached `Task` finishes — or fails, or is stopped — its full report
+  (bounded like a Task result, the rest kept on disk) arrives in the
+  conversation that started it, marked as from the background agent, never
+  as you. A running turn reads it at its next step; if the turn has already
+  ended, the chat starts a short turn to read it (`agents.wakeOnResult`,
+  default on). A stopped agent never wakes the chat.
+- **Follow-ups to a finished sub-agent**: `Task` with `resume: "<id>"` sends
+  it a new message with its whole earlier conversation, same agent, model and
+  limits; a running one gets it at its next step.
+- **Background agents survive a restart.** Ones that were running come back
+  `interrupted`, and recent background ones (`agents.resumeWithinHours`,
+  default 24) carry on by themselves (`agents.resumeAfterRestart`) — nothing
+  they had started is run again; the call in flight reads as unanswered.
+  Others can be resumed with `Task {resume}` or `POST /api/agents/resume`.
+- **A cap on agents per chat**: `agents.maxConcurrent` (default 6) covers
+  sub-agents, background agents and Investigate workers; more wait as
+  `queued` instead of all running at once.
+- A backgrounded shell command reports its exit (command, exit code, last 40
+  lines, redacted) into its chat, without waking it.
+
+### Changed
+
+- **`BackgroundTask` runs with your limits.** It is now a detached Task: your
+  directory, plan mode, tool scope, depth limit and session budget apply to
+  it, and its row belongs to your chat (another chat can no longer see or
+  stop it). Stop in the composer also stops background agents an earlier
+  turn started.
+- **Worktree isolation isolates.** `Task {isolation: "worktree"}` runs the
+  sub-agent inside the worktree (file tools are confined to it), and finishing
+  never throws work away: changes are committed to its branch and you are told
+  the branch and a diff summary; if that commit fails the worktree is left in
+  place. Worktrees live under the AICO store and survive a restart.
+  `EnterWorktree` says plainly that it does not change your directory, and
+  `ExitWorktree` no longer deletes a branch with work on it.
+- `Supervise wait` returns the full result, and accepts the id `Task` printed
+  (with or without `agent:`).
+
+- **Full autonomy** (desktop and web approval menu). Auto-approve still asks
+  you when the safety reviewer is unsure; Full autonomy does not stop to ask
+  (the call continues and the audit records `proceeded-unasked`). A Sentinel
+  refusal still stops the call, and buying, sending, deleting, sign-ins and
+  human checks still wait for you. Also `sentinel.onEscalate: "proceed"` in
+  your own settings; a project cannot set it.
+- **The refactor tools load when you ask for a wide change.** A request that
+  says rename, refactor, move a file, every call site or across the codebase
+  offers CodeSearch, CodeRewrite and Refactor up front, and they stay loaded
+  for the chat — the model never asked for tools it could not see.
+
+- **The jump buttons no longer cover the answer, and a reply in progress shows
+  the AICO mark instead of a blinking caret** (desktop and web). The
+  "↑ Start of answer" pill and its "↓" are gone; one small round "↓ Jump to
+  latest" fades in just above the composer only while you are scrolled away
+  from the latest, over a fade that the transcript's bottom padding fills when
+  you are at the end. "Jump to start of answer" is now an icon in a long
+  answer's action row. A streaming reply ends in the animated AICO mark (the
+  tile with the A, traced and breathing; still with reduced motion), and the
+  desktop's "Worked…" line and the web's activity line use the same mark in
+  place of a spinner and a bolt.
+- **The desktop Artifacts panel previews every type, and its list reads like a
+  person wrote it.** Selecting a file opens it in the panel (wider, with back,
+  ← → between artifacts, full size, Open, Show in folder, Copy path, Save a
+  copy): pictures fit-to-width or whole or 1:1, Markdown rendered, CSV and
+  .xlsx as tables with sheet tabs, .docx as a document, code highlighted, PDF
+  in Chromium's viewer, SVG, audio and video natively, and HTML live — its
+  scripts, the files beside it and a chart library from cdnjs, jsDelivr or
+  unpkg run — with its source and "Open in browser". Names are humanised ("the-chart-still-draws-all-50-days-1440.png"
+  → "The chart still draws all 50 days", the file name underneath), identical
+  copies fold into one row with ×N, namesakes are numbered, and the list
+  groups by type, date or topic, filters as you type, shows pictures as a grid,
+  and moves with the arrow keys. Fixed: the "…" menu was transparent and
+  clipped (it now uses the shell's menu), and screenshot thumbnails showed a
+  blank square of page (now anchored to the top). The engine adds
+  `GET /api/artifacts/preview` (cells of an .xlsx, a .docx as HTML) and each
+  file's path to `artifacts/list`.
+- **Scripted HTML previews run from their own origin** (ADR 0020). The desktop
+  serves an HTML artifact, or a chat ```html block with "scripts" ticked, from
+  `aico://preview/<token>/` — a separate origin with no bridge, storage or
+  engine token, framed `sandbox="allow-scripts"`, under a CSP with
+  `connect-src 'none'`, no forms, framed only by the app, and navigation kept
+  inside the preview; a token serves one directory. Before, the block's
+  "scripts" checkbox did nothing in the desktop: a srcdoc frame inherits the
+  window's CSP, which refused its inline scripts.
+
+### Fixed
+
+- A backgrounded shell command that exited non-zero was recorded as finished
+  cleanly; it is now `failed` with its exit code.
+- Sub-agent transcripts (`sub-…`) no longer appear as "New chat" rows in the
+  desktop and web sidebars; they still open from the Tasks panel.
+- A background agent was offered AskUserQuestion and CredentialRequest with
+  nobody to answer them (the headless flag never reached its tool list).
+- A detached sub-agent under a chat that asks before acting waited on a
+  terminal prompt nobody could see; it now decides from policy like any
+  background agent.
+- Spend by a background agent after its turn ended was not held to
+  `maxCostPerSession`/`maxTokensPerSession`; delegated agents now measure the
+  session ceilings on the conversation's own tracker.
+- **The Sentinel asked about every edit to a project kept under AICO's own
+  folder** (`~/.aico/workspace/projects/…`, where chats without a project
+  work), calling it "AICO's own configuration". Only AICO's real settings,
+  hooks, tools, agents and trust files, and a project's `.aico/settings.json`,
+  count now.
+- **The Sentinel did not see a message sent while the agent was working**,
+  so a request you made mid-run was judged unrequested, and it stopped a
+  Teach AICO replay you had asked for. It now reads your messages live, sees
+  up to 4,000 characters of the latest one, never reviews following a replay
+  already started, and is told that a replay is your own recorded steps whose
+  buying, sending and deleting still wait for your Allow.
+- Claude Haiku 4.5 is costed at $1 / $5 per million tokens (was the old
+  Haiku rate).
+
 ## 0.36.0 — 2026-10-03
 
 Always on, safer, and learning: long-run jobs that ask before they start, a

@@ -24,11 +24,14 @@ export interface DesktopPaths {
 
 /** Services one module offers others (the MCP tools use these). Filled in by register(). */
 export interface DesktopServices {
+  /** Terminal tabs (terminal.ts). `write` is the agent's and refuses tabs it did not start (ADR 0019). */
   terminal?: {
-    list(): Array<{ id: string; title: string; cwd: string; exited: boolean }>;
+    list(): import('./terminal').TerminalSummary[];
     tail(id: string): string;
-    run(command: string, cwd?: string): { id: string };
-    write(id: string, data: string): void;
+    /** Redacted, bounded, wrapped as untrusted: what the agent may read of a tab. */
+    read(id: string, opts?: { maxChars?: number; commands?: number }): string | undefined;
+    run(command: string, cwd?: string): Promise<{ id: string; started: boolean; note?: string }>;
+    write(id: string, data: string): { ok: true } | { ok: false; reason: string };
   };
   browser?: import('./browser').BrowserService;
   /** The import centre (browser-import.ts): the agent can only open its wizard and read counts. */

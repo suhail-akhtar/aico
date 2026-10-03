@@ -31,7 +31,10 @@ import { stopWork, takeStopHandle } from '../work/handles.js';
 import { ledger } from '../work/ledger.js';
 import { supervisor } from '../work/supervisor.js';
 import { unwatch, watch } from '../work/watchers.js';
-import { guideAgent, owningSession } from './task.js';
+import {
+  awaitAgents, guideAgent, normalizeAgentId, owningSession, releaseAwaited, reportDelivered,
+} from './task.js';
+import { REPORT_MAX_CHARS } from '../agents/report-back.js';
 import type { SupervisionPolicy, WatchSpec, WorkRecord } from '../work/types.js';
 import { isTerminal, reportsProgress } from '../work/types.js';
 
@@ -98,7 +101,49 @@ function line(record: WorkRecord, now: number): string {
   else if (record.result && isTerminal(record.state)) {
     bits.push(`  result: ${record.result.slice(0, 200)}`);
   }
+  if (record.state === 'interrupted') {
+    bits.push(`  resumable: Task {"resume": "${record.id.replace(/^agent:/, '')}", "description": "…", "prompt": "…"}`);
+  }
   return bits.join('\n');
+}
+
+/**
+ * A finished agent's outcome in full, for `wait` — the point of waiting.
+ *
+ * `list` keeps its 200-character preview (it is read on turns about something
+ * else); `wait` is the call made *because* the result is needed, and a
+ * preview there sent the model to read the transcript to learn what it had
+ * just waited for. Bounded like a Task result. When the report was already
+ * delivered into the conversation, it is not repeated.
+ */
+function fullOutcome(record: WorkRecord, now: number): string {
+  const base = line(record, now);
+  if (record.kind !== 'agent' || !isTerminal(record.state)) return base;
+  const text = record.state === 'done' ? record.result : record.error;
+  if (!text || text.length <= 200) return base;
+  if (reportDelivered(record.id)) {
+    return `${base}\n  (its full report was already delivered into this conversation)`;
+  }
+  const bounded = text.length > REPORT_MAX_CHARS
+    ? `${text.slice(0, REPORT_MAX_CHARS)}\n[… ${text.length - REPORT_MAX_CHARS} more characters — read the agent's transcript]`
+    : text;
+  return `${record.id}  [${record.state}]  ${record.kind}  ${record.title}\n  ${record.state === 'done' ? 'result' : 'error'}:\n${bounded}`;
+}
+
+/**
+ * The ledger id a caller means.
+ *
+ * `Task` reports a sub-agent by its bare id ("sub-agent 3f2a…") and the
+ * ledger files it as `agent:3f2a…`; a `BackgroundTask` used to return a bare
+ * id for a `bg:` row. Both spellings are accepted so the id the model was
+ * just given works, rather than reading as "not found".
+ */
+function resolveId(id: string, byId: Map<string, WorkRecord>): string {
+  if (byId.has(id)) return id;
+  const bare = normalizeAgentId(id);
+  if (byId.has(`agent:${bare}`)) return `agent:${bare}`;
+  if (byId.has(`bg:${id}`)) return `bg:${id}`;
+  return id;
 }
 
 /** Only this conversation's work — one session must never stop another's. */
@@ -111,7 +156,7 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
   const now = Date.now();
   const mine = visible();
   const byId = new Map(mine.map(r => [r.id, r]));
-  const targets = ids(input);
+  const targets = ids(input).map(id => resolveId(id, byId));
 
   switch (input.action) {
     case 'list': {
@@ -230,7 +275,13 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
       for (const id of targets) {
         const record = byId.get(id);
         if (!record) { cannot.push(`${id} (not found)`); continue; }
-        if (isTerminal(record.state)) { cannot.push(`${id} (${record.state})`); continue; }
+        if (isTerminal(record.state)) {
+          // Finished is not the end of an agent's conversation (ADR 0021).
+          cannot.push(id.startsWith('agent:')
+            ? `${id} (${record.state} — send it a follow-up with Task {"resume": "${id.slice('agent:'.length)}", "prompt": …} instead)`
+            : `${id} (${record.state})`);
+          continue;
+        }
         // Only sub-agents have an inbox. A background agent runs headless with
         // nothing listening, and a process has no notion of being told
         // anything — saying so is better than a silent no-op that reads as
@@ -299,19 +350,33 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
         const r = byId.get(id);
         return r && !isTerminal(r.state);
       });
+      // Agents being waited on report through this call, not into the
+      // conversation as well (tools/task deliverReport) — the same report
+      // twice is context paid for twice.
+      const agentIds = targets.filter(id => id.startsWith('agent:'));
       if (!pending.length) {
-        return targets.map(id => {
+        awaitAgents(agentIds);
+        const out = targets.map(id => {
           const r = byId.get(id);
-          return r ? line(r, now) : `${id}: not found in this session.`;
+          return r ? fullOutcome(r, now) : `${id}: not found in this session.`;
         }).join('\n\n');
+        releaseAwaited(agentIds, true);
+        return out;
       }
 
-      const settled = await waitFor(pending, timeoutMs);
-      const after = Date.now();
-      const lines = targets.map(id => {
-        const r = ledger.get(id);
-        return r ? line(r, after) : `${id}: not found.`;
-      });
+      awaitAgents(agentIds);
+      let settled = false;
+      let lines: string[] = [];
+      try {
+        settled = await waitFor(pending, timeoutMs);
+        const after = Date.now();
+        lines = targets.map(id => {
+          const r = ledger.get(id);
+          return r ? (settled ? fullOutcome(r, after) : line(r, after)) : `${id}: not found.`;
+        });
+      } finally {
+        releaseAwaited(agentIds, settled);
+      }
       return settled
         ? lines.join('\n\n')
         : [
@@ -371,8 +436,10 @@ export const superviseToolDefinition = {
     + 'not acked will be offered again — that is deliberate.\n'
     + '- stop: end work. Requires a reason, and accepts an array of ids. Stops children first. '
     + 'Pass force:true to signal immediately instead of asking.\n'
-    + '- wait: block until the given ids finish, or timeoutSeconds elapses. Nothing is '
-    + 'cancelled on timeout.\n'
+    + '- wait: block until the given ids finish, or timeoutSeconds elapses, and get their full '
+    + 'results. Nothing is cancelled on timeout. You rarely need it: a detached or background '
+    + 'agent\'s report is delivered into this conversation by itself when it finishes. To send a '
+    + 'finished agent a follow-up, use Task with resume.\n'
     + '- policy: attach limits the platform enforces for you — deadlineMs, maxCostUsd, '
     + 'maxSteps, idleMs — with onBreach of "report", "stop" or "kill". Set it once and stop '
     + 'checking back; the sweep does the rest.\n'

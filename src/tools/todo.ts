@@ -47,7 +47,8 @@ function todoFilePath(sessionId?: string): string {
   return path.join(todoDir(), `${readable}-${digest}.json`);
 }
 
-async function loadTodos(sessionId?: string): Promise<Todo[]> {
+/** Exported for the Tasks panel (work/tasks), which reads a sub-agent's list by its session. */
+export async function loadTodos(sessionId?: string): Promise<Todo[]> {
   try {
     const raw = await readFile(todoFilePath(sessionId), 'utf8');
     return JSON.parse(raw) as Todo[];

@@ -16,6 +16,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { AicoMark } from './AicoMark';
 
 export interface ReasoningBlockProps {
   text: string;
@@ -47,7 +48,8 @@ export function ReasoningBlock({
     return (
       <div className="my-3">
         <div className="mb-1.5 flex items-center gap-2 text-[13px] text-aico-muted">
-          <span className="aico-thinking">✳</span>
+          {/* Still: the live mark belongs to the status row, and two moving marks compete. */}
+          <AicoMark size={14} still className="aico-thinking" />
           <span className="aico-thinking">Thinking…</span>
         </div>
         <div

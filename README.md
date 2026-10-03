@@ -252,6 +252,26 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **Spreadsheets and artifacts.** A real sheet with Excel formulas and `.xlsx` export, documents designed per type (41 types, 16 themes), and an Artifacts panel to work side by side.
 - **Refactor at scale.** Structural search & replace (ast-grep) and TypeScript rename/move across a codebase — previewed, checkpointed, checked, rolled back if red.
 
+### 🧠 It knows you — and you control what it knows
+
+- **Recall: memory by meaning.** A local index of your memories, knowledge and every past session — search by words, and by meaning once you pick an embeddings model. *"What did we decide about auth last week?"* just works. Duplicates update instead of piling up, a changed fact supersedes the old one (kept, restorable), and only memories relevant to the request are sent.
+- **About you.** In the background, AICO learns your stack, interests, way of working, likes and dislikes from your work and (in the desktop) a summary of your browsing — domains and topics only, never pages or whole searches. Every fact shows why it was learned; confirm, edit, hide, forget, export or erase it. Health, religion, politics, sexuality, ethnicity, finances, location and family are never inferred — a filter in code drops them.
+- **The right model for each job.** Main chat, coding and research helpers, reviewers, background jobs, the Sentinel, the judge, vision, image generation, embeddings and summaries each get their own model — presets (Balanced, Economy, Best quality, Private) or per job, with provider, price and local/cloud shown. *Keep personal data on this machine* sends the learner and embeddings only to a local model, never silently to the cloud.
+- **Vision for any model.** A text-only model gets attached images described by your vision model.
+
+### 🧵 Agents that work in parallel — and report back
+
+- **Several helpers at once**, each in its own git worktree when they write code; uncommitted work is never thrown away.
+- **Background agents report back.** Start one, keep talking; its full result lands in the chat when it finishes (failures too), within the parent's tools, budget and plan mode. Continue a finished helper with its context intact; background agents resume after a restart.
+- **A Tasks panel** shows every running, waiting and finished job — helpers as a tree, live time, tokens, cost, current step, to-do progress and output — with transcript, stop, pause and retry.
+- **Full autonomy, when you want it.** One switch stops the safety reviewer's "are you sure?" questions; clear harm is still refused, and buying, sending and sign-in checks still wait for you.
+
+### 💻 A terminal that works with the agent
+
+- Tabs follow your project; a failed command gets **Explain · Fix with AICO**; **Watch with AICO** spots errors in a dev server; an **Agent** tab shows the agent's own commands live with Stop.
+- **Save as…** turns commands into a script, a custom tool or a scheduled job.
+- **SSH tabs from the vault** — the password never reaches the window, and a new host key is yours to accept. The agent reads your terminals only on request, masked, and never types into yours.
+
 ### 🔐 Credentials the agent uses but never sees
 
 Ask AICO to set up a server and it creates the service's admin account itself —

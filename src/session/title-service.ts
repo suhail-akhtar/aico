@@ -27,31 +27,12 @@ import {
   fallbackSessionTitle, normalizeSessionTitle, parseModelTitle,
 } from './title.js';
 import type { SessionTitle } from './title.js';
-import { CHEAP_MODELS } from '../../shared/models.js';
-
-/**
- * Cheapest model each family offers, used for naming rather than the work
- * model. One table in `shared/models`, shared with the sub-agent
- * recommendation, so the two never disagree about a vendor's small model.
- */
-const NAMING_MODELS: Record<string, string> = CHEAP_MODELS;
-
-/**
- * Brand prefixes that identify a model's family.
- *
- * Matching on the family id does not work: models are named after the *brand*,
- * not the vendor's company or our routing key. "claude-opus-5" contains no
- * "anthropic", so a naive family-name search silently fell through to naming an
- * Opus conversation with Opus — the exact cost this feature exists to avoid.
- */
-const MODEL_BRANDS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/^(anthropic\/)?claude/i, 'anthropic'],
-  [/^(openai\/)?(gpt|o[1-9]|chatgpt)/i, 'openai'],
-  [/^(deepseek\/)?deepseek/i, 'deepseek'],
-  [/^(google\/)?gemini/i, 'gemini'],
-  [/^(z-ai\/|zai\/)?glm/i, 'zai'],
-  [/^(moonshotai\/)?kimi/i, 'kimi'],
-];
+// The cheapest model per family lives in `shared/models` (CHEAP_MODELS) and is
+// chosen by `cheapModelFor` in models/roles, so naming, the sub-agent
+// recommendation and the background role never disagree about a vendor's
+// small model. Matching is on the *brand* ("claude-opus-5" names no
+// "anthropic"), which is what `familyOfModel` does.
+import { backgroundModel, recordRoleSpend } from '../models/roles.js';
 
 /** How long the naming call may take before it is abandoned. */
 const NAMING_TIMEOUT_MS = 20_000;
@@ -129,6 +110,7 @@ export async function generateModelTitle(
     // them before it has been asked to name anything.
     const { selectProvider } = await import('../providers/index.js');
     const namingModel = pickNamingModel(opts.settings, opts.workModel);
+    if (!namingModel) return skip('no background model may be used (Settings → Models says why)');
     const provider = selectProvider(namingModel, withoutReasoning(opts.settings));
 
     let text = '';
@@ -145,6 +127,10 @@ export async function generateModelTitle(
       signal,
     })) {
       if (event.type === 'text') text += event.content;
+      else if (event.type === 'usage') {
+        const { costFor } = await import('../tokens.js');
+        recordRoleSpend('background', costFor(namingModel, { inputTokens: event.inputTokens, outputTokens: event.outputTokens, cachedTokens: event.cacheReadTokens ?? 0 }, opts.settings));
+      }
     }
 
     const title = parseModelTitle(text);
@@ -205,27 +191,14 @@ function skip(reason: string): undefined {
 }
 
 /**
- * Which model does the naming.
+ * Which model does the naming: the `background` role (ADR 0017).
  *
- * Prefers an explicit setting, then the cheapest model in the same family as
- * the work model — same provider means the key is already configured and the
- * request adds no new dependency — and finally the work model itself.
+ * `models.roles.background`, then `sessionTitles.model`, then the preset —
+ * by default the cheapest model in the same family as the work model, so the
+ * key is already configured and the request adds no new dependency. Empty
+ * when the role may not be used (kept on this machine with no local model):
+ * the session keeps its fallback name rather than going to another provider.
  */
 export function pickNamingModel(settings: AicoSettings, workModel: string): string {
-  const configured = settings.sessionTitles?.model;
-  if (configured) return configured;
-
-  for (const [pattern, family] of MODEL_BRANDS) {
-    if (pattern.test(workModel)) {
-      // A slash-qualified work model came through a router, so the naming model
-      // must be qualified the same way or the router will not recognise it.
-      const routed = workModel.includes('/');
-      return routed ? (NAMING_MODELS.openrouter ?? NAMING_MODELS[family]!) : NAMING_MODELS[family]!;
-    }
-  }
-  // Model names rarely contain their vendor, so fall back to the configured
-  // provider's family before giving up and reusing the work model.
-  const active = settings.activeProvider ?? settings.provider;
-  if (active && NAMING_MODELS[active]) return NAMING_MODELS[active];
-  return workModel;
+  return backgroundModel(settings, workModel, 'titles') ?? '';
 }

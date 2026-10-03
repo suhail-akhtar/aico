@@ -16,10 +16,35 @@
  */
 
 import { spawn, execFile, execFileSync } from 'child_process';
-import { currentCwd } from '../run-context.js';
+import { currentCwd, currentRunContext } from '../run-context.js';
 import { detectShell } from './shell-choice.js';
 import { closeBackgroundProcess, registerBackgroundProcess } from '../work/register.js';
-import { sinkRedactAccumulated } from '../vault/sink.js';
+import { sinkRedactAccumulated, sinkRedactText } from '../vault/sink.js';
+import { owningSession } from '../agents/ownership.js';
+import { reportBack } from '../agents/report-back.js';
+
+/** Lines of a backgrounded command's output its exit notice carries. */
+const EXIT_NOTICE_LINES = 40;
+
+/**
+ * The notice a backgrounded command's exit sends to its conversation.
+ *
+ * Short on purpose — the command, how it ended, its last lines — because it
+ * arrives in the middle of whatever the model is doing now. Redacted like any
+ * other output; colour codes stripped.
+ */
+export function backgroundExitNotice(command: string, pid: number, code: number | null, signal: string | null, output: string): string {
+  const how = code === 0 ? 'exited cleanly (code 0)'
+    : code !== null ? `FAILED with exit code ${code}`
+      : `was killed${signal ? ` (${signal})` : ''}`;
+  // eslint-disable-next-line no-control-regex
+  const plain = output.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+  const tail = plain.split(/\r?\n/).filter((l, i, all) => l.trim() || i < all.length - 1).slice(-EXIT_NOTICE_LINES).join('\n');
+  return sinkRedactText(
+    `[Background command finished] \`${command.length > 200 ? `${command.slice(0, 197)}…` : command}\` (pid ${pid}) ${how}.`
+    + (tail.trim() ? `\nLast ${Math.min(EXIT_NOTICE_LINES, tail.split('\n').length)} line(s):\n${tail}` : '\n(It printed nothing.)'),
+  );
+}
 
 export interface BashInput {
   command: string;
@@ -293,6 +318,9 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
     let timedOut = false;
     let lastReport = 0;
     let pending = false;
+    /** Left running past the startup window, so its exit is reported (see `close`). */
+    let backgrounded = false;
+    let backgroundOwner: string | undefined;
 
     const report = (force = false): void => {
       if (!progressSink) return;
@@ -346,11 +374,22 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
       // supervision and survives a restart as a pid that can be checked. The
       // local `running` map stays: it is what `killAllBackground` walks, and it
       // is reachable without importing the work subsystem into the shell tool.
+      //
+      // Filed under the conversation that started it (ADR 0021), so another
+      // chat's `Supervise` can neither see nor stop it, and its exit notice
+      // has somewhere to go. The owner, not the run: a server a sub-agent
+      // started belongs to the chat that delegated.
+      backgroundOwner = owningSession(currentRunContext()?.sessionId);
       registerBackgroundProcess({
         pid: child.pid,
         command: input.command,
         kill: () => killTree(child.pid),
+        ...(backgroundOwner ? { sessionId: backgroundOwner } : {}),
+        // For the Tasks panel: which run started it, and its output so far.
+        ...(currentRunContext()?.sessionId ? { startedBy: currentRunContext()!.sessionId! } : {}),
+        tail: () => combined,
       });
+      backgrounded = true;
       installExitHook();
       // Detached from the parent's event loop so a live server cannot keep the
       // process from exiting on its own.
@@ -443,10 +482,35 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
       finish(1, err instanceof Error ? err.message : String(err));
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, exitSignal) => {
       if (child.pid !== undefined) {
         running.delete(child.pid);
-        closeBackgroundProcess(child.pid, `Exited ${code ?? 0}`);
+        const closed = closeBackgroundProcess(
+          child.pid,
+          code === null ? `Killed${exitSignal ? ` (${exitSignal})` : ''}` : `Exited ${code}`,
+          code,
+        );
+        /*
+          A command left running reports its own exit (ADR 0021): the command,
+          how it ended and its last lines, into its conversation as a context
+          note — read at the next step of a running turn, or first thing on the
+          next one. It does not wake the session: a dev server stopping is
+          usually not something to act on unprompted, and a model that wants to
+          be woken for it sets a watcher ({kind: "process", pid}) — the
+          watcher, not this, decides that. Only when this exit closed the row:
+          one stopped on purpose through Supervise was already settled and
+          needs no notice.
+        */
+        if (backgrounded && closed && backgroundOwner) {
+          void reportBack({
+            sessionId: backgroundOwner,
+            content: backgroundExitNotice(input.command, child.pid, code, exitSignal, combined),
+            plugin: 'background-command',
+            wake: false,
+            cwd: input.cwd ?? currentCwd(),
+            failed: code !== 0,
+          }).catch(() => undefined);
+        }
       }
       if (cancelled) { finish(code ?? 1, cancelMessage); return; }
       if (timedOut) {

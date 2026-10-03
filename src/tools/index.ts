@@ -20,6 +20,7 @@ import { runChecks, runChecksDefinition } from './run-checks.js';
 import { codeMap, codeMapDefinition } from './codemap.js';
 import { gitTool, gitDefinition } from './git.js';
 import { knowledgeTool, knowledgeDefinition } from './knowledge.js';
+import { recallTool, recallDefinition } from './recall.js';
 import { checkpointTool, checkpointDefinition } from './checkpoint.js';
 import { useSkill, skillDefinition } from './skill.js';
 import { noteSourceChanged } from '../checks.js';
@@ -229,6 +230,8 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...gitDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   // Reads dominate, and a write is one small file — safe to overlap.
   { ...knowledgeDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
+  // Reads the Recall index (its only writes are use counts); deferred group `recall`.
+  { ...recallDefinition, isConcurrencySafe: true, maxResultSizeChars: 20_000 },
   // A restore rewrites files. Nothing else may be running while it does.
   { ...checkpointDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...webSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 50_000 },
@@ -692,6 +695,9 @@ export async function executeTool(
       break;
     case 'Knowledge':
       result = await knowledgeTool(args as unknown as Parameters<typeof knowledgeTool>[0]);
+      break;
+    case 'Recall':
+      result = await recallTool(args as unknown as Parameters<typeof recallTool>[0], signal);
       break;
     case 'Checkpoint':
       result = await checkpointTool(args as unknown as Parameters<typeof checkpointTool>[0]);

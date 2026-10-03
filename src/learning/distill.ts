@@ -9,8 +9,10 @@
  * flight, and only when there is something to read: a turn without a
  * correction, a note, a hand edit or a repeated choice costs nothing.
  *
- * The call uses the cheapest model in the work model's family (the naming
- * model, `session/title-service`), with reasoning off and a small output cap.
+ * The call uses the `background` model role (models/roles, ADR 0017): by
+ * default the cheapest model in the work model's family, with reasoning off
+ * and a small output cap. When that role must stay on this machine and no
+ * local model is set, nothing is distilled and the signals wait.
  * The prompt asks for durable *work* preferences only, scoped, with evidence
  * ids and the topic each decides; the reply is parsed as data — unknown
  * fields dropped, scope and category normalised, every text sanitised again
@@ -26,6 +28,7 @@
 
 import type { AicoSettings } from '../settings.js';
 import type { Session } from '../session/session.js';
+import { backgroundModel, recordRoleSpend } from '../models/roles.js';
 import {
   consumeSignals, queueSignals, readPendingSignals, signalsFromTurn, tallyChoices, feedbackSignal,
   rememberAgentWrites, userEditSignals, type PreferenceSignal,
@@ -132,12 +135,22 @@ export function fallbackCandidates(signals: readonly PreferenceSignal[]): RuleCa
 
 export type Completer = (system: string, user: string, signal: AbortSignal) => Promise<string>;
 
-/** The real completer: the naming model, reasoning off, no tools, no AICO prompt. */
+/**
+ * The model distilling may use: the `background` role (ADR 0017), with
+ * `learning.model` as its legacy key. Undefined when the role must stay on
+ * this machine and nothing local is set — then nothing is distilled and the
+ * signals wait (they are capped), never sent to another provider.
+ */
+export function distillModel(settings: AicoSettings, workModel?: string): string | undefined {
+  return backgroundModel(settings, workModel || settings.model || '', 'learning');
+}
+
+/** The real completer: the background model, reasoning off, no tools, no AICO prompt. */
 export function modelCompleter(settings: AicoSettings, workModel?: string): Completer {
   return async (system, user, signal) => {
     const { selectProvider } = await import('../providers/index.js');
-    const { pickNamingModel } = await import('../session/title-service.js');
-    const model = settings.learning?.model || pickNamingModel(settings, workModel || settings.model || '');
+    const model = distillModel(settings, workModel);
+    if (!model) throw new Error('no background model may be used');
     const providers = (settings.providers ?? {}) as Record<string, Record<string, unknown>>;
     const quiet = {
       ...settings,
@@ -153,6 +166,10 @@ export function modelCompleter(settings: AicoSettings, workModel?: string): Comp
     let text = '';
     for await (const ev of provider.chat({ model, systemPrompt: system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: DISTILL_MAX_TOKENS, signal })) {
       if (ev.type === 'text') text += ev.content;
+      else if (ev.type === 'usage') {
+        const { costFor } = await import('../tokens.js');
+        recordRoleSpend('background', costFor(model, { inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, cachedTokens: ev.cacheReadTokens ?? 0 }, settings));
+      }
     }
     return text;
   };
@@ -213,6 +230,9 @@ async function runDistill(loadSettings: () => Promise<AicoSettings>, workModel?:
     try {
       const settings = await loadSettings();
       if (!preferencesEnabled(settings)) return;
+      // No usable background model (kept local, none set): leave the signals
+      // pending rather than distil them by rule now and lose the better pass.
+      if (!distillModel(settings, workModel)) return;
       await distillPending({ settings, complete: modelCompleter(settings, workModel) });
     } catch { /* best effort: the signals stay pending for the batch */ }
   })().finally(() => { inFlight = undefined; });

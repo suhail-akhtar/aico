@@ -248,7 +248,7 @@ interface AppState {
   submit: (task: string, opts?: {
     planMode?: boolean; model?: string; retireTasks?: 'done' | 'cancelled';
     /** How much to ask before acting. Omitted means `auto`, as it always was. */
-    approval?: 'auto' | 'edits' | 'ask';
+    approval?: 'full' | 'auto' | 'edits' | 'ask';
     /** This client will apply the run's file writes itself. See `edit`. */
     applyEdits?: boolean;
     /** Editor-backed tools this client will service. See `hostCall`. */

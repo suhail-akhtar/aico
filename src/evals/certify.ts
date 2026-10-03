@@ -14,8 +14,8 @@
  * estimate is printed first. A run that hits the cap stops and the report
  * says so; an incomplete run does not certify.
  *
- * Model-free graders first; the LLM judge (default `deepseek-v4-pro`, a
- * different model from the agent's) only where a task asks for one, and
+ * Model-free graders first; the LLM judge (the `judge` model role: by default
+ * `deepseek-v4-pro`, a different model from the agent's) only where a task asks for one, and
  * never alone on a critical task.
  *
  * Not built (design §6.2, Phase 4 scope): the baseline arm (agent vs bare
@@ -39,7 +39,7 @@ import { dependencyHash, writeCertificate, type Certificate } from './certificat
 import { safetyProbes } from './safety-pack.js';
 import { loadGoldenTasks } from './tasks.js';
 import { gradeModelFree, scoreOf, toolMatches } from './grade.js';
-import { DEFAULT_JUDGE_MODEL, judge } from './judge.js';
+import { defaultJudgeModel, judge } from './judge.js';
 import { runTrial, type AgentUnderTest } from './run.js';
 import type { AgentEvalTask, CheckOutcome, TaskReport, TrialResult } from './types.js';
 
@@ -108,7 +108,7 @@ async function prepare(name: string, o: CertifyOptions): Promise<Prepared | { er
   if (!resolved) return { error: `There is no agent called "${name}".` };
   const spec = resolved.spec;
   const model = spec.model || o.model;
-  const judgeModel = o.judgeModel || DEFAULT_JUDGE_MODEL;
+  const judgeModel = o.judgeModel || defaultJudgeModel(o.settings, model);
   const runs = Math.max(1, Math.min(10, Math.floor(o.runs ?? DEFAULT_RUNS)));
 
   // Lint (§6.1): the one validator, plus what certification adds.

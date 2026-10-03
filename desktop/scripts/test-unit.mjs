@@ -977,6 +977,109 @@ function makeFakeDom(p5) {
   ok(!ho.isHandOffChoice('Which size do you want?') && !ho.isHandOffChoice('Is the chat here working?'), 'handoff: other questions are not');
 }
 
+// ── Artifacts panel: names, copies, groups, viewers (renderer/src/chat/artifacts-core.ts) ──
+{
+  const ac = await load(path.join(desktop, 'renderer/src/chat/artifacts-core.ts'), 'artifacts-core');
+  const h = ac.humaniseName;
+  ok(h('the-chart-still-draws-all-50-days-1440.png').name === 'The chart still draws all 50 days' && h('the-chart-still-draws-all-50-days-1440.png').detail === '1440 px wide',
+    'artifacts/name: a verify screenshot reads as its caption; the width is kept as detail', h('the-chart-still-draws-all-50-days-1440.png'));
+  ok(h('load-1440.png').name === 'Load' && h('load-1440.png').ext === 'png', 'artifacts/name: load-1440.png → Load (png)');
+  ok(h('report-2026.docx').name === 'Report 2026' && !h('report-2026.docx').detail, 'artifacts/name: a year is not a viewport width');
+  ok(h('Q3 BOQ.xlsx').name === 'Q3 BOQ' && h('README.md').name === 'README', 'artifacts/name: names with capitals are left as written');
+  ok(h('shot-2026-10-03T12-30-05-123Z.png').name === 'Screenshot' && h('shot-2026-10-03T12-30-05-123Z.png').detail === '2026-10-03 12:30', 'artifacts/name: timestamped shots', h('shot-2026-10-03T12-30-05-123Z.png'));
+  ok(h('sales_by_region-v2.csv').name === 'Sales by region v2' && h('noext').name === 'Noext', 'artifacts/name: underscores and dashes become spaces; no extension is fine');
+
+  const pk = (title, source = 'file') => ac.previewKind({ title, source });
+  ok(pk('a.png') === 'image' && pk('a.SVG') === 'svg' && pk('a.htm') === 'html' && pk('a.md') === 'markdown' && pk('a.tsv') === 'csv'
+    && pk('a.xlsx') === 'xlsx' && pk('a.docx') === 'docx' && pk('a.pdf') === 'pdf' && pk('a.ts') === 'code' && pk('a.json') === 'code'
+    && pk('a.log') === 'text' && pk('a.mp4') === 'video' && pk('a.mp3') === 'audio' && pk('a.bin') === 'none' && pk('Q3 plan', 'canvas') === 'canvas',
+  'artifacts/type: each extension gets its viewer; canvases open the editor');
+  ok(ac.previewKind({ title: 'x', ext: 'PNG', source: 'attachment' }) === 'image' && ac.languageFor('mjs') === 'javascript' && ac.mimeFor('pdf') === 'application/pdf' && ac.mimeFor('zzz') === 'application/octet-stream',
+    'artifacts/type: the engine\'s ext wins; languages and media types');
+
+  const it = (key, title, bytes, at, extra = {}) => ({ key, kind: 'image', source: 'attachment', id: key, title, bytes, updatedAt: at, topic: 'Generated images', ...extra });
+  const items = [
+    it('a1', 'load-1440.png', 100, 1), it('a2', 'load-1440.png', 100, 5), it('a3', 'load-1440.png', 100, 3),
+    it('a4', 'load-1440.png', 222, 4), it('a5', 'chart-1440.png', 50, 2),
+    { key: 'canvas:c1', kind: 'document', source: 'canvas', id: 'c1', title: 'Notes', updatedAt: 6, topic: 'Notes' },
+    { key: 'file:notes.docx', kind: 'export', source: 'file', id: 'notes.docx', title: 'notes.docx', ext: 'docx', bytes: 9, updatedAt: 7, topic: 'Notes' },
+    { key: 'file:app.html', kind: 'file', source: 'file', id: 'app.html', title: 'app.html', ext: 'html', bytes: 9, updatedAt: 0, topic: 'Files' },
+  ];
+  const es = ac.buildEntries(items);
+  const loads = es.filter(e => e.name === 'Load');
+  ok(loads.length === 2 && loads[0].item.key === 'a2' && loads[0].copies.map(c => c.key).join() === 'a3,a1' && loads[1].copies.length === 0,
+    'artifacts/dedupe: same name and size fold into the newest row (×3); a different size stays its own row', loads.map(e => [e.item.key, e.copies.map(c => c.key)]));
+  ok(loads[0].variant?.index === 2 && loads[1].variant?.index === 1 && loads[0].variant.of === 2 && !es.find(e => e.name === 'Chart').variant,
+    'artifacts/dedupe: namesakes are numbered (newest highest); unique names are not');
+  ok(es[0].item.key === 'file:notes.docx' && es.length === 6, 'artifacts/dedupe: newest first');
+  ok(es[0].name === 'Notes' && es[0].ext === 'docx', 'artifacts/name: an export is named after its canvas, not its lower-cased file', es[0]);
+
+  const byType = ac.groupEntries(es, 'type');
+  ok(byType.map(g => g.name).join() === 'Documents,Web pages,Images' && byType[0].entries.length === 2,
+    'artifacts/group: by type in a fixed order; a .docx export sits with documents', byType.map(g => [g.name, g.entries.length]));
+  const now = new Date(2026, 9, 3, 15, 0).getTime();
+  const timed = ac.buildEntries([it('t1', 'a.png', 1, now - 3600e3), it('t2', 'b.png', 1, now - 86400e3 * 10)]);
+  ok(ac.groupEntries(timed, 'time', now).map(g => g.name).join() === 'Today,Previous 30 days', 'artifacts/group: by day');
+  const topics = ac.groupEntries(es, 'topic');
+  ok(topics.find(g => g.name === 'Notes').entries[0].kind === 'canvas', 'artifacts/group: by topic, the canvas leads its exports');
+
+  ok(ac.matchesQuery(loads[0], 'load png') && ac.matchesQuery(es.find(e => e.ext === 'html'), 'html') && !ac.matchesQuery(loads[0], 'chart'),
+    'artifacts/search: every word must match the name, file name, type or topic');
+
+  const csv = ac.parseDelimited('Item,Rate,Note\r\nCement,5.5,"bags, 25kg"\nSand,12,"say ""hi""\nthere"\n');
+  ok(csv.rows.length === 3 && csv.rows[1][2] === 'bags, 25kg' && csv.rows[2][2] === 'say "hi"\nthere' && !csv.truncated, 'artifacts/csv: quotes, doubled quotes, newlines in quotes, CRLF', csv.rows);
+  ok(ac.parseDelimited('a\tb\n1\t2').rows[1].join('|') === '1|2' && ac.parseDelimited('a;b;c\n1;2;3').rows[0].length === 3, 'artifacts/csv: tab and semicolon delimiters are detected');
+  ok(ac.parseDelimited('h\n1\n2\n3\n4', 3).truncated === true, 'artifacts/csv: a row cap says it truncated');
+}
+
+// ── Scripted HTML previews: tokens, paths, CSP, navigation (electron/preview-core.ts, ADR 0020) ──
+{
+  const pc = await load(path.join(desktop, 'electron/preview-core.ts'), 'preview-core');
+  let n = 0;
+  const reg = new pc.PreviewRegistry(() => `tok${String(++n).padStart(20, '0')}`);
+  const a = reg.registerFile('web-1', 'site/app.html');
+  ok(a.url === `aico://preview/${a.token}/app.html`, 'preview: a file registers as aico://preview/<token>/<name>', a);
+  ok(reg.resolve(`/${a.token}/app.html`)?.path === 'site/app.html' && reg.resolve(`/${a.token}/js/chart.js`)?.path === 'site/js/chart.js',
+    'preview: the token serves its own file and the files beside it');
+  const escapes = ['../secret.txt', '..%2fsecret.txt', '%2e%2e/secret.txt', 'js/../../x', 'a%5c..%5cb', 'C:%5cWindows%5cwin.ini', 'c:/x', '%00x', '', 'js//x', './app.html'];
+  ok(escapes.every(p => reg.resolve(`/${a.token}/${p}`) === null), 'preview: traversal, encoded dots, backslashes, drive letters, NUL and empty segments resolve to nothing',
+    escapes.filter(p => reg.resolve(`/${a.token}/${p}`) !== null));
+  ok(reg.resolve('/nope/app.html') === null && reg.resolve(`/${a.token}`) === null, 'preview: an unknown token, or no file, is nothing');
+  ok('error' in reg.registerFile('web-1', '../x.html') && 'error' in reg.registerFile('web-1', 'notes.md') && 'error' in reg.registerFile('bad id!', 'a.html')
+    && 'error' in reg.registerFile('web-1', 'C:/a.html'), 'preview: registering refuses escapes, non-HTML and bad session ids');
+  const h = reg.registerHtml('<p>hi</p>');
+  ok(reg.resolve(`/${h.token}/index.html`)?.html === '<p>hi</p>' && reg.resolve(`/${h.token}/other.js`) === null, 'preview: an in-memory page serves itself and nothing else');
+  ok(a.token !== h.token, 'preview: every registration gets its own token');
+  throws(() => new pc.PreviewRegistry(() => 'short').registerHtml('x'), /long/, 'preview: a short token is refused');
+  const big = new pc.PreviewRegistry(() => `t${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`);
+  for (let i = 0; i < 230; i++) big.registerHtml(`p${i}`);
+  ok(big.size === 200, 'preview: the registry forgets the oldest past 200', big.size);
+
+  const csp = pc.previewCsp('TOKEN', []);
+  const dir = (name) => csp.split('; ').find(d => d.startsWith(`${name} `)) ?? '';
+  ok(dir('default-src') === "default-src 'none'" && dir('connect-src') === "connect-src 'none'" && dir('form-action') === "form-action 'none'"
+    && dir('frame-ancestors') === 'frame-ancestors aico://app' && csp.includes('sandbox allow-scripts') && !csp.includes('allow-same-origin'),
+  'preview/csp: nothing by default, no connections, no forms, framed only by the app, sandboxed without same-origin', csp);
+  ok(dir('script-src') === "script-src 'unsafe-inline' aico://preview/TOKEN/" && !csp.includes('unsafe-eval') && !csp.includes('https:'),
+    'preview/csp: scripts inline and from the token\'s own directory only; no eval; no CDN unless named', dir('script-src'));
+  ok(dir('img-src') === 'img-src aico://preview/TOKEN/ data: blob:', 'preview/csp: images from the directory, data: and blob:');
+  const page = '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script><script src="//evil.example/x.js"></script>';
+  const cdns = pc.cdnsReferenced(page);
+  ok(cdns.join() === 'https://cdn.jsdelivr.net', 'preview/csp: only the CDNs a page names are allowed (of cdnjs, jsDelivr, unpkg)', cdns);
+  const withCdn = pc.previewCsp('T', [...cdns, 'https://evil.example']);
+  ok(withCdn.includes("script-src 'unsafe-inline' aico://preview/T/ https://cdn.jsdelivr.net") && !withCdn.includes('evil'), 'preview/csp: a CDN outside the list is never added', withCdn);
+
+  ok(!pc.previewNavigationAllowed('aico://preview/A/app.html', 'https://evil.example/?data=1')
+    && !pc.previewNavigationAllowed('aico://preview/A/app.html', 'aico://app/')
+    && !pc.previewNavigationAllowed('aico://preview/A/app.html', 'aico://preview/B/x.html')
+    && pc.previewNavigationAllowed('aico://preview/A/app.html', 'aico://preview/A/page2.html')
+    && pc.previewNavigationAllowed('aico://app/', 'aico://preview/A/app.html')
+    && pc.previewNavigationAllowed(undefined, 'https://example.com/'),
+  'preview/nav: a preview frame stays inside its token; navigations it did not start are not its business');
+  ok(pc.previewMime('chart.js').startsWith('text/javascript') && pc.previewMime('a.HTML').startsWith('text/html') && pc.previewMime('x.bin') === 'application/octet-stream',
+    'preview: sibling files get their real type (nosniff would refuse a script served as octet-stream)');
+}
+
 fs.rmSync(out, { recursive: true, force: true });
 console.log(`\n  DESKTOP UNIT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

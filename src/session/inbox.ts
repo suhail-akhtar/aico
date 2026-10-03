@@ -155,6 +155,25 @@ export class Inbox {
   }
 
   /**
+   * Discard pending step input, except what `keep` says to hold on to.
+   *
+   * For a cancelled turn: a correction addressed to it is moot, but a
+   * background agent's report queued on the same queue is not (ADR 0021).
+   * Each discarded message is its own splice, so a replay of the log ends in
+   * exactly this state. Returns what was discarded.
+   */
+  discardStep(keep: (message: QueuedMessage) => boolean): QueuedMessage[] {
+    const discarded: QueuedMessage[] = [];
+    for (let i = this.queues['next-step'].length - 1; i >= 0; i--) {
+      const message = this.queues['next-step'][i]!;
+      if (keep(message)) continue;
+      this.splice('next-step', i, 1, []);
+      discarded.unshift(message);
+    }
+    return discarded;
+  }
+
+  /**
    * Remove and return the next queued turn, if any.
    *
    * One at a time by design: each followup is its own turn, so draining them in

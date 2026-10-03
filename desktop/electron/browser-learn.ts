@@ -29,6 +29,8 @@ import {
   learnKind, learnTitle, learnTyped, learnVisit, normaliseLearn, predict, profileText, pruneLearn, removeItem, seedFromHistory, setExcluded,
   tabAt, tabClosed, tabFocus, tabPriorities, tabsText, threads, type LearnData, type OpenTab,
 } from './browser-learn-core';
+import { buildDigest, digestFile, readUseBrowsing, writeDigest, writeUseBrowsing } from './browser-profile-digest';
+import type { ProfileDigestStatus } from '../shared/profile-digest-types';
 
 export interface LearnHooks {
   state(): BrowserState;
@@ -89,10 +91,12 @@ export function createLearning(ctx: DesktopContext, hooks: LearnHooks): Learning
   const d = (): LearnData => store.get();
   const save = (): void => store.set(store.get());
   const wcs = new Map<string, WebContents>();
+  /** Tabs outside the browser's persistent profile (an incognito-like session): never learned from. */
+  const ephemeral = new Set<string>();
 
   const learnable = (tabId: string, url: string): boolean => {
     if (d().paused || !/^https?:/i.test(url)) return false;
-    if (hooks.flagged(tabId) || hooks.byAgent(tabId)) return false;
+    if (ephemeral.has(tabId) || hooks.flagged(tabId) || hooks.byAgent(tabId)) return false;
     return !isExcluded(d(), hostKey(url));
   };
 
@@ -110,6 +114,7 @@ export function createLearning(ctx: DesktopContext, hooks: LearnHooks): Learning
   // ── The tabs ──
   const attachTab = (tabId: string, wc: WebContents): void => {
     wcs.set(tabId, wc);
+    try { if (!wc.session.isPersistent()) ephemeral.add(tabId); } catch { /* the default profile is persistent */ }
     let url = '';
     let typedAt = 0;
     const nav = (next: string, inPage: boolean): void => {
@@ -135,7 +140,7 @@ export function createLearning(ctx: DesktopContext, hooks: LearnHooks): Learning
       learnTyped(d(), url, now);
       save();
     });
-    wc.on('destroyed', () => { wcs.delete(tabId); });
+    wc.on('destroyed', () => { wcs.delete(tabId); ephemeral.delete(tabId); });
   };
 
   // ── Time in front, and how far down the page is ──
@@ -171,7 +176,26 @@ export function createLearning(ctx: DesktopContext, hooks: LearnHooks): Learning
     }
   }, TICK).unref?.();
   setInterval(() => { store.set(pruneLearn(d(), Date.now())); }, 6 * 3600_000).unref?.();
-  app.on('before-quit', () => store.flush());
+
+  // ── The digest "About you" reads (browser-profile-digest.ts, ADR 0018) ──
+  // Aggregates only, rewritten every few hours, on pause/forget and on quit.
+  const digestPath = digestFile(ctx.paths.desktopDir);
+  const aboutYouFile = path.join(ctx.paths.desktopDir, 'browser', 'about-you.json');
+  let digestAt = 0; let digestDomains = 0;
+  const writeProfileDigest = (): void => {
+    const g = buildDigest(d(), Date.now(), { useBrowsing: readUseBrowsing(aboutYouFile) });
+    if (writeDigest(digestPath, g)) { digestAt = g.at; digestDomains = g.domains.length; }
+  };
+  const digestStatus = (): ProfileDigestStatus => ({ useBrowsing: readUseBrowsing(aboutYouFile), learningPaused: d().paused, writtenAt: digestAt, domains: digestDomains });
+  setTimeout(writeProfileDigest, 60_000).unref?.();
+  setInterval(writeProfileDigest, 3 * 3600_000).unref?.();
+  ctx.handle('browser:profile:status', (): ProfileDigestStatus => digestStatus());
+  ctx.handle('browser:profile:set', (o?: { useBrowsing?: boolean }): ProfileDigestStatus => {
+    writeUseBrowsing(aboutYouFile, o?.useBrowsing !== false);
+    writeProfileDigest();
+    return digestStatus();
+  });
+  app.on('before-quit', () => { store.flush(); writeProfileDigest(); });
 
   // ── Tidying tabs (the agent's tool and the For-you card) ──
   const apply = (tabs: Array<{ id: string; url: string; title: string }>, action: LearnCleanup['action'], folder?: string): { closed: number; bookmarked: number; folderId?: string; folder?: string } => {
@@ -256,8 +280,8 @@ export function createLearning(ctx: DesktopContext, hooks: LearnHooks): Learning
   });
   ctx.handle('browser:learn:remove', (id: string) => { removeItem(d(), String(id)); save(); return view(); });
   ctx.handle('browser:learn:exclude', (site: string, on?: boolean) => { setExcluded(d(), String(site ?? ''), on !== false); save(); return view(); });
-  ctx.handle('browser:learn:pause', (paused: boolean) => { d().paused = Boolean(paused); save(); store.flush(); return view(); });
-  ctx.handle('browser:learn:forget', () => { store.set(forgetAll(d(), Date.now())); store.flush(); return view(); });
+  ctx.handle('browser:learn:pause', (paused: boolean) => { d().paused = Boolean(paused); save(); store.flush(); writeProfileDigest(); return view(); });
+  ctx.handle('browser:learn:forget', () => { store.set(forgetAll(d(), Date.now())); store.flush(); writeProfileDigest(); return view(); });
   ctx.handle('browser:learn:cleanup', (o: LearnCleanup) => {
     const ids = new Set((o?.tabIds ?? []).map(String));
     const tabs = openTabs().filter(t => ids.has(t.id));
@@ -268,7 +292,7 @@ export function createLearning(ctx: DesktopContext, hooks: LearnHooks): Learning
   return {
     attachTab,
     noteCopilot(url) { if (!d().paused && /^https?:/i.test(url) && !isExcluded(d(), hostKey(url))) { learnCopilot(d(), url, Date.now()); save(); } },
-    clear(sinceMs) { store.set(clearSince(d(), Date.now(), sinceMs)); store.flush(); },
+    clear(sinceMs) { store.set(clearSince(d(), Date.now(), sinceMs)); store.flush(); writeProfileDigest(); },
     forgetUrl(url) { forgetUrl(d(), url); save(); },
     service,
     flush: () => store.flush(),

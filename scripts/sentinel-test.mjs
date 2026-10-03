@@ -90,6 +90,18 @@ await block('Triggers: only high-risk calls are reviewed', async () => {
     && !trig('mcp__aico-host__browser_click', { text: 'Next' }, mcp('browser_click', false, true)), 'browser: "Place order" reviewed, "Next" not');
   assert(trig('mcp__aico-host__browser_login', { name: 'grafana' }, mcp('browser_login', false, true))?.effect === 'credential'
     && trig('mcp__aico-host__browser_upload', { files: ['a'] }, mcp('browser_upload', false, true))?.effect === 'external', 'browser: login is credential use, upload sends files');
+  {
+    const home = path.join(os.tmpdir(), 'aico-home-x');
+    const w = (file) => T.sentinelTrigger('Edit', { file_path: file }, { cwd: path.join(home, 'workspace', 'projects', 'desktop'), tainted: false, aicoHome: home });
+    assert(!w(path.join(home, 'workspace', 'projects', 'desktop', '.aico', 'dashboard', 'view.template.html'))
+      && w(path.join(home, 'settings.json'))?.effect === 'config'
+      && w(path.join(home, 'workspace', 'projects', 'desktop', '.aico', 'settings.json'))?.effect === 'config',
+      'a project kept under the AICO store is ordinary work; the store settings and a project .aico/settings.json are config');
+  }
+  const proc = (args, tainted) => T.sentinelTrigger('mcp__aico-host__browser_run_procedure', args, { cwd: process.cwd(), tainted, mcp: { tool: 'browser_run_procedure', readOnly: false, host: true } });
+  assert(!proc({ runId: 'r1' }, true) && !proc({ name: 'weekly report', params: {} }, false), 'replay: following a run is never reviewed; a start is not, before taint');
+  assert(/procedure the user taught/.test(proc({ name: 'weekly report', params: {} }, true)?.why ?? ''), 'replay start after taint: reviewed, and the reviewer is told what a procedure is');
+  assert(!T.sentinelTrigger('mcp__aico-host__browser_procedures', {}, { cwd: process.cwd(), tainted: true, mcp: { tool: 'browser_procedures', readOnly: false, host: true } }), 'listing procedures is never reviewed');
 });
 
 await block('When it is on', async () => {
@@ -157,7 +169,7 @@ function stage(o = {}) {
     customEffect: (n) => (n === 'deploy_tool' ? 'exec' : undefined),
     ...(o.ask === null ? {} : { ask: async (t, d) => { asked.push(d); return o.ask ?? true; } }),
     ...(o.park ? { park: o.park } : {}),
-    unattended: Boolean(o.unattended), sessionId: 's1',
+    unattended: Boolean(o.unattended), sessionId: 's1', ...(o.onEscalate ? { onEscalate: o.onEscalate } : {}),
     review: async (prompt, opts) => { seen.push({ prompt, opts }); return reviewer(prompt, opts); },
   });
   if (o.after) pipeline.onGuard('after', o.after);
@@ -170,6 +182,16 @@ function stage(o = {}) {
 }
 const verdict = (v, reason = v) => async () => ({ verdict: v, reason, model: 'stub', costUsd: 0.001, ms: 5 });
 const RISKY = ['Bash', { command: 'rm -rf build' }];
+
+await block('Full autonomy: escalations proceed, refusals still stop', async () => {
+  let s = stage({ onEscalate: 'proceed', unattended: true, reviewer: verdict('escalate') });
+  let r = await s.run(...RISKY);
+  assert(r.ran && s.asked.length === 0, 'an unsure verdict does not stop the run or ask anyone');
+  s = stage({ onEscalate: 'proceed', reviewer: verdict('deny') });
+  r = await s.run(...RISKY);
+  assert(!r.ran, 'a refusal still stops the call');
+  assert(!T.tightenOnlySentinel({ sentinel: { onEscalate: 'proceed' } }).sentinel, 'a project cannot turn on full autonomy');
+});
 
 await block('The stage can only deny or escalate', async () => {
   let s = stage();
@@ -264,6 +286,7 @@ await block('Session helpers', async () => {
   assert(JSON.stringify(T.userRequestsOf(events, [], 'and run the smoke test')) === '["Deploy the staging build","and run the smoke test"]', 'the person\'s messages only, then this turn\'s task');
   assert(T.userRequestsOf(undefined, [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'yo' }], 'hi').join() === 'hi', 'client history when there is no log; the task is not repeated');
   assert(T.recentCallsOf(events).map(c => c.name).join() === 'WebFetch,Bash', 'recent calls, oldest first');
+  assert(T.mergeRequests(['Deploy the staging build'], ['Deploy the staging build', 'now replay my weekly report']).join('|') === 'Deploy the staging build|now replay my weekly report', 'a steer sent mid-run joins the run requests');
   assert(T.untrustedSourcesOf(events, true).join() === 'WebFetch', 'untrusted sources by name');
 });
 

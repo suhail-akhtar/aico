@@ -30,6 +30,7 @@ import { FAMILY_REASONING, type FamilyDefault } from '../../../../shared/reasoni
 import { useStore } from '../../store';
 import { Icon } from '../Icon';
 import { ModelChooser, ProviderEditor, TestResult } from './ProviderEditor';
+import { RolesPane } from './RolesPane';
 
 type TestMap = Record<string, ProviderTestResult & { running?: boolean }>;
 
@@ -384,6 +385,9 @@ export function ModelsPane(): React.ReactElement {
           <Icon name="plus" size={17} /> Add provider
         </button>
       )}
+
+      {/* Which model does which job (ADR 0017): below the providers it draws on. */}
+      <RolesPane />
     </div>
   );
 }

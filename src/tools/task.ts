@@ -1,4 +1,4 @@
-import { createChildTracker } from '../tokens.js';
+import { costFor, createChildTracker } from '../tokens.js';
 import crypto from 'crypto';
 import type { SubAgentType } from './index.js';
 import { runHooks } from '../hooks.js';
@@ -8,6 +8,7 @@ import { workOf, absorbWork } from '../checks.js';
 import { noteFileWritten } from '../verification.js';
 import { loadProfile, renderProfile } from '../project/profile.js';
 import { projectRoot } from '../run-context.js';
+import { recordRoleSpend, resolveRole, roleForAgentType } from '../models/roles.js';
 
 /**
  * The parent's project profile, appended to a sub-agent's brief.
@@ -23,6 +24,17 @@ function withProjectProfile(brief: string): string {
 import { currentCwd, currentRunContext } from '../run-context.js';
 import { openSession } from '../session/open.js';
 import { Inbox } from '../session/inbox.js';
+import { humaniseStep } from '../../shared/tasks.js';
+import fs from 'fs';
+import path from 'path';
+import { owningSession, recordOwner } from '../agents/ownership.js';
+import { boundReport, reportBack, wakeOnResult } from '../agents/report-back.js';
+import { acquireSlot, maxConcurrentFrom, releaseSlot, resumeSlot, suspendSlot } from '../agents/limiter.js';
+import { deserializeScope, intersectScopes, serializeScope } from '../agents/scope-json.js';
+import { OPEN_SCOPE, type ToolScope } from '../agents/effective.js';
+import { ledger } from '../work/ledger.js';
+import type { AgentResumeSpec } from '../work/types.js';
+import type { WorktreeRecord } from '../worktree/index.js';
 
 // ── Sub-agent status types (mirrors Claude Code's task states) ─────────────
 export type SubAgentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
@@ -65,6 +77,27 @@ export interface SubAgentRecord {
   outputTokens: number;
   /** Cumulative cached tokens consumed by this sub-agent */
   cachedTokens: number;
+  /**
+   * The sub-agent that spawned this one, when it was not a chat.
+   *
+   * `sessionId` climbs to the conversation on purpose, which flattens the
+   * delegation tree: the Tasks panel could not show that an implementer's
+   * reviewer was the implementer's, not the chat's. Read from the ambient
+   * run context at spawn (`sub-<agentId>`), so no caller has to pass it.
+   */
+  parentAgentId?: string;
+  /** The registered agent this runs as (`agent_name`), when one was named. */
+  agentName?: string;
+  /** The last tool call in words ("Editing src/app.ts"), for the Tasks panel. */
+  lastStep?: string;
+  /** The start of the brief it was given, so a reader can tell siblings apart. */
+  brief?: string;
+  /** Spawned without waiting (`detach`, `BackgroundTask`): its report is delivered back (ADR 0021). */
+  detached?: boolean;
+  /** Waiting for a free slot under `agents.maxConcurrent`; mirrored as `queued` in the ledger. */
+  queued?: boolean;
+  /** How many times it has been continued with `Task {resume}`. */
+  resumed?: number;
 }
 
 // ── Sub-agent colors (Claude Code uses distinct colors per agent) ──────────
@@ -92,27 +125,11 @@ function isTerminal(status: SubAgentStatus): boolean {
 }
 
 /**
- * `sub-<agentId>` → the conversation that owns it.
- *
- * Lets a nested spawn climb back to the session a person is actually looking
- * at. Entries are kept for the life of the process alongside the record they
- * describe; they are two small strings each, and dropping one would orphan any
- * agent a completed agent had spawned.
+ * `sub-<agentId>` → the conversation that owns it. The map moved to
+ * `agents/ownership` so the shell tool can resolve an owner without importing
+ * this module (a cycle); re-exported here for every existing caller.
  */
-const OWNER_OF_SUB_SESSION = new Map<string, string>();
-
-/** The conversation a spawn belongs to, climbing out of any nesting. */
-export function owningSession(sessionId: string | undefined): string | undefined {
-  let current = sessionId;
-  // Bounded: a cycle here would be a bug, but an unbounded walk would be a
-  // hang, and sub-agent depth is limited to single digits anyway.
-  for (let hop = 0; hop < 16 && current; hop++) {
-    const owner = OWNER_OF_SUB_SESSION.get(current);
-    if (!owner) return current;
-    current = owner;
-  }
-  return current;
-}
+export { owningSession };
 
 /**
  * How to stop each running sub-agent, by id.
@@ -150,6 +167,69 @@ const _inboxes = new Map<string, Inbox>();
  * already in flight, and there is otherwise nothing to await.
  */
 const _detached = new Map<string, Promise<string>>();
+
+/**
+ * What each agent ran as, so it can be continued (`Task {resume}`) and, after a
+ * restart, resumed from its ledger row (ADR 0021). Bounded; the ledger keeps
+ * the durable copy.
+ */
+const _specs = new Map<string, AgentResumeSpec>();
+
+/** Agents a `Supervise wait` is blocking on right now: their report comes back from the wait, not twice. */
+const _awaited = new Map<string, number>();
+/** Agents whose outcome a wait already handed over, so delivery skips them. */
+const _consumedByWait = new Set<string>();
+/** Agents whose report was delivered into the conversation, so a later wait does not repeat it whole. */
+const _delivered = new Set<string>();
+
+/** The id a caller gave, without the ledger's `agent:` or the log's `sub-` prefix. */
+export function normalizeAgentId(id: string): string {
+  return id.trim().replace(/^agent:/, '').replace(/^sub-/, '');
+}
+
+/** What an agent ran as, from this process or (after a restart) from its ledger row. */
+export function agentResumeSpec(agentId: string): AgentResumeSpec | undefined {
+  const id = normalizeAgentId(agentId);
+  return _specs.get(id) ?? ledger.get(`agent:${id}`)?.resume;
+}
+
+/** `Supervise wait` is about to block on these agents. */
+export function awaitAgents(agentIds: readonly string[]): void {
+  for (const raw of agentIds) {
+    const id = normalizeAgentId(raw);
+    _awaited.set(id, (_awaited.get(id) ?? 0) + 1);
+  }
+}
+
+/** The wait is over; `consumed` when it handed the outcomes over itself. */
+export function releaseAwaited(agentIds: readonly string[], consumed: boolean): void {
+  for (const raw of agentIds) {
+    const id = normalizeAgentId(raw);
+    if (consumed) _consumedByWait.add(id);
+    const n = (_awaited.get(id) ?? 1) - 1;
+    if (n > 0) _awaited.set(id, n); else _awaited.delete(id);
+  }
+}
+
+/** Whether an agent's report was already delivered into its conversation. */
+export function reportDelivered(agentId: string): boolean {
+  return _delivered.has(normalizeAgentId(agentId));
+}
+
+/**
+ * Stop every agent a conversation still has running — detached ones from
+ * earlier turns included. The composer's Stop means "stop what this chat is
+ * doing", and a background agent spawned two turns ago is part of that; before
+ * this, only the current turn's children were reached (through its signal).
+ */
+export function stopSessionAgents(sessionId: string, reason: string): string[] {
+  const stopped: string[] = [];
+  for (const rec of _registry.values()) {
+    if (rec.sessionId !== sessionId || isTerminal(rec.status)) continue;
+    if (requestAgentStop(rec.agentId, reason)) stopped.push(rec.agentId);
+  }
+  return stopped;
+}
 
 /** Deliver a correction to a running sub-agent. False when it has no inbox. */
 export function guideAgent(agentId: string, message: string): boolean {
@@ -195,12 +275,12 @@ export function requestAgentStop(agentId: string, reason: string): boolean {
  * the check cost money and depend on a provider being up.
  */
 export function registerOwnerForTest(subSessionId: string, owner: string): void {
-  OWNER_OF_SUB_SESSION.set(subSessionId, owner);
+  recordOwner(subSessionId, owner);
 }
 
 function _register(record: SubAgentRecord) {
   _registry.set(record.agentId, record);
-  if (record.sessionId) OWNER_OF_SUB_SESSION.set(`sub-${record.agentId}`, record.sessionId);
+  if (record.sessionId) recordOwner(`sub-${record.agentId}`, record.sessionId);
   _emit();
 }
 
@@ -283,6 +363,7 @@ export const taskToolDefinition = {
     'Brief it like a capable colleague new to the repo: prompt = the goal and the context you already hold (paths, findings, decisions, the why); files = scope; constraints = what not to change, patterns to follow; acceptance_criteria = checkable conditions for done (required when it can change files), covering the change\'s security and edge cases — never declare one out of scope unless the user did.',
     'It reports STATUS, changes, evidence per criterion and open risks. That report is a claim: files it changes count against this turn\'s checks, so RunChecks (and VerifyApp for pages) still decide when the work is done.',
     'Who runs it: subagent_type — general (default: implements in any language/stack, all tools), explore (fast read-only search), plan (read-only design), review (code review), verification (tries to break the work), security-audit (read-only); agent_name — a registered agent; agent_spec — inline instructions, tools ("all", "readonly" or names) and model.',
+    'Follow-up to an earlier sub-agent: resume = its id, prompt = the follow-up. It continues with its own conversation, agent, model and limits (a running one gets it at its next step).',
   ].join('\n'),
   inputSchema: {
     type: 'object',
@@ -348,7 +429,11 @@ export const taskToolDefinition = {
       },
       detach: {
         type: 'boolean',
-        description: 'Default false: the result comes back from the call. True returns an id at once so you can watch, guide or stop it with Supervise — only when you will supervise, and you MUST wait for it (Supervise "wait") before treating the work as done.',
+        description: 'Default false: the result comes back from the call. True returns an id at once; its full report is delivered into this conversation when it finishes (you are woken for it if your turn has ended), so do not poll. Use it only when you have other work meanwhile; the work is not done until that report arrives. Supervise can watch, guide, stop or wait on it.',
+      },
+      resume: {
+        type: 'string',
+        description: 'The id of an earlier sub-agent to continue: prompt is the follow-up. Same agent, model and limits, with its prior conversation.',
       },
     },
     required: ['description', 'prompt'],
@@ -522,13 +607,22 @@ export async function runTask(
      * Opt-in, and off by default, because a blocking `Task` is what every
      * existing caller and every agent prompt already expects: the result comes
      * back from the call. Detaching is for the case those cannot express —
-     * supervising a child while it works, which is impossible while suspended
-     * inside the call that spawned it.
+     * work that runs while the parent does something else. Its report is
+     * delivered back into the conversation when it finishes (ADR 0021).
      */
     detach?: boolean;
+    /** Continue an earlier sub-agent instead of spawning one — see {@link resumeTask}. */
+    resume?: string;
   },
   opts: RunTaskOpts,
 ): Promise<string> {
+  if (args.resume) {
+    return resumeTask({
+      resume: args.resume, prompt: args.prompt,
+      ...(args.detach !== undefined ? { detach: args.detach } : {}),
+      ...(args.timeout !== undefined ? { timeout: args.timeout } : {}),
+    }, opts);
+  }
   if (opts.depth >= 4) {
     return `[error] Sub-agent depth limit reached — max nesting is 4 levels.`;
   }
@@ -588,18 +682,24 @@ export async function runTask(
   // it, and everything else used to silently inherit whatever the session was
   // set to. A fleet of explorers running greps was billed at the rate chosen
   // for the session's hardest reasoning.
+  //
+  // Below anything explicit, the model role for this kind of agent decides
+  // (ADR 0017): `explore` for read-only researchers, `review` for checkers,
+  // `coding` for the rest — `models.roles[role]`, then `agentModels` (the
+  // legacy key: the name as requested first, so a model configured for a
+  // retired role name still applies), then the preset (`balanced`: the
+  // parent's model, as before).
   const IMPLEMENTATION_AGENTS = new Set(['frontend', 'backend', 'qa', 'healer']);
-  // The name as requested first, so a model configured for a retired role
-  // name still applies to calls that use it.
-  const roleModel = (args.subagent_type ? opts.settings?.agentModels?.[args.subagent_type] : undefined)
-    ?? opts.settings?.agentModels?.[agentType]
-    ?? opts.settings?.agentModels?.default;
+  const legacyType = args.subagent_type && opts.settings?.agentModels?.[args.subagent_type]
+    ? args.subagent_type : agentType;
+  const modelRole = resolveRole(roleForAgentType(args.subagent_type || args.agent_name || agentType), {
+    settings: opts.settings, mainModel: opts.model, agentType: legacyType,
+  });
+  const roleModel = modelRole.ok && modelRole.model ? modelRole.model : undefined;
   const requestedModel = resolvedModel ?? args.model ?? roleModel ?? opts.model;
   const agentModel = (
     IMPLEMENTATION_AGENTS.has(agentType) && requestedModel.includes('haiku')
   ) ? opts.model : requestedModel;
-  const colorIdx = _registry.size % AGENT_COLORS.length;
-  const color = AGENT_COLORS[colorIdx];
 
   // ── The delegation contract ───────────────────────────────────────
   // Checked after resolution because only then is it known whether this child
@@ -624,38 +724,11 @@ export async function runTask(
     fullPrompt = typePrompt ? `${typePrompt}\n\n---\n\n${brief}` : brief;
   }
 
-  const now = Date.now();
   // Read from the ambient run context rather than passed down through options:
   // the Task tool executes inside its caller's context, so this is the session
   // the spawn belongs to without every call site having to remember to say so.
-  const owner = owningSession(currentRunContext()?.sessionId);
-  const record: SubAgentRecord = {
-    agentId,
-    ...(owner ? { sessionId: owner } : {}),
-    description: args.description,
-    model: agentModel,
-    status: 'running',
-    statusMessage: 'Starting…',
-    startedAt: now,
-    depth: opts.depth + 1,
-    agentType,
-    lastActivityAt: now,
-    toolCallCount: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    cachedTokens: 0,
-  };
-
-  _register(record);
-  if (opts.settings) {
-    await runHooks('SubagentStart', {
-      event: 'SubagentStart',
-      agentId,
-      agentType,
-      agentDescription: args.description,
-    }, opts.settings);
-  }
-  opts.onSubagentStart?.(record);
+  const spawnedFrom = currentRunContext()?.sessionId;
+  const parentAgentId = spawnedFrom?.startsWith('sub-') ? spawnedFrom.slice(4) : undefined;
 
   /*
     The parent's directory, not the process's.
@@ -665,9 +738,208 @@ export async function runTask(
     it happened to be launched, not the project the delegation belongs to. A
     sub-agent asked to read a file was reading the wrong repository's copy of
     it. This is also where the child's log is filed, so it has to be right
-    before that starts.
+    before that starts — and for a grandchild it is the conversation's
+    directory, not a worktree its parent happened to be working in, or the
+    Tasks panel could never find the transcript.
   */
   const parentCwd = currentCwd();
+  const logCwd = (parentAgentId ? _specs.get(parentAgentId)?.logCwd : undefined) ?? parentCwd;
+
+  /*
+    Worktree isolation that isolates (ADR 0021).
+
+    The worktree used to be created and then ignored: the child was handed
+    `parentCwd` and edited the real checkout. Now the child's directory *is*
+    the worktree, and a write bound pins AICO's file tools inside it — an
+    absolute path copied from the brief into the parent's checkout is refused
+    rather than quietly landing there. Bash is not bound (a command line is not
+    a path; agents/paths-guard says so), which is why the brief says where to
+    work as well.
+  */
+  let worktree: WorktreeRecord | undefined;
+  let childCwd = parentCwd;
+  let worktreeNote: string | undefined;
+  if (args.isolation === 'worktree') {
+    try {
+      const { worktreeManager } = await import('../worktree/index.js');
+      worktree = await worktreeManager.createWorktree(agentId, parentCwd);
+      childCwd = worktreeManager.childCwd(worktree, parentCwd);
+      fs.mkdirSync(childCwd, { recursive: true });
+    } catch (err) {
+      // Worktree creation failed — continue without isolation, and say so.
+      worktree = undefined;
+      worktreeNote = `Worktree failed, running in-place: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+  if (worktree) {
+    fullPrompt += `\n\n---\n\nYou are working in an isolated git worktree at ${childCwd} (branch ${worktree.branch}), `
+      + `a separate checkout of ${worktree.repoRoot ?? parentCwd}. Read and change files only there: a path in this brief `
+      + `under ${worktree.repoRoot ?? parentCwd} means the same file inside your worktree. Your changes are committed to `
+      + 'the branch for the caller to review and merge — do not merge or push it yourself.';
+  }
+
+  return launch({
+    agentId,
+    description: args.description,
+    agentType,
+    ...(args.agent_name ? { agentName: args.agent_name } : {}),
+    model: agentModel,
+    roleName: modelRole.role,
+    task: withProjectProfile(fullPrompt),
+    brief: args.prompt,
+    ...(resolvedTools ? { tools: resolvedTools } : {}),
+    ...(resolvedCanDelegate === false ? { canDelegate: false } : {}),
+    ...(resolvedBounds ? { bounds: resolvedBounds } : {}),
+    cwd: childCwd,
+    logCwd,
+    ...(worktree ? { worktree } : {}),
+    ...(worktreeNote ? { startNote: worktreeNote } : {}),
+    detach: args.detach === true,
+    ...(args.timeout ? { timeout: args.timeout } : {}),
+    ...(spawnedFrom ? { spawnedFrom } : {}),
+    depth: opts.depth + 1,
+    scope: worktree ? scopeForWorktree(opts.toolScope, worktree) : opts.toolScope,
+    planMode: opts.planMode === true,
+  }, opts);
+}
+
+/**
+ * The delegating run's scope, re-rooted into a worktree: every inherited write
+ * bound rooted in the repository is moved to the same place in the worktree,
+ * and one more bound admits only the worktree. Only ever narrower than the
+ * parent's for the real checkout — writes there are refused outright.
+ */
+function scopeForWorktree(scope: ToolScope | undefined, wt: WorktreeRecord): ToolScope {
+  const base = scope ?? OPEN_SCOPE;
+  const repo = wt.repoRoot;
+  const rebased = (base.writeBounds ?? []).map(b => {
+    if (!repo) return b;
+    const rel = path.relative(repo, b.root);
+    return rel.startsWith('..') || path.isAbsolute(rel) ? b : { ...b, root: path.join(wt.path, rel) };
+  });
+  return {
+    ...base,
+    writeBounds: [...rebased, { label: 'its worktree', root: wt.path, globs: ['**'] }],
+  };
+}
+
+/** One child run, new or continued. Everything `launch` needs to start it and, later, to resume it. */
+interface LaunchSpec {
+  agentId: string;
+  description: string;
+  agentType: SubAgentType;
+  agentName?: string;
+  model: string;
+  /** The model role its spend is booked to (ADR 0017). */
+  roleName: Parameters<typeof recordRoleSpend>[0];
+  /** What the child is told this run: the composed brief, or a follow-up when resumed. */
+  task: string;
+  /** The brief as the caller gave it, for the record. */
+  brief: string;
+  tools?: string[] | 'all' | 'readonly' | readonly string[];
+  canDelegate?: false;
+  bounds?: import('../agents/types.js').AgentBounds;
+  cwd: string;
+  logCwd: string;
+  worktree?: WorktreeRecord;
+  /** Said on the record before it starts (a worktree that could not be made). */
+  startNote?: string;
+  detach: boolean;
+  timeout?: number;
+  spawnedFrom?: string;
+  /** The child's own depth. */
+  depth: number;
+  scope?: ToolScope | undefined;
+  planMode: boolean;
+  /** Set when this continues an earlier run of the same agent. */
+  resumed?: boolean;
+}
+
+/** The ledger-persisted shape of a launch, for resume (ADR 0021). */
+function resumeSpecOf(spec: LaunchSpec, opts: RunTaskOpts, owner: string | undefined): AgentResumeSpec {
+  const scope = serializeScope(spec.scope);
+  return {
+    v: 1,
+    description: spec.description,
+    agentType: spec.agentType,
+    ...(spec.agentName ? { agentName: spec.agentName } : {}),
+    ...(spec.tools ? { tools: Array.isArray(spec.tools) ? [...spec.tools] : spec.tools as 'all' | 'readonly' } : {}),
+    model: spec.model,
+    cwd: spec.cwd,
+    logCwd: spec.logCwd,
+    ...(owner ? { owner } : {}),
+    ...(spec.spawnedFrom ? { spawnedFrom: spec.spawnedFrom } : {}),
+    depth: spec.depth,
+    detach: spec.detach,
+    autoApprove: opts.autoApprove,
+    ...(spec.planMode ? { planMode: true } : {}),
+    ...(scope ? { scope } : {}),
+    ...(opts.toolGroups?.length ? { toolGroups: [...opts.toolGroups] } : {}),
+    ...(spec.worktree ? {
+      worktree: {
+        path: spec.worktree.path, branch: spec.worktree.branch,
+        base: spec.worktree.baseCommit ?? '', repoRoot: spec.worktree.repoRoot ?? spec.logCwd,
+      },
+    } : {}),
+  };
+}
+
+/** Where every agent outside a conversation (a CLI run with no session) shares its slots. */
+const NO_SESSION_POOL = '(no session)';
+
+/**
+ * Start one child run — a new spawn or a resumed one — blocking or detached.
+ *
+ * One path for both, so a resumed agent gets exactly the bounds, heartbeat,
+ * slot, report delivery and worktree handling a new one does: a second, shorter
+ * path beside this one is how "resume" would have become the way around them.
+ */
+async function launch(spec: LaunchSpec, opts: RunTaskOpts): Promise<string> {
+  const { agentId, agentType } = spec;
+  const owner = owningSession(spec.spawnedFrom);
+  const parentAgentId = spec.spawnedFrom?.startsWith('sub-') ? spec.spawnedFrom.slice(4) : undefined;
+  const now = Date.now();
+  const previous = _registry.get(agentId);
+  const record: SubAgentRecord = {
+    agentId,
+    ...(owner ? { sessionId: owner } : {}),
+    ...(parentAgentId ? { parentAgentId } : {}),
+    ...(spec.agentName ? { agentName: spec.agentName } : {}),
+    brief: spec.brief.slice(0, 400),
+    description: spec.description,
+    model: spec.model,
+    status: 'running',
+    statusMessage: spec.startNote ?? 'Starting…',
+    startedAt: now,
+    depth: spec.depth,
+    agentType,
+    lastActivityAt: now,
+    toolCallCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+    ...(spec.detach ? { detached: true } : {}),
+    ...(spec.resumed ? { resumed: (previous?.resumed ?? 0) + 1 } : {}),
+  };
+
+  // Recorded before the registry emits, so the ledger row the mirror opens
+  // carries it — and so does the row after a restart.
+  _specs.set(agentId, resumeSpecOf(spec, opts, owner));
+  if (_specs.size > 500) _specs.delete(_specs.keys().next().value!);
+  // A resume reuses the id; whatever was waiting to clear the old record must
+  // not clear this one, and nothing about the old run is still steerable.
+  _consumedByWait.delete(agentId);
+  _delivered.delete(agentId);
+  _register(record);
+  if (opts.settings) {
+    await runHooks('SubagentStart', {
+      event: 'SubagentStart',
+      agentId,
+      agentType,
+      agentDescription: spec.description,
+    }, opts.settings);
+  }
+  opts.onSubagentStart?.(record);
 
   /*
     A session of the child's own, and an inbox on top of it.
@@ -680,7 +952,8 @@ export async function runTask(
     The log is a side effect worth having on its own. A delegated agent used to
     be a black box that returned a paragraph; now what it actually did is on
     disk beside the conversation that asked for it. Nothing is written unless
-    the child records something — see `persistSession`.
+    the child records something — see `persistSession`. It is also what a
+    resume rebuilds the conversation from: reopening `sub-<id>` replays it.
 
     Failing to open one is not fatal. The child runs without steering rather
     than not running.
@@ -688,24 +961,43 @@ export async function runTask(
   let sub: Awaited<ReturnType<typeof openSession>> | undefined;
   let inbox: Inbox | undefined;
   try {
-    sub = await openSession(`sub-${agentId}`, parentCwd);
+    sub = await openSession(`sub-${agentId}`, spec.logCwd);
     inbox = new Inbox(sub.session);
     _inboxes.set(agentId, inbox);
   } catch {
     // No transcript and no steering for this one; the work still happens.
   }
 
-  // Optional worktree isolation
-  let worktreeRecord: import('../worktree/index.js').WorktreeRecord | undefined;
-  if (args.isolation === 'worktree') {
-    try {
-      const { worktreeManager } = await import('../worktree/index.js');
-      worktreeRecord = await worktreeManager.createWorktree(agentId, parentCwd);
-    } catch (err) {
-      // Worktree creation failed — continue without isolation, emit warning
-      _update(agentId, { statusMessage: `Worktree failed, running in-place: ${err instanceof Error ? err.message : String(err)}` });
+  /*
+    The stop handle exists before the child has a slot, so a queued agent can
+    be stopped too — it then never starts. Registered so a supervisor (the
+    reader watching the panel, the orchestrator between delegations, the
+    composer's Stop on a later turn) can stop this one child without taking
+    its siblings down with it.
+  */
+  const abortController = new AbortController();
+  _stops.set(agentId, { abort: () => abortController.abort() });
+  // Forward an external abort (e.g. studio pipeline cancellation, the parent
+  // turn's Stop) into the sub-agent's internal controller so the runAgent call
+  // tears down promptly.
+  let detachParentAbort: (() => void) | undefined;
+  if (opts.abortSignal) {
+    if (opts.abortSignal.aborted) abortController.abort();
+    else {
+      // Detached when the sub-agent settles: this listener lives on the
+      // PARENT's signal, which outlives the child, so one is left behind
+      // per Task call otherwise.
+      const parentSignal = opts.abortSignal;
+      const onParentAbort = (): void => abortController.abort();
+      parentSignal.addEventListener('abort', onParentAbort, { once: true });
+      detachParentAbort = () => parentSignal.removeEventListener('abort', onParentAbort);
     }
   }
+
+  const pool = owner ?? NO_SESSION_POOL;
+  const maxSlots = maxConcurrentFrom(opts.settings);
+  /** How it ended, for the report a detached run delivers. */
+  let finalStatus: SubAgentStatus = 'failed';
 
   /*
     The whole run, as one promise.
@@ -718,6 +1010,15 @@ export async function runTask(
   */
   const settle = async (): Promise<string> => {
   try {
+    // A slot under `agents.maxConcurrent` first (agents/limiter). Over the
+    // cap the agent waits, shown as queued — never refused.
+    const slot = acquireSlot(pool, agentId, maxSlots, abortController.signal);
+    if (slot.queued) {
+      _update(agentId, { queued: true, statusMessage: `Queued — ${maxSlots} agent(s) already running in this session` });
+    }
+    await slot.ready;
+    if (slot.queued) _update(agentId, { queued: false });
+
     // Dynamic import avoids circular dependency
     const { runAgent } = await import('../agent.js');
 
@@ -731,7 +1032,7 @@ export async function runTask(
     const isStudioAgent = STUDIO_AGENT_TYPES.has(agentType);
 
     // Idle timeout: how long with NO tool activity before we kill the agent
-    const idleTimeoutMs = (args.timeout ? args.timeout * 1000 : undefined)
+    const idleTimeoutMs = (spec.timeout ? spec.timeout * 1000 : undefined)
       ?? opts.subagentTimeout
       ?? (isStudioAgent ? 120_000 : 60_000);  // 2 min idle for studio, 1 min for others
 
@@ -744,48 +1045,48 @@ export async function runTask(
     // on a job the ceiling then cuts short is a contradiction.
     const absoluteMaxMs = Math.max(
       isStudioAgent ? 1_800_000 : 900_000,  // 30 min studio, 15 min others
-      args.timeout ? args.timeout * 1000 * 3 : 0,
+      spec.timeout ? spec.timeout * 1000 * 3 : 0,
       opts.subagentMaxMs ?? 0,
     );
 
-    let lastActivity = Date.now();
+    // Measured from when it got a slot: time spent queued is not time worked.
+    const runStartedAt = Date.now();
+    let lastActivity = runStartedAt;
     let toolCallCount = 0;
-    const abortController = new AbortController();
-    // Registered so a supervisor — the reader watching the panel, or the
-    // orchestrator between delegations — can stop this one child without
-    // taking its siblings down with it.
-    _stops.set(agentId, { abort: () => abortController.abort() });
-    // Forward an external abort (e.g. studio pipeline cancellation) into the
-    // sub-agent's internal controller so the runAgent call tears down promptly.
-    let detachParentAbort: (() => void) | undefined;
-    if (opts.abortSignal) {
-      if (opts.abortSignal.aborted) abortController.abort();
-      else {
-        // Detached when the sub-agent settles: this listener lives on the
-        // PARENT's signal, which outlives the child, so one is left behind
-        // per Task call otherwise.
-        const parentSignal = opts.abortSignal;
-        const onParentAbort = (): void => abortController.abort();
-        parentSignal.addEventListener('abort', onParentAbort, { once: true });
-        detachParentAbort = () => parentSignal.removeEventListener('abort', onParentAbort);
-      }
+
+    /*
+      A detached child has nobody to ask. It inherits the parent's approval
+      posture (autoApprove) and decides everything else from policy, exactly as
+      a background agent always has (background/decideHeadlessPermission).
+      Without this, a detached child under a parent that asks fell through to
+      the terminal prompt and hung until its idle timeout.
+    */
+    let headless: Partial<Parameters<typeof runAgent>[0]> = {};
+    if (spec.detach) {
+      const { decideHeadlessPermission } = await import('../background/index.js');
+      headless = {
+        headless: true,
+        onPermissionRequest: async (toolName: string) =>
+          decideHeadlessPermission(toolName, 'inherit', opts.autoApprove).allowed,
+      };
     }
 
     const agentPromise = runAgent({
-      task: withProjectProfile(fullPrompt),
+      task: spec.task,
       token: opts.token ?? '',
-      model: agentModel,
+      model: spec.model,
       autoApprove: opts.autoApprove,
       verbose: opts.verbose,
       showPlan: false,
       conversationHistory: [],
       sessionId: `sub-${agentId}`,
-      cwd: parentCwd,
+      cwd: spec.cwd,
       ...(sub ? { session: sub.session } : {}),
       ...(inbox ? { inbox } : {}),
       silent: true,
-      depth: opts.depth + 1,
+      depth: spec.depth,
       agentType,
+      ...headless,
       // ── Inherited constraints ────────────────────────────────────────
       // Everything below is a promise the parent made that the child has to
       // keep too. Omitting any of them makes the corresponding restriction
@@ -805,20 +1106,20 @@ export async function runTask(
       // unchanged; what this adds is the ability to tell one agent's spend
       // from its siblings', which is what `maxCostPerSubagent` measures.
       ...(opts.tokenTracker ? { tokenTracker: createChildTracker(opts.tokenTracker) } : {}),
-      ...(opts.planMode ? { planMode: true } : {}),
+      ...(spec.planMode ? { planMode: true } : {}),
       ...(opts.toolGroups?.length ? { toolGroups: opts.toolGroups } : {}),
       // Pass the resolved spec tools so runAgent uses the custom whitelist
       // instead of the hardcoded SUBAGENT_TOOL_SETS for this agent type.
-      ...(resolvedTools ? { agentSpecTools: resolvedTools } : {}),
+      ...(spec.tools ? { agentSpecTools: spec.tools as string[] | 'all' | 'readonly' } : {}),
       //   toolScope    the parent's effective set — the child's own list is
       //                intersected with it, so `tools: 'all'` means the parent's.
       //   canDelegate  a named agent that may not delegate does not, in code.
-      ...(opts.toolScope ? { toolScope: opts.toolScope } : {}),
-      ...(resolvedCanDelegate === false ? { canDelegate: false } : {}),
-      ...(resolvedBounds ? { agentBounds: resolvedBounds } : {}),
+      ...(spec.scope ? { toolScope: spec.scope } : {}),
+      ...(spec.canDelegate === false ? { canDelegate: false } : {}),
+      ...(spec.bounds ? { agentBounds: spec.bounds } : {}),
       abortSignal: abortController.signal,
       // Sub-agent status updates feed back into registry — AND reset heartbeat
-      onToolCall: (name: string) => {
+      onToolCall: (name: string, toolArgs?: Record<string, unknown>) => {
         const current = _registry.get(agentId);
         if (current && isTerminal(current.status)) return;
         lastActivity = Date.now();
@@ -828,6 +1129,7 @@ export async function runTask(
           lastActivityAt: lastActivity,
           toolCallCount,
           currentTool: name,
+          lastStep: humaniseStep(name, toolArgs),
         });
       },
       onToolDone: () => {
@@ -847,6 +1149,8 @@ export async function runTask(
         _update(agentId, { lastActivityAt: lastActivity });
       },
       onTokens: (input, output, cached) => {
+        // Spend per model role (ADR 0017): explore, review or coding.
+        recordRoleSpend(spec.roleName, costFor(spec.model, { inputTokens: input, outputTokens: output, cachedTokens: cached }, opts.settings));
         const current = _registry.get(agentId);
         if (!current || isTerminal(current.status)) return;
         _update(agentId, {
@@ -861,63 +1165,57 @@ export async function runTask(
     const heartbeatPromise = new Promise<never>((_, reject) => {
       const checkInterval = setInterval(() => {
         const idleMs = Date.now() - lastActivity;
-        const totalMs = Date.now() - record.startedAt;
+        const totalMs = Date.now() - runStartedAt;
 
         if (idleMs > idleTimeoutMs) {
           abortController.abort();
           clearInterval(checkInterval);
           reject(new Error(
-            `Sub-agent "${args.description}" idle for ${Math.round(idleMs / 1000)}s (no tool activity). ` +
+            `Sub-agent "${spec.description}" idle for ${Math.round(idleMs / 1000)}s (no tool activity). ` +
             `Total runtime: ${Math.round(totalMs / 1000)}s, ${toolCallCount} tool calls made.`
           ));
         } else if (totalMs > absoluteMaxMs) {
           abortController.abort();
           clearInterval(checkInterval);
           reject(new Error(
-            `Sub-agent "${args.description}" hit absolute time limit (${Math.round(absoluteMaxMs / 60_000)} min). ` +
+            `Sub-agent "${spec.description}" hit absolute time limit (${Math.round(absoluteMaxMs / 60_000)} min). ` +
             `${toolCallCount} tool calls made. Last activity ${Math.round(idleMs / 1000)}s ago.`
           ));
         }
       }, 10_000);
+      checkInterval.unref?.();
 
       // Clean up interval if agent finishes normally
       agentPromise.then(() => clearInterval(checkInterval), () => clearInterval(checkInterval));
     });
 
-    agentPromise.then(() => detachParentAbort?.(), () => detachParentAbort?.());
     let result = await Promise.race([agentPromise, heartbeatPromise]);
 
     _stops.delete(agentId);
+    finalStatus = 'completed';
     _update(agentId, { status: 'completed', statusMessage: 'Done', completedAt: Date.now(), result });
     if (opts.settings) {
       await runHooks('SubagentStop', {
         event: 'SubagentStop',
         agentId,
         agentType,
-        agentDescription: args.description,
+        agentDescription: spec.description,
       }, opts.settings);
     }
     opts.onSubagentStop?.({ ..._registry.get(agentId)! });
 
-    // Cleanup worktree if one was created
-    if (worktreeRecord) {
-      const { worktreeManager } = await import('../worktree/index.js');
-      const cleanup = await worktreeManager.cleanupWorktree(worktreeRecord.worktreeId, {
-        cwd: process.cwd(),
-        keepBranch: true,  // preserve changes for review
-      });
-      if (cleanup.cleaned && cleanup.branch) {
-        result += `\n\n[Worktree changes saved to branch: ${cleanup.branch}]`;
-      }
-    }
+    // A worktree's work is committed to its branch, never discarded, and the
+    // parent is told where it is and how to take it.
+    const wtNote = await finishWorktree(spec);
+    if (wtNote) result += `\n\n${wtNote}`;
 
     // Auto-clear completed agents after 10s so panel stays clean
-    setTimeout(() => {
-      _update(agentId, { status: 'completed' });  // keep, just don't re-add
+    const clear = setTimeout(() => {
       const rec = _registry.get(agentId);
-      if (rec?.status === 'completed') _registry.delete(agentId);
+      if (rec === record && rec.status === 'completed') _registry.delete(agentId);
       _emit();
     }, 10_000);
+    clear.unref?.();
 
     // Verification nudge: for implementation/coding agents, if the result reads
     // like a completion summary but shows no verification evidence (no mention of
@@ -942,53 +1240,52 @@ export async function runTask(
     const errMsg = stopReason
       ? `stopped by the supervisor: ${stopReason}`
       : err instanceof Error ? err.message : String(err);
+    // Never discard a worktree's work, however the run ended (worktree/).
+    const wtNote = await finishWorktree(spec);
     if (stopReason) {
+      finalStatus = 'cancelled';
       _update(agentId, {
-        status: 'cancelled', statusMessage: 'Stopped',
+        status: 'cancelled', statusMessage: 'Stopped', queued: false,
         completedAt: Date.now(), error: errMsg,
       });
       // Cleared on the same schedule as a failure — a reader who just stopped
       // something wants to see that it stopped.
-      setTimeout(() => {
+      const clear = setTimeout(() => {
         const rec = _registry.get(agentId);
-        if (rec?.status === 'cancelled') _registry.delete(agentId);
+        if (rec === record && rec.status === 'cancelled') _registry.delete(agentId);
         _emit();
       }, 30_000);
-      if (worktreeRecord) {
-        const { worktreeManager } = await import('../worktree/index.js');
-        await worktreeManager.cleanupWorktree(worktreeRecord.worktreeId, { cwd: process.cwd() })
-          .catch(() => {});
-      }
+      clear.unref?.();
       // From the record, not the loop variable: the counter is scoped to the
       // try block and this is the catch.
       const calls = _registry.get(agentId)?.toolCallCount ?? 0;
-      return `[Sub-agent "${args.description}" was stopped: ${stopReason}. `
+      return `[Sub-agent "${spec.description}" was stopped: ${stopReason}. `
         + `It made ${calls} tool call(s) before stopping — anything it had already `
-        + `written is still on disk. Decide what to do next rather than re-running it unchanged.]`;
+        + `written is still on disk. Decide what to do next rather than re-running it unchanged.]`
+        + (wtNote ? `\n\n${wtNote}` : '');
     }
-    _update(agentId, { status: 'failed', statusMessage: 'Failed', completedAt: Date.now(), error: errMsg });
+    finalStatus = 'failed';
+    _update(agentId, { status: 'failed', statusMessage: 'Failed', queued: false, completedAt: Date.now(), error: errMsg });
     if (opts.settings) {
       await runHooks('SubagentStop', {
         event: 'SubagentStop',
         agentId,
         agentType,
-        agentDescription: args.description,
+        agentDescription: spec.description,
       }, opts.settings);
     }
     opts.onSubagentStop?.({ ..._registry.get(agentId)! });
     // Auto-clear failed agents after 30s (longer than success 10s so user can read the error)
-    setTimeout(() => {
+    const clear = setTimeout(() => {
       const rec = _registry.get(agentId);
-      if (rec?.status === 'failed') _registry.delete(agentId);
+      if (rec === record && rec.status === 'failed') _registry.delete(agentId);
       _emit();
     }, 30_000);
-    // Cleanup worktree on failure too
-    if (worktreeRecord) {
-      const { worktreeManager } = await import('../worktree/index.js');
-      await worktreeManager.cleanupWorktree(worktreeRecord.worktreeId, { cwd: process.cwd() }).catch(() => {});
-    }
-    return `[Sub-agent "${args.description}" failed: ${errMsg}]`;
+    clear.unref?.();
+    return `[Sub-agent "${spec.description}" failed: ${errMsg}]` + (wtNote ? `\n\n${wtNote}` : '');
   } finally {
+    releaseSlot(pool, agentId);
+    detachParentAbort?.();
     /*
       The child's file changes are the parent's changes.
 
@@ -1001,9 +1298,12 @@ export async function runTask(
       RunChecks result is evidence whoever ran it, and a stale one is caught
       by the same mtime rule as the parent's own. Success, failure or stop
       alike — a child cut short can still have written half a change.
+
+      Not for a worktree child: what it wrote is on its branch, not in the
+      parent's tree, and the parent's checks have nothing of it to judge.
     */
     const work = workOf(`sub-${agentId}`);
-    if (work) {
+    if (work && !spec.worktree) {
       absorbWork(work);
       for (const file of work.written) noteFileWritten(file);
     }
@@ -1015,7 +1315,19 @@ export async function runTask(
   }
   };
 
-  if (!args.detach) return settle();
+  if (!spec.detach) {
+    /*
+      A sub-agent blocking on its own child gives its slot up while it waits
+      (agents/limiter): otherwise parents waiting on children could hold every
+      slot while the children queue for one that never frees.
+    */
+    if (parentAgentId) suspendSlot(pool, parentAgentId);
+    try {
+      return await settle();
+    } finally {
+      if (parentAgentId) await resumeSlot(pool, parentAgentId, maxSlots, opts.abortSignal).catch(() => undefined);
+    }
+  }
 
   /*
     Detached: started, not awaited.
@@ -1025,10 +1337,20 @@ export async function runTask(
     `catch` is attached immediately and separately: an unhandled rejection here
     would take the process down, and the rejection is genuinely handled, by
     whoever calls `wait`.
+
+    And when it settles, its report goes back to whoever is waiting for it
+    (ADR 0021) — the full text, bounded like a Task result, success or not.
   */
   const running = settle();
+  // Read after `settle` has asked for its slot (synchronously, before its
+  // first await), so the reply can say the agent is waiting for one.
+  const queuedAtSpawn = _registry.get(agentId)?.queued === true;
   _detached.set(agentId, running);
   running.catch(() => undefined);
+  void running.then(
+    text => deliverReport(spec, finalStatus, text, opts.settings),
+    err => deliverReport(spec, 'failed', err instanceof Error ? err.message : String(err), opts.settings),
+  ).catch(() => undefined);
   /*
     Kept well past the finish, then dropped.
 
@@ -1039,14 +1361,204 @@ export async function runTask(
     days does not accumulate every delegation it ever made.
   */
   void running.finally(() => {
-    const forget = setTimeout(() => _detached.delete(agentId), 600_000);
+    const forget = setTimeout(() => { if (_detached.get(agentId) === running) _detached.delete(agentId); }, 600_000);
     forget.unref?.();
   });
-  return `[Spawned "${args.description}" as sub-agent ${agentId}, running in the background. `
-    + 'It is NOT finished and has produced nothing yet. Use Supervise to watch it '
-    + `("list"), correct it without restarting it ("guide"), stop it ("stop"), or collect `
-    + `its result ("wait"). Do not report this task as done until you have waited for it.]`;
+  return `[Spawned "${spec.description}" as sub-agent ${agentId}, running in the background`
+    + `${queuedAtSpawn ? ` (queued: this session already has ${maxSlots} agent(s) running; it starts when one finishes)` : ''}. `
+    + 'It is NOT finished and has produced nothing yet. Its full report will be delivered into this '
+    + 'conversation when it finishes — you do not need to poll for it. Supervise can watch it ("list"), '
+    + 'correct it without restarting it ("guide"), stop it ("stop"), or block on it ("wait") if you cannot '
+    + `continue without it. Do not report this task as done until its report has arrived.]`;
 }
+
+/** Finish a launch's worktree, if it had one, and describe where the work is. */
+async function finishWorktree(spec: LaunchSpec): Promise<string | undefined> {
+  if (!spec.worktree) return undefined;
+  try {
+    const { worktreeManager, describeWorktreeFinish } = await import('../worktree/index.js');
+    const finished = await worktreeManager.finish(spec.worktree.worktreeId, {
+      message: `AICO sub-agent ${spec.agentId}: ${spec.description}`.slice(0, 200),
+    });
+    return finished ? describeWorktreeFinish(finished) : undefined;
+  } catch (err) {
+    return `[Worktree ${spec.worktree.path} was left in place: ${err instanceof Error ? err.message : String(err)}. Nothing was discarded.]`;
+  }
+}
+
+/**
+ * Hand a finished detached agent's report back (agents/report-back).
+ *
+ * To its parent agent's inbox when another agent spawned it and is still
+ * running — that is who asked — and to the conversation otherwise. Skipped
+ * when a `Supervise wait` handed the outcome over already: the same report
+ * twice is context paid for twice.
+ */
+async function deliverReport(
+  spec: LaunchSpec, status: SubAgentStatus, text: string, settings: AicoSettings | undefined,
+): Promise<void> {
+  const id = spec.agentId;
+  if (_awaited.has(id) || _consumedByWait.has(id)) return;
+  const head = status === 'completed'
+    ? `[Background agent ${id} finished — "${spec.description}"]`
+    : status === 'cancelled'
+      ? `[Background agent ${id} was stopped — "${spec.description}"]`
+      : `[Background agent ${id} failed — "${spec.description}"]`;
+  const body = await boundReport(text, 'BackgroundAgent', id);
+  const tail = `\n\n(Its conversation is kept: send it a follow-up with Task {"resume": "${id}", "description": "…", "prompt": "…"}.)`;
+  const content = `${head}\n\n${body}${tail}`;
+  _delivered.add(id);
+
+  const parentAgentId = spec.spawnedFrom?.startsWith('sub-') ? spec.spawnedFrom.slice(4) : undefined;
+  const parentInbox = parentAgentId ? _inboxes.get(parentAgentId) : undefined;
+  if (parentInbox) {
+    parentInbox.inject(content, { kind: 'plugin', plugin: 'background-agent' });
+    return;
+  }
+  const owner = owningSession(spec.spawnedFrom);
+  await reportBack({
+    sessionId: owner ?? '',
+    content,
+    plugin: 'background-agent',
+    // A stopped agent never starts a turn: the person (or the model) who
+    // stopped it already knows, and a Stop followed by the session talking
+    // again by itself would undo what Stop means.
+    wake: Boolean(owner) && status !== 'cancelled' && wakeOnResult(settings),
+    cwd: spec.logCwd,
+    title: `Agent ${status === 'completed' ? 'done' : status}: ${spec.description.slice(0, 50)}`,
+    failed: status !== 'completed',
+  });
+}
+
+/**
+ * Continue an earlier sub-agent with a follow-up (`Task {resume}`).
+ *
+ * Why on `Task` and not a `Supervise message` verb: continuing an agent *is*
+ * making a child run, and `Task` is the one place a child is made — the
+ * calling run's depth, tool scope, plan mode, delegation rule, token tracker
+ * and abort signal are all in hand there and are applied exactly as for a new
+ * spawn. `Supervise` runs outside the loop and has none of them; a resume from
+ * there would be a second, unbounded way to start a model loop (ADR 0021).
+ *
+ * - A running agent gets the follow-up at its next step boundary (what
+ *   `Supervise guide` does).
+ * - A finished, failed, stopped or interrupted one is run again under the same
+ *   id: same agent type/name, tools and model, its history rebuilt from its own
+ *   `sub-<id>` log — tool calls are never replayed, an unanswered one reads as
+ *   unanswered (session/derive) — within the caller's budgets and scope,
+ *   intersected with the scope it originally ran under.
+ */
+export async function resumeTask(
+  args: { resume: string; prompt: string; detach?: boolean; timeout?: number },
+  opts: RunTaskOpts,
+): Promise<string> {
+  const id = normalizeAgentId(args.resume);
+  const prompt = args.prompt?.trim();
+  if (!id) return '[error] resume needs the id of an earlier sub-agent.';
+  if (!prompt) return '[error] resume needs a prompt — the follow-up to send it.';
+  const spec = agentResumeSpec(id);
+  if (!spec) return `[error] No sub-agent "${id}" to resume — it is unknown here (use Supervise "list" with all:true to see ids).`;
+
+  // One conversation must never drive another's agents.
+  const caller = owningSession(currentRunContext()?.sessionId);
+  if (spec.owner && caller && spec.owner !== caller) {
+    return `[error] Sub-agent "${id}" belongs to another conversation and cannot be resumed from this one.`;
+  }
+
+  const live = _registry.get(id);
+  if (live && !isTerminal(live.status)) {
+    if (guideAgent(id, prompt)) {
+      return `[Delivered to running sub-agent ${id} ("${live.description}") — it reads it at its next step boundary, `
+        + 'keeping everything it has learned so far. Its report comes back as before.]';
+    }
+    return `[error] Sub-agent "${id}" is still running but cannot be reached right now; try again in a moment or stop it.`;
+  }
+
+  if (opts.depth >= 4) return `[error] Sub-agent depth limit reached — max nesting is 4 levels.`;
+  if (opts.toolScope && !opts.toolScope.delegate) {
+    return '[error] This agent may not delegate (canDelegate is off for it or for an agent above it), so it cannot resume one either.';
+  }
+
+  // A named agent is resolved again: its bounds (deny list, budget, write
+  // paths) are part of what it is, and a definition switched off since is
+  // honoured rather than bypassed by resuming.
+  let bounds: import('../agents/types.js').AgentBounds | undefined;
+  let canDelegate: false | undefined;
+  if (spec.agentName) {
+    try {
+      const { resolveAgent } = await import('../agents/resolve.js');
+      const resolved = await resolveAgent(spec.agentName, spec.logCwd);
+      if (!resolved) return `[error] Agent "${spec.agentName}" no longer exists, so sub-agent "${id}" cannot be resumed as it.`;
+      bounds = resolved.bounds;
+      if (resolved.bounds.delegate === 'none') canDelegate = false;
+    } catch {
+      return `[error] Failed to load agent "${spec.agentName}" to resume sub-agent "${id}".`;
+    }
+  }
+
+  // Where to work: its worktree again (re-added from the kept branch when it
+  // was removed), else where it worked, else the conversation's directory.
+  let cwd = fs.existsSync(spec.cwd) ? spec.cwd : spec.logCwd;
+  let worktree: WorktreeRecord | undefined;
+  let note: string | undefined;
+  if (spec.worktree) {
+    const { worktreeManager } = await import('../worktree/index.js');
+    const back = await worktreeManager.reattach({ path: spec.worktree.path, branch: spec.worktree.branch, repoRoot: spec.worktree.repoRoot });
+    worktree = worktreeManager.getByAgentId(id);
+    if (back && worktree) {
+      cwd = fs.existsSync(spec.cwd) ? spec.cwd : back;
+    } else {
+      worktree = undefined;
+      cwd = spec.logCwd;
+      note = `Its worktree (branch ${spec.worktree.branch}) could not be restored; it continues in ${cwd}.`;
+    }
+  }
+
+  const callerScope = opts.toolScope;
+  const originalScope = deserializeScope(spec.scope);
+  const scope = intersectScopes(callerScope, worktree ? scopeForWorktree(originalScope, worktree) : originalScope);
+  const agentType = canonicalAgentType(spec.agentType);
+  const owner = spec.owner ?? caller;
+  if (owner) recordOwner(`sub-${id}`, owner);
+
+  return launch({
+    agentId: id,
+    description: spec.description,
+    agentType,
+    ...(spec.agentName ? { agentName: spec.agentName } : {}),
+    model: spec.model,
+    roleName: roleForAgentType(spec.agentName || agentType),
+    task: prompt,
+    brief: prompt,
+    ...(spec.tools ? { tools: spec.tools as string[] | 'all' | 'readonly' } : {}),
+    ...(canDelegate === false ? { canDelegate } : {}),
+    ...(bounds ? { bounds } : {}),
+    cwd,
+    logCwd: spec.logCwd,
+    ...(worktree ? { worktree } : {}),
+    ...(note ? { startNote: note } : {}),
+    detach: args.detach ?? false,
+    ...(args.timeout ? { timeout: args.timeout } : {}),
+    // Filed under the same parent as before, so ownership and the report's
+    // route do not change because someone else asked for the follow-up.
+    ...(spec.spawnedFrom ? { spawnedFrom: spec.spawnedFrom } : owner ? { spawnedFrom: owner } : {}),
+    depth: opts.depth + 1,
+    ...(scope ? { scope } : {}),
+    planMode: opts.planMode === true || spec.planMode === true,
+    resumed: true,
+  }, opts);
+}
+
+/**
+ * The follow-up an agent interrupted by a restart is resumed with.
+ *
+ * Says plainly that nothing was replayed: the tool call it was in the middle
+ * of reads as unanswered in its history, and it has to look before repeating
+ * anything that changes things.
+ */
+export const RESUME_AFTER_RESTART = '[Resumed after a restart] AICO restarted while you were working. Your conversation so far '
+  + 'is above. Any tool call that had not returned was NOT re-run — check the actual state (files, processes) before '
+  + 'repeating anything that changes things. Then continue the task and finish with your report.';
 
 // ── Verification nudge ──────────────────────────────────────────────────────
 

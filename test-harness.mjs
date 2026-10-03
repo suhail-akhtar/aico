@@ -2272,8 +2272,16 @@ console.log('\n══ 24. STEERING IN THE AGENT LOOP ══');
     [{ type: 'tool_call', id: 'st1', name: 'Pwd', input: {} }, { type: 'finish', reason: 'tool_calls' }],
     [{ type: 'text', content: 'adjusted' }, { type: 'finish', reason: 'stop' }],
   ]);
-  // Enqueue before the run: the loop drains at the first step boundary.
-  inbox.steer('actually, use the other approach');
+  // Enqueued while step 1 is in flight, so the loop drains it at the first
+  // step boundary. (It used to be enqueued before the run; input pending when
+  // a turn starts is now read at the start of that turn — ADR 0021 — which
+  // is a different case, asserted in agents-background-test.)
+  const chat = provider.chat.bind(provider);
+  let first = true;
+  provider.chat = async function* (opts) {
+    if (first) { first = false; inbox.steer('actually, use the other approach'); }
+    yield* chat(opts);
+  };
 
   await baseRun(provider, session, { inbox });
 
@@ -3383,7 +3391,9 @@ console.log('\n══ 30. CAPABILITY SEAMS IN THE LOOP ══');
   const taskSrc = fs.readFileSync('src/tools/task.ts', 'utf8');
   assert(/opts\.planMode \? \{ planMode: true \}/.test(agentSrc),
     'runAgent forwards planMode into runTask');
-  assert(/opts\.planMode \? \{ planMode: true \}/.test(taskSrc),
+  // `spec.planMode` since new and resumed children share one launch path
+  // (ADR 0021); the spec is built from `opts.planMode`.
+  assert(/(opts|spec)\.planMode \? \{ planMode: true \}/.test(taskSrc) && /planMode: opts\.planMode === true/.test(taskSrc),
     'runTask forwards planMode into the child agent');
 }
 
@@ -11109,9 +11119,11 @@ console.log('  -- Correcting a sub-agent instead of starting it over --');
   assert(/Default false/i.test(detach.description),
     'the schema says which way the default falls');
   // A detached call returns an id, not an answer. A model that treats it as a
-  // result reports work as done that has not started.
-  assert(/MUST wait/i.test(detach.description),
-    'and that a detached spawn has to be waited on before the work counts as done');
+  // result reports work as done that has not started. Its report now arrives
+  // by itself (ADR 0021), so the contract is "not done until it arrives"
+  // rather than "you must wait" — and the schema must not invite polling.
+  assert(/not done until that report arrives/i.test(detach.description) && /do not poll/i.test(detach.description),
+    'and that a detached spawn is not done until its report arrives');
 }
 
 console.log('  -- A detached spawn returns an id, and the result waits for you --');
@@ -15823,6 +15835,13 @@ console.log('\n══ ENGINEERING: ON-DEMAND TOOLS, THE DELEGATION CONTRACT, DEL
   logged.append('tool/call', { turn: 1, step: 1, callId: 'b', name: 'CronList', arguments: '{}' });
   logged.append('tool/call', { turn: 1, step: 1, callId: 'c', name: 'LoadTools', arguments: '{not json' });
   assert([...T.loadedGroupsFromLog(logged.events)].sort().join() === 'schedule,world', 'the loaded set is read from the log, and a malformed call does not break it');
+  assert(T.groupsForRequest('Rename formatPrice to formatMoney across the codebase').join() === 'refactor'
+    && T.groupsForRequest('update every call site of parseDate').join() === 'refactor'
+    && T.groupsForRequest('fix the typo in the header').length === 0 && T.groupsForRequest(undefined).length === 0,
+    'a request that names a wide change offers the refactor tools; an ordinary one does not');
+  logged.append('user/message', { content: 'now refactor the shipping module', source: { kind: 'human' } });
+  logged.append('user/message', { content: 'refactor everything', source: { kind: 'plugin', plugin: 'x' } });
+  assert([...T.loadedGroupsFromLog(logged.events)].sort().join() === 'refactor,schedule,world', 'the request in the log keeps the group loaded on later turns');
 
   console.log('  -- Loading mid-turn, and staying loaded --');
   {

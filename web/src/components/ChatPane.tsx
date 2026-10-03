@@ -23,8 +23,9 @@
  */
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { MessageBubble } from '@aico/ui';
+import { AicoMark, MessageBubble } from '@aico/ui';
 import type { ChatMessage } from '@aico/ui';
+import { Icon } from './Icon';
 import { useStore } from '../store';
 import { collectWidgetFixes, fixMarker, widgetHash } from '../widget-fixes';
 import { widgetById } from '../../../shared/widgets/catalog';
@@ -284,7 +285,8 @@ export function ChatPane(): React.ReactElement {
   const jumpToLatest = (): void => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el.scrollTo({ top: el.scrollHeight, behavior: still ? 'auto' : 'smooth' });
     setFollowing(true);
   };
 
@@ -452,21 +454,33 @@ export function ChatPane(): React.ReactElement {
 
           {!busy && <TurnSummary summary={turnSummary} />}
 
-          {/* Breathing room so the last line never sits against the composer. */}
-          <div className="h-6" />
+          {/* Breathing room so the last line never sits against the composer,
+              and (with the pane's py-6) exactly the height of the jump fade. */}
+          <div className="h-10" />
         </div>
       </div>
 
-      {!following && (
+      {/*
+        One small round "↓" over a fade, not a text pill sitting on the last
+        lines: the 64px fade, opaque where the button sits, covers only the
+        column's bottom space when you are at the end, so the button never
+        hides words you are reading.
+      */}
+      <div className="transcript-fade pointer-events-none absolute inset-x-0 bottom-0 h-16" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
         <button
+          type="button"
           onClick={jumpToLatest}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-aico-border
-                     bg-aico-bg px-3.5 py-1.5 text-[13px] text-aico-secondary shadow-sm
-                     transition-colors hover:bg-aico-hover hover:text-aico-primary"
+          className="jump-latest"
+          data-shown={!following}
+          tabIndex={following ? -1 : 0}
+          aria-hidden={following}
+          title="Jump to latest"
+          aria-label="Jump to latest"
         >
-          ↓ Jump to latest
+          <Icon name="arrow-down" size={16} />
         </button>
-      )}
+      </div>
     </div>
   );
 }
@@ -492,7 +506,7 @@ function seqOf(id: string): number | null {
 function Working(): React.ReactElement {
   return (
     <div className="my-5 flex items-center gap-2 text-[13px] text-aico-muted">
-      <span className="aico-thinking">✳</span>
+      <AicoMark size={16} />
       <span className="aico-thinking">Working…</span>
     </div>
   );

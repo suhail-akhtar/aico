@@ -5,6 +5,20 @@
  *   GET  /api/artifacts/list?session=              canvases, exported/generated files, attachments
  *   GET  /api/artifacts/file?session=&path=        one file from the session's artifacts folder
  *   POST /api/artifacts/rename {session,path,name}  rename a file in that folder
+ *   GET  /api/artifacts/preview?session=&path=|attachment=
+ *                                                  a workbook's cells or a Word file as HTML, for the viewer
+ *
+ * ## Why the engine reads spreadsheets and Word files for the viewer
+ *
+ * The panel previews most types itself from the file's bytes (pictures, PDF,
+ * Markdown, CSV, code, HTML in a sandboxed frame). An .xlsx and a .docx are
+ * zips of XML that the engine already knows how to read (`tools/xlsx-lite`,
+ * `mammoth` — both here for ReadAttachment), so the viewer asks for them
+ * rather than every client shipping a second reader. Bounded: at most
+ * PREVIEW_SHEETS sheets × PREVIEW_ROWS rows × PREVIEW_COLS columns, and
+ * PREVIEW_HTML characters of document. The Word HTML is mammoth's own output
+ * (it does not pass raw HTML through) and the client still shows it in a
+ * frame with scripts off.
  *
  * ## Why one list, assembled here
  *
@@ -36,7 +50,8 @@ import { loadSettings } from '../settings.js';
 import { getWorkspaceInfo } from '../workspace.js';
 import { listCanvases } from '../canvas/store.js';
 import { fileBase } from '../canvas/markdown.js';
-import { listAttachments } from './attachments.js';
+import { listAttachments, readStoredAttachment } from './attachments.js';
+import { readWorkbook } from '../tools/xlsx-lite.js';
 
 export interface ArtifactRouteDeps {
   resolveCwd: (sessionId: string) => Promise<string>;
@@ -63,7 +78,14 @@ export interface Artifact {
   topic: string;
   /** Uploaded by the person rather than made in the chat. */
   uploaded?: boolean;
+  /** Absolute path on this machine (files and attachments), for Reveal, Copy path and Open with. */
+  path?: string;
 }
+
+const PREVIEW_SHEETS = 12;
+const PREVIEW_ROWS = 1000;
+const PREVIEW_COLS = 60;
+const PREVIEW_HTML = 400_000;
 
 const SESSION = /^[\w.-]{1,160}$/;
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
@@ -127,7 +149,7 @@ export async function listArtifacts(input: { cwd: string; sessionId: string }): 
       const from = byBase.get(base);
       out.push({
         key: `file:${f.rel}`, kind: from ? 'export' : IMAGE_EXT.has(ext) ? 'image' : 'file', source: 'file', id: f.rel, title: name,
-        ...(ext ? { ext } : {}), bytes: f.bytes, updatedAt: f.at, topic: from ?? 'Files',
+        ...(ext ? { ext } : {}), bytes: f.bytes, updatedAt: f.at, topic: from ?? 'Files', path: path.join(root, f.rel),
       });
     }
   }
@@ -136,6 +158,7 @@ export async function listArtifacts(input: { cwd: string; sessionId: string }): 
       key: `attachment:${a.id}`, kind: a.image ? 'image' : 'file', source: 'attachment', id: a.id, title: a.name,
       ext: a.extension.replace(/^\./, ''), bytes: a.bytes, updatedAt: a.at,
       topic: a.origin === 'tool' ? 'Generated images' : 'Attachments', ...(a.origin === 'upload' ? { uploaded: true } : {}),
+      path: a.path,
     });
   }
   return out.sort((x, y) => y.updatedAt - x.updatedAt);
@@ -178,6 +201,48 @@ export async function handleArtifactRoute(
         'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
       });
       res.end(bytes);
+      return true;
+    }
+
+    if (route === 'artifacts/preview' && method === 'GET') {
+      const sessionId = url.searchParams.get('session') ?? '';
+      const rel = url.searchParams.get('path') ?? '';
+      const attachment = url.searchParams.get('attachment') ?? '';
+      if (!SESSION.test(sessionId) || (!rel && !attachment)) { send(res, 400, { error: 'session and path (or attachment) required' }); return true; }
+      const settings = await loadSettings();
+      const ctx = { settings, cwd: await deps.resolveCwd(sessionId), sessionId };
+      let bytes: Buffer | undefined;
+      let name = '';
+      if (attachment) {
+        const found = await readStoredAttachment({ ...ctx, id: attachment });
+        if (found) { bytes = found.bytes; name = found.name; }
+      } else {
+        const root = getWorkspaceInfo(ctx).artifactsDir;
+        const file = root ? await inside(root, rel) : undefined;
+        if (file) { bytes = await readFile(file); name = path.basename(file); }
+      }
+      if (!bytes) { send(res, 404, { error: 'no such file in this chat\'s artifacts' }); return true; }
+      const ext = path.extname(name).slice(1).toLowerCase();
+      if (ext === 'xlsx') {
+        const book = readWorkbook(new Uint8Array(bytes));
+        const sheets = book.sheets.slice(0, PREVIEW_SHEETS).map(sheetName => {
+          const byRow = book.rows(sheetName);
+          const last = Math.max(0, ...byRow.keys());
+          const rows: string[][] = [];
+          for (let r = 1; r <= Math.min(last, PREVIEW_ROWS); r++) rows.push(Array.from((byRow.get(r) ?? []).slice(0, PREVIEW_COLS), c => c ?? '')); // sparse rows: holes become ''
+          const width = Math.max(0, ...rows.map(row => row.length));
+          return { name: sheetName, rows: rows.map(row => [...row, ...Array<string>(width - row.length).fill('')]), truncated: last > PREVIEW_ROWS };
+        });
+        send(res, 200, { type: 'table', sheets });
+        return true;
+      }
+      if (ext === 'docx') {
+        const mammoth = await import('mammoth');
+        const { value } = await mammoth.convertToHtml({ buffer: bytes });
+        send(res, 200, { type: 'html', html: value.slice(0, PREVIEW_HTML), truncated: value.length > PREVIEW_HTML });
+        return true;
+      }
+      send(res, 415, { error: `no engine preview for .${ext || 'this file'} — the viewer shows it from the file itself` });
       return true;
     }
 

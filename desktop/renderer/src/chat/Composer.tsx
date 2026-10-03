@@ -496,13 +496,14 @@ export function ModelChip(): React.ReactElement {
 }
 
 function ApprovalChip({ opts }: { opts: SendOptions }): React.ReactElement {
-  const LABEL: Record<SendOptions['approval'], string> = { auto: 'Auto-approve', edits: 'Ask before edits', ask: 'Ask every time' };
+  const LABEL: Record<SendOptions['approval'], string> = { full: 'Full autonomy', auto: 'Auto-approve', edits: 'Ask before edits', ask: 'Ask every time' };
   return (
     <MenuButton className="flex items-center gap-1 rounded-lg px-2 py-1 text-aico-secondary hover:bg-aico-hover hover:text-aico-primary" title="How much the agent asks before acting" placement="top-start" width={300}
-      button={<><Icon name={opts.approval === 'auto' ? 'zap' : 'shield'} size={13} /><span>{LABEL[opts.approval]}</span><Icon name="chevron-down" size={12} /></>}>
+      button={<><Icon name={opts.approval === 'auto' || opts.approval === 'full' ? 'zap' : 'shield'} size={13} /><span>{LABEL[opts.approval]}</span><Icon name="chevron-down" size={12} /></>}>
       {close => (
         <>
-          <MenuItem icon="zap" label="Auto-approve" hint="acts, you watch" checked={opts.approval === 'auto'} onClick={() => { close(); setSendOptions({ approval: 'auto' }); }} />
+          <MenuItem icon="zap" label="Full autonomy" hint="never stops to ask; clear harm is still refused" checked={opts.approval === 'full'} onClick={() => { close(); setSendOptions({ approval: 'full' }); }} />
+          <MenuItem icon="zap" label="Auto-approve" hint="acts, you watch; asks when the safety reviewer is unsure" checked={opts.approval === 'auto'} onClick={() => { close(); setSendOptions({ approval: 'auto' }); }} />
           <MenuItem icon="edit" label="Ask before edits" hint="file writes need a yes" checked={opts.approval === 'edits'} onClick={() => { close(); setSendOptions({ approval: 'edits' }); }} />
           <MenuItem icon="shield" label="Ask every time" hint="every tool call" checked={opts.approval === 'ask'} onClick={() => { close(); setSendOptions({ approval: 'ask' }); }} />
         </>

@@ -15,7 +15,8 @@
  *   ← `vault/fulfil`   { requestId, secret?|decline }          a credential typed into a main-owned prompt
  *   ← `vault/lock`     {}                                      forget the key
  *   ← `vault/fill-request` { requestId, origin, name?, sessionId?, tool? } browser vault login
- *                        (tool: 'Browser' for the person's own fill, 'browser_login' for the agent's)
+ *                        (tool: 'Browser' for the person's own fill, 'browser_login' for the agent's;
+ *                        or { requestId, host, name, tool: 'SshTerminal' } for an SSH terminal tab, ADR 0019)
  *   → `vault/fill`     { requestId, ok, name?, kind?, username?, fields?, allowSelfSigned?, reason?, candidates? }
  *   → `vault/approve-request`    { request }                   ask the person (native dialog)
  *   → `vault/credential-request` { request }                   ask for a credential (secure prompt)
@@ -110,6 +111,7 @@ export function attachVaultHostChannel(port: HostPort): void {
    * this exchange or its answer.
    */
   async function fill(msg: { [k: string]: unknown }): Promise<void> {
+    if (msg.tool === 'SshTerminal') { await sshFill(msg); return; }
     const requestId = typeof msg.requestId === 'string' ? msg.requestId : '';
     const origin = typeof msg.origin === 'string' ? msg.origin : '';
     // Who is asking, as main knows it: `Browser` for a person's own fill (the
@@ -140,6 +142,40 @@ export function attachVaultHostChannel(port: HostPort): void {
           ...(resolved.username ? { username: resolved.username } : {}),
           fields: { ...resolved.fields },
           allowSelfSigned: resolved.allowSelfSigned,
+        });
+      } finally {
+        resolved.release();
+      }
+    } catch (err) {
+      reply({ ok: false, reason: err instanceof Error ? err.message : 'failed' });
+    }
+  }
+
+  /**
+   * An SSH terminal the person opened in the desktop (ADR 0019): main names
+   * the credential and the exact `host[:port]` it is about to connect to,
+   * after its own host-key check. Resolved like any trusted consumer's use —
+   * tool `SshTerminal`, the credential's host scope, allowed tools and
+   * approval mode, the audit log — and answered over this port only. Unlike
+   * a browser fill there is no "best match": the person chose a name.
+   */
+  async function sshFill(msg: { [k: string]: unknown }): Promise<void> {
+    const requestId = typeof msg.requestId === 'string' ? msg.requestId : '';
+    const host = typeof msg.host === 'string' ? msg.host.trim() : '';
+    const name = typeof msg.name === 'string' ? msg.name.trim() : '';
+    const reply = (body: Record<string, unknown>): void => port.postMessage({ type: 'vault/fill', requestId, ...body });
+    if (!requestId || !host || !name) { reply({ ok: false, reason: 'requestId, host and name required' }); return; }
+    try {
+      const resolved = await vault.resolve(name, {
+        tool: 'SshTerminal',
+        host,
+        purpose: typeof msg.purpose === 'string' ? msg.purpose.slice(0, 300) : `interactive SSH terminal to ${host}`,
+      });
+      try {
+        reply({
+          ok: true, name: resolved.name, kind: resolved.kind,
+          ...(resolved.username ? { username: resolved.username } : {}),
+          fields: { ...resolved.fields },
         });
       } finally {
         resolved.release();

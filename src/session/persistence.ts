@@ -356,11 +356,20 @@ export async function forkSession(
   return { id: newId, ...(title ? { title } : {}) };
 }
 
+/** Whether a session id (or its log's file name) is a sub-agent's, not a conversation. */
+export function isSubAgentSessionId(idOrFile: string): boolean {
+  return idOrFile.startsWith('sub-');
+}
+
 export async function listSessionSummaries(cwd: string): Promise<SessionSummary[]> {
   const dir = getSessionDir(cwd);
   let files: string[];
   try {
-    files = (await readdir(dir)).filter(f => f.endsWith('.events.jsonl'));
+    // A sub-agent's own log (`sub-<agentId>`) is filed beside the chats but
+    // is not one: listed, it showed in every sidebar as a "New chat" row
+    // nobody started. It stays readable by id — the Tasks panel's "View
+    // transcript" opens it through the trajectory route.
+    files = (await readdir(dir)).filter(f => f.endsWith('.events.jsonl') && !isSubAgentSessionId(f));
   } catch {
     return [];
   }

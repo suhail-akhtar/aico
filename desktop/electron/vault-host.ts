@@ -85,8 +85,14 @@ export interface VaultHost {
   keyProblem(): string | undefined;
   /** Mint a one-time grant for one action. Call ONLY after a native confirmation. */
   mintGrant(action: GrantAction, credentialId?: string, ttlMs?: number): string;
-  /** Ask the engine for a login for this exact origin. The reply carries values: use them and drop them. */
-  requestFill(req: { origin: string; name?: string; tool: 'Browser' | 'browser_login'; sessionId?: string; purpose?: string }): Promise<FillReply>;
+  /**
+   * Ask the engine for a login for this exact origin — or, for an SSH
+   * terminal the person opened (`tool: 'SshTerminal'`), for this exact
+   * `host[:port]` by name (terminal-ssh.ts, ADR 0019). The reply carries
+   * values: use them and drop them.
+   */
+  requestFill(req: { origin: string; name?: string; tool: 'Browser' | 'browser_login'; sessionId?: string; purpose?: string }
+    | { host: string; name: string; tool: 'SshTerminal'; purpose: string }): Promise<FillReply>;
   /**
    * A person's own fill (the key icon, the chooser) is itself their approval:
    * a Browser approval for this origin arriving in the next few seconds is
@@ -303,7 +309,8 @@ export function registerVaultHost(ctx: DesktopContext): VaultHost {
         // Long enough for a person to answer an approval dialog.
         const timer = setTimeout(() => { fills.delete(requestId); resolve({ ok: false, reason: 'the vault did not answer in time (was an approval left open?)' }); }, 5 * 60_000);
         fills.set(requestId, { resolve, timer });
-        if (!ctx.engine.post({ type: 'vault/fill-request', requestId, origin: req.origin, tool: req.tool, ...(req.name ? { name: req.name } : {}), ...(req.sessionId ? { sessionId: req.sessionId } : {}), ...(req.purpose ? { purpose: req.purpose } : {}) })) {
+        const target = 'host' in req ? { host: req.host } : { origin: req.origin, ...(req.sessionId ? { sessionId: req.sessionId } : {}) };
+        if (!ctx.engine.post({ type: 'vault/fill-request', requestId, ...target, tool: req.tool, ...(req.name ? { name: req.name } : {}), ...(req.purpose ? { purpose: req.purpose } : {}) })) {
           clearTimeout(timer);
           fills.delete(requestId);
           resolve({ ok: false, reason: 'the AICO engine is not running' });

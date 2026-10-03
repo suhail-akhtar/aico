@@ -80,7 +80,7 @@ export async function sendPrompt(text: string, opts?: Parameters<ReturnType<type
 
 /** The composer's standing choices (approval, effort), kept here so every sender uses them. */
 export interface SendOptions {
-  approval: 'auto' | 'edits' | 'ask';
+  approval: 'full' | 'auto' | 'edits' | 'ask';
   effort: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   planMode: boolean;
 }

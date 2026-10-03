@@ -61,7 +61,14 @@ export type WorkState =
   | 'failed'
   | 'cancelled'
   /** Was running when the process died, and is provably not running now. */
-  | 'lost';
+  | 'lost'
+  /**
+   * An agent that was running when the process died and can be continued:
+   * its spec is on the record (`resume`) and its conversation is in its
+   * `sub-<id>` log. Settled like `lost` — nothing is running — but not a dead
+   * end (ADR 0021).
+   */
+  | 'interrupted';
 
 /**
  * Kinds that report progress, and for which silence therefore means something.
@@ -85,7 +92,7 @@ export function reportsProgress(kind: WorkKind): boolean {
 
 /** The states nothing further will happen from. */
 export const TERMINAL_STATES: ReadonlySet<WorkState> =
-  new Set<WorkState>(['done', 'failed', 'cancelled', 'lost']);
+  new Set<WorkState>(['done', 'failed', 'cancelled', 'lost', 'interrupted']);
 
 export function isTerminal(state: WorkState): boolean {
   return TERMINAL_STATES.has(state);
@@ -208,6 +215,58 @@ export interface WorkRecord {
    * as it is read, rather than the same list forever.
    */
   reported: boolean;
+  /**
+   * How to continue an agent: what it ran as and within which bounds.
+   *
+   * Persisted with the record because the record is what survives a restart;
+   * the agent's conversation itself is its `sub-<id>` session log, which a
+   * resume rebuilds history from rather than replaying any tool call
+   * (ADR 0021). Absent for everything that cannot be resumed.
+   */
+  resume?: AgentResumeSpec;
+}
+
+/**
+ * What a sub-agent or background agent ran as, kept so it can be continued.
+ *
+ * Plain data — it is written to the work log. The tool scope is serialised
+ * (sets as arrays); the brief is not here, it is the first message of the
+ * agent's own log.
+ */
+export interface AgentResumeSpec {
+  v: 1;
+  description: string;
+  agentType: string;
+  agentName?: string;
+  /** An inline spec's or a named agent's tool list, as Task resolved it. */
+  tools?: readonly string[] | 'all' | 'readonly';
+  model: string;
+  /** Where it worked: the parent's directory, or its worktree. */
+  cwd: string;
+  /** Where its `sub-<id>` log is filed (always the parent's directory). */
+  logCwd: string;
+  /** The conversation it belongs to. */
+  owner?: string;
+  /** The session that spawned it (`sub-<id>` when another agent did). */
+  spawnedFrom?: string;
+  /** Its depth (the parent's + 1). */
+  depth: number;
+  detach: boolean;
+  /** The approval posture it inherited; a resumed run is held to the same one. */
+  autoApprove?: boolean;
+  planMode?: boolean;
+  /** The delegating run's tool scope, serialised. */
+  scope?: SerializedScope;
+  toolGroups?: readonly string[];
+  worktree?: { path: string; branch: string; base: string; repoRoot: string };
+}
+
+/** A `ToolScope` (agents/effective) as JSON. */
+export interface SerializedScope {
+  layers: Array<{ label: string; tools: 'all' | string[]; mcp: 'all' | 'readonly' | string[]; deny?: string[] }>;
+  delegate: boolean;
+  delegateTo?: 'readonly' | string[];
+  writeBounds?: Array<{ label: string; root: string; globs: string[] }>;
 }
 
 /**

@@ -30,6 +30,7 @@ import { loadSettings } from '../settings.js';
 import { currentCwd, currentRunContext } from '../run-context.js';
 import { listInstances, isUsable, resolveApiKey, resolveBaseUrl, type ProviderInstance } from '../providers/instances.js';
 import { getWorkspaceRuntime } from '../workspace.js';
+import { resolveRole } from '../models/roles.js';
 import { requestJson, request, fencedBlock, round, NetError } from './net.js';
 import { sniffImageType, extensionFor, type ToolImageMediaType } from './tool-images.js';
 
@@ -67,8 +68,11 @@ export interface ImageBackend {
  * nothing usable is an error rather than a silent fallback to someone else's
  * bill.
  */
-export function pickImageBackend(settings: AicoSettings): ImageBackend | { error: string } {
-  const prefs = settings.imageGeneration ?? {};
+export function pickImageBackend(settings: AicoSettings, roleModel?: string): ImageBackend | { error: string } {
+  // `roleModel` is `models.roles.image` (ADR 0017), which outranks
+  // `imageGeneration.model`; with no provider named, its name picks the
+  // backend (a Gemini/Imagen model is drawn by Gemini, anything else by OpenAI).
+  const prefs = { ...(settings.imageGeneration ?? {}), ...(roleModel ? { model: roleModel } : {}) };
   const usable = listInstances(settings).filter(isUsable);
   const kindOf = (i: ProviderInstance): ImageBackend['kind'] | undefined =>
     i.type === 'openai' ? 'openai' : i.type === 'gemini' ? 'gemini' : undefined;
@@ -89,8 +93,13 @@ export function pickImageBackend(settings: AicoSettings): ImageBackend | { error
           + 'with that id or type is configured. ' + NO_KEY_HELP,
       };
     }
+  } else if (roleModel && /gemini|imagen/i.test(roleModel)) {
+    chosen = usable.find(i => i.type === 'gemini');
+    kind = chosen ? 'gemini' : undefined;
+    if (!chosen) return { error: `The image model role is "${roleModel}", but no usable Google Gemini provider is configured. ${NO_KEY_HELP}` };
   } else {
-    chosen = usable.find(i => i.type === 'openai') ?? usable.find(i => i.type === 'gemini');
+    // A role model that is not Gemini's is OpenAI's to draw, never Gemini's.
+    chosen = usable.find(i => i.type === 'openai') ?? (roleModel ? undefined : usable.find(i => i.type === 'gemini'));
     kind = chosen ? kindOf(chosen) : undefined;
   }
   if (!chosen || !kind) return { error: `Image generation needs an OpenAI or Google Gemini API key, and none is configured. ${NO_KEY_HELP}` };
@@ -259,7 +268,11 @@ export async function generateImage(input: GenerateImageInput, deps: { settings?
   const n = Math.max(1, Math.min(4, Math.round(input.n ?? 1)));
 
   const settings = deps.settings ?? currentRunContext()?.settings ?? getWorkspaceRuntime().settings ?? await loadSettings();
-  const backend = pickImageBackend(settings);
+  // Only an explicit `models.roles.image` changes anything; otherwise the
+  // backend is chosen exactly as before (the role has no preset).
+  const role = resolveRole('image', { settings, mainModel: settings.model ?? '' });
+  const imageRole = role.ok && role.source === 'role' ? role.model : undefined;
+  const backend = pickImageBackend(settings, imageRole);
   if ('error' in backend) throw new Error(backend.error);
   const quality: ImageQuality = input.quality ?? settings.imageGeneration?.quality ?? 'medium';
   const fullPrompt = input.style?.trim() ? `${prompt}\n\nStyle: ${input.style.trim()}` : prompt;

@@ -23,6 +23,7 @@ import { ImportWizard } from '@/browser/ImportWizard';
 import { BottomPanel } from '@/shell/BottomPanel';
 import { Dock } from '@/shell/Dock';
 import { StatusBar } from '@/shell/StatusBar';
+import { TasksHost } from '@/tasks/TasksHost';
 import { matchesKey } from '@/lib/util';
 import { Icon } from '@/lib/icons';
 import { useFullView } from '@/browser/fullview';
@@ -47,6 +48,8 @@ export function App({ engineReady }: { engineReady: boolean }): React.ReactEleme
             <ViewHost />
           </div>
           {dock.open && !onBrowserPage && <Dock />}
+          {/* The Tasks side panel (tasks/TasksHost): always mounted — it keeps the task stream and its notifications alive. */}
+          <TasksHost hidden={fullView} />
         </div>
         {panel.open && !fullView && <BottomPanel />}
         {!fullView && <StatusBar />}

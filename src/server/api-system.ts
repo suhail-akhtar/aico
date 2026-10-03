@@ -195,6 +195,16 @@ export async function handleSystemRoute(
     const { handleBriefRoute } = await import('../brief/service.js');
     return handleBriefRoute(route, method, body, query);
   }
+  // About you (profile/service, ADR 0018): facts, their controls, a run, export, wipe.
+  if (route === 'profile' || route.startsWith('profile/')) {
+    const { handleProfileRoute } = await import('../profile/service.js');
+    return handleProfileRoute(route, method, body, human);
+  }
+  // Recall (ADR 0018): search past sessions, memories, knowledge, About you; rebuild the index.
+  if (route.startsWith('recall/')) {
+    const { handleRecallRoute } = await import('../recall/index.js');
+    return handleRecallRoute(route, method, query, process.cwd());
+  }
   switch (route) {
     // ── the approve-later inbox (Phase 7, autonomy/inbox.ts) ─────────
     //
@@ -387,6 +397,53 @@ export async function handleSystemRoute(
       const settings = await loadSettings();
       const model = query.get('model') || settings.model || '';
       return { status: 200, body: { ...recommendedAgentModels(model, settings), roles: CHEAP_ROLES } };
+    }
+
+    // ── model roles (models/roles, ADR 0017) ─────────────────────────
+    //
+    // Which model does which job, where it is served, what it costs and why
+    // it is what it is. A read: choices are written through `settings/path`
+    // (`models.*`), the user's own file only — a project's files cannot set
+    // them. Model ids, prices and provider names only; never a key.
+    case 'models/roles': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const settings = await loadSettings();
+      const { resolveAllRoles, ROLES, rolePrice, roleSpend } = await import('../models/roles.js');
+      const { PROVIDER_DEFAULT_MODELS } = await import('../providers/index.js');
+      const { CHEAP_MODELS } = await import('../../shared/models.js');
+      const mainModel = query.get('model') || settings.model
+        || PROVIDER_DEFAULT_MODELS[settings.activeProvider ?? settings.provider ?? 'openrouter'] || '';
+      const instances = listInstances(settings);
+      const spend = roleSpend();
+      const roles = resolveAllRoles({ settings, mainModel }).map((r) => {
+        const info = ROLES.find(i => i.role === r.role)!;
+        const instance = r.instanceId ? instances.find(i => i.id === r.instanceId) : undefined;
+        return {
+          ...r,
+          label: info.label, does: info.does, personal: info.personal, needs: info.needs,
+          provider: instance?.name ?? r.providerType ?? null,
+          price: r.model ? rolePrice(r.model, settings) : null,
+          chosen: settings.models?.roles?.[r.role] ?? null,
+          spent: spend[r.role] ?? null,
+        };
+      });
+      // What the picker offers: every model a provider has listed, the cheap
+      // model of each family, and the work model. Free text is accepted too.
+      const suggestions = [...new Set([
+        mainModel,
+        ...instances.flatMap(i => [i.defaultModel, ...(i.models ?? [])]),
+        ...Object.values(CHEAP_MODELS),
+      ].filter((m): m is string => typeof m === 'string' && m.length > 0))].slice(0, 500);
+      return {
+        status: 200,
+        body: {
+          mainModel,
+          preset: settings.models?.preset ?? 'balanced',
+          localOnlyPersonal: settings.models?.localOnlyPersonal === true,
+          roles,
+          suggestions,
+        },
+      };
     }
 
     case 'project/profile': {
@@ -978,6 +1035,8 @@ ${content || 'Describe the procedure here.'}
           memories: found.map(m => ({
             id: m.id, scope: m.scope, text: m.text, tags: m.tags, enabled: m.enabled,
             updatedAt: m.updatedAt, belongsTo: m.belongsTo,
+            pinned: m.pinned === true, status: m.status ?? 'active',
+            ...(m.supersededBy ? { supersededBy: m.supersededBy } : {}),
           })),
         },
       };
@@ -1337,6 +1396,19 @@ ${content || 'Describe the procedure here.'}
         return { status: 400, body: { error: (err as Error).message } };
       }
       return { status: 200, body: redactSettings(await loadSettings()) };
+    }
+
+    /*
+      The Tasks panel's list (work/tasks): live and recent work with model,
+      tokens, step text, todo progress and output tails, plus what waits for
+      a person. A read; the live form is the `tasks/events` topic. Strings are
+      redacted in the projection and again here, as every sink is.
+    */
+    case 'tasks': {
+      if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
+      const { tasksSnapshot } = await import('../work/tasks.js');
+      const { sinkRedact } = await import('../vault/sink.js');
+      return { status: 200, body: sinkRedact(await tasksSnapshot()) };
     }
 
     /*

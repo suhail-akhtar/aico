@@ -27,7 +27,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { Icon } from './Icon';
+import { AicoMark } from '@aico/ui';
 
 /** Silence past this is worth naming rather than hiding. */
 const QUIET_MS = 20_000;
@@ -93,9 +93,10 @@ export function ActivityLine(): React.ReactElement | null {
       aria-live="polite"
       className="mx-auto flex w-full max-w-column items-center gap-2 px-5 pb-1 text-[12px]"
     >
-      <span className="aico-thinking shrink-0 text-aico-accent">
-        <Icon name="bolt" size={14} />
-      </span>
+      {/* The working mark; still while the reply is being written, when the
+          live one sits at the end of the text and one moving mark is enough. */}
+      <AicoMark size={15} still={writing && !thinking && running.length === 0 && !delegated} />
+
 
       <span className="shrink-0 font-medium text-aico-secondary">{what}</span>
 

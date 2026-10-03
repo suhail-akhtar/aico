@@ -236,12 +236,14 @@ export async function readStoredAttachment(input: {
  */
 export async function listAttachments(input: {
   settings: AicoSettings; cwd: string; sessionId: string;
-}): Promise<Array<AttachmentDescriptor & { origin: 'upload' | 'tool'; image: boolean; at: number }>> {
+}): Promise<Array<AttachmentDescriptor & { origin: 'upload' | 'tool'; image: boolean; at: number; path: string }>> {
   const dir = directory(input.settings, input.cwd, input.sessionId);
   const index = await load(dir);
   return Promise.all(index.attachments.map(async item => ({
     ...descriptor(item), origin: item.origin ?? 'upload', image: isImage(item.extension),
     at: await stat(path.join(dir, item.file)).then(s => s.mtimeMs, () => 0),
+    // Where it is on disk, for the panel's Reveal / Copy path / Open with — the person's own machine.
+    path: path.join(dir, item.file),
   })));
 }
 

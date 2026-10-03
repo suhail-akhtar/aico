@@ -245,7 +245,7 @@ export {
 export { resolvedEffort } from './run-context.js';
 export { resolveToolSet, isRetryableError, buildToolDefs } from './agent.js';
 export {
-  TOOL_GROUPS, LOAD_TOOLS, groupOf, groupsLoadedBy, loadedGroupsFromLog, isDeferred, loadToolsDefinition, executeLoadTools,
+  TOOL_GROUPS, LOAD_TOOLS, groupOf, groupsForRequest, groupsLoadedBy, loadedGroupsFromLog, isDeferred, loadToolsDefinition, executeLoadTools,
 } from './tools/deferred.js';
 export { HOST_TOOLS, hostToolsFrom, isHostTool } from '../shared/host-tools.js';
 export {
@@ -285,6 +285,20 @@ export { currentAgent, currentModel } from './session/projections.js';
 export { executeMemoryManage } from './tools/manage-memory.js';
 export { executeMcpManage, splitCommandLine, parseMcpConfig } from './mcp/manage-tool.js';
 export { remember, listScope, applicable, activeMemories, memoryRoot, scopeDir, searchMemories, setMemoryEnabled, memoryKey } from './memory/store.js';
+// Recall (ADR 0018): index, search, episodes, injection split, upkeep, tool.
+export { setMemoryPinned, findNearDuplicate } from './memory/store.js';
+export {
+  recallDb, recallDbPath, closeRecall, syncAll, syncMemories, syncEpisodes, rebuildRecall, listItems, getItem, countItems,
+  upsertProfileItems, removeProfileItem, registerProfileSource, setEmbedding, recordUse,
+} from './recall/store.js';
+export { searchRecall, recencyWeight, visibleTo } from './recall/search.js';
+export { episodeFromLog } from './recall/episodes.js';
+export { embedPending, embedRole, embedderFromSettings, cosine } from './recall/embed.js';
+export { splitMemories, recalledMemoryBlock } from './recall/inject.js';
+export { runRecallUpkeep, upkeepDue } from './recall/upkeep.js';
+export { ftsQuery, subjectOf, jaccard as recallJaccard } from './recall/text.js';
+export { recallTool } from './tools/recall.js';
+export { handleRecallRoute } from './recall/index.js';
 export { updateMcpServer } from './mcp/manage.js';
 export { buildRuntimeAwareness, buildRuntimeBlocks } from './capabilities.js';
 export { capGitStatus, GIT_STATUS_MAX_LINES, GIT_STATUS_MAX_CHARS, MEMORY_REPRISE_MAX_CHARS } from './prompts.js';
@@ -616,7 +630,7 @@ export { longJobTool, longJobDefinition } from './tools/long-job.js';
 export {
   sentinelTrigger, sentinelActive, tightenOnlySentinel, defaultSentinelModel, buildReviewInput, parseSentinelReply,
   redactForReview, SENTINEL_SYSTEM, DEFAULT_SENTINEL_TIMEOUT_MS, installSentinel, reviewCall, listSentinelVerdicts,
-  sentinelFile, userRequestsOf, recentCallsOf, untrustedSourcesOf, HUMAN_APPROVED, setSentinelReviewerForTest,
+  sentinelFile, userRequestsOf, mergeRequests, recentCallsOf, untrustedSourcesOf, HUMAN_APPROVED, setSentinelReviewerForTest,
 } from './sentinel/index.js';
 
 // The morning brief and monitors (brief/): scripts/brief-test.mjs.
@@ -639,3 +653,42 @@ export {
   parseDistillReply, buildDistillRequest, fallbackCandidates, distillPending, DISTILL_SYSTEM, modelCompleter,
   afterTurn as preferencesAfterTurn, afterFeedback as preferencesAfterFeedback, beforeTurn as preferencesBeforeTurn,
 } from './learning/distill.js';
+
+// Model roles (models/roles, models/vision; ADR 0017): scripts/model-roles-test.mjs.
+export {
+  resolveRole, resolveAllRoles, ROLES, ROLE_IDS, roleInfo, cheapModelFor, roleForAgentType, backgroundModel,
+  dropProjectModelChoices, rolePrice, recordRoleSpend, roleSpend, resetRoleSpend,
+} from './models/roles.js';
+export {
+  visionDescriber, describeImagesWith, describedImageNote, clearVisionCache, VISION_SYSTEM, VISION_MAX_TOKENS,
+} from './models/vision.js';
+export { distillModel } from './learning/distill.js';
+export { defaultJudgeModel } from './evals/judge.js';
+
+// About you (profile/; ADR 0018): scripts/profile-test.mjs.
+export * as profile from './profile/index.js';
+
+// The Tasks panel (work/tasks, shared/tasks): scripts/tasks-test.mjs.
+export {
+  tasksSnapshot, subscribeTasks, setTaskAsksProvider, startTaskTracking, resetTasksForTest, clean as cleanTaskText,
+} from './work/tasks.js';
+export { processInfo } from './work/register.js';
+export * as sharedTasks from '../shared/tasks.js';
+// -- Background agents that report back (ADR 0021) --
+export {
+  resumeTask, stopSessionAgents, agentResumeSpec, normalizeAgentId, RESUME_AFTER_RESTART,
+} from './tools/task.js';
+export {
+  setReportBackDelivery, reportBack, recentReports, rememberSessionInbox, boundReport, wakeOnResult,
+  WAKE_TASK, REPORT_MAX_CHARS,
+} from './agents/report-back.js';
+export {
+  acquireSlot, releaseSlot, suspendSlot, resumeSlot, slotState, maxConcurrentFrom, resetLimiterForTest,
+  DEFAULT_MAX_CONCURRENT,
+} from './agents/limiter.js';
+export { serializeScope, deserializeScope, intersectScopes } from './agents/scope-json.js';
+export { interruptedAgents, autoResumable, resumeAgentFromOutside, resumeInterruptedAgents } from './agents/background.js';
+export { worktreeManager, describeWorktreeFinish } from './worktree/index.js';
+export { executeEnterWorktree, executeExitWorktree } from './worktree/tools.js';
+export { backgroundExitNotice } from './tools/bash.js';
+export { isSubAgentSessionId } from './session/persistence.js';

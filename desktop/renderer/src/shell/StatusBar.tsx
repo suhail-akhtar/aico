@@ -1,15 +1,16 @@
 /**
  * A quiet line at the foot of the window: engine health, what is running in
  * the background, and whatever status items plugins contribute. Clicking the
- * activity count opens the Activity monitor.
+ * running count opens the Tasks panel (the Activity page stays in the nav).
  *
  * @module desktop/renderer/shell/StatusBar
  */
 
 import React, { useEffect } from 'react';
 import { useStore } from '@web/store';
-import { useDesk, go } from '@/state/desk';
+import { useDesk } from '@/state/desk';
 import { useStatusItems, runCommand } from '@/plugins/registry';
+import { toggleTasks, useTaskTotals } from '@/tasks/TasksHost';
 import { Icon } from '@/lib/icons';
 import { cls } from '@/lib/util';
 
@@ -23,6 +24,7 @@ export function StatusBar(): React.ReactElement | null {
   // Background work lives in the engine's ledger; keep it fresh here too (the Activity page polls faster).
   useEffect(() => { const t = setInterval(() => { void refreshSystem(); }, 10_000); return () => clearInterval(t); }, [refreshSystem]);
   const items = useStatusItems();
+  const tasks = useTaskTotals();
   const disabled = useDesk(s => s.prefs.plugins.disabled);
   if (disabled.includes('aico.statusbar')) return null;
   // The same count the Activity page shows: chats with a turn in flight plus live background work.
@@ -31,7 +33,8 @@ export function StatusBar(): React.ReactElement | null {
   const runningChats = sessions.filter(s => s.running).length;
   const liveWork = (system?.work ?? []).filter(w => ['running', 'queued', 'blocked'].includes(w.state)).length;
   const otherFeed = activity.filter(a => a.status === 'running' && a.kind !== 'turn').length;
-  const running = runningChats + Math.max(liveWork, otherFeed);
+  // The Tasks panel's own count also sees terminal commands and browser procedures (tasks/TasksHost).
+  const running = runningChats + Math.max(liveWork, otherFeed, tasks.running);
   const tone = engine.status === 'ready' ? (status === 'lost' ? 'bg-aico-warning' : 'bg-aico-success') : engine.status === 'crashed' ? 'bg-aico-danger' : 'bg-aico-warning';
   const label = engine.status === 'ready' ? (status === 'lost' ? 'Reconnecting' : 'Engine ready') : engine.status === 'crashed' ? 'Engine stopped' : 'Starting engine';
   const left = items.filter(i => i.align !== 'right');
@@ -48,9 +51,11 @@ export function StatusBar(): React.ReactElement | null {
       {left.map(item)}
       <div className="flex-1" />
       {right.map(item)}
-      <button className={cls('flex items-center gap-1.5 rounded px-1.5 hover:bg-aico-hover', running > 0 && 'text-aico-accent')} onClick={() => go('activity')} title="Background activity">
+      <button className={cls('flex items-center gap-1.5 rounded px-1.5 hover:bg-aico-hover', running > 0 && 'text-aico-accent')} onClick={() => toggleTasks()}
+        title="Tasks — what is running and what waits for you (Ctrl+Shift+Y)" aria-label={`Tasks: ${running} running, ${tasks.waiting} waiting for you`}>
         {running > 0 ? <span className="live-dot h-1.5 w-1.5" /> : <Icon name="activity" size={12} />}
         {running > 0 ? `${running} running` : 'Idle'}
+        {tasks.waiting > 0 && <span className="text-aico-warning">· {tasks.waiting} need{tasks.waiting === 1 ? 's' : ''} you</span>}
       </button>
     </footer>
   );

@@ -43,6 +43,9 @@ in the module header of the code they govern.
 | [0014](0014-long-jobs.md) | Long jobs: work estimated over a few hours runs only after a person approves its proposal; milestones gated by checks and acceptance | Accepted |
 | [0015](0015-sentinel-reviewer.md) | The Sentinel: an independent model reviews high-risk calls and can only deny or escalate to a person | Accepted |
 | [0016](0016-learning-preferences.md) | Learn how the user works as reviewed, scoped rules injected in the request tail | Accepted |
+| [0019](0019-terminal-integration.md) | Terminals: OSC 133 shell integration, read-only agent access to user tabs, vault SSH shells from main | Accepted |
+| [0020](0020-scripted-html-previews.md) | Run HTML previews from their own origin (`aico://preview`), sandboxed, with no network | Accepted |
+| [0021](0021-background-agents-that-report-back.md) | Background agents report back, inherit their parent's bounds, resume (also after a restart), isolate in worktrees without discarding work, and share a per-session concurrency cap | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

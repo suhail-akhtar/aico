@@ -25,13 +25,13 @@
 import { getBackgroundAgents, cancelBackgroundAgent, subscribeToBackgroundAgents } from '../background/index.js';
 import type { BackgroundAgentRecord } from '../background/index.js';
 import { subscribeToApps, stopApp } from '../miniapps/process.js';
-import { requestAgentStop, subscribeToAgents } from '../tools/task.js';
+import { agentResumeSpec, requestAgentStop, subscribeToAgents } from '../tools/task.js';
 import type { SubAgentRecord } from '../tools/task.js';
 import { costFor } from '../tokens.js';
 import type { AicoSettings } from '../settings.js';
 import { registerStopHandle } from './handles.js';
 import { ledger } from './ledger.js';
-import { isTerminal, type WorkState } from './types.js';
+import { isTerminal, type AgentResumeSpec, type WorkState } from './types.js';
 
 /** Settings for pricing. Set once at boot; absent just means list prices. */
 let settings: AicoSettings | undefined;
@@ -66,12 +66,24 @@ function agentState(status: string): WorkState {
  */
 function reflectAgent(
   source: SubAgentRecord | BackgroundAgentRecord,
-  opts: { id: string; kind: 'agent'; sessionId?: string; stop: (reason: string) => void },
+  opts: {
+    id: string; kind: 'agent'; sessionId?: string; stop: (reason: string) => void;
+    /** The ledger row of the agent that spawned this one, so stopping it stops this first. */
+    parent?: string;
+    /** How to continue it after a restart (ADR 0021). */
+    resume?: AgentResumeSpec;
+  },
 ): void {
-  const state = agentState(source.status);
+  // A sub-agent waiting for a slot is `running` in its own registry and
+  // `queued` here: the registry's consumers treat anything not running as
+  // finished, the ledger has a word for it.
+  const queued = 'queued' in source && source.queued === true;
+  const state = queued && source.status === 'running' ? 'queued' : agentState(source.status);
   const existing = ledger.get(opts.id);
 
-  if (!existing) {
+  // A resumed agent keeps its id; its earlier run's row is history, and the
+  // new run is new work under the same id — as a Mini App restart is below.
+  if (!existing || (isTerminal(existing.state) && !isTerminal(state))) {
     ledger.open({
       id: opts.id,
       kind: opts.kind,
@@ -79,8 +91,13 @@ function reflectAgent(
       origin: 'model',
       state,
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+      ...(opts.parent ? { parent: opts.parent } : {}),
+      ...(opts.resume ? { resume: opts.resume } : {}),
     });
     registerStopHandle(opts.id, (_mode, reason) => opts.stop(reason));
+  } else if ((existing.state === 'queued' && state === 'running') || (existing.state === 'running' && state === 'queued')) {
+    // Into and out of the queue (agents/limiter).
+    ledger.setState(opts.id, state);
   }
 
   // Both registries now carry the same four counters. Read defensively anyway:
@@ -129,10 +146,13 @@ export function startLedgerMirroring(): void {
 
   unsubscribers.push(subscribeToAgents(records => {
     for (const record of records) {
+      const resume = agentResumeSpec(record.agentId);
       reflectAgent(record, {
         id: `agent:${record.agentId}`,
         kind: 'agent',
         ...(record.sessionId ? { sessionId: record.sessionId } : {}),
+        ...(record.parentAgentId ? { parent: `agent:${record.parentAgentId}` } : {}),
+        ...(resume ? { resume } : {}),
         stop: reason => { requestAgentStop(record.agentId, reason); },
       });
     }

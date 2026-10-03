@@ -15,7 +15,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
-export type ApprovalMode = 'auto' | 'edits' | 'ask';
+export type ApprovalMode = 'full' | 'auto' | 'edits' | 'ask';
 import { TOOLBAR_CAPTION, TOOLBAR_CONTROL, toolbarTone } from './toolbar';
 
 /**
@@ -27,6 +27,12 @@ import { TOOLBAR_CAPTION, TOOLBAR_CONTROL, toolbarTone } from './toolbar';
  * "Ask, not for edits" was long enough to push the whole row into wrapping.
  */
 const MODES: Array<{ mode: ApprovalMode; label: string; short: string; blurb: string }> = [
+  {
+    mode: 'full',
+    label: 'Full autonomy',
+    short: 'full',
+    blurb: 'Never stops to ask, even when the safety reviewer is unsure. Clear harm is still refused; buying, sending and sign-in checks still wait for you.',
+  },
   {
     mode: 'auto',
     label: 'Auto',

@@ -34,7 +34,19 @@
  * @module shared/ui/HtmlPreview
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+
+/** How a host serves a scripted page from its own origin; null keeps srcdoc. */
+let scriptedFrame: ((documentHtml: string) => Promise<string>) | null = null;
+
+/**
+ * Register how this client hosts a scripted preview (the desktop's
+ * `aico://preview`). The function gets the wrapped document and returns a URL
+ * to frame with `sandbox="allow-scripts"` — never with `allow-same-origin`.
+ */
+export function setScriptedHtmlFrame(fn: ((documentHtml: string) => Promise<string>) | null): void {
+  scriptedFrame = fn;
+}
 
 export interface HtmlPreviewProps {
   html: string;
@@ -81,6 +93,19 @@ export const HtmlPreview = React.memo(function HtmlPreview({
 
   const document = useMemo(() => wrapDocument(html, allowScripts), [html, allowScripts]);
 
+  // With scripts on, a host that can serve the page from an origin of its own
+  // (the desktop: aico://preview, ADR 0020) does — a srcdoc frame inherits the
+  // host page's CSP, which there refuses inline script whatever the sandbox
+  // says. Elsewhere (the browser portal, VS Code) srcdoc is used as before.
+  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  useEffect(() => {
+    setFrameUrl(null);
+    if (!allowScripts || !scriptedFrame) return;
+    let alive = true;
+    scriptedFrame(document).then(url => { if (alive) setFrameUrl(url); }, () => { /* stays on srcdoc */ });
+    return () => { alive = false; };
+  }, [allowScripts, document]);
+
   return (
     <figure className="group/html my-4 overflow-hidden rounded-xl border border-aico-border-subtle">
       <figcaption className="flex items-center gap-2 bg-aico-code px-4 py-2 text-[12px] text-aico-muted">
@@ -116,10 +141,10 @@ export const HtmlPreview = React.memo(function HtmlPreview({
         <iframe
           // Remounted when the sandbox changes: a frame's sandbox attribute is
           // only read at load, so toggling it on a live frame does nothing.
-          key={sandbox}
+          key={`${sandbox}|${frameUrl ?? ''}`}
           title="HTML preview"
           sandbox={sandbox}
-          srcDoc={document}
+          {...(frameUrl ? { src: frameUrl } : { srcDoc: document })}
           referrerPolicy="no-referrer"
           onLoad={event => setHeight(measure(event.currentTarget))}
           style={{ height }}
@@ -144,8 +169,11 @@ export const HtmlPreview = React.memo(function HtmlPreview({
  * renders as unstyled serif text on white and looks broken. The wrapper also
  * carries a restrictive CSP as a second layer: even with `allow-scripts` on,
  * the frame cannot reach the network to fetch code or exfiltrate anything.
+ *
+ * Exported for the desktop's Artifacts viewer, which frames a whole HTML file
+ * under the same rules rather than writing a second, weaker wrapper.
  */
-function wrapDocument(html: string, allowScripts: boolean): string {
+export function wrapDocument(html: string, allowScripts: boolean): string {
   // Only `data:` and inline are permitted; `connect-src 'none'` means a script
   // that does run cannot phone home with whatever it found.
   const csp = [

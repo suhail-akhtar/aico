@@ -52,7 +52,7 @@ const RECORDED = new Set([
   'SshExec', 'SshCopy', 'SshTunnel', 'WinRmExec', 'HttpRequest', 'SnmpQuery',
   'CredentialGenerate', 'CredentialRequest', 'CredentialList',
   'AgentCreate', 'AgentManage', 'SkillCreate', 'SkillManage', 'ToolManage', 'McpManage', 'McpAddServer',
-  'McpRemoveServer', 'McpReloadServers', 'MemoryManage', 'Knowledge', 'AppManage', 'Checkpoint',
+  'McpRemoveServer', 'McpReloadServers', 'MemoryManage', 'Knowledge', 'Recall', 'AppManage', 'Checkpoint',
   'CronCreate', 'CronDelete', 'CronPause', 'CronResume', 'BackgroundTask', 'PushNotification', 'Supervise',
   'WorkspaceWrite', 'WorkspaceSetPath',
 ]);

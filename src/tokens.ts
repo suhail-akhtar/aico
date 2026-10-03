@@ -52,6 +52,7 @@ const COST_RATES: Array<{ match: string; rate: CostRate }> = [
   // ── Anthropic ──
   { match: 'claude-opus',      rate: { input: 15.0, output: 75.0 } },
   { match: 'claude-sonnet',    rate: { input: 3.0,  output: 15.0 } },
+  { match: 'claude-haiku-4-5', rate: { input: 1.0,  output: 5.0 } },
   { match: 'claude-haiku',     rate: { input: 0.25, output: 1.25 } },
   // ── OpenAI ──
   { match: 'gpt-4.1-mini',     rate: { input: 0.40, output: 1.60 } },
@@ -413,17 +414,20 @@ export function estimateTokens(text: string): number {
  * This keeps its own counters and forwards every entry upward, so the child
  * can be held to a ceiling of its own while the parent still sees the total.
  *
- * One consequence, stated because it is a real limit rather than an oversight:
- * inside a child, the *session* ceiling is measured against the child's own
- * numbers and so will not fire there. The parent re-checks at its next step
- * boundary with the full picture, and the per-sub-agent ceiling is what stops
- * a single child before it gets that far. The two are meant to be set
- * together.
+ * The *session* ceiling used to be measured against the child's own numbers,
+ * relying on the parent to re-check at its next step boundary. A detached or
+ * background agent outlives its parent's turn, so there was no next boundary:
+ * it could spend past `maxCostPerSession` with nothing to stop it (ADR 0021).
+ * So the child also carries `session` — the conversation's own tracker, the
+ * root of the chain — and the loop measures session ceilings against that,
+ * per-sub-agent ceilings against the child's own counters.
  */
-export function createChildTracker(parent: ReturnType<typeof createTokenTracker>) {
+export function createChildTracker(parent: ReturnType<typeof createTokenTracker> & { session?: ReturnType<typeof createTokenTracker> }) {
   const child = createTokenTracker();
   return {
     ...child,
+    /** The conversation's tracker: the root of the delegation chain. */
+    session: parent.session ?? parent,
     add(input: number, output: number, cached = 0, cacheWrite = 0, measured = true, cacheWrite1h = 0): void {
       child.add(input, output, cached, cacheWrite, measured, cacheWrite1h);
       parent.add(input, output, cached, cacheWrite, measured, cacheWrite1h);

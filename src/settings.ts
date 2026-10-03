@@ -9,6 +9,7 @@ import {
 import type { ProviderInstance } from './providers/instances.js';
 import { tightenOnlySentinel, type SentinelSettings } from './sentinel/policy.js';
 import type { BriefSettings } from './brief/core.js';
+import { dropProjectModelChoices, type ModelsSettings } from './models/roles.js';
 
 export interface AicoSettings {
   model?: string;
@@ -332,6 +333,22 @@ export interface AicoSettings {
    */
   agents?: {
     directChat?: boolean;
+    /**
+     * Agents (sub-agents, background agents, Investigate workers) one
+     * conversation may have running at once; more wait as `queued`, never
+     * refused. Default 6 (agents/limiter, ADR 0021).
+     */
+    maxConcurrent?: number;
+    /**
+     * When a background agent finishes after the turn that started it has
+     * ended, start a turn so the model reads its report now. Default true; off,
+     * the report waits at the head of the next turn (agents/report-back).
+     */
+    wakeOnResult?: boolean;
+    /** Resume background agents a restart interrupted. Default true. */
+    resumeAfterRestart?: boolean;
+    /** Only those whose last sign of life is within this many hours. Default 24. */
+    resumeWithinHours?: number;
   };
 
   /** Extra skill directories and options */
@@ -640,6 +657,29 @@ export interface AicoSettings {
    * `monitors`; calendar/email only from the MCP tools named in `mcp`.
    */
   brief?: BriefSettings;
+  /**
+   * "About you" (src/profile, ADR 0018): a background learner the person
+   * controls. Read from the user's own settings file only — a project's
+   * `.aico/settings.json` cannot switch it on or widen it (profile/service
+   * `readProfileSettings`). Defaults: on, both sources, $0.02 a day.
+   */
+  profile?: {
+    enabled?: boolean;
+    /** Learn from session logs and accepted working rules. */
+    work?: boolean;
+    /** Learn from the desktop browser's digest (aggregates only). */
+    browsing?: boolean;
+    /** Cap on the learner's model spend per local day, in USD (max 1). */
+    dailyBudgetUsd?: number;
+  };
+  /**
+   * Model roles (src/models/roles.ts, ADR 0017): which model does which job —
+   * a `preset`, an explicit model per role, and `localOnlyPersonal` to keep
+   * the personal roles (background, embeddings) on this machine. The older
+   * per-feature keys still work beneath `roles`. User settings only: a
+   * project's settings files cannot set it (`dropProjectModelChoices`).
+   */
+  models?: ModelsSettings;
 }
 
 async function tryReadJson(filePath: string): Promise<AicoSettings> {
@@ -828,6 +868,14 @@ export async function loadSettings(): Promise<AicoSettings> {
   // agent can write these files, and a cloned repository brings its own.
   tightenOnlySentinel(project as Record<string, unknown>);
   tightenOnlySentinel(local as Record<string, unknown>);
+  // Which model does which job is the person's choice alone (ADR 0017): a
+  // repository must not re-route personal data or pick the reviewer's model.
+  for (const [name, layer] of [['settings.json', project], ['settings.local.json', local]] as const) {
+    const dropped = dropProjectModelChoices(layer as Record<string, unknown>);
+    if (dropped.length && process.env.AICO_DEBUG) {
+      warnOnce(`models:${cwd}:${name}:${dropped.join(',')}`, `  · .aico/${name} may not choose models; ignored: ${dropped.join(', ')}`);
+    }
+  }
   if ([global_, project, local].some(layer => layer.mcpSecurity !== undefined)) {
     warnOnce('mcpSecurity', '  ⚠ Settings warning: mcpSecurity is no longer used (it was never enforced). '
       + 'A project\'s MCP servers and hooks now run only after you trust the project; mark a server that '

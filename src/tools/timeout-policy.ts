@@ -83,6 +83,10 @@ const TIMEOUTS: Record<string, number> = {
   CodeRewrite: 31 * 60 * 1000,
   Refactor: 31 * 60 * 1000,
 
+  // Local index sync (≤4 s) plus, with an embedding model, one batch of
+  // embeddings (≤6 s) and the query's own (20 s request ceiling).
+  Recall: 90 * 1000,
+
   // Local and fast. A minute here means something is wrong, not slow.
   Read: 60 * 1000,
   Write: 60 * 1000,

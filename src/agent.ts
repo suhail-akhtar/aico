@@ -6,7 +6,7 @@ import { PromptDocument, renderPrompt, renderTail, DEFAULT_DIALECT } from './pro
 import { spillResult } from './tools/spill.js';
 import { toolDefinitions, executeTool, setBashDefaultTimeout, getToolsForAgent, getToolsForSpec, truncateResult, agentTypeGetsAllTools, type SubAgentType } from './tools/index.js';
 import {
-  LOAD_TOOLS, executeLoadTools, groupsLoadedBy, isDeferred, loadToolsDefinition, loadedGroupsFromLog, type ToolGroup,
+  LOAD_TOOLS, executeLoadTools, groupsForRequest, groupsLoadedBy, isDeferred, loadToolsDefinition, loadedGroupsFromLog, type ToolGroup,
 } from './tools/deferred.js';
 import { installCustomToolGuards, taints, ttyAsk, type CustomToolStageOptions } from './custom-tools/policy.js';
 import { groupIdOf, loadCustomTools, usableTools } from './custom-tools/store.js';
@@ -14,7 +14,8 @@ import { runCustomTool } from './custom-tools/runner.js';
 import { DEFAULT_MAX_CHARS, providerSchema } from './custom-tools/format.js';
 import { minLevel, type AutonomyLevel } from './autonomy/levels.js';
 import { parkAction, type ActionOrigin } from './autonomy/inbox.js';
-import { taskToolDefinition, runTask } from './tools/task.js';
+import { taskToolDefinition, runTask, agentResumeSpec } from './tools/task.js';
+import { rememberSessionInbox } from './agents/report-back.js';
 import { mcpRegistry } from './mcp.js';
 import { checkPermission } from './permissions.js';
 import { classifyBashCommand, isBashReadOnly } from './safety.js';
@@ -32,7 +33,7 @@ import { runHooks } from './hooks.js';
 import { estimateTokens } from './tokens.js';
 import type { SdkAttachment } from './attachments.js';
 import type { AicoMessage, ImagePart, ImageRef } from './providers/types.js';
-import type { UserAttachment } from './session/events.js';
+import type { MessageSource, UserAttachment } from './session/events.js';
 import { modelAccepts, explainRefusal } from './model-capabilities.js';
 import {
   createToolImageSink, drainToolImages, toolImagesMessage, withToolCall, type ToolImageBytes,
@@ -117,6 +118,8 @@ import { checkpointDir } from './tools/checkpoint.js';
 import { matchKnowledge, renderKnowledge } from './knowledge/match.js';
 import { preferencesForTask } from './learning/preferences.js';
 import { activeMemories } from './memory/store.js';
+import { splitMemories, recalledMemoryBlock } from './recall/inject.js';
+import { embedderFromSettings } from './recall/embed.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
 import { sinkRedact, sinkRedactText } from './vault/sink.js';
@@ -136,8 +139,11 @@ import { activeJob, isLongEstimate, pendingJob, propose, proposalResult, subAgen
 import { longJobDefinition, longJobTool } from './tools/long-job.js';
 import { proposePlan, type PlanInput } from './tools/plan.js';
 import {
-  defaultSentinelModel, installSentinel, recentCallsOf, sentinelActive, sentinelParker, untrustedSourcesOf, userRequestsOf,
+  defaultSentinelModel, installSentinel, mergeRequests, recentCallsOf, sentinelActive, sentinelParker, untrustedSourcesOf, userRequestsOf,
 } from './sentinel/index.js';
+import { recordRoleSpend, resolveRole } from './models/roles.js';
+import { costFor } from './tokens.js';
+import { describedImageNote, describeImagesWith, visionDescriber, type ImageDescriber } from './models/vision.js';
 
 /**
  * A built-in that only reads: never asked about under an autonomy ceiling
@@ -327,6 +333,11 @@ export interface TokenTracker {
   /** Whether the *token counts* were guessed because no usage was reported. */
   hasEstimatedUsage(): boolean;
   format(model?: string, settings?: AicoSettings, providerType?: string): string;
+  /**
+   * For a delegated agent's tracker: the conversation's own, which session
+   * ceilings are measured against (tokens.ts createChildTracker, ADR 0021).
+   */
+  session?: TokenTracker;
 }
 
 export interface AgentOptions {
@@ -361,6 +372,12 @@ export interface AgentOptions {
   filePath?: string;
   showPlan: boolean;
   autoApprove: boolean;
+  /**
+   * When the Sentinel is unsure (escalate): `ask` a person (default), or
+   * `proceed` — full autonomy, chosen by the person for this turn or in their
+   * own `sentinel.onEscalate`. A Sentinel refusal still stops the call.
+   */
+  sentinelEscalation?: 'ask' | 'proceed';
   verbose: boolean;
   conversationHistory: Array<{ role: string; content: string }>;
   /** Optional: session ID for hooks/logging */
@@ -602,6 +619,12 @@ export interface AgentOptions {
    * this call returns and submit each as its own run.
    */
   inbox?: Inbox;
+  /**
+   * Who the task is from, when it is not the person: a turn started only to
+   * read a background agent's report (agents/report-back) is recorded as a
+   * `plugin` message, never as something the user typed. Default human.
+   */
+  taskSource?: MessageSource;
   /**
    * Persist every streamed delta as an `assistant/chunk` event. Off by default:
    * it roughly triples log size and only exact stream replay consumes it.
@@ -1054,6 +1077,8 @@ const PLAN_MODE_TOOLS = new Set([
   // How a planning turn ends. Without it the only way to deliver a plan was
   // prose, which can be read and cannot be answered.
   'ProposePlan',
+  // Reads the Recall index of past sessions and memories (ADR 0018); writes nothing.
+  'Recall',
 ]);
 
 /**
@@ -1381,6 +1406,10 @@ function attachmentsToText(attachments: SdkAttachment[]): string {
  * The returned messages are for this request only. Nothing here is recorded,
  * so switching to a vision model makes every picture in the session visible
  * rather than only the ones attached afterwards.
+ *
+ * With a `describer` (the `vision` model role, models/vision), a text-only
+ * model gets a description of each image instead of the one-line note; it is
+ * cached per image, so it is paid for once, not on every step.
  */
 export async function projectImages(
   messages: AicoMessage[],
@@ -1388,16 +1417,22 @@ export async function projectImages(
   settings: AicoSettings | undefined,
   resolve: ((refs: ImageRef[]) => Promise<Array<ImagePart | undefined>>) | undefined,
   cache: Map<string, ImagePart>,
+  describer?: ImageDescriber,
 ): Promise<AicoMessage[]> {
   if (!messages.some(m => m.role === 'user' && m.imageRefs?.length)) return messages;
 
   if (!modelAccepts(model, 'image', settings)) {
     const reason = explainRefusal(model, 'image', settings)
       ?? 'this model does not read images';
+    const described = describer
+      ? await describeImagesWith(describer, messages.flatMap(m => (m.role === 'user' ? m.imageRefs ?? [] : [])), resolve, cache)
+      : new Map<string, string>();
     return messages.map((message) => {
       if (message.role !== 'user' || !message.imageRefs?.length) return message;
       const notes = message.imageRefs
-        .map(ref => `[${ref.name ?? 'image'} was attached but not sent: ${reason}]`)
+        .map(ref => (described.has(ref.id)
+          ? describedImageNote(ref, describer!.model, model, described.get(ref.id)!)
+          : `[${ref.name ?? 'image'} was attached but not sent: ${reason}]`))
         .join('\n');
       return { ...message, content: `${message.content}\n\n${notes}` };
     });
@@ -1659,6 +1694,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // outlived the sub-agent and the parent's next WorkspaceWrite landed in
   // `sessions/sub-…`.
   if ((opts.depth ?? 0) === 0) setWorkspaceRuntime({ settings, sessionId: opts.sessionId });
+  // Where a background agent's report lands when no server installed a
+  // delivery (agents/report-back): this conversation's inbox.
+  if ((opts.depth ?? 0) === 0 && opts.sessionId && opts.inbox) rememberSessionInbox(opts.sessionId, opts.inbox);
 
   // Wire bash default timeout from settings
   if (settings?.bashTimeout !== undefined) {
@@ -1731,6 +1769,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
       ].join('\n'),
     });
   }
+  const memorySplit = splitMemories(activeMemories(currentCwd(), opts.sessionId));
   const runtime = buildRuntimeBlocks({
     model,
     cwd: process.cwd(),
@@ -1752,7 +1791,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     // Everything remembered that applies to this directory and this
     // conversation. Read at build time rather than cached: a memory saved
     // during a turn should be in effect on the next one, not next launch.
-    memories: activeMemories(currentCwd(), opts.sessionId).map(m => ({
+    // Above 30 memories (ADR 0018) only pinned and global ones stay here; the
+    // rest are recalled per turn into the tail (`recalled_memory` below).
+    memories: memorySplit.prefix.map(m => ({
       id: m.id, scope: m.scope, text: m.text,
     })),
   });
@@ -1860,6 +1901,18 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     if (known) volatileDoc.add({ id: 'knowledge', body: known });
   }
 
+  // Memories beyond the prefix (a store over 30 entries, ADR 0018): the ones
+  // relevant to this request, about 600 tokens at most, in the tail for the
+  // same reason as knowledge. Empty — and absent — for a small store.
+  if (memorySplit.ranked.length) {
+    const embedder = embedderFromSettings(settings, model);
+    const recalled = await recalledMemoryBlock(memorySplit.ranked, task, {
+      cwd: currentCwd(), ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+      ...(embedder ? { embedder } : {}), signal: AbortSignal.timeout(4_000),
+    });
+    if (recalled) volatileDoc.add({ id: 'recalled_memory', body: recalled });
+  }
+
   // How this user works — rules they accepted (learning/preferences.ts, ADR
   // 0016). In the tail for the same reason as knowledge: which rules apply
   // depends on the project and the task, and the set changes when one is
@@ -1867,6 +1920,19 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   if (settings?.learning?.preferences !== false) {
     const prefs = preferencesForTask(currentCwd(), task);
     if (prefs) volatileDoc.add({ id: 'user_preferences', body: prefs });
+  }
+
+  // About the person (profile/inject.ts, ADR 0018): confirmed or confident
+  // facts relevant to this task, ≤ 250 tokens, framed as context and never as
+  // instructions. The top-level run only: never a sub-agent, never work
+  // another program submitted over MCP, never a certification run.
+  if (depth === 0 && !opts.agentType && !opts.evalHarness && opts.parkFrom?.origin !== 'remote') {
+    const { readProfileSettings } = await import('./profile/service.js');
+    if (readProfileSettings().enabled) {
+      const { profileForTurn } = await import('./profile/inject.js');
+      const about = profileForTurn(task, { skipPreferenceMirrors: settings?.learning?.preferences !== false });
+      if (about) volatileDoc.add({ id: 'about_user', body: about });
+    }
   }
 
   if (toolProfile === 'browser-qa') {
@@ -2042,6 +2108,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     ? undefined
     : new Set([
       ...loadedGroupsFromLog(opts.session?.events, extraGroups), ...(opts.toolGroups ?? []),
+      // This turn's request, before it is in the log (the loop records it later).
+      ...groupsForRequest(task),
       // An agent's own MCP servers are loaded eagerly (design §5.4).
       ...(bounds?.mcpServers ?? []).map(server => `mcp:${server}`),
     ]);
@@ -2157,11 +2225,19 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     active: () => sentinelPossible && sentinelActive({
       settings: settings?.sentinel, level: runLevel, autoApprove, planMode: opts.planMode, headless: opts.headless, agentName: bounds?.name,
     }),
-    model: defaultSentinelModel(model, settings?.sentinel),
+    // The `sentinel` role (ADR 0017): models.roles.sentinel, then
+    // sentinel.model, then a different model from the agent's where one is
+    // reachable. Nothing usable at all keeps the old default.
+    model: (() => {
+      const role = resolveRole('sentinel', { settings, mainModel: model });
+      return role.ok ? role.model : defaultSentinelModel(model, settings?.sentinel);
+    })(),
     ...(settings ? { settings } : {}),
     cwd: () => runCwd,
     tainted: () => tainted,
-    requests: () => [...runRequests],
+    // Read live: a steer the person sends while the run is busy is their
+    // request too (a replay they asked for mid-run was refused without it).
+    requests: () => mergeRequests(runRequests, userRequestsOf(opts.session?.events, undefined, undefined)),
     intent: () => stepIntent,
     recent: () => recentCallsOf(opts.session?.events),
     untrusted: () => untrustedSourcesOf(opts.session?.events, tainted),
@@ -2169,6 +2245,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     ...(askPerson ? { ask: askPerson } : {}),
     ...(park ? { park: sentinelParker(customTools, park, runCwd, opts.sessionId) } : {}),
     unattended: runLevel === 'L4' || Boolean(opts.headless),
+    onEscalate: opts.sentinelEscalation ?? settings?.sentinel?.onEscalate ?? 'ask',
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(bounds?.name ? { agentName: bounds.name } : {}),
     ...(runLevel ? { level: runLevel } : {}),
@@ -2184,7 +2261,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     handlers.set(taskToolDefinition.name, async (args: Record<string, unknown>, callId: string) => {
       const {
         description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout,
-        isolation, detach, acceptance_criteria, files, constraints,
+        isolation, detach, acceptance_criteria, files, constraints, resume,
       } = args as {
         description: string; prompt: string; model?: string;
         subagent_type?: SubAgentType; agent_name?: string;
@@ -2193,14 +2270,18 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         isolation?: 'worktree';
         detach?: boolean;
         acceptance_criteria?: unknown; files?: unknown; constraints?: unknown;
+        resume?: string;
       };
       onToolCall?.(taskToolDefinition.name, args, callId);
       // An agent's `delegate` rule: a list names the only agents it may hand
       // work to; `readonly` lets it delegate, but every child is read-only
       // (no Bash either — a command line can write). Enforced here, at the
-      // one place a child is made.
+      // one place a child is made — a resumed child included, by the name it
+      // originally ran as.
       const rule = scope.delegateTo;
-      if (Array.isArray(rule) && (!agent_name || !rule.includes(agent_name))) {
+      const resuming = typeof resume === 'string' && resume.trim() ? resume.trim() : undefined;
+      const childName = resuming ? agentResumeSpec(resuming)?.agentName : agent_name;
+      if (Array.isArray(rule) && (!childName || !rule.includes(childName))) {
         const error = `This agent may delegate only to: ${rule.join(', ')} (its delegate rule). `
           + 'Call Task with agent_name set to one of those, or do the work yourself.';
         onToolDone?.(taskToolDefinition.name, { error }, callId);
@@ -2219,6 +2300,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             description, prompt, model: taskModel, subagent_type, agent_name, agent_spec, timeout,
             ...(isolation === 'worktree' ? { isolation } : {}),
             ...(detach === true ? { detach } : {}),
+            ...(resuming ? { resume: resuming } : {}),
             // The model-facing call is held to the delegation contract; the
             // engine's own callers of runTask compose their briefs themselves.
             acceptance_criteria, files, constraints, contract: true,
@@ -2296,6 +2378,57 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     }
   }
 
+  /*
+    `BackgroundTask` is a detached `Task` (ADR 0021).
+
+    It used to go to `background/spawnBackgroundAgent` from the generic tool
+    dispatch, which knows nothing about the run calling it: the child ran in
+    the server's directory with the full tool set, outside plan mode, at depth
+    0 (so the four-level cap never applied), on a token tracker of its own
+    (so `maxCostPerSession` never saw its spend), in a ledger row with no
+    session (so any other chat could see and stop it) — and its result reached
+    nobody but the tray. Routed through `runTask` it inherits every bound a
+    Task child does, and its report comes back into this conversation.
+    Replaced whatever the dispatch built, so the tool name keeps working; an
+    agent that may not delegate is refused here, not just not shown it.
+  */
+  if (handlers.has('BackgroundTask')) {
+    handlers.set('BackgroundTask', wrapInPipeline('BackgroundTask', async (call) => {
+      if (!mayDelegate) {
+        return { error: 'BackgroundTask starts an agent, and this run may not delegate (depth limit, or canDelegate is off here or above). Do the work yourself.' };
+      }
+      const rule = scope.delegateTo;
+      if (Array.isArray(rule)) {
+        return { error: `This agent may delegate only to: ${rule.join(', ')} (its delegate rule). Use Task with agent_name and detach:true instead.` };
+      }
+      const a = call.arguments as { description?: unknown; prompt?: unknown; model?: unknown };
+      const raw = await runTask(
+        {
+          description: String(a.description ?? 'background task').slice(0, 200),
+          prompt: String(a.prompt ?? ''),
+          ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}),
+          detach: true,
+        },
+        {
+          token: opts.token ?? '',
+          model, autoApprove, verbose, depth, settings,
+          abortSignal: loopSignal,
+          ...(loadedGroups?.size ? { toolGroups: [...loadedGroups] } : {}),
+          ...(opts.context ? { context: opts.context } : {}),
+          ...(tokenTracker ? { tokenTracker } : {}),
+          ...(opts.planMode ? { planMode: true } : {}),
+          toolScope: rule === 'readonly'
+            ? narrowScope(scope, { layer: { label: 'its delegate rule (read-only children)', tools: readOnlyBuiltinNames(), mcp: 'readonly' } })
+            : scope,
+          ...(longJob ? { subagentMaxMs: subAgentMaxMs(settings) } : {}),
+          onSubagentStart: opts.onSubagentStart,
+          onSubagentStop: opts.onSubagentStop,
+        },
+      );
+      return raw.startsWith('[error]') ? { error: raw.slice('[error] '.length) } : raw;
+    }));
+  }
+
   // Add MCP tools. A browser-QA sub-agent keeps only the Playwright tools; the
   // conversation itself keeps every MCP tool it had, so the tool set — and the
   // cache behind it — does not change because one message mentioned a URL.
@@ -2337,6 +2470,10 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   const rebuildToolDefs = (): void => {
     const next = buildToolDefs({
       agentType: opts.agentType, planMode: opts.planMode, toolProfile, depth,
+      // A run nobody is attached to is not shown the tools that wait for one.
+      // `resolveToolSet` has always honoured this; it was never passed, so a
+      // background agent was offered AskUserQuestion and CredentialRequest.
+      ...(opts.headless ? { headless: true } : {}),
       ...(toolRegistry ? { toolRegistry } : {}),
       ...(opts.agentSpecTools ? { agentSpecTools: opts.agentSpecTools } : {}),
       ...(settings ? { settings } : {}),
@@ -2450,6 +2587,18 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     let next = 0;
     return local.map(part => part ?? fetched[next++]);
   };
+
+  /*
+    The vision fallback (ADR 0017 §9): when this model cannot read images and
+    the person chose a vision model, that model describes each picture once.
+    Counted in this run's tracker so spend ceilings see it; not sent to
+    `onTokens`, which reports the work model's own usage.
+  */
+  const imageDescriber = visionDescriber({
+    settings, mainModel: model,
+    signal: () => loopSignal,
+    onUsage: (input, output, cached, cacheWrite) => tokenTracker?.add(input, output, cached, cacheWrite),
+  });
 
   let userMessage = task;
 
@@ -2606,10 +2755,20 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   if (interruptedNote) {
     transcript.recordUserMessage(interruptedNote, { kind: 'plugin', plugin: 'resume' });
   }
+  /*
+    Whatever reached the inbox's step queue while no turn was running — a
+    background agent's report that landed after the last turn ended
+    (agents/report-back), a steer sent a moment too late — is read now, before
+    the request, rather than after this turn's first answer. Recorded with its
+    own source, so a report is never shown as something the person typed.
+  */
+  for (const pending of opts.inbox?.claimStep() ?? []) {
+    transcript.recordUserMessage(pending.content, pending.source);
+  }
   // The images ride with this exact message, not the turn: a completion-gate
   // nudge later in the same turn is a different message and must not inherit
   // the reader's screenshot.
-  transcript.recordUserMessage(userMessage, undefined, opts.images, opts.shownAttachments);
+  transcript.recordUserMessage(userMessage, opts.taskSource, opts.images, opts.shownAttachments);
 
   // Recording starts here, before any tool can write, and captures each file
   // as it was when the turn began. Only the root agent opens one: a sub-agent
@@ -2750,14 +2909,20 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     const usage = tokenTracker.getUsage();
 
     const total = usage.inputTokens + usage.outputTokens;
+    // Session ceilings against the conversation's tracker: a delegated agent's
+    // own is only its share, and a background agent has no parent step left to
+    // re-check for it (tokens.ts createChildTracker).
+    const whole = tokenTracker.session ?? tokenTracker;
+    const sessionUsage = whole === tokenTracker ? usage : whole.getUsage();
+    const sessionTotal = sessionUsage.inputTokens + sessionUsage.outputTokens;
     if (limits.maxTokensPerSession && limits.maxTokensPerSession > 0
-        && total > limits.maxTokensPerSession) {
-      return `token limit reached (${total.toLocaleString()} > `
+        && sessionTotal > limits.maxTokensPerSession) {
+      return `token limit reached (${sessionTotal.toLocaleString()} > `
         + `${limits.maxTokensPerSession.toLocaleString()} maxTokensPerSession)`;
     }
 
     if (limits.maxCostPerSession && limits.maxCostPerSession > 0) {
-      const cost = tokenTracker.estimateCost(model, settings);
+      const cost = whole.estimateCost(model, settings);
       if (cost > limits.maxCostPerSession) {
         return `cost limit reached ($${cost.toFixed(4)} > `
           + `$${limits.maxCostPerSession} maxCostPerSession)`;
@@ -2819,12 +2984,19 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
         heuristic summary rather than failing the turn.
       */
       summarize: async () => {
+        // The `compact` role (ADR 0017 §8) is the main model unless the person
+        // set another; moving it forfeits the cached prefix, which is theirs
+        // to trade. Only an explicit `models.roles.compact` moves it.
+        const compactRole = resolveRole('compact', { settings, mainModel: model });
+        const moved = compactRole.ok && compactRole.source === 'role' && compactRole.model !== model;
+        const summaryModel = moved ? compactRole.model : model;
+        const summaryProvider = moved ? selectProvider(summaryModel, settings) : provider;
         const history = await projectImages(
-          transcript.messages(), model, settings, resolveImages, imageCache,
+          transcript.messages(), summaryModel, settings, resolveImages, imageCache, imageDescriber,
         );
         let text = '';
-        for await (const event of provider.chat({
-          model,
+        for await (const event of summaryProvider.chat({
+          model: summaryModel,
           systemPrompt,
           messages: [...history, { role: 'user', content: HANDOFF_INSTRUCTION }],
           tools: toolDefs,
@@ -2836,7 +3008,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
             const read = event.cacheReadTokens ?? 0;
             const write = event.cacheWriteTokens ?? 0;
             tokenTracker?.add(event.inputTokens, event.outputTokens, read, write, true, event.cacheWrite1hTokens ?? 0);
-            onTokens?.(event.inputTokens, event.outputTokens, read, write);
+            if (moved) {
+              recordRoleSpend('compact', costFor(summaryModel, { inputTokens: event.inputTokens, outputTokens: event.outputTokens, cachedTokens: read, cacheWriteTokens: write }, settings));
+            } else {
+              onTokens?.(event.inputTokens, event.outputTokens, read, write);
+            }
           }
         }
         return text.trim() || undefined;
@@ -3010,7 +3186,7 @@ const GOAL_REMINDER_EVERY = 6;
         // references, and they become bytes — or a sentence saying why not —
         // here, where the model for this request is finally known.
         const requestMessages = await projectImages(
-          transcript.messages(), model, settings, resolveImages, imageCache,
+          transcript.messages(), model, settings, resolveImages, imageCache, imageDescriber,
         );
         contextManager?.noteRequest();
 
@@ -3531,8 +3707,11 @@ const GOAL_REMINDER_EVERY = 6;
     if (reason.kind === 'aborted' && opts.inbox) {
       // Steering input was addressed to a turn that no longer exists, so
       // delivering it to the next one would apply a correction out of context.
-      // Queued followups are separate requests and survive.
-      const abandoned = opts.inbox.claimStep();
+      // Queued followups are separate requests and survive — and so does a
+      // background agent's report: it is not a correction to this turn, and
+      // discarding it would lose the work it describes (ADR 0021).
+      const abandoned = opts.inbox.discardStep(m =>
+        m.source.kind === 'plugin' && (m.source.plugin === 'background-agent' || m.source.plugin === 'background-command'));
       if (abandoned.length > 0 && !silent) {
         showError(`Cancelled: ${abandoned.length} steering message(s) discarded.`);
       }

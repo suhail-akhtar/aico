@@ -375,6 +375,16 @@ console.log('\n══ AICO Sheets: the Canvas tool (version-checked small writes
     fs.writeFileSync(path.join(path.dirname(file), 'notes.docx'), 'PK');
     const topical = (await listArtifacts({ cwd: project, sessionId: sid })).find(a => a.title === 'notes.docx');
     ok(topical?.kind === 'export' && topical.topic === 'Notes', 'an export named after a canvas is grouped under it', topical);
+    const files = (await listArtifacts({ cwd: project, sessionId: sid })).filter(a => a.source !== 'canvas');
+    ok(files.length > 0 && files.every(a => path.isAbsolute(a.path ?? '') && fs.existsSync(a.path)), 'files carry their absolute path (Reveal / Copy path)', files.map(a => a.path));
+    const pv = await call(handleArtifactRoute, 'artifacts/preview', { query: { path: 'Bill of quantities.xlsx' } });
+    const pvSheet = pv.body?.sheets?.[0];
+    ok(pv.status === 200 && pv.body.type === 'table' && pvSheet?.name === 'BOQ' && pvSheet.rows.length >= 4 && pvSheet.rows.every(r => r.length === pvSheet.rows[0].length),
+      'artifacts/preview: an .xlsx as rectangular rows per sheet', pv.body);
+    fs.writeFileSync(path.join(path.dirname(file), 'readme.txt'), 'plain');
+    const pvBad = await Promise.all([{ path: '../canvas' }, { path: 'notes.docx' }, { path: 'rates.csv' }, { attachment: 'nope' }, { path: 'readme.txt' }].map(q => call(handleArtifactRoute, 'artifacts/preview', { query: q })));
+    ok(pvBad[0].status === 404 && pvBad[1].status === 400 && pvBad[2].status === 404 && pvBad[3].status === 404 && pvBad[4].status === 415,
+      'artifacts/preview: traversal and unknown ids are 404; a broken .docx is a 400, not a crash; a text file is the client\'s to show (415)', pvBad.map(p => [p.status, p.body?.error]));
     const xl = await call(handleCanvasRoute, `canvas/${id}/export`, { query: { format: 'xlsx' } });
     const xlBad = await call(handleCanvasRoute, `canvas/${id}/export`, { query: { format: 'pdf' } });
     ok(xl.status === 200 && /boq-v2\.xlsx/.test(xl.headers['Content-Disposition']) && xlBad.status === 400, 'export route: a sheet as xlsx; pdf refused');

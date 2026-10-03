@@ -42,7 +42,7 @@ export const HOST_READ_TOOLS: ReadonlySet<string> = new Set([
   'browser_new_tab', 'browser_open', 'browser_read', 'browser_screenshot', 'browser_scroll',
   'browser_scroll_to', 'browser_select_tab', 'browser_snapshot', 'browser_tabs',
   'browser_tabs_overview', 'browser_text', 'browser_wait', 'browser_hover',
-  'ide_describe', 'ide_plugin_list', 'ide_plugin_read', 'ide_terminal_read',
+  'ide_describe', 'ide_plugin_list', 'ide_plugin_read', 'ide_terminal_read', 'ide_terminal_list',
 ]);
 
 /** Whether a tool name is an MCP tool (`mcp__<server>__<tool>`). */

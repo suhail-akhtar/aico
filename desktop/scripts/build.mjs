@@ -44,7 +44,9 @@ await build({
   outfile: path.join(dist, 'main.cjs'),
   bundle: true, platform: 'node', format: 'cjs', target: 'node24',
   // electron-updater stays a real dependency (loaded only in a packaged build).
-  external: ['electron', '@lydell/node-pty', 'playwright-core', 'electron-updater'], define, sourcemap: 'linked', logLevel: 'warning',
+  // ssh2 is bundled for SSH terminals (terminal-ssh.ts); cpu-features is its
+  // optional native helper, required inside a try — left out, as in the engine.
+  external: ['electron', '@lydell/node-pty', 'playwright-core', 'electron-updater', 'cpu-features'], define, sourcemap: 'linked', logLevel: 'warning',
 });
 await build({
   entryPoints: [path.join(desktop, 'electron/preload.ts')],

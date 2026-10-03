@@ -76,7 +76,10 @@ export async function initializeFeatures(opts: BootstrapOptions): Promise<void> 
     warn(`  ↻ ${recovered.length} process(es) still running from a previous session`);
   }
   if (lost.length) {
-    warn(`  ⚠ ${lost.length} item(s) were interrupted by a restart and are marked lost`);
+    // Agents with a resume spec are `interrupted`, not lost (ADR 0021).
+    const resumable = lost.filter(r => r.state === 'interrupted').length;
+    warn(`  ⚠ ${lost.length} item(s) were interrupted by a restart`
+      + (resumable ? ` — ${resumable} agent(s) can be resumed, the rest are marked lost` : ' and are marked lost'));
   }
   setAdapterSettings(settings);
   startLedgerMirroring();

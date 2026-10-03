@@ -72,6 +72,8 @@ export function useSlashItems({ busy, hasChat, pickFiles, mentionFile, mentionFo
         keywords: 'reasoning effort think harder', checked: opts.effort === v,
         run: () => { setSendOptions({ effort: v }); return v === 'off' ? 'Thinking is off' : v === 'auto' ? 'Thinking: automatic' : `Thinking: ${l}`; },
       })),
+      { id: 'approve-full', group: msg, icon: 'zap', title: 'Full autonomy', hint: 'never stops to ask', keywords: 'approval permission autonomous', checked: opts.approval === 'full',
+        run: () => { setSendOptions({ approval: 'full' }); return 'Full autonomy is on'; } },
       { id: 'approve-auto', group: msg, icon: 'zap', title: 'Auto-approve', hint: 'acts, you watch', keywords: 'approval permission', checked: opts.approval === 'auto',
         run: () => { setSendOptions({ approval: 'auto' }); return 'Auto-approve is on'; } },
       { id: 'approve-edits', group: msg, icon: 'edit', title: 'Ask before edits', keywords: 'approval permission', checked: opts.approval === 'edits',

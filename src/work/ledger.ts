@@ -33,7 +33,7 @@ import {
   appendWorkEvent, compactWorkLog, pidAlive, readWorkLog, shouldCompact,
 } from './store.js';
 import type {
-  SupervisionPolicy, WorkCost, WorkKind, WorkOrigin, WorkProgress, WorkRecord, WorkState,
+  AgentResumeSpec, SupervisionPolicy, WorkCost, WorkKind, WorkOrigin, WorkProgress, WorkRecord, WorkState,
 } from './types.js';
 import { isTerminal } from './types.js';
 
@@ -52,6 +52,8 @@ export interface OpenWorkOptions {
   policy?: SupervisionPolicy;
   /** Start `queued` rather than `running`, for work that is not moving yet. */
   state?: WorkState;
+  /** How to continue it after a restart (agents only). See `WorkRecord.resume`. */
+  resume?: AgentResumeSpec;
 }
 
 export interface WorkQuery {
@@ -177,6 +179,7 @@ class Ledger {
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
       ...(opts.pid !== undefined ? { pid: opts.pid } : {}),
       ...(opts.policy ? { policy: opts.policy } : {}),
+      ...(opts.resume ? { resume: opts.resume } : {}),
     };
     this.records.set(record.id, record);
     this.lastFlush.set(record.id, now);
@@ -345,6 +348,10 @@ class Ledger {
    * - Everything else — agents, runs, watchers, cron firings — lives inside
    *   this process. If the log says it was running and we have only just
    *   started, it cannot be. `lost`, without a check.
+   * - Except an agent that carries a `resume` spec: it is not running either,
+   *   but its conversation is on disk and it can be continued, so it is
+   *   `interrupted` rather than `lost` (ADR 0021). Continuing it is the
+   *   caller's decision — the ledger only records that it is possible.
    *
    * Returns what it settled so the caller can say so rather than doing it
    * silently.
@@ -375,15 +382,18 @@ class Ledger {
         // having been alive while we were not.
         record.heartbeatAt = now;
       } else {
-        record.state = 'lost';
+        const resumable = record.kind === 'agent' && record.resume !== undefined;
+        record.state = resumable ? 'interrupted' : 'lost';
         record.endedAt = now;
         record.error = record.kind === 'process'
           ? 'Process was gone when aico restarted'
-          : 'Interrupted — aico restarted while this was running';
+          : resumable
+            ? 'Interrupted — aico restarted while this was running. Its conversation is kept; it can be resumed.'
+            : 'Interrupted — aico restarted while this was running';
         lost.push(record);
         void appendWorkEvent({
           t: 'patch', at: now, id: record.id,
-          patch: { state: 'lost', endedAt: now, error: record.error },
+          patch: { state: record.state, endedAt: now, error: record.error },
         });
       }
     }

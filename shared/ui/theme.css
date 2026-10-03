@@ -144,16 +144,66 @@ body {
   background-clip: content-box;
 }
 
-/* ── Streaming cursor ────────────────────────────────────────────── */
-@keyframes aico-blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
-.stream-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1.1em;
-  background: var(--aico-text-primary);
-  animation: aico-blink 1s step-end infinite;
-  margin-left: 2px;
-  vertical-align: text-bottom;
+/* ── The working mark (AicoMark.tsx) ──────────────────────────────────
+   Replaced a blinking caret at the end of a streaming reply: a caret means
+   "type here", and its hard blink dragged the eye. The tile breathes and the
+   A is traced in, held, and traced out — slow enough to sit in the corner of
+   the eye, never a strobe. Reduced motion: drawn whole, opacity only. */
+.aico-mark { display: inline-block; flex-shrink: 0; overflow: visible; vertical-align: middle; }
+.aico-mark.is-live { transform-origin: 50% 50%; animation: aico-mark-breathe 1.8s ease-in-out infinite; }
+.aico-mark.is-live .aico-mark-a,
+.aico-mark.is-live .aico-mark-bar { stroke-dasharray: 1; animation: aico-mark-trace 1.8s ease-in-out infinite; }
+.aico-mark.is-live .aico-mark-bar { animation-name: aico-mark-trace-bar; }
+@keyframes aico-mark-breathe {
+  0%, 100% { transform: scale(0.9) rotate(-6deg); }
+  50% { transform: scale(1) rotate(0deg); }
+}
+@keyframes aico-mark-trace {
+  0% { stroke-dashoffset: 1; }
+  40%, 75% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -1; }
+}
+@keyframes aico-mark-trace-bar {
+  0%, 20% { stroke-dashoffset: 1; }
+  50%, 75% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -1; }
+}
+@keyframes aico-mark-fade { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+/* Specific enough to beat a client's blanket `* { animation-duration: .01ms !important }`. */
+@media (prefers-reduced-motion: reduce) {
+  .aico-mark.is-live { animation: aico-mark-fade 2.4s ease-in-out infinite !important; transform: none; }
+  .aico-mark.is-live .aico-mark-a,
+  .aico-mark.is-live .aico-mark-bar { animation: none !important; stroke-dasharray: none; }
+}
+
+/* Where the streaming reply ends: the mark on its own line under the last words. */
+.stream-mark { display: flex; align-items: center; height: 24px; margin-top: 6px; }
+
+/* ── Jump control (transcripts) ──────────────────────────────────────
+   One small round button that floats just above the composer while you are
+   scrolled away from the latest, over a fade that the transcript's own bottom
+   padding fills when you are at the end — so it never sits on readable text. */
+.jump-latest {
+  width: 32px; height: 32px; border-radius: 9999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--aico-text-secondary);
+  background: color-mix(in srgb, var(--aico-bg) 88%, transparent);
+  border: 1px solid var(--aico-border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 14px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  transition: opacity 0.18s ease, transform 0.18s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.jump-latest:hover { color: var(--aico-text-primary); background: var(--aico-bg); }
+.jump-latest[data-shown='false'] { opacity: 0; transform: translateY(6px); pointer-events: none; }
+.transcript-fade {
+  pointer-events: none;
+  /* Opaque for the lower half, where the button sits, so no line shows through behind it. */
+  background: linear-gradient(to bottom, transparent, var(--aico-bg) 50%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .jump-latest { transition: none; }
+  .jump-latest[data-shown='false'] { transform: none; }
 }
 
 @keyframes aico-spin { to { transform: rotate(360deg); } }

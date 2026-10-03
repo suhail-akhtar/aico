@@ -131,7 +131,10 @@ export async function investigate(
   const started = Date.now();
   // All at once. These are read-only and touch nothing shared, which is the
   // property that makes running them together safe — and is exactly what an
-  // implementation fan-out would not have.
+  // implementation fan-out would not have. "At once" is bounded: each worker
+  // is a `runTask`, which takes a slot under the session's
+  // `agents.maxConcurrent` (agents/limiter), so angles past the cap queue
+  // rather than all streaming from the provider together.
   const results = await Promise.all(angles.map(async (angle, index) => {
     try {
       const report = await runTask(

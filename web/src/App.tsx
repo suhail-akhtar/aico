@@ -35,6 +35,7 @@ import { ChangesPane } from './components/ChangesPane';
 import { SessionMenu } from './components/SessionMenu';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { ProjectPicker } from './components/ProjectPicker';
+import { TasksButton, TasksDrawer } from './components/TasksDrawer';
 import { Icon } from './components/Icon';
 import { applyTheme, type ThemeChoice } from './theme';
 import { getToken, setToken, setTokenRejectedHandler } from './api';
@@ -107,6 +108,8 @@ export function App(): React.ReactElement {
     } catch { return false; }
   });
   const [pickerOpen, setPickerOpen] = useState(false);
+  // The Tasks drawer (components/TasksDrawer): running and delegated work, and what waits for you.
+  const [tasksOpen, setTasksOpen] = useState(false);
   const [hasToken, setHasToken] = useState(Boolean(getToken()));
   /** True when a token we had was refused — a restarted server, not a first visit. */
   const [wasRejected, setWasRejected] = useState(false);
@@ -245,6 +248,8 @@ export function App(): React.ReactElement {
 
           {showsSessionTabs(route) && <SessionMenu />}
 
+          <TasksButton onOpen={() => setTasksOpen(o => !o)} />
+
           <span
             className="flex items-center gap-1.5 text-[12px] text-aico-muted"
             title={status === 'live' ? 'Connected to the server' : status}
@@ -320,6 +325,13 @@ export function App(): React.ReactElement {
         />
       )}
       {pickerOpen && <ProjectPicker onClose={() => setPickerOpen(false)} />}
+      <TasksDrawer
+        open={tasksOpen}
+        onClose={() => setTasksOpen(false)}
+        onOpenChat={(id) => { void useStore.getState().openSession(id); setRoute({ ...DEFAULT_ROUTE, tab: 'chat' }); }}
+        // A sub-agent's transcript is its own session (`sub-<id>`), read through the Trajectory tab.
+        onViewTranscript={(id) => { void useStore.getState().openSession(id); setRoute({ ...DEFAULT_ROUTE, tab: 'trajectory' }); }}
+      />
     </div>
   );
 }

@@ -16,6 +16,7 @@
  */
 
 import { AttachmentStrip } from './AttachmentStrip';
+import { AicoMark } from './AicoMark';
 import React from 'react';
 import type { ChatMessage } from './types';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -103,7 +104,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           {...(onFix ? { onFix } : {})}
           {...(widgetFixes ? { widgetFixes } : {})}
         />
-        {message.streaming && <span className="stream-cursor" aria-hidden />}
+        {message.streaming && <div className="stream-mark" data-stream-mark><AicoMark size={18} /></div>}
       </div>
     );
   }

@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { EngineHost } from './engine-host';
 import { onRequestHeaders } from './web-request';
+import { PREVIEW_HOST, previewResponse } from './preview';
 
 export const SCHEME = 'aico';
 export const APP_ORIGIN = `${SCHEME}://app`;
@@ -145,12 +146,14 @@ export interface ProtocolOptions {
  * enabling an imported skill after its review screen (design §5.1), and the
  * person's own skill saved from the editor, and approving a call parked in
  * the inbox (Phase 7), and approving or resuming a long job (longjob/), and
- * putting a learned preference rule in force (learning/preferences.ts).
+ * putting a learned preference rule in force (learning/preferences.ts),
+ * and confirming, editing or adding an About-you fact, running the learner
+ * or widening what it reads (profile/service.ts).
  * The renderer is the AICO window —
  * a request from it is the person's click — so main attaches a grant here;
  * plugin frames are sandboxed with `connect-src 'none'` and cannot reach it.
  */
-const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act']);
+const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings']);
 
 /**
  * Vault routes the interface may never call: they return a value, or mint
@@ -184,7 +187,11 @@ export function attachEmbedReferer(ses: Electron.Session): void {
 export function handleProtocol({ rendererDir, pluginDir, engine, decidePermission, mintHumanGrant }: ProtocolOptions): void {
   protocol.handle(SCHEME, async (request) => {
     const url = new URL(request.url);
+    // Scripted HTML previews: their own origin and CSP, never the API (preview.ts, ADR 0020).
+    if (url.host === PREVIEW_HOST) return previewResponse(url, engine);
     const pathname = decodeURIComponent(url.pathname);
+    // The engine (and its token) only for the app's own origin.
+    if (url.host !== 'app' && pathname.startsWith('/api/')) return json(404, { error: 'not found' });
 
     if (BLOCKED_FROM_RENDERER.test(pathname)) {
       return json(403, { error: 'Values leave the vault only through AICO’s own confirmation (Settings → Credentials & passwords).' });

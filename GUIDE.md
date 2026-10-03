@@ -208,6 +208,25 @@ Outcomes stay listed until they are acknowledged. Reading does not clear them,
 which is deliberate: a background job that failed at 3am should still be there
 in the morning, not lost to whichever turn happened to glance at it.
 
+### Background agents report back
+
+A background agent (or a sub-agent started with `detach`) sends its full report
+back into the chat that started it when it finishes, fails or is stopped — shown
+as a note from the background agent, not as something you said. If the turn that
+started it has already ended, the chat starts a short turn to read the report;
+turn that off with `"agents": { "wakeOnResult": false }` and the report waits at
+the top of your next message instead. A backgrounded shell command reports its
+exit code and last lines the same way, without starting a turn.
+
+Background agents work in your folder with your limits — plan mode, the tools
+you allowed, the session budget — and only your chat can see or stop them. Stop
+in the composer stops them too. You can ask a finished one a follow-up ("ask the
+researcher to also check the tests"): it continues with everything it already
+knew. If AICO restarts while one is running, it carries on afterwards (within 24
+hours, `agents.resumeAfterRestart`), without re-running whatever it was in the
+middle of. At most six agents run at once per chat (`agents.maxConcurrent`);
+more wait their turn.
+
 ### Limits the platform enforces for you
 
 Rather than remembering to check on something, put a limit on it:
@@ -593,6 +612,15 @@ You can also just tell the model. It has a `ContextWindow` tool: it can read
 the figure and where it came from, and record one you give it. It will not
 record its own guess — models are reliably wrong about their limits — and it
 refuses anything smaller than a prompt it has already been seen to accept.
+
+**Which model does which job.** Below the providers, Settings → Models lists
+every job AICO runs a model for — helpers, titles and the brief, the safety
+reviewer, the judge, vision, summaries — with the model, where it runs, its
+price, and why it is that model. *Balanced* keeps today's behaviour; *Economy*
+moves research and review helpers to the cheap model; *Private* keeps the jobs
+that read your own data on a local model. Set a vision model there and a
+text-only chat model is told what your screenshots show. `/doctor` lists any
+job whose choice could not be used.
 
 ---
 

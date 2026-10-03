@@ -43,6 +43,7 @@ import { ToolsPane } from './ToolsPane';
 import { AgentsPane } from './AgentsPane';
 import { MemoryPane } from './MemoryPane';
 import { LearnedPane } from './LearnedPane';
+import { AboutYouPane } from './AboutYouPane';
 
 export interface SettingsModalProps {
   onClose: () => void;
@@ -287,7 +288,8 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
                     : pane.custom === 'tools' ? <ToolsPane />
                     : pane.custom === 'agents' ? <AgentsPane onClose={onClose} />
                     : pane.custom === 'memory' ? <MemoryPane />
-                    : pane.custom === 'learned' ? <LearnedPane onClose={onClose} /> : null}
+                    : pane.custom === 'learned' ? <LearnedPane onClose={onClose} />
+                    : pane.custom === 'about' ? <AboutYouPane /> : null}
 
                   {pane.groups.length > 0 && (
                     <div className={pane.custom ? 'mt-7 border-t border-aico-border-subtle pt-6' : ''}>

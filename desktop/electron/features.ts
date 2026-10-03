@@ -22,6 +22,7 @@ import { registerContextMenus } from './context-menu';
 import { registerVaultHost } from './vault-host';
 import { registerCredentialManager } from './credential-manager';
 import { registerSecurePromptIpc } from './secure-prompt';
+import { registerPreview } from './preview';
 
 export function registerFeatures(ctx: DesktopContext): void {
   // The vault's host side first: it names the engine's key provider before the
@@ -40,4 +41,5 @@ export function registerFeatures(ctx: DesktopContext): void {
   registerUpdater(ctx);
   registerBackup(ctx);
   registerContextMenus(ctx);
+  registerPreview(ctx);
 }

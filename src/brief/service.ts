@@ -9,9 +9,11 @@
  * next slot. `AICO_BRIEF=off` in the environment disables both.
  *
  * COST. Gathering makes no model call (brief/collect). Then exactly one
- * request to the cheapest model of the configured family, reasoning off, at
- * most {@link MAX_RANKED} one-line items in and 600 tokens out — a fraction of
- * a cent. No items, or `brief.useModel: false`, means no call at all. Monitors
+ * request to the `background` model role (by default the cheapest model of the
+ * configured family), reasoning off, at most {@link MAX_RANKED} one-line items
+ * in and 600 tokens out — a fraction of a cent. No items, `brief.useModel:
+ * false`, or a background role kept local with no local model, means no call
+ * at all. Monitors
  * never call a model: they diff what they saw (brief/core `diffMonitor`).
  *
  * PRIVACY. The ranking request carries titles and short details only, through
@@ -37,6 +39,7 @@ import { aicoHome } from '../home.js';
 import { loadSettings, patchUserSettingPath, type AicoSettings } from '../settings.js';
 import { pushNotification } from '../background/notifications.js';
 import { sinkRedactText } from '../vault/sink.js';
+import { recordRoleSpend, resolveRole } from '../models/roles.js';
 import {
   applyRanking, briefDue, buildRankingInput, dedupeItems, diffMonitor, dropRepeats, fallbackSummary,
   inQuietHours, nextDelay, nextSlot, parseRankingReply, releaseNotices, resolveBriefSettings, ruleOrder,
@@ -175,19 +178,20 @@ async function advisoriesFor(cwd: string, now: number, audit: NonNullable<BriefD
   return { items, critical: critical.map(a => a.id), titles: Object.fromEntries(critical.map(a => [a.id, `${a.pkg}: ${a.title} (${a.id})`])) };
 }
 
-/** The one cheap model call: smallest model of the configured family, reasoning off, no tools. */
-async function realRank(settings: AicoSettings, r: ResolvedBriefSettings, system: string, user: string): Promise<{ text: string; model: string; costUsd: number }> {
-  const { pickNamingModel, withoutReasoning } = await import('../session/title-service.js');
+/** The one cheap model call: the `background` role's model (ADR 0017), reasoning off, no tools. */
+async function realRank(settings: AicoSettings, model: string, system: string, user: string): Promise<{ text: string; model: string; costUsd: number }> {
+  const { withoutReasoning } = await import('../session/title-service.js');
   const { selectProvider } = await import('../providers/index.js');
   const { costFor } = await import('../tokens.js');
-  const model = r.model ?? pickNamingModel(settings, settings.model ?? '');
   const provider = selectProvider(model, withoutReasoning(settings));
   let text = ''; let usage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
   for await (const ev of provider.chat({ model, systemPrompt: system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: RANK_MAX_TOKENS, signal: AbortSignal.timeout(RANK_TIMEOUT_MS) })) {
     if (ev.type === 'text') text += ev.content;
     else if (ev.type === 'usage') usage = { inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, cachedTokens: ev.cacheReadTokens ?? 0 };
   }
-  return { text, model, costUsd: costFor(model, usage, settings) };
+  const costUsd = costFor(model, usage, settings);
+  recordRoleSpend('background', costUsd);
+  return { text, model, costUsd };
 }
 
 /** Gather, dedupe, rank once, keep. Single-flight: a second call while one runs gets the same brief. */
@@ -246,10 +250,17 @@ async function buildBrief(trigger: Brief['trigger'], deps: BriefDeps): Promise<B
   let summary = fallbackSummary(list);
   let rankedBy: Brief['rankedBy'] = 'rules';
   let model: string | undefined; let costUsd: number | undefined;
-  if (r.useModel && list.length > 0) {
+  // The background role decides the model (legacy key `brief.model`). When it
+  // must stay on this machine and none is set, the brief is ranked by rule —
+  // never sent to another provider instead.
+  const role = deps.rank ? undefined : resolveRole('background', { settings, mainModel: settings.model ?? '', feature: 'brief' });
+  if (role && !role.ok && r.useModel && list.length > 0) {
+    notes.push(`Ranked by rule, not by a model: ${role.fellBack ?? 'no background model may be used'}`);
+  }
+  if (r.useModel && list.length > 0 && (!role || role.ok)) {
     const { user, ranked } = buildRankingInput(list, sinkRedactText);
     try {
-      const out = await (deps.rank ?? ((sys, u) => realRank(settings, r, sys, u)))(RANKING_SYSTEM, user);
+      const out = await (deps.rank ?? ((sys, u) => realRank(settings, role!.model, sys, u)))(RANKING_SYSTEM, user);
       model = out.model; costUsd = out.costUsd;
       const reply = parseRankingReply(out.text, ranked.length);
       if (reply) {

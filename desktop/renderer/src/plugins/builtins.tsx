@@ -20,6 +20,7 @@ import { newTab, showInternal } from '@/browser/store';
 import { toggleCopilot, useCopilotUi } from '@/browser/copilot-ui';
 import { browserElsewhere, popInBrowser, popOutBrowser, showBrowser } from '@/browser/host';
 import { ChatView } from '@/chat/ChatView';
+import { TasksPage, openTasksPage, toggleTasks } from '@/tasks/TasksHost';
 import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection, BrowserSection, AboutSection } from '@/settings/sections/AppSections';
 import { CredentialManager } from '@/settings/CredentialManager';
 import { ToolsPane } from '@web/components/settings/ToolsPane';
@@ -43,6 +44,7 @@ const ChatsPage = lazyPage(() => import('@/pages/ChatsPage'), 'ChatsPage');
 const LibraryPage = lazyPage(() => import('@/pages/LibraryPage'), 'LibraryPage');
 const ScheduledPage = lazyPage(() => import('@/pages/ScheduledPage'), 'ScheduledPage');
 const InboxPage = lazyPage(() => import('@/pages/InboxPage'), 'InboxPage');
+const AboutYouPage = lazyPage(() => import('@/pages/AboutYouPage'), 'AboutYouPage');
 const ProjectsPage = lazyPage(() => import('@/pages/ProjectsPage'), 'ProjectsPage');
 const ProjectPage = lazyPage(() => import('@/pages/ProjectPage'), 'ProjectPage');
 const GroupPage = lazyPage(() => import('@/pages/GroupPage'), 'GroupPage');
@@ -133,6 +135,13 @@ export const BUILTINS: BuiltinPlugin[] = [
     commands: [{ id: 'inbox.open', title: 'Waiting for you (approve-later inbox)', category: 'Automation', icon: 'inbox', run: () => go('inbox') }],
   },
   {
+    manifest: manifest({ id: 'aico.about', name: 'About you', icon: 'user', category: 'Core', description: 'What AICO has learned about you from your work and browsing, with the evidence — confirm, edit, hide or forget each fact.', contributes: {
+      navItems: [{ id: 'about', title: 'About you', icon: 'user', view: 'about', order: 32, placement: 'more' }],
+    } }),
+    views: [{ id: 'about', title: 'About you', icon: 'user', component: AboutYouPage }],
+    commands: [{ id: 'about.open', title: 'About you (what AICO has learned about you)', category: 'Core', icon: 'user', run: () => go('about') }],
+  },
+  {
     manifest: manifest({ id: 'aico.plugins', name: 'Plugins', icon: 'puzzle', required: true, category: 'Core', description: 'Switch features on and off; create and manage your own plugins.', contributes: {
       navItems: [{ id: 'plugins', title: 'Plugins', icon: 'puzzle', view: 'plugins', order: 40 }],
     } }),
@@ -209,6 +218,15 @@ export const BUILTINS: BuiltinPlugin[] = [
       navItems: [{ id: 'activity', title: 'Activity', icon: 'activity', view: 'activity', order: 65, placement: 'more' }],
     } }),
     views: [{ id: 'activity', title: 'Activity', icon: 'activity', component: ActivityPage }],
+  },
+  {
+    // The Tasks panel (tasks/TasksHost): a side panel from the status bar, the chip under a chat, the palette or Ctrl+Shift+Y; this is its full page.
+    manifest: manifest({ id: 'aico.tasks', name: 'Tasks', icon: 'check', category: 'Core', description: 'Running and delegated work beside your chats — sub-agents, background agents, long jobs, scheduled runs, commands, terminals, browser procedures — and what is waiting for you.' }),
+    views: [{ id: 'tasks', title: 'Tasks', icon: 'check-circle', component: TasksPage }],
+    commands: [
+      { id: 'tasks.toggle', title: 'Tasks: show or hide the panel', category: 'View', icon: 'check-circle', keybinding: 'Ctrl+Shift+Y', run: () => toggleTasks(undefined, true) },
+      { id: 'tasks.page', title: 'Tasks: open as a page', category: 'View', icon: 'expand', run: () => openTasksPage() },
+    ],
   },
   {
     manifest: manifest({ id: 'aico.statusbar', name: 'Status bar', icon: 'list', category: 'Core', description: 'The line at the foot of the window: engine health and background activity.' }),

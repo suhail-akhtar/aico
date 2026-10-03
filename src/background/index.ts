@@ -6,6 +6,7 @@ import type { AicoSettings } from '../settings.js';
 import type { SubAgentType } from '../tools/index.js';
 import type { AutonomyLevel } from '../autonomy/levels.js';
 import type { ActionOrigin } from '../autonomy/inbox.js';
+import { humaniseStep } from '../../shared/tasks.js';
 
 export interface BackgroundAgentRecord {
   agentId: string;
@@ -35,6 +36,10 @@ export interface BackgroundAgentRecord {
   outputTokens: number;
   cachedTokens: number;
   cacheWriteTokens: number;
+  /** The last tool call in words ("Running npm test"), for the Tasks panel. */
+  lastStep?: string;
+  /** The registered agent it runs as, when one was named. */
+  agentName?: string;
 }
 
 const _bgRegistry = new Map<string, BackgroundAgentRecord>();
@@ -207,6 +212,7 @@ export function spawnBackgroundAgent(
     outputTokens: 0,
     cachedTokens: 0,
     cacheWriteTokens: 0,
+    ...(opts.agent ? { agentName: opts.agent } : {}),
   };
 
   _bgRegistry.set(agentId, rec);
@@ -319,11 +325,12 @@ export function spawnBackgroundAgent(
         agentType: opts.agentType,
         ...asAgent,
         abortSignal: abortController.signal,
-        onToolCall: (name) => {
+        onToolCall: (name, toolArgs) => {
           const r = _bgRegistry.get(agentId);
           if (r && !isTerminal(r.status)) {
             lastActivity = Date.now();
             r.currentTool = name;
+            r.lastStep = humaniseStep(name, toolArgs);
             r.toolCallCount++;
             r.statusMessage = `${name}…`;
             r.lastActivityAt = lastActivity;
@@ -497,8 +504,10 @@ export const backgroundTaskToolDefinition = {
   name: 'BackgroundTask',
   description:
     'Spawn a background agent that runs asynchronously without blocking the current conversation. ' +
-    'Returns immediately with an agentId. Use this for long-running tasks (analysis, bulk edits, ' +
-    'research) that should not interrupt the current interaction.',
+    'Returns immediately with its id. It works in your directory with your limits (plan mode, tools, ' +
+    'budget), and its full report is delivered into this conversation when it finishes — you are woken ' +
+    'for it if your turn has ended, so do not poll. Use this for long-running tasks (analysis, bulk edits, ' +
+    'research) that should not interrupt the current interaction. Same as Task with detach:true.',
   inputSchema: {
     type: 'object',
     properties: {

@@ -30,7 +30,7 @@ export function registerAgentCommands(program: Command, deps: AgentCommandDeps):
     .option('--runs <n>', 'trials per task (k)', '3')
     .option('--budget <usd>', 'hard cap in dollars (default and maximum 2)')
     .option('-m, --model <model>', 'model to certify on, when the agent does not pin one (default: the configured model)')
-    .option('--judge-model <model>', 'model for LLM-judged checks (default deepseek-v4-pro)')
+    .option('--judge-model <model>', 'model for LLM-judged checks (default: the judge model role, deepseek-v4-pro unless set)')
     .option('--dry-run', 'print the plan and the estimate; spend nothing')
     .action(async (name: string, cmd: { runs: string; budget?: string; model?: string; judgeModel?: string; dryRun?: boolean }) => {
       const settings = await loadSettings();

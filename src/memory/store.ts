@@ -23,6 +23,14 @@
  * greppable, and portable — and means a corrupt entry costs one memory rather
  * than the whole store.
  *
+ * **Writes are kept clean (ADR 0018).** A near-duplicate of an entry in the
+ * same scope updates that entry instead of adding `…-2` beside it; an entry
+ * about the same subject with a different value ("Package manager: npm" after
+ * "Package manager: pnpm") marks the older one `status: superseded` — kept on
+ * disk with its history, withheld from the prompt, and restorable with
+ * `enable`. `pinned: true` keeps an entry in the prompt even when the store is
+ * large enough for memories to be recalled by relevance instead of sent whole.
+ *
  * @module memory/store
  */
 
@@ -31,6 +39,7 @@ import path from 'path';
 import { aicoHome } from '../home.js';
 import crypto from 'crypto';
 import { disabledIn, setEnabled as setRegistryEnabled } from '../registry-state.js';
+import { jaccard, normalizeText, subjectOf } from '../recall/text.js';
 
 export type MemoryScope = 'global' | 'project' | 'session';
 
@@ -46,7 +55,23 @@ export interface StoredMemory {
   file: string;
   /** False when silenced: kept on disk, withheld from the prompt. */
   enabled: boolean;
+  /** Always in the prompt, even when the rest are recalled by relevance. */
+  pinned?: boolean;
+  /** `superseded`: a later entry says otherwise. Kept on disk, withheld from the prompt. */
+  status?: 'active' | 'superseded';
+  /** The id of the entry that superseded this one. */
+  supersededBy?: string;
 }
+
+/** What `remember` did: a new entry, or an existing near-duplicate brought up to date. */
+export interface RememberResult extends StoredMemory {
+  outcome: 'added' | 'merged';
+  /** Older entries about the same subject that this one now supersedes. */
+  superseded: StoredMemory[];
+}
+
+/** Two entries at or above this word overlap say the same thing. */
+export const NEAR_DUPLICATE = 0.85;
 
 export function memoryRoot(): string {
   return path.join(aicoHome(), 'memories');
@@ -108,10 +133,18 @@ function parse(file: string, scope: MemoryScope): StoredMemory | null {
       updatedAt: Number(meta['updatedAt'] ?? 0),
       belongsTo: meta['belongsTo'] || undefined,
       file,
+      ...(meta['pinned'] === 'true' ? { pinned: true } : {}),
+      ...(meta['status'] === 'superseded' ? { status: 'superseded' as const } : {}),
+      ...(meta['supersededBy'] ? { supersededBy: meta['supersededBy'] } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/** One entry file, for the Recall index (recall/store), which mirrors these files. */
+export function parseMemoryFile(file: string, scope: MemoryScope): StoredMemory | null {
+  return parse(file, scope);
 }
 
 /** How a memory is named in the disabled list: unique across scopes. */
@@ -139,6 +172,9 @@ function serialise(memory: Omit<StoredMemory, 'file'>): string {
     memory.tags.length ? `tags: ${memory.tags.join(', ')}` : '',
     `createdAt: ${memory.createdAt}`,
     `updatedAt: ${memory.updatedAt}`,
+    memory.pinned ? 'pinned: true' : '',
+    memory.status === 'superseded' ? 'status: superseded' : '',
+    memory.status === 'superseded' && memory.supersededBy ? `supersededBy: ${memory.supersededBy}` : '',
     '---',
     memory.text,
     '',
@@ -180,17 +216,48 @@ export function applicable(cwd: string, sessionId?: string): StoredMemory[] {
  * ignoring it is worse than not having it.
  */
 export function activeMemories(cwd: string, sessionId?: string): StoredMemory[] {
-  return applicable(cwd, sessionId).filter(m => m.enabled);
+  // A superseded entry is history, not a fact: the one that replaced it is.
+  return applicable(cwd, sessionId).filter(m => m.enabled && m.status !== 'superseded');
+}
+
+/**
+ * The entry in `existing` that `text` repeats, if any: the same words after
+ * normalising, or a word overlap of {@link NEAR_DUPLICATE} or more.
+ */
+export function findNearDuplicate(text: string, existing: readonly StoredMemory[]): StoredMemory | undefined {
+  const norm = normalizeText(text);
+  let best: { m: StoredMemory; score: number } | undefined;
+  for (const m of existing) {
+    if (normalizeText(m.text) === norm) return m;
+    const score = jaccard(text, m.text);
+    if (score >= NEAR_DUPLICATE && (!best || score > best.score)) best = { m, score };
+  }
+  return best?.m;
 }
 
 export function remember(
   text: string,
   scope: MemoryScope,
   opts: { belongsTo?: string; tags?: string[] } = {},
-): StoredMemory {
+): RememberResult {
   const dir = scopeDir(scope, opts.belongsTo);
   fs.mkdirSync(dir, { recursive: true });
   const now = Date.now();
+  const siblings = listScope(scope, opts.belongsTo);
+
+  // Said again in other words: bring the existing entry up to date rather
+  // than file a second copy beside it. Newer wording wins; tags accumulate.
+  const twin = findNearDuplicate(text, siblings);
+  if (twin) {
+    const merged: Omit<StoredMemory, 'file'> = {
+      ...twin, text: text.trim(), updatedAt: now,
+      tags: [...new Set([...twin.tags, ...(opts.tags ?? [])])],
+      status: 'active', supersededBy: undefined,
+    };
+    fs.writeFileSync(twin.file, serialise(merged), 'utf8');
+    return { ...merged, file: twin.file, outcome: 'merged', superseded: [] };
+  }
+
   const id = makeId(text, dir);
   const memory: Omit<StoredMemory, 'file'> = {
     id, scope, enabled: true, text: text.trim(), tags: opts.tags ?? [],
@@ -199,7 +266,42 @@ export function remember(
   };
   const file = path.join(dir, `${id}.md`);
   fs.writeFileSync(file, serialise(memory), 'utf8');
-  return { ...memory, file };
+
+  // The same subject with a different value: the new entry is the current
+  // truth, the old one is kept as history (never deleted).
+  const superseded: StoredMemory[] = [];
+  const about = subjectOf(text);
+  if (about) {
+    for (const older of siblings) {
+      if (older.status === 'superseded') continue;
+      const theirs = subjectOf(older.text);
+      if (theirs && theirs.subject === about.subject && theirs.value !== about.value) {
+        superseded.push(markSuperseded(older, id));
+      }
+    }
+  }
+  return { ...memory, file, outcome: 'added', superseded };
+}
+
+/** Keep the entry, withhold it from the prompt, and say what replaced it. */
+export function markSuperseded(memory: StoredMemory, byId: string): StoredMemory {
+  const next: Omit<StoredMemory, 'file'> = { ...memory, status: 'superseded', supersededBy: byId, updatedAt: Date.now() };
+  fs.writeFileSync(memory.file, serialise(next), 'utf8');
+  return { ...next, file: memory.file };
+}
+
+/** Undo a supersede: the entry is current again. */
+export function restoreMemory(memory: StoredMemory): StoredMemory {
+  const next: Omit<StoredMemory, 'file'> = { ...memory, status: 'active', supersededBy: undefined, updatedAt: Date.now() };
+  fs.writeFileSync(memory.file, serialise(next), 'utf8');
+  return { ...next, file: memory.file };
+}
+
+/** Pin or unpin: a pinned entry stays in the prompt however large the store grows. */
+export function setMemoryPinned(memory: StoredMemory, pinned: boolean): StoredMemory {
+  const next: Omit<StoredMemory, 'file'> = { ...memory, pinned: pinned || undefined };
+  fs.writeFileSync(memory.file, serialise(next), 'utf8');
+  return { ...next, file: memory.file };
 }
 
 /** Find one by id, looking through every scope that applies. */

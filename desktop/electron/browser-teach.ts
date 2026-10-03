@@ -527,6 +527,13 @@ export function registerTeach(ctx: DesktopContext, deps: TeachDeps): TeachServic
   ctx.handle('browser:teach:discard', () => discard());
   ctx.handle('browser:teach:save', (req: TeachSaveRequest) => save(req));
   ctx.handle('browser:teach:list', () => list());
+  // Replays in flight and recent, for the Tasks panel: names, progress and status only — no step
+  // details (they can quote page text) and nothing typed.
+  ctx.handle('browser:teach:runs', () => [...jobs.values()].map(j => ({
+    id: j.id, name: j.name, origin: j.origin, status: j.status, at: j.at,
+    done: j.steps.filter(s => s.status === 'ok').length, total: j.total,
+    ...(j.current ? { current: j.current.slice(0, 160) } : {}),
+  })));
 
   return { list, run: runTool };
 }

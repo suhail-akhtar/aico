@@ -38,7 +38,16 @@ import type { UserAttachment } from '../session/events.js';
 import { readFile } from 'fs/promises';
 import { summarizeLastTurn } from '../session/summary.js';
 import { writeFallbackTitle, writeUserTitle, generateModelTitle } from '../session/title-service.js';
-import { getAgentRegistry, subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
+import { getAgentRegistry, stopSessionAgents, subscribeToAgents, type SubAgentStatus } from '../tools/task.js';
+import { WAKE_TASK, wakeOnResult, type ReportBackOutcome, type ReportBackRequest } from '../agents/report-back.js';
+import type { MessageSource, QueuedMessage } from '../session/events.js';
+
+/** A pending inbox entry that should wake an idle session: a background agent's report, not a command's exit. */
+function wakesSession(message: QueuedMessage): boolean {
+  return message.source.kind === 'plugin' && message.source.plugin === 'background-agent'
+    // A stopped agent's report is read next time, never a reason to start a turn.
+    && !/^\[Background agent \S+ was stopped/.test(message.content);
+}
 import { currentMiniApp } from '../session/projections.js';
 import { appStateLine, miniAppContext } from '../miniapps/context.js';
 import { learnFromTurn, preferencesAfterTurn, preferencesAfterFeedback, preferencesBeforeTurn } from '../learning/index.js';
@@ -219,6 +228,11 @@ export interface ActiveRun {
   /** How this run's tool calls are approved. Fixed for the turn. */
   approval: ApprovalMode;
   conversationHistory: Array<{ role: string; content: string }>;
+  /**
+   * The modes of the last turn a person started, for a turn the session starts
+   * itself to read a background report (ADR 0021): plan mode stays plan mode.
+   */
+  wakeOpts?: { planMode?: boolean; approval?: RequestedApproval; autonomy?: AutonomyLevel; effort?: string };
 }
 
 export interface PendingEdit {
@@ -259,6 +273,14 @@ export interface PendingPermission {
  * thing off after the fourth dialog about a file they expected to change.
  */
 export type ApprovalMode = 'auto' | 'edits' | 'ask';
+
+/**
+ * What a client may ask for: the modes above, or `full` — auto-approve that
+ * also does not stop to ask when the Sentinel is unsure (it still refuses
+ * clear harm, and the desktop's buy/send/delete, credential and CAPTCHA gates
+ * still wait for the person: those are ADR 0005, not approval settings).
+ */
+export type RequestedApproval = ApprovalMode | 'full';
 
 /**
  * Tools that `edits` lets through without asking.
@@ -390,7 +412,7 @@ export class RunManager {
     opts: {
       planMode?: boolean; autoApprove?: boolean; effort?: string;
       /** How much to ask before acting. Defaults to `auto`, as it always was. */
-      approval?: ApprovalMode;
+      approval?: RequestedApproval;
       /**
        * The autonomy level (L0–L4), for a client that speaks the scale. When
        * set it decides plan mode and the approval mode (the two fields above
@@ -428,11 +450,28 @@ export class RunManager {
        * like `hostTools` — the same session opened in the main chat is a chat.
        */
       surface?: 'browser-copilot';
+      /**
+       * Who the task is from when it is not the person — a turn started to read
+       * a background agent's report (agents/report-back). Recorded with this
+       * source, so the transcript never shows it as something they typed.
+       */
+      source?: MessageSource;
     } = {},
   ): Promise<string> {
     const run = await this.ensure(sessionId, cwd);
     if (run.busy) throw new Error('A turn is already running — use steer or followup');
-    run.approval = opts.approval ?? 'auto';
+    // The modes a turn this session starts by itself (a wake for a background
+    // report) runs under: the person's last choice, never something wider.
+    if (!opts.source) {
+      run.wakeOpts = {
+        ...(opts.planMode !== undefined ? { planMode: opts.planMode } : {}),
+        ...(opts.approval ? { approval: opts.approval } : {}),
+        ...(opts.autonomy ? { autonomy: opts.autonomy } : {}),
+        ...(opts.effort ? { effort: opts.effort } : {}),
+      };
+    }
+    run.approval = opts.approval === 'full' ? 'auto' : (opts.approval ?? 'auto');
+    let fullAutonomy = opts.approval === 'full';
 
     let settings = await this.currentSettings();
     const goal = currentGoal(run.session);
@@ -457,7 +496,7 @@ export class RunManager {
       : undefined;
     const leveled = opts.autonomy ? effectiveLevel({ requested: opts.autonomy, agentCeiling: agent.bounds?.autonomy, ...(certified === undefined ? {} : { certified }) }) : undefined;
     const levelMode = leveled ? modeFromLevel(leveled.level) : undefined;
-    if (levelMode) run.approval = levelMode.approval;
+    if (levelMode) { run.approval = levelMode.approval; fullAutonomy = false; }
     const planMode = levelMode ? levelMode.planMode : (opts.planMode ?? false);
 
     run.busy = true;
@@ -475,7 +514,9 @@ export class RunManager {
 
     // Named before the work begins: a turn can take minutes, and an unnamed
     // row in the sidebar for all of them is the common case, not the edge one.
-    const named = writeFallbackTitle(run.session, task);
+    // Not from a turn the session started itself: "[Background work finished…]"
+    // is not what the conversation is about.
+    const named = opts.source ? undefined : writeFallbackTitle(run.session, task);
     if (named) emit('title', named);
 
     // Remembered so the turn's deliverables can be scoped to this turn rather
@@ -491,7 +532,7 @@ export class RunManager {
     if (agent.notice) emit('notice', { text: agent.notice });
     if (leveled?.cappedBy) emit('notice', { text: `This turn runs at ${levelLabel(leveled.level)}, not ${leveled.requested}: ${leveled.reason}.` });
 
-    emit('turn-start', { task, model });
+    emit('turn-start', { task, model, ...(opts.source ? { source: opts.source } : {}) });
 
     /*
       Compact before the request goes out, if the log has outgrown the model.
@@ -750,6 +791,7 @@ export class RunManager {
       const handOff = copilot && this.handOff ? this.handOff : undefined;
       const result = await runAgent({
         task,
+        ...(opts.source ? { taskSource: opts.source } : {}),
         // What the run did to its own context — older output cleared, earlier
         // steps condensed — so the reader sees why the meter dropped.
         onNotice: (text) => emit('notice', { text }),
@@ -881,6 +923,7 @@ export class RunManager {
           apart: a gate with no callback falls through to stdin.
         */
         autoApprove: run.approval === 'auto' ? (opts.autoApprove ?? true) : false,
+        ...(fullAutonomy ? { sentinelEscalation: 'proceed' as const } : {}),
         ...(onPermissionRequest ? { onPermissionRequest } : {}),
         onApprovalRequired,
         ...(opts.applyEdits ? { applyEdit: applyEditThroughClient } : {}),
@@ -1011,8 +1054,10 @@ export class RunManager {
       // Deliberately not awaited: the turn is finished as far as the user is
       // concerned, and a naming call must never hold it open. Failures are
       // swallowed inside — the fallback name was already good enough.
-      void generateModelTitle(run.session, task, result, { settings, workModel: model })
-        .then(title => { if (title) emit('title', title); });
+      if (!opts.source) {
+        void generateModelTitle(run.session, task, result, { settings, workModel: model })
+          .then(title => { if (title) emit('title', title); });
+      }
 
       return result;
     } catch (err) {
@@ -1110,7 +1155,77 @@ export class RunManager {
         if (next) run.inbox.followup(next, { kind: 'plugin', plugin: 'long-job' });
       } catch { /* a journal write failed; the turn itself is unaffected */ }
       this.drainQueued(sessionId, cwd, model, opts);
+      // A background agent that finished during the last moments of this turn
+      // left its report in the step queue after the loop's final check. Read
+      // it now rather than whenever the person next types — unless a queued
+      // turn just took over, which reads it first anyway (agents/report-back).
+      if (!run.abort.signal.aborted && !run.inbox.nextTurn.length && run.inbox.nextStep.some(wakesSession) && wakeOnResult(settings)) {
+        this.scheduleWake(sessionId);
+      }
     }
+  }
+
+  /** Default model for a turn the session starts itself; set by the server. */
+  defaultModel?: () => Promise<string>;
+
+  private readonly wakeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /**
+   * Deliver a background agent's or command's report (agents/report-back,
+   * ADR 0021).
+   *
+   * Always through the inbox, as a `plugin` message — durable, attributed, and
+   * read at the next step of a running turn or first thing in the next one.
+   * When no turn is running and the report asks to wake the session, a turn is
+   * started to read it, with the modes of the last turn the person started.
+   * A session not open on this server is opened from its directory first: the
+   * report belongs in its log either way.
+   */
+  async reportBack(req: ReportBackRequest): Promise<ReportBackOutcome | false> {
+    let run = this.runs.get(req.sessionId);
+    if (!run) {
+      if (!req.cwd) return false;
+      run = await this.ensure(req.sessionId, req.cwd);
+    }
+    run.inbox.inject(req.content, { kind: 'plugin', plugin: req.plugin });
+    // A live hint for an open client; the content itself is in the log.
+    this.hub.publish({ type: 'background-report', sessionId: req.sessionId, data: { plugin: req.plugin, failed: req.failed === true } });
+    if (run.busy) return 'step';
+    if (!req.wake) return 'queued';
+    this.scheduleWake(req.sessionId);
+    return 'woken';
+  }
+
+  /**
+   * Start a turn to read pending reports, once, shortly.
+   *
+   * Coalesced: three agents finishing together wake the session once, and
+   * that turn reads all three. Re-checked when it fires — a person may have
+   * started a turn meanwhile, which reads them at its first step instead.
+   */
+  private scheduleWake(sessionId: string): void {
+    if (this.wakeTimers.has(sessionId)) return;
+    const timer = setTimeout(() => {
+      this.wakeTimers.delete(sessionId);
+      void this.wakeForReports(sessionId).catch(() => undefined);
+    }, 50);
+    timer.unref?.();
+    this.wakeTimers.set(sessionId, timer);
+  }
+
+  private async wakeForReports(sessionId: string): Promise<void> {
+    const run = this.runs.get(sessionId);
+    if (!run || run.busy) return;
+    if (!run.inbox.nextStep.some(wakesSession)) return;
+    const model = this.modelOf(sessionId) ?? await this.defaultModel?.() ?? (await this.currentSettings()).model;
+    if (!model) return;
+    await this.submit(sessionId, run.cwd, WAKE_TASK, model, {
+      ...(run.wakeOpts ?? {}),
+      source: { kind: 'plugin', plugin: 'background-agent' },
+    }).catch(() => {
+      // The turn's own error reached the client through `turn-end`; a turn
+      // that started meanwhile reads the reports itself.
+    });
   }
 
   /**
@@ -1389,7 +1504,14 @@ export class RunManager {
 
   cancel(sessionId: string): boolean {
     const run = this.runs.get(sessionId);
-    if (!run || !run.busy) return false;
+    /*
+      Stop means everything this conversation has running — background
+      agents spawned by earlier turns included (ADR 0021). The turn's own
+      children go with its signal; detached ones from before it did not, and
+      a Stop that leaves them spending is not a stop.
+    */
+    const stopped = stopSessionAgents(sessionId, 'stopped with the conversation (Stop was pressed)');
+    if (!run || !run.busy) return stopped.length > 0;
     run.abort.abort();
     return true;
   }

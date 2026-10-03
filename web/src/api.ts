@@ -234,7 +234,14 @@ export interface ArtifactItem {
   updatedAt: number;
   topic: string;
   uploaded?: boolean;
+  /** Where the file is on disk (files and attachments; not canvases) — for Reveal, Copy path, Open with. */
+  path?: string;
 }
+
+/** What `artifacts/preview` returns: a workbook's cells, or a Word file as plain HTML (no scripts, images inlined). */
+export type ArtifactPreview =
+  | { type: 'table'; sheets: Array<{ name: string; rows: string[][]; truncated: boolean }> }
+  | { type: 'html'; html: string; truncated: boolean };
 
 /** A long job as `longjob/list` returns it (engine: longjob `LongJob`). */
 export interface LongJob {
@@ -315,7 +322,7 @@ export interface SubmitOptions {
   planMode?: boolean;
   autoApprove?: boolean;
   /** How much to ask before acting. Omitted means `auto`, as it always was. */
-  approval?: 'auto' | 'edits' | 'ask';
+  approval?: 'full' | 'auto' | 'edits' | 'ask';
   /**
    * This client applies the run's file writes itself.
    *
@@ -631,6 +638,17 @@ export const api = {
   preferencesExport: () =>
     get<{ exportedAt: string; format: string; rules: PreferenceRule[] }>('learning/preferences/export'),
 
+  /** About you (engine: profile/, ADR 0018). Confirm/edit/add/run/widening need a person; hide/forget/narrowing do not. */
+  profile: () => get<import('./profile').ProfileOverview>('profile'),
+  profileAct: (body: { id: string; action: 'confirm' | 'hide' | 'unhide' | 'forget' | 'edit'; text?: string }) =>
+    (body.action === 'hide' || body.action === 'forget' ? post : postAsPerson)<{ ok: true }>('profile/act', body as Record<string, unknown>),
+  profileAdd: (category: string, text: string) => postAsPerson<{ ok: true }>('profile/add', { category, text }),
+  profileRun: () => postAsPerson<{ ok: boolean; started?: boolean }>('profile/run', {}),
+  profileSettings: (patch: { enabled?: boolean; work?: boolean; browsing?: boolean; dailyBudgetUsd?: number }) =>
+    (Object.values(patch).some(v => v === true || typeof v === 'number') ? postAsPerson : post)<{ ok: true }>('profile/settings', patch),
+  profileExport: () => get<Record<string, unknown>>('profile/export'),
+  profileWipe: () => post<{ ok: true; removed: number }>('profile/wipe', {}),
+
   /** The morning brief and monitors (engine: brief/). Reads, a manual run, per-project monitor switches. */
   brief: () => get<BriefLatest>('brief/latest'),
   briefHistory: (limit = 14) => get<{ briefs: BriefSummaryRow[] }>(`brief/history?limit=${limit}`),
@@ -663,6 +681,10 @@ export const api = {
   /** Which cheap model the read-only sub-agent roles could run on, for the model in use. */
   agentRecommendation: (model?: string) =>
     get<AgentRecommendation>(`agents/recommendation${model ? `?model=${encodeURIComponent(model)}` : ''}`),
+
+  /** Which model does which job (engine: models/roles, ADR 0017). Choices are written with `saveSettingPath('models.…')`. */
+  modelRoles: (model?: string) =>
+    get<ModelRolesView>(`models/roles${model ? `?model=${encodeURIComponent(model)}` : ''}`),
 
   /** Run the app's own deploy script. A missing requirement answers 400 with `missing`. */
   deployApp: (slug: string, target?: string) =>
@@ -941,6 +963,10 @@ export const api = {
     if (!res.ok) throw new Error(`could not fetch the file (${res.status})`);
     return res.blob();
   },
+  /** A spreadsheet's cells or a Word file's content, read by the engine for the Artifacts viewer. */
+  artifactPreview: (sessionId: string, ref: { path?: string; attachment?: string }) =>
+    get<ArtifactPreview>(`artifacts/preview?session=${encodeURIComponent(sessionId)}&${ref.attachment
+      ? `attachment=${encodeURIComponent(ref.attachment)}` : `path=${encodeURIComponent(ref.path ?? '')}`}`),
   canvasComments: (sessionId: string, id: string) =>
     get<{ comments: CanvasComment[] }>(`canvas/${encodeURIComponent(id)}/comments?session=${encodeURIComponent(sessionId)}`),
   canvasComment: (sessionId: string, id: string, input: { tabId: string; anchor: CommentAnchor; body: string; askAgent?: boolean }) =>
@@ -1291,6 +1317,34 @@ export interface Proposal {
 }
 
 /** Which cheap model the read-only sub-agent roles could run on. */
+/** One model role as the engine resolved it (models/roles `RoleResolution` plus what the page shows). */
+export interface ModelRoleRow {
+  role: string;
+  label: string;
+  does: string;
+  personal: boolean;
+  needs: 'chat' | 'vision' | 'image-out' | 'embedding';
+  model: string;
+  source: 'override' | 'role' | 'legacy' | 'preset' | 'default' | 'off';
+  ok: boolean;
+  local: boolean;
+  fellBack?: string;
+  note?: string;
+  provider: string | null;
+  price: { input: number; output: number; known: boolean } | null;
+  /** The person's own `models.roles[role]`, if any. */
+  chosen: string | null;
+  spent: { usd: number; calls: number } | null;
+}
+
+export interface ModelRolesView {
+  mainModel: string;
+  preset: 'balanced' | 'economy' | 'quality' | 'private';
+  localOnlyPersonal: boolean;
+  roles: ModelRoleRow[];
+  suggestions: string[];
+}
+
 export interface AgentRecommendation {
   workModel: string;
   family?: string;

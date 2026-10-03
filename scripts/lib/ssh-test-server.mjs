@@ -226,6 +226,26 @@ export async function startSshServer({ backend, users, hostKey, port = 0 }) {
         });
         session.on('signal', (accept) => { accept?.(); });
         session.on('sftp', (accept) => serveSftp(accept(), backend));
+        // An interactive shell (AICO Desktop's SSH terminal, ADR 0019): a tiny line
+        // REPL, not a real shell — enough to prove keystrokes go out and output comes
+        // back over a pty-style channel. `exit` closes it with status 0.
+        session.on('pty', (accept, _reject, info) => { state.pty = { term: info?.term, cols: info?.cols, rows: info?.rows }; accept?.(); });
+        session.on('window-change', (accept, _reject, info) => { state.window = { cols: info?.cols, rows: info?.rows }; accept?.(); });
+        session.on('shell', (accept) => {
+          const stream = accept();
+          state.shells = (state.shells ?? 0) + 1;
+          let line = '';
+          stream.write('test-shell$ ');
+          stream.on('data', (d) => {
+            for (const ch of d.toString('utf8')) {
+              if (ch !== '\r' && ch !== '\n') { line += ch; continue; }
+              const cmd = line.trim();
+              line = '';
+              if (cmd === 'exit') { try { stream.write('\r\nbye\r\n'); stream.exit(0); stream.end(); } catch { /* gone */ } return; }
+              stream.write(`\r\nyou said: ${cmd}\r\ntest-shell$ `);
+            }
+          });
+        });
       });
       client.on('tcpip', (accept, reject, info) => {
         const sock = net.connect(info.destPort, info.destIP);
@@ -249,6 +269,8 @@ export async function startSshServer({ backend, users, hostKey, port = 0 }) {
     execs: state.execs,
     authAttempts: state.authAttempts,
     env: state.env,
+    /** Interactive-shell facts (`shells` opened, last `pty` and `window` sizes). */
+    shellState: state,
     close: () => new Promise((resolve) => {
       for (const c of state.sockets) { try { c.end(); } catch { /* gone */ } }
       server.close(() => resolve());

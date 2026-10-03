@@ -59,7 +59,9 @@ import type { ChatRow } from '../../shared/chat-handoff.js';
 import { saveKnowledge } from '../knowledge/store.js';
 import { initializeFeatures, shutdownFeatures } from '../bootstrap.js';
 import { startMiniAppServer, type MiniAppServer } from '../miniapps/server.js';
-import { requestAgentStop } from '../tools/task.js';
+import { agentResumeSpec, requestAgentStop } from '../tools/task.js';
+import { setReportBackDelivery } from '../agents/report-back.js';
+import { resumeAgentFromOutside, resumeInterruptedAgents } from '../agents/background.js';
 import {
   backlogProgress, deleteMiniApp, effectiveKind, getMiniApp, hasProcess, listMiniApps, miniAppDir, runProfileFor,
 } from '../miniapps/store.js';
@@ -121,8 +123,11 @@ import { createMiniApp, slugify } from '../miniapps/store.js';
 import { cp } from 'fs/promises';
 import { closeDatabase } from '../miniapps/data.js';
 import { setWakeDelivery } from '../work/watchers.js';
+import { setTaskAsksProvider, startTaskTracking, subscribeTasks, tasksSnapshot, type TaskAsk } from '../work/tasks.js';
 import { setLongJobHost, resumeAfterRestart } from '../longjob/index.js';
 import { startBriefService, stopBriefService } from '../brief/service.js';
+import { startProfileService, stopProfileService } from '../profile/service.js';
+import { startRecallUpkeep, stopRecallUpkeep } from '../recall/upkeep.js';
 import { parseLevel } from '../autonomy/levels.js';
 import { getVault } from '../vault/index.js';
 import { handleVaultRoute } from '../vault/http.js';
@@ -282,6 +287,42 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     steer: (sessionId, message) => runs.wake(sessionId, message, 'steer'),
     followup: (sessionId, message) => runs.wake(sessionId, message, 'followup'),
   });
+  // Background agents and commands report back into their conversation the
+  // same way (agents/report-back, ADR 0021): into the running turn, or into
+  // the log and — for an agent, when the session allows — a turn to read it.
+  setReportBackDelivery({ deliver: (req) => runs.reportBack(req) });
+  runs.defaultModel = currentDefaultModel;
+  /*
+    Background agents a restart interrupted carry on (agents/background):
+    detached, top-level, recent, never by replaying a step. Not awaited — a
+    server starting must not wait on model calls — and best effort: one that
+    cannot be resumed stays `interrupted`, resumable by hand.
+  */
+  setTimeout(() => {
+    void (async () => {
+      const resumed = await resumeInterruptedAgents({
+        settings: await loadSettings().catch(() => settings),
+        model: await currentDefaultModel(),
+        trackerFor: async (sessionId, sessionDir) => (await runs.ensure(sessionId, sessionDir)).tokenTracker,
+      });
+      if (resumed.length) console.error(`  ↻ resumed ${resumed.length} background agent(s) a restart interrupted`);
+    })().catch(() => undefined);
+  }, 0).unref?.();
+  // The Tasks panel (work/tasks): which open chats are blocked on a person,
+  // read from the runs here for the same reason as the wake delivery above.
+  startTaskTracking();
+  setTaskAsksProvider({
+    asks: () => runs.list().flatMap((r): TaskAsk[] => {
+      const out: TaskAsk[] = [];
+      if (r.pendingPermission) {
+        out.push({ type: 'permission', sessionId: r.sessionId, id: r.pendingPermission.id, tool: r.pendingPermission.tool, detail: r.pendingPermission.detail, at: r.pendingPermission.at });
+      }
+      if (r.pendingQuestion) out.push({ type: 'question', sessionId: r.sessionId, question: r.pendingQuestion.question, at: r.pendingQuestion.at });
+      return out;
+    }),
+    open: (sessionId) => runs.list().some(r => r.sessionId === sessionId),
+  });
+  let stopTasksFeed: (() => void) | undefined;
 
   /**
    * Which directory each session belongs to.
@@ -431,6 +472,13 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       sessionCwd.set(sessionId, found);
       return found;
     }
+    // A sub-agent's log (`sub-<id>`) is filed in its conversation's directory,
+    // which need not be a listed project; its spec remembers where.
+    const filedIn = sessionId.startsWith('sub-') ? agentResumeSpec(sessionId)?.logCwd : undefined;
+    if (filedIn && fs.existsSync(eventLogPath(sessionId, filedIn))) {
+      sessionCwd.set(sessionId, filedIn);
+      return filedIn;
+    }
     // The workspace, not the launch directory. See webDefaultDir above.
     return fs.existsSync(webDefaultDir) ? webDefaultDir : cwd;
   }
@@ -558,6 +606,26 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       return;
     }
 
+    if (route === 'agents/resume' && req.method === 'POST') {
+      /*
+        Continue a sub-agent or background agent — one a restart interrupted,
+        or one that finished and has a follow-up (ADR 0021). Its history is its
+        own log; nothing it did is replayed. Detached: its report comes back
+        into its conversation like any background agent's.
+      */
+      const body = await readJson(req) as { agentId?: string; prompt?: string };
+      if (!body.agentId) { send(res, 400, { error: 'agentId required' }); return; }
+      const result = await resumeAgentFromOutside(body.agentId, {
+        settings: await loadSettings().catch(() => settings),
+        model: await currentDefaultModel(),
+        trackerFor: async (sessionId, sessionDir) => (await runs.ensure(sessionId, sessionDir)).tokenTracker,
+        detach: true,
+        ...(body.prompt?.trim() ? { prompt: body.prompt.trim() } : {}),
+      });
+      send(res, result.startsWith('[error]') ? 404 : 200, { resumed: !result.startsWith('[error]'), message: result });
+      return;
+    }
+
     if ((route === 'miniapps' || route === 'apps') && req.method === 'GET') {
       // `host` is null when the plugin is off, and the panel says so rather
       // than listing apps behind links that would not resolve. Read live so
@@ -618,6 +686,20 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     if (route === 'chat/handoff/events' && req.method === 'GET') {
       const detach = hub.subscribeTopic('chat-handoff', res);
       req.on('close', detach);
+      return;
+    }
+
+    // The Tasks panel (work/tasks): one full frame, then a `tasks` frame
+    // whenever the list changes. The feed runs only while someone watches.
+    if (route === 'tasks/events' && req.method === 'GET') {
+      const detach = hub.subscribeTopic('tasks', res);
+      if (!stopTasksFeed) stopTasksFeed = subscribeTasks(snap => hub.publishTopic('tasks', 'tasks', snap));
+      req.on('close', () => {
+        detach();
+        if (hub.topicSize('tasks') === 0) { stopTasksFeed?.(); stopTasksFeed = undefined; }
+      });
+      const full = sinkRedact(await tasksSnapshot());
+      try { res.write(`event: full\ndata: ${JSON.stringify({ type: 'full', topic: 'tasks', data: full })}\n\n`); } catch { /* closed already */ }
       return;
     }
 
@@ -887,7 +969,8 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       // back after a reload, as long as the server still held them in memory.
       const known = new Set(projects.map(p => normalizeProjectPath(p.path)));
       for (const run of open.values()) {
-        if (run.session.length > 0 && known.has(normalizeProjectPath(run.cwd))
+        // Never a sub-agent's log: those are transcripts, not chats.
+        if (run.session.length > 0 && !run.sessionId.startsWith('sub-') && known.has(normalizeProjectPath(run.cwd))
           && !used.some(s => s.id === run.sessionId)) {
           used.unshift({ id: run.sessionId, updatedAt: Date.now(), turns: 0, project: run.cwd });
         }
@@ -1409,7 +1492,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
             be answered by blocking the turn on a dialog that client has no code
             to render.
           */
-          approval: (['auto', 'edits', 'ask'] as const)
+          approval: (['auto', 'edits', 'ask', 'full'] as const)
             .find(m => m === (body as { approval?: string }).approval) ?? 'auto',
           // The L0–L4 scale, for a client that speaks it; overrides the two
           // fields above. Unknown values are ignored, like `approval`'s.
@@ -1863,6 +1946,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
   // The morning brief and monitors: a quiet minute timer (brief/service).
   startBriefService({ launchCwd: cwd });
+  // About you (ADR 0018): the learner, at most six-hourly, only while no turn runs.
+  startProfileService({ idle: () => !runs.list().some(r => r.busy) });
+  // Recall's nightly upkeep: an hourly unref'd check, no model (recall/upkeep).
+  startRecallUpkeep();
 
   await reconcileMiniApps(boundPort);
   // Once per start: what repeats across projects becomes a global proposal.
@@ -1882,6 +1969,8 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       // running in the journal, to resume on the next start, not paused.
       setLongJobHost(undefined);
       stopBriefService();
+      stopProfileService();
+      stopRecallUpkeep();
       stopCanvasEvents();
       stopPreferenceBatch();
       stopCanvasEdits();

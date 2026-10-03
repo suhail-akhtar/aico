@@ -134,13 +134,16 @@ export async function reviewCall(prompt: string, o: {
     return fail((err as Error).message.slice(0, 200));
   } finally {
     clearTimeout(timer);
+    // Spend per model role (ADR 0017): whatever the call cost, answered or not.
+    const { recordRoleSpend } = await import('../models/roles.js');
+    recordRoleSpend('sentinel', tracker.estimateCost(o.model, o.settings));
   }
 }
 
 // ── audit ────────────────────────────────────────────────────────────
 
 export type SentinelOutcome =
-  | 'no-objection' | 'refused' | 'person-allowed' | 'person-refused' | 'parked' | 'refused-unattended';
+  | 'no-objection' | 'refused' | 'person-allowed' | 'person-refused' | 'parked' | 'refused-unattended' | 'proceeded-unasked';
 
 export interface SentinelRecord {
   at: number;
@@ -226,6 +229,16 @@ export function userRequestsOf(
   return out.slice(-6);
 }
 
+/**
+ * The run's requests plus any the person added since it started (a steer
+ * mid-run is recorded as their own message), oldest first, last six.
+ */
+export function mergeRequests(atStart: readonly string[], live: readonly string[]): string[] {
+  const out = [...atStart];
+  for (const r of live) if (!out.some(o => o.trim() === r.trim())) out.push(r);
+  return out.slice(-6);
+}
+
 /** The last calls in a session's log, for the reviewer's "recent activity". */
 export function recentCallsOf(events: ReadonlyArray<LogEvent> | undefined, max = 8): Array<{ name: string; args: string }> {
   const out: Array<{ name: string; args: string }> = [];
@@ -301,6 +314,8 @@ export interface SentinelStageOptions {
   park?: (name: string, args: Record<string, unknown>, why: string) => Promise<{ id: string } | { error: string } | undefined>;
   /** No person is attending this run (L4, cron, background). */
   unattended: boolean;
+  /** Escalations: ask a person (default) or proceed without asking (full autonomy). */
+  onEscalate?: 'ask' | 'proceed';
   sessionId?: string;
   agentName?: string;
   level?: string;
@@ -370,6 +385,10 @@ export function installSentinel(pipeline: ToolPipeline, o: SentinelStageOptions)
           + 'tell them what was stopped and why; they can ask for it explicitly.',
       };
     }
+
+    // Full autonomy: the person chose not to be asked. Not an approval — the
+    // call continues under the ordinary rules, and the audit says so.
+    if (o.onEscalate === 'proceed') { log('proceeded-unasked'); return { kind: 'abstain' }; }
 
     // Escalate: a person decides. Unattended runs park what the inbox can replay.
     const why = `Sentinel: ${review.reason}`;

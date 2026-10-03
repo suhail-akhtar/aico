@@ -9,6 +9,8 @@ import React, { Suspense, lazy } from 'react';
 import { useDesk } from '@/state/desk';
 import { Icon } from '@/lib/icons';
 import { cls } from '@/lib/util';
+// Eager: queues "open a terminal" requests made before the lazy panel loads.
+import '@/ide/terminal-bus';
 
 const TerminalPanel = lazy(() => import('@/ide/TerminalPanel').then(m => ({ default: m.TerminalPanel })));
 const OutputPanel = lazy(() => import('@/ide/OutputPanel').then(m => ({ default: m.OutputPanel })));

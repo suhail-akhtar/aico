@@ -26,8 +26,19 @@
 import type { AicoSettings } from '../settings.js';
 import type { ProviderAPI } from '../providers/types.js';
 import { createTokenTracker } from '../tokens.js';
+import { recordRoleSpend, resolveRole } from '../models/roles.js';
 
 export const DEFAULT_JUDGE_MODEL = 'deepseek-v4-pro';
+
+/**
+ * The judge when none is named: the `judge` model role (ADR 0017) —
+ * `models.roles.judge`, else `deepseek-v4-pro` where a key reaches it, else
+ * the agent's own model (allowed, and reported as not independent).
+ */
+export function defaultJudgeModel(settings: AicoSettings | undefined, agentModel: string): string {
+  const role = resolveRole('judge', { settings, mainModel: agentModel });
+  return role.ok ? role.model : DEFAULT_JUDGE_MODEL;
+}
 
 export interface JudgeVerdict {
   pass: boolean;
@@ -87,5 +98,7 @@ export async function judge(o: {
     else if (event.type === 'usage') tracker.add(event.inputTokens, event.outputTokens, event.cacheReadTokens ?? 0, event.cacheWriteTokens ?? 0);
   }
   });
-  return { ...parseVerdict(text), costUsd: tracker.estimateCost(o.model, o.settings) };
+  const costUsd = tracker.estimateCost(o.model, o.settings);
+  recordRoleSpend('judge', costUsd);
+  return { ...parseVerdict(text), costUsd };
 }

@@ -27,6 +27,7 @@ import { onCanvasEvent } from '@aico/ui';
 import { newChat, openChat } from './actions';
 import { BriefCard, type BriefHost } from '@web/components/BriefCard';
 import { desktop } from '@/desktop';
+import { TasksChipHost } from '@/tasks/TasksHost';
 
 /** How the brief's one-click actions open things here: the OS browser, the Inbox page, the chat. */
 const BRIEF_HOST: BriefHost = {
@@ -92,6 +93,7 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
           <Transcript scrollRef={scrollRef} />
         </div>
         <div className="shrink-0 px-6 pb-4 pt-1">
+          <TasksChipHost />
           <Attention />
           <Composer />
           <p className="mt-1.5 text-center text-[11px] text-aico-muted">AICO runs on this computer. The agent can make mistakes — check important work.</p>

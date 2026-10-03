@@ -152,6 +152,15 @@ export const desktop = {
     writeImage: (dataUrl: string) => invoke('clipboard:writeImage', dataUrl),
   },
 
+  /**
+   * A URL on the scripted-preview origin (`aico://preview/<token>/…`, ADR 0020) for an HTML
+   * file in a chat's artifacts folder, or for a page held in memory. Frame it with
+   * `sandbox="allow-scripts"` and nothing else.
+   */
+  preview: {
+    register: (o: { session: string; path: string } | { html: string }) => invoke<{ url: string }>('preview:register', o),
+  },
+
   exportPdf: (html: string, defaultName: string) => invoke<string | null>('export:pdf', { html, defaultName }),
 
   updates: {

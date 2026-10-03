@@ -1188,6 +1188,20 @@ export async function handleSlashCommand(
         }
       }
 
+      // 4c. Model roles (ADR 0017): a role that fell back, cannot run, or
+      // checks the agent with its own model is said here, never silently.
+      {
+        const { resolveAllRoles, roleInfo } = await import('./models/roles.js');
+        const flagged = resolveAllRoles({ settings: ctx.settings, mainModel: ctx.currentModel })
+          .filter(r => r.fellBack || r.note);
+        if (flagged.length === 0) checks.push('✓ Model roles resolve as set (Settings → Models)');
+        for (const r of flagged) {
+          const label = roleInfo(r.role).label;
+          const state = r.ok ? `uses ${r.model}` : 'has no usable model';
+          checks.push(`  ${r.ok ? '⚠' : '✗'} ${label} ${state}: ${[r.fellBack, r.note].filter(Boolean).join('; ')}`);
+        }
+      }
+
       // 5. AICO.md / CLAUDE.md
       const aicoMd  = path.join(process.cwd(), 'AICO.md');
       const claudeMd = path.join(process.cwd(), 'CLAUDE.md');
@@ -1308,8 +1322,11 @@ export async function handleSlashCommand(
     case 'worktree-cleanup': {
       if (!args) return { handled: true, output: 'Usage: /worktree-cleanup <worktreeId>' };
       try {
-        const result = await worktreeManager.cleanupWorktree(args, { cwd: process.cwd() });
-        return { handled: true, output: result.cleaned ? `Cleaned worktree ${args}.` : `Worktree "${args}" not found.` };
+        // Never discards: work is committed to its branch, or the worktree is kept (worktree/).
+        const result = await worktreeManager.finish(args, { message: `Work from worktree ${args}` });
+        if (!result) return { handled: true, output: `Worktree "${args}" not found.` };
+        const { describeWorktreeFinish } = await import('./worktree/index.js');
+        return { handled: true, output: describeWorktreeFinish(result) };
       } catch (err) {
         return { handled: true, output: `Cleanup failed: ${err instanceof Error ? err.message : String(err)}` };
       }

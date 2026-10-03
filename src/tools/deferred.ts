@@ -144,6 +144,12 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     summary: 'context-window settings, capability report, workspace location',
     tools: ['ContextWindow', 'CapabilityReport', 'WorkspaceSetPath'],
   },
+  {
+    // ADR 0018. Loaded outright by a request about earlier work (REQUEST_LOADS).
+    id: 'recall',
+    summary: 'search past sessions, memories, knowledge and what is known about the person',
+    tools: ['Recall'],
+  },
 ];
 
 export const LOAD_TOOLS = 'LoadTools';
@@ -167,6 +173,36 @@ const SKILL_LOADS: Record<string, readonly string[]> = {
   'server-ops': ['remote', 'credentials'],
 };
 
+/**
+ * Groups a person's own request implies, loaded before the first step.
+ *
+ * Measured, not guessed: with the refactor group one `LoadTools` away, the
+ * model never loaded it on a 200-file rename and wrote a regex script instead
+ * (ADR 0013). A model does not ask for a tool whose absence it cannot see, so
+ * a request that names a wide change offers the tools outright. Read from the
+ * person's messages in the log, so the group stays loaded on later turns
+ * (and the cached tool list stays stable) without anything new being stored.
+ */
+const REQUEST_LOADS: Array<{ re: RegExp; groups: readonly string[] }> = [
+  {
+    re: /\b(?:renam(?:e|ing)|refactor(?:ing)?|codemod|(?:move|relocate) (?:the |this |a )?(?:file|module|component|class|function)s?|find (?:all )?references|(?:every|all) (?:the )?(?:call[- ]?sites?|callers|usages?|occurrences|references|imports)|across (?:all|every|the (?:whole|entire)) (?:files?|codebase|repo(?:sitory)?|project))\b/i,
+    groups: ['refactor'],
+  },
+  {
+    // A question about earlier work: the same "cannot ask for what it cannot see" reason.
+    re: /\b(?:last (?:time|week|month|session|chat)|(?:yesterday|earlier) we|we (?:did|tried|decided|discussed|fixed|built|talked about)\b|what did we|remember when|previous (?:session|chat|conversation)s?|earlier (?:session|chat|conversation)|(?:a|the) (?:past|previous) (?:session|chat))/i,
+    groups: ['recall'],
+  },
+];
+
+/** Groups a request's text implies. Pure. */
+export function groupsForRequest(text: string | undefined): string[] {
+  if (!text) return [];
+  const out = new Set<string>();
+  for (const rule of REQUEST_LOADS) if (rule.re.test(text)) for (const g of rule.groups) out.add(g);
+  return [...out];
+}
+
 /** A custom tool pack's group id. */
 export const CUSTOM_GROUP_RE = /^tools:[a-z0-9][a-z0-9-]{0,39}$/;
 
@@ -188,12 +224,18 @@ export function groupsLoadedBy(name: string, input: Record<string, unknown> | un
 /**
  * Every group this session has loaded, read from its log.
  *
- * Reads `tool/call` events only, and parses their arguments defensively: a
+ * Reads `tool/call` events, plus the person's own messages for the groups
+ * their request implies (`groupsForRequest`), and parses their arguments defensively: a
  * malformed call in an old log must not stop the next turn from starting.
  */
 export function loadedGroupsFromLog(events: readonly SessionEvent[] | undefined, extra: readonly ToolGroup[] = []): Set<string> {
   const loaded = new Set<string>();
   for (const event of events ?? []) {
+    if (event.type === 'user/message') {
+      const d = event.data as { content?: unknown; source?: { kind?: string } };
+      if ((!d.source?.kind || d.source.kind === 'human') && typeof d.content === 'string') for (const g of groupsForRequest(d.content)) loaded.add(g);
+      continue;
+    }
     if (event.type !== 'tool/call') continue;
     const data = event.data as { name?: string; arguments?: string };
     if (!data.name) continue;

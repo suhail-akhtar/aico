@@ -7,13 +7,14 @@
  * agent's work folded under a single "Worked for…" line, and its answer as
  * prose with every widget, chart, formula and diagram the shared renderers
  * draw. Actions sit under each answer: copy (Markdown and rich), rate, retry,
- * branch, export.
+ * branch, export, and — on a long one — back to its start. A reply still being
+ * written ends in the animated AICO mark (`@aico/ui` AicoMark), not a caret.
  *
  * @module desktop/renderer/chat/Transcript
  */
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AttachmentStrip, MessageBubble, type ChatMessage } from '@aico/ui';
+import { AicoMark, AttachmentStrip, MessageBubble, type ChatMessage } from '@aico/ui';
 import { useStore } from '@web/store';
 import { composeMessages } from '@web/reduce';
 import { applyVersions, editMarker, seqOf, stripEditMarker } from '@web/message-versions';
@@ -114,7 +115,6 @@ export function Transcript({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
     if (!el) return;
     const onScroll = (): void => {
       setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_PX);
-      setAnswerAbove(answerStartAbove(el));
     };
     const touched = (): void => { touchedAt.current = Date.now(); };
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -138,7 +138,6 @@ export function Transcript({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
     away to read something else, the transcript leaves you there.
   */
   const jump = useDesk(s => s.prefs.jumpToAnswer);
-  const [answerAbove, setAnswerAbove] = useState(false);
   const wasBusy = useRef(busy);
   useEffect(() => {
     const finished = wasBusy.current && !busy;
@@ -160,38 +159,53 @@ export function Transcript({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
     return () => { cancelAnimationFrame(raf); clearTimeout(again); };
   }, [busy, jump, scrollRef]);
 
+  const jumpToStart = useCallback((section: HTMLElement) => {
+    const el = scrollRef.current;
+    if (el) scrollToAnswerStart(el, motion(), section);
+  }, [scrollRef]);
+
+  /*
+    One jump control, and it never sits on the words. It used to be a pill
+    ("↑ Start of answer" beside a "↓") fixed 150px up the window, where it
+    covered whatever line of the answer was under it. Now, the way Claude's
+    desktop app does it: a single 32px round "↓" that fades in just above the
+    composer only while you are scrolled away from the latest, over an 80px
+    fade, opaque where the button sits, that the transcript's own bottom space
+    (pb-12 plus the last turn's mb-8) fills when you are at the end.
+    "Back to the start of the answer" moved into each long answer's action
+    row, where it belongs to the answer it scrolls to.
+  */
   return (
-    <div className="transcript mx-auto w-full max-w-column px-6 pb-10 pt-6">
-      {turns.map((t, i) => (
-        <TurnView key={t.key} turn={t} last={i === turns.length - 1} verbose={verbose}
-          onFix={onFix} widgetFixes={widgetFixes} versions={versions} setVersion={setVersion} />
-      ))}
-      {(!following || (answerAbove && !busy)) && (
-        <div className="fixed bottom-[150px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border border-aico-border bg-aico-bg p-0.5 shadow-[var(--desk-shadow)]"
-          style={{ marginLeft: 'calc(var(--desk-sidebar-w, 0px) / 2)' }}>
-          {answerAbove && !busy && (
-            <button className="flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] text-aico-secondary hover:bg-aico-hover hover:text-aico-primary"
-              onClick={() => { const el = scrollRef.current; if (el) scrollToAnswerStart(el, 'smooth'); }}
-              title="Scroll to where the last answer starts" aria-label="Jump to the start of the answer">
-              <Icon name="arrow-up" size={14} /> Start of answer
-            </button>
-          )}
-          {!following && (
-            <button className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-aico-hover"
-              onClick={() => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); setFollowing(true); }}
-              title="Jump to latest" aria-label="Jump to latest">
-              <Icon name="arrow-down" size={16} />
-            </button>
-          )}
+    <>
+      <div className="transcript mx-auto w-full max-w-column px-6 pb-12 pt-6">
+        {turns.map((t, i) => (
+          <TurnView key={t.key} turn={t} last={i === turns.length - 1} verbose={verbose}
+            onFix={onFix} widgetFixes={widgetFixes} versions={versions} setVersion={setVersion} onJumpToStart={jumpToStart} />
+        ))}
+      </div>
+      <div className="pointer-events-none sticky bottom-0 z-20 h-0" data-jump-dock>
+        <div className="transcript-fade absolute inset-x-0 bottom-0 h-20" />
+        <div className="absolute inset-x-0 bottom-2 flex justify-center">
+          <button className="jump-latest" data-shown={!following}
+            tabIndex={following ? -1 : 0} aria-hidden={following}
+            onClick={() => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: motion() }); setFollowing(true); }}
+            title="Jump to latest" aria-label="Jump to latest">
+            <Icon name="arrow-down" size={16} />
+          </button>
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }
 
-/** The last turn's question and answer, as scroll targets inside `el`. */
-function lastTurnNodes(el: HTMLElement): { turn: HTMLElement; answer: HTMLElement | null } | null {
-  const turn = el.querySelector<HTMLElement>('section[data-turn="last"]');
+/** Smooth scrolling, unless the reader asked the system for less motion. */
+function motion(): ScrollBehavior {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
+
+/** A turn's question and answer (the last turn's by default), as scroll targets inside `el`. */
+function turnNodes(el: HTMLElement, section?: HTMLElement): { turn: HTMLElement; answer: HTMLElement | null } | null {
+  const turn = section ?? el.querySelector<HTMLElement>('section[data-turn="last"]');
   if (!turn) return null;
   return { turn, answer: turn.querySelector<HTMLElement>('[data-answer]') };
 }
@@ -202,11 +216,12 @@ function offsetIn(el: HTMLElement, node: HTMLElement): number {
 }
 
 /**
- * Where the last answer starts: the question above it when both fit in the top
- * part of the view together, otherwise the answer itself.
+ * Where an answer starts (the last one unless `section` names a turn): the
+ * question above it when both fit in the top part of the view together,
+ * otherwise the answer itself.
  */
-export function scrollToAnswerStart(el: HTMLElement, behavior: ScrollBehavior = 'smooth'): number {
-  const nodes = lastTurnNodes(el);
+export function scrollToAnswerStart(el: HTMLElement, behavior: ScrollBehavior = 'smooth', section?: HTMLElement): number {
+  const nodes = turnNodes(el, section);
   if (!nodes) return -1;
   const turnTop = offsetIn(el, nodes.turn);
   const answerTop = nodes.answer && nodes.answer.offsetHeight > 0 ? offsetIn(el, nodes.answer) : turnTop;
@@ -216,20 +231,13 @@ export function scrollToAnswerStart(el: HTMLElement, behavior: ScrollBehavior = 
   return top;
 }
 
-/** True when the last answer's first line is above the top of the view. */
-function answerStartAbove(el: HTMLElement): boolean {
-  const nodes = lastTurnNodes(el);
-  const node = nodes?.answer ?? nodes?.turn;
-  if (!node || node.offsetHeight < el.clientHeight * 0.6) return false;
-  return offsetIn(el, node) < el.scrollTop - 40;
-}
-
-function TurnView({ turn, last, verbose, onFix, widgetFixes, versions, setVersion }: {
+function TurnView({ turn, last, verbose, onFix, widgetFixes, versions, setVersion, onJumpToStart }: {
   turn: Turn; last: boolean; verbose: boolean;
   onFix: (r: { kind: string; source: string; error: string }) => void;
   widgetFixes: ReturnType<typeof useTranscript>['widgetFixes'];
   versions: ReturnType<typeof useTranscript>['versions'];
   setVersion: (seq: number, v: number) => void;
+  onJumpToStart: (section: HTMLElement) => void;
 }): React.ReactElement {
   const [open, setOpen] = useState(verbose);
   useEffect(() => { setOpen(verbose); }, [verbose]);
@@ -260,7 +268,7 @@ function TurnView({ turn, last, verbose, onFix, widgetFixes, versions, setVersio
       </div>
 
       {!turn.running && answerText && (
-        <AnswerActions turn={turn} text={answerText} node={answerRef} />
+        <AnswerActions turn={turn} text={answerText} node={answerRef} onJumpToStart={onJumpToStart} />
       )}
       {last && !turn.running && <ChangesCard />}
     </section>
@@ -358,7 +366,10 @@ function WorkFold({ turn, last, open, onToggle, children }: {
   return (
     <div className="mb-3">
       <button className="group flex items-center gap-2 rounded-lg py-1 text-[13.5px] text-aico-muted transition-colors hover:text-aico-primary" onClick={onToggle} aria-expanded={open}>
-        {turn.running && <span className="spinner h-3.5 w-3.5" />}
+        {/* The working mark, not a spinner ring. Still while the answer is being
+            written: then the live one sits at the end of the text, and one moving
+            mark on screen is enough. */}
+        {turn.running && <AicoMark size={16} still={turn.answer.some(m => m.streaming)} />}
         <span className={cls(turn.running && 'text-aico-secondary')}>{label}</span>
         {turn.running && elapsed !== null && <span className="tabular-nums text-aico-muted">· {duration(elapsed)}</span>}
         {turn.toolCount > 0 && !turn.running && <span className="text-aico-muted">· {turn.toolCount} step{turn.toolCount === 1 ? '' : 's'}</span>}
@@ -373,7 +384,22 @@ function WorkFold({ turn, last, open, onToggle, children }: {
   );
 }
 
-function AnswerActions({ turn, text, node }: { turn: Turn; text: string; node: React.RefObject<HTMLDivElement | null> }): React.ReactElement {
+function AnswerActions({ turn, text, node, onJumpToStart }: {
+  turn: Turn; text: string; node: React.RefObject<HTMLDivElement | null>;
+  onJumpToStart: (section: HTMLElement) => void;
+}): React.ReactElement {
+  // "Back to the start" only where it saves a long scroll: a turn taller than most of the window.
+  const [long, setLong] = useState(false);
+  useLayoutEffect(() => {
+    const section = node.current?.closest('section');
+    if (!section) return;
+    const measure = (): void => setLong(section.offsetHeight > window.innerHeight * 0.75);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(section);
+    window.addEventListener('resize', measure);
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+  }, [node]);
   const rate = useStore(s => s.rate);
   const feedback = useStore(s => s.feedback);
   const submit = useStore(s => s.submit);
@@ -464,6 +490,12 @@ function AnswerActions({ turn, text, node }: { turn: Turn; text: string; node: R
           </>
         )}
       </MenuButton>
+      {long && (
+        <button className="icon-btn-sm" title="Jump to start of answer" aria-label="Jump to start of answer" data-jump-start
+          onClick={() => { const section = node.current?.closest('section'); if (section) onJumpToStart(section); }}>
+          <Icon name="arrow-up" size={15} />
+        </button>
+      )}
     </div>
   );
 }

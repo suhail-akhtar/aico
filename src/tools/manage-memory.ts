@@ -20,11 +20,11 @@ import fs from 'fs';
 import path from 'path';
 import {
   applicable, listScope, remember, findMemory, updateMemory, forgetMemory,
-  searchMemories, memoryRoot, setMemoryEnabled, type MemoryScope, type StoredMemory,
+  searchMemories, memoryRoot, setMemoryEnabled, setMemoryPinned, restoreMemory, type MemoryScope, type StoredMemory,
 } from '../memory/store.js';
 
 export interface MemoryManageInput {
-  action: 'list' | 'remember' | 'update' | 'forget' | 'search' | 'enable' | 'disable' | 'export' | 'import';
+  action: 'list' | 'remember' | 'update' | 'forget' | 'search' | 'enable' | 'disable' | 'pin' | 'unpin' | 'export' | 'import';
   /** For export/import: the JSON file. */
   path?: string;
   /** What to remember, or the new text when updating. */
@@ -38,7 +38,9 @@ export interface MemoryManageInput {
 }
 
 function line(memory: StoredMemory): string {
-  const off = memory.enabled ? '' : ' [disabled]';
+  const off = (memory.enabled ? '' : ' [disabled]')
+    + (memory.status === 'superseded' ? ` [superseded${memory.supersededBy ? ` by ${memory.supersededBy}` : ''}]` : '')
+    + (memory.pinned ? ' [pinned]' : '');
   const tags = memory.tags.length ? ` [${memory.tags.join(', ')}]` : '';
   const first = memory.text.split('\n')[0]!;
   const text = first.length > 160 ? `${first.slice(0, 157)}…` : first;
@@ -83,7 +85,17 @@ export async function executeMemoryManage(input: MemoryManageInput): Promise<str
       const where = scope === 'global' ? 'everywhere'
         : scope === 'project' ? `this project (${cwd})`
           : 'this conversation only';
-      return `Remembered as "${stored.id}", applying to ${where}.\nForget it with action:"forget" id:"${stored.id}".`;
+      // Write hygiene (memory/store): say what happened to what was already there.
+      if (stored.outcome === 'merged') {
+        return `Already remembered as "${stored.id}" (${where}); updated it to the new wording instead of adding a copy.`
+          + (stored.enabled ? '' : ' It is silenced; enable it to put it back in the prompt.');
+      }
+      const replaced = stored.superseded.map(m => `"${m.id}" (${m.text.split('\n')[0]!.slice(0, 80)})`);
+      return `Remembered as "${stored.id}", applying to ${where}.\nForget it with action:"forget" id:"${stored.id}".`
+        + (replaced.length
+          ? `\nThis says something different about the same thing as ${replaced.join(', ')}, which ${replaced.length === 1 ? 'is' : 'are'} now marked superseded`
+            + ' (kept on disk, no longer in the prompt). If both are true, restore with action:"enable".'
+          : '');
     }
 
     case 'update': {
@@ -118,11 +130,30 @@ export async function executeMemoryManage(input: MemoryManageInput): Promise<str
       const found = findMemory(input.id, cwd, sessionId);
       if (!found) return `No memory called "${input.id}" applies here.`;
       const wanted = input.action === 'enable';
+      // Enabling a superseded entry is the undo for a contradiction that was not one.
+      if (wanted && found.status === 'superseded') {
+        restoreMemory(found);
+        setMemoryEnabled(found, true);
+        return `"${found.id}" is current again (no longer superseded) and back in the prompt.`;
+      }
       const changed = setMemoryEnabled(found, wanted);
       return changed
         ? `"${found.id}" is now ${wanted ? 'active again' : 'silenced'}.`
           + (wanted ? '' : ' It stays on disk; the agent just stops being told it.')
         : `"${found.id}" was already ${wanted ? 'active' : 'silenced'}.`;
+    }
+
+    case 'pin':
+    case 'unpin': {
+      if (!input.id) return 'An id is required. Use action:"list" to see them.';
+      const found = findMemory(input.id, cwd, sessionId);
+      if (!found) return `No memory called "${input.id}" applies here.`;
+      const wanted = input.action === 'pin';
+      if (Boolean(found.pinned) === wanted) return `"${found.id}" was already ${wanted ? 'pinned' : 'not pinned'}.`;
+      setMemoryPinned(found, wanted);
+      return wanted
+        ? `"${found.id}" is pinned: it stays in every prompt, even when the store is large enough that other memories are only recalled when relevant.`
+        : `"${found.id}" is unpinned: with more than 30 memories it is sent only when relevant to the request.`;
     }
 
     case 'export': {
@@ -186,11 +217,12 @@ export const memoryManageToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'remember', 'update', 'forget', 'search', 'enable', 'disable', 'export', 'import'],
+        enum: ['list', 'remember', 'update', 'forget', 'search', 'enable', 'disable', 'pin', 'unpin', 'export', 'import'],
         description:
           'list: everything that applies here, or one scope. remember: store something new. '
           + 'update: change one. forget: delete one for good. search: find by words. '
-          + 'enable/disable: silence one without deleting it, for a fact that is true again later. '
+          + 'enable/disable: silence one without deleting it, for a fact that is true again later (enable also restores a superseded one). '
+          + 'pin/unpin: keep one in every prompt even when a large store is recalled by relevance. '
           + 'export/import: JSON files.',
       },
       text: { type: 'string', description: 'What to remember, or the replacement text when updating.' },
