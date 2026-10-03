@@ -47,6 +47,10 @@ await build({
   // ssh2 is bundled for SSH terminals (terminal-ssh.ts); cpu-features is its
   // optional native helper, required inside a try — left out, as in the engine.
   external: ['electron', '@lydell/node-pty', 'playwright-core', 'electron-updater', 'cpu-features'], define, sourcemap: 'linked', logLevel: 'warning',
+  // Where ssh2's optional native crypto was compiled (Linux CI), esbuild needs
+  // a loader for it; it is required inside a try, so a binary that does not
+  // load under Electron's ABI just falls back to ssh2's JavaScript ciphers.
+  loader: { '.node': 'file' },
 });
 await build({
   entryPoints: [path.join(desktop, 'electron/preload.ts')],
