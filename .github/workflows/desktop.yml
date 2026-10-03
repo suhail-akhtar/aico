@@ -1,8 +1,9 @@
 name: Desktop
 
 # Builds AICO Desktop for Windows (NSIS installer) and Linux (AppImage, deb).
-# On a version tag the installers are attached to that GitHub release; on a
-# manual run they are kept as workflow artifacts.
+# On a version tag the installers are attached to that GitHub release (a
+# draft), the update feeds are verified against them, and only then is the
+# release published; on a manual run they are kept as workflow artifacts.
 on:
   push:
     tags: ['v*']
@@ -74,11 +75,50 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # The release is created by hand (with notes) when the tag is pushed;
-          # wait for it briefly rather than racing it.
+          # The release is created as a DRAFT (with notes) by scripts/release.mjs
+          # when the tag is pushed; wait for it briefly rather than racing it.
           TAG="${{ inputs.release }}"
           [ -n "$TAG" ] || TAG="$GITHUB_REF_NAME"
           for i in $(seq 1 30); do gh release view "$TAG" >/dev/null 2>&1 && break; sleep 20; done
           # latest*.yml and the blockmaps are what installed copies read to
           # find, verify and (differentially) download an update.
           gh release upload "$TAG" $(ls desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb desktop/release/latest*.yml desktop/release/*.blockmap 2>/dev/null) --clobber
+
+  # Installed copies read the LATEST published release's latest*.yml. 0.37.0 was
+  # published ~24 minutes before its feed was attached, so an update check in
+  # that window failed and waited six hours. Now the release stays a draft
+  # until both builds have uploaded and the feeds are proven to name — and hash
+  # to — the installers actually attached; only then is it published.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Feeds match the attached installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release }}"
+          [ -n "$TAG" ] || TAG="$GITHUB_REF_NAME"
+          node scripts/verify-update-feed.mjs "$TAG" --repo "$GITHUB_REPOSITORY"
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release }}"
+          [ -n "$TAG" ] || TAG="$GITHUB_REF_NAME"
+          # Only a draft is published (and so becomes Latest). Re-attaching to an
+          # already-published release (a manual run) changes nothing about it.
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh release edit "$TAG" --draft=false
+          else
+            echo "$TAG is already published"
+          fi

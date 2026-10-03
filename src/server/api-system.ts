@@ -1378,6 +1378,10 @@ ${content || 'Describe the procedure here.'}
         return { status: 200, body: redactSettings(settings) };
       }
       if (method !== 'POST') return { status: 405, body: { error: 'GET or POST' } };
+      {
+        const weakens = safetyWeakening(settings, body as Record<string, unknown>);
+        if (weakens) { const h = await human(); if (!h.ok) return needsHuman(`${weakens} needs a person in the AICO window; the API token alone cannot do it.`); }
+      }
       // Applied key by key so a partial update cannot blank the rest of the file.
       for (const [key, value] of Object.entries(body)) {
         await saveUserSetting(key, value);
@@ -1390,6 +1394,11 @@ ${content || 'Describe the procedure here.'}
       if (method !== 'POST') return { status: 405, body: { error: 'POST' } };
       const { path: dotted, value } = body as { path?: unknown; value?: unknown };
       if (typeof dotted !== 'string' || !dotted.trim()) return { status: 400, body: { error: 'path required' } };
+      {
+        const patch = dotted.split('.').reduceRight<unknown>((acc, k) => ({ [k]: acc }), value ?? null) as Record<string, unknown>;
+        const weakens = safetyWeakening(await loadSettings(), patch);
+        if (weakens) { const h = await human(); if (!h.ok) return needsHuman(`${weakens} needs a person in the AICO window; the API token alone cannot do it.`); }
+      }
       try {
         await patchUserSettingPath(dotted, value === undefined ? null : value);
       } catch (err) {
@@ -1588,4 +1597,32 @@ async function importLegacy(
       installed: out.installed, skipped: out.skipped,
     },
   };
+}
+
+/**
+ * What a settings write would weaken, if anything. The model can hold the API
+ * token (it runs `curl` like anyone), so switching the safety reviewer off or
+ * to "proceed without asking", or letting personal data leave the machine,
+ * must come from a person — the same rule as approving a parked call. Making
+ * things stricter needs nothing. Pure; exported for tests.
+ */
+export function safetyWeakening(current: object | undefined, patch: Record<string, unknown>): string | undefined {
+  const obj = (v: unknown): Record<string, unknown> | undefined => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
+  const cur = obj(current as unknown) ?? {};
+  const sent = obj(patch.sentinel);
+  if (sent) {
+    const was = obj(cur.sentinel) ?? {};
+    if (sent.onEscalate === 'proceed' && was.onEscalate !== 'proceed') return 'Turning on full autonomy';
+    if (sent.mode === 'off' && was.mode !== 'off') return 'Turning the safety reviewer off';
+    const agents = obj(sent.agents);
+    if (agents && Object.entries(agents).some(([k, v]) => v === 'off' && obj(was.agents)?.[k] !== 'off')) return 'Turning the safety reviewer off for an agent';
+  }
+  const models = obj(patch.models);
+  if (models) {
+    const was = obj(cur.models) ?? {};
+    const wasLocal = was.localOnlyPersonal === true || was.preset === 'private';
+    const nowLocal = (models.localOnlyPersonal ?? was.localOnlyPersonal) === true || (models.preset ?? was.preset) === 'private';
+    if (wasLocal && !nowLocal) return 'Letting personal data leave this machine';
+  }
+  return undefined;
 }

@@ -41,6 +41,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { STAMP_FILES, applyStamps, requiredDownloads } from './lib/release-stamps.mjs';
+import { parseUpdateFeed, checkUpdateFeed } from './lib/update-feed.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'suhail-akhtar/aico';
@@ -320,7 +321,10 @@ if (opt.execute && cap('gh', ['release', 'view', TAG, '--repo', REPO]).ok) {
   log(`   release ${TAG} already exists (resume) — re-uploading the VSIX only`);
   run('gh', ['release', 'upload', TAG, vsixPath, '--repo', REPO, '--clobber']);
 } else {
-  run('gh', ['release', 'create', TAG, vsixPath, '--repo', REPO, '--title', V, '--notes-file', notesFile, '--verify-tag']);
+  // A draft: installed desktop copies follow the latest PUBLISHED release, and
+  // 0.37.0 went Latest ~24 minutes before its latest.yml existed. desktop.yml
+  // publishes it once both builds are attached and their feeds verify.
+  run('gh', ['release', 'create', TAG, vsixPath, '--repo', REPO, '--title', V, '--notes-file', notesFile, '--verify-tag', '--draft']);
 }
 
 step(10, 'Desktop installers (desktop.yml runs on the tag and attaches them)');
@@ -332,6 +336,18 @@ if (opt.execute && opt.wait) {
   const missing = expected.filter(a => !assets.includes(a));
   if (missing.length) die(`release ${TAG} is missing: ${missing.join(', ')}`);
   log('   all assets attached');
+  // desktop.yml hashed the installers against the feeds before publishing; this
+  // re-checks names and sizes (no 380 MB download) and that it is published.
+  const view = JSON.parse(cap('gh', ['release', 'view', TAG, '--repo', REPO, '--json', 'isDraft,assets'], { allowFail: false }).out);
+  if (view.isDraft) die(`release ${TAG} is still a draft — desktop.yml's publish job did not run or failed; installed copies cannot see it. Check: node scripts/verify-update-feed.mjs ${TAG}`);
+  const sized = view.assets.map(a => ({ name: a.name, size: a.size }));
+  for (const feedName of ['latest.yml', 'latest-linux.yml']) {
+    const text = cap('gh', ['release', 'download', TAG, '--repo', REPO, '--pattern', feedName, '--output', '-'], { allowFail: false }).out;
+    let problems;
+    try { problems = checkUpdateFeed(parseUpdateFeed(text), sized, { version: V }); } catch (err) { problems = [err.message]; }
+    if (problems.length) die(`${feedName} cannot update installed copies:\n   ${problems.join('\n   ')}`);
+  }
+  log('   update feeds name the attached installers (names, sizes); release is published');
 }
 
 step(11, 'Every README download link answers (curl -sIL)');

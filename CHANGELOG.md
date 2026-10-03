@@ -3,6 +3,48 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Settings for background agents, full autonomy and the About-you budget**
+  (desktop and web). Settings → Agents → Background agents: agents running at
+  once per chat (`agents.maxConcurrent`, 1–16, default 6), read a report as
+  soon as it arrives (`agents.wakeOnResult`), resume after a restart
+  (`agents.resumeAfterRestart`) and only within N hours
+  (`agents.resumeWithinHours`, 1–168, default 24). Settings → Permissions →
+  "When the safety reviewer is unsure": Ask me / Proceed (full autonomy)
+  (`sentinel.onEscalate`). About you: "At most $… a day"
+  (`profile.dailyBudgetUsd`); raising it still asks for a person.
+
+### Fixed
+
+- **Desktop updates arrived hours late, and quietly.** The updater itself
+  worked (an installed 0.36.0 downloaded 0.37.0 by itself, exactly six hours
+  after it was started), but it checked only at launch and on a six-hour
+  timer that stops while the computer sleeps, a failed check waited six more
+  hours, and 0.37.0 was published 24 minutes before its `latest.yml` was
+  attached. Now checks follow the wall clock (every 6 h, re-asked every
+  15 minutes and on wake; 30 minutes after a failure), the status bar shows the
+  version and, while an update is on its way, "Update X — Restart to install"
+  (or Download, or "Download from GitHub" when the update failed), a toast says
+  when a version is found with automatic download off, and Settings → About
+  shows the version with the update controls. "Download updates automatically"
+  (on by default) now only decides whether a found update downloads by itself
+  — checking always runs. A downloaded update installs on Restart or the next
+  quit, never on its own. Releases are created as drafts and published by the
+  Desktop workflow only after `scripts/verify-update-feed.mjs` proves each
+  feed names, and hashes to, the installer actually attached.
+
+- **A local embeddings model was sent to the cloud provider.** Choosing an
+  Ollama model such as `nomic-embed-text` for Embeddings routed its requests to
+  the active cloud provider (which answered "model does not exist"), so Recall
+  quietly stayed words-only. Ollama-style names (`name:tag`) and well-known
+  local embedding models now go to the local Ollama. Measured live: with
+  `nomic-embed-text`, Recall found 6 of 6 reworded questions, against 2 of 6
+  by words alone (`npm run test:roles:live`, which also checks the vision
+  fallback and the About-you wording on real models).
+
 ## 0.37.0 — 2026-10-03
 
 ### Added

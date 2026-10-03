@@ -384,6 +384,81 @@ const busy = await load(path.join(desktop, 'electron/engine-busy.ts'), 'engine-b
 {
   const merged = prefs.mergePrefs(prefs.DEFAULT_PREFS, { autoUpdate: { enabled: false } });
   ok(merged.autoUpdate.enabled === false && merged.autoUpdate.channel === 'latest' && merged.autoUpdate.lastCheckedAt === 0 && merged.developerMenus === false, 'prefs: autoUpdate merges over its defaults', merged.autoUpdate);
+  ok(prefs.DEFAULT_PREFS.autoUpdate.enabled === true, 'prefs: updates download automatically by default');
+}
+
+// ── Update policy: versions, the wall-clock schedule, the state machine, the badge ──
+const up = await load(path.join(desktop, 'shared/update-policy.ts'), 'update-policy');
+{
+  ok(up.compareVersions('0.37.0', '0.36.0') > 0 && up.compareVersions('0.36.9', '0.37.0') < 0 && up.compareVersions('v0.37.0', '0.37.0') === 0,
+    'update/version: X.Y.Z compares numerically, a leading v is ignored');
+  ok(up.compareVersions('0.10.0', '0.9.9') > 0, 'update/version: 0.10 is newer than 0.9 (not a string compare)');
+  ok(up.compareVersions('0.38.0-beta.1', '0.38.0') < 0 && up.compareVersions('0.38.0-beta.1', '0.37.9') > 0, 'update/version: a pre-release sorts before its release, after the one before');
+  ok(up.isNewer('0.37.1', '0.37.0') && !up.isNewer('0.37.0', '0.37.0'), 'update/version: isNewer is strict');
+
+  const H = 60 * 60 * 1000; const t0 = Date.UTC(2026, 9, 3, 1, 33);
+  ok(up.checkDue({ now: t0, lastAttemptAt: 0, failed: false }), 'update/schedule: never checked → due');
+  ok(!up.checkDue({ now: t0 + 5 * H, lastAttemptAt: t0, failed: false }), 'update/schedule: 5 h after a good check → not due');
+  ok(up.checkDue({ now: t0 + 6 * H, lastAttemptAt: t0, failed: false }), 'update/schedule: 6 h of wall-clock time → due (the 0.36.0 → 0.37.0 case)');
+  ok(up.checkDue({ now: t0 + 30 * H, lastAttemptAt: t0, failed: false }), 'update/schedule: a laptop that slept through the 6 h checks on its first tick after waking');
+  ok(!up.checkDue({ now: t0 + 20 * 60 * 1000, lastAttemptAt: t0, failed: true }) && up.checkDue({ now: t0 + 30 * 60 * 1000, lastAttemptAt: t0, failed: true }),
+    'update/schedule: a failed check (feed not attached yet, offline) retries after 30 minutes, not 6 hours');
+  ok(up.checkDue({ now: t0 - H, lastAttemptAt: t0, failed: false }), 'update/schedule: a clock that went backwards does not stall checks');
+  ok(up.TICK_MS <= 15 * 60 * 1000 && up.TICK_MS < up.RETRY_AFTER_ERROR_MS, 'update/schedule: the tick is finer than the retry');
+
+  const s0 = { status: 'idle', current: '0.36.0', releaseUrl: 'https://example.invalid/r' };
+  const run = (s, ...events) => events.reduce((acc, e) => up.reduceUpdate(acc, e), s);
+  const ready = run(s0, { type: 'checking' }, { type: 'available', version: '0.37.0', autoDownload: true }, { type: 'progress', percent: 41.6, bytesPerSecond: 1e6 });
+  ok(ready.status === 'downloading' && ready.percent === 42 && ready.version === '0.37.0', 'update/state: available + auto-download → downloading with a rounded percent', ready);
+  const done = run(ready, { type: 'downloaded', version: '0.37.0' });
+  ok(done.status === 'ready' && done.version === '0.37.0' && done.percent === 100 && done.bytesPerSecond === undefined, 'update/state: downloaded → ready, progress fields cleared', done);
+  ok(run(done, { type: 'checking' }).status === 'ready' && run(done, { type: 'error', message: 'offline' }).status === 'ready',
+    'update/state: a later check or a failed check never hides Restart');
+  ok(run({ ...done, status: 'waiting', busy: ['x'] }, { type: 'error', message: 'x' }).status === 'waiting', 'update/state: waiting for idle survives an error');
+  const manual = run(s0, { type: 'available', version: '0.37.0', autoDownload: false });
+  ok(manual.status === 'available' && manual.percent === undefined, 'update/state: automatic download off → available (waits for a Download click)', manual);
+  const failed = run(ready, { type: 'error', message: 'sha512 checksum mismatch' });
+  ok(failed.status === 'error' && failed.version === '0.37.0' && failed.message === 'sha512 checksum mismatch', 'update/state: a failed download keeps the version for the GitHub fallback', failed);
+  const offline = run(s0, { type: 'checking' }, { type: 'error', message: 'Could not reach GitHub' });
+  ok(offline.status === 'error' && offline.version === undefined, 'update/state: a failed check names no version', offline);
+  ok(run(failed, { type: 'not-available' }).status === 'up-to-date' && run(failed, { type: 'not-available' }).message === undefined, 'update/state: up to date clears an old error');
+  ok(run({ ...s0, lastCheckedAt: 5 }, { type: 'not-available' }).lastCheckedAt === 5 && run(s0, { type: 'checking' }).current === '0.36.0', 'update/state: current version and last-checked time are kept across events');
+
+  ok(up.updateBadge(null) === null && up.updateBadge(s0) === null && up.updateBadge({ ...s0, status: 'up-to-date' }) === null && up.updateBadge(offline) === null
+    && up.updateBadge({ ...s0, status: 'unsupported' }) === null, 'update/badge: nothing to say → no badge (idle, up to date, unsupported, a failed check)');
+  const b1 = up.updateBadge(done);
+  ok(b1?.action === 'install' && b1.text === 'Update 0.37.0 — Restart to install', 'update/badge: ready → "Update 0.37.0 — Restart to install"', b1);
+  const b2 = up.updateBadge(manual);
+  ok(b2?.action === 'download' && /available — Download/.test(b2.text), 'update/badge: available → Download', b2);
+  const b3 = up.updateBadge(failed);
+  ok(b3?.action === 'release-page' && /Download from GitHub/.test(b3.text) && /checksum/.test(b3.title), 'update/badge: a failed update links the release page with the reason', b3);
+  ok(up.updateBadge(ready)?.text === 'Downloading 0.37.0 · 42%' && up.updateBadge({ ...ready, version: undefined })?.text === 'Downloading · 42%', 'update/badge: downloading shows the percent');
+}
+
+// ── Update feed: latest.yml names (and hashes to) the installer actually attached ──
+const feed = await load(path.join(repo, 'scripts/lib/update-feed.mjs'), 'update-feed');
+{
+  // The real v0.37.0 latest-linux.yml (CRLF to prove line endings do not matter).
+  const linux = ['version: 0.37.0', 'files:', '  - url: AICO-0.37.0-linux-x64.AppImage', '    sha512: apN2ZFUMGi8OUroMVOyH6iTJK++PMv94GH3GyetFWL1xJbInwY+KFw+ogMxvRAaMTd32jmH/oCA5tiq1ixNyUg==',
+    '    size: 142034614', '    blockMapSize: 149194', '  - url: AICO-0.37.0-linux-x64.deb', '    sha512: cIB7hElD395V5B0A7ZQcgruu4n/jjXrGsQRtd+PCu4NPwsehU9Br6FLwRZ83QbnGjv06zmpg7Y74+GnnY6ItGg==',
+    '    size: 112748404', 'path: AICO-0.37.0-linux-x64.AppImage', 'sha512: apN2ZFUMGi8OUroMVOyH6iTJK++PMv94GH3GyetFWL1xJbInwY+KFw+ogMxvRAaMTd32jmH/oCA5tiq1ixNyUg==',
+    "releaseDate: '2026-10-03T04:43:12.793Z'"].join('\r\n');
+  const f = feed.parseUpdateFeed(linux);
+  ok(f.version === '0.37.0' && f.files.length === 2 && f.files[0].size === 142034614 && f.files[0].blockMapSize === 149194 && f.releaseDate === '2026-10-03T04:43:12.793Z',
+    'feed: parses the electron-builder shape (files list, numbers, quoted date)', f);
+  const assets = [{ name: 'AICO-0.37.0-linux-x64.AppImage', size: 142034614 }, { name: 'AICO-0.37.0-linux-x64.deb', size: 112748404 }, { name: 'latest-linux.yml', size: 539 }];
+  ok(feed.checkUpdateFeed(f, assets, { version: '0.37.0' }).length === 0, 'feed: the v0.37.0 Linux feed matches its release');
+  ok(feed.checkUpdateFeed(f, assets, { version: '0.37.1' }).some(p => /announces 0\.37\.0/.test(p)), 'feed: a feed for another version is caught');
+  const spaced = feed.parseUpdateFeed(linux.replace(/AICO-0\.37\.0-linux-x64\.AppImage/g, 'AICO 0.37.0 linux.AppImage'));
+  const sp = feed.checkUpdateFeed(spaced, assets);
+  ok(sp.some(p => /no spaces/.test(p)) && sp.some(p => /not attached/.test(p)), 'feed: a url with spaces (GitHub renames those to dots) is caught', sp);
+  ok(feed.checkUpdateFeed(f, [{ ...assets[0], size: 999 }, assets[1]]).some(p => /different builds/.test(p)), 'feed: a size mismatch says the feed and installer come from different builds');
+  ok(feed.checkUpdateFeed(f, assets, { sha512: { 'AICO-0.37.0-linux-x64.deb': 'AAAA' } }).some(p => /sha512 of the uploaded file/.test(p)), 'feed: a hash mismatch on a downloaded asset is caught');
+  ok(feed.checkUpdateFeed(f, assets, { sha512: { 'AICO-0.37.0-linux-x64.deb': f.files[1].sha512 } }).length === 0, 'feed: a matching hash passes');
+  ok(feed.checkUpdateFeed(f, [assets[1]]).some(p => /AppImage: named by the feed but not attached/.test(p)), 'feed: a missing installer is caught');
+  ok(feed.checkUpdateFeed({ ...f, path: 'other.AppImage' }, assets).some(p => /top-level path/.test(p)), 'feed: the legacy top-level path must agree with the first file');
+  throws(() => feed.parseUpdateFeed('files:\n  - url: x.exe\n'), /no version/, 'feed: a feed without a version is refused');
+  throws(() => feed.parseUpdateFeed('version: 1.0.0\n  stray: indented\n'), /line 2/, 'feed: an unknown shape is reported with its line, not guessed at');
 }
 
 // ── Sources behind an answer ──

@@ -193,6 +193,19 @@ await block('Full autonomy: escalations proceed, refusals still stop', async () 
   assert(!T.tightenOnlySentinel({ sentinel: { onEscalate: 'proceed' } }).sentinel, 'a project cannot turn on full autonomy');
 });
 
+await block('Weakening safety through settings needs a person', async () => {
+  const W = T.safetyWeakening;
+  assert(/full autonomy/.test(W({}, { sentinel: { onEscalate: 'proceed' } }) ?? ''), 'turning on full autonomy is a weakening');
+  assert(/reviewer off/.test(W({ sentinel: { mode: 'auto' } }, { sentinel: { mode: 'off' } }) ?? ''), 'switching the reviewer off is a weakening');
+  assert(/leave this machine/.test(W({ models: { localOnlyPersonal: true } }, { models: { localOnlyPersonal: false } }) ?? ''), 'letting personal data leave is a weakening');
+  assert(!W({}, { sentinel: { onEscalate: 'ask', mode: 'always' } }) && !W({}, { models: { localOnlyPersonal: true } }) && !W({}, { theme: 'dark' }), 'stricter or unrelated settings need nothing');
+  const r = await T.handleSystemRoute('settings', 'POST', { sentinel: { onEscalate: 'proceed' } });
+  assert(r?.status === 403 && r.body?.code === 'human-required', 'the API token alone cannot turn on full autonomy (403 human-required)');
+  const ok = await T.handleSystemRoute('settings', 'POST', { sentinel: { onEscalate: 'proceed' } }, new URLSearchParams(), async () => ({ ok: true }));
+  assert(ok?.status === 200, 'a person can');
+  await T.handleSystemRoute('settings', 'POST', { sentinel: { onEscalate: 'ask' } });
+});
+
 await block('The stage can only deny or escalate', async () => {
   let s = stage();
   let r = await s.run('Read', { file_path: 'a' });

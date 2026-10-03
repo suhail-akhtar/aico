@@ -127,7 +127,7 @@ function updateStatusText(u: UpdateState): string {
     case 'downloading': return `Downloading AICO ${u.version ?? ''}… ${u.percent ?? 0}%`;
     case 'ready': return u.message ?? `AICO ${u.version} is ready — restart to install. It also installs the next time you quit.`;
     case 'waiting': return `Restarts to install AICO ${u.version} when this finishes: ${(u.busy ?? []).join('; ')}.`;
-    case 'error': return u.message ?? 'The update check failed.';
+    case 'error': return `${u.message ?? 'The update check failed.'}${u.version ? ` AICO ${u.version} can be downloaded from GitHub instead.` : ''}`;
   }
 }
 
@@ -142,13 +142,13 @@ function UpdatesGroup(): React.ReactElement {
   };
   const age = u?.lastCheckedAt ? ago(u.lastCheckedAt) : '';
   const last = age ? `Last checked ${age === 'now' ? 'just now' : `${age} ago`}.` : '';
-  const releasePage = u && <button className="btn-outline btn-sm" onClick={() => void desktop.shell.openExternal(u.releaseUrl)}>Release page</button>;
+  const releasePage = u && <button className="btn-outline btn-sm" onClick={() => void desktop.shell.openExternal(u.releaseUrl)}>{u.status === 'error' ? 'Download from GitHub' : 'Release page'}</button>;
   return (
     <>
       <h3 className="set-heading">Updates</h3>
       <div className="set-group">
-        <Row title="Update automatically" desc="Check GitHub releases at start and every 6 hours, and download new versions in the background. Nothing restarts without you.">
-          <Switch checked={prefs.autoUpdate.enabled} onChange={v => void set({ autoUpdate: { ...prefs.autoUpdate, enabled: v } })} label="Update automatically"
+        <Row title="Download updates automatically" desc="AICO checks GitHub releases at start and every 6 hours either way. On: new versions download in the background. Off: you are told and click Download. A downloaded update installs when you click Restart or the next time you quit — nothing restarts without you.">
+          <Switch checked={prefs.autoUpdate.enabled} onChange={v => void set({ autoUpdate: { ...prefs.autoUpdate, enabled: v } })} label="Download updates automatically"
             disabled={u?.status === 'unsupported'} />
         </Row>
         <Row title={<span>AICO <span className="font-mono text-[12.5px]">{u?.current ?? '…'}</span></span>}
@@ -463,6 +463,9 @@ export function AboutSection(): React.ReactElement {
   const info = useDesk(s => s.info);
   return (
     <div className="space-y-4 text-[13.5px] text-aico-secondary">
+      <p className="text-[18px] font-semibold text-aico-primary" data-testid="about-version">
+        AICO {info?.app ?? '…'}{info?.engine && info.engine !== info.app && <span className="ml-2 text-[13px] font-normal text-aico-muted">engine {info.engine}</span>}
+      </p>
       <p><span className="font-semibold text-aico-primary">AICO Desktop</span> {info?.app} — the AICO coding agent as a native app, with a built-in IDE, browser, terminal and plugins.</p>
       <p>Engine {info?.engine}. Everything runs on this computer; providers are called directly with your own keys.</p>
       <div className="flex flex-wrap gap-2">
@@ -470,6 +473,7 @@ export function AboutSection(): React.ReactElement {
         <button className="btn-outline btn-sm" onClick={() => void desktop.shell.openExternal('https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md')}>Release notes</button>
         <button className="btn-outline btn-sm" onClick={() => void desktop.shell.openExternal('https://github.com/suhail-akhtar/aico/issues/new')}>Report an issue</button>
       </div>
+      <UpdatesGroup />
       <p className="text-[12px] text-aico-muted">Free for personal use (PolyForm Noncommercial 1.0.0) — © Suhail Akhtar. Electron {info?.electron}, Chromium {info?.chrome}, Node {info?.node}, {info?.platform}/{info?.arch}.</p>
     </div>
   );

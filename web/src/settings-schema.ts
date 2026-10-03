@@ -269,6 +269,52 @@ export const PANES: Pane[] = [
           },
         ],
       },
+      {
+        title: 'Background agents',
+        hint: 'Sub-agents, background agents and Investigate workers a chat starts. '
+          + 'Each one’s report comes back into the chat that started it.',
+        fields: [
+          {
+            path: 'agents.maxConcurrent',
+            label: 'Agents running at once, per chat',
+            hint: 'More than this wait as queued and start when one finishes — never refused.',
+            kind: 'number',
+            fallback: 6,
+            min: 1,
+            max: 16,
+            unit: 'agents',
+            keywords: 'concurrency parallel limit queue sub-agent background investigate',
+          },
+          {
+            path: 'agents.wakeOnResult',
+            label: 'Read a report as soon as it arrives',
+            hint: 'When a background agent finishes after the chat went quiet, start a short turn to read it. '
+              + 'Off, it waits for your next message.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'background report back wake notify result',
+          },
+          {
+            path: 'agents.resumeAfterRestart',
+            label: 'Resume background agents after a restart',
+            hint: 'Ones a restart interrupted carry on by themselves; nothing they had already started runs again.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'background restart resume interrupted crash',
+          },
+          {
+            path: 'agents.resumeWithinHours',
+            label: 'Only if they were active within',
+            hint: 'Older interrupted agents stay interrupted until you resume them.',
+            kind: 'number',
+            fallback: 24,
+            min: 1,
+            max: 168,
+            unit: 'hours',
+            keywords: 'background restart resume window',
+          },
+        ],
+      },
     ],
   },
   {
@@ -436,6 +482,19 @@ export const PANES: Pane[] = [
             max: 120,
             unit: 's',
             keywords: 'sentinel timeout',
+          },
+          {
+            path: 'sentinel.onEscalate',
+            label: 'When the safety reviewer is unsure',
+            hint: 'Proceed lets the call continue and records it. A refusal still stops the call either way, '
+              + 'and buying, sending, deleting and sign-ins still wait for you.',
+            kind: 'segmented',
+            fallback: 'ask',
+            keywords: 'sentinel escalate full autonomy unattended ask proceed',
+            options: [
+              { value: 'ask', label: 'Ask me', hint: 'Stop and ask before the call runs.', icon: 'shield' },
+              { value: 'proceed', label: 'Proceed (full autonomy)', hint: 'Continue without asking; the audit records it.', icon: 'bolt' },
+            ],
           },
         ],
       },

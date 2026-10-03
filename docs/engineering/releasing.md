@@ -40,8 +40,8 @@ steps that already happened (tag, release) are detected.
 | 6 | Commit + push | `Release X.Y.Z: <first sentence of the CHANGELOG summary>`; only the edited files; hooks run; `git push origin HEAD:main` | no attribution; never `--no-verify` |
 | 7 | **Wait for CI** | `gh run list --workflow ci.yml --commit <sha>` → `gh run watch <id> --exit-status` | 0.21.0: CI had been red for ~10 releases unnoticed. **Never tag on red.** |
 | 8 | Tag + branch | `git tag -a vX.Y.Z`; new minor → `git branch release/vX.Y` + push; patch → verify fast-forward, `git push origin HEAD:refs/heads/release/vX.Y` (never forced); push the tag | per-minor branches only |
-| 9 | GitHub release | `gh release create vX.Y.Z <vsix> --title X.Y.Z --notes-file <CHANGELOG section> --verify-tag` | `desktop.yml` waits for the release to exist before attaching |
-| 10 | Desktop assets | watch `desktop.yml` for the tag; assert assets: `AICO-Setup-X-win-x64.exe`, `AICO-X-linux-x64.AppImage`, `AICO-X-linux-x64.deb`, `latest.yml`, `latest-linux.yml`, the VSIX | without `latest*.yml` installed copies never update |
+| 9 | GitHub release (draft) | `gh release create vX.Y.Z <vsix> --title X.Y.Z --notes-file <CHANGELOG section> --verify-tag --draft` | `desktop.yml` waits for the release to exist before attaching; a draft is invisible to installed copies |
+| 10 | Desktop assets + publish | watch `desktop.yml` for the tag: both builds attach, its `publish` job runs `node scripts/verify-update-feed.mjs vX.Y.Z` (feeds name the attached installers; sha512 of each download matches) and only then `gh release edit --draft=false`. The script then asserts the assets, that the release is published, and re-checks feed names/sizes | without `latest*.yml` installed copies never update; a feed from another build makes them reject the download |
 | 11 | Link check | `curl -sIL` every README `releases/download/…` link → 200 | a broken download link is the first thing a new user sees |
 | 12 | Website | `https://suhail-akhtar.github.io/aico/` shows `v<X.Y.Z>` (Pages serves `docs/` from `main`; retries 10 min, warning only) | |
 
@@ -65,7 +65,8 @@ hooks, runs paid suites, or publishes to npm.
 | CI red in step 7 | do **not** tag; fix forward on `main` (the release commit stays), re-run the same command — it resumes |
 | Tag pushed, release creation failed | re-run; it detects the tag and creates/updates the release |
 | `gh release create` left a broken draft (GitHub 500s) | `gh release edit vX.Y.Z --draft=false --tag vX.Y.Z` |
-| Desktop workflow failed | fix, then `gh workflow run desktop.yml -f release=vX.Y.Z` (attaches with `--clobber`) |
+| Desktop workflow failed | fix, then `gh workflow run desktop.yml -f release=vX.Y.Z` (attaches with `--clobber`, verifies the feeds, publishes the draft) |
+| Release still a draft after step 10 | `node scripts/verify-update-feed.mjs vX.Y.Z` says why; publish by hand (`gh release edit vX.Y.Z --draft=false`) only once it passes |
 | Wrong content released | never delete or move the tag; release the next patch |
 | `release/vX.Y` is not an ancestor of HEAD | stop; this needs the owner (it would need a force-push) |
 
@@ -78,4 +79,5 @@ hooks, runs paid suites, or publishes to npm.
 - **0.23.0** — desktop tests joined CI; desktop version = engine version.
 - **0.24.0** — first release with `latest*.yml`; a release without them strands users.
 - **0.26.0** — README direct download links need bumping every release.
+- **0.37.0** — the release went Latest ~24 min before `desktop.yml` attached `latest.yml`; an update check in that window failed and the updater waited six more hours. Releases are now drafts until the feeds verify.
 - **0.28.0** — licence changed; `docs/install.html` (a 0.7 example) and `docs/vscode.html` (a 0.6.4 VSIX) found stale by the new checker, and `SECURITY.md` still named `0.3.x` as the supported line.

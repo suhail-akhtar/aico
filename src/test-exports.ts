@@ -272,7 +272,7 @@ export {
   listProjects, addProject, updateProject, removeProject, normalizeProjectPath,
   isKnownProject, instructionsFor,
 } from './server/projects.js';
-export { handleSystemRoute } from './server/api-system.js';
+export { handleSystemRoute, safetyWeakening } from './server/api-system.js';
 export { useSkill, skillCatalogue, skillDefinition, describeSize } from './tools/skill.js';
 export { skillRegistry } from './skills/registry.js';
 export { executeSkillCreate } from './skills/create.js';

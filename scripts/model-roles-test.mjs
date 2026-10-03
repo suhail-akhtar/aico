@@ -68,6 +68,9 @@ await block('A cloud model is never routed to the always-listed local Ollama', a
   assert(!res.ok && !res.local && !res.model, `deepseek-v4-flash is not "local" because Ollama is keyless (${res.fellBack})`);
   const listed = r('background', { providerInstances: [{ id: 'ollama', type: 'ollama', models: ['qwen3:8b'] }], models: { localOnlyPersonal: true, roles: { background: 'qwen3:8b' } } }, 'deepseek-v4-flash');
   assert(listed.ok && listed.local && listed.model === 'qwen3:8b', 'a model the local Ollama lists is local');
+  const cloudFirst = { providerInstances: [{ id: 'openai', type: 'openai', apiKey: 'sk-test-not-real' }], models: { roles: { embed: 'nomic-embed-text:latest' } } }; // standards-allow: secret
+  const emb = r('embed', cloudFirst, 'gpt-4o');
+  assert(emb.ok && emb.local && emb.providerType === 'ollama', `an Ollama-style embedder goes to the local Ollama, not the active cloud provider (${emb.providerType})`);
 });
 
 await block('Legacy keys keep working, each for its own feature', async () => {

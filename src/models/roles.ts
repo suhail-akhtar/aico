@@ -131,6 +131,22 @@ function isLocalInstance(i: ProviderInstance | undefined): boolean {
   return Boolean(i.baseUrl && LOOPBACK.test(i.baseUrl));
 }
 
+/**
+ * Names only a local runtime serves: an Ollama tag (`qwen3:8b`,
+ * `nomic-embed-text:latest`) or a well-known local embedding family. Without
+ * this, `resolveInstance` sent `nomic-embed-text:latest` to the active cloud
+ * provider (OpenAI answered 404), so choosing a local embedder for privacy
+ * quietly failed — found by the live Recall check.
+ */
+const LOCAL_ONLY_NAME = /^[\w.-]+:[\w.-]+$|^(?:nomic-embed|mxbai-embed|all-minilm|bge-|snowflake-arctic-embed)/i;
+
+function localHome(model: string, instances: ProviderInstance[]): ProviderInstance | undefined {
+  const listed = instances.find(i => i.models?.includes(model));
+  if (listed) return listed;
+  if (familyOfModel(model) || !LOCAL_ONLY_NAME.test(model)) return undefined;
+  return instances.find(i => isLocalInstance(i));
+}
+
 /** The cheapest same-family model, routed the same way the work model is. */
 export function cheapModelFor(mainModel: string, settings?: AicoSettings): string {
   const family = familyOfModel(mainModel);
@@ -223,7 +239,7 @@ export function resolveRole(role: ModelRole, o: ResolveOptions): RoleResolution 
     if (!c.model) continue;
     const unmet = meetsNeed(c.model, info.needs, s);
     if (unmet) { reasons.push(`${c.source} choice skipped: ${unmet}`); continue; }
-    const found = s ? resolveInstance(s, { model: c.model }) : undefined;
+    const found = s ? (localHome(c.model, instances) ?? resolveInstance(s, { model: c.model })) : undefined;
     // `resolveInstance` falls back to the first usable instance, and Ollama is
     // always usable (keyless). A vendor's model (deepseek-v4-flash, claude-…)
     // is not served by a local Ollama unless it lists it: treating that

@@ -692,6 +692,40 @@ test('zero counts as a value, because zero means "no limit"', () => {
   assert.deepEqual(changedPaths({ bashTimeout: 0 }), ['bashTimeout']);
 });
 
+test('background-agent settings (ADR 0021) have controls, engine defaults and bounds', () => {
+  const field = (p) => allFields().find(f => f.path === p);
+  const max = field('agents.maxConcurrent');
+  assert.equal(max.kind, 'number');
+  assert.equal(max.fallback, 6, 'the limiter default');
+  assert.equal(max.min, 1); assert.equal(max.max, 16);
+  assert.equal(field('agents.wakeOnResult').kind, 'toggle');
+  assert.equal(field('agents.wakeOnResult').fallback, true);
+  assert.equal(field('agents.resumeAfterRestart').kind, 'toggle');
+  assert.equal(field('agents.resumeAfterRestart').fallback, true);
+  const hours = field('agents.resumeWithinHours');
+  assert.equal(hours.fallback, 24);
+  assert.equal(hours.min, 1); assert.equal(hours.max, 168);
+  assert.equal(PANES.find(p => p.id === 'agents').groups.flatMap(g => g.fields).filter(f => f.path.startsWith('agents.')).length, 5,
+    'all on the Agents pane, beside directChat');
+  assert.deepEqual(changedPaths({ agents: { maxConcurrent: 6, wakeOnResult: true } }), [], 'defaults are not changes');
+  assert.deepEqual(changedPaths({ agents: { maxConcurrent: 2 } }), ['agents.maxConcurrent']);
+  assert.ok(searchFields('queued').some(h => h.field.path === 'agents.maxConcurrent'));
+});
+
+test('the Sentinel escalation choice defaults to asking', () => {
+  const f = allFields().find(x => x.path === 'sentinel.onEscalate');
+  assert.equal(f.kind, 'segmented');
+  assert.equal(f.fallback, 'ask');
+  assert.deepEqual(f.options.map(o => o.value), ['ask', 'proceed'], 'exactly the engine\'s two values');
+  assert.ok(searchFields('full autonomy').some(h => h.field.path === 'sentinel.onEscalate'));
+  assert.deepEqual(patchFor({ sentinel: { mode: 'always' } }, 'sentinel.onEscalate', 'proceed'),
+    { sentinel: { mode: 'always', onEscalate: 'proceed' } }, 'saving keeps the other Sentinel keys');
+});
+
+test('the About-you budget is not a schema field: raising it must go through the person-gated route', () => {
+  assert.ok(!allFields().some(f => f.path.startsWith('profile.')));
+});
+
 section('A reload resumes the session you were in');
 
 /** A Storage stand-in, so these tests need no browser. */

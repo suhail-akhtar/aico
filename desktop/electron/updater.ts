@@ -7,10 +7,17 @@
  * run, an unpacked folder — reports `unsupported` and the interface offers
  * the release page instead.
  *
- * With automatic updates on, it checks ten seconds after start and every six
- * hours, downloads what it finds, and says so: a native notification and a
- * toast with Restart. A downloaded update also installs on the next ordinary
- * quit (`autoInstallOnAppQuit`), so ignoring the toast is fine.
+ * It checks ten seconds after start and then whenever `checkDue` says so —
+ * six hours of WALL-CLOCK time since the last check (half an hour after a
+ * failed one), asked every 15 minutes and on wake from sleep. Until 0.37.x it
+ * used a bare six-hour `setInterval`, which counts process time: a laptop that
+ * slept went far longer between checks, and a check that failed (0.37.0 was
+ * published before its latest.yml was attached) waited six more hours. The
+ * checking always runs; the "Download updates automatically" setting (on by
+ * default) only decides whether a found update downloads by itself or waits
+ * for a Download click. Either way the status bar shows a badge, a toast
+ * says so, and a downloaded update installs on Restart or on the next
+ * ordinary quit (`autoInstallOnAppQuit`, like VS Code) — never on its own.
  *
  * NOT LOSING WORK. Restarting stops the engine, and with it any reply still
  * streaming and any background agent mid-task. So Restart first asks the
@@ -27,18 +34,19 @@
  * @module desktop/electron/updater
  */
 
-import { app, dialog, Notification } from 'electron';
+import { app, dialog, Notification, powerMonitor } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppUpdater, ProgressInfo, UpdateInfo } from 'electron-updater';
 import type { DesktopContext } from './context';
 import { engineBusy } from './engine-busy';
 import { RELEASES_URL, type UpdateState } from '../shared/updates';
+import { checkDue, reduceUpdate, TICK_MS, type UpdateEvent } from '../shared/update-policy';
 
 declare const __DESKTOP_VERSION__: string;
 
 const FIRST_CHECK_MS = 10_000;
-const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+const AFTER_WAKE_MS = 30_000;
 const IDLE_POLL_MS = 5_000;
 
 /** Whether this install can update itself, and if not, why. */
@@ -61,16 +69,22 @@ export function registerUpdater(ctx: DesktopContext): void {
   let state: UpdateState = { status: 'idle', current, releaseUrl: RELEASES_URL, lastCheckedAt: ctx.prefs.get().autoUpdate.lastCheckedAt || undefined };
   let updater: AppUpdater | null = null;
   let loading: Promise<AppUpdater | null> | null = null;
-  let firstTimer: NodeJS.Timeout | null = null;
-  let everyTimer: NodeJS.Timeout | null = null;
   let waitTimer: NodeJS.Timeout | null = null;
   let notifiedVersion: string | null = null;
   let installing = false;
+  // When the last check started and whether it failed: the wall-clock schedule (checkDue).
+  let lastAttemptAt = 0;
+  let lastFailed = false;
 
   const set = (patch: Partial<UpdateState>, replace = false): void => {
     state = replace
       ? { current, releaseUrl: RELEASES_URL, lastCheckedAt: state.lastCheckedAt, ...patch } as UpdateState
       : { ...state, ...patch };
+    ctx.emit('updates:state', state);
+  };
+  const apply = (e: UpdateEvent): void => {
+    if (e.type === 'error') lastFailed = true;
+    state = reduceUpdate(state, e);
     ctx.emit('updates:state', state);
   };
 
@@ -94,24 +108,20 @@ export function registerUpdater(ctx: DesktopContext): void {
       u.autoInstallOnAppQuit = true;
       u.allowPrerelease = false;
       u.logger = { info: () => {}, warn: (m: unknown) => console.warn('[updater]', m), error: (m: unknown) => console.error('[updater]', m), debug: () => {} };
-      u.on('checking-for-update', () => set({ status: 'checking', message: undefined }));
-      u.on('update-not-available', () => { markChecked(); set({ status: 'up-to-date', version: undefined, percent: undefined }, true); });
+      // The transitions (and the rule that a failed check never hides Restart) are reduceUpdate's.
+      u.on('checking-for-update', () => apply({ type: 'checking' }));
+      u.on('update-not-available', () => { markChecked(); apply({ type: 'not-available' }); });
       u.on('update-available', (info: UpdateInfo) => {
         markChecked();
-        set({ status: u.autoDownload ? 'downloading' : 'available', version: info.version, percent: 0 }, true);
+        apply({ type: 'available', version: info.version, autoDownload: u.autoDownload });
+        if (!u.autoDownload) announce(info.version, 'available');
       });
-      u.on('download-progress', (p: ProgressInfo) => {
-        set({ status: 'downloading', percent: Math.round(p.percent), bytesPerSecond: Math.round(p.bytesPerSecond) });
-      });
+      u.on('download-progress', (p: ProgressInfo) => apply({ type: 'progress', percent: p.percent, bytesPerSecond: p.bytesPerSecond }));
       u.on('update-downloaded', (info: UpdateInfo) => {
-        set({ status: 'ready', version: info.version, percent: 100 }, true);
-        announceReady(info.version);
+        apply({ type: 'downloaded', version: info.version });
+        announce(info.version, 'ready');
       });
-      u.on('error', (err: Error) => {
-        // A failed check while something is already downloaded must not hide the Restart button.
-        if (state.status === 'ready' || state.status === 'waiting') return;
-        set({ status: 'error', message: cleanError(err) }, true);
-      });
+      u.on('error', (err: Error) => apply({ type: 'error', message: cleanError(err) }));
       updater = u;
       return u;
     }).catch((err: Error) => {
@@ -127,12 +137,15 @@ export function registerUpdater(ctx: DesktopContext): void {
     ctx.prefs.set({ autoUpdate: { ...ctx.prefs.get().autoUpdate, lastCheckedAt: at } });
   };
 
-  const announceReady = (version: string): void => {
-    if (notifiedVersion === version) return;
-    notifiedVersion = version;
+  /** A native notification once per version and stage, only while AICO is not in front (the badge and toast cover that). */
+  const announce = (version: string, stage: 'available' | 'ready'): void => {
+    if (notifiedVersion === `${stage}:${version}`) return;
+    notifiedVersion = `${stage}:${version}`;
     const w = ctx.window();
     if (Notification.isSupported() && !(w && w.isFocused() && w.isVisible())) {
-      const n = new Notification({ title: `AICO ${version} is ready`, body: 'Restart to update — or it installs the next time you quit.', silent: true });
+      const n = stage === 'ready'
+        ? new Notification({ title: `AICO ${version} is ready`, body: 'Restart to update — or it installs the next time you quit.', silent: true })
+        : new Notification({ title: `AICO ${version} is available`, body: 'Open AICO to download it.', silent: true });
       n.on('click', () => ctx.reveal());
       n.show();
     }
@@ -143,10 +156,12 @@ export function registerUpdater(ctx: DesktopContext): void {
     if (!u) return state;
     if (state.status === 'downloading' || state.status === 'ready' || state.status === 'waiting') return state;
     u.autoDownload = enabled();
+    lastAttemptAt = Date.now();
+    lastFailed = false; // the 'error' event (or the catch) sets it again
     try {
       await u.checkForUpdates();
     } catch (err) {
-      set({ status: 'error', message: cleanError(err as Error) }, true);
+      apply({ type: 'error', message: cleanError(err as Error) });
     }
     return state;
   };
@@ -156,7 +171,7 @@ export function registerUpdater(ctx: DesktopContext): void {
     if (!u) return state;
     if (state.status !== 'available') return state;
     set({ status: 'downloading', percent: 0 });
-    try { await u.downloadUpdate(); } catch (err) { set({ status: 'error', message: cleanError(err as Error) }, true); }
+    try { await u.downloadUpdate(); } catch (err) { apply({ type: 'error', message: cleanError(err as Error) }); }
     return state;
   };
 
@@ -227,12 +242,18 @@ export function registerUpdater(ctx: DesktopContext): void {
     return state;
   };
 
+  /** Check if the wall-clock schedule says so (after a sleep, the first tick or the wake event catches up). */
+  const tick = (): void => {
+    if (checkDue({ now: Date.now(), lastAttemptAt, failed: lastFailed })) void check();
+  };
+
+  // Checking always runs where updates are possible; the setting only decides
+  // whether a found update downloads by itself (see the module header).
   const schedule = (): void => {
-    if (firstTimer) { clearTimeout(firstTimer); firstTimer = null; }
-    if (everyTimer) { clearInterval(everyTimer); everyTimer = null; }
-    if (!supported.ok || !enabled()) return;
-    firstTimer = setTimeout(() => { firstTimer = null; void check(); }, FIRST_CHECK_MS);
-    everyTimer = setInterval(() => { void check(); }, CHECK_EVERY_MS);
+    if (!supported.ok) return;
+    setTimeout(() => { void check(); }, FIRST_CHECK_MS).unref();
+    setInterval(tick, TICK_MS).unref();
+    powerMonitor.on('resume', () => { setTimeout(tick, AFTER_WAKE_MS).unref(); });
   };
 
   let wasEnabled = enabled();
@@ -241,7 +262,8 @@ export function registerUpdater(ctx: DesktopContext): void {
     if (now === wasEnabled) return;
     wasEnabled = now;
     if (updater) updater.autoDownload = now;
-    schedule();
+    // Turned on while an update was waiting for a Download click: fetch it now.
+    if (now && state.status === 'available') void download();
   });
   schedule();
 

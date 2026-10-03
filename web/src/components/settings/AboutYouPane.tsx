@@ -35,6 +35,7 @@ export function AboutYouPane({ confirm, extraSources }: AboutYouPaneProps = {}):
   const [draft, setDraft] = useState('');
   const [draftCat, setDraftCat] = useState<FactCategory>('communication');
   const [showHidden, setShowHidden] = useState(false);
+  const [budget, setBudget] = useState('');
 
   const refresh = useCallback(async (): Promise<void> => {
     try { setData(await api.profile()); } catch (err) { setNote(err instanceof Error ? err.message : String(err)); }
@@ -46,6 +47,7 @@ export function AboutYouPane({ confirm, extraSources }: AboutYouPaneProps = {}):
     const t = setTimeout(() => void refresh(), 3000);
     return () => clearTimeout(t);
   }, [data, refresh]);
+  useEffect(() => { if (data) setBudget(data.settings.dailyBudgetUsd.toFixed(2)); }, [data]);
 
   const run = async (fn: () => Promise<unknown>, done?: string): Promise<void> => {
     try { await fn(); if (done) setNote(done); await refresh(); } catch (err) { setNote(err instanceof Error ? err.message : String(err)); }
@@ -101,6 +103,21 @@ export function AboutYouPane({ confirm, extraSources }: AboutYouPaneProps = {}):
           {data && s?.browsing && <span className="text-aico-muted">({BROWSING_STATUS[data.sources.browsing] ?? data.sources.browsing})</span>}
         </label>
         {extraSources}
+        <label className="flex items-center gap-1.5" title="Cap on the model spend for phrasing facts, per local day (at most $1). Raising it asks you to confirm.">
+          At most $
+          <input type="number" min={0} max={1} step={0.01} disabled={!s} value={budget}
+            onChange={e => setBudget(e.target.value)}
+            onBlur={() => {
+              if (!s) return;
+              const saved = s.dailyBudgetUsd;
+              const n = Number(budget);
+              if (budget.trim() === '' || !Number.isFinite(n) || n < 0 || n > 1) { setNote('The daily budget is a number from 0 to 1 (USD).'); setBudget(saved.toFixed(2)); return; }
+              // A refused raise (it needs a person) must not leave the unsaved number showing.
+              if (n !== saved) void run(() => api.profileSettings({ dailyBudgetUsd: n }).catch((err: unknown) => { setBudget(saved.toFixed(2)); throw err; }));
+            }}
+            className="w-16 rounded border border-aico-border bg-aico-bg px-1.5 py-0.5 text-right text-[12px] tabular-nums text-aico-primary outline-none focus:ring-2 focus:ring-aico-accent/40" data-budget />
+          a day
+        </label>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-[12px] text-aico-muted" data-last-run>

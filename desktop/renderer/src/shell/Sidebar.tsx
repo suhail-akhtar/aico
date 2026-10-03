@@ -508,7 +508,7 @@ function ProfileRow(): React.ReactElement {
                 void desktop.updates.check().then(s => { if (report(s)) off(); }).catch(e => { off(); toast.error('Could not check for updates', (e as Error).message); });
                 window.setTimeout(off, 60_000);
               }} />
-              <MenuItem icon="info" label="About AICO" onClick={() => { close(); openSettings('about'); }} />
+              <MenuItem icon="info" label="About AICO" hint={info?.app ? `v${info.app}` : undefined} onClick={() => { close(); openSettings('about'); }} />
             </MenuSub>
             <MenuSep />
             <MenuItem icon="logout" label="Quit AICO" hint="Ctrl+Q" onClick={() => { close(); void desktop.quit(); }} />
