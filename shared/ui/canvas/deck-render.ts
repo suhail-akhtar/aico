@@ -21,8 +21,10 @@
  */
 
 import type { DeckChart } from './deck-model';
-import type { Color, Frame, Para, SlideLayout, TableFrame, TextFrame } from './deck-layout';
+import type { Color, Frame, ImageFrame, Para, ShapeFrame, SlideLayout, TableFrame, TextFrame } from './deck-layout';
 import { chartPalette, cssColor, cssFont, resolveHex, roles, type ColorRef, type DeckTheme } from './deck-themes';
+import { presetPath } from './deck-geometry';
+import { iconPath } from './deck-icons';
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -38,12 +40,17 @@ export function hashKey(text: string): string {
   return h.toString(36);
 }
 
+/** A theme's identity for caches: its id, and its colours and fonts when a deck overrides them (ADR 0025). */
+function themeKey(theme: DeckTheme): string {
+  return `${theme.id}:${Object.values(theme.scheme).join('')}:${theme.fonts.heading}/${theme.fonts.body}`;
+}
+
 export function chartKey(chart: DeckChart, theme: DeckTheme, w: number, h: number): string {
-  return `c${hashKey(`${theme.id}|${Math.round(w)}x${Math.round(h)}|${JSON.stringify(chart)}`)}`;
+  return `c${hashKey(`${themeKey(theme)}|${Math.round(w)}x${Math.round(h)}|${JSON.stringify(chart)}`)}`;
 }
 
 export function diagramKey(source: string, theme: DeckTheme): string {
-  return `d${hashKey(`${theme.id}|${source}`)}`;
+  return `d${hashKey(`${themeKey(theme)}|${source}`)}`;
 }
 
 /** The base CSS every rendered slide needs (inlined in exports, injected once in the app). */
@@ -54,7 +61,8 @@ export const DECK_SLIDE_CSS = `
 .dk-t p, .dk-tb p { margin: 0; padding: 0; position: relative; overflow-wrap: break-word; white-space: normal; }
 .dk-bu { position: absolute; top: 0; }
 .dk-slide code { font-family: Consolas, "Cascadia Code", Menlo, monospace; font-size: 1em; background: none; padding: 0; color: inherit; }
-.dk-s, .dk-i, .dk-v, .dk-tb { position: absolute; }
+.dk-s, .dk-i, .dk-v, .dk-tb, .dk-g { position: absolute; }
+.dk-g { display: block; overflow: visible; }
 .dk-i { overflow: hidden; }
 .dk-i img { width: 100%; height: 100%; display: block; }
 .dk-v { display: flex; align-items: center; justify-content: center; }
@@ -110,14 +118,15 @@ function box(f: { x: number; y: number; w: number; h: number }): string {
   return `left:${f.x}pt;top:${f.y}pt;width:${f.w}pt;height:${f.h}pt`;
 }
 
-function fieldAttr(field: string | undefined, opts: RenderOptions): string {
-  return opts.fields && field ? ` data-field="${esc(field)}"` : '';
+/** The field a frame edits, and (for "Ask AICO") which frame it is — "Value 2" is KPI 2. Editor only. */
+function fieldAttr(field: string | undefined, opts: RenderOptions, name?: string): string {
+  return opts.fields && field ? ` data-field="${esc(field)}"${name ? ` data-frame="${esc(name)}"` : ''}` : '';
 }
 
 function textHtml(f: TextFrame, theme: DeckTheme, opts: RenderOptions): string {
   const justify = f.anchor === 'm' ? 'center' : f.anchor === 'b' ? 'flex-end' : 'flex-start';
   const over = opts.showOverflow && f.overflow ? ' dk-over' : '';
-  return `<div class="dk-t${over}"${fieldAttr(f.field, opts)} style="${box(f)};justify-content:${justify}">${f.paras.map(p => paraHtml(p, theme)).join('')}</div>`;
+  return `<div class="dk-t${over}"${fieldAttr(f.field, opts, f.name)} style="${box(f)};justify-content:${justify}">${f.paras.map(p => paraHtml(p, theme)).join('')}</div>`;
 }
 
 function tableHtml(f: TableFrame, theme: DeckTheme, opts: RenderOptions): string {
@@ -126,7 +135,7 @@ function tableHtml(f: TableFrame, theme: DeckTheme, opts: RenderOptions): string
     `<td style="padding:${f.pad.y}pt ${f.pad.x}pt;border-bottom:0.75pt solid ${line};${cell.fill ? `background:${col(theme, cell.fill)}` : ''}">${cell.paras.map(p => paraHtml(p, theme)).join('')}</td>`
   )).join('')}</tr>`).join('');
   const over = opts.showOverflow && f.overflow ? ' dk-over' : '';
-  return `<div class="dk-tb${over}"${fieldAttr(f.field, opts)} style="${box(f)}"><table><colgroup>${f.cols.map(w => `<col style="width:${w}pt">`).join('')}</colgroup><tbody>${rows}</tbody></table></div>`;
+  return `<div class="dk-tb${over}"${fieldAttr(f.field, opts, f.name)} style="${box(f)}"><table><colgroup>${f.cols.map(w => `<col style="width:${w}pt">`).join('')}</colgroup><tbody>${rows}</tbody></table></div>`;
 }
 
 function placeholder(theme: DeckTheme, label: string, detail?: string): string {
@@ -135,11 +144,64 @@ function placeholder(theme: DeckTheme, label: string, detail?: string): string {
     + `<div>${esc(label)}</div>${detail ? `<code>${esc(detail.slice(0, 300))}</code>` : ''}</div>`;
 }
 
+// ── Shapes beyond boxes (ADR 0025) ───────────────────────────────────
+
+const CSS_GEOMS = new Set(['rect', 'roundRect', 'topRound', 'ellipse', 'corner']);
+
+/** Presets, freeforms, icons, rotation, two-colour gradients: drawn as SVG with the outline PowerPoint computes. */
+function needsSvg(f: ShapeFrame): boolean {
+  return !CSS_GEOMS.has(f.geom) || Boolean(f.rot) || Boolean(f.grad) || Boolean(f.flipV);
+}
+
+let gradSeq = 0;
+
+function shapeSvg(f: ShapeFrame, theme: DeckTheme, opts: RenderOptions): string {
+  const rot = f.rot ? `;transform:rotate(${Math.round(f.rot * 100) / 100}deg);transform-origin:50% 50%` : '';
+  const attrs = fieldAttr(f.field, opts, f.name);
+  if (f.geom === 'icon') {
+    const d = f.icon ? iconPath(f.icon) : undefined;
+    const sw = f.line ? (f.line.w * 24) / Math.max(1, f.w) : 2;
+    return `<svg class="dk-g"${attrs} style="${box(f)}${rot}" viewBox="0 0 24 24" preserveAspectRatio="none" overflow="visible">`
+      + `<path d="${esc(d ?? '')}" fill="none" stroke="${col(theme, f.line?.color ?? roles(theme).accent)}" stroke-width="${Math.round(sw * 100) / 100}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+  const w = Math.max(0.01, f.w);
+  const h = Math.max(0.01, f.h);
+  const d = f.geom === 'path' ? (f.path ?? '') : presetPath(f.geom, w, h, f.adj, f.radius);
+  let fill = f.fill === undefined ? 'none' : col(theme, f.fill);
+  let defs = '';
+  const g = f.grad ?? (f.gradient ? { from: { ...f.gradient, a: 0 }, to: f.gradient, angle: 90 } : undefined);
+  if (g) {
+    const id = `dkg${++gradSeq}`;
+    const t = (g.angle * Math.PI) / 180;
+    const c0 = Math.cos(t) / 2;
+    const s0 = Math.sin(t) / 2;
+    defs = `<defs><linearGradient id="${id}" x1="${0.5 - c0}" y1="${0.5 - s0}" x2="${0.5 + c0}" y2="${0.5 + s0}">`
+      + `<stop offset="0" stop-color="${cssColor(theme, g.from)}"/><stop offset="1" stop-color="${cssColor(theme, g.to)}"/></linearGradient></defs>`;
+    fill = `url(#${id})`;
+  }
+  const stroke = f.line ? ` stroke="${col(theme, f.line.color)}" stroke-width="${f.line.w}"${f.line.dash ? ' stroke-dasharray="4 3"' : ''}` : '';
+  const flip = f.flipV ? ` transform="translate(0 ${Math.round(h * 100) / 100}) scale(1 -1)"` : '';
+  return `<svg class="dk-g"${attrs} style="${box(f)}${rot}" viewBox="0 0 ${Math.round(w * 100) / 100} ${Math.round(h * 100) / 100}" preserveAspectRatio="none" overflow="visible">`
+    + `${defs}<path d="${esc(d)}" fill="${fill}" fill-rule="evenodd"${stroke}${flip}/></svg>`;
+}
+
+/** A picture's cut as CSS — the same outline as the PowerPoint picture geometry. */
+function maskCss(mask: ImageFrame['mask'], flip?: boolean): string {
+  switch (mask) {
+    case 'circle': return ';clip-path:ellipse(50% 50% at 50% 50%)';
+    case 'hexagon': return ';clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)';
+    case 'rounded': return ';border-radius:18pt';
+    case 'diagonal': return flip ? ';clip-path:polygon(0 0,100% 0,82% 100%,0 100%)' : ';clip-path:polygon(18% 0,100% 0,100% 100%,0 100%)';
+    default: return '';
+  }
+}
+
 function frameHtml(f: Frame, theme: DeckTheme, opts: RenderOptions): string {
   switch (f.kind) {
     case 'text': return textHtml(f, theme, opts);
     case 'table': return tableHtml(f, theme, opts);
     case 'shape': {
+      if (needsSvg(f)) return shapeSvg(f, theme, opts);
       const s: string[] = [box(f)];
       if (f.fill !== undefined) s.push(`background:${col(theme, f.fill)}`);
       if (f.gradient) {
@@ -152,22 +214,22 @@ function frameHtml(f: Frame, theme: DeckTheme, opts: RenderOptions): string {
       else if (f.geom === 'roundRect') s.push(`border-radius:${f.radius ?? 8}pt`);
       else if (f.geom === 'topRound') s.push(`border-radius:${f.radius ?? 8}pt ${f.radius ?? 8}pt 0 0`);
       else if (f.geom === 'corner') s.push('clip-path:polygon(0 0,100% 0,100% 100%)');
-      return `<div class="dk-s"${fieldAttr(f.field, opts)} style="${s.join(';')}"></div>`;
+      return `<div class="dk-s"${fieldAttr(f.field, opts, f.name)} style="${s.join(';')}"></div>`;
     }
     case 'image': {
       const url = opts.image?.(f.src);
       const inner = url
         ? `<img src="${esc(url)}" alt="${esc(f.alt)}" style="object-fit:${f.fit}">`
         : placeholder(theme, f.alt ? `Image: ${f.alt}` : 'Image', f.src.startsWith('data:') ? undefined : f.src);
-      return `<div class="dk-i"${fieldAttr(f.field, opts)} style="${box(f)}">${inner}</div>`;
+      return `<div class="dk-i"${fieldAttr(f.field, opts, f.name)} style="${box(f)}${maskCss(f.mask, f.maskFlip)}">${inner}</div>`;
     }
     case 'chart': {
       const v = opts.visual?.(chartKey(f.chart, theme, f.w, f.h));
-      return `<div class="dk-v"${fieldAttr(f.field, opts)} style="${box(f)}">${v ?? placeholder(theme, 'Chart')}</div>`;
+      return `<div class="dk-v"${fieldAttr(f.field, opts, f.name)} style="${box(f)}">${v ?? placeholder(theme, 'Chart')}</div>`;
     }
     case 'diagram': {
       const v = opts.visual?.(diagramKey(f.source, theme));
-      return `<div class="dk-v"${fieldAttr(f.field, opts)} style="${box(f)}">${v ?? placeholder(theme, 'Diagram', f.source)}</div>`;
+      return `<div class="dk-v"${fieldAttr(f.field, opts, f.name)} style="${box(f)}">${v ?? placeholder(theme, 'Diagram', f.source)}</div>`;
     }
   }
 }

@@ -30,7 +30,7 @@ import { mediaUrl } from '../media';
 import type { Deck } from './deck-model';
 import { layoutSlide, type SlideLayout } from './deck-layout';
 import { DECK_SLIDE_CSS, chartKey, deckChartOption, diagramKey, slideHtml, themedMermaid } from './deck-render';
-import { deckTheme, type DeckTheme } from './deck-themes';
+import { themeOfDeck, type DeckTheme } from './deck-themes';
 
 // ── The visuals cache ────────────────────────────────────────────────
 
@@ -122,7 +122,7 @@ export interface DeckSlideProps {
 
 export function DeckSlide({ deck, index, width, draft, onField, layout: given, className }: DeckSlideProps): React.ReactElement {
   injectCss();
-  const theme = useMemo(() => deckTheme(deck.theme), [deck.theme]);
+  const theme = useMemo(() => themeOfDeck(deck), [deck.theme, deck.palette, deck.fonts]); // eslint-disable-line react-hooks/exhaustive-deps
   const layout = useMemo(() => given ?? layoutSlide(deck, index, { draft: Boolean(draft) }), [given, deck, index, draft]);
   const tick = useVisuals(layout, theme);
   const html = useMemo(() => slideHtml(layout, theme, {

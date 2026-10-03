@@ -18,7 +18,8 @@
  *   POST /api/canvas/import  {session,name,data(base64),title?}   a .xlsx/.csv as a new sheet canvas
  *   POST /api/canvas/rename  {session,id,title}
  *   POST /api/canvas/edit-part {session,id,tab?,target:{blockIds,range?,cells?,part?},instruction,history?,retryError?}
- *                                a scoped AI edit of one part (ADR 0024): a validated PROPOSAL, nothing is written
+ *                                a scoped AI edit of one part (ADR 0024): a validated PROPOSAL, nothing is written;
+ *                                a deck names target:{slideId,elementId?,range?,cells?} and gets the slide after it too
  *
  * A save based on a stale version of its tab is a 409 carrying the current
  * document, so the editor can offer "keep mine" or "take the agent's" instead
@@ -51,6 +52,7 @@ import { parseBook, serializeBook } from '../../shared/ui/canvas/sheet-model.js'
 import { fileBase } from '../canvas/markdown.js';
 import { DECK_EXPORT_FORMATS, exportDeck, type DeckExportFormat } from '../canvas/deck-export.js';
 import { editDocPart, MAX_INSTRUCTION, MAX_THREAD, type EditTurn } from '../canvas/inline-edit.js';
+import { editDeckPart } from '../canvas/deck-inline-edit.js';
 
 /** Largest file `canvas/import` takes (the body is base64, a third larger). */
 export const SHEET_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
@@ -167,27 +169,54 @@ export async function handleCanvasRoute(
         send(res, 400, { error: `instruction required (at most ${MAX_INSTRUCTION} characters)` });
         return true;
       }
-      const t = (body.target ?? {}) as { blockIds?: unknown; range?: unknown; cells?: unknown; part?: unknown };
+      const t = (body.target ?? {}) as { blockIds?: unknown; range?: unknown; cells?: unknown; part?: unknown; slideId?: unknown; elementId?: unknown };
+      const num = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
+      const range = t.range as { start?: unknown; end?: unknown } | undefined;
+      const cells = t.cells as { r0?: unknown; r1?: unknown; c0?: unknown; c1?: unknown } | undefined;
+      const rangeOf = range && num(range.start) && num(range.end) ? { range: { start: range.start, end: range.end } } : {};
+      const cellsOf = cells && num(cells.r0) && num(cells.r1) && num(cells.c0) && num(cells.c1) ? { cells: { r0: cells.r0, r1: cells.r1, c0: cells.c0, c1: cells.c1 } } : {};
+      const history: EditTurn[] = (Array.isArray(body.history) ? body.history : []).slice(-MAX_THREAD)
+        .filter((h): h is { instruction: string; patch?: unknown } => Boolean(h) && typeof (h as { instruction?: unknown }).instruction === 'string')
+        .map(h => ({ instruction: h.instruction.slice(0, MAX_INSTRUCTION), ...(h.patch && typeof h.patch === 'object' ? { patch: h.patch as EditTurn['patch'] } : {}) }));
+      const retryError = typeof body.retryError === 'string' && body.retryError.trim() ? { retryError: body.retryError.slice(0, 1000) } : {};
+      if (typeof t.slideId === 'string') {
+        // A deck: a slide, or one element of it (ADR 0024, deck section).
+        if (!/^[A-Za-z0-9_-]{1,24}$/.test(t.slideId) || (t.elementId !== undefined && (typeof t.elementId !== 'string' || t.elementId.length > 40))) {
+          send(res, 400, { error: 'target.slideId (and an optional elementId) required' });
+          return true;
+        }
+        const ctx = await ctxFor(sessionId);
+        const doc = await getCanvas(ctx, body.id);
+        if (!doc) throw new CanvasNotFound(body.id);
+        if (doc.kind !== 'deck') { send(res, 400, { error: `a slide target needs a deck, not a ${doc.kind}` }); return true; }
+        const abort = new AbortController();
+        res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+        const settings = ctx.settings ?? await loadSettings();
+        const result = await editDeckPart({
+          doc, target: { slideId: t.slideId, ...(typeof t.elementId === 'string' ? { elementId: t.elementId } : {}), ...rangeOf, ...cellsOf },
+          instruction: body.instruction, history, ...retryError,
+          settings, mainModel: (await deps.modelFor?.(sessionId)) ?? settings.model ?? '', signal: abort.signal,
+        });
+        const { part, slide, ...rest } = result;
+        send(res, 200, {
+          ...rest, tabVersion: doc.tabs[0]!.version,
+          ...(part ? { part: { kind: part.kind, label: part.label, what: part.what, span: part.span, before: part.before, blocks: part.blocks, slideId: part.slideId, elementId: part.elementId } } : {}),
+          ...(slide ? { slide } : {}),
+        });
+        return true;
+      }
       if (!Array.isArray(t.blockIds) || !t.blockIds.length || t.blockIds.length > 200 || !t.blockIds.every(k => typeof k === 'string' && k.length < 200)) {
         send(res, 400, { error: 'target.blockIds required' });
         return true;
       }
-      const num = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
-      const range = t.range as { start?: unknown; end?: unknown } | undefined;
-      const cells = t.cells as { r0?: unknown; r1?: unknown; c0?: unknown; c1?: unknown } | undefined;
       const target = {
-        blockIds: t.blockIds as string[],
-        ...(range && num(range.start) && num(range.end) ? { range: { start: range.start, end: range.end } } : {}),
-        ...(cells && num(cells.r0) && num(cells.r1) && num(cells.c0) && num(cells.c1) ? { cells: { r0: cells.r0, r1: cells.r1, c0: cells.c0, c1: cells.c1 } } : {}),
+        blockIds: t.blockIds as string[], ...rangeOf, ...cellsOf,
         ...(t.part === 'section' || t.part === 'caption' ? { part: t.part as 'section' | 'caption' } : {}),
       };
-      const history: EditTurn[] = (Array.isArray(body.history) ? body.history : []).slice(-MAX_THREAD)
-        .filter((h): h is { instruction: string; patch?: unknown } => Boolean(h) && typeof (h as { instruction?: unknown }).instruction === 'string')
-        .map(h => ({ instruction: h.instruction.slice(0, MAX_INSTRUCTION), ...(h.patch && typeof h.patch === 'object' ? { patch: h.patch as EditTurn['patch'] } : {}) }));
       const ctx = await ctxFor(sessionId);
       const doc = await getCanvas(ctx, body.id);
       if (!doc) throw new CanvasNotFound(body.id);
-      if (doc.kind !== 'document') { send(res, 400, { error: `an inline edit works on a document, not a ${doc.kind}` }); return true; }
+      if (doc.kind !== 'document') { send(res, 400, { error: `an inline edit of blocks works on a document, not a ${doc.kind}${doc.kind === 'deck' ? ' (name target.slideId)' : ''}` }); return true; }
       const tab = typeof body.tab === 'string' && body.tab ? doc.tabs.find(x => x.id === body.tab) : doc.tabs[0];
       if (!tab) { send(res, 404, { error: `canvas ${doc.id} has no tab "${String(body.tab)}"` }); return true; }
       // The person closing the box (or the page) cancels the model call.
@@ -195,8 +224,7 @@ export async function handleCanvasRoute(
       res.on('close', () => { if (!res.writableEnded) abort.abort(); });
       const settings = ctx.settings ?? await loadSettings();
       const result = await editDocPart({
-        doc, tab, target, instruction: body.instruction, history,
-        ...(typeof body.retryError === 'string' && body.retryError.trim() ? { retryError: body.retryError.slice(0, 1000) } : {}),
+        doc, tab, target, instruction: body.instruction, history, ...retryError,
         settings, mainModel: (await deps.modelFor?.(sessionId)) ?? settings.model ?? '', signal: abort.signal,
       });
       const { part, ...rest } = result;

@@ -32,9 +32,13 @@
  * @module shared/ui/canvas/deck-model
  */
 
+import { MEASURED_FONTS } from './deck-fonts';
+
 export type DeckLayout =
   | 'title' | 'section' | 'bullets' | 'two-column' | 'comparison' | 'image-text' | 'image'
-  | 'chart' | 'diagram' | 'table' | 'kpi' | 'quote' | 'timeline' | 'agenda' | 'closing';
+  | 'chart' | 'diagram' | 'table' | 'kpi' | 'quote' | 'timeline' | 'agenda' | 'closing'
+  // ADR 0025: the infographic library and a grid of pictures.
+  | 'infographic' | 'image-grid';
 
 export type DeckAspect = '16:9' | '4:3';
 export type DeckTransition = 'none' | 'fade';
@@ -59,7 +63,71 @@ export interface DeckChart {
   echarts?: Record<string, unknown>;
 }
 
-export interface DeckImage { src: string; alt?: string; fit?: 'cover' | 'contain' }
+/** How a picture is cut (ADR 0025): a native picture shape in PowerPoint, a clip path in the app. */
+export type ImageMask = 'rect' | 'rounded' | 'circle' | 'hexagon' | 'diagonal';
+
+export interface DeckImage {
+  /**
+   * A project file, a data URL, `/api/deck-media/<file>` (a picture AICO
+   * fetched or imported, kept under the AICO home), or `art:<style>` — a
+   * generated abstract picture in the theme's colours, drawn as native shapes.
+   */
+  src: string;
+  alt?: string;
+  fit?: 'cover' | 'contain';
+  mask?: ImageMask;
+  /** image-text and title slides: which side the picture takes. */
+  side?: 'left' | 'right';
+  /** Who made it ("Jane Doe"), for the on-slide credit. Set by AICO for every picture it fetched. */
+  credit?: string;
+  /** Its licence ("CC BY 2.0", "CC0", "Pexels licence"). */
+  license?: string;
+  /** Where it came from (the page that states the licence). */
+  sourceUrl?: string;
+  /** Pixel size, when known — the validator checks it is sharp enough for its slot. */
+  px?: [number, number];
+  /** image-grid / team: a caption under the picture. */
+  caption?: string;
+}
+
+/** The infographic library (ADR 0025, `deck-infographics.ts`). */
+export type InfographicKind =
+  | 'process' | 'arrows' | 'cycle' | 'semicircle' | 'radial' | 'pyramid' | 'funnel' | 'hexagons' | 'stairs'
+  | 'timeline' | 'roadmap' | 'cards' | 'versus' | 'pros-cons' | 'swot' | 'matrix' | 'venn' | 'rings'
+  | 'tiles' | 'stat-bars' | 'team' | 'quote-photo' | 'agenda' | 'icon-grid' | 'before-after';
+
+export interface InfoItem {
+  title: string;
+  /** One or two short lines (a newline separates lines where a kind lists them: versus, pros-cons, swot). */
+  text?: string;
+  /** A number, percentage or date ("42%", "£4.2m", "Q3 2026"): rings and stat-bars read a percentage from it. */
+  value?: string;
+  /** An icon name from the deck icon set (`deck-icons.ts`). */
+  icon?: string;
+  /** team, quote-photo, before-after: a picture. */
+  image?: DeckImage;
+}
+
+export interface DeckInfographic {
+  kind: InfographicKind;
+  items: InfoItem[];
+  /** cycle, radial, venn, semicircle: the label in the middle. */
+  centre?: string;
+  /** matrix: [x-axis label, y-axis label]. */
+  axes?: [string, string];
+}
+
+/** The design brief a deck was styled from (ADR 0025) — visible and editable in the editor. */
+export interface DesignBrief {
+  audience?: string;
+  industry?: string;
+  tone?: string;
+  /** Brand name, site and colours (#RRGGBB) as given or extracted. */
+  brand?: { name?: string; url?: string; colors?: string[]; font?: string };
+  imageStyle?: 'photo' | 'illustration' | 'abstract' | 'none';
+  /** Free notes: what the audience must leave with, constraints. */
+  notes?: string;
+}
 export interface DeckTable { header: string[]; rows: string[][] }
 export interface DeckKpi { value: string; label: string; delta?: string; trend?: 'up' | 'down' | 'flat' }
 export interface DeckMilestone { date: string; title: string; text?: string }
@@ -83,6 +151,10 @@ export interface Slide {
   quote?: string;
   attribution?: string;
   timeline?: DeckMilestone[];
+  /** layout "infographic". */
+  infographic?: DeckInfographic;
+  /** layout "image-grid": 2–4 pictures. */
+  images?: DeckImage[];
   /** A source or footnote line under the content. */
   source?: string;
   notes?: string;
@@ -102,6 +174,12 @@ export interface Deck {
   footer?: string;
   /** Slide numbers on content slides; default on. */
   slideNumbers?: boolean;
+  /** Brand colours laid over the theme's slots (`themeOfDeck`), #RRGGBB. */
+  palette?: Partial<Record<'dk1' | 'lt1' | 'dk2' | 'lt2' | 'accent1' | 'accent2' | 'accent3' | 'accent4' | 'accent5' | 'accent6', string>>;
+  /** Fonts from the measured set replacing the theme's (a brand font, when it is one of them). */
+  fonts?: { heading?: string; body?: string };
+  /** What the deck was designed for (ADR 0025). */
+  brief?: DesignBrief;
   slides: Slide[];
 }
 
@@ -121,8 +199,8 @@ export interface LayoutInfo {
 
 /** The catalogue — order is the picker's. */
 export const LAYOUTS: readonly LayoutInfo[] = [
-  { id: 'title', label: 'Title', hint: 'opening slide: title, subtitle, body (presenter · date)', fields: ['title', 'subtitle', 'body'] },
-  { id: 'section', label: 'Section header', hint: 'divider: title, subtitle', fields: ['title', 'subtitle'] },
+  { id: 'title', label: 'Title', hint: 'opening slide: title, subtitle, body (presenter · date), image?', fields: ['title', 'subtitle', 'body', 'image'] },
+  { id: 'section', label: 'Section header', hint: 'divider: title, subtitle', fields: ['title', 'subtitle', 'image'] },
   { id: 'bullets', label: 'Title and bullets', hint: 'title, body? (lead line), bullets (≤6)', fields: ['title', 'body', 'bullets', 'source'] },
   { id: 'two-column', label: 'Two columns', hint: 'title, left/right {heading, bullets|body}', fields: ['title', 'left', 'right', 'source'] },
   { id: 'comparison', label: 'Comparison', hint: 'title, left/right {heading, bullets} as two cards', fields: ['title', 'left', 'right', 'source'] },
@@ -132,11 +210,77 @@ export const LAYOUTS: readonly LayoutInfo[] = [
   { id: 'diagram', label: 'Diagram', hint: 'title, diagram (Mermaid), bullets? (≤4), source', fields: ['title', 'diagram', 'bullets', 'source'] },
   { id: 'table', label: 'Table', hint: 'title, table {header, rows} (≤8 rows, ≤6 columns), source', fields: ['title', 'table', 'source'] },
   { id: 'kpi', label: 'Big numbers', hint: 'title, kpis [{value, label, delta?, trend?}] (1–4), body?', fields: ['title', 'kpis', 'body', 'source'] },
-  { id: 'quote', label: 'Quote', hint: 'quote, attribution, title? (small label)', fields: ['quote', 'attribution', 'title'] },
+  { id: 'quote', label: 'Quote', hint: 'quote, attribution, title? (small label)', fields: ['quote', 'attribution', 'title', 'image'] },
   { id: 'timeline', label: 'Timeline', hint: 'title, timeline [{date, title, text?}] (2–6)', fields: ['title', 'timeline', 'source'] },
   { id: 'agenda', label: 'Agenda', hint: 'title, bullets (the items, ≤8)', fields: ['title', 'bullets'] },
-  { id: 'closing', label: 'Closing', hint: 'title ("Thank you", "Questions?"), subtitle, body (contact)', fields: ['title', 'subtitle', 'body'] },
+  { id: 'closing', label: 'Closing', hint: 'title ("Thank you", "Questions?"), subtitle, body (contact)', fields: ['title', 'subtitle', 'body', 'image'] },
+  { id: 'infographic', label: 'Infographic', hint: 'title, infographic {kind, items}, body?', fields: ['title', 'infographic', 'body', 'source'] },
+  { id: 'image-grid', label: 'Picture grid', hint: 'title, images (2–4)', fields: ['title', 'images', 'body', 'source'] },
 ];
+
+export interface InfographicInfo {
+  id: InfographicKind;
+  label: string;
+  /** What it shows best — the tool help and the gallery. */
+  hint: string;
+  min: number;
+  max: number;
+  /** Item fields this kind draws. */
+  uses: (keyof InfoItem)[];
+}
+
+/** The infographic library — order is the gallery's. */
+export const INFOGRAPHICS: readonly InfographicInfo[] = [
+  { id: 'process', label: 'Chevron process', hint: 'sequential steps left to right', min: 3, max: 6, uses: ['title', 'text', 'icon'] },
+  { id: 'arrows', label: 'Numbered arrows', hint: 'ordered steps as staggered arrow banners', min: 3, max: 6, uses: ['title', 'text', 'icon'] },
+  { id: 'cycle', label: 'Cycle', hint: 'a repeating loop of 3–6 stages around a hub (centre)', min: 3, max: 6, uses: ['title', 'text', 'icon'] },
+  { id: 'semicircle', label: 'Semicircle steps', hint: 'stages fanned over an arc, with a centre label', min: 3, max: 6, uses: ['title', 'text', 'icon'] },
+  { id: 'radial', label: 'Radial', hint: 'parts around one core idea (centre)', min: 3, max: 7, uses: ['title', 'text', 'icon'] },
+  { id: 'pyramid', label: 'Pyramid', hint: 'levels from a broad base to a narrow top (item 1 = top)', min: 3, max: 6, uses: ['title', 'text'] },
+  { id: 'funnel', label: 'Funnel', hint: 'narrowing stages (leads → customers), with values', min: 3, max: 6, uses: ['title', 'text', 'value'] },
+  { id: 'hexagons', label: 'Hexagon cluster', hint: 'related capabilities or pillars', min: 3, max: 7, uses: ['title', 'text', 'icon'] },
+  { id: 'stairs', label: 'Stair steps', hint: 'progression or maturity levels, rising', min: 3, max: 6, uses: ['title', 'text', 'icon'] },
+  { id: 'timeline', label: 'Icon timeline', hint: 'dated events with icon markers (value = date)', min: 3, max: 7, uses: ['title', 'text', 'value', 'icon'] },
+  { id: 'roadmap', label: 'Roadmap', hint: 'phases/milestones along an arrow (value = date)', min: 3, max: 6, uses: ['title', 'text', 'value'] },
+  { id: 'cards', label: 'Numbered cards', hint: '2–4 key points with icon or number', min: 2, max: 4, uses: ['title', 'text', 'icon', 'value'] },
+  { id: 'versus', label: 'Versus', hint: 'two options side by side (text: one line per point)', min: 2, max: 2, uses: ['title', 'text', 'icon', 'value'] },
+  { id: 'pros-cons', label: 'Pros and cons', hint: 'item 1 = pros, item 2 = cons (text: one line per point)', min: 2, max: 2, uses: ['title', 'text'] },
+  { id: 'swot', label: 'SWOT', hint: 'Strengths, Weaknesses, Opportunities, Threats (text: lines)', min: 4, max: 4, uses: ['title', 'text'] },
+  { id: 'matrix', label: '2×2 matrix', hint: 'four quadrants (top-left, top-right, bottom-left, bottom-right) with axes', min: 4, max: 4, uses: ['title', 'text'] },
+  { id: 'venn', label: 'Venn', hint: '2–3 overlapping sets, centre = the overlap', min: 2, max: 3, uses: ['title', 'text'] },
+  { id: 'rings', label: 'Progress rings', hint: 'percentages as donuts (value = "72%")', min: 2, max: 5, uses: ['title', 'text', 'value'] },
+  { id: 'tiles', label: 'KPI tiles', hint: 'big numbers on coloured tiles (value)', min: 2, max: 4, uses: ['title', 'text', 'value', 'icon'] },
+  { id: 'stat-bars', label: 'Stat bars', hint: 'labelled bars with percentages (value)', min: 2, max: 6, uses: ['title', 'value', 'text'] },
+  { id: 'team', label: 'Team', hint: 'people with circular photos (title = name, text = role)', min: 2, max: 6, uses: ['title', 'text', 'image'] },
+  { id: 'quote-photo', label: 'Quote with photo', hint: 'one testimonial (text = quote, title = name, value = role)', min: 1, max: 1, uses: ['title', 'text', 'value', 'image'] },
+  { id: 'agenda', label: 'Numbered agenda', hint: 'the parts of the talk, numbered', min: 3, max: 7, uses: ['title', 'text', 'icon'] },
+  { id: 'icon-grid', label: 'Icon grid', hint: 'features or benefits with icons', min: 3, max: 8, uses: ['title', 'text', 'icon'] },
+  { id: 'before-after', label: 'Before / after', hint: 'item 1 = before, item 2 = after (text: lines)', min: 2, max: 2, uses: ['title', 'text', 'image'] },
+];
+
+const INFO_IDS = new Set<string>(INFOGRAPHICS.map(i => i.id));
+const INFO_ALIASES: Record<string, InfographicKind> = {
+  chevron: 'process', chevrons: 'process', steps: 'process', 'process-flow': 'process', 'numbered-arrows': 'arrows', 'arrow-steps': 'arrows',
+  loop: 'cycle', circle: 'cycle', 'circular': 'cycle', 'semi-circle': 'semicircle', arc: 'semicircle', 'half-circle': 'semicircle',
+  petal: 'radial', petals: 'radial', hub: 'radial', 'hub-and-spoke': 'radial', triangle: 'pyramid', hierarchy: 'pyramid', 'inverted-pyramid': 'funnel',
+  hexagon: 'hexagons', honeycomb: 'hexagons', staircase: 'stairs', 'step-up': 'stairs', 'icon-timeline': 'timeline', milestones: 'roadmap',
+  'numbered-cards': 'cards', vs: 'versus', comparison: 'versus', compare: 'versus', 'pros-and-cons': 'pros-cons', proscons: 'pros-cons',
+  quadrant: 'matrix', quadrants: 'matrix', '2x2': 'matrix', 'progress': 'rings', donuts: 'rings', donut: 'rings', 'percent-rings': 'rings',
+  kpis: 'tiles', 'kpi-tiles': 'tiles', 'big-numbers': 'tiles', bars: 'stat-bars', 'stat-rows': 'stat-bars', people: 'team', 'team-cards': 'team',
+  testimonial: 'quote-photo', features: 'icon-grid', icons: 'icon-grid', 'feature-grid': 'icon-grid', 'before-and-after': 'before-after',
+};
+
+/** An infographic kind from what a model or person typed, or undefined. */
+export function toInfographicKind(value: unknown): InfographicKind | undefined {
+  if (typeof value !== 'string') return undefined;
+  const k = value.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (INFO_IDS.has(k)) return k as InfographicKind;
+  return INFO_ALIASES[k] ?? INFO_ALIASES[k.replace(/-/g, '')];
+}
+
+export function infographicInfo(kind: string): InfographicInfo {
+  return INFOGRAPHICS.find(i => i.id === kind) ?? INFOGRAPHICS[0]!;
+}
 
 const LAYOUT_IDS = new Set<string>(LAYOUTS.map(l => l.id));
 const ALIASES: Record<string, DeckLayout> = {
@@ -146,6 +290,8 @@ const ALIASES: Record<string, DeckLayout> = {
   graph: 'chart', mermaid: 'diagram', architecture: 'diagram', kpis: 'kpi', 'big-number': 'kpi', 'big-numbers': 'kpi', stats: 'kpi', metrics: 'kpi',
   'section-header': 'section', divider: 'section', cover: 'title', thanks: 'closing', 'thank-you': 'closing', end: 'closing', questions: 'closing',
   roadmap: 'timeline', milestones: 'timeline', contents: 'agenda',
+  infographics: 'infographic', visual: 'infographic', diagram2: 'infographic', gallery: 'image-grid', photos: 'image-grid', pictures: 'image-grid',
+  'photo-grid': 'image-grid', 'picture-grid': 'image-grid', imagegrid: 'image-grid',
 };
 
 export function layoutInfo(id: string): LayoutInfo {
@@ -299,7 +445,7 @@ function toTable(v: unknown): DeckTable | undefined {
   return { header: h, rows: r };
 }
 
-function toKpis(v: unknown): DeckKpi[] | undefined {
+export function toKpis(v: unknown): DeckKpi[] | undefined {
   if (!Array.isArray(v)) return undefined;
   const out: DeckKpi[] = [];
   for (const k of v.slice(0, 8)) {
@@ -317,7 +463,7 @@ function toKpis(v: unknown): DeckKpi[] | undefined {
   return out.length ? out : undefined;
 }
 
-function toTimeline(v: unknown): DeckMilestone[] | undefined {
+export function toTimeline(v: unknown): DeckMilestone[] | undefined {
   if (!Array.isArray(v)) return undefined;
   const out: DeckMilestone[] = [];
   for (const m of v.slice(0, 12)) {
@@ -332,18 +478,77 @@ function toTimeline(v: unknown): DeckMilestone[] | undefined {
   return out.length ? out : undefined;
 }
 
-function toImage(v: unknown): DeckImage | undefined {
-  if (typeof v === 'string') return str(v, 2000) ? { src: str(v, 2000)! } : undefined;
+const MASKS = new Set<ImageMask>(['rect', 'rounded', 'circle', 'hexagon', 'diagonal']);
+
+export function toImage(v: unknown): DeckImage | undefined {
+  // Data URLs are long by nature (a picture the person chose); everything else is a path or a URL.
+  const max = (s: unknown): number => (typeof s === 'string' && s.startsWith('data:') ? 400_000 : 2000);
+  if (typeof v === 'string') return str(v, max(v)) ? { src: str(v, max(v))! } : undefined;
   if (!v || typeof v !== 'object') return undefined;
   const o = v as Record<string, unknown>;
-  const src = str(o.src ?? o.path ?? o.url, 2000);
+  const raw = o.src ?? o.path ?? o.url;
+  const src = str(raw, max(raw));
   if (!src) return undefined;
   const alt = str(o.alt, 300);
-  return { src, ...(alt ? { alt } : {}), ...(o.fit === 'contain' ? { fit: 'contain' as const } : {}) };
+  const mask = typeof o.mask === 'string' ? (o.mask.toLowerCase() === 'round' ? 'rounded' : o.mask.toLowerCase() === 'hex' ? 'hexagon' : o.mask.toLowerCase() === 'angled' ? 'diagonal' : o.mask.toLowerCase()) : undefined;
+  const credit = str(o.credit ?? o.creator ?? o.author, 160);
+  const license = str(o.license ?? o.licence, 80);
+  const sourceUrl = str(o.sourceUrl ?? o.source, 600);
+  const caption = str(o.caption, 160);
+  const px = Array.isArray(o.px) && o.px.length === 2 && o.px.every(n => Number.isFinite(Number(n)) && Number(n) > 0) ? [Math.round(Number(o.px[0])), Math.round(Number(o.px[1]))] as [number, number] : undefined;
+  return {
+    src, ...(alt ? { alt } : {}), ...(o.fit === 'contain' ? { fit: 'contain' as const } : {}),
+    ...(mask && MASKS.has(mask as ImageMask) && mask !== 'rect' ? { mask: mask as ImageMask } : {}),
+    ...(o.side === 'right' || o.side === 'left' ? { side: o.side } : {}),
+    ...(credit ? { credit } : {}), ...(license ? { license } : {}), ...(sourceUrl ? { sourceUrl } : {}), ...(px ? { px } : {}), ...(caption ? { caption } : {}),
+  };
+}
+
+function toImages(v: unknown): DeckImage[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = v.slice(0, 6).map(toImage).filter((x): x is DeckImage => Boolean(x));
+  return out.length ? out : undefined;
+}
+
+function toItem(v: unknown): InfoItem | undefined {
+  if (typeof v === 'string') {
+    const t = str(v, 300);
+    if (!t) return undefined;
+    // "Title: detail" or "Title — detail" splits; a bare line is a title.
+    const m = /^(.{2,60}?)\s*(?::|—|–|\s-\s)\s+(.+)$/.exec(t);
+    return m ? { title: m[1]!, text: m[2]! } : { title: t };
+  }
+  if (!v || typeof v !== 'object') return undefined;
+  const o = v as Record<string, unknown>;
+  const title = str(o.title ?? o.label ?? o.name ?? o.heading, 160);
+  const text = str(o.text ?? o.description ?? o.detail ?? o.body ?? (Array.isArray(o.points) ? (o.points as unknown[]).map(String).join('\n') : undefined), 500);
+  const value = str(o.value ?? o.stat ?? o.number ?? o.date ?? o.percent, 40);
+  const icon = str(o.icon, 60)?.toLowerCase().replace(/[\s_]+/g, '-');
+  const image = toImage(o.image ?? o.photo);
+  if (!title && !text && !value) return undefined;
+  return { title: title ?? '', ...(text ? { text } : {}), ...(value ? { value } : {}), ...(icon ? { icon } : {}), ...(image ? { image } : {}) };
+}
+
+export function toInfographic(v: unknown, kindHint?: InfographicKind): DeckInfographic | undefined {
+  if (Array.isArray(v)) v = { items: v };
+  if (!v || typeof v !== 'object') return undefined;
+  const o = v as Record<string, unknown>;
+  const kind = toInfographicKind(o.kind ?? o.type ?? o.style) ?? kindHint;
+  if (!kind) throw new Error(`infographic.kind "${String(o.kind ?? o.type ?? '')}" is not one of ${INFOGRAPHICS.map(i => i.id).join(', ')}`);
+  const items = (Array.isArray(o.items) ? o.items : Array.isArray(o.steps) ? o.steps : []).slice(0, 12).map(toItem).filter((x): x is InfoItem => Boolean(x));
+  const centre = str(o.centre ?? o.center ?? o.hub, 80);
+  const axes = Array.isArray(o.axes) && o.axes.length >= 2 ? [str(o.axes[0], 60) ?? '', str(o.axes[1], 60) ?? ''] as [string, string] : undefined;
+  return { kind, items, ...(centre ? { centre } : {}), ...(axes ? { axes } : {}) };
 }
 
 /** The content fields, for "is this slide still only a plan?" */
-const CONTENT_KEYS: (keyof Slide)[] = ['title', 'subtitle', 'bullets', 'body', 'left', 'right', 'image', 'chart', 'diagram', 'table', 'kpis', 'quote', 'timeline'];
+const CONTENT_KEYS: (keyof Slide)[] = ['title', 'subtitle', 'bullets', 'body', 'left', 'right', 'image', 'chart', 'diagram', 'table', 'kpis', 'quote', 'timeline', 'infographic', 'images'];
+
+/** A field that holds content (an infographic with no items yet is still a plan: its kind is the plan). */
+function hasContent(s: Slide, k: keyof Slide): boolean {
+  if (k === 'infographic') return (s.infographic?.items.length ?? 0) > 0;
+  return s[k] !== undefined;
+}
 
 /**
  * A slide from loose input. `base` is the slide being changed: fields the
@@ -356,11 +561,21 @@ export function normalizeSlide(input: unknown, id: string, base?: Slide): Slide 
   const set = <K extends keyof Slide>(k: K, v: Slide[K] | undefined): void => {
     if (v === undefined) delete out[k]; else out[k] = v;
   };
+  // An infographic kind given as the layout ("layout": "cycle") is the infographic layout of that kind.
+  let kindHint: InfographicKind | undefined;
   if (has('layout')) {
-    const l = toLayout(o.layout);
-    if (!l) throw new Error(`slide ${id}: layout "${String(o.layout)}" is not one of ${LAYOUTS.map(x => x.id).join(', ')}`);
+    const l = toLayout(o.layout) ?? (toInfographicKind(o.layout) ? 'infographic' : undefined);
+    if (!l) throw new Error(`slide ${id}: layout "${String(o.layout)}" is not one of ${LAYOUTS.map(x => x.id).join(', ')} (or an infographic kind: ${INFOGRAPHICS.map(i => i.id).join(', ')})`);
+    if (l === 'infographic' && !toLayout(o.layout)) kindHint = toInfographicKind(o.layout);
     out.layout = l;
   }
+  if (has('infographic') || kindHint) {
+    const given = has('infographic') ? o.infographic : undefined;
+    const prev = base?.infographic;
+    set('infographic', given === null ? undefined
+      : toInfographic(given ?? (prev ? { ...prev, kind: kindHint ?? prev.kind } : { items: [] }), kindHint ?? prev?.kind));
+  }
+  if (has('images')) set('images', toImages(o.images));
   if (has('title')) set('title', str(o.title, 300));
   if (has('subtitle')) set('subtitle', str(o.subtitle, 400));
   if (has('bullets') || has('items') || has('points')) set('bullets', toBullets(o.bullets ?? o.items ?? o.points));
@@ -380,13 +595,13 @@ export function normalizeSlide(input: unknown, id: string, base?: Slide): Slide 
   if (has('notes')) set('notes', str(o.notes, MAX_NOTES));
   if (has('transition')) set('transition', o.transition === 'fade' ? 'fade' : o.transition === 'none' ? 'none' : undefined);
   if (has('intent')) set('intent', str(o.intent, 400));
-  else if (CONTENT_KEYS.some(k => k !== 'title' && has(k as string) && out[k] !== undefined)) delete out.intent;
+  else if (CONTENT_KEYS.some(k => k !== 'title' && has(k as string) && hasContent(out, k))) delete out.intent;
   return out;
 }
 
 /** Is the slide still a plan (an intent and no content beyond a title)? */
 export function isPending(s: Slide): boolean {
-  return Boolean(s.intent) && !CONTENT_KEYS.some(k => k !== 'title' && s[k] !== undefined);
+  return Boolean(s.intent) && !CONTENT_KEYS.some(k => k !== 'title' && hasContent(s, k));
 }
 
 // ── Parsing and ids ──────────────────────────────────────────────────
@@ -433,8 +648,52 @@ export function deckFrom(raw: unknown): Deck {
     ...(typeof o.type === 'string' && o.type.trim() ? { type: o.type.trim().slice(0, 40) } : {}),
     ...(typeof o.footer === 'string' && o.footer.trim() ? { footer: o.footer.trim().slice(0, 120) } : {}),
     ...(o.slideNumbers === false ? { slideNumbers: false } : {}),
+    ...(toPalette(o.palette) ? { palette: toPalette(o.palette)! } : {}),
+    ...(toFonts(o.fonts) ? { fonts: toFonts(o.fonts)! } : {}),
+    ...(toBrief(o.brief) ? { brief: toBrief(o.brief)! } : {}),
     slides,
   };
+}
+
+const SLOTS = ['dk1', 'lt1', 'dk2', 'lt2', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6'] as const;
+
+/** Brand colours per theme slot, #RRGGBB only. */
+export function toPalette(v: unknown): Deck['palette'] | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: NonNullable<Deck['palette']> = {};
+  for (const k of SLOTS) {
+    const c = (v as Record<string, unknown>)[k];
+    if (typeof c === 'string' && /^#?[0-9a-f]{6}$/i.test(c.trim())) out[k] = `#${c.trim().replace('#', '').toUpperCase()}`;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Fonts the layout engine can measure — anything else would wrap differently in PowerPoint than here. */
+export function toFonts(v: unknown): Deck['fonts'] | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const o = v as Record<string, unknown>;
+  const pick = (f: unknown): string | undefined => (typeof f === 'string' ? MEASURED_FONTS.find(m => m.toLowerCase() === f.trim().toLowerCase()) : undefined);
+  const heading = pick(o.heading);
+  const body = pick(o.body);
+  return heading || body ? { ...(heading ? { heading } : {}), ...(body ? { body } : {}) } : undefined;
+}
+
+export function toBrief(v: unknown): DesignBrief | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const o = v as Record<string, unknown>;
+  const b = (o.brand && typeof o.brand === 'object' ? o.brand : {}) as Record<string, unknown>;
+  const colors = (Array.isArray(b.colors) ? b.colors : []).map(c => (typeof c === 'string' && /^#?[0-9a-f]{6}$/i.test(c.trim()) ? `#${c.trim().replace('#', '').toUpperCase()}` : '')).filter(Boolean).slice(0, 6);
+  const brand = { ...(str(b.name, 80) ? { name: str(b.name, 80)! } : {}), ...(str(b.url, 300) ? { url: str(b.url, 300)! } : {}), ...(colors.length ? { colors } : {}), ...(str(b.font, 60) ? { font: str(b.font, 60)! } : {}) };
+  const style = String(o.imageStyle ?? '').toLowerCase();
+  const out: DesignBrief = {
+    ...(str(o.audience, 120) ? { audience: str(o.audience, 120)! } : {}),
+    ...(str(o.industry, 120) ? { industry: str(o.industry, 120)! } : {}),
+    ...(str(o.tone, 120) ? { tone: str(o.tone, 120)! } : {}),
+    ...(Object.keys(brand).length ? { brand } : {}),
+    ...(['photo', 'illustration', 'abstract', 'none'].includes(style) ? { imageStyle: style as DesignBrief['imageStyle'] } : {}),
+    ...(str(o.notes, 600) ? { notes: str(o.notes, 600)! } : {}),
+  };
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function serializeDeck(deck: Deck): string {
@@ -448,7 +707,7 @@ export type DeckOp =
   | { op: 'insert'; at: number; slide: Slide }
   | { op: 'delete'; id: string }
   | { op: 'move'; id: string; to: number }
-  | { op: 'meta'; patch: Partial<Pick<Deck, 'theme' | 'aspect' | 'type' | 'footer' | 'slideNumbers'>> }
+  | { op: 'meta'; patch: Partial<Pick<Deck, 'theme' | 'aspect' | 'type' | 'footer' | 'slideNumbers' | 'palette' | 'fonts' | 'brief'>> }
   | { op: 'replace'; deck: Deck };
 
 /** Apply one operation. Throws when it no longer applies (its slide is gone). */
@@ -487,6 +746,10 @@ export function applyDeckOp(deck: Deck, op: DeckOp): Deck {
       if (p.type !== undefined) { if (p.type) next.type = p.type; else delete next.type; }
       if (p.footer !== undefined) { if (p.footer) next.footer = p.footer; else delete next.footer; }
       if (p.slideNumbers !== undefined) { if (p.slideNumbers === false) next.slideNumbers = false; else delete next.slideNumbers; }
+      // An empty palette, fonts or brief clears it.
+      if (p.palette !== undefined) { const v = toPalette(p.palette); if (v) next.palette = v; else delete next.palette; }
+      if (p.fonts !== undefined) { const v = toFonts(p.fonts); if (v) next.fonts = v; else delete next.fonts; }
+      if (p.brief !== undefined) { const v = toBrief(p.brief); if (v) next.brief = v; else delete next.brief; }
       return next;
     }
     case 'replace':
@@ -529,7 +792,35 @@ export function blankSlide(layout: DeckLayout, id: string): Slide {
     case 'timeline': return { id, layout, title: 'Slide title', timeline: [{ date: 'Q1', title: 'Milestone' }, { date: 'Q2', title: 'Milestone' }, { date: 'Q3', title: 'Milestone' }] };
     case 'agenda': return { id, layout, title: 'Agenda', bullets: [{ text: 'Item' }, { text: 'Item' }, { text: 'Item' }] };
     case 'closing': return { id, layout, title: 'Thank you', subtitle: 'Questions?' };
+    case 'infographic': return { id, layout, title: 'Slide title', infographic: sampleInfographic('process') };
+    case 'image-grid': return { id, layout, title: 'Slide title', images: [{ src: 'art:mesh', alt: 'Picture' }, { src: 'art:circles', alt: 'Picture' }, { src: 'art:waves', alt: 'Picture' }] };
     default: return { id, layout: 'bullets', title: 'Slide title', bullets: [{ text: 'Point' }] };
+  }
+}
+
+/** Placeholder content for an infographic of a kind — the gallery's thumbnails and a new slide. */
+export function sampleInfographic(kind: InfographicKind): DeckInfographic {
+  const icons = ['target', 'lightbulb', 'rocket', 'users', 'chart-line', 'shield-check', 'cog', 'globe'];
+  const info = infographicInfo(kind);
+  const n = Math.min(info.max, Math.max(info.min, kind === 'cards' || kind === 'tiles' ? 3 : kind === 'rings' ? 3 : 4));
+  const words = ['Discover', 'Design', 'Build', 'Launch', 'Grow', 'Scale', 'Review', 'Learn'];
+  const items: InfoItem[] = Array.from({ length: n }, (_, i) => ({ title: words[i]!, text: 'One short line', icon: icons[i]! }));
+  switch (kind) {
+    case 'swot': return { kind, items: ['Strengths', 'Weaknesses', 'Opportunities', 'Threats'].map(t => ({ title: t, text: 'Point one\nPoint two' })) };
+    case 'matrix': return { kind, axes: ['Effort', 'Impact'], items: ['Quick wins', 'Big bets', 'Fill-ins', 'Money pits'].map(t => ({ title: t, text: 'Example' })) };
+    case 'pros-cons': return { kind, items: [{ title: 'Pros', text: 'Faster\nCheaper' }, { title: 'Cons', text: 'Riskier\nNew skills' }] };
+    case 'versus': return { kind, items: [{ title: 'Option A', text: 'Point one\nPoint two', icon: 'box' }, { title: 'Option B', text: 'Point one\nPoint two', icon: 'boxes' }] };
+    case 'before-after': return { kind, items: [{ title: 'Before', text: 'Manual\nSlow' }, { title: 'After', text: 'Automated\nFast' }] };
+    case 'venn': return { kind, centre: 'Sweet spot', items: [{ title: 'Desirable' }, { title: 'Feasible' }, { title: 'Viable' }] };
+    case 'rings': return { kind, items: [{ title: 'Adoption', value: '72%' }, { title: 'Retention', value: '88%' }, { title: 'NPS', value: '45%' }] };
+    case 'stat-bars': return { kind, items: [{ title: 'Awareness', value: '82%' }, { title: 'Trial', value: '54%' }, { title: 'Purchase', value: '31%' }, { title: 'Loyalty', value: '22%' }] };
+    case 'tiles': return { kind, items: [{ title: 'Customers', value: '12k', icon: 'users' }, { title: 'Growth', value: '3×', icon: 'trending-up' }, { title: 'Uptime', value: '99.9%', icon: 'activity' }] };
+    case 'funnel': return { kind, items: [{ title: 'Visitors', value: '50k' }, { title: 'Leads', value: '8k' }, { title: 'Trials', value: '2k' }, { title: 'Customers', value: '600' }] };
+    case 'timeline': case 'roadmap': return { kind, items: items.map((it, i) => ({ ...it, value: `Q${(i % 4) + 1}` })) };
+    case 'team': return { kind, items: ['Alex Kim', 'Sam Patel', 'Jo Rivera'].map((t, i) => ({ title: t, text: ['CEO', 'CTO', 'COO'][i]! })) };
+    case 'quote-photo': return { kind, items: [{ title: 'Customer name', value: 'Role, Company', text: 'A short quote that says why it mattered.' }] };
+    case 'cycle': case 'radial': case 'semicircle': return { kind, centre: 'Core', items };
+    default: return { kind, items };
   }
 }
 
@@ -567,5 +858,8 @@ export function slideText(s: Slide): string {
   push(s.quote); push(s.attribution);
   s.kpis?.forEach(k => push(`${k.value} ${k.label}`));
   s.timeline?.forEach(m => push(`${m.date} ${m.title}`));
+  push(s.infographic?.centre);
+  s.infographic?.items.forEach(it => push([it.value, it.title, it.text].filter(Boolean).join(' ')));
+  s.images?.forEach(im => push(im.caption));
   return parts.join(' · ');
 }

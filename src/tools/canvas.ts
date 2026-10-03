@@ -28,7 +28,8 @@
  * system prompt, so it costs nothing on turns that write no document.
  *
  * `edit_part` (ADR 0024) changes ONE named part — a paragraph, a table or some
- * of its cells, a chart, a diagram, a section — through the same contract and
+ * of its cells, a chart, a diagram, a section, or on a deck a slide or one
+ * element of it (held to the slide's layout too) — through the same contract and
  * validator as the editor's inline "Ask AICO": the agent's own replacement, or
  * one written by the `edit` model from an instruction, is checked (nothing
  * outside the part changes, type and shape kept unless asked, figures,
@@ -68,13 +69,16 @@ import {
   applyPart, definedTerms, findPart, patchFromMarkdown, resolveTarget, validatePatch, type PartQuery,
 } from '../../shared/ui/canvas/scoped-edit.js';
 import { diffStats, wordDiff } from '../../shared/ui/canvas/scoped-diff.js';
-import { DECK_TOOL_HELP, createDeck, readDeck, readSlides, setSlides } from '../canvas/deck-tool.js';
+import { DECK_TOOL_HELP, createDeck, readDeck, readSlides, setSlides, stale as deckStale } from '../canvas/deck-tool.js';
+import { DECK_VISUAL_HELP, designBriefAction, findIconsAction, findImagesAction, makeVisualAction } from '../canvas/deck-visual-tool.js';
+import { deckEditPartTool } from '../canvas/deck-inline-edit.js';
 import { DECK_EXPORT_FORMATS, exportDeck, type DeckExportFormat } from '../canvas/deck-export.js';
 
 export interface CanvasInput {
   action?: 'create' | 'read' | 'update' | 'edit' | 'list' | 'outline' | 'write_section' | 'add_tab' | 'rename_tab'
     | 'comments' | 'reply_comment' | 'export' | 'settings' | 'edit_part'
-    | 'set_cells' | 'format_cells' | 'add_sheet' | 'grid_op' | 'import' | 'set_slides';
+    | 'set_cells' | 'format_cells' | 'add_sheet' | 'grid_op' | 'import' | 'set_slides'
+    | 'find_images' | 'find_icons' | 'design_brief' | 'make_visual';
   id?: string;
   title?: string;
   kind?: 'document' | 'code' | 'sheet' | 'deck';
@@ -115,6 +119,14 @@ export interface CanvasInput {
   theme?: string;
   aspect?: string;
   footer?: string;
+  // Deck visuals (canvas/deck-visual-tool, ADR 0025).
+  query?: string;
+  orientation?: string;
+  count?: number;
+  infographic?: string;
+  brief?: Record<string, unknown>;
+  palette?: Record<string, unknown>;
+  fonts?: Record<string, unknown>;
 }
 
 function context(): CanvasContext {
@@ -401,7 +413,14 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
 
     case 'edit_part': {
       const doc = await load(ctx, input.id);
-      if (doc.kind !== 'document') throw new Error(`edit_part changes one part of a document; canvas ${doc.id} is a ${doc.kind}.`);
+      if (doc.kind === 'deck') {
+        // A slide or one element of it (ADR 0024, deck section): held to the part, the layout and the facts.
+        const rc = currentRunContext();
+        return withActivity(ctx, doc, doc.tabs[0]!, {}, () => deckEditPartTool(ctx, doc, input, {
+          mainModel: rc?.model ?? ctx.settings?.model ?? '', stale: d => deckStale(d, input.version),
+        }));
+      }
+      if (doc.kind !== 'document') throw new Error(`edit_part changes one part of a document or a deck; canvas ${doc.id} is a ${doc.kind}.`);
       const tab = tabFor(doc, input.tab);
       if (typeof input.version !== 'number' || input.version !== tab.version) throw stale(doc, tab, input.version);
       const instruction = (input.instruction ?? '').trim();
@@ -507,6 +526,20 @@ export async function canvasTool(input: CanvasInput): Promise<string> {
       const doc = await load(ctx, input.id);
       if (doc.kind !== 'deck') throw new Error(`Canvas ${doc.id} is a ${doc.kind}, not a deck — set_slides is for decks (create one with kind "deck").`);
       return withActivity(ctx, doc, doc.tabs[0]!, {}, () => setSlides(ctx, doc, input));
+    }
+
+    // Deck visuals (ADR 0025): licensed pictures, icons, the design brief, bullets → infographic.
+    case 'find_images': return findImagesAction(ctx, input.id ? await load(ctx, input.id) : undefined, input);
+    case 'find_icons': return findIconsAction(input);
+    case 'design_brief': {
+      const doc = input.id ? await load(ctx, input.id) : undefined;
+      if (doc && doc.kind !== 'deck') throw new Error(`Canvas ${doc.id} is a ${doc.kind}, not a deck — design_brief is for decks.`);
+      return doc ? withActivity(ctx, doc, doc.tabs[0]!, {}, () => designBriefAction(ctx, doc, input)) : designBriefAction(ctx, undefined, input);
+    }
+    case 'make_visual': {
+      const doc = await load(ctx, input.id);
+      if (doc.kind !== 'deck') throw new Error(`Canvas ${doc.id} is a ${doc.kind}, not a deck — make_visual is for decks.`);
+      return withActivity(ctx, doc, doc.tabs[0]!, {}, () => makeVisualAction(ctx, doc, { ...input, ...(input.infographic ? { kind: input.infographic } : { kind: undefined }) }));
     }
 
     case 'import': {
@@ -630,14 +663,16 @@ export const canvasDefinition = {
     + 'After create/outline, put the ```canvas block from the result in your reply: it is only a reference card that opens '
     + 'the canvas. A message like "Edit canvas <id> — …" means: read that canvas, then edit it.\n'
     + SHEET_TOOL_HELP + '\n'
-    + DECK_TOOL_HELP,
+    + DECK_TOOL_HELP + '\n'
+    + DECK_VISUAL_HELP,
   inputSchema: {
     type: 'object',
     properties: {
       action: {
         type: 'string',
         enum: ['create', 'read', 'update', 'edit', 'list', 'outline', 'write_section', 'add_tab', 'rename_tab', 'comments', 'reply_comment', 'export', 'settings',
-          'edit_part', 'set_cells', 'format_cells', 'add_sheet', 'grid_op', 'import', 'set_slides'],
+          'edit_part', 'set_cells', 'format_cells', 'add_sheet', 'grid_op', 'import', 'set_slides',
+          'find_images', 'find_icons', 'design_brief', 'make_visual'],
       },
       id: { type: 'string', description: 'The canvas id (from create/outline or list).' },
       title: { type: 'string', description: 'create/outline: the title. update/edit: optionally rename. add_tab/rename_tab: the tab name.' },
@@ -704,6 +739,8 @@ export const canvasDefinition = {
       theme: { type: 'string', description: 'Decks — create/set_slides: the theme id.' },
       aspect: { type: 'string', enum: ['16:9', '4:3'], description: 'Decks — create/set_slides: slide shape (default 16:9).' },
       footer: { type: 'string', description: 'Decks — create/set_slides: footer text on content slides.' },
+      query: { type: 'string', description: 'find_images/find_icons: what to find.' },
+      brief: { type: 'object' },
     },
     required: ['action'],
   },

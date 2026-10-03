@@ -1,0 +1,39 @@
+/* Deck visual tools (DeckVisuals.tsx, ADR 0025): gallery, pictures, icons, design brief. Same tokens as deck.css. */
+.aw .adv-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.aw .adv-gallery-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border: 1px solid transparent; border-radius: 8px; background: none; color: inherit; cursor: pointer; font-size: 11.5px; }
+.aw .adv-gallery-item:hover { border-color: var(--aw-line); background: var(--aw-raised); }
+.aw .adv-gallery-item .adk-slidebox { border-radius: 4px; box-shadow: 0 0 0 1px var(--aw-line); }
+.aw .adv-gallery-title { grid-column: 1 / -1; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--aico-text-muted); padding: 6px 2px 0; }
+.aw .adv-ig textarea, .aw .adv-panel textarea { width: 100%; font: 12px/1.45 ui-monospace, Consolas, monospace; }
+.aw .adv-icon-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.aw .adv-icon-chip { width: 30px; height: 30px; min-width: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.aw .adv-icons { width: min(380px, 86vw); }
+.aw .adv-icon-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; max-height: 240px; overflow: auto; margin: 6px 0; }
+.aw .adv-icon { height: 36px; border: 1px solid transparent; border-radius: 6px; background: none; color: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.aw .adv-icon:hover { border-color: var(--aico-accent); background: var(--aw-raised); }
+.aw .adv-pic { border-top: 1px dashed var(--aw-soft); padding-top: 6px; margin-top: 6px; }
+.aw .adv-pic:first-of-type { border-top: 0; margin-top: 0; }
+.aw .adv-pic-head { display: flex; gap: 6px; align-items: baseline; justify-content: space-between; font-size: 12px; }
+.aw .adv-pic-label { font-weight: 600; }
+.aw .adv-pic-credit { color: var(--aico-text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.aw .adv-pic-actions { flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.aw .adv-panel { border: 1px solid var(--aw-line); border-radius: 8px; padding: 8px; margin: 6px 0; background: var(--aw-raised); }
+.aw .adv-panel input:not([type]) { flex: 1; min-width: 0; }
+.aw .adv-results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
+.aw .adv-result { position: relative; padding: 0; border: 1px solid var(--aw-line); border-radius: 6px; overflow: hidden; background: var(--aw-card); cursor: pointer; aspect-ratio: 4 / 3; }
+.aw .adv-result:hover { border-color: var(--aico-accent); }
+.aw .adv-result img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.aw .adv-noprev { display: block; padding: 6px; font-size: 11px; color: var(--aico-text-muted); }
+.aw .adv-lic { position: absolute; left: 0; right: 0; bottom: 0; font-size: 10px; padding: 2px 4px; background: rgba(0, 0, 0, 0.55); color: #fff; text-align: left; }
+.aw .adv-files { max-height: 180px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.aw .adv-file { text-align: left; border: 0; background: none; color: inherit; padding: 3px 6px; border-radius: 4px; cursor: pointer; font: 12px ui-monospace, Consolas, monospace; }
+.aw .adv-file:hover { background: var(--aw-card); }
+.aw .adv-make { width: 100%; margin: 6px 0; }
+.aw .adv-design { width: min(560px, 92vw); right: 0; left: auto; max-height: 78vh; overflow: auto; }
+.aw .adv-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.aw .adv-swatches { gap: 4px; }
+.aw .adv-swatch { width: 22px; height: 22px; border-radius: 5px; box-shadow: 0 0 0 1px var(--aw-line); display: inline-block; }
+.aw .adv-palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 6px 0; }
+.aw .adv-slot { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.aw .adv-slot input[type="color"] { width: 30px; height: 26px; padding: 0; border: 1px solid var(--aw-line); border-radius: 5px; background: none; }
+.aw .adv-photos { display: flex; flex-direction: column; gap: 2px; }

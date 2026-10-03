@@ -16,9 +16,10 @@
  * @module shared/ui/canvas/deck-types
  */
 
-import type { DeckLayout } from './deck-model';
+import type { DeckLayout, InfographicKind } from './deck-model';
 
-export interface DeckTypeSlide { layout: DeckLayout; title: string; intent: string }
+/** A planned slide; `infographic` names the kind an infographic slide is planned as (ADR 0025). */
+export interface DeckTypeSlide { layout: DeckLayout; title: string; intent: string; infographic?: InfographicKind }
 
 export interface DeckType {
   id: string;
@@ -42,14 +43,15 @@ export const DECK_TYPES: readonly DeckType[] = [
     aliases: ['investor pitch', 'startup pitch', 'fundraising'], match: /\bpitch|investor|fundrais|seed round|series [a-c]\b/i,
     theme: 'ember', maxBullets: 4, words: [10, 40],
     slides: [
-      { layout: 'title', title: 'Company — one-line promise', intent: 'Name, the one-line value proposition, presenter and date' },
-      { layout: 'bullets', title: 'The problem', intent: 'Who hurts, how much, and why existing options fail (3 bullets, one number)' },
-      { layout: 'image-text', title: 'Our solution', intent: 'What the product does for that customer, in their words' },
-      { layout: 'kpi', title: 'Market', intent: 'TAM / SAM / SOM as three big numbers with their basis' },
+      { layout: 'title', title: 'Company — one-line promise', intent: 'Name, the one-line value proposition, presenter and date; a photo cut-out (image.mask circle) or background photo' },
+      { layout: 'infographic', infographic: 'cards', title: 'The problem', intent: 'Who hurts, how much, why existing options fail — 3 cards with an icon each, one number' },
+      { layout: 'image-text', title: 'Our solution', intent: 'What the product does for that customer, in their words, beside a product or customer photo' },
+      { layout: 'infographic', infographic: 'tiles', title: 'Market', intent: 'TAM / SAM / SOM as three tiles (value) with their basis' },
       { layout: 'chart', title: 'Traction', intent: 'Growth over time (revenue, users or pilots) with the one takeaway' },
-      { layout: 'two-column', title: 'Business model', intent: 'How it makes money (pricing, unit economics) vs. how it reaches customers' },
-      { layout: 'comparison', title: 'Why we win', intent: 'Us vs. the alternative customers use today' },
-      { layout: 'timeline', title: 'Roadmap', intent: 'The next 3–5 milestones the money buys' },
+      { layout: 'infographic', infographic: 'process', title: 'Business model', intent: 'How money flows: acquire → convert → retain → expand, with unit economics' },
+      { layout: 'infographic', infographic: 'versus', title: 'Why we win', intent: 'Us vs. the alternative customers use today' },
+      { layout: 'infographic', infographic: 'roadmap', title: 'Roadmap', intent: 'The next 3–5 milestones the money buys (value = date)' },
+      { layout: 'infographic', infographic: 'team', title: 'Team', intent: 'Founders and key hires: name, role, one credential' },
       { layout: 'kpi', title: 'The ask', intent: 'Amount, runway, and the 2–3 uses of funds' },
       { layout: 'closing', title: 'Thank you', intent: 'Contact details' },
     ],
@@ -62,13 +64,14 @@ export const DECK_TYPES: readonly DeckType[] = [
     theme: 'slate', maxBullets: 6, words: [20, 70],
     slides: [
       { layout: 'title', title: 'System — briefing', intent: 'What system, for which audience, presenter and date' },
-      { layout: 'agenda', title: 'Agenda', intent: 'The 4–6 parts of the briefing' },
-      { layout: 'bullets', title: 'Context and goals', intent: 'Why this matters now, the constraints, what success looks like' },
+      { layout: 'infographic', infographic: 'agenda', title: 'Agenda', intent: 'The 4–6 parts of the briefing' },
+      { layout: 'infographic', infographic: 'icon-grid', title: 'Context and goals', intent: 'Why this matters now, the constraints, what success looks like — one icon each' },
       { layout: 'diagram', title: 'Architecture', intent: 'Component diagram (Mermaid flowchart) with the 2–3 things to notice' },
       { layout: 'table', title: 'Components', intent: 'Each component: role, technology, scale/sizing, owner' },
+      { layout: 'infographic', infographic: 'cycle', title: 'How it is run', intent: 'The operating cycle (patch, monitor, back up, review…) as 4–5 stages' },
       { layout: 'chart', title: 'Performance and capacity', intent: 'Measured load, latency or capacity vs. target' },
       { layout: 'table', title: 'Risks and mitigations', intent: 'Risk, likelihood/impact, mitigation, owner' },
-      { layout: 'bullets', title: 'Recommendations', intent: 'What to decide or do, in priority order' },
+      { layout: 'infographic', infographic: 'cards', title: 'Recommendations', intent: 'What to decide or do, in priority order — 3 cards' },
       { layout: 'timeline', title: 'Next steps', intent: 'Dated actions' },
       { layout: 'closing', title: 'Questions', intent: 'Contacts and where the detail lives' },
     ],
@@ -93,21 +96,39 @@ export const DECK_TYPES: readonly DeckType[] = [
   },
   {
     id: 'training', title: 'Training session', description: 'Teaching deck: objectives, concepts, examples, exercise, recap',
-    aliases: ['training', 'workshop', 'course', 'lesson', 'tutorial', 'onboarding'],
-    match: /\btrain|workshop|course|lesson|tutorial|onboard|introduction to|101\b/i,
+    aliases: ['training', 'workshop', 'course', 'lesson', 'tutorial'],
+    match: /\btrain|workshop|course|lesson|tutorial|introduction to|101\b/i,
     theme: 'meadow', maxBullets: 5, words: [15, 50],
     slides: [
       { layout: 'title', title: 'Topic — training', intent: 'Topic, audience, trainer, date' },
-      { layout: 'agenda', title: 'Agenda', intent: 'The modules of the session' },
-      { layout: 'bullets', title: 'Learning objectives', intent: 'By the end you will be able to… (3–4 objectives)' },
+      { layout: 'infographic', infographic: 'agenda', title: 'Agenda', intent: 'The modules of the session' },
+      { layout: 'infographic', infographic: 'icon-grid', title: 'Learning objectives', intent: 'By the end you will be able to… (3–4 objectives, an icon each)' },
       { layout: 'section', title: 'Module 1', intent: 'The first concept' },
       { layout: 'image-text', title: 'Key concept', intent: 'The concept explained with one picture or example' },
-      { layout: 'diagram', title: 'How it works', intent: 'A process or flow diagram' },
+      { layout: 'infographic', infographic: 'process', title: 'How it works', intent: 'The process as 3–5 steps' },
       { layout: 'bullets', title: 'Exercise', intent: 'Hands-on task with clear steps and expected result' },
-      { layout: 'bullets', title: 'Recap', intent: 'The 3–5 things to remember' },
+      { layout: 'infographic', infographic: 'cards', title: 'Recap', intent: 'The 3–4 things to remember' },
       { layout: 'closing', title: 'Thank you', intent: 'Resources and contact' },
     ],
     brief: 'Teach one concept per slide, with an example. Objectives use action verbs. Put the detail in speaker notes, not on the slide.',
+  },
+  {
+    id: 'onboarding', title: 'Staff onboarding', description: 'Welcome for new staff: who we are, first weeks, people, tools, help',
+    aliases: ['onboarding', 'induction', 'new starter', 'new hire', 'welcome pack', 'orientation', 'hr onboarding'],
+    match: /\bonboard|induction|new (?:staff|starters?|hires?|joiners?|employees?)|welcome pack|orientation\b/i,
+    theme: 'sunrise', maxBullets: 4, words: [12, 40],
+    slides: [
+      { layout: 'title', title: 'Welcome to the team', intent: 'Organisation, who it is for, date; a welcoming team photo (image.mask circle or background)' },
+      { layout: 'infographic', infographic: 'agenda', title: 'Today', intent: 'The parts of the session' },
+      { layout: 'image-text', title: 'Who we are', intent: 'Purpose, what we do, who for — beside a photo of the place or people' },
+      { layout: 'infographic', infographic: 'timeline', title: 'Your first weeks', intent: 'Day 1, week 1, month 1, month 3: what happens (value = when, an icon each)' },
+      { layout: 'infographic', infographic: 'team', title: 'People you will meet', intent: 'Manager, buddy, HR, IT: name and role' },
+      { layout: 'infographic', infographic: 'icon-grid', title: 'Tools and access', intent: 'The systems they get and how (laptop, email, chat, HR portal…)' },
+      { layout: 'infographic', infographic: 'cards', title: 'Policies that matter', intent: 'The 3–4 policies to read first and where they live' },
+      { layout: 'infographic', infographic: 'radial', title: 'Where to get help', intent: 'Who to ask for what, around "You" in the centre' },
+      { layout: 'closing', title: 'Welcome aboard', intent: 'Contacts and the next step' },
+    ],
+    brief: 'Warm and practical: faces and names, the first weeks as a timeline, who to ask for what. Real names and dates only — mark unknowns [To confirm].',
   },
   {
     id: 'sales-proposal', title: 'Sales proposal', description: 'Client proposal: their challenge, our approach, value, plan, pricing',

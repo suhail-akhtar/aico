@@ -93,7 +93,7 @@ console.log('\n══ AICO Slides: the deck model ══');
   ok(d.slides.map(x => x.id).join() === 's2,s2x,s1', 'move');
   const dup = M.duplicateSlide(d, 's1');
   ok(dup.deck.slides.length === 4 && dup.slide.id === 's3' && dup.deck.slides[3].id === 's3', 'duplicate inserts a copy after it under a new id');
-  ok(M.LAYOUTS.length === 15 && M.LAYOUTS.every(l => M.layoutInfo(l.id).id === l.id), 'fifteen layouts');
+  ok(M.LAYOUTS.length === 17 && M.LAYOUTS.every(l => M.layoutInfo(l.id).id === l.id), 'seventeen layouts (ADR 0025 added infographic and image-grid)');
 }
 
 console.log('\n══ AICO Slides: measuring text ══');
@@ -120,8 +120,8 @@ console.log('\n══ AICO Slides: themes and deck types ══');
   ok(T.resolveHex(th, { s: 'dk1', mod: 0.12, off: 0.86 }) !== th.scheme.dk1 && T.cssColor(th, { s: 'accent1', a: 0.5 }).startsWith('rgba('), 'derived colours and alpha resolve for HTML');
   ok(T.deckTheme('nope').id === 'slate' && T.isDeckTheme('Boardroom') && !T.isDeckTheme('nope'), 'theme lookup by id or name, unknown falls back');
   const layoutIds = new Set(M.LAYOUTS.map(l => l.id));
-  ok(DT.DECK_TYPES.length === 7 && DT.DECK_TYPES.every(t => T.isDeckTheme(t.theme) && t.slides.every(s => layoutIds.has(s.layout)) && t.slides[0].layout === 'title'),
-    'seven deck types, each on a real theme, real layouts, opening with a title slide');
+  ok(DT.DECK_TYPES.length === 8 && DT.DECK_TYPES.every(t => T.isDeckTheme(t.theme) && t.slides.every(s => layoutIds.has(s.layout)) && t.slides[0].layout === 'title'),
+    'eight deck types, each on a real theme, real layouts, opening with a title slide');
   ok(DT.deckTypeById('board pack')?.id === 'board-update' && DT.pickDeckType('Q3 board update')?.id === 'board-update' && DT.pickDeckType('Hello') === undefined,
     'deck types resolve by alias and from an obvious title');
 }

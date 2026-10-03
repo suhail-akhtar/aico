@@ -49,6 +49,7 @@ import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { handleCanvasRoute } from './canvas-routes.js';
 import { handleArtifactRoute } from './artifact-routes.js';
+import { handleDeckVisualRoute } from './deck-visual-routes.js';
 import { onCanvasActivity, onCanvasChange, onCanvasComments } from '../canvas/store.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
@@ -1287,6 +1288,11 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     // The Artifacts panel: everything this chat made or opened (server/artifact-routes).
     if (await handleArtifactRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;
+
+    // Deck pictures, licensed image search and brand colours (server/deck-visual-routes, ADR 0025).
+    if (await handleDeckVisualRoute(route, req, res, url, {
+      resolveCwd: id => resolveCwd(id), send, readJson: r => readJson(r, route === 'deck/images/upload' ? UPLOAD_BODY_MAX : undefined),
+    })) return;
 
     // Settings, provider onboarding, and system state. Consulted before the
     // POST guard because several of these are reads.

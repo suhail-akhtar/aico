@@ -3,6 +3,81 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Ask AICO on a slide** (ADR 0024, deck section). In a presentation, the ✦
+  on the element under the pointer, a right-click, text selected on the slide
+  or in a field, Ctrl+K / Ctrl+I, or a slide's ✦ in the sorter opens the
+  inline edit for a whole slide or one element: title, subtitle, lead line,
+  the bullets or one bullet, a column, the table or some of its cells, the
+  chart, the diagram, the KPI tiles or one tile, a milestone, the infographic
+  or one of its items, the quote, the
+  image caption, the speaker notes, or words selected inside any of them.
+  Quick actions: Shorten to fit, Punchier title, Fewer bullets, Bullets → big
+  numbers / timeline / two columns, Change chart type, Simplify diagram,
+  Change infographic style (among the kinds that can draw the same items),
+  Add a step, Write speaker notes, Translate. Infographic icons must be in the
+  icon set. The model sees the deck type, theme, the
+  slide's layout and its limits (bullets allowed, title length), the outline
+  and the neighbouring slides. Checked in code before you see it: only the
+  part changes (every other slide and field compared), the layout and the
+  element's kind are kept unless asked, figures are kept or carried into a new
+  layout, and the slide must still fit — a proposal that would overflow is
+  sent back once with the layout engine's reason, then refused. The review
+  shows the slide before and after, the words or cells that changed and the
+  fit; Accept is one undoable change saved as one version. The agent's Canvas
+  `edit_part` now takes a slide and element too.
+- `scripts/deck-edit-test.mjs` (in `npm test`), `web/test-deck-edit.mjs` (in
+  `test:web:unit`) and `scripts/deck-edit-live.mjs` (paid, on request).
+- **Infographics in presentations** (ADR 0025). A new `infographic` slide
+  layout with 25 kinds — chevron process, numbered arrows, cycle, semicircle,
+  radial, pyramid, funnel, hexagons, stairs, icon timeline, roadmap, numbered
+  cards, versus, pros/cons, SWOT, 2×2 matrix, Venn, progress rings, KPI tiles,
+  stat bars, team, quote with photo, numbered agenda, icon grid, before/after —
+  each laid out from its items (2–8, with title, text, value and icon) in the
+  theme's colours, in light and dark themes. In PowerPoint they are native,
+  editable preset shapes (chevrons, block arcs, hexagons, donuts…), one group
+  per item, never pictures.
+- **Pictures on slides**: full-bleed backgrounds with a scrim that keeps
+  white text readable, side pictures, pictures cut into a circle, hexagon,
+  rounded box or diagonal (a cut picture stays a picture in PowerPoint), a
+  picture grid layout, team photos, generated abstract art in the theme's
+  colours. Licensed picture search (Openverse and Wikimedia Commons, no key;
+  Pexels or Unsplash with a key stored in the vault as `pexels`/`unsplash`):
+  only CC0, public domain, CC BY and CC BY-SA are offered, only a searched
+  picture is downloaded (through the SSRF guard), and its creator and licence
+  are credited on the slide and in the speaker notes.
+- **Icons**: 355 icons from Lucide (ISC, vendored), searched by meaning,
+  drawn in PowerPoint as recolourable native shapes.
+- **Design brief and brand colours**: the audience, industry, tone and brand
+  pick the theme, palette, layout mix and picture style; a brand's colours
+  can be read from its website and become the deck's palette, adjusted until
+  text passes contrast. Ten new themes (22 in all) with dark variants and
+  gradients; a Staff onboarding deck type; pitch, technical-briefing and
+  training decks now plan infographic slides.
+- **Presentation rules in the layout check**: body text below 18 pt, missing
+  alt text, a fetched picture without credit, soft pictures, palette contrast,
+  more than three slides on one layout, runs of text-only slides, too few
+  visuals, no section dividers in a long deck, too many words, label-only
+  titles.
+- **Editor**: an infographic gallery in the layout picker, an item editor
+  with an icon picker, a picture picker (search online with previews, project
+  files, upload, generated art, ask AICO to generate), a Design panel (brief,
+  brand colours, palette), and "Make this slide visual". Agent actions:
+  `design_brief`, `find_images`, `find_icons`, `make_visual`.
+- `scripts/deck-visual-test.mjs` (in `npm test`) and
+  `scripts/vendor-deck-icons.mjs` (regenerates the icon subset).
+
+### Fixed
+
+- A picture chosen in the deck editor was stored truncated (the slide model
+  cut every image source at 2,000 characters, including the data URL).
+- Secondary text in light deck themes was below WCAG AA contrast (4.0:1); it
+  is now darker, and accent section slides are deepened until white text
+  passes.
+
 ## 0.38.0 — 2026-10-03
 
 ### Added

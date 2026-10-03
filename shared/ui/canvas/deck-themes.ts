@@ -61,6 +61,11 @@ export interface DeckTheme {
   radius: number;
   /** Small labels (kickers, section numbers) in capitals with tracking. */
   caps: boolean;
+  /**
+   * A two-slot gradient (ADR 0025): title, section and closing fields, and
+   * infographic accents, run from the first slot to the second. Absent = flat.
+   */
+  gradient?: [SchemeSlot, SchemeSlot];
 }
 
 export interface ThemeRoles {
@@ -87,6 +92,15 @@ const T = (s: SchemeSlot, mod?: number, off?: number, a?: number): ColorRef => (
   s, ...(mod !== undefined ? { mod } : {}), ...(off !== undefined ? { off } : {}), ...(a !== undefined ? { a } : {}),
 });
 
+/** A slot as a field white text sits on: the slot itself, or darkened just enough for 4.5:1. */
+function readableField(t: DeckTheme, s: SchemeSlot): ColorRef {
+  for (const mod of [1, 0.9, 0.8, 0.7, 0.6, 0.5]) {
+    const ref = mod === 1 ? T(s) : T(s, mod);
+    if (contrastRatio(resolveHex(t, ref), t.scheme.lt1) >= 4.5) return ref;
+  }
+  return T(s, 0.4);
+}
+
 /** What each part of a slide is coloured with. */
 export function roles(t: DeckTheme): ThemeRoles {
   if (t.dark) {
@@ -98,10 +112,12 @@ export function roles(t: DeckTheme): ThemeRoles {
     };
   }
   return {
-    bg: T('lt1'), text: T('dk1'), muted: T('dk1', 0.55, 0.42), title: T('dk2'), accent: T('accent1'), accent2: T('accent2'),
+    // Muted text at 0.6/0.32 keeps WCAG AA (4.5:1) on white for every theme's dk1 (ADR 0025 checks it); 0.55/0.42 did not.
+    bg: T('lt1'), text: T('dk1'), muted: T('dk1', 0.6, 0.32), title: T('dk2'), accent: T('accent1'), accent2: T('accent2'),
     line: T('dk1', 0.12, 0.86), surface: T('lt2'), onFill: T('lt1'),
     titleBg: T('dk2'), titleText: T('lt1'), titleMuted: T('lt1', 0.8),
-    sectionBg: t.section === 'field' ? T('accent1') : T('dk2'), sectionText: T('lt1'), good: '#15803D', bad: '#B91C1C',
+    // An accent section field is deepened (lumMod) until white text keeps AA on it — a bright accent stays the accent elsewhere.
+    sectionBg: t.section === 'field' ? readableField(t, 'accent1') : T('dk2'), sectionText: T('lt1'), good: '#15803D', bad: '#B91C1C',
   };
 }
 
@@ -178,6 +194,67 @@ export const DECK_THEMES: readonly DeckTheme[] = [
     scheme: { dk1: '#1E2A38', lt1: '#FFFFFF', dk2: '#1D4E89', lt2: '#EEF3FA', accent1: '#1D6FD1', accent2: '#F2A541', accent3: '#3AA17E', accent4: '#C0504D', accent5: '#7E57C2', accent6: '#6D7B8D' },
     title: 'frame', section: 'field', motif: 'bar', dark: false, radius: 6, caps: false,
   },
+  // ADR 0025: dark variants and gradient accents, so a pitch, a technical briefing and an onboarding deck do not all look like one template.
+  {
+    id: 'nebula', name: 'Nebula', description: 'Dark, violet-to-cyan gradient, geometric — investor pitches and launches',
+    fonts: { heading: 'Century Gothic', body: 'Segoe UI' }, headingBold: true,
+    scheme: { dk1: '#070A1A', lt1: '#F8FAFF', dk2: '#0D1330', lt2: '#1A2148', accent1: '#7C5CFF', accent2: '#22D3EE', accent3: '#F472B6', accent4: '#FBBF24', accent5: '#34D399', accent6: '#94A3B8' },
+    title: 'field', section: 'field', motif: 'underline', dark: true, radius: 12, caps: true, gradient: ['accent1', 'accent2'],
+  },
+  {
+    id: 'sapphire', name: 'Sapphire', description: 'Dark navy and gold with a serif — finance and board decks',
+    fonts: { heading: 'Georgia', body: 'Segoe UI' }, headingBold: false,
+    scheme: { dk1: '#0A1222', lt1: '#FFFFFF', dk2: '#0F1B33', lt2: '#1B2A4A', accent1: '#D4A73C', accent2: '#4C8DF6', accent3: '#36C2A0', accent4: '#E46F5A', accent5: '#9DB2D3', accent6: '#B48CF2' },
+    title: 'split', section: 'number', motif: 'rule', dark: true, radius: 6, caps: true,
+  },
+  {
+    id: 'carbon', name: 'Carbon', description: 'Dark charcoal with lime and teal — product and engineering',
+    fonts: { heading: 'Bahnschrift', body: 'Segoe UI' }, headingBold: false,
+    scheme: { dk1: '#0B0D0E', lt1: '#F5F7F7', dk2: '#15191B', lt2: '#232A2D', accent1: '#A3E635', accent2: '#2DD4BF', accent3: '#60A5FA', accent4: '#FACC15', accent5: '#F472B6', accent6: '#A1A1AA' },
+    title: 'minimal', section: 'side', motif: 'bar', dark: true, radius: 4, caps: true,
+  },
+  {
+    id: 'graphite', name: 'Graphite', description: 'Dark grey with an orange-to-pink gradient, bold sans — sales and keynotes',
+    fonts: { heading: 'Segoe UI Semibold', body: 'Segoe UI' }, headingBold: false,
+    scheme: { dk1: '#111216', lt1: '#FAFAFA', dk2: '#1C1E24', lt2: '#2A2D35', accent1: '#FF7A1A', accent2: '#FF3D71', accent3: '#3DB2FF', accent4: '#FFC23D', accent5: '#7BD88F', accent6: '#A8A8B3' },
+    title: 'field', section: 'number', motif: 'underline', dark: true, radius: 10, caps: true, gradient: ['accent1', 'accent2'],
+  },
+  {
+    id: 'lagoon', name: 'Lagoon', description: 'Navy-to-teal gradient on white — IT, platforms and technical briefings',
+    fonts: { heading: 'Segoe UI Semibold', body: 'Segoe UI' }, headingBold: false,
+    scheme: { dk1: '#13232F', lt1: '#FFFFFF', dk2: '#0B3954', lt2: '#EDF6F9', accent1: '#087E8B', accent2: '#1B98E0', accent3: '#F4A259', accent4: '#5B6C7D', accent5: '#8E7DBE', accent6: '#E15554' },
+    title: 'field', section: 'field', motif: 'bar', dark: false, radius: 8, caps: true, gradient: ['dk2', 'accent1'],
+  },
+  {
+    id: 'sunrise', name: 'Sunrise', description: 'Warm orange-to-pink gradient, rounded and friendly — onboarding and community',
+    fonts: { heading: 'Trebuchet MS', body: 'Segoe UI' }, headingBold: true,
+    scheme: { dk1: '#2B1B17', lt1: '#FFFFFF', dk2: '#3A1F2B', lt2: '#FFF4EC', accent1: '#E0522B', accent2: '#D63B74', accent3: '#F6B53C', accent4: '#3F8F8B', accent5: '#7A5CC2', accent6: '#8C7A72' },
+    title: 'field', section: 'field', motif: 'dot', dark: false, radius: 14, caps: false, gradient: ['accent1', 'accent2'],
+  },
+  {
+    id: 'citrus', name: 'Citrus', description: 'Orange and green, round geometric sans — workshops and internal comms',
+    fonts: { heading: 'Century Gothic', body: 'Calibri' }, headingBold: true,
+    scheme: { dk1: '#1F2A1E', lt1: '#FFFFFF', dk2: '#1F3D2B', lt2: '#F3F8EC', accent1: '#E47A12', accent2: '#3A9447', accent3: '#2A8BD8', accent4: '#E9B33C', accent5: '#C73E50', accent6: '#6C7A89' },
+    title: 'band', section: 'number', motif: 'dot', dark: false, radius: 16, caps: false,
+  },
+  {
+    id: 'blossom', name: 'Blossom', description: 'Plum and pink gradient, soft corners — HR, people and culture',
+    fonts: { heading: 'Trebuchet MS', body: 'Corbel' }, headingBold: true,
+    scheme: { dk1: '#2A1F33', lt1: '#FFFFFF', dk2: '#3B2557', lt2: '#F7F1FB', accent1: '#8E44AD', accent2: '#D63E86', accent3: '#21A090', accent4: '#E99A17', accent5: '#4A7BD0', accent6: '#8D8399' },
+    title: 'split', section: 'field', motif: 'underline', dark: false, radius: 16, caps: false, gradient: ['accent1', 'accent2'],
+  },
+  {
+    id: 'harbor', name: 'Harbor', description: 'Navy, teal and saffron, humanist sans — consulting and proposals',
+    fonts: { heading: 'Gill Sans MT', body: 'Calibri' }, headingBold: true,
+    scheme: { dk1: '#1A2633', lt1: '#FFFFFF', dk2: '#102A43', lt2: '#F0F4F8', accent1: '#1D9AA5', accent2: '#334E68', accent3: '#E0A21B', accent4: '#627D98', accent5: '#D2333F', accent6: '#8540D9' },
+    title: 'split', section: 'side', motif: 'rule', dark: false, radius: 4, caps: true,
+  },
+  {
+    id: 'pine', name: 'Pine', description: 'Forest-to-teal gradient, condensed sans — sustainability and operations',
+    fonts: { heading: 'Bahnschrift', body: 'Segoe UI' }, headingBold: false,
+    scheme: { dk1: '#15241C', lt1: '#FFFFFF', dk2: '#123524', lt2: '#EEF6F1', accent1: '#2A8C5D', accent2: '#1C7E90', accent3: '#D9A42E', accent4: '#6B7F73', accent5: '#C0503A', accent6: '#5D5FEF' },
+    title: 'field', section: 'number', motif: 'underline', dark: false, radius: 8, caps: true, gradient: ['dk2', 'accent1'],
+  },
 ];
 
 export function deckTheme(id: string | undefined): DeckTheme {
@@ -187,6 +264,91 @@ export function deckTheme(id: string | undefined): DeckTheme {
 
 export function isDeckTheme(id: unknown): boolean {
   return typeof id === 'string' && DECK_THEMES.some(t => t.id === id.trim().toLowerCase() || t.name.toLowerCase() === id.trim().toLowerCase());
+}
+
+/** What a deck may override on its theme (ADR 0025): brand colours per slot, and fonts from the measured set. */
+export interface ThemeOverrides {
+  theme: string;
+  palette?: Partial<Record<SchemeSlot, string>>;
+  fonts?: { heading?: string; body?: string };
+}
+
+const overridden = new Map<string, DeckTheme>();
+
+/**
+ * The theme a deck is drawn in: its named theme with the deck's brand palette
+ * and fonts laid over it. Everything that draws a deck (layout engine, HTML,
+ * PowerPoint) goes through this, so a brand colour is the theme's colour slot
+ * everywhere — and PowerPoint's Design → Variants still recolour it.
+ */
+export function themeOfDeck(d: ThemeOverrides): DeckTheme {
+  const base = deckTheme(d.theme);
+  const palette = d.palette && Object.keys(d.palette).length ? d.palette : undefined;
+  const fonts = d.fonts && (d.fonts.heading || d.fonts.body) ? d.fonts : undefined;
+  if (!palette && !fonts) return base;
+  const key = `${base.id}|${JSON.stringify(palette ?? {})}|${JSON.stringify(fonts ?? {})}`;
+  const hit = overridden.get(key);
+  if (hit) return hit;
+  const scheme = { ...base.scheme };
+  for (const [k, v] of Object.entries(palette ?? {})) if (k in scheme && typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) scheme[k as SchemeSlot] = v.toUpperCase();
+  const t: DeckTheme = { ...base, scheme, fonts: { heading: fonts?.heading ?? base.fonts.heading, body: fonts?.body ?? base.fonts.body } };
+  overridden.set(key, t);
+  if (overridden.size > 64) overridden.delete(overridden.keys().next().value!);
+  return t;
+}
+
+// ── Contrast (WCAG 2.x) ──────────────────────────────────────────────
+
+/** Relative luminance of #RRGGBB. */
+export function luminance(hex: string): number {
+  const lin = (c: number): number => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const [r, g, b] = hexToRgb(hex);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/** WCAG contrast ratio between two colours (1–21). */
+export function contrastRatio(a: string, b: string): number {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/**
+ * The text colour for a fill: the theme's light or dark slot, whichever
+ * contrasts more. Infographic shapes take any accent, and white on amber is
+ * unreadable — so the choice is computed, never assumed.
+ */
+export function inkOn(theme: DeckTheme, fill: ColorRef | string): ColorRef {
+  const hex = typeof fill === 'string' ? fill : resolveHex(theme, fill);
+  const light = theme.scheme.lt1;
+  const dark = theme.scheme.dk1;
+  return contrastRatio(hex, light) >= contrastRatio(hex, dark) ? { s: 'lt1' } : { s: 'dk1' };
+}
+
+/** Contrast failures of a theme's text roles (a brand palette can break what a built-in theme guarantees). */
+export function themeContrastProblems(theme: DeckTheme): string[] {
+  const r = roles(theme);
+  const hex = (c: ColorRef): string => resolveHex(theme, c);
+  const out: string[] = [];
+  const check = (what: string, fg: ColorRef, bg: ColorRef, min: number): void => {
+    const c = contrastRatio(hex(fg), hex(bg));
+    if (c < min) out.push(`${what}: contrast ${c.toFixed(1)}:1, needs ${min}:1 (WCAG AA)`);
+  };
+  check('body text on the slide background', r.text, r.bg, 4.5);
+  check('titles on the slide background', r.title, r.bg, 4.5);
+  check('secondary text on the slide background', r.muted, r.bg, 4.5);
+  check('title-slide text on its field', r.titleText, r.titleBg, 4.5);
+  check('section text on its field', r.sectionText, r.sectionBg, 4.5);
+  return out;
+}
+
+export function hexToHsl(hex: string): [number, number, number] {
+  return rgbToHsl(hexToRgb(hex));
+}
+
+export function hslToHex(h: number, s: number, l: number): string {
+  const [r, g, b] = hslToRgb([((h % 1) + 1) % 1, Math.max(0, Math.min(1, s)), Math.max(0, Math.min(1, l))]);
+  return `#${hex2(r)}${hex2(g)}${hex2(b)}`.toUpperCase();
 }
 
 // ── Colour arithmetic (PowerPoint's) ─────────────────────────────────

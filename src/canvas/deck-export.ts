@@ -30,7 +30,7 @@ import { imageSize, nativeChart, toPptx, PPTX_MEDIA, type PptxImage, type PptxPi
 import { parseDeck, type Deck, type DeckChart } from '../../shared/ui/canvas/deck-model.js';
 import { layoutDeck, type ChartFrame, type DiagramFrame, type SlideLayout } from '../../shared/ui/canvas/deck-layout.js';
 import { DECK_SLIDE_CSS, chartKey, deckChartOption, diagramKey, slideHtml, themedMermaid } from '../../shared/ui/canvas/deck-render.js';
-import { deckTheme, type DeckTheme } from '../../shared/ui/canvas/deck-themes.js';
+import { themeOfDeck, type DeckTheme } from '../../shared/ui/canvas/deck-themes.js';
 
 export type DeckExportFormat = 'pptx' | 'pdf' | 'png';
 export const DECK_EXPORT_FORMATS: readonly DeckExportFormat[] = ['pptx', 'pdf', 'png'];
@@ -77,7 +77,7 @@ interface Prepared {
 
 async function prepare(doc: CanvasDoc, resolveImage: ImageResolver, opts: { charts: 'all' | 'picture-only'; getBrowser: () => Promise<ExportBrowser | { error: string }> }): Promise<Prepared> {
   const deck = deckOf(doc);
-  const theme = deckTheme(deck.theme);
+  const theme = themeOfDeck(deck);
   const layouts = layoutDeck(deck);
   const warnings: string[] = [];
   const svgs = new Map<string, string>();

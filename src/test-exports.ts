@@ -478,6 +478,8 @@ export * as SheetFormula from '../shared/ui/canvas/sheet-formula.js';
 export { editPart, editDocPart, editPrompt, docInfo, EDIT_SYSTEM, EDIT_EFFORT } from './canvas/inline-edit.js';
 export * as ScopedEdit from '../shared/ui/canvas/scoped-edit.js';
 export * as ScopedDiff from '../shared/ui/canvas/scoped-diff.js';
+export * as DeckScopedEdit from '../shared/ui/canvas/deck-scoped-edit.js';
+export { editDeckPart, deckPatchFromContent, deckTargetOf, deckEditPartTool } from './canvas/deck-inline-edit.js';
 // -- Credential vault & broker --
 export {
   getVault, configureVault, resolve as vaultResolve, redactor as vaultRedactor, redact as vaultRedact,
@@ -711,3 +713,16 @@ export { textWidth as deckTextWidth } from '../shared/ui/canvas/deck-fonts.js';
 export { toPptx, chartXml as deckChartXml, imageSize, nativeChart } from './canvas/deck-pptx.js';
 export { exportDeck, deckHtml, deckChartSvg, DECK_EXPORT_FORMATS } from './canvas/deck-export.js';
 export { createDeck, setSlides, readDeck, DECK_TOOL_HELP } from './canvas/deck-tool.js';
+// -- Deck visual system, ADR 0025 --
+export * as DeckGeometry from '../shared/ui/canvas/deck-geometry.js';
+export * as DeckIcons from '../shared/ui/canvas/deck-icons.js';
+export * as DeckInfographics from '../shared/ui/canvas/deck-infographics.js';
+export * as DeckRules from '../shared/ui/canvas/deck-rules.js';
+export { custGeom as deckCustGeom, creditLines as deckCreditLines } from './canvas/deck-pptx.js';
+export * as DeckDesign from '../shared/ui/canvas/deck-design.js';
+export * as DeckMedia from './canvas/deck-media.js';
+export * as DeckMediaStore from './canvas/deck-media-store.js';
+export * as DeckImageSearch from './canvas/deck-image-search.js';
+export * as DeckBrand from './canvas/deck-brand.js';
+export { DECK_VISUAL_HELP } from './canvas/deck-visual-tool.js';
+export { handleDeckVisualRoute, projectPictures } from './server/deck-visual-routes.js';

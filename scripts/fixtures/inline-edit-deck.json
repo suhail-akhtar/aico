@@ -1,0 +1,81 @@
+{
+  "v": 1,
+  "aspect": "16:9",
+  "theme": "boardroom",
+  "type": "board-update",
+  "footer": "Northwind Analytics · Board pack · Confidential",
+  "slides": [
+    { "id": "s1", "layout": "title", "title": "Q3 2026 board update", "subtitle": "Customer Feedback Platform: delivery, revenue and the decisions we need", "body": "Priya Shah, COO · 14 October 2026" },
+    { "id": "s2", "layout": "agenda", "title": "Agenda", "bullets": ["Summary and KPIs", "Revenue and margin", "Delivery plan", "Risks", "Decisions for the board"] },
+    {
+      "id": "s3", "layout": "bullets", "title": "Summary",
+      "body": "A strong quarter for the platform, with two risks to watch.",
+      "bullets": [
+        "Revenue reached £4.2m, up 18% on Q2, ahead of the £3.9m plan",
+        "Gross margin improved to 61% after the hosting migration",
+        "Average feedback routing time fell from 42 minutes to 15 minutes",
+        "Three enterprise pilots converted to paid contracts (Contoso, Fabrikam, Litware)",
+        "Hiring is behind plan: 9 of 14 engineering roles filled"
+      ],
+      "notes": "Open with the revenue beat, then the routing time — that is what customers notice. Keep the hiring point honest: we are five roles short and it affects Q1 delivery."
+    },
+    {
+      "id": "s4", "layout": "chart", "title": "Revenue grew every quarter this year",
+      "chart": { "type": "column", "categories": ["Q4 2025", "Q1 2026", "Q2 2026", "Q3 2026"], "series": [{ "name": "Revenue", "values": [2.6, 3.1, 3.56, 4.2] }, { "name": "Plan", "values": [2.5, 3, 3.5, 3.9] }], "unit": "£m" },
+      "bullets": ["Q3 beat plan by £0.3m", "Enterprise share rose to 46%"],
+      "source": "Finance ledger, 30 September 2026"
+    },
+    {
+      "id": "s5", "layout": "table", "title": "Delivery against the plan",
+      "table": {
+        "header": ["Workstream", "Owner", "Status", "Due"],
+        "rows": [
+          ["Ingestion API", "Tom Reid", "Done", "July 2026"],
+          ["Routing engine", "Ana Costa", "On track", "November 2026"],
+          ["CRM connector", "Contoso IT", "At risk", "December 2026"],
+          ["Analytics dashboard", "Priya Shah", "On track", "January 2027"]
+        ]
+      },
+      "source": "Programme office, week 39"
+    },
+    {
+      "id": "s6", "layout": "kpi", "title": "The numbers that matter",
+      "kpis": [
+        { "value": "£4.2m", "label": "Quarterly revenue", "delta": "+18% QoQ", "trend": "up" },
+        { "value": "61%", "label": "Gross margin", "delta": "+4 pts", "trend": "up" },
+        { "value": "15 min", "label": "Average routing time", "delta": "-27 min", "trend": "down" }
+      ],
+      "body": "All three moved the right way for the second quarter running."
+    },
+    {
+      "id": "s7", "layout": "two-column", "title": "Risks and what we are doing",
+      "left": { "heading": "Risks", "bullets": ["CRM test accounts arrive late", "Engineering hiring gap of 5 roles", "Data residency review for EU customers"] },
+      "right": { "heading": "Mitigations", "bullets": ["Weekly escalation with Contoso IT", "Two contractors from November", "Legal review booked for 3 November"] }
+    },
+    {
+      "id": "s8", "layout": "diagram", "title": "How feedback flows through the platform",
+      "diagram": "flowchart LR\n  WEB[Web form] --> ING[Ingestion]\n  APP[Mobile app] --> ING\n  ING --> RT[Routing engine]\n  RT --> CRM[CRM]\n  RT --> DASH[Dashboard]",
+      "bullets": ["Every channel lands in one queue", "Routing decides the owning team"]
+    },
+    {
+      "id": "s9", "layout": "timeline", "title": "What the next two quarters deliver",
+      "timeline": [
+        { "date": "Nov 2026", "title": "Routing engine live", "text": "All web and app feedback routed automatically" },
+        { "date": "Dec 2026", "title": "CRM connector", "text": "Cases sync both ways with Contoso" },
+        { "date": "Jan 2027", "title": "Analytics dashboard", "text": "Weekly trends for every product team" },
+        { "date": "Mar 2027", "title": "EU region", "text": "Data stays in the EU for EU customers" }
+      ]
+    },
+    {
+      "id": "s10", "layout": "bullets", "title": "Decisions for the board",
+      "bullets": [
+        "Approve £350k for two contractors until hiring catches up",
+        "Approve the EU hosting region at £8k a month",
+        "Note the CRM connector risk and the December fallback"
+      ],
+      "notes": "We need both approvals today to hold the January date."
+    },
+    { "id": "s11", "layout": "quote", "quote": "Routing in fifteen minutes changed how our support team works.", "attribution": "Head of Support, Fabrikam" },
+    { "id": "s12", "layout": "closing", "title": "Thank you", "subtitle": "Questions?", "body": "priya.shah@northwind.example" }
+  ]
+}

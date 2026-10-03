@@ -24,6 +24,25 @@
 import type React from 'react';
 import type { CanvasComment, CommentAnchor } from './comments';
 import type { PartEditRequest, PartEditResponse } from './scoped-edit';
+import type { DeckImage } from './deck-model';
+
+/** A licensed picture an image search returned (engine: `canvas/deck-media.ts`). */
+export interface DeckImageCandidate {
+  id: string;
+  provider: string;
+  url: string;
+  title: string;
+  creator?: string;
+  license: string;
+  licenseUrl?: string;
+  sourceUrl: string;
+  width?: number;
+  height?: number;
+  score: number;
+  why: string;
+  /** A preview, shown through the engine's `/api/deck/images/thumb?u=` (the page never fetches it directly). */
+  thumb?: string;
+}
 
 /** `sheet`: an AICO Sheets workbook (`sheet-model.ts`), its one tab holding the workbook JSON. `deck`: an AICO Slides presentation (`deck-model.ts`), likewise. */
 export type CanvasKind = 'document' | 'code' | 'sheet' | 'deck';
@@ -190,6 +209,19 @@ export interface CanvasHost {
    * route: "Ask AICO" then falls back to a chat message.
    */
   editPart?: (id: string, req: PartEditRequest, signal?: AbortSignal) => Promise<PartEditResponse>;
+  /**
+   * Deck pictures and brand (ADR 0025): licensed search, placing a search
+   * result, upload, project files, a brand's colours. Absent on an engine
+   * without the routes — the picker then offers only "choose a file".
+   */
+  deckMedia?: {
+    search(query: string, opts?: { orientation?: string; slot?: { w: number; h: number } }): Promise<{ candidates: DeckImageCandidate[]; notes: string[]; providers: string[] }>;
+    place(url: string): Promise<DeckImage>;
+    upload(file: { name: string; data: string }): Promise<DeckImage>;
+    projectFiles(): Promise<{ path: string; bytes: number }[]>;
+    projectFile(path: string): Promise<DeckImage>;
+    brand(url: string, theme: string): Promise<{ brand: { url: string; name?: string; colors: string[]; font?: string; notes: string[] }; palette: Record<string, string> }>;
+  };
   /** Rename a canvas (title only). */
   rename?: (id: string, title: string) => Promise<CanvasDoc>;
   /** A .xlsx/.csv file as a new sheet canvas. */

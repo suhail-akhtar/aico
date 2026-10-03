@@ -30,7 +30,8 @@
 
 import { transportFetch } from './transport';
 import type { HostAnswer, HostCall, HostToolName } from '../../shared/host-tools';
-import type { CanvasDoc, CanvasSummary, CanvasWriteResult, DocSettings, ExportFormat } from '../../shared/ui/canvas/host';
+import type { CanvasDoc, CanvasSummary, CanvasWriteResult, DeckImageCandidate, DocSettings, ExportFormat } from '../../shared/ui/canvas/host';
+import type { DeckImage } from '../../shared/ui/canvas/deck-model';
 import type { PartEditRequest, PartEditResponse } from '../../shared/ui/canvas/scoped-edit';
 import type { CanvasComment, CommentAnchor } from '../../shared/ui/canvas/comments';
 import type { ImportReview, ReviewedSkill, SkillProvenance } from './skill-review';
@@ -953,6 +954,14 @@ export const api = {
   /** A .xlsx/.csv as a new sheet canvas; `data` is base64. */
   canvasImport: (sessionId: string, file: { name: string; data: string }) =>
     post<{ canvas: CanvasDoc }>('canvas/import', { session: sessionId, ...file }),
+  // ── Deck pictures and brand (server/deck-visual-routes, ADR 0025) ──
+  deckImageSearch: (query: string, opts: { orientation?: string; slot?: { w: number; h: number } } = {}) =>
+    post<{ candidates: DeckImageCandidate[]; notes: string[]; providers: string[] }>('deck/images/search', { query, ...opts }),
+  deckImagePlace: (url: string) => post<{ image: DeckImage }>('deck/images/place', { url }),
+  deckImageUpload: (file: { name: string; data: string }) => post<{ image: DeckImage }>('deck/images/upload', file),
+  deckProjectImages: (sessionId: string) => get<{ files: { path: string; bytes: number }[] }>(`deck/images/project?session=${encodeURIComponent(sessionId)}`),
+  deckProjectImage: (sessionId: string, path: string) => post<{ image: DeckImage }>('deck/images/project', { session: sessionId, path }),
+  deckBrand: (url: string, theme: string) => post<{ brand: { url: string; name?: string; colors: string[]; font?: string; notes: string[] }; palette: Record<string, string> }>('deck/brand', { url, theme }),
   // ── Artifacts (server/artifact-routes): what this chat made or opened ──
   artifactsList: (sessionId: string) =>
     get<{ artifacts: ArtifactItem[] }>(`artifacts/list?session=${encodeURIComponent(sessionId)}`),

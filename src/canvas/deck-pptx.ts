@@ -39,8 +39,11 @@
 import { zipSync, strToU8 } from 'fflate';
 import type { Deck, DeckChart } from '../../shared/ui/canvas/deck-model.js';
 import type { Color, Frame, ImageFrame, Para, ShapeFrame, SlideLayout, TableFrame, TextFrame } from '../../shared/ui/canvas/deck-layout.js';
+import { diagonalPoints } from '../../shared/ui/canvas/deck-layout.js';
 import { chartKey, diagramKey } from '../../shared/ui/canvas/deck-render.js';
-import { deckTheme, roles, type ColorRef, type DeckTheme, type SchemeSlot } from '../../shared/ui/canvas/deck-themes.js';
+import { roles, themeOfDeck, type ColorRef, type DeckTheme, type SchemeSlot } from '../../shared/ui/canvas/deck-themes.js';
+import { PRST, pathCommands, polyPath, presetAdjust } from '../../shared/ui/canvas/deck-geometry.js';
+import { iconPath } from '../../shared/ui/canvas/deck-icons.js';
 import { applyOp, emptyBook, type SheetBook } from '../../shared/ui/canvas/sheet-model.js';
 import { bookToXlsx } from './sheet-xlsx.js';
 
@@ -159,8 +162,30 @@ function rel(s: SlideCtx, type: string, target: string): string {
   return id;
 }
 
-function xfrm(f: { x: number; y: number; w: number; h: number }, flip = ''): string {
-  return `<a:xfrm${flip}><a:off x="${e(f.x)}" y="${e(f.y)}"/><a:ext cx="${Math.max(1, e(f.w))}" cy="${Math.max(1, e(f.h))}"/></a:xfrm>`;
+function xfrm(f: { x: number; y: number; w: number; h: number; rot?: number }, flip = ''): string {
+  const rot = f.rot ? ` rot="${Math.round((((f.rot % 360) + 360) % 360) * 60000)}"` : '';
+  return `<a:xfrm${rot}${flip}><a:off x="${e(f.x)}" y="${e(f.y)}"/><a:ext cx="${Math.max(1, e(f.w))}" cy="${Math.max(1, e(f.h))}"/></a:xfrm>`;
+}
+
+/**
+ * A freeform (`a:custGeom`) from absolute M/L/C/Z path data in a `w`×`h`
+ * coordinate box (points ×100 so the integers keep the curve). Used for icons
+ * (stroked, no fill — recolourable lines), clipped art polygons and the
+ * diagonal picture cut.
+ */
+export function custGeom(d: string, w: number, h: number, opts: { stroke?: boolean; fill?: boolean } = {}): string {
+  const P = (n: number): number => Math.round(n * 100);
+  const pt = (x: number, y: number): string => `<a:pt x="${P(x)}" y="${P(y)}"/>`;
+  const body = pathCommands(d).map((c) => {
+    switch (c[0]) {
+      case 'M': return `<a:moveTo>${pt(c[1], c[2])}</a:moveTo>`;
+      case 'L': return `<a:lnTo>${pt(c[1], c[2])}</a:lnTo>`;
+      case 'C': return `<a:cubicBezTo>${pt(c[1], c[2])}${pt(c[3], c[4])}${pt(c[5], c[6])}</a:cubicBezTo>`;
+      default: return '<a:close/>';
+    }
+  }).join('');
+  const attrs = `${opts.fill === false ? ' fill="none"' : ''}${opts.stroke === false ? ' stroke="0"' : ''}`;
+  return `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="l" t="t" r="r" b="b"/><a:pathLst><a:path w="${Math.max(1, P(w))}" h="${Math.max(1, P(h))}"${attrs}>${body}</a:path></a:pathLst></a:custGeom>`;
 }
 
 function textSp(f: TextFrame, s: SlideCtx): string {
@@ -174,39 +199,53 @@ function textSp(f: TextFrame, s: SlideCtx): string {
     + `${txBody(f.paras, f.anchor, f.paras.length > 0 && f.h >= 30)}</p:sp>`;
 }
 
-function geomXml(f: ShapeFrame): { prst: string; av: string; flip: string } {
-  const short = Math.max(1, Math.min(f.w, f.h));
-  const adj = (r: number): number => Math.max(0, Math.min(50000, Math.round((r / short) * 100000)));
-  switch (f.geom) {
-    case 'ellipse': return { prst: 'ellipse', av: '', flip: '' };
-    case 'roundRect': return { prst: 'roundRect', av: `<a:gd name="adj" fmla="val ${adj(f.radius ?? 8)}"/>`, flip: '' };
-    case 'topRound': return { prst: 'round2SameRect', av: `<a:gd name="adj1" fmla="val ${adj(f.radius ?? 8)}"/><a:gd name="adj2" fmla="val 0"/>`, flip: '' };
-    case 'corner': return { prst: 'rtTriangle', av: '', flip: ' flipH="1" flipV="1"' };
-    default: return { prst: 'rect', av: '', flip: '' };
+/** The geometry element of a shape: a preset with its adjust values (corner keeps its flips), or a freeform. */
+function geometryXml(f: ShapeFrame): { geom: string; flip: string } {
+  if (f.geom === 'icon') {
+    return { geom: custGeom(iconPath(f.icon ?? '') ?? '', 24, 24, { fill: false }), flip: '' };
   }
+  if (f.geom === 'path') return { geom: custGeom(f.path ?? '', f.w, f.h), flip: f.flipV ? ' flipV="1"' : '' };
+  const av = presetAdjust(f.geom, f.w, f.h, f.adj, f.radius).map(g => `<a:gd name="${g.name}" fmla="val ${g.val}"/>`).join('');
+  const flip = f.geom === 'corner' ? ' flipH="1" flipV="1"' : f.flipV ? ' flipV="1"' : '';
+  return { geom: `<a:prstGeom prst="${PRST[f.geom]}"><a:avLst>${av}</a:avLst></a:prstGeom>`, flip };
 }
 
 function shapeSp(f: ShapeFrame, s: SlideCtx): string {
   const id = nextId(s);
-  const g = geomXml(f);
-  let fillXml = fill(f.fill);
+  const g = geometryXml(f);
+  let fillXml = f.geom === 'icon' ? '<a:noFill/>' : fill(f.fill);
   if (f.gradient) {
     fillXml = `<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0">${clr(f.gradient, 0)}</a:gs><a:gs pos="100000">${clr(f.gradient)}</a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>`;
   }
+  if (f.grad) {
+    const ang = Math.round((((f.grad.angle % 360) + 360) % 360) * 60000);
+    fillXml = `<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0">${clr(f.grad.from)}</a:gs><a:gs pos="100000">${clr(f.grad.to)}</a:gs></a:gsLst><a:lin ang="${ang}" scaled="0"/></a:gradFill>`;
+  }
   const line = f.line
-    ? `<a:ln w="${e(f.line.w)}"><a:solidFill>${clr(f.line.color)}</a:solidFill>${f.line.dash ? '<a:prstDash val="dash"/>' : ''}</a:ln>`
+    ? `<a:ln w="${e(f.line.w)}"${f.geom === 'icon' ? ' cap="rnd"' : ''}><a:solidFill>${clr(f.line.color)}</a:solidFill>${f.line.dash ? '<a:prstDash val="dash"/>' : ''}${f.geom === 'icon' ? '<a:round/>' : ''}</a:ln>`
     : '<a:ln><a:noFill/></a:ln>';
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${x(f.name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>`
-    + `<p:spPr>${xfrm(f, g.flip)}<a:prstGeom prst="${g.prst}"><a:avLst>${g.av}</a:avLst></a:prstGeom>${fillXml}${line}</p:spPr></p:sp>`;
+    + `<p:spPr>${xfrm(f, g.flip)}${g.geom}${fillXml}${line}</p:spPr></p:sp>`;
 }
 
-function picXml(s: SlideCtx, name: string, alt: string, rid: string, box: { x: number; y: number; w: number; h: number }, crop?: { l: number; t: number; r: number; b: number }): string {
+/** A picture's outline: its mask as PowerPoint picture geometry (the picture stays a picture — crop, recolour, replace all work). */
+function picGeometry(box: { w: number; h: number }, mask?: ImageFrame['mask'], flip?: boolean): string {
+  switch (mask) {
+    case 'circle': return '<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>';
+    case 'hexagon': return `<a:prstGeom prst="hexagon"><a:avLst>${presetAdjust('hexagon', box.w, box.h, [box.w / 4]).map(g => `<a:gd name="${g.name}" fmla="val ${g.val}"/>`).join('')}</a:avLst></a:prstGeom>`;
+    case 'rounded': return `<a:prstGeom prst="roundRect"><a:avLst>${presetAdjust('roundRect', box.w, box.h, [], 18).map(g => `<a:gd name="${g.name}" fmla="val ${g.val}"/>`).join('')}</a:avLst></a:prstGeom>`;
+    case 'diagonal': return custGeom(polyPath(diagonalPoints(box.w, box.h, flip)), box.w, box.h);
+    default: return '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>';
+  }
+}
+
+function picXml(s: SlideCtx, name: string, alt: string, rid: string, box: { x: number; y: number; w: number; h: number }, crop?: { l: number; t: number; r: number; b: number }, mask?: ImageFrame['mask'], flip?: boolean): string {
   const id = nextId(s);
   const src = crop && (crop.l || crop.t || crop.r || crop.b)
     ? `<a:srcRect l="${Math.round(crop.l * 100000)}" t="${Math.round(crop.t * 100000)}" r="${Math.round(crop.r * 100000)}" b="${Math.round(crop.b * 100000)}"/>` : '';
   return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${x(name)}" descr="${x(alt)}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>`
     + `<p:blipFill><a:blip r:embed="${rid}"/>${src}<a:stretch><a:fillRect/></a:stretch></p:blipFill>`
-    + `<p:spPr>${xfrm(box)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
+    + `<p:spPr>${xfrm(box)}${picGeometry(box, mask, flip)}</p:spPr></p:pic>`;
 }
 
 function addMedia(s: SlideCtx, bytes: Buffer, ext: string): string {
@@ -242,8 +281,9 @@ function imageXml(f: ImageFrame, s: SlideCtx): string {
     return placeholderSp(s, f, f.alt ? `Image: ${f.alt}` : 'Image');
   }
   const rid = addMedia(s, img.bytes, img.ext);
-  const placed = placeImage(f, img.width, img.height, f.fit);
-  return picXml(s, f.name, f.alt, rid, placed.box, placed.crop);
+  // A cut picture always covers its outline: "contain" inside a circle would leave the cut empty at the edges.
+  const placed = placeImage(f, img.width, img.height, f.mask ? 'cover' : f.fit);
+  return picXml(s, f.name, f.alt, rid, placed.box, placed.crop, f.mask, f.maskFlip);
 }
 
 function tableXml(f: TableFrame, s: SlideCtx): string {
@@ -422,8 +462,38 @@ const LAYOUT_FOR: Record<string, number> = {
   title: 1, closing: 1, bullets: 2, agenda: 4, section: 3,
 };
 
+/** Frames, with each run of frames that share a group id written as one `p:grpSp` (an infographic item moves as one). */
+function framesXml(frames: Frame[], s: SlideCtx): string {
+  const out: string[] = [];
+  for (let i = 0; i < frames.length;) {
+    const g = (frames[i] as { group?: string }).group;
+    let j = i + 1;
+    if (g) while (j < frames.length && (frames[j] as { group?: string }).group === g) j++;
+    const run = frames.slice(i, j);
+    if (!g || run.length < 2) { out.push(...run.map(f => frameXml(f, s))); i = j; continue; }
+    const x0 = Math.min(...run.map(f => f.x));
+    const y0 = Math.min(...run.map(f => f.y));
+    const x1 = Math.max(...run.map(f => f.x + f.w));
+    const y1 = Math.max(...run.map(f => f.y + f.h));
+    const id = nextId(s);
+    const off = `<a:off x="${e(x0)}" y="${e(y0)}"/><a:ext cx="${Math.max(1, e(x1 - x0))}" cy="${Math.max(1, e(y1 - y0))}"/>`;
+    out.push(`<p:grpSp><p:nvGrpSpPr><p:cNvPr id="${id}" name="${x(`Item ${g.replace(/^g/, '')}`)}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>`
+      + `<p:grpSpPr><a:xfrm>${off}<a:chOff x="${e(x0)}" y="${e(y0)}"/><a:chExt cx="${Math.max(1, e(x1 - x0))}" cy="${Math.max(1, e(y1 - y0))}"/></a:xfrm></p:grpSpPr>`
+      + `${run.map(f => frameXml(f, s)).join('')}</p:grpSp>`);
+    i = j;
+  }
+  return out.join('');
+}
+
+/** "Photo: Jane Doe · CC BY 2.0 · https://…" for every fetched picture on a slide — appended to its notes. */
+export function creditLines(slide: SlideLayout['slide']): string[] {
+  const imgs = [slide.image, ...(slide.images ?? []), ...(slide.infographic?.items.map(i => i.image) ?? [])];
+  return imgs.filter((im): im is NonNullable<typeof im> => Boolean(im && (im.credit || im.license || im.sourceUrl)))
+    .map(im => `${im.alt ? `${im.alt}: ` : ''}${im.credit ? `photo by ${im.credit}` : 'photo'}${im.license ? `, ${im.license}` : ''}${im.sourceUrl ? ` — ${im.sourceUrl}` : ''}`);
+}
+
 function slideXml(layout: SlideLayout, s: SlideCtx): string {
-  const body = layout.frames.map(f => frameXml(f, s)).join('');
+  const body = framesXml(layout.frames, s);
   const fade = layout.slide.transition === 'fade' ? '<p:transition spd="med"><p:fade/></p:transition>' : '';
   return `${XML}<p:sld xmlns:a="${NS_A}" xmlns:r="${NS_R}" xmlns:p="${NS_P}"><p:cSld><p:bg><p:bgPr>${fill(layout.background)}<a:effectLst/></p:bgPr></p:bg>`
     + `<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>`
@@ -544,7 +614,7 @@ export const PPTX_MEDIA = 'application/vnd.openxmlformats-officedocument.present
 /** Write the presentation. */
 export function toPptx(input: PptxInput): PptxResult {
   const { deck, layouts } = input;
-  const theme = deckTheme(deck.theme);
+  const theme = themeOfDeck(deck);
   const W = layouts[0]?.w ?? (deck.aspect === '4:3' ? 720 : 960);
   const H = 540;
   const files: Record<string, Uint8Array> = {};
@@ -570,7 +640,9 @@ export function toPptx(input: PptxInput): PptxResult {
     const layoutNo = LAYOUT_FOR[layout.slide.layout] ?? (layout.frames.some(f => f.kind === 'text' && f.ph === 'title') ? 4 : 5);
     rel(s, 'slideLayout', `../slideLayouts/slideLayout${layoutNo}.xml`);
     const xml = slideXml(layout, s);
-    const notes = layout.slide.notes?.trim();
+    // Fetched pictures carry their credit on the slide; the notes keep the full line with the source (ADR 0025).
+    const credits = creditLines(layout.slide);
+    const notes = [layout.slide.notes?.trim(), credits.length ? `Image credits:\n${credits.join('\n')}` : ''].filter(Boolean).join('\n\n');
     if (notes) {
       notesCount++;
       rel(s, 'notesSlide', `../notesSlides/notesSlide${n}.xml`);

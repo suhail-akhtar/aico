@@ -18,7 +18,8 @@
  * project. Files are read only from inside the session's project directory
  * and only as png/jpeg/gif/webp/svg under 15 MB; remote URLs are never
  * fetched (an export must not become a way to make the engine request an
- * arbitrary address).
+ * arbitrary address). A deck's `/api/deck-media/<hash>` pictures are read
+ * from the AICO home's media store (`deck-media-store.ts`).
  *
  * @module canvas/markdown
  */
@@ -31,6 +32,7 @@ import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { math } from 'micromark-extension-math';
 import { mathFromMarkdown } from 'mdast-util-math';
 import type { Root } from 'mdast';
+import { DECK_MEDIA_PREFIX, readDeckMedia } from './deck-media-store.js';
 
 export type { Root } from 'mdast';
 
@@ -80,6 +82,8 @@ export function workspaceImages(root: string): ImageResolver {
   return async (src) => {
     if (!src) return undefined;
     if (/^data:/i.test(src)) return decodeDataUrl(src);
+    // A picture AICO stored for a deck (ADR 0025): by hash from the AICO home, never a path walk.
+    if (src.startsWith(DECK_MEDIA_PREFIX)) return readDeckMedia(src);
     if (/^[a-z][a-z0-9+.-]*:/i.test(src) && !/^[a-z]:[\\/]/i.test(src)) return undefined;
     let rel = src;
     try { rel = decodeURIComponent(src); } catch { /* keep as written */ }

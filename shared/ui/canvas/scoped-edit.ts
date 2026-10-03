@@ -114,6 +114,13 @@ export interface ResolvedPart {
   section?: { level: number; heading: string };
   /** The block's section path ("2 Scope › 2.1 Services") — where it is. */
   where: string;
+  /**
+   * How the target is shown to the model, when its kind's default wording does
+   * not fit (a deck element: "The slide's title", with its layout limits).
+   */
+  describe?: string;
+  /** The part's kind never changes (a deck element): the prompt offers no Markdown alternative. */
+  fixedKind?: boolean;
 }
 
 /** Longest part an inline edit takes; anything bigger is a job for the chat. */
@@ -283,7 +290,8 @@ export function resolveTarget(text: string, target: Pick<PartTarget, 'blockIds' 
 
 export interface PartEditRequest {
   tab?: string;
-  target: Pick<PartTarget, 'blockIds' | 'range' | 'cells' | 'part'>;
+  /** A document names blocks; a deck names `slideId` and `elementId` (`deck-scoped-edit.ts`). */
+  target: Pick<PartTarget, 'blockIds' | 'range' | 'cells' | 'part' | 'slideId' | 'elementId'>;
   instruction: string;
   /** The thread so far, oldest first: each instruction and what it proposed. */
   history?: Array<{ instruction: string; patch?: PartPatch }>;
@@ -295,7 +303,7 @@ export interface PartEditResponse {
   ok: boolean;
   error?: string;
   /** The resolved part (span, the exact text it replaces). */
-  part?: Pick<ResolvedPart, 'kind' | 'label' | 'what' | 'span' | 'before' | 'blocks'>;
+  part?: Pick<ResolvedPart, 'kind' | 'label' | 'what' | 'span' | 'before' | 'blocks'> & { slideId?: string; elementId?: string };
   /** The span's new Markdown. */
   after?: string;
   patch?: PartPatch;
@@ -307,6 +315,8 @@ export interface PartEditResponse {
   model?: string;
   costUsd?: number;
   tabVersion?: number;
+  /** Decks: the whole slide as it would be after the edit (the review draws it beside the current one). */
+  slide?: Record<string, unknown>;
 }
 
 // ── Patches ──────────────────────────────────────────────────────────
@@ -663,6 +673,7 @@ export function buildEditContext(text: string, part: Pick<ResolvedPart, 'blocks'
 
 /** The target as the model sees it: its structured form, with a selection or cell range marked. */
 export function describeTarget(part: ResolvedPart): string {
+  if (part.describe) return part.describe;
   switch (part.kind) {
     case 'text':
       if (part.selection) {
@@ -850,6 +861,18 @@ export function checkMermaid(source: string): string[] {
   });
   if (kind === 'flowchart' && depth !== 0) errs.push(depth > 0 ? 'a subgraph is not closed with "end"' : 'there is an "end" without a subgraph');
   return errs;
+}
+
+/**
+ * The prose checks on their own (figures, links, citations, cross-references,
+ * marks, shorten/expand) — for a part whose structure is checked elsewhere
+ * (a deck's slide, its KPI tiles, its speaker notes).
+ */
+export function checkTextFacts(before: string, after: string, intent: EditIntent, opts: { inline?: boolean; glossary?: readonly string[] } = {}): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  textChecks(before, after, intent, errors, warnings, opts);
+  return { errors, warnings };
 }
 
 /** Text-level checks shared by every kind that carries prose. */
@@ -1171,6 +1194,8 @@ export interface PartAction {
   instruction: string;
   /** Opens the box prefilled instead of sending (it needs a word from the person: a language, a column name). */
   ask?: boolean;
+  /** Runs on another part than the one open (a slide's "Punchier title" edits its title): its element and label. */
+  target?: { elementId: string; label: string };
 }
 
 const PROSE_ACTIONS: PartAction[] = [
@@ -1253,6 +1278,10 @@ export interface PartQuery {
   rows?: [number, number];
   /** Tables: column names or 1-based numbers. */
   columns?: Array<string | number>;
+  /** Decks: the slide (its id "s3", or its 1-based number). */
+  slide?: string | number;
+  /** Decks: the element on it ("title", "bullets", "bullets.2", "table", "notes"…); default the whole slide. */
+  element?: string;
 }
 
 const plainOf = (s: string): string => s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`~]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();

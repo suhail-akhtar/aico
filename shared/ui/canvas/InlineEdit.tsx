@@ -24,6 +24,12 @@
  * it can be accepted (the engine's check is syntax only); a failure is sent
  * back once as `retryError`, then shown.
  *
+ * Decks use the same panel (`DeckEditor`): they pass their own resolver,
+ * quick actions, proposal view and diagram check, and their accept re-applies
+ * the patch to the deck they hold (`deck-scoped-edit.ts`). A quick action may
+ * run on another element than the one open — a slide's "Punchier title" edits
+ * its title — which switches the scope before it runs.
+ *
  * Deliberately not here: streaming the proposal word by word. The answer is
  * a JSON patch that cannot be validated (or shown honestly) until complete,
  * and parts are small; a spinner with Cancel is the honest progress.
@@ -43,22 +49,41 @@ import { parseFence, parseTable } from './visual';
 import { CvIcon } from './icons';
 import './inline-edit.css';
 
-/** One way to scope the edit, offered as a chip ("Selection", "Paragraph", "Whole section"). */
-export interface InlineScope { label: string; target: Pick<PartTarget, 'blockIds' | 'range' | 'cells' | 'part'> }
+/** One way to scope the edit, offered as a chip ("Selection", "Paragraph", "Whole section"; "This bullet", "Whole slide"). */
+export interface InlineScope { label: string; target: Pick<PartTarget, 'blockIds' | 'range' | 'cells' | 'part' | 'slideId' | 'elementId'> }
 
 export interface InlineAccept {
   part: NonNullable<PartEditResponse['part']>;
   after: string;
   instruction: string;
   note?: string;
+  /** The whole response (a deck's accept re-applies its patch to the slide). */
+  res: PartEditResponse;
+  /** The target the proposal was made for. */
+  target: InlineScope['target'];
 }
+
+type Resolved = { ok: true; part: ResolvedPart } | { ok: false; error: string };
 
 export interface InlineEditProps {
   host: CanvasHost;
   canvasId: string;
   tabId?: string;
-  getText: () => string;
+  /** The text the targets resolve in (documents); a deck passes `resolvePart` instead. */
+  getText?: () => string;
   scopes: InlineScope[];
+  /** Resolve a target (default: a document block in `getText()`). */
+  resolvePart?: (target: InlineScope['target']) => Resolved;
+  /** Quick actions for a part (default: the document's). */
+  actionsFor?: (part: ResolvedPart) => PartAction[];
+  /** Draw a proposal (default: the document's diff in the part's place). */
+  renderProposal?: (res: PartEditResponse) => React.ReactNode;
+  /** A last check of a proposal the engine cannot make (default: the browser's Mermaid parser on a diagram). */
+  checkProposal?: (res: PartEditResponse) => Promise<string | null>;
+  /** What "nothing else in the … can change" names. */
+  where?: string;
+  /** The proposal under review, or null (a deck draws it on its stage). */
+  onProposal?: (res: PartEditResponse | null) => void;
   /** Run this instruction at once (a quick action chosen from a block menu). */
   autoRun?: string;
   /** Save pending edits first, so the engine edits what the person sees. */
@@ -85,7 +110,9 @@ function message(err: unknown): string {
 export function InlineEdit(props: InlineEditProps): React.ReactElement {
   const { host, canvasId, tabId, getText, scopes, autoRun, saveFirst, onAccept, onReviewing, onScope, onClose } = props;
   const [scopeIx, setScopeIx] = useState(0);
-  const scope = scopes[Math.min(scopeIx, scopes.length - 1)]!;
+  // A quick action that runs on another element than the chips offer (a slide's "Punchier title").
+  const [override, setOverride] = useState<InlineScope | null>(null);
+  const scope = override ?? scopes[Math.min(scopeIx, scopes.length - 1)]!;
   const [phase, setPhase] = useState<Phase>({ at: 'compose' });
   const [thread, setThread] = useState<Turn[]>([]);
   const [value, setValue] = useState('');
@@ -95,19 +122,23 @@ export function InlineEdit(props: InlineEditProps): React.ReactElement {
   const started = useRef(false);
 
   // The part as the editor reads it — for its label, its quick actions and the diff's "before".
-  const resolved = useMemo((): { ok: true; part: ResolvedPart } | { ok: false; error: string } => resolveTarget(getText(), scope.target),
+  const resolved = useMemo((): Resolved => (props.resolvePart ? props.resolvePart(scope.target) : resolveTarget(getText?.() ?? '', scope.target)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scope]);
-  const actions: PartAction[] = resolved.ok ? partActions(resolved.part) : [];
+  const actions: PartAction[] = resolved.ok ? (props.actionsFor ?? partActions)(resolved.part) : [];
+  const check = props.checkProposal ?? defaultCheck;
 
   useEffect(() => { onReviewing(phase.at === 'review'); }, [phase.at, onReviewing]);
+  const onProposal = props.onProposal;
+  useEffect(() => { onProposal?.(phase.at === 'review' ? phase.res : null); }, [phase, onProposal]);
   useEffect(() => () => { abort.current?.abort(); }, []);
   useEffect(() => { if (phase.at === 'compose' || phase.at === 'review') input.current?.focus({ preventScroll: true }); }, [phase.at]);
   useEffect(() => { box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [phase.at]);
 
-  const run = useCallback(async (instruction: string, opts: { history?: Turn[]; retryError?: string } = {}): Promise<void> => {
+  const run = useCallback(async (instruction: string, opts: { history?: Turn[]; retryError?: string; target?: InlineScope['target'] } = {}): Promise<void> => {
     const text = instruction.trim();
     if (!text || !host.editPart) return;
+    const target = opts.target ?? scope.target;
     abort.current?.abort();
     const ac = new AbortController();
     abort.current = ac;
@@ -117,21 +148,21 @@ export function InlineEdit(props: InlineEditProps): React.ReactElement {
     try {
       if (!(await saveFirst())) throw new Error('your latest changes could not be saved first — try again in a moment');
       let res = await host.editPart(canvasId, {
-        ...(tabId ? { tab: tabId } : {}), target: scope.target, instruction: text,
+        ...(tabId ? { tab: tabId } : {}), target, instruction: text,
         ...(history.length ? { history } : {}), ...(opts.retryError ? { retryError: opts.retryError } : {}),
       }, ac.signal);
       if (ac.signal.aborted) return;
       // The real Mermaid parser gets the last word on a diagram, once, before the person sees it.
       if (res.ok && res.after && !opts.retryError) {
-        const bad = await diagramProblem(res.after);
+        const bad = await check(res);
         if (bad && !ac.signal.aborted) {
           setPhase({ at: 'running', instruction: text, checking: true });
           res = await host.editPart(canvasId, {
-            ...(tabId ? { tab: tabId } : {}), target: scope.target, instruction: text,
+            ...(tabId ? { tab: tabId } : {}), target, instruction: text,
             history: [...history, { instruction: text, ...(res.patch ? { patch: res.patch } : {}) }], retryError: `Mermaid could not parse the diagram: ${bad}`,
           }, ac.signal);
           if (ac.signal.aborted) return;
-          const still = res.ok && res.after ? await diagramProblem(res.after) : null;
+          const still = res.ok && res.after ? await check(res) : null;
           if (still) res = { ...res, ok: false, error: `the diagram still does not parse: ${still}`, errors: [still] };
         }
       }
@@ -145,7 +176,7 @@ export function InlineEdit(props: InlineEditProps): React.ReactElement {
       if (ac.signal.aborted) return;
       setPhase({ at: 'error', instruction: text, message: message(err), details: [] });
     }
-  }, [host, canvasId, tabId, scope, thread, saveFirst]);
+  }, [host, canvasId, tabId, scope, thread, saveFirst, check]);
 
   useEffect(() => {
     if (autoRun && !started.current) { started.current = true; void run(autoRun, { history: [] }); }
@@ -153,7 +184,10 @@ export function InlineEdit(props: InlineEditProps): React.ReactElement {
 
   const accept = (): void => {
     if (phase.at !== 'review' || !phase.res.part || phase.res.after === undefined) return;
-    const err = onAccept({ part: phase.res.part, after: phase.res.after, instruction: thread.map(t => t.instruction).join(' → '), ...(phase.res.note ? { note: phase.res.note } : {}) });
+    const err = onAccept({
+      part: phase.res.part, after: phase.res.after, instruction: thread.map(t => t.instruction).join(' → '), ...(phase.res.note ? { note: phase.res.note } : {}),
+      res: phase.res, target: scope.target,
+    });
     if (err) setPhase({ at: 'error', instruction: phase.instruction, message: err, details: [] });
   };
 
@@ -179,6 +213,17 @@ export function InlineEdit(props: InlineEditProps): React.ReactElement {
   };
 
   const pickAction = (a: PartAction): void => {
+    if (a.target && resolved.ok) {
+      // Another element of the same slide: switch to it (its chip shows), then run or ask.
+      const { range: _r, cells: _c, ...rest } = scope.target;
+      const next: InlineScope = { label: a.target.label, target: { ...rest, elementId: a.target.elementId } };
+      setOverride(next);
+      setThread([]);
+      onScope(next);
+      if (a.ask) { setValue(a.instruction); return; }
+      void run(a.instruction, { history: [], target: next.target });
+      return;
+    }
     if (a.ask) {
       setValue(a.instruction);
       requestAnimationFrame(() => { const el = input.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
@@ -207,7 +252,7 @@ export function InlineEdit(props: InlineEditProps): React.ReactElement {
   return (
     <div ref={box} className={`aie${reviewing ? ' is-review' : ''}`} data-adoc-ui data-adoc-keep-focus role="dialog" aria-label={`Ask AICO to edit: ${label}`} onKeyDown={onKey}>
       {reviewing && reviewing.res.part && reviewing.res.after !== undefined && (
-        <Proposal part={reviewing.res.part} after={reviewing.res.after} />
+        props.renderProposal ? props.renderProposal(reviewing.res) : <Proposal part={reviewing.res.part} after={reviewing.res.after} />
       )}
       <div className="aie-card">
         <div className="aie-head">
@@ -215,9 +260,10 @@ export function InlineEdit(props: InlineEditProps): React.ReactElement {
           {scopes.length > 1 && !busy && !reviewing ? (
             <span className="aie-scopes" role="radiogroup" aria-label="What to edit">
               {scopes.map((s, i) => (
-                <button key={s.label} type="button" role="radio" aria-checked={i === scopeIx} className={i === scopeIx ? 'is-on' : ''}
-                  onClick={() => { setScopeIx(i); setThread([]); onScope(s); }}>{s.label}</button>
+                <button key={s.label} type="button" role="radio" aria-checked={!override && i === scopeIx} className={!override && i === scopeIx ? 'is-on' : ''}
+                  onClick={() => { setOverride(null); setScopeIx(i); setThread([]); onScope(s); }}>{s.label}</button>
               ))}
+              {override && !scopes.some(s => s.label === override.label) && <button type="button" role="radio" aria-checked className="is-on">{override.label}</button>}
             </span>
           ) : <span className="aie-label">{label}</span>}
           <span className="aw-grow" />
@@ -280,7 +326,7 @@ export function InlineEdit(props: InlineEditProps): React.ReactElement {
                 {actions.map(a => <button key={a.id} type="button" className="aw-chip" onClick={() => pickAction(a)}>{a.label}</button>)}
               </div>
             )}
-            {!reviewing && <div className="acv-ask-hint">Only the {noun} {/s$/.test(noun) ? 'change' : 'changes'}; nothing else in the document can. You review the edit before it is applied.</div>}
+            {!reviewing && <div className="acv-ask-hint">Only the {noun} {/s$/.test(noun) ? 'change' : 'changes'}; nothing else in the {props.where ?? 'document'} can. You review the edit before it is applied.</div>}
           </>
         )}
       </div>
@@ -311,6 +357,10 @@ function summary(res: PartEditResponse): string {
   if (k === 'chart' || k === 'mermaid') return 'Before and after';
   const s = diffStats(wordDiff(res.part.before, res.after));
   return `${s.removed} word${s.removed === 1 ? '' : 's'} out · ${s.added} in`;
+}
+
+function defaultCheck(res: PartEditResponse): Promise<string | null> {
+  return res.after !== undefined ? diagramProblem(res.after) : Promise.resolve(null);
 }
 
 async function diagramProblem(after: string): Promise<string | null> {
@@ -357,7 +407,7 @@ function Proposal({ part, after }: { part: NonNullable<PartEditResponse['part']>
   );
 }
 
-function WordChanges({ parts }: { parts: DiffPart[] }): React.ReactElement {
+export function WordChanges({ parts }: { parts: DiffPart[] }): React.ReactElement {
   return (
     <div className="aie-words">
       {parts.map((p, i) => (p.op === '=' ? <span key={i}>{p.text}</span>
@@ -367,7 +417,7 @@ function WordChanges({ parts }: { parts: DiffPart[] }): React.ReactElement {
   );
 }
 
-function TableChanges({ a, b }: { a: import('./visual').TableModel; b: import('./visual').TableModel }): React.ReactElement {
+export function TableChanges({ a, b }: { a: import('./visual').TableModel; b: import('./visual').TableModel }): React.ReactElement {
   const d = tableDiff(a, b);
   return (
     <div className="aie-table-wrap">

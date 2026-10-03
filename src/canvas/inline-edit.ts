@@ -30,8 +30,9 @@
  * never an instruction (it is the person's document, but it may quote a web
  * page or an email).
  *
- * Decks reuse {@link editPart} with a `ResolvedPart` of their own element and
- * an `EditContext` describing the deck; {@link editDocPart} is the document
+ * Decks reuse {@link editPart} with a `ResolvedPart` of their own element, an
+ * `EditContext` describing the deck and their own validator (the layout fit
+ * check, `canvas/deck-inline-edit`); {@link editDocPart} is the document
  * front end.
  *
  * @module canvas/inline-edit
@@ -106,7 +107,7 @@ export function editPrompt(part: ResolvedPart, ctx: EditContext, instruction: st
   lines.push(`The part to edit: ${part.label}${part.where ? ` in "${part.where}"` : ''}.`);
   lines.push(describeTarget(part), '');
   lines.push(`Answer with JSON only, in exactly this shape: ${partContract(part)}`);
-  lines.push('Only if the instruction asks to change what kind of block this is (e.g. "turn it into a table"), answer {"markdown": "<the new Markdown for the part>", "note": "…"} instead.');
+  if (!part.fixedKind) lines.push('Only if the instruction asks to change what kind of block this is (e.g. "turn it into a table"), answer {"markdown": "<the new Markdown for the part>", "note": "…"} instead.');
   lines.push('', `Instruction: ${instruction.trim()}`);
   return lines.join('\n');
 }
@@ -134,6 +135,11 @@ export async function editPart(o: {
   signal?: AbortSignal;
   /** Overrides the role's model (tests, evals). */
   model?: string;
+  /**
+   * The check a patch must pass, when it is not a document block's
+   * (`validatePatch`): a deck element is also held to its slide's layout.
+   */
+  validate?: (patch: PartPatch, instructions: readonly string[]) => Verdict;
 }): Promise<PartEditResult> {
   const instruction = o.instruction.trim();
   const fail = (error: string, extra: Partial<PartEditResult> = {}): PartEditResult => ({ ok: false, error, warnings: [], errors: [], attempts: 0, model: '', costUsd: 0, ...extra });
@@ -206,7 +212,7 @@ export async function editPart(o: {
     if (!parsed.ok) {
       last = { error: finish === 'length' ? 'the answer was cut off before it finished' : parsed.error };
     } else {
-      const verdict = validatePatch(o.part, parsed.patch, all, { glossary: terms });
+      const verdict = o.validate ? o.validate(parsed.patch, all) : validatePatch(o.part, parsed.patch, all, { glossary: terms });
       last = { verdict, patch: parsed.patch, ...(parsed.note ? { note: parsed.note } : {}) };
       if (verdict.ok) break;
     }

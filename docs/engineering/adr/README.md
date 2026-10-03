@@ -48,7 +48,8 @@ in the module header of the code they govern.
 | [0021](0021-background-agents-that-report-back.md) | Background agents report back, inherit their parent's bounds, resume (also after a restart), isolate in worktrees without discarding work, and share a per-session concurrency cap | Accepted |
 | [0022](0022-document-design-system.md) | Lay documents out by family: blueprints (cover, front matter, faces, numbering, running text, captions, expected visuals) drive the writing brief, the .docx and the PDF | Accepted |
 | [0023](0023-presentations.md) | Presentations: slides as layouts plus fields, one layout engine that fits text for the app, PDF and a hand-written .pptx (native text, tables, charts, notes) | Accepted |
-| [0024](0024-inline-scoped-edits.md) | Ask AICO edits one part of a document: a typed patch for that part, validated in code (scope, shape, figures, references), reviewed as a diff, accepted as one version | Proposed |
+| [0024](0024-inline-scoped-edits.md) | Ask AICO edits one part of a document: a typed patch for that part, validated in code (scope, shape, figures, references), reviewed as a diff, accepted as one version | Accepted |
+| [0025](0025-deck-visual-system.md) | Deck visuals: a parametric infographic library as native PowerPoint shapes, licensed picture search behind the SSRF guard, a vendored icon set, design briefs with brand palettes, and presentation rules enforced by the validator | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

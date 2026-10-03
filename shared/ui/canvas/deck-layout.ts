@@ -37,10 +37,14 @@
  * @module shared/ui/canvas/deck-layout
  */
 
-import { isPending, layoutInfo, parseRuns, plainOf, type Bullet, type Deck, type DeckChart, type Slide, type TextRun } from './deck-model';
-import { deckTheme, roles, type ColorRef, type DeckTheme } from './deck-themes';
+import { isPending, layoutInfo, parseRuns, plainOf, type Bullet, type Deck, type DeckChart, type DeckImage, type ImageMask, type Slide, type TextRun } from './deck-model';
+import { contrastRatio, inkOn, resolveHex, roles, themeContrastProblems, themeOfDeck, type ColorRef, type DeckTheme, type SchemeSlot } from './deck-themes';
 import { deckTypeById } from './deck-types';
 import { textWidth } from './deck-fonts';
+import { clipToRect, polyPath, type PresetGeom, type Pt } from './deck-geometry';
+import { isDeckIcon } from './deck-icons';
+import { layoutInfographic } from './deck-infographics';
+import { deckRuleProblems } from './deck-rules';
 
 export type Color = ColorRef | string;
 
@@ -69,7 +73,7 @@ export interface Para {
   tracking?: number;
 }
 
-interface Box { x: number; y: number; w: number; h: number }
+export interface Box { x: number; y: number; w: number; h: number }
 
 export interface TextFrame extends Box {
   kind: 'text';
@@ -81,18 +85,33 @@ export interface TextFrame extends Box {
   /** PowerPoint placeholder this box is (slide titles are, for outline and accessibility). */
   ph?: 'title' | 'ctrTitle' | 'subTitle' | 'body';
   overflow?: boolean;
+  /** Frames sharing a group id are one PowerPoint group (an infographic item: its shape, icon and text). */
+  group?: string;
+  /** The smallest size this text may be set at by the rules (body ≥ 18 pt…); below it the validator reports it. */
+  minRule?: number;
 }
 
 export interface ShapeFrame extends Box {
   kind: 'shape';
   name: string;
-  geom: 'rect' | 'roundRect' | 'topRound' | 'ellipse' | 'corner';
+  /** A PowerPoint preset, a freeform `path` (absolute M/L/C/Z in the box), or an `icon` from the deck icon set. */
+  geom: PresetGeom | 'path' | 'icon';
+  /** Preset adjust values in slide units (deck-geometry `presetPath`). */
+  adj?: number[];
+  path?: string;
+  icon?: string;
+  /** Clockwise degrees about the box centre. */
+  rot?: number;
+  flipV?: boolean;
   fill?: Color;
   /** A vertical gradient from transparent to this colour at `a` (photo scrims). */
   gradient?: ColorRef;
+  /** A two-colour linear gradient; `angle` in degrees, 0 = left to right, clockwise. */
+  grad?: { from: ColorRef; to: ColorRef; angle: number };
   line?: { color: Color; w: number; dash?: boolean };
   radius?: number;
   field?: string;
+  group?: string;
 }
 
 export interface ImageFrame extends Box {
@@ -102,6 +121,10 @@ export interface ImageFrame extends Box {
   alt: string;
   fit: 'cover' | 'contain';
   field: string;
+  mask?: ImageMask;
+  /** The diagonal cut on the right edge instead of the left. */
+  maskFlip?: boolean;
+  group?: string;
 }
 
 export interface TableCell { paras: Para[]; fill?: Color }
@@ -196,7 +219,7 @@ function paraHeight(paras: Para[], theme: DeckTheme, width: number): { height: n
   return { height, lines };
 }
 
-interface ParaSpec {
+export interface ParaSpec {
   text: string;
   /** Size relative to the box's size. */
   rel?: number;
@@ -243,7 +266,7 @@ function build(specs: ParaSpec[], size: number): Para[] {
   });
 }
 
-interface FitResult { paras: Para[]; size: number; height: number; overflow: boolean; lines: number }
+export interface FitResult { paras: Para[]; size: number; height: number; overflow: boolean; lines: number }
 
 /** The largest size from `size` down to `min` at which the paragraphs fit `box`. */
 function fit(specs: ParaSpec[], theme: DeckTheme, w: number, h: number, size: number, min: number, maxLines?: number): FitResult {
@@ -312,7 +335,7 @@ function growShared(groups: { specs: ParaSpec[]; w: number; h: number }[], theme
 
 // ── The engine ───────────────────────────────────────────────────────
 
-interface Ctx {
+export interface Ctx {
   deck: Deck;
   slide: Slide;
   theme: DeckTheme;
@@ -338,13 +361,27 @@ function problem(c: Ctx, severity: Problem['severity'], message: string, field?:
   c.problems.push({ slide: c.slide.id, n: c.n, severity, message, ...(field ? { field } : {}) });
 }
 
-function text(c: Ctx, name: string, box: Box, fitted: FitResult, opts: { anchor?: TextFrame['anchor']; field?: string; ph?: TextFrame['ph'] } = {}): TextFrame {
+function text(c: Ctx, name: string, box: Box, fitted: FitResult, opts: { anchor?: TextFrame['anchor']; field?: string; ph?: TextFrame['ph']; group?: string; minRule?: number } = {}): TextFrame {
   const f: TextFrame = {
     kind: 'text', name, ...box, paras: fitted.paras, anchor: opts.anchor ?? 't',
     ...(opts.field ? { field: opts.field } : {}), ...(opts.ph ? { ph: opts.ph } : {}), ...(fitted.overflow ? { overflow: true } : {}),
+    ...(opts.group ? { group: opts.group } : {}), ...(opts.minRule ? { minRule: opts.minRule } : {}),
   };
   c.frames.push(f);
   return f;
+}
+
+/**
+ * The body-size rule (ADR 0025): text the audience must read is not set
+ * below `min` points — 18 for a slide's main text at 16:9, a little less for
+ * two columns. The fitter may still shrink to its floor so nothing spills;
+ * the rule turns "it fits at 14 pt" into a problem to fix (cut or split).
+ */
+function sizeRule(c: Ctx, what: string, f: FitResult, min: number, field: string): void {
+  if (f.overflow || !f.paras.length) return;
+  const size = f.size;
+  const floor = c.W === 960 ? min : min - 2;
+  if (size < floor) problem(c, 'error', `${what} is set at ${size} pt to fit — below the ${floor} pt minimum for reading at a distance; cut words, split the slide, or make it visual (make_visual)`, field);
 }
 
 function shape(c: Ctx, name: string, box: Box, s: Omit<ShapeFrame, 'kind' | 'name' | 'x' | 'y' | 'w' | 'h'>): void {
@@ -433,7 +470,14 @@ function requireTitle(c: Ctx): void {
 
 function titleSlide(c: Ctx, closing = false): Color {
   const { theme: t, r, W, H, MX, slide: s } = c;
+  if (s.image?.src) {
+    if (s.image.mask && s.image.mask !== 'rect' && !closing) return heroTitle(c, false);
+    return photoField(c, closing ? 'closing' : 'title');
+  }
   const style = closing ? 'field' : t.title;
+  // Gradient themes run their field from one slot to the other (ADR 0025).
+  if (style === 'field' && t.gradient) shape(c, 'Gradient field', { x: 0, y: 0, w: W, h: H }, { geom: 'rect', grad: gradOf(c, 35) });
+  if (style === 'split' && t.gradient) shape(c, 'Gradient panel', { x: 0, y: 0, w: W * 0.5, h: H }, { geom: 'rect', grad: gradOf(c, 60) });
   const center = closing || style === 'frame';
   let bg: Color = r.bg;
   let titleColor: Color = r.title;
@@ -455,7 +499,7 @@ function titleSlide(c: Ctx, closing = false): Color {
       break;
     case 'split': {
       const pw = W * 0.5;
-      shape(c, 'Title panel', { x: 0, y: 0, w: pw, h: H }, { geom: 'rect', fill: r.titleBg });
+      if (!t.gradient) shape(c, 'Title panel', { x: 0, y: 0, w: pw, h: H }, { geom: 'rect', fill: r.titleBg });
       shape(c, 'Disc', { x: pw + (W - pw) * 0.18, y: 64, w: (W - pw) * 0.66, h: (W - pw) * 0.66 }, { geom: 'ellipse', fill: r.accent });
       shape(c, 'Disc 2', { x: pw + (W - pw) * 0.52, y: 64 + (W - pw) * 0.42, w: (W - pw) * 0.4, h: (W - pw) * 0.4 }, { geom: 'ellipse', fill: { ...r.accent2, a: 0.9 } as ColorRef });
       shape(c, 'Ring', { x: pw + (W - pw) * 0.08, y: H - 120, w: 56, h: 56 }, { geom: 'ellipse', line: { color: r.title, w: 2 } });
@@ -519,6 +563,8 @@ function titleSlide(c: Ctx, closing = false): Color {
 
 function sectionSlide(c: Ctx): Color {
   const { theme: t, r, W, H, MX, slide: s } = c;
+  if (s.image?.src) return photoField(c, 'section');
+  if (t.section === 'field' && t.gradient) shape(c, 'Gradient field', { x: 0, y: 0, w: W, h: H }, { geom: 'rect', grad: gradOf(c, 20) });
   const num = String(c.section).padStart(2, '0');
   let bg: Color = r.bg;
   const kicker = (color: Color, box: Box): void => {
@@ -605,8 +651,9 @@ function bulletsSlide(c: Ctx, agenda = false): void {
   checkBullets(c, s.bullets, 'bullets');
   if (!specs.length) { if (!c.draft) problem(c, 'error', 'this slide has a title but no content — add bullets or body, or use a section layout', 'bullets'); return; }
   const f = fitAiry(specs, t, CW, h, c.W === 960 ? 24 : 22, 14, 30);
-  text(c, 'Content', { x: MX, y: Y0, w: CW, h }, f, { field: s.bullets ? 'bullets' : 'body', ph: 'body' });
+  text(c, 'Content', { x: MX, y: Y0, w: CW, h }, f, { field: s.bullets ? 'bullets' : 'body', ph: 'body', minRule: 18 });
   overflowNote(c, 'The text', f, h, 'bullets');
+  sizeRule(c, 'The text', f, 18, s.bullets ? 'bullets' : 'body');
 }
 
 function columnSpecs(c: Ctx, col: Slide['left'], headingColor: Color | null, textColor?: Color): ParaSpec[] {
@@ -652,27 +699,246 @@ function columnsSlide(c: Ctx, cards: boolean): void {
     text(c, `Column ${i + 1}`, { x: x + inset, y: bodyTop, w: colW - 2 * inset, h: cards ? cardH - (bodyTop - Y0) - 16 : bodyH }, bodies.results[i]!, { field });
     if (bodies.results[i]!.overflow) overflowNote(c, `The ${field} column`, bodies.results[i]!, bodyH, field);
   });
+  if (bodies.results.some(b => b.paras.length)) sizeRule(c, 'The column text', bodies.results.find(b => b.paras.length)!, 16, 'left');
 }
 
-function imageFrame(c: Ctx, box: Box): void {
-  const img = c.slide.image;
-  if (img?.src) {
-    c.frames.push({ kind: 'image', name: 'Picture', ...box, src: img.src, alt: img.alt ?? c.slide.title ?? '', fit: img.fit ?? 'cover', field: 'image' });
-    return;
+// ── Pictures (ADR 0025) ──────────────────────────────────────────────
+
+/** The scrim colour: the theme's darkest slot. White text over it is checked to keep 4.5:1 on a white photo. */
+const INK: ColorRef = { s: 'dk1' };
+/** Overlay on the whole photo, then a gradient under the text: their composite at the top of the text is ≥ 0.66. */
+export const SCRIM = { base: 0.32, from: 0.5, to: 0.88 } as const;
+
+/** The worst-case contrast of the theme's light text over a photo behind the scrim (a pure white photo). */
+export function scrimContrast(theme: DeckTheme): number {
+  const a = 1 - (1 - SCRIM.base) * (1 - SCRIM.from);
+  const ink = resolveHex(theme, INK);
+  const mix = (ch: number): number => Math.round(255 * (1 - a) + parseInt(ink.slice(ch, ch + 2), 16) * a);
+  const bg = `#${[1, 3, 5].map(i => mix(i).toString(16).padStart(2, '0')).join('')}`;
+  return contrastRatio(resolveHex(theme, { s: 'lt1' }), bg);
+}
+
+function scrim(c: Ctx, box: Box, textTop: number, group?: string): void {
+  shape(c, 'Photo overlay', box, { geom: 'rect', fill: { ...INK, a: SCRIM.base }, ...(group ? { group } : {}) });
+  const top = Math.max(box.y, textTop - 36);
+  shape(c, 'Scrim', { x: box.x, y: top, w: box.w, h: box.y + box.h - top }, { geom: 'rect', grad: { from: { ...INK, a: SCRIM.from }, to: { ...INK, a: SCRIM.to }, angle: 90 }, ...(group ? { group } : {}) });
+}
+
+/**
+ * The theme's gradient (or dk2 → accent1) for fields and art. White text sits
+ * on fields, so each stop is darkened (PowerPoint `lumMod`) until white keeps
+ * 4.5:1 on it — a cyan end that would wash out the subtitle is deepened, not
+ * trusted.
+ */
+export function gradOf(c: { theme: DeckTheme }, angle = 35): { from: ColorRef; to: ColorRef; angle: number } {
+  const g: [SchemeSlot, SchemeSlot] = c.theme.gradient ?? ['dk2', 'accent1'];
+  const light = resolveHex(c.theme, { s: 'lt1' });
+  const stop = (s: SchemeSlot): ColorRef => {
+    for (const mod of [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3]) {
+      const ref: ColorRef = mod === 1 ? { s } : { s, mod };
+      if (contrastRatio(light, resolveHex(c.theme, ref)) >= 4.5) return ref;
+    }
+    return { s, mod: 0.25 };
+  };
+  return { from: stop(g[0]), to: stop(g[1]), angle };
+}
+
+function maskGeom(mask: ImageMask | undefined): PresetGeom | 'path' {
+  return mask === 'circle' ? 'ellipse' : mask === 'hexagon' ? 'hexagon' : mask === 'rounded' ? 'roundRect' : mask === 'diagonal' ? 'path' : 'rect';
+}
+
+/** The diagonal cut: the long edge slants in by 18% of the width (left edge, or right when `flip`). */
+export function diagonalPoints(w: number, h: number, flip = false): Pt[] {
+  const k = w * 0.18;
+  return flip ? [[0, 0], [w, 0], [w - k, h], [0, h]] : [[k, 0], [w, 0], [w, h], [0, h]];
+}
+
+/** Seeded pseudo-random numbers: the same slide always gets the same art. */
+function seeded(seed: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return () => { h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x6d2b79f5) >>> 0; return (h % 10000) / 10000; };
+}
+
+/**
+ * Generated art for a picture slot (`art:mesh|circles|waves|grid|blocks`):
+ * the theme's gradient and a few light shapes, all native and all inside the
+ * box — the fallback when there is no licensed photo, and never a stock cliché.
+ */
+function artFrames(c: Ctx, box: Box, style: string, mask: ImageMask | undefined, field: string, group?: string, flip = false): void {
+  const g = { ...(group ? { group } : {}), field };
+  const geom = maskGeom(mask);
+  const base = geom === 'path'
+    ? { geom: 'path' as const, path: polyPath(diagonalPoints(box.w, box.h, flip)) }
+    : { geom, ...(geom === 'roundRect' ? { radius: 18 } : {}), ...(geom === 'hexagon' ? { adj: [box.w / 4] } : {}) };
+  shape(c, 'Art', box, { ...base, grad: gradOf(c, 40), ...g });
+  // Decorations stay inside the shape: a circle or hexagon gets its inscribed square.
+  const inset = geom === 'ellipse' || geom === 'hexagon' ? 0.16 : geom === 'path' ? 0.2 : geom === 'roundRect' ? 0.04 : 0;
+  const ib: Box = { x: box.x + box.w * inset, y: box.y + box.h * (geom === 'path' ? 0.04 : inset), w: box.w * (1 - 2 * inset), h: box.h * (1 - (geom === 'path' ? 0.08 : 2 * inset)) };
+  const rnd = seeded(`${c.slide.id}|${style}|${Math.round(box.w)}`);
+  const light = (a: number): ColorRef => ({ s: 'lt1', a });
+  const clipped = (pts: Pt[]): string => polyPath(clipToRect(pts, 0, 0, ib.w, ib.h));
+  switch (style) {
+    case 'circles': {
+      const d = Math.min(ib.w, ib.h);
+      for (let i = 0; i < 3; i++) {
+        const s = d * (0.9 - i * 0.25);
+        shape(c, `Art ring ${i + 1}`, { x: ib.x + ib.w * (0.55 + rnd() * 0.1) - s / 2, y: ib.y + ib.h / 2 - s / 2, w: s, h: s }, { geom: 'donut', adj: [Math.max(2, s * 0.035)], fill: light(0.18 + i * 0.06), ...g });
+      }
+      const ds = d * 0.22;
+      shape(c, 'Art disc', { x: ib.x + ib.w * 0.12, y: ib.y + ib.h * 0.62, w: ds, h: ds }, { geom: 'ellipse', fill: { s: 'accent2', a: 0.85 }, ...g });
+      break;
+    }
+    case 'waves': {
+      for (let k = 0; k < 3; k++) {
+        const pts: Pt[] = [];
+        const y0 = ib.h * (0.45 + k * 0.17);
+        const amp = ib.h * (0.06 + rnd() * 0.04);
+        const ph = rnd() * Math.PI * 2;
+        for (let i = 0; i <= 24; i++) pts.push([(ib.w * i) / 24, y0 + Math.sin(ph + (i / 24) * Math.PI * 2.2) * amp]);
+        pts.push([ib.w, ib.h], [0, ib.h]);
+        shape(c, `Art wave ${k + 1}`, ib, { geom: 'path', path: clipped(pts), fill: light(0.12 + k * 0.08), ...g });
+      }
+      break;
+    }
+    case 'grid': {
+      const cols = 9;
+      const step = ib.w / cols;
+      const rows = Math.floor(ib.h / step);
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (rnd() < 0.35) continue;
+          const s = step * (0.12 + rnd() * 0.14);
+          shape(c, 'Art dot', { x: ib.x + x * step + (step - s) / 2, y: ib.y + y * step + (step - s) / 2, w: s, h: s }, { geom: 'ellipse', fill: light(0.25 + rnd() * 0.3), ...g });
+        }
+      }
+      break;
+    }
+    case 'blocks': {
+      for (let i = 0; i < 4; i++) {
+        const w = ib.w * (0.3 + rnd() * 0.3);
+        const h = ib.h * (0.18 + rnd() * 0.16);
+        shape(c, `Art block ${i + 1}`, { x: ib.x + rnd() * (ib.w - w), y: ib.y + (i / 4) * (ib.h - h) + rnd() * 10, w, h }, { geom: 'roundRect', radius: 10, fill: i === 1 ? { s: 'accent2', a: 0.75 } : light(0.14 + i * 0.05), ...g });
+      }
+      break;
+    }
+    default: { // mesh: diagonal bands
+      for (let k = 0; k < 4; k++) {
+        const x0 = ib.w * (-0.3 + k * 0.32 + rnd() * 0.08);
+        const bw = ib.w * (0.12 + rnd() * 0.12);
+        shape(c, `Art band ${k + 1}`, ib, { geom: 'path', path: clipped([[x0, ib.h], [x0 + bw, ib.h], [x0 + bw + ib.h * 0.8, 0], [x0 + ib.h * 0.8, 0]]), fill: light(0.08 + k * 0.05), ...g });
+      }
+    }
   }
-  shape(c, 'Picture placeholder', box, { geom: 'rect', fill: c.r.surface, field: 'image' });
-  const f = fit([{ text: 'Image — set image.src to a picture in the project', color: c.r.muted, align: 'c', italic: true }], c.theme, box.w - 40, 60, 14, 10);
-  text(c, 'Picture label', { x: box.x + 20, y: box.y + box.h / 2 - 30, w: box.w - 40, h: 60 }, f, { anchor: 'm', field: 'image' });
-  problem(c, 'warn', 'no image.src — add a picture (a PNG or JPEG in the project), or choose another layout', 'image');
+}
+
+/** Sharpness, alt text and credit — the picture rules (ADR 0025). */
+function imageChecks(c: Ctx, img: DeckImage, box: Box, field: string): void {
+  if (img.src.startsWith('art:')) return;
+  if (!img.alt?.trim()) problem(c, 'error', 'a picture has no alt text — set image.alt to what it shows (screen readers and PowerPoint\'s accessibility check read it)', field);
+  if (img.px) {
+    // Pixels per point the slot gets once the picture is cropped to cover it; 1.25 px/pt is a 1200 px wide full-bleed picture.
+    const ppp = Math.max(box.w / img.px[0], box.h / img.px[1]);
+    if (1 / ppp < 1.25) problem(c, 'warn', `a picture of ${img.px[0]}×${img.px[1]} px is soft in a ${Math.round(box.w)}×${Math.round(box.h)} pt slot (it needs about ${Math.round(box.w * 1.25)}×${Math.round(box.h * 1.25)} px to cover it) — choose a larger one`, field);
+  }
+  if (img.sourceUrl && !img.credit && !img.license) problem(c, 'error', 'a fetched picture has no credit or licence — keep the credit find_images returned', field);
+}
+
+/** "Photo: Jane Doe · CC BY 2.0", small, inside the picture's corner (or under it when the corner is cut away). */
+function creditFrame(c: Ctx, img: DeckImage, box: Box, field: string, group?: string): void {
+  if (!img.credit && !img.license) return;
+  const label = `${img.credit ? `Photo: ${img.credit}` : 'Photo'}${img.license ? ` · ${img.license}` : ''}`;
+  const cut = img.mask === 'circle' || img.mask === 'hexagon';
+  const w = Math.min(box.w - 16, 240);
+  const f = fit([{ text: label, color: cut ? c.r.muted : { s: 'lt1' }, align: 'r' }], c.theme, w - 8, 12, 7, 6, 1);
+  const y = cut ? Math.min(c.H - 14, box.y + box.h + 4) : box.y + box.h - 18;
+  if (!cut) shape(c, 'Credit backing', { x: box.x + box.w - w - 8, y, w: w + 4, h: 14 }, { geom: 'rect', fill: { ...INK, a: 0.45 }, field, ...(group ? { group } : {}) });
+  text(c, 'Picture credit', { x: box.x + box.w - w - 6, y: y + 1, w, h: 12 }, f, { anchor: 'm', field, ...(group ? { group } : {}) });
+}
+
+/** A picture (or its art, or a placeholder) in a box. Returns whether something real is drawn. */
+function imageFrame(c: Ctx, box: Box, opts: { img?: DeckImage; mask?: ImageMask; field?: string; name?: string; credit?: boolean; group?: string; warnEmpty?: boolean } = {}): boolean {
+  const img = opts.img ?? c.slide.image;
+  const field = opts.field ?? 'image';
+  const mask = opts.mask ?? img?.mask;
+  const group = opts.group ? { group: opts.group } : {};
+  if (img?.src?.startsWith('art:')) { artFrames(c, box, img.src.slice(4), mask, field, opts.group); return true; }
+  if (img?.src) {
+    c.frames.push({
+      kind: 'image', name: opts.name ?? 'Picture', ...box, src: img.src, alt: img.alt ?? c.slide.title ?? '', fit: img.fit ?? 'cover', field,
+      ...(mask && mask !== 'rect' ? { mask } : {}), ...group,
+    });
+    if (opts.credit !== false) creditFrame(c, { ...img, ...(mask ? { mask } : {}) }, box, field, opts.group);
+    imageChecks(c, img, box, field);
+    return true;
+  }
+  const geom = maskGeom(mask);
+  shape(c, 'Picture placeholder', box, { geom: geom === 'path' ? 'rect' : geom, fill: c.r.surface, field, ...(geom === 'hexagon' ? { adj: [box.w / 4] } : {}), ...group });
+  if (box.w >= 120) {
+    const f = fit([{ text: 'Picture — find_images, a project file, or art:mesh', color: c.r.muted, align: 'c', italic: true }], c.theme, box.w * 0.7, 60, 13, 9);
+    text(c, 'Picture label', { x: box.x + box.w * 0.15, y: box.y + box.h / 2 - 30, w: box.w * 0.7, h: 60 }, f, { anchor: 'm', field, ...group });
+  }
+  if (opts.warnEmpty !== false) problem(c, 'warn', 'no picture yet — set image.src (find_images for a licensed photo, a project file, or "art:mesh|circles|waves|grid|blocks" for generated art), or choose another layout', field);
+  return false;
+}
+
+/**
+ * A full-height picture with one slanted edge facing the text (`flip`: the
+ * right edge slants, for a picture on the left), and an accent stripe along
+ * the cut. Art takes the same cut.
+ */
+function diagonalPicture(c: Ctx, img: DeckImage, box: Box, flip: boolean): void {
+  const k = box.w * 0.18;
+  if (img.src.startsWith('art:')) artFrames(c, box, img.src.slice(4), 'diagonal', 'image', undefined, flip);
+  else {
+    c.frames.push({ kind: 'image', name: 'Picture', ...box, src: img.src, alt: img.alt ?? c.slide.title ?? '', fit: img.fit ?? 'cover', field: 'image', mask: 'diagonal', ...(flip ? { maskFlip: true } : {}) });
+    // The credit sits in the corner the cut keeps.
+    creditFrame(c, img, flip ? { ...box, w: box.w * 0.8 } : box, 'image');
+    imageChecks(c, img, box, 'image');
+  }
+  const stripe: Pt[] = flip
+    ? [[box.w - 3, 0], [box.w + 9, 0], [box.w - k + 9, box.h], [box.w - k - 3, box.h]]
+    : [[k - 9, 0], [k + 3, 0], [3, box.h], [-9, box.h]];
+  const xs = stripe.map(p => p[0]);
+  const x0 = Math.min(...xs);
+  shape(c, 'Edge accent', { x: box.x + x0, y: box.y, w: Math.max(...xs) - x0, h: box.h }, { geom: 'path', path: polyPath(stripe.map(([x, y]) => [x - x0, y] as Pt)), fill: c.r.accent, field: 'image' });
+}
+
+/** A decorative accent behind a cut-out picture: an offset disc or ring in the accent colour. */
+function photoAccent(c: Ctx, box: Box, mask: ImageMask | undefined): void {
+  const off = Math.round(Math.min(box.w, box.h) * 0.06);
+  if (mask === 'circle') {
+    shape(c, 'Photo ring', { x: box.x - off, y: box.y - off, w: box.w + off * 2, h: box.h + off * 2 }, { geom: 'donut', adj: [3], fill: c.r.accent });
+    shape(c, 'Photo dot', { x: box.x + box.w * 0.82, y: box.y + box.h * 0.8, w: off * 3, h: off * 3 }, { geom: 'ellipse', fill: c.r.accent2 });
+  } else if (mask === 'hexagon') {
+    shape(c, 'Photo hexagon', { x: box.x + off * 1.4, y: box.y + off * 1.4, w: box.w, h: box.h }, { geom: 'hexagon', adj: [box.w / 4], fill: { ...c.r.accent, a: 0.9 } as ColorRef });
+  } else if (mask === 'rounded') {
+    shape(c, 'Photo block', { x: box.x + off * 1.5, y: box.y + off * 1.5, w: box.w, h: box.h }, { geom: 'roundRect', radius: 18, fill: { ...c.r.accent, a: 0.9 } as ColorRef });
+  }
 }
 
 function imageTextSlide(c: Ctx): void {
-  const { theme: t, r, W, MX, slide: s } = c;
+  const { theme: t, r, W, H, MX, slide: s } = c;
   requireTitle(c);
+  const img = s.image;
+  const right = img?.side === 'right';
+  const mask = img?.mask;
   const iw = Math.round(W * 0.44);
-  imageFrame(c, { x: 0, y: 0, w: iw, h: c.H });
-  const x = iw + 44;
-  const w = W - x - MX;
+  let x: number;
+  if (!mask || mask === 'diagonal') {
+    const box = { x: right ? W - iw : 0, y: 0, w: iw, h: H };
+    if (mask === 'diagonal' && img?.src) diagonalPicture(c, img, box, !right);
+    else imageFrame(c, box);
+    x = right ? MX : iw + 44;
+  } else {
+    const d = Math.min(iw - 70, H - 150);
+    const bw = mask === 'hexagon' ? Math.round(d * 1.1547) : d;
+    const box = { x: right ? W - iw + (iw - bw) / 2 - 10 : (iw - bw) / 2 + 10, y: (H - d) / 2, w: bw, h: d };
+    if (img?.src) photoAccent(c, box, mask);
+    imageFrame(c, box);
+    x = right ? MX : iw + 30;
+  }
+  const w = right ? W - iw - MX - 40 : W - x - MX;
   contentTitle(c, x, w);
   const bottom = c.H - 56;
   const specs: ParaSpec[] = [];
@@ -683,16 +949,15 @@ function imageTextSlide(c: Ctx): void {
   checkBullets(c, s.bullets, 'bullets', Math.min(c.maxBullets, 5));
   if (!specs.length) return;
   const f = fitAiry(specs, t, w, bottom - Y0, 20, 13, 24);
-  text(c, 'Content', { x, y: Y0, w, h: bottom - Y0 }, f, { field: s.bullets ? 'bullets' : 'body' });
+  text(c, 'Content', { x, y: Y0, w, h: bottom - Y0 }, f, { field: s.bullets ? 'bullets' : 'body', minRule: 16 });
   overflowNote(c, 'The text', f, bottom - Y0, 'bullets');
+  sizeRule(c, 'The text', f, 16, s.bullets ? 'bullets' : 'body');
 }
 
 function fullImageSlide(c: Ctx): Color {
   const { theme: t, r, W, H, MX, slide: s } = c;
-  imageFrame(c, { x: 0, y: 0, w: W, h: H });
-  if (s.title?.trim() || s.subtitle?.trim()) {
-    shape(c, 'Scrim', { x: 0, y: H * 0.42, w: W, h: H * 0.58 }, { geom: 'rect', gradient: { s: 'dk1', a: 0.78 } });
-  }
+  imageFrame(c, { x: 0, y: 0, w: W, h: H }, { credit: false });
+  if (s.title?.trim() || s.subtitle?.trim()) scrim(c, { x: 0, y: 0, w: W, h: H }, H - 186);
   const white: ColorRef = { s: 'lt1' };
   if (s.title?.trim()) {
     const f = fit([{ text: s.title, font: 'h', bold: t.headingBold, color: white }], t, W * 0.75, 110, 36, 22, 2);
@@ -700,10 +965,122 @@ function fullImageSlide(c: Ctx): Color {
     overflowNote(c, 'The caption', f, 110, 'title');
   }
   if (s.subtitle?.trim()) {
-    const f = fit([{ text: s.subtitle, color: { s: 'lt1', mod: 0.86 } }], t, W * 0.7, 48, 18, 12);
+    const f = fit([{ text: s.subtitle, color: { s: 'lt1', mod: 0.9 } }], t, W * 0.7, 48, 18, 12);
     text(c, 'Subtitle', { x: MX, y: H - 70, w: W * 0.7, h: 48 }, f, { field: 'subtitle' });
   }
+  if (s.image) creditFrame(c, s.image, { x: 0, y: 0, w: W, h: H }, 'image');
   return r.titleBg;
+}
+
+/** Title, section or closing over a full-bleed photo (or art), with the scrim that keeps white text at AA. */
+function photoField(c: Ctx, kind: 'title' | 'section' | 'closing'): Color {
+  const { theme: t, r, W, H, MX, slide: s } = c;
+  const full = { x: 0, y: 0, w: W, h: H };
+  const art = s.image?.src.startsWith('art:');
+  imageFrame(c, full, { credit: false, mask: 'rect' });
+  const center = kind === 'closing';
+  const titleBox = kind === 'section' ? { x: MX, y: H * 0.36, w: W * 0.8, h: 140 } : center ? { x: MX, y: H * 0.26, w: W - 2 * MX, h: 150 } : { x: MX, y: H * 0.3, w: W * 0.8, h: 170 };
+  if (!art) scrim(c, full, titleBox.y); else shape(c, 'Art overlay', full, { geom: 'rect', fill: { ...INK, a: 0.18 } });
+  const white: ColorRef = { s: 'lt1' };
+  const soft: ColorRef = { s: 'lt1', mod: 0.9 };
+  const align = center ? 'c' : 'l';
+  if (kind === 'section') {
+    const kf = fit([{ text: `Section ${String(c.section).padStart(2, '0')}`, color: white, caps: true, trackingEm: 0.14, bold: true }], t, 300, 22, 13, 10, 1);
+    text(c, 'Kicker', { x: MX, y: titleBox.y - 40, w: 300, h: 22 }, kf, { anchor: 'b' });
+  }
+  shape(c, 'Accent rule', { x: center ? W / 2 - 40 : MX, y: titleBox.y - 12, w: 80, h: 5 }, { geom: 'rect', fill: r.accent });
+  if (s.title?.trim()) {
+    const f = fit([{ text: s.title, font: 'h', bold: t.headingBold, color: white, align }], t, titleBox.w, titleBox.h, kind === 'section' ? 42 : c.W === 960 ? 48 : 42, 26, 3);
+    text(c, 'Title', titleBox, f, { anchor: 't', field: 'title', ph: kind === 'title' ? 'ctrTitle' : 'title' });
+    overflowNote(c, 'The title', f, titleBox.h, 'title');
+  } else problem(c, 'error', `${kind} slide has no title`, 'title');
+  const subY = titleBox.y + titleBox.h + 8;
+  if (s.subtitle?.trim()) {
+    const f = fit([{ text: s.subtitle, color: soft, align }], t, titleBox.w * (center ? 1 : 0.9), 70, 21, 13);
+    text(c, 'Subtitle', { x: titleBox.x, y: subY, w: titleBox.w * (center ? 1 : 0.9), h: 70 }, f, { field: 'subtitle', ...(kind === 'title' ? { ph: 'subTitle' as const } : {}) });
+    overflowNote(c, 'The subtitle', f, 70, 'subtitle');
+  }
+  if (s.body?.trim() && kind !== 'section') {
+    const f = fit([{ text: s.body, color: soft, align }], t, W - 2 * MX, 26, 15, 10);
+    text(c, 'Presenter', { x: MX, y: H - 70, w: W - 2 * MX, h: 26 }, f, { anchor: 'b', field: 'body' });
+  }
+  if (s.image) creditFrame(c, s.image, full, 'image');
+  return r.titleBg;
+}
+
+/** A title slide with a cut-out photo (circle, hexagon, diagonal, rounded) beside the title. */
+function heroTitle(c: Ctx, closing: boolean): Color {
+  const { theme: t, r, W, H, MX, slide: s } = c;
+  const img = s.image!;
+  const mask = img.mask!;
+  const right = img.side !== 'left';
+  let box: Box;
+  if (mask === 'diagonal') box = { x: right ? W * 0.46 : 0, y: 0, w: W * 0.54, h: H };
+  else if (mask === 'rounded') box = { x: right ? W * 0.52 : 40, y: 46, w: W * 0.48 - 46, h: H - 92 };
+  else {
+    const d = Math.min(H * 0.74, W * 0.4);
+    const bw = mask === 'hexagon' ? d * 1.1547 : d;
+    box = { x: right ? W * 0.73 - bw / 2 : W * 0.27 - bw / 2, y: (H - d) / 2, w: bw, h: d };
+  }
+  // A colour field from the photo's centre to the edge: the cut-out sits half on it, as in a printed layout.
+  if (mask === 'circle' || mask === 'hexagon') {
+    const fx = right ? box.x + box.w / 2 : 0;
+    const fw = right ? W - fx : box.x + box.w / 2;
+    shape(c, 'Photo field', { x: fx, y: 0, w: fw, h: H }, t.gradient ? { geom: 'rect', grad: gradOf(c, 90) } : { geom: 'rect', fill: r.titleBg });
+  }
+  if (mask !== 'diagonal') photoAccent(c, box, mask);
+  if (mask === 'diagonal') diagonalPicture(c, img, box, !right);
+  else imageFrame(c, box);
+  const tx = right ? MX : box.x + box.w + 50;
+  const tw = (right ? box.x - 50 : W - MX) - tx;
+  const align = 'l';
+  shape(c, 'Accent rule', { x: tx, y: 330, w: 84, h: 6 }, { geom: 'rect', fill: r.accent });
+  if (s.title?.trim()) {
+    const f = fit([{ text: s.title, font: 'h', bold: t.headingBold, color: r.title, align }], t, tw, 200, closing ? 44 : c.W === 960 ? 46 : 40, 26, 4);
+    text(c, 'Title', { x: tx, y: 112, w: tw, h: 200 }, f, { anchor: 'b', field: 'title', ph: 'ctrTitle' });
+    overflowNote(c, 'The title', f, 200, 'title');
+  } else problem(c, 'error', 'title slide has no title', 'title');
+  if (s.subtitle?.trim()) {
+    const f = fit([{ text: s.subtitle, color: r.muted, align }], t, tw, 80, 21, 13);
+    text(c, 'Subtitle', { x: tx, y: 352, w: tw, h: 80 }, f, { field: 'subtitle', ph: 'subTitle' });
+    overflowNote(c, 'The subtitle', f, 80, 'subtitle');
+  }
+  if (s.body?.trim()) {
+    const f = fit([{ text: s.body, color: r.muted, align }], t, tw, 26, 15, 10);
+    text(c, 'Presenter', { x: tx, y: H - 78, w: tw, h: 26 }, f, { anchor: 'b', field: 'body' });
+  }
+  return r.bg;
+}
+
+/** 2–4 pictures in a row (or two rows of two), each with an optional caption. */
+function imageGridSlide(c: Ctx): void {
+  const { theme: t, r, MX, CW, slide: s } = c;
+  requireTitle(c);
+  contentTitle(c);
+  const bottom = contentBottom(c);
+  const imgs = s.images ?? [];
+  if (imgs.length < 2) problem(c, 'error', 'a picture grid needs images: [{src, alt, caption?}] — 2 to 4', 'images');
+  if (imgs.length > 4) problem(c, 'error', `${imgs.length} pictures — at most 4 read on one slide`, 'images');
+  const shown = imgs.slice(0, 4);
+  if (!shown.length) return;
+  let top = Y0;
+  if (s.body?.trim()) {
+    const f = fit([{ text: s.body, color: r.muted }], t, CW, 30, 18, 13, 1);
+    text(c, 'Lead', { x: MX, y: Y0, w: CW, h: 30 }, f, { field: 'body' });
+    top += 42;
+  }
+  const n = shown.length;
+  const cols = n;
+  const gap = 20;
+  const capH = shown.some(i => i.caption) ? 40 : 0;
+  const cw = (CW - gap * (cols - 1)) / cols;
+  const ch = bottom - top - capH;
+  const caps = fitShared(shown.map(i => ({ specs: i.caption ? [{ text: i.caption, color: r.text, align: 'c' as const }] : [], w: cw, h: capH - 8 })), t, 15, 11);
+  shown.forEach((im, i) => {
+    const box = { x: MX + i * (cw + gap), y: top, w: cw, h: ch };
+    imageFrame(c, box, { img: im, field: 'images', name: `Picture ${i + 1}`, mask: im.mask ?? (t.radius >= 8 ? 'rounded' : undefined) });
+    if (im.caption) text(c, `Caption ${i + 1}`, { x: box.x, y: top + ch + 8, w: cw, h: capH - 8 }, caps.results[i]!, { field: 'images' });
+  });
 }
 
 /**
@@ -898,10 +1275,19 @@ function quoteSlide(c: Ctx): void {
     const f = fit([{ text: s.title, color: r.accent, caps: true, trackingEm: 0.12, bold: true }], t, CW, 22, 13, 10, 1);
     text(c, 'Label', { x: MX, y: 56, w: CW, h: 22 }, f, { field: 'title', ph: 'title' });
   }
+  // A portrait beside the quote (ADR 0025): a circle with an accent ring, the quote moved right of it.
+  const portrait = Boolean(s.image?.src);
+  const pd = 230;
+  if (portrait) {
+    const box = { x: MX + 6, y: (H - pd) / 2 + 6, w: pd, h: pd };
+    photoAccent(c, box, 'circle');
+    imageFrame(c, box, { mask: 'circle' });
+  }
+  const shift = portrait ? pd + 60 : 0;
   const mark = fit([{ text: '“', font: 'h', color: { ...r.accent, a: 0.85 } as ColorRef, lhf: 1 }], t, 120, 150, 140, 140, 1);
-  text(c, 'Quote mark', { x: MX - 8, y: 70, w: 120, h: 150 }, mark);
-  const qx = MX + 70;
-  const qw = CW - 110;
+  text(c, 'Quote mark', { x: MX - 8 + shift, y: 70, w: 120, h: 150 }, mark);
+  const qx = MX + 70 + shift;
+  const qw = CW - 110 - shift;
   const qy = 140;
   const qh = H - qy - 130;
   if (s.quote?.trim()) {
@@ -967,7 +1353,7 @@ export interface LayoutOptions {
 /** Lay out one slide of a deck. */
 export function layoutSlide(deck: Deck, index: number, opts: LayoutOptions = {}): SlideLayout {
   const slide = deck.slides[index]!;
-  const theme = deckTheme(deck.theme);
+  const theme = themeOfDeck(deck);
   const size = SLIDE_SIZE[deck.aspect] ?? SLIDE_SIZE['16:9'];
   const W = size.w;
   const MX = W === 960 ? 56 : 44;
@@ -1013,6 +1399,8 @@ export function layoutSlide(deck: Deck, index: number, opts: LayoutOptions = {})
       case 'kpi': kpiSlide(c); break;
       case 'quote': quoteSlide(c); break;
       case 'timeline': timelineSlide(c); break;
+      case 'infographic': requireTitle(c); contentTitle(c); layoutInfographic(c, KIT); break;
+      case 'image-grid': imageGridSlide(c); break;
     }
   }
   if (chrome) footer(c);
@@ -1023,10 +1411,30 @@ export function layoutDeck(deck: Deck, opts: LayoutOptions = {}): SlideLayout[] 
   return deck.slides.map((_, i) => layoutSlide(deck, i, opts));
 }
 
+/**
+ * What the infographic library (`deck-infographics.ts`) builds with — the
+ * engine's own fitting and frame helpers, handed over rather than imported so
+ * the two modules do not import each other.
+ */
+export const KIT = {
+  fit, fitShared, growShared, text, shape, problem, overflowNote, contentBottom, imageFrame, photoAccent, gradOf, sizeRule,
+  Y0, LH_BODY,
+  /** Item `i`'s colour: accents 1–5 in order (accent 6 is kept for neutrals), so one slide stays within five colours. */
+  accent: (i: number): ColorRef => ({ s: (['accent1', 'accent2', 'accent3', 'accent4', 'accent5'] as const)[i % 5]! }),
+  ink: (c: Ctx, fill: ColorRef): ColorRef => inkOn(c.theme, fill),
+  /** An accent for bold label text on the slide background — or the title colour when the accent would be under 3:1 there. */
+  readable: (c: Ctx, ref: ColorRef): ColorRef => (contrastRatio(resolveHex(c.theme, ref), resolveHex(c.theme, c.r.bg)) >= 3 ? ref : c.r.title),
+  isIcon: isDeckIcon,
+};
+export type Kit = typeof KIT;
+
 /** Every problem in the deck, slide problems first, then the deck's own. */
 export function validateDeck(deck: Deck): { problems: Problem[]; pending: string[] } {
   const layouts = layoutDeck(deck);
   const problems = layouts.flatMap(l => l.problems);
+  problems.push(...deckRuleProblems(deck, layouts));
+  const theme = themeOfDeck(deck);
+  for (const m of themeContrastProblems(theme)) problems.push({ slide: deck.slides[0]?.id ?? '-', n: 1, severity: 'error', message: `the palette fails contrast — ${m}; adjust the brand colours (palette) or pick another theme` });
   const pending = layouts.filter(l => l.pending).map(l => l.slide.id);
   if (deck.slides.length && deck.slides[0]!.layout !== 'title' && !pending.includes(deck.slides[0]!.id)) {
     problems.push({ slide: deck.slides[0]!.id, n: 1, severity: 'warn', message: 'a deck usually opens with a title slide (layout "title")' });

@@ -70,6 +70,65 @@ changes", for documents and presentations.
    (economy preset: the cheap one), reasoning effort `low`; a reply cut off at
    the token ceiling is retried with thinking off and twice the budget.
 
+### Presentations (decks, ADR 0023)
+
+9. **A deck target is a slide plus an element** — `{slideId, elementId?,
+   range?, cells?}` (`DeckTarget`, `shared/ui/canvas/deck-scoped-edit.ts`):
+   `slide` (default), `title`, `subtitle`, `body`, `bullets` or `bullets.N`,
+   `left`/`right`, `table` (with cells), `chart`, `diagram`, `kpis` or
+   `kpis.N`, `timeline` or `timeline.N`, `infographic` or `infographic.N`
+   (ADR 0025), `quote`, `attribution`, `image`
+   (its caption), `source`, `notes`; items are 1-based; `range` is a
+   selection in a text element. It resolves to the same `ResolvedPart` kinds —
+   text (a bullet list as a Markdown list), table/cells, Mermaid, an ECharts
+   chart — and JSON for the structured fields (our chart shape, KPI tiles,
+   milestones, a column, the whole slide with its layout; an embedded picture
+   is never sent, it stands in as `"(image)"`). The part is `fixedKind`: the
+   prompt offers no Markdown escape and a Markdown answer is refused.
+10. **The deck validator** (`validateDeckPatch`) runs the document checks where
+    the part is text/table/cells/chart/diagram and adds: the patch is applied
+    to the target field only (`applyDeckPatch`), then every other slide and
+    every other field of the slide (and the other bullets/tiles/milestones of
+    an item edit) is compared as stable JSON; list lengths kept unless asked
+    (and *fewer* when "fewer bullets" is asked); a bullet's sub-point level
+    kept; chart type, categories and series kept unless asked; notes may only
+    use figures that are on the slide or its neighbours; a whole-slide edit
+    keeps its layout unless the instruction names another
+    (`deckIntentOf`: "turn the bullets into big numbers" → `kpi`), and then
+    must become exactly that layout, carry every figure, and leave nothing in
+    a field the new layout does not draw. An infographic keeps its kind unless
+    asked, and then only for a kind that can draw the same items
+    (`compatibleKinds`: room for them, a percentage for rings, a picture for
+    the photo kinds; never SWOT/matrix, whose positions mean something); it
+    keeps 2–8 items, every icon must be in the vendored icon set, and the
+    infographic layout's own checks are the fit check. **The fit check:** the slide is laid
+    out before and after; a layout error the edit introduces refuses it; one
+    already there on the edited element refuses it when the instruction was to
+    shorten/fit/cut, and is a warning otherwise. The retry-once loop is the
+    document one (`editPart` with a `validate` override), so the model gets the
+    layout engine's own sentence back.
+11. **Context** (`buildDeckEditContext`, bounded): deck type and brief, theme,
+    the slide's layout and its limits (bullets allowed for the deck type,
+    about how many title characters fit, table/KPI/timeline counts, what
+    already does not fit), the outline (≤ 40 slide titles around the target,
+    marked), two neighbouring slides either side (clipped).
+12. **Entry points and review** (`DeckEditor`, `DeckInlineEdit`): ✦ on the
+    element under the pointer (a bullet by its paragraph, a tile or milestone
+    by its frame — `data-frame`, editor only), right-click, a selection on the
+    slide or in an inspector field, Ctrl+K / Ctrl+I, and a slide's ✦ (or
+    right-click) in the sorter. Quick actions: Shorten to fit, Punchier title,
+    Fewer bullets, Bullets → big numbers / timeline / two columns, Change
+    chart type, Simplify diagram, Change infographic style, Add a step, Write
+    speaker notes, Translate (a slide's
+    title and notes actions switch to that element). The stage draws the
+    proposed slide; the panel shows before/after thumbnails, the word or cell
+    diff and the fit. Accept re-applies the patch to the deck the editor holds
+    (a field typed meanwhile is kept; the part itself must be unchanged) as one
+    `set` operation — one Ctrl+Z, one version noted "AICO edit: …" — with an
+    Undo toast. The route takes `target.slideId` and answers with the slide
+    after the edit; Canvas `edit_part` takes `part: {slide, element?, rows?,
+    columns?}`.
+
 ## Alternatives considered
 
 | Option | Why not |
@@ -80,6 +139,8 @@ changes", for documents and presentations.
 | Full Mermaid parse in the engine | Mermaid needs a DOM; the engine's syntax check is the floor and the browser's real parser the ceiling. |
 | Use the `background` role (cheap model) | Personal-data routing rules apply to it, and the person reads every word an edit changes; quality is visible. |
 | A selection range in rendered text | Rendered and source text differ (`**`, links); the range is located in the Markdown and widened so it never cuts a mark or link in half (`locateSelection`). |
+| Decks: let the agent's `set_slides` do targeted edits | `set_slides` writes whatever fields it is sent; nothing holds "a punchier title" to the title or a shortened table to its columns, and nothing asks whether the result still fits. |
+| Decks: send the whole slide for every element edit | The model then may "improve" fields it was not asked about; an element patch cannot touch them by construction, and the scope check proves it. |
 
 ## Consequences
 
@@ -120,3 +181,14 @@ token-guarded `127.0.0.1` API; no credentials are involved.
   hashed), a rule per instruction, a judge only for tone — plus a broken stub
   answer the validator must refuse. 2026-10-03, deepseek-v4-flash: 15/15,
   all first attempt, scope held 15/15, $0.0041.
+- Decks: `scripts/deck-edit-test.mjs` (in `npm test`): targets and errors,
+  context bounds (an 80-slide deck), intent, every validator rule incl. the
+  fit check (a title past two lines, a sixth bullet on a board slide, a table
+  past eight rows, a commentary that overflows), conversions, apply/undo,
+  the retry with a stub provider, `edit_part` and the route.
+  `web/test-deck-edit.mjs` (in `test:web:unit`): pointing (`elementAt`,
+  `data-frame`), scopes, selections in a field and on the slide, quick
+  actions' intents, accept/undo, fit. `scripts/deck-edit-live.mjs` (paid, on
+  request): 12 edits of every element kind on a board deck. 2026-10-03,
+  deepseek-v4-flash: 12/12 passed every check, scope held 12/12, fit 12/12,
+  10 first attempt, broken stub refused, $0.0050.
