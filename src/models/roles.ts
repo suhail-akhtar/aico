@@ -223,8 +223,16 @@ export function resolveRole(role: ModelRole, o: ResolveOptions): RoleResolution 
     if (!c.model) continue;
     const unmet = meetsNeed(c.model, info.needs, s);
     if (unmet) { reasons.push(`${c.source} choice skipped: ${unmet}`); continue; }
-    const inst = s ? resolveInstance(s, { model: c.model }) : undefined;
-    if (s && !inst) { reasons.push(`${c.source} choice skipped: no configured provider can serve ${c.model}`); continue; }
+    const found = s ? resolveInstance(s, { model: c.model }) : undefined;
+    // `resolveInstance` falls back to the first usable instance, and Ollama is
+    // always usable (keyless). A vendor's model (deepseek-v4-flash, claude-…)
+    // is not served by a local Ollama unless it lists it: treating that
+    // fallback as a match sent a cloud model name to a local endpoint and
+    // called it "local". Found by CI, which has no cloud keys. Such a choice
+    // is kept (it fails at call time, as before) but is never local.
+    const strayLocal = Boolean(found && found.type === 'ollama' && familyOfModel(c.model) && !found.models?.includes(c.model));
+    const inst = strayLocal ? undefined : found;
+    if (s && !found) { reasons.push(`${c.source} choice skipped: no configured provider can serve ${c.model}`); continue; }
     const local = isLocalInstance(inst);
     if (localOnly && !local) {
       // Never re-route personal data: stop here rather than try a cloud default.

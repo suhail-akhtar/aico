@@ -62,6 +62,14 @@ await block('One order: override, models.roles, legacy key, preset', async () =>
   assert(blank.source === 'preset', 'an empty role entry means "use the preset"');
 });
 
+await block('A cloud model is never routed to the always-listed local Ollama', async () => {
+  const onlyLocal = { providerInstances: [], models: { localOnlyPersonal: true } };
+  const res = r('background', onlyLocal, 'deepseek-v4-flash');
+  assert(!res.ok && !res.local && !res.model, `deepseek-v4-flash is not "local" because Ollama is keyless (${res.fellBack})`);
+  const listed = r('background', { providerInstances: [{ id: 'ollama', type: 'ollama', models: ['qwen3:8b'] }], models: { localOnlyPersonal: true, roles: { background: 'qwen3:8b' } } }, 'deepseek-v4-flash');
+  assert(listed.ok && listed.local && listed.model === 'qwen3:8b', 'a model the local Ollama lists is local');
+});
+
 await block('Legacy keys keep working, each for its own feature', async () => {
   const s = { providerInstances: [ANT], sessionTitles: { model: 'claude-sonnet-4-5' }, learning: { model: 'claude-haiku-4-5' }, brief: { model: 'claude-opus-5' } };
   assert(r('background', s, 'claude-opus-5', { feature: 'titles' }).model === 'claude-sonnet-4-5', 'titles read sessionTitles.model');
