@@ -11,7 +11,7 @@
   },
   "comment:types": "React and its types are deliberately absent. They resolve from the repository root, which is where `shared/ui` and `web/src` resolve them too — and a second copy of @types/react here is not a duplicate but a *conflict*: pinning 18 against the root's 19 made every shared component stop being a valid JSX element, with an error naming `bigint` and nothing else.",
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.4.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
