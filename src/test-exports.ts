@@ -715,6 +715,7 @@ export { exportDeck, deckHtml, deckChartSvg, DECK_EXPORT_FORMATS } from './canva
 export { createDeck, setSlides, readDeck, DECK_TOOL_HELP } from './canvas/deck-tool.js';
 // -- Deck visual system, ADR 0025 --
 export * as DeckGeometry from '../shared/ui/canvas/deck-geometry.js';
+export * as DeckDecor from '../shared/ui/canvas/deck-decor.js';
 export * as DeckIcons from '../shared/ui/canvas/deck-icons.js';
 export * as DeckInfographics from '../shared/ui/canvas/deck-infographics.js';
 export * as DeckRules from '../shared/ui/canvas/deck-rules.js';

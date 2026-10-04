@@ -477,7 +477,7 @@ function framesXml(frames: Frame[], s: SlideCtx): string {
     const y1 = Math.max(...run.map(f => f.y + f.h));
     const id = nextId(s);
     const off = `<a:off x="${e(x0)}" y="${e(y0)}"/><a:ext cx="${Math.max(1, e(x1 - x0))}" cy="${Math.max(1, e(y1 - y0))}"/>`;
-    out.push(`<p:grpSp><p:nvGrpSpPr><p:cNvPr id="${id}" name="${x(`Item ${g.replace(/^g/, '')}`)}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>`
+    out.push(`<p:grpSp><p:nvGrpSpPr><p:cNvPr id="${id}" name="${x(/^g\d+$/.test(g) ? `Item ${g.slice(1)}` : g)}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>`
       + `<p:grpSpPr><a:xfrm>${off}<a:chOff x="${e(x0)}" y="${e(y0)}"/><a:chExt cx="${Math.max(1, e(x1 - x0))}" cy="${Math.max(1, e(y1 - y0))}"/></a:xfrm></p:grpSpPr>`
       + `${run.map(f => frameXml(f, s)).join('')}</p:grpSp>`);
     i = j;

@@ -155,6 +155,9 @@ export function IconPicker({ initial = '', onPick, onClose }: { initial?: string
 // ── Pictures ─────────────────────────────────────────────────────────
 
 const ART = ['mesh', 'circles', 'waves', 'grid', 'blocks'] as const;
+/** Illustrations (ADR 0025): `scene` picks one from the slide's words. */
+const SCENE_ART = ['scene', 'landscape', 'city', 'network', 'data', 'people', 'civic', 'water'] as const;
+const isScene = (src: string): boolean => (SCENE_ART as readonly string[]).includes(src.slice(4));
 
 async function fileData(file: File): Promise<string> {
   const buf = new Uint8Array(await file.arrayBuffer());
@@ -191,7 +194,7 @@ export function PictureTools({ host, image, onImage, label = 'Picture', masks, s
     <div className={`adv-pic${compact ? ' is-compact' : ''}`}>
       <div className="adv-pic-head">
         <span className="adv-pic-label">{label}</span>
-        {image && <span className="adv-pic-credit" title={image.sourceUrl ?? ''}>{image.src.startsWith('art:') ? `Generated art (${image.src.slice(4)})` : image.credit || image.license ? `${image.credit ?? ''}${image.license ? ` · ${image.license}` : ''}` : image.src.startsWith('data:') ? 'Embedded picture' : 'Picture'}</span>}
+        {image && <span className="adv-pic-credit" title={image.sourceUrl ?? ''}>{image.src.startsWith('art:') ? isScene(image.src) ? `Illustration (${image.src.slice(4)}) — no credit needed` : `Generated art (${image.src.slice(4)})` : image.credit || image.license ? `${image.credit ?? ''}${image.license ? ` · ${image.license}` : ''}` : image.src.startsWith('data:') ? 'Embedded picture' : 'Picture'}</span>}
       </div>
       <div className="adk-row adv-pic-actions">
         {media && <button className="aw-btn adk-btn" onClick={() => setOpen(open === 'search' ? null : 'search')}>Search online</button>}
@@ -248,6 +251,7 @@ export function PictureTools({ host, image, onImage, label = 'Picture', masks, s
       )}
       {open === 'art' && (
         <div className="adv-panel adk-row">
+          {SCENE_ART.map(a => <button key={a} className="aw-btn adk-btn" title="A vector illustration in the theme colours" onClick={() => { onImage(keep({ src: `art:${a}`, alt: image?.alt ?? (a === 'scene' ? 'Illustration' : `Illustration: ${a}`) })); setOpen(null); }}>{a === 'scene' ? 'illustration' : a}</button>)}
           {ART.map(a => <button key={a} className="aw-btn adk-btn" onClick={() => { onImage(keep({ src: `art:${a}`, alt: image?.alt ?? 'Abstract pattern in the theme colours' })); setOpen(null); }}>{a}</button>)}
         </div>
       )}

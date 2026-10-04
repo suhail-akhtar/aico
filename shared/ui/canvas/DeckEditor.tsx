@@ -595,12 +595,13 @@ export function DeckEditor({ host, id, initial, variant = 'panel', onClose, open
                 <label>Shape <select value={deck.aspect} onChange={e => apply({ op: 'meta', patch: { aspect: e.target.value as Deck['aspect'] } })}><option value="16:9">16:9</option><option value="4:3">4:3</option></select></label>
                 <label>Footer <input value={deck.footer ?? ''} placeholder="e.g. Company · Confidential" onChange={e => apply({ op: 'meta', patch: { footer: e.target.value } }, { quiet: true })} /></label>
                 <label className="adk-check"><input type="checkbox" checked={deck.slideNumbers !== false} onChange={e => apply({ op: 'meta', patch: { slideNumbers: e.target.checked } })} /> Slide numbers</label>
+                <label className="adk-check" title="Big 01, 02… on section slides"><input type="checkbox" checked={deck.sectionNumbers !== false} onChange={e => apply({ op: 'meta', patch: { sectionNumbers: e.target.checked } })} /> Section numbers</label>
               </div>
               <div className="adk-theme-grid">
                 {DECK_THEMES.map(t => (
-                  <button key={t.id} className={`adk-theme${t.id === theme.id ? ' is-on' : ''}`} title={t.description} onClick={() => apply({ op: 'meta', patch: { theme: t.id } })}>
+                  <button key={t.id} className={`adk-theme${t.id === theme.id ? ' is-on' : ''}`} title={`${t.description} · motif: ${t.decor}`} onClick={() => apply({ op: 'meta', patch: { theme: t.id } })}>
                     <DeckSlide deck={{ ...deck, theme: t.id, slides: [deck.slides.find(s => s.layout === 'title') ?? { id: 'p', layout: 'title', title: doc.title }] }} index={0} width={150} />
-                    <span>{t.name}</span>
+                    <span>{t.name} <small className="adk-theme-motif">· {t.decor}</small></span>
                   </button>
                 ))}
               </div>

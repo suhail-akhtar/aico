@@ -23,6 +23,9 @@
  * underline, corner block, top band, side rule…), card corner radius and a
  * font pair from the fonts Windows and Office ship (measured in
  * `deck-fonts.ts`), with web-safe fallbacks for the browser on other systems.
+ * Each theme also has one signature {@link Decor} (waves, shards, an arch…)
+ * drawn on its cover, section and closing slides and, small, in a corner of
+ * content slides — placed by `deck-decor.ts` only where no text is.
  *
  * @module shared/ui/canvas/deck-themes
  */
@@ -43,6 +46,8 @@ export interface ColorRef {
 export type TitleStyle = 'field' | 'split' | 'band' | 'minimal' | 'frame';
 export type SectionStyle = 'field' | 'number' | 'side';
 export type Motif = 'bar' | 'underline' | 'corner' | 'band' | 'side' | 'rule' | 'dot';
+/** The theme's signature decoration (ADR 0025): drawn as native shapes in theme colours, never over text. */
+export type Decor = 'waves' | 'shards' | 'arch' | 'triangle' | 'dots' | 'blobs' | 'stripes';
 
 export interface DeckTheme {
   id: string;
@@ -55,6 +60,8 @@ export interface DeckTheme {
   title: TitleStyle;
   section: SectionStyle;
   motif: Motif;
+  /** The signature motif of cover, section and closing slides (`deck-decor.ts`). */
+  decor: Decor;
   /** Content slides on the dark slot (dk2) rather than lt1. */
   dark: boolean;
   /** Card corner radius in points (0 = square). */
@@ -126,134 +133,134 @@ export const DECK_THEMES: readonly DeckTheme[] = [
     id: 'slate', name: 'Slate', description: 'Charcoal and teal, split title — technical briefings',
     fonts: { heading: 'Segoe UI Semibold', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#1F2A30', lt1: '#FFFFFF', dk2: '#22313A', lt2: '#EEF3F4', accent1: '#0F9D8A', accent2: '#3B82C4', accent3: '#F2A93B', accent4: '#7A8C99', accent5: '#C2577A', accent6: '#5BB98C' },
-    title: 'split', section: 'side', motif: 'bar', dark: false, radius: 6, caps: true,
+    title: 'split', section: 'side', motif: 'bar', decor: 'triangle', dark: false, radius: 6, caps: true,
   },
   {
     id: 'boardroom', name: 'Boardroom', description: 'Navy and gold with a serif — board and investor updates',
     fonts: { heading: 'Georgia', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#1D2433', lt1: '#FFFFFF', dk2: '#14213D', lt2: '#F3F1EA', accent1: '#B8892B', accent2: '#2F5D8C', accent3: '#7D8BA1', accent4: '#C9A86A', accent5: '#4E7F6B', accent6: '#A3473E' },
-    title: 'field', section: 'number', motif: 'rule', dark: false, radius: 0, caps: true,
+    title: 'field', section: 'number', motif: 'rule', decor: 'arch', dark: false, radius: 0, caps: true,
   },
   {
     id: 'ember', name: 'Ember', description: 'Warm orange on charcoal, bold sans — pitch decks',
     fonts: { heading: 'Franklin Gothic Medium', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#1C1917', lt1: '#FFFFFF', dk2: '#1C1917', lt2: '#FBF3EC', accent1: '#EA580C', accent2: '#F59E0B', accent3: '#57534E', accent4: '#FB923C', accent5: '#A8A29E', accent6: '#B45309' },
-    title: 'field', section: 'number', motif: 'underline', dark: false, radius: 10, caps: true,
+    title: 'field', section: 'number', motif: 'underline', decor: 'shards', dark: false, radius: 10, caps: true,
   },
   {
     id: 'ocean', name: 'Ocean', description: 'Corporate blues with a title band — project status and sales',
     fonts: { heading: 'Calibri', body: 'Calibri' }, headingBold: true,
     scheme: { dk1: '#1B2B3A', lt1: '#FFFFFF', dk2: '#0B3B60', lt2: '#EAF2FA', accent1: '#1E78C8', accent2: '#16A3A3', accent3: '#F0A830', accent4: '#5D6D7E', accent5: '#8E5BC4', accent6: '#E2574C' },
-    title: 'band', section: 'field', motif: 'band', dark: false, radius: 4, caps: false,
+    title: 'band', section: 'field', motif: 'band', decor: 'waves', dark: false, radius: 4, caps: false,
   },
   {
     id: 'meadow', name: 'Meadow', description: 'Fresh greens, friendly humanist sans — training',
     fonts: { heading: 'Trebuchet MS', body: 'Trebuchet MS' }, headingBold: true,
     scheme: { dk1: '#1F2D24', lt1: '#FFFFFF', dk2: '#1E4D35', lt2: '#EEF6EF', accent1: '#2E8B57', accent2: '#E9A23B', accent3: '#4A90A4', accent4: '#9BC53D', accent5: '#C5523F', accent6: '#7A6F9B' },
-    title: 'split', section: 'field', motif: 'dot', dark: false, radius: 12, caps: false,
+    title: 'split', section: 'field', motif: 'dot', decor: 'waves', dark: false, radius: 12, caps: false,
   },
   {
     id: 'mono', name: 'Mono', description: 'Black, white and one red — conference talks',
     fonts: { heading: 'Arial', body: 'Arial' }, headingBold: true,
     scheme: { dk1: '#111111', lt1: '#FFFFFF', dk2: '#111111', lt2: '#F2F2F2', accent1: '#E63946', accent2: '#457B9D', accent3: '#8D99AE', accent4: '#1D3557', accent5: '#F4A261', accent6: '#2A9D8F' },
-    title: 'minimal', section: 'number', motif: 'underline', dark: false, radius: 0, caps: true,
+    title: 'minimal', section: 'number', motif: 'underline', decor: 'triangle', dark: false, radius: 0, caps: true,
   },
   {
     id: 'aurora', name: 'Aurora', description: 'Indigo and violet, geometric — keynotes',
     fonts: { heading: 'Century Gothic', body: 'Segoe UI' }, headingBold: true,
     scheme: { dk1: '#1E1B3A', lt1: '#FFFFFF', dk2: '#25215C', lt2: '#F1EFFB', accent1: '#7C5CFA', accent2: '#E0569B', accent3: '#22B8CF', accent4: '#F6A93B', accent5: '#4B4891', accent6: '#9AA5B1' },
-    title: 'field', section: 'field', motif: 'corner', dark: false, radius: 14, caps: true,
+    title: 'field', section: 'field', motif: 'corner', decor: 'blobs', dark: false, radius: 14, caps: true,
   },
   {
     id: 'midnight', name: 'Midnight', description: 'Dark slides with cyan accents — engineering talks',
     fonts: { heading: 'Bahnschrift', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#060B16', lt1: '#F8FAFC', dk2: '#0F172A', lt2: '#1E293B', accent1: '#22D3EE', accent2: '#A78BFA', accent3: '#F472B6', accent4: '#FBBF24', accent5: '#34D399', accent6: '#94A3B8' },
-    title: 'minimal', section: 'side', motif: 'band', dark: true, radius: 8, caps: true,
+    title: 'minimal', section: 'side', motif: 'band', decor: 'dots', dark: true, radius: 8, caps: true,
   },
   {
     id: 'sandstone', name: 'Sandstone', description: 'Terracotta, cream and a book serif — editorial',
     fonts: { heading: 'Palatino Linotype', body: 'Gill Sans MT' }, headingBold: false,
     scheme: { dk1: '#2E2420', lt1: '#FFFDF9', dk2: '#3E2C23', lt2: '#F4ECE2', accent1: '#B4532A', accent2: '#6B8F71', accent3: '#D4A24C', accent4: '#8C6A5A', accent5: '#4F6D8A', accent6: '#A35C7A' },
-    title: 'frame', section: 'number', motif: 'rule', dark: false, radius: 2, caps: true,
+    title: 'frame', section: 'number', motif: 'rule', decor: 'arch', dark: false, radius: 2, caps: true,
   },
   {
     id: 'coral', name: 'Coral', description: 'Coral on navy, slab headings — sales and marketing',
     fonts: { heading: 'Rockwell', body: 'Calibri' }, headingBold: false,
     scheme: { dk1: '#22313F', lt1: '#FFFFFF', dk2: '#22313F', lt2: '#FFF1EE', accent1: '#F25F4C', accent2: '#2C7DA0', accent3: '#F7B32B', accent4: '#5C6B73', accent5: '#69B578', accent6: '#9C6ADE' },
-    title: 'band', section: 'field', motif: 'corner', dark: false, radius: 8, caps: false,
+    title: 'band', section: 'field', motif: 'corner', decor: 'triangle', dark: false, radius: 8, caps: false,
   },
   {
     id: 'forest', name: 'Forest', description: 'Deep green and brass, classic serif — strategy',
     fonts: { heading: 'Cambria', body: 'Calibri' }, headingBold: true,
     scheme: { dk1: '#1D2A22', lt1: '#FFFFFF', dk2: '#1F3B2D', lt2: '#F1F4EE', accent1: '#C08B3E', accent2: '#3F7D5A', accent3: '#7A9E7E', accent4: '#D9B26F', accent5: '#56707F', accent6: '#A2513B' },
-    title: 'field', section: 'side', motif: 'side', dark: false, radius: 0, caps: true,
+    title: 'field', section: 'side', motif: 'side', decor: 'arch', dark: false, radius: 0, caps: true,
   },
   {
     id: 'scholar', name: 'Scholar', description: 'Blue and amber, readable serif — teaching',
     fonts: { heading: 'Constantia', body: 'Corbel' }, headingBold: true,
     scheme: { dk1: '#1E2A38', lt1: '#FFFFFF', dk2: '#1D4E89', lt2: '#EEF3FA', accent1: '#1D6FD1', accent2: '#F2A541', accent3: '#3AA17E', accent4: '#C0504D', accent5: '#7E57C2', accent6: '#6D7B8D' },
-    title: 'frame', section: 'field', motif: 'bar', dark: false, radius: 6, caps: false,
+    title: 'frame', section: 'field', motif: 'bar', decor: 'arch', dark: false, radius: 6, caps: false,
   },
   // ADR 0025: dark variants and gradient accents, so a pitch, a technical briefing and an onboarding deck do not all look like one template.
   {
     id: 'nebula', name: 'Nebula', description: 'Dark, violet-to-cyan gradient, geometric — investor pitches and launches',
     fonts: { heading: 'Century Gothic', body: 'Segoe UI' }, headingBold: true,
     scheme: { dk1: '#070A1A', lt1: '#F8FAFF', dk2: '#0D1330', lt2: '#1A2148', accent1: '#7C5CFF', accent2: '#22D3EE', accent3: '#F472B6', accent4: '#FBBF24', accent5: '#34D399', accent6: '#94A3B8' },
-    title: 'field', section: 'field', motif: 'underline', dark: true, radius: 12, caps: true, gradient: ['accent1', 'accent2'],
+    title: 'field', section: 'field', motif: 'underline', decor: 'shards', dark: true, radius: 12, caps: true, gradient: ['accent1', 'accent2'],
   },
   {
     id: 'sapphire', name: 'Sapphire', description: 'Dark navy and gold with a serif — finance and board decks',
     fonts: { heading: 'Georgia', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#0A1222', lt1: '#FFFFFF', dk2: '#0F1B33', lt2: '#1B2A4A', accent1: '#D4A73C', accent2: '#4C8DF6', accent3: '#36C2A0', accent4: '#E46F5A', accent5: '#9DB2D3', accent6: '#B48CF2' },
-    title: 'split', section: 'number', motif: 'rule', dark: true, radius: 6, caps: true,
+    title: 'split', section: 'number', motif: 'rule', decor: 'stripes', dark: true, radius: 6, caps: true,
   },
   {
     id: 'carbon', name: 'Carbon', description: 'Dark charcoal with lime and teal — product and engineering',
     fonts: { heading: 'Bahnschrift', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#0B0D0E', lt1: '#F5F7F7', dk2: '#15191B', lt2: '#232A2D', accent1: '#A3E635', accent2: '#2DD4BF', accent3: '#60A5FA', accent4: '#FACC15', accent5: '#F472B6', accent6: '#A1A1AA' },
-    title: 'minimal', section: 'side', motif: 'bar', dark: true, radius: 4, caps: true,
+    title: 'minimal', section: 'side', motif: 'bar', decor: 'shards', dark: true, radius: 4, caps: true,
   },
   {
     id: 'graphite', name: 'Graphite', description: 'Dark grey with an orange-to-pink gradient, bold sans — sales and keynotes',
     fonts: { heading: 'Segoe UI Semibold', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#111216', lt1: '#FAFAFA', dk2: '#1C1E24', lt2: '#2A2D35', accent1: '#FF7A1A', accent2: '#FF3D71', accent3: '#3DB2FF', accent4: '#FFC23D', accent5: '#7BD88F', accent6: '#A8A8B3' },
-    title: 'field', section: 'number', motif: 'underline', dark: true, radius: 10, caps: true, gradient: ['accent1', 'accent2'],
+    title: 'field', section: 'number', motif: 'underline', decor: 'shards', dark: true, radius: 10, caps: true, gradient: ['accent1', 'accent2'],
   },
   {
     id: 'lagoon', name: 'Lagoon', description: 'Navy-to-teal gradient on white — IT, platforms and technical briefings',
     fonts: { heading: 'Segoe UI Semibold', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#13232F', lt1: '#FFFFFF', dk2: '#0B3954', lt2: '#EDF6F9', accent1: '#087E8B', accent2: '#1B98E0', accent3: '#F4A259', accent4: '#5B6C7D', accent5: '#8E7DBE', accent6: '#E15554' },
-    title: 'field', section: 'field', motif: 'bar', dark: false, radius: 8, caps: true, gradient: ['dk2', 'accent1'],
+    title: 'field', section: 'field', motif: 'bar', decor: 'waves', dark: false, radius: 8, caps: true, gradient: ['dk2', 'accent1'],
   },
   {
     id: 'sunrise', name: 'Sunrise', description: 'Warm orange-to-pink gradient, rounded and friendly — onboarding and community',
     fonts: { heading: 'Trebuchet MS', body: 'Segoe UI' }, headingBold: true,
     scheme: { dk1: '#2B1B17', lt1: '#FFFFFF', dk2: '#3A1F2B', lt2: '#FFF4EC', accent1: '#E0522B', accent2: '#D63B74', accent3: '#F6B53C', accent4: '#3F8F8B', accent5: '#7A5CC2', accent6: '#8C7A72' },
-    title: 'field', section: 'field', motif: 'dot', dark: false, radius: 14, caps: false, gradient: ['accent1', 'accent2'],
+    title: 'field', section: 'field', motif: 'dot', decor: 'blobs', dark: false, radius: 14, caps: false, gradient: ['accent1', 'accent2'],
   },
   {
     id: 'citrus', name: 'Citrus', description: 'Orange and green, round geometric sans — workshops and internal comms',
     fonts: { heading: 'Century Gothic', body: 'Calibri' }, headingBold: true,
     scheme: { dk1: '#1F2A1E', lt1: '#FFFFFF', dk2: '#1F3D2B', lt2: '#F3F8EC', accent1: '#E47A12', accent2: '#3A9447', accent3: '#2A8BD8', accent4: '#E9B33C', accent5: '#C73E50', accent6: '#6C7A89' },
-    title: 'band', section: 'number', motif: 'dot', dark: false, radius: 16, caps: false,
+    title: 'band', section: 'number', motif: 'dot', decor: 'dots', dark: false, radius: 16, caps: false,
   },
   {
     id: 'blossom', name: 'Blossom', description: 'Plum and pink gradient, soft corners — HR, people and culture',
     fonts: { heading: 'Trebuchet MS', body: 'Corbel' }, headingBold: true,
     scheme: { dk1: '#2A1F33', lt1: '#FFFFFF', dk2: '#3B2557', lt2: '#F7F1FB', accent1: '#8E44AD', accent2: '#D63E86', accent3: '#21A090', accent4: '#E99A17', accent5: '#4A7BD0', accent6: '#8D8399' },
-    title: 'split', section: 'field', motif: 'underline', dark: false, radius: 16, caps: false, gradient: ['accent1', 'accent2'],
+    title: 'split', section: 'field', motif: 'underline', decor: 'blobs', dark: false, radius: 16, caps: false, gradient: ['accent1', 'accent2'],
   },
   {
     id: 'harbor', name: 'Harbor', description: 'Navy, teal and saffron, humanist sans — consulting and proposals',
     fonts: { heading: 'Gill Sans MT', body: 'Calibri' }, headingBold: true,
     scheme: { dk1: '#1A2633', lt1: '#FFFFFF', dk2: '#102A43', lt2: '#F0F4F8', accent1: '#1D9AA5', accent2: '#334E68', accent3: '#E0A21B', accent4: '#627D98', accent5: '#D2333F', accent6: '#8540D9' },
-    title: 'split', section: 'side', motif: 'rule', dark: false, radius: 4, caps: true,
+    title: 'split', section: 'side', motif: 'rule', decor: 'dots', dark: false, radius: 4, caps: true,
   },
   {
     id: 'pine', name: 'Pine', description: 'Forest-to-teal gradient, condensed sans — sustainability and operations',
     fonts: { heading: 'Bahnschrift', body: 'Segoe UI' }, headingBold: false,
     scheme: { dk1: '#15241C', lt1: '#FFFFFF', dk2: '#123524', lt2: '#EEF6F1', accent1: '#2A8C5D', accent2: '#1C7E90', accent3: '#D9A42E', accent4: '#6B7F73', accent5: '#C0503A', accent6: '#5D5FEF' },
-    title: 'field', section: 'number', motif: 'underline', dark: false, radius: 8, caps: true, gradient: ['dk2', 'accent1'],
+    title: 'field', section: 'number', motif: 'underline', decor: 'stripes', dark: false, radius: 8, caps: true, gradient: ['dk2', 'accent1'],
   },
 ];
 

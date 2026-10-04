@@ -115,7 +115,7 @@ export function planDesign(brief: DesignBrief, context: { title?: string; type?:
     why: `${theme.name} (${theme.description}) — ${reasons.length ? reasons.join('; ') : 'a neutral default'}`,
     layoutMix: aud?.mix ?? ['process', 'cards', 'image-text', 'tiles', 'timeline', 'icon-grid'],
     imageStyle,
-    imageQueries: imageStyle === 'none' ? [] : imageStyle === 'abstract' ? ['art:mesh', 'art:circles', 'art:waves'] : subjectQueries(text),
+    imageQueries: imageStyle === 'none' ? [] : imageStyle === 'abstract' ? ['art:mesh', 'art:circles', 'art:waves'] : imageStyle === 'illustration' ? ['art:scene'] : subjectQueries(text),
     maxBullets: aud?.maxBullets ?? 5, words: aud?.words ?? [15, 50],
     tips: [aud?.tip ?? 'one message per slide', 'titles state the point', 'a visual on most slides; no more than three of one layout in a row', 'section slides between parts'],
   };
@@ -208,6 +208,7 @@ export function chooseKind(items: InfoItem[], title = '', layout?: Slide['layout
   if (n === 2 && /\bpros?\b|advantage|benefit/.test(titles[0] ?? '') && /\bcons?\b|disadvantage|risk|drawback/.test(titles[1] ?? '')) return 'pros-cons';
   if (n === 2 && /before|today|current|as-is|old/.test(titles[0] ?? '') && /after|future|to-be|new|tomorrow/.test(titles[1] ?? '')) return 'before-after';
   if (n === 2 && /\bvs\.?\b|versus|compare|option|alternative/.test(text)) return 'versus';
+  if (n >= 2 && n <= 5 && /\b(decid|decision|approv|sign[- ]?off|we ask)/i.test(title)) return 'decisions';
   const values = items.filter(i => i.value).length;
   if (values >= Math.max(2, n - 1)) {
     const pcts = items.filter(i => /%/.test(i.value ?? '') && percentOf(i.value) !== undefined).length;

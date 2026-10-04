@@ -45,7 +45,7 @@ is told to fix ("FIX" lines) after every write.
 ## Decision
 
 1. **An `infographic` layout and a parametric library** (`shared/ui/canvas/deck-infographics.ts`):
-   25 kinds — process (chevrons), numbered arrows, cycle, semicircle, radial
+   25 kinds (26 with decision cards, item 11) — process (chevrons), numbered arrows, cycle, semicircle, radial
    (petals), pyramid, funnel, hexagons, stairs, icon timeline, roadmap,
    numbered cards, versus, pros/cons, SWOT, 2×2 matrix, Venn, progress rings,
    KPI tiles, stat bars, team, quote with photo, numbered agenda, icon grid,
@@ -115,6 +115,21 @@ is told to fix ("FIX" lines) after every write.
    word and adding icons; in the editor and as the `make_visual` tool action.
 10. **Tool actions**: `design_brief`, `find_images`, `find_icons`,
     `make_visual`; `create`/`set_slides` take `brief`, `palette`, `fonts`.
+
+11. **Motifs, illustrations, section numbers, decision cards** (amendment,
+    2026-10-04). Each theme declares a `decor` (waves, shards, arch, triangle,
+    dots, blobs, stripes); `deck-decor.ts` places it *after* a slide's text,
+    trying its anchors at shrinking scales until no shape touches a protected
+    box (text, pictures, content, small accents — a polygon/rectangle test,
+    not bounding boxes), falling back to a small corner variant or nothing.
+    Covers reserve room for it (side motifs keep the right third, waves lift
+    the text block). An empty picture slot, `art:scene` or `art:<scene>` draws a
+    vector scene (seven, keyword-picked) clipped to the convex cut; no credit.
+    Section slides carry big 01/02… numbers (deck `sectionNumbers: false` turns
+    them off — an editor switch, not a tool field, so the always-sent schema
+    does not grow). `decisions` joins the infographic library. A new validator
+    pass (`overlapProblems`) reports a label/number/icon on the title, a motif
+    on text, and text straddling a band or panel edge.
 
 ## Alternatives considered
 

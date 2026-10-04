@@ -1,5 +1,5 @@
 /**
- * The infographic library — 25 parametric slide diagrams (chevron process,
+ * The infographic library — 26 parametric slide diagrams (chevron process,
  * cycle, pyramid, funnel, hexagons, rings, SWOT, team cards…) laid out by the
  * deck layout engine as native shapes and fitted text.
  *
@@ -744,6 +744,36 @@ function agendaKind(c: Ctx, k: Kit, a: Area, items: InfoItem[]): void {
   });
 }
 
+/**
+ * Decision cards (ADR 0025): the "what we ask you to decide" slide — one
+ * full-width card per decision, a big 01–05 on an accent block, the decision in
+ * bold with one line of why, and an empty check ring for the room to tick.
+ */
+function decisionsKind(c: Ctx, k: Kit, a: Area, items: InfoItem[]): void {
+  const n = items.length;
+  const gap = n >= 5 ? 10 : 14;
+  const rowH = Math.min(n <= 3 ? 104 : 88, (a.h - gap * (n - 1)) / n);
+  const y0 = a.y + (a.h - (rowH * n + gap * (n - 1))) / 2;
+  const numW = Math.round(Math.min(110, rowH * 1.15));
+  const mark = Math.min(30, rowH * 0.4);
+  const tx = numW + 24;
+  const tw = a.w - tx - mark - 44;
+  const groups = items.map(it => ({ specs: specs(c, it, { align: 'l', color: c.r.title, textColor: c.r.muted }), w: tw, h: rowH - 14 }));
+  const fitted = fitItems(c, k, items, groups, n >= 5 ? 18 : n === 4 ? 20 : 22, TEXT_MIN, 2);
+  const radius = Math.min(c.theme.radius, 12);
+  items.forEach((_, i) => {
+    const g = `g${i + 1}`;
+    const acc = k.accent(i);
+    const y = y0 + i * (rowH + gap);
+    k.shape(c, `Decision card ${i + 1}`, { x: a.x, y, w: a.w, h: rowH }, { geom: radius ? 'roundRect' : 'rect', radius, fill: c.r.surface, field: F, group: g });
+    k.shape(c, `Decision block ${i + 1}`, { x: a.x, y, w: numW, h: rowH }, { geom: radius ? 'roundRect' : 'rect', radius, fill: acc, field: F, group: g });
+    const nf = k.fit([{ text: String(i + 1).padStart(2, '0'), font: 'h', bold: true, color: k.ink(c, acc), align: 'c', lhf: 1 }], c.theme, numW, rowH, Math.round(Math.min(rowH * 0.5, 46)), 16, 1);
+    k.text(c, `Decision number ${i + 1}`, { x: a.x, y, w: numW, h: rowH }, nf, { anchor: 'm', field: F, group: g });
+    k.text(c, `Decision ${i + 1}`, { x: a.x + tx, y: y + 7, w: tw, h: rowH - 14 }, fitted[i]!, { anchor: 'm', field: F, group: g });
+    k.shape(c, `Decision check ${i + 1}`, { x: a.x + a.w - mark - 22, y: y + (rowH - mark) / 2, w: mark, h: mark }, { geom: 'donut', adj: [2.5], fill: k.readable(c, acc), field: F, group: g });
+  });
+}
+
 /** Lay out an infographic slide's content (its title is already placed). */
 export function layoutInfographic(c: Ctx, k: Kit): void {
   const ig = c.slide.infographic;
@@ -785,5 +815,6 @@ export function layoutInfographic(c: Ctx, k: Kit): void {
     case 'team': teamKind(c, k, a, items); break;
     case 'quote-photo': quotePhotoKind(c, k, a, items); break;
     case 'agenda': agendaKind(c, k, a, items); break;
+    case 'decisions': decisionsKind(c, k, a, items); break;
   }
 }

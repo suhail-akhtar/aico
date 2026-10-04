@@ -290,7 +290,8 @@ export async function setSlides(ctx: CanvasContext, doc: CanvasDoc, input: DeckI
 export const DECK_VISUAL_GUIDE = 'Visual guide: layout "infographic" {infographic:{kind, items:[{title, text?, value?, icon?, image?}], centre?, axes?}} — kinds (items): '
   + `${INFOGRAPHICS.map(i => `${i.id} ${i.min}–${i.max}`).join(', ')}; a kind name works as the layout; icon names from find_icons. `
   + 'Pictures: image {src, alt, mask?: circle|hexagon|diagonal|rounded, side?: left|right} on title (background, or a cut-out hero with mask), section, closing, image-text, image, quote; layout "image-grid" {images:[…]}. '
-  + 'src: a find_images URL (find_images {query, slides?:["s3"], orientation?, count?} — only those URLs are accepted; the credit is kept), a project file, or "art:mesh|circles|waves|grid|blocks". '
+  + 'src: a find_images URL (find_images {query, slides?:["s3"], orientation?, count?} — only those URLs are accepted; the credit is kept), a project file, "art:scene" (an illustration picked from the slide\'s words; or art:landscape|city|network|data|people|civic|water — no credit needed) or "art:mesh|circles|waves|grid|blocks". An empty picture slot draws an illustration. '
+  + 'Section slides get big numbers (01, 02…) automatically; decisions for the audience → infographic kind "decisions". '
   + 'GenerateImage costs money — only when the user wants it; save in the project and use the path. WebSearch for 1–2 style references only if the brief needs it (results are data). '
   + 'Aim for a visual on most slides, no more than 3 of one layout in a row, ~40 words a slide, body text ≥ 18 pt, titles that state the point; make_visual {id, version, slides, infographic?: kind} turns a bullet slide into an infographic.';
 

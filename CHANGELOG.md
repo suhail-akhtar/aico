@@ -3,6 +3,36 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Theme motifs** (ADR 0025). Every deck theme has one signature motif —
+  waves, shards, an arch, corner triangles, a dot grid, soft blobs or stripes
+  (seven across the 22 themes) — drawn on cover, section and closing slides
+  and, small, in a corner of content slides. Native PowerPoint freeforms in
+  theme colours, one group named "Motif"; placed around the text (they shrink,
+  move to another anchor, or are left out rather than touch a word). The theme
+  picker names each theme's motif.
+- **Illustrations for empty picture slots.** A slot with no picture now draws a
+  vector scene in the theme's colours — landscape, city, network, data, people,
+  a civic building or water — picked from the slide's words (then the deck's
+  title and brief), clipped to the picture's cut, editable in PowerPoint, no
+  credit needed. Choose one with `art:scene` or `art:landscape|city|…`; the
+  picture tools' Art menu lists them.
+- **Big section numbers** (01, 02… by section order) on every section style,
+  with a per-deck "Section numbers" switch in the theme menu.
+- **Decision cards** — infographic kind `decisions` (2–5 numbered cards: the
+  decision and one line why) for "what we ask you to decide" slides; native
+  PowerPoint shapes, one group per decision, works with Ask AICO and
+  make_visual.
+
+### Fixed
+
+- Overlap checks in the deck validator: a section label, number or icon running
+  into the title, a motif touching text, and a cover or section line straddling
+  the edge of a band or panel are now reported as problems.
+
 ## 0.39.0 — 2026-10-03
 
 ### Added

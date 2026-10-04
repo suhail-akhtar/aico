@@ -81,7 +81,7 @@ export async function findImagesAction(_ctx: CanvasContext, doc: CanvasDoc | und
   const orientation = o === 'portrait' || o === 'square' || o === 'landscape' ? o : slot && slot.h > slot.w ? 'portrait' : 'landscape';
   const r = await searchImages(query, { orientation, ...(slot ? { slot } : {}), count: input.count ?? 6, keys: await stockKeys() });
   if (!r.candidates.length) {
-    return `No licensed pictures found for "${query}"${r.notes.length ? ` (${r.notes.join('; ')})` : ''}. Try simpler, concrete words, or use generated art: image {src: "art:mesh"} (also circles, waves, grid, blocks).`;
+    return `No licensed pictures found for "${query}"${r.notes.length ? ` (${r.notes.join('; ')})` : ''}. Try simpler, concrete words, or use an illustration: image {src: "art:scene"} (or art:landscape|city|network|data|people|civic|water; abstract: art:mesh|circles|waves|grid|blocks).`;
   }
   return [
     `${r.candidates.length} licensed pictures for "${query}" from ${r.providers.join(' + ')} (commercial use allowed: CC0, public domain, CC BY, CC BY-SA${r.providers.some(p => p === 'pexels' || p === 'unsplash') ? ', stock licence' : ''}):`,

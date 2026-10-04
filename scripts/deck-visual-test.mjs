@@ -7,8 +7,9 @@
  * presentation rules the validator reports, the licence filter and the
  * picture pipeline (only searched candidates are fetched, credit kept), the
  * SSRF guard in front of every fetch, brand colours read from a local
- * fixture site, the design brief and "make this slide visual", and the
- * Canvas tool's new actions.
+ * fixture site, the design brief and "make this slide visual", the
+ * Canvas tool's new actions, and the theme motifs, illustrations, section
+ * numbers, decision cards and overlap checks.
  *
  * Why a script of its own: the cases are many and touch both shared and
  * engine code. Part of `npm test`. No model; no internet — fetchers are
@@ -26,7 +27,7 @@ import { unzipSync, strFromU8 } from 'fflate';
 import {
   DeckModel as M, DeckLayout as L, DeckThemes as T, DeckGeometry as G, DeckIcons as I, DeckRules as RU, DeckDesign as D, DeckRender as R,
   DeckMedia as MD, DeckMediaStore as MS, DeckImageSearch as S, DeckBrand as B, toPptx, deckCreditLines, DECK_VISUAL_HELP,
-  handleDeckVisualRoute, runInContext, canvasTool, getCanvas,
+  handleDeckVisualRoute, runInContext, canvasTool, getCanvas, DeckDecor, DeckScopedEdit, DECK_TOOL_HELP,
 } from '../dist-test/test-exports.js';
 
 let pass = 0; let fail = 0;
@@ -369,6 +370,178 @@ console.log('\n══ Deck visuals: the Canvas tool and routes ══');
   ok(!(await call('canvas/list')).handled, 'other routes are not this module\'s');
   const thumb = await call('deck/images/thumb?u=https%3A%2F%2Fevil.example%2Fx.png');
   ok(thumb.status === 400 && /not a preview an image search returned/.test(thumb.body?.error ?? ''), 'previews are only served for search results');
+}
+
+console.log('\n══ Deck visuals: theme motifs, illustrations, section numbers, decision cards ══');
+{
+  const DC = DeckDecor;
+  const decors = new Set(T.DECK_THEMES.map(t => t.decor));
+  ok(T.DECK_THEMES.every(t => ['waves', 'shards', 'arch', 'triangle', 'dots', 'blobs', 'stripes'].includes(t.decor)) && decors.size === 7, `every theme has a signature motif; ${decors.size} motifs across ${T.DECK_THEMES.length} themes`);
+  // Geometry the placement rests on.
+  ok(DC.polyHitsBox([[0, 0], [10, 0], [0, 10]], { x: 2, y: 2, w: 2, h: 2 }) && !DC.polyHitsBox([[0, 0], [10, 0], [0, 10]], { x: 7, y: 7, w: 5, h: 5 }), 'a triangle hits a box inside it and misses one beyond its hypotenuse (not a bounding-box test)');
+  ok(DC.polyHitsBox([[0, 0], [100, 0], [100, 100], [0, 100]], { x: 40, y: 40, w: 5, h: 5 }), 'a box wholly inside a polygon is a hit');
+  const cl = DC.clipConvex([[-20, -20], [120, -20], [120, 120], [-20, 120]], [[50, 0], [100, 50], [50, 100], [0, 50]]);
+  ok(cl.length >= 4 && cl.every(([x, y]) => Math.abs(x - 50) + Math.abs(y - 50) <= 50.01), 'polygons are clipped to a convex cut (either winding)');
+  // Placement: every motif keeps clear of what it is told to protect, at every anchor it falls back to.
+  for (const d of decors) {
+    const protect = [{ x: 56, y: 110, w: 748, h: 210 }, { x: 56, y: 358, w: 690, h: 76 }, { x: 56, y: 462, w: 672, h: 26 }];
+    const shapes = DC.decorShapes(d, { bounds: { x: 0, y: 0, w: 960, h: 540 }, protect, light: false, small: false }, 'seed');
+    const pad = protect.map(b => ({ x: b.x - 9, y: b.y - 9, w: b.w + 18, h: b.h + 18 }));
+    const hit = shapes.filter(s => pad.some(b => (s.parts ?? [s.pts]).some(pp => DC.polyHitsBox(pp, b))));
+    const outside = shapes.filter(s => (s.parts ?? [s.pts]).flat().some(([x, y]) => x < -0.5 || y < -0.5 || x > 960.5 || y > 540.5));
+    if (!shapes.length || hit.length || outside.length) ok(false, `motif ${d} is drawn clear of the text and inside the slide`, { n: shapes.length, hit: hit.map(s => s.name), outside: outside.map(s => s.name) });
+    else pass++;
+    const blocked = DC.decorShapes(d, { bounds: { x: 0, y: 0, w: 960, h: 540 }, protect: [{ x: 0, y: 0, w: 960, h: 540 }], light: false, small: false }, 'seed');
+    if (blocked.length) ok(false, `motif ${d} draws nothing when there is no free room`, blocked.map(s => s.name));
+    else pass++;
+  }
+  ok(true, 'each motif keeps clear of protected boxes and draws nothing rather than overlap');
+  // Every theme × every relevant layout: motif present where expected, no overlap problem of any kind.
+  const longTitle = 'The National Water Programme has connected two million homes ahead of plan';
+  const cases = [
+    { layout: 'title', title: 'National Water Programme', subtitle: 'Mid-term review for the Ministry of Water Resources', body: 'Programme Office · October 2026' },
+    { layout: 'title', title: longTitle, subtitle: 'A subtitle long enough to need two lines when it is set beside the motif on the cover', body: 'Presenter' },
+    { layout: 'title', title: 'With an illustration', subtitle: 'Hero cut-out', image: { src: 'art:scene', mask: 'circle', alt: 'water' } },
+    { layout: 'section', title: 'Where the programme stands', subtitle: 'Delivery, spend and outcomes' },
+    { layout: 'section', title: 'A much longer section title that takes two full lines here', subtitle: 'And a subtitle' },
+    { layout: 'bullets', title: 'Three regions are ahead of plan', bullets: ['North: 92% built', 'Coast: leakage down 18%'] },
+    { layout: 'infographic', title: 'What we ask the ministry to decide', infographic: { kind: 'decisions', items: [{ title: 'Approve funding', text: 'Two years' }, { title: 'Extend the pilot', text: 'Six months' }, { title: 'Name an owner', text: 'One lead' }] } },
+    { layout: 'kpi', title: 'Results so far', kpis: [{ value: '2.1m', label: 'Homes connected' }, { value: '18%', label: 'Less leakage' }] },
+    { layout: 'image-text', title: 'Communities see the difference', bullets: ['Clean water within 500 m'] },
+    { layout: 'table', title: 'Spend by region', table: { header: ['Region', 'Spend'], rows: [['North', '£12m'], ['Coast', '£9m']] } },
+    { layout: 'closing', title: 'Thank you', subtitle: 'Questions and discussion', body: 'programme.office@example.gov' },
+  ];
+  const bad = [];
+  let full = 0; let small = 0;
+  for (const t of T.DECK_THEMES) {
+    for (const aspect of ['16:9', '4:3']) {
+      const deck = M.deckFrom({ v: 1, theme: t.id, aspect, slides: cases });
+      L.layoutDeck(deck).forEach((l, i) => {
+        const motif = l.frames.filter(f => f.group === 'Motif');
+        const errs = l.problems.filter(p => /overlaps|touches|crosses the edge/.test(p.message));
+        if (errs.length) bad.push(`${t.id} ${aspect} slide ${i + 1}: ${errs.map(p => p.message).join('; ')}`);
+        const big = ['title', 'section', 'closing'].includes(cases[i].layout) && !cases[i].image;
+        if (big && aspect === '16:9') { if (motif.length) full++; else bad.push(`${t.id} slide ${i + 1}: no motif on a ${cases[i].layout} slide`); }
+        if (!big && cases[i].layout !== 'title' && motif.length) small++;
+        // Motif frames sit under every text frame (z-order) and inside the slide.
+        const firstText = l.frames.findIndex(f => f.kind === 'text');
+        const lastMotif = l.frames.map(f => f.group === 'Motif').lastIndexOf(true);
+        if (lastMotif > firstText && firstText >= 0) bad.push(`${t.id} slide ${i + 1}: a motif shape is drawn over text`);
+        if (motif.some(f => f.x < -0.5 || f.y < -0.5 || f.x + f.w > l.w + 0.5 || f.y + f.h > l.h + 0.5)) bad.push(`${t.id} slide ${i + 1}: a motif shape leaves the slide`);
+        if (motif.some(f => typeof f.fill === 'string' || typeof f.line?.color === 'string')) bad.push(`${t.id}: a motif colour is not a theme slot`);
+      });
+    }
+  }
+  ok(!bad.length, `every theme × cover, section, closing and content layouts (16:9 and 4:3): motif clear of text, under it, inside the slide, theme colours only — ${full} full motifs, ${small} corner accents`, bad.slice(0, 8));
+  ok(small > T.DECK_THEMES.length * 3, 'content slides carry the small corner variant');
+  // The validator itself: an injected overlap is reported.
+  const sec = M.deckFrom({ v: 1, theme: 'ocean', slides: [{ layout: 'section', title: 'Where the programme stands' }] });
+  const sl = L.layoutSlide(sec, 0);
+  const tf = sl.frames.find(f => f.name === 'Title');
+  const kicker = sl.frames.find(f => f.name === 'Kicker');
+  ok(L.overlapProblems(sl.frames, T.deckTheme('ocean'), 'section').length === 0, 'a real section slide has no overlap');
+  const moved = sl.frames.map(f => (f === kicker ? { ...f, y: tf.y + 4 } : f));
+  ok(L.overlapProblems(moved, T.deckTheme('ocean'), 'section').some(p => /section label overlaps the title/.test(p.message)), 'a section label moved onto the title is reported');
+  const icon = { kind: 'shape', name: 'Icon star', geom: 'icon', icon: 'star', x: tf.x + 10, y: tf.y + 4, w: 24, h: 24 };
+  ok(L.overlapProblems([...sl.frames, icon], T.deckTheme('ocean'), 'section').some(p => /icon \(star\) overlaps the title/.test(p.message)), 'an icon on the title is reported');
+  const band = M.deckFrom({ v: 1, theme: 'ocean', slides: [{ layout: 'title', title: 'Cover', subtitle: 'Subtitle in the band' }] });
+  const bl = L.layoutSlide(band, 0);
+  const bandShape = bl.frames.find(f => f.name === 'Band');
+  ok(bandShape && L.overlapProblems(bl.frames, T.deckTheme('ocean'), 'title').length === 0, 'the band cover\'s subtitle sits wholly in the band');
+  const clipped = bl.frames.map(f => (f.name === 'Subtitle' ? { ...f, y: bandShape.y - 20 } : f));
+  ok(L.overlapProblems(clipped, T.deckTheme('ocean'), 'title').some(p => /subtitle crosses the edge of the band/.test(p.message)), 'a subtitle cut by the band edge is reported');
+  const motifOnText = [...bl.frames, { kind: 'shape', name: 'Motif x', group: 'Motif', geom: 'path', path: 'M0 0L200 0L200 200L0 200Z', x: tf.x, y: 100, w: 200, h: 200 }];
+  ok(L.overlapProblems(motifOnText, T.deckTheme('ocean'), 'title').some(p => /theme motif touches/.test(p.message)), 'a motif shape over text is reported');
+
+  // Illustrations.
+  ok(DC.pickScene('National Water Programme review for a ministry') === 'water' && DC.pickScene('Ministry of Finance budget') === 'civic'
+    && DC.pickScene('Our team and culture') === 'people' && DC.pickScene('Cloud platform architecture') === 'network'
+    && DC.pickScene('Quarterly revenue results') === 'data' && DC.pickScene('Urban transport and housing') === 'city' && DC.pickScene('Hello') === 'landscape', 'scenes are picked by keyword (water, civic, people, network, data, city; landscape otherwise)');
+  ok(DC.pickScene('Communities see the difference', 'National Water Programme') === 'people' && DC.pickScene('Next steps', 'National Water Programme') === 'water', 'the slide\'s own words win; the deck\'s title is the fallback');
+  for (const sc of DC.SCENES) {
+    for (const mask of [undefined, 'circle', 'hexagon', 'rounded', 'diagonal']) {
+      const deck = M.deckFrom({ v: 1, theme: 'lagoon', slides: [{ layout: 'image-text', title: 'A slide with an illustration', image: { src: `art:${sc}`, alt: sc, ...(mask ? { mask } : {}) }, bullets: ['One'] }] });
+      const l = L.layoutSlide(deck, 0);
+      const ill = l.frames.filter(f => f.group === 'Illustration');
+      const base = ill[0];
+      const strays = ill.slice(1).filter(f => f.x < base.x - 0.5 || f.y < base.y - 0.5 || f.x + f.w > base.x + base.w + 0.5 || f.y + f.h > base.y + base.h + 0.5);
+      let outsideCut = 0;
+      if (mask === 'circle') {
+        const cx = base.x + base.w / 2; const cy = base.y + base.h / 2;
+        for (const f of ill.slice(1)) for (const m of f.path.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)) {
+          const x = f.x + Number(m[1]); const y = f.y + Number(m[2]);
+          if (((x - cx) / (base.w / 2)) ** 2 + ((y - cy) / (base.h / 2)) ** 2 > 1.002) outsideCut++;
+        }
+      }
+      const okScene = base?.name === `Illustration: ${sc}` && ill.length >= 4 && !strays.length && !outsideCut && ill.every(f => f.kind === 'shape' && f.field === 'image') && !l.frames.some(f => f.kind === 'image')
+        && !l.problems.some(p => p.severity === 'error') && !l.problems.some(p => /credit|alt text/.test(p.message));
+      if (!okScene) ok(false, `${sc} in a ${mask ?? 'rect'} cut: native shapes inside the cut, no credit asked`, { n: ill.length, strays: strays.map(f => f.name), outsideCut, problems: l.problems });
+      else pass++;
+    }
+  }
+  ok(true, 'every scene × every cut: native freeforms clipped to the cut, one group, no picture, no credit needed');
+  const empty = M.deckFrom({ v: 1, theme: 'ember', slides: [{ layout: 'image-text', title: 'Government budget for the ministry', bullets: ['a'] }] });
+  const el = L.layoutSlide(empty, 0);
+  ok(el.frames.some(f => f.name === 'Illustration: civic') && !el.frames.some(f => f.name === 'Picture placeholder') && el.problems.some(p => p.severity === 'warn' && /generated illustration stands in/.test(p.message)), 'an empty picture slot draws an illustration from the slide\'s words, with a warning to replace or keep it');
+  ok(D.planDesign({ audience: 'ministers', imageStyle: 'illustration' }).imageQueries[0] === 'art:scene', 'an illustration brief asks for art:scene');
+
+  // Section numbers.
+  for (const th of ['ocean', 'boardroom', 'slate']) { // field, number, side
+    const deck = M.deckFrom({ v: 1, theme: th, slides: [{ layout: 'title', title: 'T' }, { layout: 'section', title: 'First part' }, { layout: 'bullets', title: 'x y z', bullets: ['a'] }, { layout: 'section', title: 'Second part' }] });
+    const ls = L.layoutDeck(deck);
+    const num = (l) => l.frames.find(f => f.name === 'Number')?.paras[0].runs.map(r => r.text).join('');
+    ok(num(ls[1]) === '01' && num(ls[3]) === '02', `${th} (${T.deckTheme(th).section} sections): big numbers 01, 02 by section order`);
+    const off = L.layoutDeck({ ...deck, sectionNumbers: false });
+    ok(!off[1].frames.some(f => f.name === 'Number') && !off[3].frames.some(f => f.name === 'Number') && !off.flatMap(l => l.problems).some(p => /overlaps/.test(p.message)), `${th}: numbers off per deck leaves none`);
+  }
+  {
+    const deck = M.deckFrom({ v: 1, theme: 'lagoon', slides: [{ layout: 'section', title: 'A section title long enough to wrap onto a second line', subtitle: 'Sub' }] });
+    const l = L.layoutSlide(deck, 0);
+    const f = (n) => l.frames.find(x => x.name === n);
+    ok(f('Number').y + f('Number').h <= f('Kicker').y && f('Kicker').y + f('Kicker').h < f('Title').y, 'field section: number above the label above the title, each in its own band');
+    ok(M.deckFrom({ v: 1, theme: 'x', sectionNumbers: false, slides: [] }).sectionNumbers === false && M.applyDeckOp(M.deckFrom({ v: 1, theme: 'x', slides: [] }), { op: 'meta', patch: { sectionNumbers: false } }).sectionNumbers === false, 'sectionNumbers survives parsing and the editor\'s meta op');
+    const photo = M.deckFrom({ v: 1, theme: 'lagoon', sectionNumbers: false, slides: [{ layout: 'section', title: 'Over art', image: { src: 'art:water', alt: 'w' } }] });
+    ok(L.layoutSlide(photo, 0).frames.find(x => x.name === 'Kicker').paras[0].runs[0].text === 'Section', 'a section over a picture drops the number too when turned off');
+  }
+
+  // Decision cards.
+  ok(M.toInfographicKind('decision-cards') === 'decisions' && M.infographicInfo('decisions').min === 2 && M.infographicInfo('decisions').max === 5, 'decision cards are an infographic kind (2–5)');
+  for (let n = 2; n <= 5; n++) {
+    const items = Array.from({ length: n }, (_, i) => ({ title: `Decision number ${i + 1} to take`, text: 'One line on why it matters' }));
+    const deck = M.deckFrom({ v: 1, theme: 'harbor', slides: [{ layout: 'infographic', title: 'What we ask you to decide today', infographic: { kind: 'decisions', items } }] });
+    const l = L.layoutSlide(deck, 0);
+    const cards = l.frames.filter(f => /^Decision card \d$/.test(f.name));
+    const nums = l.frames.filter(f => /^Decision number \d$/.test(f.name)).map(f => f.paras[0].runs[0].text);
+    const overlapping = cards.some((a, i) => cards.slice(i + 1).some(b => a.y < b.y + b.h && b.y < a.y + a.h));
+    const sizes = l.frames.filter(f => /^Decision \d$/.test(f.name)).map(f => f.paras[0].size);
+    const good = cards.length === n && !overlapping && nums.join() === Array.from({ length: n }, (_, i) => String(i + 1).padStart(2, '0')).join() && cards.every(c => c.y >= 134 && c.y + c.h <= 540 - 56 && c.x >= 56 && c.x + c.w <= 904.5)
+      && new Set(l.frames.filter(f => f.field === 'infographic').map(f => f.group)).size === n && Math.min(...sizes) >= 16 && !l.problems.some(p => p.severity === 'error');
+    if (!good) ok(false, `decision cards with ${n} items: numbered rows inside the content area, one group each, ≥ 16 pt`, { cards: cards.length, nums, overlapping, sizes, problems: l.problems });
+    else pass++;
+  }
+  ok(true, 'decision cards 2–5: numbered 01–0n, rows inside the content area, one PowerPoint group per decision');
+  ok(D.chooseKind([{ title: 'Approve the budget' }, { title: 'Extend the pilot' }, { title: 'Name an owner' }], 'What we ask you to decide') === 'decisions', 'make_visual picks decision cards for a "decide" slide');
+  ok(DeckScopedEdit.compatibleKinds({ kind: 'cards', items: [{ title: 'a' }, { title: 'b' }, { title: 'c' }] }).includes('decisions') && DeckScopedEdit.elementAt({ layout: 'infographic', infographic: { kind: 'decisions', items: [{ title: 'a' }, { title: 'b' }] } }, 'infographic', 'Decision 2') === 'infographic.2', 'Ask AICO: cards can become decision cards, and a click on decision 2 edits item 2');
+  ok(DECK_TOOL_HELP.length > 0 && !/decisions/.test(DECK_TOOL_HELP), 'the always-sent tool help does not grow (decisions live in the returned guide)');
+
+  // PowerPoint: motifs, illustrations and decision cards are native, grouped and well formed.
+  const deck = M.deckFrom({ v: 1, theme: 'lagoon', slides: [
+    { layout: 'title', title: 'National Water Programme', subtitle: 'Review', image: { src: 'art:scene', mask: 'circle', alt: 'w' } },
+    { layout: 'section', title: 'Where we are' },
+    { layout: 'infographic', title: 'What we ask you to decide', infographic: { kind: 'decisions', items: [{ title: 'Approve', text: 'Funds' }, { title: 'Extend', text: 'Pilot' }, { title: 'Name', text: 'Owner' }] } },
+    { layout: 'image-text', title: 'Communities see the difference', bullets: ['a'] },
+    { layout: 'closing', title: 'Thank you' },
+  ] });
+  const out = toPptx({ title: 'x', deck, layouts: L.layoutDeck(deck), images: new Map(), pictures: new Map() });
+  const z = unzipSync(out.bytes);
+  const names = Object.keys(z);
+  const badXml = names.filter(n => /\.(xml|rels)$/.test(n)).map(n => [n, xmlProblem(strFromU8(z[n]))]).filter(([, e]) => e);
+  ok(!badXml.length && !out.warnings.length, 'the .pptx with motifs, illustrations and decision cards is well formed, with no warnings', { badXml: badXml.slice(0, 2), warnings: out.warnings });
+  const sx = (i) => strFromU8(z[`ppt/slides/slide${i}.xml`]);
+  ok(/<p:grpSp><p:nvGrpSpPr><p:cNvPr id="\d+" name="Motif"\/>/.test(sx(2)) && /name="Motif"/.test(sx(5)), 'the motif is one PowerPoint group named "Motif" on section and closing slides');
+  ok(/name="Illustration"/.test(sx(4)) && /name="Illustration: people"/.test(sx(4)) && (sx(4).match(/<a:custGeom>/g) ?? []).length >= 8 && !/<p:pic>/.test(sx(4)), 'an empty slot\'s illustration is a group of freeforms, no picture');
+  ok(/name="Illustration: water"/.test(sx(1)) && /name="Item 1"/.test(sx(3)) && /name="Decision 1"/.test(sx(3)) && /prst="donut"/.test(sx(3)), 'the cover\'s illustration and the decision cards (groups per decision, a check ring) are native');
+  ok(!/srgbClr/.test(sx(1).replace(/<p:txBody>[\s\S]*?<\/p:txBody>/g, '')), 'motif and illustration colours are theme slots (schemeClr), so Design → Variants recolours them');
 }
 
 console.log(`\nDeck visuals: ${pass} passed, ${fail} failed`);

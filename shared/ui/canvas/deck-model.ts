@@ -94,7 +94,7 @@ export interface DeckImage {
 export type InfographicKind =
   | 'process' | 'arrows' | 'cycle' | 'semicircle' | 'radial' | 'pyramid' | 'funnel' | 'hexagons' | 'stairs'
   | 'timeline' | 'roadmap' | 'cards' | 'versus' | 'pros-cons' | 'swot' | 'matrix' | 'venn' | 'rings'
-  | 'tiles' | 'stat-bars' | 'team' | 'quote-photo' | 'agenda' | 'icon-grid' | 'before-after';
+  | 'tiles' | 'stat-bars' | 'team' | 'quote-photo' | 'agenda' | 'icon-grid' | 'before-after' | 'decisions';
 
 export interface InfoItem {
   title: string;
@@ -174,6 +174,8 @@ export interface Deck {
   footer?: string;
   /** Slide numbers on content slides; default on. */
   slideNumbers?: boolean;
+  /** Big section numbers (01, 02…) on section slides; default on (ADR 0025). */
+  sectionNumbers?: boolean;
   /** Brand colours laid over the theme's slots (`themeOfDeck`), #RRGGBB. */
   palette?: Partial<Record<'dk1' | 'lt1' | 'dk2' | 'lt2' | 'accent1' | 'accent2' | 'accent3' | 'accent4' | 'accent5' | 'accent6', string>>;
   /** Fonts from the measured set replacing the theme's (a brand font, when it is one of them). */
@@ -256,6 +258,7 @@ export const INFOGRAPHICS: readonly InfographicInfo[] = [
   { id: 'agenda', label: 'Numbered agenda', hint: 'the parts of the talk, numbered', min: 3, max: 7, uses: ['title', 'text', 'icon'] },
   { id: 'icon-grid', label: 'Icon grid', hint: 'features or benefits with icons', min: 3, max: 8, uses: ['title', 'text', 'icon'] },
   { id: 'before-after', label: 'Before / after', hint: 'item 1 = before, item 2 = after (text: lines)', min: 2, max: 2, uses: ['title', 'text', 'image'] },
+  { id: 'decisions', label: 'Decision cards', hint: 'numbered decisions to ask for (title = the decision, text = one line why)', min: 2, max: 5, uses: ['title', 'text'] },
 ];
 
 const INFO_IDS = new Set<string>(INFOGRAPHICS.map(i => i.id));
@@ -268,6 +271,7 @@ const INFO_ALIASES: Record<string, InfographicKind> = {
   quadrant: 'matrix', quadrants: 'matrix', '2x2': 'matrix', 'progress': 'rings', donuts: 'rings', donut: 'rings', 'percent-rings': 'rings',
   kpis: 'tiles', 'kpi-tiles': 'tiles', 'big-numbers': 'tiles', bars: 'stat-bars', 'stat-rows': 'stat-bars', people: 'team', 'team-cards': 'team',
   testimonial: 'quote-photo', features: 'icon-grid', icons: 'icon-grid', 'feature-grid': 'icon-grid', 'before-and-after': 'before-after',
+  decision: 'decisions', 'decision-cards': 'decisions', asks: 'decisions', 'the-ask': 'decisions', approvals: 'decisions',
 };
 
 /** An infographic kind from what a model or person typed, or undefined. */
@@ -648,6 +652,7 @@ export function deckFrom(raw: unknown): Deck {
     ...(typeof o.type === 'string' && o.type.trim() ? { type: o.type.trim().slice(0, 40) } : {}),
     ...(typeof o.footer === 'string' && o.footer.trim() ? { footer: o.footer.trim().slice(0, 120) } : {}),
     ...(o.slideNumbers === false ? { slideNumbers: false } : {}),
+    ...(o.sectionNumbers === false ? { sectionNumbers: false } : {}),
     ...(toPalette(o.palette) ? { palette: toPalette(o.palette)! } : {}),
     ...(toFonts(o.fonts) ? { fonts: toFonts(o.fonts)! } : {}),
     ...(toBrief(o.brief) ? { brief: toBrief(o.brief)! } : {}),
@@ -707,7 +712,7 @@ export type DeckOp =
   | { op: 'insert'; at: number; slide: Slide }
   | { op: 'delete'; id: string }
   | { op: 'move'; id: string; to: number }
-  | { op: 'meta'; patch: Partial<Pick<Deck, 'theme' | 'aspect' | 'type' | 'footer' | 'slideNumbers' | 'palette' | 'fonts' | 'brief'>> }
+  | { op: 'meta'; patch: Partial<Pick<Deck, 'theme' | 'aspect' | 'type' | 'footer' | 'slideNumbers' | 'sectionNumbers' | 'palette' | 'fonts' | 'brief'>> }
   | { op: 'replace'; deck: Deck };
 
 /** Apply one operation. Throws when it no longer applies (its slide is gone). */
@@ -746,6 +751,7 @@ export function applyDeckOp(deck: Deck, op: DeckOp): Deck {
       if (p.type !== undefined) { if (p.type) next.type = p.type; else delete next.type; }
       if (p.footer !== undefined) { if (p.footer) next.footer = p.footer; else delete next.footer; }
       if (p.slideNumbers !== undefined) { if (p.slideNumbers === false) next.slideNumbers = false; else delete next.slideNumbers; }
+      if (p.sectionNumbers !== undefined) { if (p.sectionNumbers === false) next.sectionNumbers = false; else delete next.sectionNumbers; }
       // An empty palette, fonts or brief clears it.
       if (p.palette !== undefined) { const v = toPalette(p.palette); if (v) next.palette = v; else delete next.palette; }
       if (p.fonts !== undefined) { const v = toFonts(p.fonts); if (v) next.fonts = v; else delete next.fonts; }
@@ -811,6 +817,7 @@ export function sampleInfographic(kind: InfographicKind): DeckInfographic {
     case 'pros-cons': return { kind, items: [{ title: 'Pros', text: 'Faster\nCheaper' }, { title: 'Cons', text: 'Riskier\nNew skills' }] };
     case 'versus': return { kind, items: [{ title: 'Option A', text: 'Point one\nPoint two', icon: 'box' }, { title: 'Option B', text: 'Point one\nPoint two', icon: 'boxes' }] };
     case 'before-after': return { kind, items: [{ title: 'Before', text: 'Manual\nSlow' }, { title: 'After', text: 'Automated\nFast' }] };
+    case 'decisions': return { kind, items: [{ title: 'Approve the budget', text: 'Funds the next two phases' }, { title: 'Confirm the scope', text: 'Three regions first, the rest in 2027' }, { title: 'Name an owner', text: 'One accountable lead per region' }] };
     case 'venn': return { kind, centre: 'Sweet spot', items: [{ title: 'Desirable' }, { title: 'Feasible' }, { title: 'Viable' }] };
     case 'rings': return { kind, items: [{ title: 'Adoption', value: '72%' }, { title: 'Retention', value: '88%' }, { title: 'NPS', value: '45%' }] };
     case 'stat-bars': return { kind, items: [{ title: 'Awareness', value: '82%' }, { title: 'Trial', value: '54%' }, { title: 'Purchase', value: '31%' }, { title: 'Loyalty', value: '22%' }] };
