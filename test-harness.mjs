@@ -6348,9 +6348,13 @@ console.log('  -- The log survives the process --');
   const finished = ledger.open({ kind: 'agent', title: 'already done', origin: 'model' });
   ledger.close(finished, 'done', 'ok');
 
-  // Give the fire-and-forget appends a tick to land before reading the file.
-  await new Promise(r => setTimeout(r, 60));
-  const persisted = await readWorkLog();
+  // The appends are fire-and-forget: wait for them to land (a condition, not
+  // a fixed sleep — 60 ms was not enough on a loaded machine).
+  let persisted = await readWorkLog();
+  for (let i = 0; i < 100 && persisted.records.length < 4; i++) {
+    await new Promise(r => setTimeout(r, 20));
+    persisted = await readWorkLog();
+  }
   assert(persisted.records.length === 4, `all four records are on disk (${persisted.records.length})`);
 
   // The restart.
@@ -10328,7 +10332,14 @@ console.log('\n══ GIT TOOL GUARDS ══');
 // Through Bash these rules are requests in a prompt, which a model may decline.
 // Here they are conditions on the call.
 {
-  const refused = await gitTool({ action: 'commit', message: 'straight to trunk' });
+  // A throwaway repository on `main`: this repository's own checkout is on a
+  // release branch or a detached HEAD in CI, where "you are on the default
+  // branch" is simply false and the refusal never fires.
+  const trunkRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'aico-git-trunk-'));
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: trunkRepo });
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: trunkRepo });
+  const refused = await runInContext({ cwd: trunkRepo }, () => gitTool({ action: 'commit', message: 'straight to trunk' }));
+  fs.rmSync(trunkRepo, { recursive: true, force: true });
   assert(/Refusing to commit directly to (main|master)/.test(refused),
     'committing to the default branch is refused, not discouraged');
   assert(refused.includes('allowDefaultBranch'),
