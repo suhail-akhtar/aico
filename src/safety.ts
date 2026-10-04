@@ -46,6 +46,20 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bcat\b\s+\/sys\//i, reason: 'Reading /sys filesystem' },
   // File immutability manipulation
   { pattern: /\bchattr\b\s+\+i\b/i, reason: 'Making files immutable (prevents cleanup)' },
+  // ── Security review 2026-10: gaps the patterns above left open ──
+  // Recursive delete of root/home with the flags in any order or spelling.
+  { pattern: /\brm\s+(?=(?:-\S+\s+)*(?:-[a-zA-Z]*[rR]|--recursive)\b)(?:-\S+\s+)+(?:\/\*?|~\/?\*?|\$HOME\/?\*?)\s*$/i, reason: 'Recursive delete of root or home directory' },
+  // Download-and-execute into any shell, PowerShell's `iex` included.
+  { pattern: /\b(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b.*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh|fish|pwsh|powershell|iex|invoke-expression)\b/i, reason: 'Piping a download into a shell (code execution)' },
+  // Secret files read by any pager or PowerShell reader, not only `cat`.
+  { pattern: /\b(?:head|tail|less|more|type|get-content|gc|select-string|sls|bat|nl|strings|xxd|od)\b.*(?:\.env\b|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.pem\b|\bcredentials\b|\.netrc\b|\.pgpass\b)/i, reason: 'Reading credential files' },
+  // Shell rc / profile files, by any write (redirect, tee, PowerShell writers).
+  { pattern: /(?:>>?|\btee\b(?:\s+-a)?|\b(?:add-content|set-content|out-file|ac|sc)\b)\s*\S*(?:\.(?:bashrc|zshrc|profile|bash_profile|zprofile|zshenv|bash_login|login)\b|\$profile\b|microsoft\.powershell_profile\.ps1)/i, reason: 'Modifying shell profile' },
+  // AICO's own configuration (settings, hooks, tools, agents, trust) is
+  // changed through the settings API, which asks a person — never a shell.
+  { pattern: /(?:>>?|\btee\b|\b(?:cp|mv|copy|move|copy-item|move-item|add-content|set-content|out-file|ac|sc)\b|\bsed\s+-i)[^|;&]*\.aico[\\/]+(?:settings(?:\.local)?\.json|hooks[\\/]|tools[\\/]|agents[\\/]|trust\.json)/i, reason: 'Writing AICO configuration from a shell (use the settings screen)' },
+  // Encoded PowerShell hides the real command from every check here.
+  { pattern: /\b(?:pwsh|powershell)(?:\.exe)?\b.*\s-(?:e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\b/i, reason: 'Encoded PowerShell command (hides what runs)' },
 ];
 
 // ── Warning patterns — prompt user, not auto-blocked ─────────────────
@@ -53,8 +67,12 @@ const WARN_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   // Destructive git operations
   { pattern: /\bgit\s+push\s+.*--force\b/i, reason: 'Force push (can overwrite remote history)' },
   { pattern: /\bgit\s+reset\s+--hard\b/i, reason: 'Hard reset (discards uncommitted changes)' },
-  { pattern: /\bgit\s+clean\s+-[a-zA-Z]*f/i, reason: 'Git clean (removes untracked files)' },
-  { pattern: /\bgit\s+checkout\s+--\s*\./i, reason: 'Git checkout -- . (discards all changes)' },
+  { pattern: /\bgit\s+clean\b(?:\s+\S+)*?\s+(?:-[a-zA-Z]*[fdxX][a-zA-Z]*|--force)\b/i, reason: 'Git clean (removes untracked files)' },
+  { pattern: /\bgit\s+checkout\s+(?:--\s*)?\.(?:\s|$)/i, reason: 'Git checkout . (discards all changes)' },
+  { pattern: /\bgit\s+restore\b(?:\s+-\S+)*\s+\.(?:\s|$)/i, reason: 'Git restore . (discards all changes)' },
+  // Recursive deletes in PowerShell and cmd, by any spelling.
+  { pattern: /\b(?:remove-item|ri|rm|del|erase|rd|rmdir)\b[^|;&]*\s-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?\b/i, reason: 'Recursive file deletion' },
+  { pattern: /\b(?:del|erase)\b[^|;&]*\s\/[sq]\b|\b(?:rd|rmdir)\b[^|;&]*\s\/s\b/i, reason: 'Recursive file deletion' },
   { pattern: /\bgit\s+branch\s+-D\b/i, reason: 'Force-delete branch' },
   // Process / system management
   { pattern: /\bkill\s+-9\b/i, reason: 'Force-killing process' },
@@ -86,16 +104,20 @@ const WARN_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
  * Returns 'block' for dangerous commands, 'warn' for risky ones, 'safe' otherwise.
  */
 export function classifyBashCommand(command: string): SafetyResult {
+  // Each pattern is tried against the command as written and as normalised,
+  // so `r"m" -rf /`, `\rm`, `'curl' x | sh` and line continuations do not
+  // slip past a pattern that matches the plain spelling.
+  const forms = [command, normaliseShell(command)];
   // Check blocked patterns first
   for (const { pattern, reason } of BLOCKED_PATTERNS) {
-    if (pattern.test(command)) {
+    if (forms.some(f => pattern.test(f))) {
       return { level: 'block', reason };
     }
   }
 
   // Check warning patterns
   for (const { pattern, reason } of WARN_PATTERNS) {
-    if (pattern.test(command)) {
+    if (forms.some(f => pattern.test(f))) {
       return { level: 'warn', reason };
     }
   }
@@ -104,38 +126,117 @@ export function classifyBashCommand(command: string): SafetyResult {
 }
 
 /**
- * Check if a bash command is read-only (safe for concurrent execution).
- * Used by the concurrency classifier.
+ * The command with quoting and escapes that do not change what runs removed:
+ * line continuations joined, quote characters deleted (`r"m"` → `rm`), and a
+ * backslash or PowerShell backtick before a letter at a word start deleted
+ * (`\rm` → `rm`). Path backslashes (`C:\x`) survive: only a backslash at a
+ * word start counts as an escape here.
+ */
+export function normaliseShell(command: string): string {
+  return command
+    .replace(/[\\`]\r?\n/g, ' ')
+    .replace(/["']/g, '')
+    .replace(/(^|[\s;&|(])[\\`]+(?=[A-Za-z])/g, '$1')
+    .replace(/`(?=[A-Za-z])/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Check if a bash command is read-only — safe for concurrent execution,
+ * allowed in plan mode, and allowed after the session read untrusted content.
+ *
+ * Conservative by construction (security review 2026-10). Only the first
+ * segment used to be checked, so `ls; rm -rf x`, `cat a > b`, `echo $(rm x)`
+ * and `node -e "…"` all counted as read-only. Now a command is read-only only
+ * when it has no redirection, no command substitution, no newline, and EVERY
+ * segment of every pipe and chain is on the list. Interpreters (node, python,
+ * perl, ruby, shells), `sed` (`-i`), `env` (runs a program), `wget` (writes a
+ * file) and the writing git subcommands (config, stash, checkout, restore,
+ * clean) are not on it.
  */
 export function isBashReadOnly(command: string): boolean {
-  // Trim and get the first command (before pipes/semicolons)
-  const firstCmd = command.split(/[|;&]/).map(s => s.trim())[0];
-  const binary = firstCmd.split(/\s+/)[0];
-
-  const READ_ONLY_COMMANDS = new Set([
-    'ls', 'dir', 'cat', 'head', 'tail', 'less', 'more',
-    'grep', 'rg', 'ag', 'ack', 'find', 'fd', 'locate', 'which', 'where',
-    'wc', 'sort', 'uniq', 'diff', 'comm', 'cut', 'tr', 'awk', 'sed',
-    'file', 'stat', 'du', 'df', 'date', 'whoami', 'hostname', 'uname',
-    'pwd', 'echo', 'printf', 'env', 'printenv', 'type',
-    'git', 'node', 'python', 'python3', 'ruby', 'perl',
-    'jq', 'yq', 'curl', 'wget', 'ping', 'dig', 'nslookup',
-  ]);
-
-  // Check if the base command is read-only
-  const baseName = binary.replace(/^.*[\\/]/, ''); // strip path
-  if (!READ_ONLY_COMMANDS.has(baseName)) return false;
-
-  // For git: only certain subcommands are read-only
-  if (baseName === 'git') {
-    const gitSub = firstCmd.match(/\bgit\s+(\w+)/)?.[1];
-    const readOnlyGit = new Set([
-      'status', 'log', 'diff', 'show', 'branch', 'tag', 'remote',
-      'describe', 'blame', 'shortlog', 'rev-parse', 'ls-files',
-      'ls-tree', 'cat-file', 'config', 'stash',
-    ]);
-    return gitSub ? readOnlyGit.has(gitSub) : false;
-  }
-
-  return true;
+  const cmd = command.trim();
+  if (!cmd) return false;
+  // Redirection, command/process substitution, newlines.
+  if (/[<>`\r\n]|\$\(/.test(cmd)) return false;
+  const segments = cmd.split(/\|\||&&|[|;&]/).map(s => s.trim());
+  if (segments.some(s => !s)) return false;
+  return segments.every(segmentIsReadOnly);
 }
+
+const READ_ONLY_COMMANDS = new Set([
+  'ls', 'dir', 'cat', 'head', 'tail', 'less', 'more',
+  'grep', 'rg', 'ag', 'ack', 'find', 'fd', 'locate', 'which', 'where',
+  'wc', 'sort', 'uniq', 'diff', 'comm', 'cut', 'tr', 'awk',
+  'file', 'stat', 'du', 'df', 'date', 'whoami', 'hostname', 'uname',
+  'pwd', 'echo', 'printf', 'printenv', 'type',
+  'git', 'jq', 'yq', 'curl', 'ping', 'dig', 'nslookup',
+]);
+
+function segmentIsReadOnly(segment: string): boolean {
+  const words = segment.split(/\s+/);
+  const baseName = (words[0] ?? '').replace(/^.*[\\/]/, ''); // strip path
+  if (!READ_ONLY_COMMANDS.has(baseName)) return false;
+  const rest = words.slice(1);
+  switch (baseName) {
+    case 'git': return gitIsReadOnly(rest);
+    // -delete / -exec run or remove things; -fprint writes a file.
+    case 'find': return !rest.some(w => /^-(?:delete|exec|execdir|ok|okdir|fprint\w*|fls)$/.test(w));
+    case 'fd': return !rest.some(w => /^(?:-x|-X|--exec|--exec-batch)$/.test(w));
+    case 'sort': return !rest.some(w => /^(?:-o|--output)/.test(w));
+    // awk can run programs (system, piped print, getline from a command).
+    case 'awk': return !/system\s*\(|\bgetline\b|print[^;]*\|/.test(segment);
+    // Only fetches that send nothing and write nothing.
+    case 'curl': return !rest.some(w => /^(?:-[a-zA-Z]*[oOdFTXK]|--(?:output|remote-name|data|form|upload-file|request|config|json))/.test(w));
+    case 'date': return !rest.some(w => /^(?:-s|--set)/.test(w));
+    case 'hostname': return rest.every(w => w.startsWith('-'));
+    default: return true;
+  }
+}
+
+function gitIsReadOnly(args: string[]): boolean {
+  // Global options before the subcommand (`-C dir`, `--no-pager`). `-c`
+  // sets config for this run, which can name a program to execute.
+  let i = 0;
+  while (i < args.length && args[i]!.startsWith('-')) {
+    if (args[i] === '-c' || args[i]!.startsWith('--config')) return false;
+    i += args[i] === '-C' ? 2 : 1;
+  }
+  const sub = args[i];
+  const rest = args.slice(i + 1);
+  if (!sub) return false;
+  switch (sub) {
+    case 'status': case 'log': case 'diff': case 'show': case 'describe': case 'blame': case 'shortlog':
+    case 'rev-parse': case 'ls-files': case 'ls-tree': case 'cat-file': case 'grep':
+      return !rest.some(w => /^--(?:output|ext-diff)/.test(w));
+    // Listing forms only: `git branch foo` creates a branch, `git tag v1` a tag.
+    case 'branch':
+      return rest.every(w => /^(?:-a|-r|-l|-v|-vv|--list|--all|--remotes|--verbose|--show-current|--no-color|--color(?:=\S+)?)$/.test(w));
+    case 'tag':
+      return rest.length === 0 || rest[0] === '-l' || rest[0] === '--list';
+    case 'remote':
+      return rest.length === 0 || ['-v', '--verbose', 'show', 'get-url'].includes(rest[0]!);
+    default: return false;
+  }
+}
+
+/**
+ * The shell command a tool call will run, for every tool that runs one.
+ *
+ * The hard blocks above were applied only when the tool was named `Bash`, so
+ * the same command through `Terminal`, a `PowerShell` tool, or the desktop's
+ * `ide_terminal_run` host tool skipped them (security review 2026-10). Every
+ * guard that judges a shell command asks this instead of comparing names.
+ */
+export function shellCommandOf(name: string, args: Record<string, unknown> | undefined): string | undefined {
+  const command = args?.command;
+  if (typeof command !== 'string' || !command) return undefined;
+  if (SHELL_TOOL_NAMES.has(name)) return command;
+  // An MCP tool is `mcp__<server>__<tool>`; the host's terminal runner by its tool name.
+  if (/^mcp__.+__ide_terminal_run$/.test(name)) return command;
+  return undefined;
+}
+
+/** Built-in tools whose `command` argument is run by a shell. */
+export const SHELL_TOOL_NAMES: ReadonlySet<string> = new Set(['Bash', 'Terminal', 'PowerShell']);

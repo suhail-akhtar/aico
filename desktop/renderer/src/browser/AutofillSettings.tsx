@@ -64,7 +64,7 @@ export function AutofillSettings(): React.ReactElement {
       <h3 className="set-heading">Autofill</h3>
       <p className="-mt-1 mb-2 text-[12px] leading-relaxed text-aico-muted">
         Filled into forms when you press the <Icon name="key" size={11} className="inline" /> key by the address bar, or when you ask AICO to “fill this with my profile”.
-        Kept on this computer only{encrypted ? ', encrypted with your system keychain' : ' (your system offers no keychain, so it is stored unencrypted)'}.
+        Kept on this computer only{encrypted ? ', encrypted with your system keychain' : ' — but autofill is off: your system offers no keychain to protect it (on Linux, start GNOME Keyring or KWallet), so nothing is saved or filled'}.
         Passwords, card numbers, CVVs and one-time codes are never stored or filled.
       </p>
       <div className="set-group px-4 py-3">

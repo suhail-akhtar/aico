@@ -115,6 +115,17 @@ export function classifyAddress(raw: string): AddressClass {
     if (full === '0000:0000:0000:0000:0000:0000:0000:0001') return 'loopback';
     if (full.startsWith('ff')) return 'multicast';
     if (/^fe[89ab]/.test(full)) return 'link-local';
+    // Deprecated site-local fec0::/10 is a private range.
+    if (/^fe[c-f]/.test(full)) return 'unique-local';
+    // 6to4 (2002::/16) carries an IPv4 address in its next 32 bits: judge by it,
+    // so 2002:7f00:0001:: is loopback, not public. Teredo (2001:0000::/32)
+    // tunnels to an address the prefix does not reveal: never reachable.
+    if (full.startsWith('2002:')) {
+      const g = full.split(':');
+      const hi = parseInt(g[1]!, 16); const lo = parseInt(g[2]!, 16);
+      return classifyAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    if (full.startsWith('2001:0000:')) return 'reserved';
     if (/^f[cd]/.test(full)) return 'unique-local';
     if (compact.startsWith('2001:0db8') || full.startsWith('2001:0db8')) return 'reserved';
     return 'public';

@@ -1,6 +1,22 @@
 import { spawn, ChildProcess } from 'child_process';
 import { McpBaseClient, type McpServerConfigV2, type McpHealthStatus, type SendOptions } from './base.js';
 import { McpRpcError, McpTimeoutError } from './protocol.js';
+import { mcpServerEnv } from '../child-env.js';
+
+/**
+ * The custom-tools refusal (`custom-tools/runner.ts` CMD_UNSAFE) for the MCP
+ * spawn: with `shell: true`, cmd.exe re-parses the joined line, so an argument
+ * like `x & calc` or `%USERPROFILE%` ran or expanded something nobody
+ * approved. Narrower than CMD_UNSAFE on purpose: quotes and parentheses are
+ * handled by the quoting below (`C:\Program Files (x86)\…` must keep working)
+ * and `!` needs delayed expansion, which is off. Returns the first offending
+ * value, or undefined. Not Windows: nothing is re-parsed.
+ */
+const MCP_CMD_UNSAFE = /[&|%^<>\r\n]/;
+export function windowsShellUnsafe(values: readonly unknown[], platform: NodeJS.Platform): string | undefined {
+  if (platform !== 'win32') return undefined;
+  return values.map(String).find(v => MCP_CMD_UNSAFE.test(v));
+}
 
 interface JsonRpcPendingRequest {
   resolve: (value: unknown) => void;
@@ -42,8 +58,16 @@ export class McpStdioClient extends McpBaseClient {
     const quote = (value: string): string =>
       needsShell && /\s/.test(value) && !value.startsWith('"') ? `"${value}"` : value;
 
+    const unsafe = windowsShellUnsafe([config.command, ...(config.args ?? [])], process.platform);
+    if (unsafe !== undefined) {
+      throw new Error(`MCP server command not started: on Windows it runs through cmd.exe, and ${JSON.stringify(unsafe.slice(0, 80))} `
+        + 'contains characters cmd.exe would interpret (& | % ^ < >). Point it at the real .exe, or use values without them.');
+    }
+
     this.proc = spawn(quote(config.command), (config.args ?? []).map(quote), {
-      env: { ...process.env, ...(config.env ?? {}) } as NodeJS.ProcessEnv,
+      // Someone else's program: a safe base plus its own configured env, never
+      // the engine's provider keys or settings.env (child-env.ts).
+      env: mcpServerEnv(config.env),
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: needsShell,
     });

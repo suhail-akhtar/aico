@@ -61,6 +61,17 @@ const TOKEN_RULES: Rule[] = [
   { label: 'google-api-key', kind: 'api-token', re: /\bAIza[0-9A-Za-z_-]{35}\b/g },
   { label: 'aws-access-key-id', kind: 'api-token', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
   { label: 'aws-secret-key', kind: 'api-token', re: /\baws_?secret_?access_?key\b["']?\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})\b/gi, group: 1 },
+  // Z.AI (GLM) keys: 32 hex, a dot, 16 more — the provider AICO itself drives.
+  { label: 'zai-key', kind: 'api-token', re: /\b[0-9a-f]{32}\.[A-Za-z0-9]{16}\b/g },
+  { label: 'gitlab-token', kind: 'api-token', re: /\bglpat-[A-Za-z0-9_-]{20,}/g },
+  { label: 'huggingface-token', kind: 'api-token', re: /\bhf_[A-Za-z0-9]{30,}\b/g },
+  { label: 'npm-token', kind: 'api-token', re: /\bnpm_[A-Za-z0-9]{36}\b/g },
+  { label: 'sendgrid-key', kind: 'api-token', re: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/g },
+  { label: 'telegram-bot-token', kind: 'api-token', re: /\b\d{8,10}:AA[A-Za-z0-9_-]{33}(?![A-Za-z0-9_-])/g },
+  { label: 'discord-bot-token', kind: 'api-token', re: /\b[MNO][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,38}(?![A-Za-z0-9_-])/g },
+  // A pasted header. The token must hold a digit, so `Bearer YOUR_TOKEN` and
+  // `Bearer $TOKEN` (references, not values) are left alone.
+  { label: 'bearer-token', kind: 'api-token', re: /\bAuthorization\s*:\s*Bearer\s+((?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{12,})/gi, group: 1 },
 ];
 
 /** `scheme://user:password@host` — the password only. */

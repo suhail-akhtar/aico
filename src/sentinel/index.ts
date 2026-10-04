@@ -95,6 +95,14 @@ export async function reviewCall(prompt: string, o: {
     verdict: 'escalate', reason: `the safety reviewer could not answer (${failure}), so a person decides`,
     model: o.model, costUsd: tracker.estimateCost(o.model, o.settings), ms: Date.now() - started, failure,
   });
+  // Keep-local (models.localOnlyPersonal / the private preset): the reviewer
+  // reads the call and the person's requests, so a model off this machine is
+  // never asked — the call goes to a person instead (ADR 0017, models/roles).
+  {
+    const { localOnlyRefusal } = await import('../models/roles.js');
+    const refusal = localOnlyRefusal('sentinel', o.model, o.settings);
+    if (refusal) return fail(refusal);
+  }
   let provider: ProviderAPI;
   try {
     // Lazy for the reason evals/judge gives: the provider registry loads every adapter.

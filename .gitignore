@@ -69,3 +69,6 @@ tmp-wire-*/
 # compiled .js next to the .ts. It was committed once before this line existed.
 shared/**/*.js
 shared/**/*.js.map
+
+# CycloneDX SBOMs written by `npm run sbom` (CI attaches them to releases)
+/sbom/

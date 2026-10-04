@@ -92,7 +92,9 @@ export function sealRecord(keys: DerivedKeys, id: string, version: number, plain
 /** Open one record; throws {@link VaultTamperedError} on any authentication failure. */
 export function openRecord(keys: DerivedKeys, record: SealedRecord): Buffer {
   try {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', keys.enc, Buffer.from(record.iv, 'base64'));
+    // authTagLength pins the tag at 16 bytes: otherwise GCM accepts a truncated
+    // tag from the file, and a 4-byte tag can be forged by trial.
+    const decipher = crypto.createDecipheriv('aes-256-gcm', keys.enc, Buffer.from(record.iv, 'base64'), { authTagLength: 16 });
     decipher.setAAD(aad(record.id, record.v));
     decipher.setAuthTag(Buffer.from(record.tag, 'base64'));
     return Buffer.concat([decipher.update(Buffer.from(record.ct, 'base64')), decipher.final()]);
@@ -291,7 +293,7 @@ export function wrap(key: Buffer, plaintext: Buffer, label: string): Wrapped {
 /** Reverse {@link wrap}; `undefined` when the key or label is wrong. */
 export function unwrap(key: Buffer, wrapped: Wrapped, label: string): Buffer | undefined {
   try {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(wrapped.iv, 'base64'));
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(wrapped.iv, 'base64'), { authTagLength: 16 });
     decipher.setAAD(Buffer.from(label, 'utf8'));
     decipher.setAuthTag(Buffer.from(wrapped.tag, 'base64'));
     return Buffer.concat([decipher.update(Buffer.from(wrapped.ct, 'base64')), decipher.final()]);

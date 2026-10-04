@@ -30,6 +30,7 @@ import path from 'node:path';
 import type { EngineHost } from './engine-host';
 import { onRequestHeaders } from './web-request';
 import { PREVIEW_HOST, previewResponse } from './preview';
+import { APP_CSP, humanIntent, PLUGIN_CSP } from './protocol-policy';
 
 export const SCHEME = 'aico';
 export const APP_ORIGIN = `${SCHEME}://app`;
@@ -90,38 +91,7 @@ function fileResponse(file: string, extraHeaders: Record<string, string> = {}): 
   });
 }
 
-/** The renderer's own content-security policy. */
-const APP_CSP = [
-  "default-src 'self' aico:",
-  "script-src 'self' aico: 'wasm-unsafe-eval'",
-  // Mermaid, KaTeX and ECharts write inline styles.
-  "style-src 'self' aico: 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' aico: data: https://fonts.gstatic.com",
-  "img-src 'self' aico: data: blob: https: http:",
-  "media-src 'self' aico: data: blob:",
-  "connect-src 'self' aico:",
-  // Plugin views and HTML previews are sandboxed frames. The ```video block
-  // embeds YouTube's no-cookie player, and only after the reader clicks play.
-  // (Remote images — map tiles, thumbnails, product photos — are already
-  // covered by img-src https:.)
-  "frame-src 'self' aico: blob: data: https://www.youtube-nocookie.com",
-  "worker-src 'self' aico: blob:",
-  "object-src 'none'",
-  "base-uri 'self'",
-].join('; ');
-
-/**
- * A plugin's files: scripts may run, but inside an opaque-origin sandbox — no
- * access to the app's origin, its storage or its bridge.
- */
-const PLUGIN_CSP = [
-  "default-src 'self' aico: data: blob:",
-  "script-src 'self' aico: 'unsafe-inline'",
-  "style-src 'self' aico: 'unsafe-inline'",
-  "img-src * data: blob:",
-  "connect-src 'none'",
-  'sandbox allow-scripts allow-forms allow-popups',
-].join('; ');
+// The content-security policies and the human-intent rule: protocol-policy.ts (unit-tested there).
 
 export interface ProtocolOptions {
   rendererDir: string;
@@ -148,12 +118,18 @@ export interface ProtocolOptions {
  * the inbox (Phase 7), and approving or resuming a long job (longjob/), and
  * putting a learned preference rule in force (learning/preferences.ts),
  * and confirming, editing or adding an About-you fact, running the learner
- * or widening what it reads (profile/service.ts).
+ * or widening what it reads (profile/service.ts), and adding an MCP server,
+ * writing a skill, adopting a learned rule, and a submit that widens a chat's
+ * approval mode (full autonomy, L4) — security review 2026-10, api-system.ts.
+ * A submit's grant is spent only when the engine asks for it (a mode above the
+ * chat's last), and unspent grants expire after two minutes.
  * The renderer is the AICO window —
  * a request from it is the person's click — so main attaches a grant here;
- * plugin frames are sandboxed with `connect-src 'none'` and cannot reach it.
+ * plugin frames are sandboxed with `connect-src 'none'` and `form-action 'none'`,
+ * and a grant needs the app transport's JSON + `x-aico-intent` request
+ * (protocol-policy.ts humanIntent), which a form or a frame cannot make.
  */
-const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path']);
+const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit']);
 
 /**
  * Vault routes the interface may never call: they return a value, or mint
@@ -207,7 +183,9 @@ export function handleProtocol({ rendererDir, pluginDir, engine, decidePermissio
       return json(200, { ok: await decidePermission(body.sessionId, body.id, body.allow) });
     }
     if (pathname.startsWith('/api/')) {
-      const grant = request.method === 'POST' && mintHumanGrant && HUMAN_ROUTES.has(pathname) ? mintHumanGrant() : undefined;
+      // A grant only for the app's own JSON request with the intent header: a plugin frame's form post,
+      // or any simple request, cannot set it (protocol-policy.ts humanIntent).
+      const grant = mintHumanGrant && HUMAN_ROUTES.has(pathname) && humanIntent(request, APP_ORIGIN) ? mintHumanGrant() : undefined;
       return proxy(request, url, engine, grant);
     }
 

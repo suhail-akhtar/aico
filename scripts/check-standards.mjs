@@ -46,6 +46,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { STAMP_FILES, rulesFor, wanted, requiredDownloads } from './lib/release-stamps.mjs';
+import { SECRET_PATTERNS, PLACEHOLDER, SECRET_FILES, shannon } from '../shared/security/rules.mjs';
 
 // ── arguments ────────────────────────────────────────────────────────────────
 
@@ -95,30 +96,10 @@ const ATTRIBUTION = [
 ];
 
 /**
- * Secrets: high-confidence shapes only. A checker that cries wolf gets
- * bypassed, so generic "password=" heuristics are deliberately absent.
+ * Secrets: high-confidence shapes only, shared with the security scan and the
+ * agent's own check of code it writes (shared/security/rules.mjs), so the
+ * shapes refused here are exactly the ones refused there.
  */
-const SECRET_PATTERNS = [
-  { name: 'Anthropic API key', re: /\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{40,}/g },
-  { name: 'OpenRouter API key', re: /\bsk-or-v1-[a-f0-9]{48,}/g },
-  { name: 'OpenAI project key', re: /\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}/g },
-  { name: 'sk- style API key', re: /\bsk-[A-Za-z0-9]{32,}\b/g, entropy: 3.6 },
-  { name: 'AWS access key id', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
-  { name: 'GitHub token', re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b/g },
-  { name: 'GitHub fine-grained token', re: /\bgithub_pat_[A-Za-z0-9_]{60,}\b/g },
-  { name: 'Google API key', re: /\bAIza[0-9A-Za-z_-]{35}\b/g },
-  { name: 'Slack token', re: /\bxox[abprs]-[A-Za-z0-9-]{20,}\b/g },
-  { name: 'Stripe live key', re: /\b(?:sk|rk)_live_[0-9A-Za-z]{24,}\b/g },
-  { name: 'npm token', re: /\bnpm_[A-Za-z0-9]{36}\b/g },
-  { name: 'Hugging Face token', re: /\bhf_[A-Za-z]{34,}\b/g },
-  // The header followed by key material. The header alone is how code that
-  // *writes* keys spells the format (src/vault/generate.ts), not a key.
-  { name: 'private key block', re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----\r?\n(?:[A-Za-z0-9+/=]{40,}\r?\n)+/g, strict: true },
-];
-/** A real key is random; one that spells a placeholder word is a fixture. */
-const PLACEHOLDER = /(test|fake|dummy|example|sample|canary|redact|placeholder|xxxx|0000|1234|abcd|your|mock)/i;
-/** Files that must never be tracked, whatever they contain. */
-const SECRET_FILES = /(?:^|\/)(?:\.env(?:\.(?!example$)[^/]+)?|id_rsa|id_ed25519|[^/]+\.pem|[^/]+\.p12|[^/]+\.pfx|[^/]+\.key)$/i;
 
 /** The licence every package of ours declares. */
 const LICENCE_SPDX = 'PolyForm-Noncommercial-1.0.0';
@@ -382,14 +363,6 @@ function checkLicence(files) {
       if (os && !isDisclaimer(line, os.index)) fail('licence', at, 'calls something "open source"; AICO is source-available (PolyForm Noncommercial) — never call it open source');
     });
   }
-}
-
-function shannon(s) {
-  const counts = {};
-  for (const ch of s) counts[ch] = (counts[ch] ?? 0) + 1;
-  let h = 0;
-  for (const n of Object.values(counts)) { const p = n / s.length; h -= p * Math.log2(p); }
-  return h;
 }
 
 function checkSecrets(files) {

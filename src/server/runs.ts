@@ -21,7 +21,7 @@ import { loadSettings } from '../settings.js';
 import { ensureProjectTrust, projectTrustStatus, untrustedNotice } from '../workspace-trust.js';
 import { instructionsFor } from './projects.js';
 import { groupInstructions } from './groups.js';
-import { Inbox } from '../session/inbox.js';
+import { Inbox, deliveryStep, inboxView } from '../session/inbox.js';
 import { setAskUserCallback } from '../tools/askuser.js';
 import type { Session } from '../session/session.js';
 import type { AicoSettings } from '../settings.js';
@@ -364,6 +364,7 @@ export class RunManager {
         existing.session = opened.session;
         existing.inbox = new Inbox(opened.session);
         existing.close = opened.close;
+        this.watchInbox(existing);
       }
       return existing;
     }
@@ -385,7 +386,41 @@ export class RunManager {
       conversationHistory: [],
     };
     this.runs.set(sessionId, run);
+    this.watchInbox(run);
     return run;
+  }
+
+  /**
+   * Tell clients what is waiting in the inbox, and when a steer is read.
+   *
+   * Steer and Queue were reported as doing nothing, and from the screen they
+   * did: the inbox is durable, but the log only reaches a client when a turn
+   * ends, so a steer read at step 3 and a message queued behind the turn were
+   * both invisible until then. This is the live view of the same queues — an
+   * ephemeral `inbox` frame on every change, never a second source of truth.
+   * A human steer that leaves `next-step` while the turn is still running was
+   * claimed by the loop (a cancelled turn discards instead), so it is
+   * reported as delivered, with the step that reads it.
+   */
+  private watchInbox(run: ActiveRun): void {
+    const inbox = run.inbox;
+    let waiting = new Set<string>();
+    inbox.subscribe(snapshot => {
+      if (run.inbox !== inbox) return;
+      const view = inboxView(snapshot);
+      const now = new Set(view.nextStep.map(m => m.id));
+      const step = deliveryStep(run.session.events);
+      const delivered = run.abort.signal.aborted ? []
+        : [...waiting].filter(id => !now.has(id)).map(id => ({ id, step }));
+      waiting = now;
+      this.hub.publish({ type: 'inbox', sessionId: run.sessionId, data: { ...view, delivered } });
+    });
+  }
+
+  /** The inbox as a client draws it, for a stream that is catching up. */
+  inboxOf(sessionId: string): ReturnType<typeof inboxView> | undefined {
+    const run = this.runs.get(sessionId);
+    return run ? inboxView(run.inbox.snapshot()) : undefined;
   }
 
   get(sessionId: string): ActiveRun | undefined {
@@ -1711,20 +1746,23 @@ export class RunManager {
     };
   }
 
-  /** Deliver into the running turn at its next step boundary. */
-  steer(sessionId: string, content: string): boolean {
+  /** Deliver into the running turn at its next step boundary. Returns the message's id, or false. */
+  steer(sessionId: string, content: string): string | false {
     const run = this.runs.get(sessionId);
     if (!run) return false;
-    run.inbox.steer(content);
-    return true;
+    return run.inbox.steer(content).id;
   }
 
-  /** Queue as its own next turn, leaving the running one alone. */
-  followup(sessionId: string, content: string): boolean {
+  /** Queue as its own next turn, leaving the running one alone. Returns the message's id, or false. */
+  followup(sessionId: string, content: string): string | false {
     const run = this.runs.get(sessionId);
     if (!run) return false;
-    run.inbox.followup(content);
-    return true;
+    return run.inbox.followup(content).id;
+  }
+
+  /** Take back a queued message before its turn starts. False when it already started, or never was. */
+  unqueue(sessionId: string, id: string): boolean {
+    return Boolean(this.runs.get(sessionId)?.inbox.withdraw(id));
   }
 
   /**

@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'fs/promises';
+import { resolveInsideWorkspace } from './path.js';
 
 export interface NotebookEditInput {
   notebook_path: string;
@@ -27,9 +28,18 @@ export async function notebookEdit(input: NotebookEditInput): Promise<{ success:
   const mode = input.edit_mode ?? 'replace';
   const cellType = input.cell_type ?? 'code';
 
+  // Inside the project like every other writing tool: NotebookEdit used to
+  // read and write any path it was given (security review 2026-10).
+  let target: string;
+  try {
+    target = resolveInsideWorkspace(input.notebook_path, 'notebook_path');
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : String(err) };
+  }
+
   let notebook: Notebook;
   try {
-    const content = await readFile(input.notebook_path, 'utf8');
+    const content = await readFile(target, 'utf8');
     notebook = JSON.parse(content) as Notebook;
   } catch (err) {
     return { success: false, message: `Failed to read notebook: ${err instanceof Error ? err.message : String(err)}` };
@@ -82,7 +92,7 @@ export async function notebookEdit(input: NotebookEditInput): Promise<{ success:
   }
 
   try {
-    await writeFile(input.notebook_path, JSON.stringify(notebook, null, 1));
+    await writeFile(target, JSON.stringify(notebook, null, 1));
     return { success: true, message: `Notebook ${mode}d cell ${input.cell_number} successfully.` };
   } catch (err) {
     return { success: false, message: `Failed to write notebook: ${err instanceof Error ? err.message : String(err)}` };

@@ -127,10 +127,57 @@ export interface ResolveOptions {
 
 const LOOPBACK = /^https?:\/\/(?:localhost|127\.\d+\.\d+\.\d+|\[::1\])(?::\d+)?(?:\/|$)/i;
 
+/**
+ * Served on this machine. An Ollama instance counts only at its default
+ * address or a loopback one: `ollama.baseUrl` pointed at another host is that
+ * host, and was called "local" because of its type alone.
+ */
 function isLocalInstance(i: ProviderInstance | undefined): boolean {
   if (!i) return false;
-  if (i.type === 'ollama') return true;
+  if (i.type === 'ollama') return !i.baseUrl || LOOPBACK.test(i.baseUrl);
   return Boolean(i.baseUrl && LOOPBACK.test(i.baseUrl));
+}
+
+/**
+ * Ollama's cloud models (`gpt-oss:120b-cloud`, `qwen3-coder:480b-cloud`,
+ * `…:cloud`) are called through the local daemon but run on Ollama's
+ * servers, so the prompt leaves the machine. Never local, whatever serves them.
+ */
+const CLOUD_TAG = /(?:[-:]cloud)$/i;
+export function isCloudModelTag(model: string): boolean {
+  return CLOUD_TAG.test(model.trim());
+}
+
+/**
+ * Roles that are not personal but read the conversation or the person's work
+ * (the reviewer sees every risky call, the summariser the whole history, the
+ * inline editor a document, vision the person's images). Under
+ * `localOnlyPersonal` / the `private` preset they stay on this machine too:
+ * a local model, else the main model if it is local, else none — the feature
+ * then runs without it (the Sentinel hands the call to a person, vision adds
+ * a note, inline edit says so). Never a cloud substitute.
+ */
+const KEEP_LOCAL_ROLES: ReadonlySet<ModelRole> = new Set(['sentinel', 'judge', 'edit', 'vision', 'compact']);
+
+/** Whether the person asked for their data to stay on this machine. */
+export function keepsDataLocal(settings: AicoSettings | undefined): boolean {
+  const models = (settings as { models?: ModelsSettings } | undefined)?.models;
+  return models?.localOnlyPersonal === true || models?.preset === 'private';
+}
+
+/**
+ * Why `model` may not be used for `role` under keep-local, or undefined when
+ * it may. For callers that hold a model chosen elsewhere (the Sentinel stage,
+ * the judge) and must check it at the point of use.
+ */
+export function localOnlyRefusal(role: ModelRole, model: string, settings: AicoSettings | undefined): string | undefined {
+  if (!keepsDataLocal(settings) || !(KEEP_LOCAL_ROLES.has(role) || roleInfo(role).personal)) return undefined;
+  if (!model) return `no model for the ${roleInfo(role).label.toLowerCase()} is served on this machine`;
+  if (isCloudModelTag(model)) return `${model} runs in the cloud, and your data is set to stay on this machine`;
+  const instances = settings ? listInstances(settings).filter(isUsable) : [];
+  const found = settings ? (localHome(model, instances) ?? resolveInstance(settings, { model })) : undefined;
+  const stray = Boolean(found && found.type === 'ollama' && familyOfModel(model) && !found.models?.includes(model));
+  return !stray && isLocalInstance(found) ? undefined : `${model} is not served on this machine, and your data is set to stay on it`;
 }
 
 /**
@@ -223,6 +270,7 @@ export function resolveRole(role: ModelRole, o: ResolveOptions): RoleResolution 
   const models = (s as { models?: ModelsSettings } | undefined)?.models;
   const preset: RolePreset = models?.preset ?? 'balanced';
   const localOnly = info.personal && (models?.localOnlyPersonal === true || preset === 'private');
+  const keepLocal = !info.personal && KEEP_LOCAL_ROLES.has(role) && keepsDataLocal(s);
   const env = o.env ?? process.env;
   const instances = s ? listInstances(s).filter(isUsable) : [];
   const hasKey = (family: string): boolean =>
@@ -252,7 +300,11 @@ export function resolveRole(role: ModelRole, o: ResolveOptions): RoleResolution 
     const strayLocal = Boolean(found && found.type === 'ollama' && familyOfModel(c.model) && !found.models?.includes(c.model));
     const inst = strayLocal ? undefined : found;
     if (s && !found) { reasons.push(`${c.source} choice skipped: no configured provider can serve ${c.model}`); continue; }
-    const local = isLocalInstance(inst);
+    const local = isLocalInstance(inst) && !isCloudModelTag(c.model);
+    if (keepLocal && !local) {
+      reasons.push(`${c.source} choice skipped: ${c.model} is not served on this machine (your data is set to stay on it)`);
+      continue;
+    }
     if (localOnly && !local) {
       // Never re-route personal data: stop here rather than try a cloud default.
       return {
@@ -267,6 +319,17 @@ export function resolveRole(role: ModelRole, o: ResolveOptions): RoleResolution 
       ...(inst ? { instanceId: inst.id, providerType: inst.type } : {}),
       ...(reasons.length ? { fellBack: reasons.join('; ') } : {}),
       ...(sameAsAgent ? { note: `${info.label} is the same model as the agent it checks (${c.model}), so it is not independent.` } : {}),
+    };
+  }
+  if (keepLocal) {
+    // Last resort: the main model, but only where it is itself local.
+    const refusal = o.mainModel ? localOnlyRefusal(role, o.mainModel, s) : 'no main model';
+    if (o.mainModel && !refusal && !meetsNeed(o.mainModel, info.needs, s)) {
+      return { role, model: o.mainModel, source: 'default', ok: true, local: true, ...(reasons.length ? { fellBack: reasons.join('; ') } : {}) };
+    }
+    return {
+      role, model: '', source: 'off', ok: false, local: false,
+      fellBack: `${[...reasons, `no local model for ${info.label.toLowerCase()}; it runs without one`].join('; ')}`,
     };
   }
   const optional = role === 'vision' || role === 'image' || role === 'embed';

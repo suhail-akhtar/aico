@@ -311,7 +311,8 @@ export type ExtractKind = 'links' | 'tables' | 'prices' | 'contacts' | 'outline'
 export interface PermissionRequest { id: string; tabId: string; origin: string; permission: string }
 
 export type DialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload';
-export interface DialogRequest { id: string; tabId: string; type: DialogType; message: string; defaultPrompt?: string; byAgent: boolean }
+/** `source`: the host of the frame that raised it (security-core.ts dialogSource); `embedded` when that is not the tab's own site. */
+export interface DialogRequest { id: string; tabId: string; type: DialogType; message: string; defaultPrompt?: string; byAgent: boolean; source?: string; embedded?: boolean }
 
 export interface AuthRequest { id: string; tabId: string; host: string; realm?: string }
 

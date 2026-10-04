@@ -4,8 +4,9 @@
  *
  * The hooks are the cheap half of "enforce in the loop, not in the prompt"
  * applied to contributors: `commit-msg` refuses AI attribution before a commit
- * exists, and `pre-push` runs `check-standards --fast` over what is about to
- * leave the machine. CI runs the full check again, so a skipped hook is caught
+ * exists, `pre-push` runs `check-standards --fast` over what is about to
+ * leave the machine, and `pre-commit` runs the security scan over the staged
+ * files (scripts/security-scan.mjs --staged, ADR 0026). CI runs the full check again, so a skipped hook is caught
  * later rather than never — but later means after the push, which for an
  * attribution trailer meant a history rewrite.
  *
@@ -66,7 +67,7 @@ try {
     try { fs.chmodSync(path.join(root, HOOKS, name), 0o755); } catch { /* best effort */ }
   }
   if (current !== HOOKS) git('config', '--local', 'core.hooksPath', HOOKS);
-  say(`installed — core.hooksPath=${HOOKS} (commit-msg, pre-push)`);
+  say(`installed — core.hooksPath=${HOOKS} (pre-commit, commit-msg, pre-push)`);
 } catch (err) {
   // Never fail an install over hooks.
   say(`skipped (${err.message.split('\n')[0]})`);

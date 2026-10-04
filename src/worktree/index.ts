@@ -36,6 +36,7 @@ import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { aicoHome } from '../home.js';
+import { looksLikeSecretPath } from '../tools/git.js';
 
 export interface WorktreeRecord {
   worktreeId: string;
@@ -218,6 +219,26 @@ export class WorktreeManager {
       rec.hasChanges = true;
       try {
         await git(['add', '-A'], rec.path);
+        /*
+          `add -A` sweeps in a `.env` or a key the agent wrote. Check what was
+          actually staged, unstage anything that looks like credentials, and
+          keep the worktree (rather than clean it up) so the file is neither
+          committed nor deleted — the person decides (security review 2026-10).
+        */
+        const staged = (await git(['diff', '--cached', '--name-only'], rec.path)).split('\n').map(s => s.trim()).filter(Boolean);
+        const secrets = staged.filter(looksLikeSecretPath);
+        if (secrets.length > 0) {
+          await git(['reset', '-q', '--', ...secrets], rec.path);
+          if (staged.length > secrets.length) await git(['commit', '-m', opts.message], rec.path);
+          let status = '';
+          try { status = (await git(['status', '--short'], rec.path)).trim().slice(0, 2000); } catch { /* reported without it */ }
+          rec.status = 'kept';
+          rec.changesSummary = status;
+          rec.completedAt = Date.now();
+          _emit();
+          return report('kept', status, `left uncommitted because they look like credentials: ${secrets.join(', ')}. `
+            + 'Add them to .gitignore, or commit them yourself if they are genuinely safe');
+        }
         await git(['commit', '-m', opts.message], rec.path);
       } catch (err) {
         // Never discard: leave it exactly where it is and say where.

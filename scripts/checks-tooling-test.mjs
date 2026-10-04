@@ -277,7 +277,8 @@ console.log('\n── RunChecks: structured results, the gate, format and fix �
     setScripts({ test: 'node --test --test-name-pattern=adds math.test.mjs' }); fresh();
     const green = await run({ force: true });
     ok(/^PASSED/.test(green) && /\n {6}1 passed, 0 failed/.test(green), 'a green run carries its counts under the PASS line', green);
-    ok(green.split('\n').filter(l => /^(PASS|FAIL)\s/.test(l)).length === 1, 'and the PASS/FAIL line format the web panel parses is unchanged', green);
+    // Two lines: the project's test, and the built-in security check (ADR 0026) in the same format.
+    ok(green.split('\n').filter(l => /^(PASS|FAIL)\s/.test(l)).length === 2 && /^PASS {2}security {3}built-in: .+ {2}\([\d.]+s\)$/m.test(green), 'and the PASS/FAIL line format the web panel parses is unchanged', green);
 
     setScripts({ test: 'node junit.mjs' }); fresh();
     const junit = await run({ force: true });

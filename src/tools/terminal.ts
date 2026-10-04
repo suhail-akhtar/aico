@@ -41,6 +41,7 @@ import { randomBytes } from 'crypto';
 import { currentCwd, currentRunContext } from '../run-context.js';
 import { detectShell } from './shell-choice.js';
 import { looksLikeServer } from './bash.js';
+import { agentChildEnv } from '../child-env.js';
 
 /** How long a single command may hold the shell before it is presumed wedged. */
 const DEFAULT_TIMEOUT_MS = 2 * 60 * 1000;
@@ -111,7 +112,7 @@ function open(cwd: string, key: string): Shell {
   const child = spawn(choice.command, choice.interactive, {
     cwd,
     // The agent's shell: the vault CLI's reveal commands refuse to run here.
-    env: { ...process.env, AICO_AGENT_SHELL: '1' },
+    env: agentChildEnv({ AICO_AGENT_SHELL: '1' }),
     // A process group of its own on POSIX, so closing the shell takes its
     // children with it. Windows has no equivalent and kills the shell directly.
     ...(isWindows ? {} : { detached: true }),

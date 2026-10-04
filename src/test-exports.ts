@@ -61,7 +61,7 @@ export {
   openSession,
 } from './session/index.js';
 export { SessionTranscript, LegacyTranscript } from './session/transcript.js';
-export { Inbox } from './session/inbox.js';
+export { Inbox, inboxView, deliveryStep } from './session/inbox.js';
 export {
   maybeCompactSession,
   formatCompactionResult,
@@ -727,3 +727,30 @@ export * as DeckImageSearch from './canvas/deck-image-search.js';
 export * as DeckBrand from './canvas/deck-brand.js';
 export { DECK_VISUAL_HELP } from './canvas/deck-visual-tool.js';
 export { handleDeckVisualRoute, projectPictures } from './server/deck-visual-routes.js';
+// -- Secrets kept out of the agent's children and sinks --
+export { agentChildEnv, mcpServerEnv, registerSettingsSecrets, PROVIDER_KEY_NAMES } from './child-env.js';
+export { setExtraRedactions } from './vault/sink.js';
+export { withholdDetected } from './vault/agent-hooks.js';
+export { headersForHop } from './canvas/deck-media.js';
+// -- Project settings policy, MCP guard/pins/spawn, keep-local roles (security-settings-test) --
+export { PROJECT_POLICY, projectPolicyOf, filterProjectLayer, tightenProjectLayer } from './settings-project-policy.js';
+export { miniAppHost } from './miniapps/server.js';
+export { guardMcpText } from './mcp/base.js';
+export { serverIdentity as mcpServerIdentity } from './mcp/pins.js';
+export { windowsShellUnsafe as mcpWindowsShellUnsafe } from './mcp/stdio.js';
+export { localOnlyRefusal, keepsDataLocal, isCloudModelTag } from './models/roles.js';
+// -- Security review 2026-10: agent and tool fixes (scripts/security-fixes-test.mjs) --
+export { shellCommandOf, normaliseShell } from './safety.js';
+export { configWriteDenial, isAicoConfigFile } from './tools/config-write-guard.js';
+export { looksLikeSecretPath } from './tools/git.js';
+export { markTainted } from './run-context.js';
+// -- Security review 2026-10: server fixes (scripts/security-server-test.mjs) --
+export { isAllowedHost, isAllowedOrigin, publicErrorMessage, decideSubmitMode, submitRank } from './server/http-guards.js';
+export { isValidSessionId } from './session/persistence.js';
+// -- Shift-left security (ADR 0026): the agent's own security check (scripts/security-check-test.mjs) --
+export { securityCheck } from './security/project-scan.js';
+export { SECURITY_CHECK } from './tools/run-checks.js';
+export { writtenFiles } from './checks.js';
+export { setWebFetchTransportForTest } from './tools/webfetch.js';
+// -- Security review 2026-10: D4/D5 watcher guards (scripts/security-pipeline-fixes-test.mjs, scripts/watcher-live.mjs) --
+export { setWatcherFetcherForTest, watchCommandRefusal, watchUrlRefusal } from './work/watchers.js';

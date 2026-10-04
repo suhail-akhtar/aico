@@ -45,6 +45,41 @@ export interface InboxSnapshot {
   nextStep: QueuedMessage[];
 }
 
+/** One pending message as a client draws it: what the person typed, and the id to name it by. */
+export interface InboxItem { id: string; content: string }
+
+/**
+ * What a client is shown of the queues: only what a person typed.
+ *
+ * A background agent's report or a watcher's wake-up rides the same queues,
+ * but drawing it as "your message, waiting" would put words in the person's
+ * mouth — the same rule the transcript keeps for `source`.
+ */
+export function inboxView(snapshot: InboxSnapshot): { nextStep: InboxItem[]; nextTurn: InboxItem[] } {
+  const human = (m: QueuedMessage): boolean => (m.source?.kind ?? 'human') === 'human';
+  const item = (m: QueuedMessage): InboxItem => ({ id: m.id, content: m.content });
+  return {
+    nextStep: snapshot.nextStep.filter(human).map(item),
+    nextTurn: snapshot.nextTurn.filter(human).map(item),
+  };
+}
+
+/**
+ * The step that reads a message claimed from `next-step` right now.
+ *
+ * The loop claims at a step boundary — after step N's tools, before step N+1
+ * asks the model — or at a turn's start, before its first step. Read from the
+ * log rather than counted alongside it, so it cannot drift from what replays.
+ */
+export function deliveryStep(events: readonly { type: string; data: unknown }[]): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!;
+    if (e.type === 'turn/start') return 1;
+    if (e.type === 'step/start') return Number((e.data as { step?: number }).step ?? 0) + 1;
+  }
+  return 1;
+}
+
 /** Durable queues of pending input for one session. */
 export class Inbox {
   private readonly queues: Record<InboxTarget, QueuedMessage[]> = {
@@ -184,6 +219,22 @@ export class Inbox {
     const claimed = this.queues['next-turn'][0];
     this.splice('next-turn', 0, 1, []);
     return claimed;
+  }
+
+  /**
+   * Take back one queued turn before it starts, by id.
+   *
+   * The person's "remove" on a queued message. Only `next-turn`: a steer is
+   * claimed at the very next step boundary, usually before a click could land,
+   * and withdrawing one the model may already have read would let the screen
+   * disagree with the log. One splice, so a replay agrees it is gone.
+   */
+  withdraw(id: string): QueuedMessage | undefined {
+    const at = this.queues['next-turn'].findIndex(m => m.id === id);
+    if (at < 0) return undefined;
+    const message = this.queues['next-turn'][at];
+    this.splice('next-turn', at, 1, []);
+    return message;
   }
 
   /**

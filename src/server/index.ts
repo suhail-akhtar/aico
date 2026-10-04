@@ -34,7 +34,7 @@ import path from 'path';
 import { EventHub } from './events.js';
 import { RunManager } from './runs.js';
 import { deriveMessages } from '../session/derive.js';
-import { eventLogPath, forkSession, isUsedSession, listSessionSummaries, loadEventLog } from '../session/persistence.js';
+import { eventLogPath, forkSession, isUsedSession, isValidSessionId, listSessionSummaries, loadEventLog } from '../session/persistence.js';
 import { trajectory as projectTrajectory } from '../session/projections.js';
 import { loadSettings } from '../settings.js';
 import { activeProviderType } from '../providers/instances.js';
@@ -133,8 +133,9 @@ import { parseLevel } from '../autonomy/levels.js';
 import { getVault } from '../vault/index.js';
 import { handleVaultRoute } from '../vault/http.js';
 import { quarantineIfEnabled } from '../vault/agent-hooks.js';
-import { sinkRedact } from '../vault/sink.js';
+import { sinkRedact, sinkRedactText } from '../vault/sink.js';
 import { decisionGate } from './decision-gate.js';
+import { DEFAULT_SUBMIT_RANK, decideSubmitMode, isAllowedHost, isAllowedOrigin, isInternalFault, publicErrorMessage, submitRank, type SubmitRank } from './http-guards.js';
 
 export interface ServeOptions {
   port?: number;
@@ -338,6 +339,13 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   const sessionCwd = new Map<string, string>();
 
   /**
+   * The most freely each chat's turns may act without a person proving
+   * themselves again: the last submit's mode (server/http-guards). In memory
+   * only — a restart starts every chat back at `auto`, the historical default.
+   */
+  const submitCeiling = new Map<string, SubmitRank>();
+
+  /**
    * The directory a request should run in.
    *
    * An explicit `project` wins, but only if the server already knows it. That
@@ -490,17 +498,46 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
   const server = http.createServer((req, res) => {
     void handle(req, res).catch((err) => {
-      send(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      // A bad session id anywhere below is the caller's mistake, not ours.
+      if (err instanceof BadSessionIdError || (err instanceof Error && err.message === 'invalid session id')) {
+        if (!res.headersSent) send(res, 400, { error: 'invalid session id' });
+        else res.end();
+        return;
+      }
+      if (err instanceof BodyError) {
+        if (res.headersSent) { res.end(); return; }
+        // Past the cap the client may still be sending: the rest is drained
+        // unbuffered (readJson) so the client reads the 413. Closing or
+        // destroying the socket instead resets it before the answer is read;
+        // a client that never stops is ended by the server's request timeout.
+        if (err.status === 413) req.resume();
+        send(res, err.status, { error: err.message });
+        return;
+      }
+      // Logged here in full (redacted); the client gets a message without
+      // paths, and a programming fault's text not at all (server/http-guards).
+      console.error(`  [aico serve] ${req.method} ${(req.url ?? '').split('?')[0]}: ${sinkRedactText(err instanceof Error ? err.stack ?? err.message : String(err))}`);
+      if (res.headersSent) { res.end(); return; }
+      send(res, 500, { error: isInternalFault(err) ? 'Internal error — the details are in the AICO server log.' : (err instanceof Error ? err.message : String(err)) });
     });
   });
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
 
+    // DNS rebinding: a page whose own name now resolves to 127.0.0.1 sends no
+    // foreign Origin, but its Host still names it. Only a loopback name on
+    // this port is served — static files included (server/http-guards).
+    if (!isAllowedHost(req.headers.host, port)) {
+      send(res, 403, { error: 'host not allowed' });
+      return;
+    }
+
     // Reject cross-origin drivers outright. A same-origin page has no Origin
     // header on same-origin requests, so presence of a foreign one is the signal.
+    // Parsed and compared whole: a prefix match let `…:7340.evil.example` in.
     const origin = req.headers.origin;
-    if (origin && !origin.startsWith(`http://127.0.0.1:${port}`) && !origin.startsWith(`http://localhost:${port}`)) {
+    if (origin !== undefined && !isAllowedOrigin(origin, port)) {
       send(res, 403, { error: 'cross-origin request refused' });
       return;
     }
@@ -519,6 +556,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
   async function api(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
     const route = url.pathname.slice('/api/'.length);
+
+    // A session id names a file in the store; one that could leave it is
+    // refused once, here, for every route that takes one in its query string
+    // (bodies: `readJson`; the log itself: session/persistence `eventLogPath`).
+    {
+      const idParam = SESSION_ID_QUERY[route];
+      const ids = [url.searchParams.get('session'), url.searchParams.get('sessionId'), idParam ? url.searchParams.get(idParam) : null];
+      if (ids.some(id => id !== null && id !== '' && !isValidSessionId(id))) {
+        send(res, 400, { error: 'invalid session id' });
+        return;
+      }
+    }
 
     // The Credential Manager's routes. Secrets go in, never out, except
     // through a human grant — see vault/http.ts.
@@ -577,6 +626,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           // every promise the run is holding on a client has to be replayable,
           // or a reload turns a pause into a hang.
           hostCall: runs.hostCallOf(sessionId) ?? null,
+          // What the person sent mid-turn and is still waiting: the live
+          // `inbox` frame is ephemeral, so a reconnect restores it from here.
+          inbox: runs.inboxOf(sessionId) ?? null,
         },
       })}\n\n`);
       return;
@@ -1141,7 +1193,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     */
     if (route === 'sessions/delete' && req.method === 'POST') {
       const { ids } = await readJson(req) as { ids?: unknown };
-      if (!Array.isArray(ids) || ids.length === 0 || ids.some(id => typeof id !== 'string' || !/^[\w.-]+$/.test(id))) {
+      if (!Array.isArray(ids) || ids.length === 0 || ids.some(id => !isValidSessionId(id))) {
         send(res, 400, { error: 'ids must be a non-empty list of session ids' });
         return;
       }
@@ -1398,6 +1450,33 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       case 'submit': {
         const { sessionId, task, model } = body as { sessionId?: string; task?: string; model?: string };
         if (!sessionId || !task) { send(res, 400, { error: 'sessionId and task required' }); return; }
+        /*
+          How freely the turn may act. Unrecognised values fall back to `auto`,
+          not to asking: an older client sends nothing and must keep working
+          exactly as it did; a newer one sending a mode this server does not
+          know should not be answered by blocking the turn on a dialog that
+          client has no code to render.
+
+          Above the most a person has chosen in this chat (`auto` until one
+          chooses), a person must be behind the request — the token alone may
+          not turn on full autonomy or L4, and is capped otherwise
+          (server/http-guards `decideSubmitMode`). Lowering is always allowed.
+        */
+        const requestedMode = {
+          approval: (['auto', 'edits', 'ask', 'full'] as const)
+            .find(m => m === (body as { approval?: string }).approval) ?? 'auto',
+          ...(parseLevel((body as { autonomy?: unknown }).autonomy) ? { autonomy: parseLevel((body as { autonomy?: unknown }).autonomy)! } : {}),
+        };
+        const ceiling = submitCeiling.get(sessionId) ?? DEFAULT_SUBMIT_RANK;
+        // A person is asked for only when the request is above the ceiling: a desktop grant is spent once.
+        const person = submitRank(requestedMode) > ceiling ? (await human()).ok : false;
+        const decided = decideSubmitMode(requestedMode, ceiling, person);
+        if (decided.action === 'refuse') {
+          send(res, 403, { ok: false, code: 'human-required', error: decided.reason });
+          return;
+        }
+        submitCeiling.set(sessionId, decided.rank);
+        const mode = decided.mode;
         // Answer immediately and let the work stream. A ten-minute turn must
         // not be held open on a request that any proxy or browser will time out.
         send(res, 202, { accepted: true });
@@ -1492,19 +1571,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         void runs.submit(sessionId, runCwd, task2, chosen, {
           planMode: (body as { planMode?: boolean }).planMode ?? false,
           autoApprove: (body as { autoApprove?: boolean }).autoApprove ?? true,
-          /*
-            Unrecognised values fall back to `auto`, not to asking.
-
-            An older client sends nothing and must keep working exactly as it
-            did; a newer one sending a mode this server does not know should not
-            be answered by blocking the turn on a dialog that client has no code
-            to render.
-          */
-          approval: (['auto', 'edits', 'ask', 'full'] as const)
-            .find(m => m === (body as { approval?: string }).approval) ?? 'auto',
-          // The L0–L4 scale, for a client that speaks it; overrides the two
-          // fields above. Unknown values are ignored, like `approval`'s.
-          ...(parseLevel((body as { autonomy?: unknown }).autonomy) ? { autonomy: parseLevel((body as { autonomy?: unknown }).autonomy)! } : {}),
+          // The mode decided above (asked for, or capped to what a person last
+          // chose here). A level, when present, overrides plan mode and approval.
+          ...(mode.approval ? { approval: mode.approval } : {}),
+          ...(mode.autonomy ? { autonomy: mode.autonomy } : {}),
           // Opt-in, never inferred: a client that claims this must answer every
           // `edit` event, because the tool call waits until it does.
           applyEdits: (body as { applyEdits?: boolean }).applyEdits === true,
@@ -1718,10 +1788,12 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // it resolves a specific waiting promise rather than joining the queue —
         // steering an answer would deliver it at the next step boundary, which
         // is a boundary the turn cannot reach while it is waiting.
-        const { sessionId, content } = body as { sessionId?: string; content?: string };
-        if (!sessionId || content === undefined) {
+        const { sessionId, content: typed } = body as { sessionId?: string; content?: string };
+        if (!sessionId || typed === undefined) {
           send(res, 400, { error: 'sessionId and content required' }); return;
         }
+        // Typed by a person, so scanned exactly like steer/followup.
+        const { text: content } = await quarantineIfEnabled(typed, await loadSettings(), sessionId);
         send(res, 200, { ok: runs.answer(sessionId, content) });
         return;
       }
@@ -1789,14 +1861,23 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       }
       case 'steer':
       case 'followup': {
-        const { sessionId, content: typed } = body as { sessionId?: string; content?: string };
+        const { sessionId, content: typed, withdraw } = body as { sessionId?: string; content?: string; withdraw?: string };
+        // Taking a queued message back is the same verb's undo, not a route of
+        // its own: it names one of this session's own queued ids and can only
+        // remove, never add.
+        if (route === 'followup' && sessionId && typeof withdraw === 'string' && withdraw) {
+          send(res, 200, { ok: runs.unqueue(sessionId, withdraw) });
+          return;
+        }
         if (!sessionId || !typed) { send(res, 400, { error: 'sessionId and content required' }); return; }
         // A message typed mid-turn is scanned exactly like a new one.
         const { text: content } = await quarantineIfEnabled(typed, await loadSettings(), sessionId);
-        const ok = route === 'steer'
+        // The id lets the client follow its message through the queue (the
+        // `inbox` frame) instead of matching it by text.
+        const id = route === 'steer'
           ? runs.steer(sessionId, content)
           : runs.followup(sessionId, content);
-        send(res, 200, { ok });
+        send(res, 200, { ok: id !== false, ...(id ? { id } : {}) });
         return;
       }
       default:
@@ -2049,7 +2130,11 @@ function send(res: http.ServerResponse, status: number, body: unknown): void {
   // Every JSON response is a sink: file views, session reads and settings
   // alike pass the vault redactor. (The vault's own reveal route has its own
   // sender; it is the one deliberate exception, behind a human grant.)
-  const payload = JSON.stringify(sinkRedact(body));
+  // An error never carries an absolute path or a stack (server/http-guards).
+  const shown = status >= 400 && body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
+    ? { ...(body as Record<string, unknown>), error: publicErrorMessage((body as { error: string }).error) }
+    : body;
+  const payload = JSON.stringify(sinkRedact(shown));
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(payload);
 }
@@ -2063,17 +2148,55 @@ function send(res: http.ServerResponse, status: number, body: unknown): void {
 const UPLOAD_BODY_MAX = 36 * 1024 * 1024;
 async function readJson(req: http.IncomingMessage, max = 8 * 1024 * 1024): Promise<unknown> {
   const MAX = max;
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX) throw new Error('request body too large');
-    chunks.push(chunk as Buffer);
-  }
+  // A declared length over the cap is refused before a byte is buffered.
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > MAX) throw new BodyError(413, 'request body too large');
+  // Listeners rather than `for await`: leaving an async iterator early
+  // destroys the socket, and then not even the 413 can be sent. Past the cap
+  // the rest is drained unbuffered and the top-level handler closes the
+  // connection once the answer is out.
+  const chunks = await new Promise<Buffer[]>((resolve, reject) => {
+    const got: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      if (size > MAX) return;
+      size += chunk.length;
+      if (size > MAX) { got.length = 0; reject(new BodyError(413, 'request body too large')); return; }
+      got.push(chunk);
+    });
+    req.on('end', () => resolve(got));
+    req.on('error', reject);
+  });
   if (chunks.length === 0) return {};
+  let parsed: unknown;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new Error('invalid JSON body');
+    // Fixed text, never the parser's message: that can quote the body.
+    throw new BodyError(400, 'invalid JSON body');
   }
+  // Every body that names a session is checked once, here (the top-level
+  // handler answers 400): a route never sees an id that could leave the store.
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    for (const key of ['sessionId', 'session', 'fromSessionId']) {
+      const v = (parsed as Record<string, unknown>)[key];
+      if (typeof v === 'string' && v !== '' && !isValidSessionId(v)) throw new BadSessionIdError();
+    }
+  }
+  return parsed;
 }
+
+/** A session id that could name a file outside the store (session/persistence `isValidSessionId`). */
+class BadSessionIdError extends Error {
+  constructor() { super('invalid session id'); }
+}
+
+/** A body the caller got wrong: 400 (not JSON) or 413 (over the cap), never a 500 (DAST D7). */
+class BodyError extends Error {
+  constructor(readonly status: 400 | 413, message: string) { super(message); }
+}
+
+/** Routes whose session id rides in the query string under a name other than `session`/`sessionId`. */
+const SESSION_ID_QUERY: Record<string, string> = {
+  session: 'id', trajectory: 'id', changes: 'id', 'changes/diff': 'id', 'session/export': 'id',
+};

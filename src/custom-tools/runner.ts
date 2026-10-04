@@ -48,6 +48,7 @@ import { httpRequest } from '../tools/ops/http.js';
 import {
   DEFAULT_TIMEOUT_SEC, describeCall, fieldsOf, parseSecretRef, renderArgv, renderHttp, type CustomToolDef,
 } from './format.js';
+import { agentChildEnv } from '../child-env.js';
 
 export interface RunContext {
   /** The run's directory: `${workspace}` and relative `cwd` resolve here. */
@@ -213,7 +214,7 @@ export function runProcess(program: string, args: readonly string[], opts: {
     try {
       child = spawn(plan.file, plan.args, {
         cwd: opts.cwd,
-        env: { ...process.env, ...opts.env },
+        env: agentChildEnv(opts.env),
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),

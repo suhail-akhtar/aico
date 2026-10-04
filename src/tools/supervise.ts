@@ -30,7 +30,7 @@ import { currentRunContext } from '../run-context.js';
 import { stopWork, takeStopHandle } from '../work/handles.js';
 import { ledger } from '../work/ledger.js';
 import { supervisor } from '../work/supervisor.js';
-import { unwatch, watch } from '../work/watchers.js';
+import { unwatch, watch, watchCommandRefusal } from '../work/watchers.js';
 import {
   awaitAgents, guideAgent, normalizeAgentId, owningSession, releaseAwaited, reportDelivered,
 } from './task.js';
@@ -328,9 +328,31 @@ export async function executeSupervise(input: SuperviseInput): Promise<string> {
         ...input.watch,
         wake: { ...input.watch.wake, sessionId: input.watch.wake.sessionId || sessionId! },
       };
-      const id = watch(spec, {
-        ...(sessionId ? { sessionId } : {}),
-      });
+      // A command that is not read-only runs unattended only with a person's
+      // yes, asked through the run's always-ask channel (the same card a
+      // custom tool's approval uses; the API token alone cannot answer it).
+      // A blocked command is never put to a person; nobody to ask is a no.
+      let approvedByPerson = false;
+      const cond = spec.condition;
+      if (cond?.kind === 'command' && typeof cond.command === 'string') {
+        const refused = watchCommandRefusal(cond.command);
+        if (refused?.kind === 'needs-person') {
+          const ask = currentRunContext()?.approve;
+          if (!ask) return `Not watching. ${refused.message}`;
+          const every = Math.round((cond.intervalMs ?? 2_000) / 1000);
+          approvedByPerson = await ask('Supervise', `Watcher: run \`${cond.command}\`${cond.cwd ? ` in ${cond.cwd}` : ''} every ${every}s, unattended, until it exits ${cond.expectExit ?? 0}`);
+          if (!approvedByPerson) return 'Not watching: the person declined this command watcher. Use a read-only command, or watch a file, log, process or work item instead.';
+        }
+      }
+      let id: string;
+      try {
+        id = watch(spec, {
+          ...(sessionId ? { sessionId } : {}),
+          ...(approvedByPerson ? { approvedByPerson } : {}),
+        });
+      } catch (err) {
+        return `Not watching. ${err instanceof Error ? err.message : String(err)}`;
+      }
       return `Watching as ${id}. You will be woken when it fires — do not poll for it. `
         + `Stop watching with {"action":"unwatch","id":"${id}"}.`;
     }

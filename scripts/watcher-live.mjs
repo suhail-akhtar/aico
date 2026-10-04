@@ -27,6 +27,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import {
   ledger, setWorkStorePath, watch, setWakeDelivery, resetWatchersForTest, activeWatcherCount,
+  setWatcherFetcherForTest,
 } from '../dist-test/test-exports.js';
 
 let passed = 0, failed = 0;
@@ -130,6 +131,18 @@ try {
     server.close();
     await new Promise(r => setTimeout(r, 100));
 
+    // A real http watcher refuses loopback (the SSRF guard: the engine's own
+    // API lives there), so this probe's loopback server is reached through a
+    // plain GET swapped in for the guarded fetch. Polling, "not ready" and
+    // firing are what is under test here; the refusal is tested in
+    // scripts/security-pipeline-fixes-test.mjs.
+    let refused = false;
+    try { watch({ condition: { kind: 'http', url: `http://127.0.0.1:${port}/` }, wake: { sessionId: 'live', as: 'steer' } }); } catch { refused = true; }
+    check(refused, 'a loopback URL is refused by the real guard');
+    setWatcherFetcherForTest(async (url) => {
+      const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+      return { status: res.status, headers: {}, body: Buffer.alloc(0), url, truncated: false };
+    });
     const id = watch({
       condition: { kind: 'http', url: `http://127.0.0.1:${port}/`, intervalMs: 250 },
       wake: { sessionId: 'live', as: 'steer', message: 'server is up' },
@@ -145,6 +158,7 @@ try {
 
     check(await until(() => woken.length > 0), 'fires when the server answers');
     check(ledger.get(id).state === 'done', 'and closes');
+    setWatcherFetcherForTest(undefined);
   }
 
   console.log('\n-- log: a pattern appearing in a file being appended to --');
@@ -204,6 +218,11 @@ try {
     check(/Expired/.test(ledger.get(id).result ?? ''),
       `and says it expired rather than claiming it fired (${ledger.get(id).result})`);
   }
+} catch (e) {
+  // A throw used to fall through to the finally below and exit 0 with a
+  // partial count; it is a failure.
+  failed++;
+  fails.push(`threw: ${e?.stack ?? e}`);
 } finally {
   // Report first, tidy up afterwards. A cleanup failure must never be the
   // reason a passing run has no verdict — a locked file has swallowed a whole

@@ -151,14 +151,14 @@ export function PageModal(): React.ReactElement | null {
   if (!m) return null;
   return (
     <div className="bx-modal-scrim">
-      {m.kind === 'dialog' && <JsDialog key={m.p.id} p={m.p} host={hostOf(tab?.url ?? '')} />}
+      {m.kind === 'dialog' && <JsDialog key={m.p.id} p={m.p} host={m.p.source || hostOf(tab?.url ?? '')} site={hostOf(tab?.url ?? '')} />}
       {m.kind === 'auth' && <AuthDialog key={m.p.id} p={m.p} />}
       {m.kind === 'confirm' && <ConfirmDialog key={m.p.id} p={m.p} />}
     </div>
   );
 }
 
-function JsDialog({ p, host }: { p: DialogPrompt; host: string }): React.ReactElement {
+function JsDialog({ p, host, site }: { p: DialogPrompt; host: string; site: string }): React.ReactElement {
   const [text, setText] = useState(p.defaultPrompt ?? '');
   const answer = (accept: boolean): void => {
     fire('browser:dialogAnswer', p.id, accept, p.type === 'prompt' && accept ? text : undefined);
@@ -172,6 +172,7 @@ function JsDialog({ p, host }: { p: DialogPrompt; host: string }): React.ReactEl
       <div className="max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words text-[13.5px] text-aico-secondary selectable thin-scroll">
         {leave ? 'Changes you made may not be saved.' : p.message}
       </div>
+      {p.embedded && <div className="mt-2 text-[11.5px] text-aico-muted">From a frame embedded in {site || 'this page'}, not the site itself.</div>}
       {p.byAgent && <div className="mt-2 flex items-center gap-1.5 text-[11.5px] text-aico-muted"><span className="bx-ai-badge">AI</span>Opened while AICO was working on this page</div>}
       {p.type === 'prompt' && (
         <input className="input mt-3" value={text} autoFocus onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') answer(true); }} />

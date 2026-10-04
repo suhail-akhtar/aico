@@ -260,6 +260,7 @@ export function ChatPane(): React.ReactElement {
   const clearNotice = useStore(s => s.clearNotice);
   const turnSummary = useStore(s => s.turnSummary);
   const pendingIntents = useStore(s => s.pendingIntents);
+  const unqueue = useStore(s => s.unqueue);
   const feedback = useStore(s => s.feedback);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -373,7 +374,7 @@ export function ChatPane(): React.ReactElement {
               && !message.streaming && message.content.trim().length > 0;
             return (
               <div key={message.id} className="group/message">
-                {message.type === 'user' && seq !== null ? (
+                {message.type === 'user' && seq !== null ? (<>
                   <EditableMessage
                     content={message.content}
                     {...(busy ? {} : {
@@ -393,7 +394,12 @@ export function ChatPane(): React.ReactElement {
                       },
                     } : {})}
                   />
-                ) : (
+                  {message.steered && (
+                    <p className="-mt-4 mb-6 text-right text-[11px] text-aico-muted">
+                      Sent while working · delivered at step {message.steered.step}
+                    </p>
+                  )}
+                </>) : (
                   <MessageBubble
                     message={message}
                     onFix={fixWidget}
@@ -444,10 +450,18 @@ export function ChatPane(): React.ReactElement {
                   {intent.content}
                 </p>
               </div>
-              <span className="mt-1 text-[11px] text-aico-muted">
+              <span className="mt-1 flex items-center gap-2 text-[11px] text-aico-muted">
                 {intent.mode === 'steer'
-                  ? 'steering — applies at the next step'
-                  : 'queued — runs when this turn ends'}
+                  ? (intent.id ? 'Sent while working · waiting for the next step' : 'Sending…')
+                  : (intent.id ? 'Queued — runs next' : 'Queuing…')}
+                {intent.mode === 'followup' && intent.id && (
+                  <>
+                    <button className="underline-offset-2 hover:text-aico-primary hover:underline"
+                      onClick={() => void unqueue(intent.key, true)} aria-label="Edit queued message">Edit</button>
+                    <button className="underline-offset-2 hover:text-aico-primary hover:underline"
+                      onClick={() => void unqueue(intent.key)} aria-label="Remove queued message">Remove</button>
+                  </>
+                )}
               </span>
             </div>
           ))}

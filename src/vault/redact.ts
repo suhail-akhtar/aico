@@ -145,7 +145,11 @@ export class Redactor {
 
   static readonly EMPTY = new Redactor([]);
 
+  /** The entries this was built from, so the sink can merge in its extras. */
+  readonly entries: readonly SecretEntry[];
+
   constructor(entries: SecretEntry[]) {
+    this.entries = entries;
     let max = 0;
     let count = 0;
     for (const entry of entries) {

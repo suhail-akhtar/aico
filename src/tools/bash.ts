@@ -22,6 +22,7 @@ import { closeBackgroundProcess, registerBackgroundProcess } from '../work/regis
 import { sinkRedactAccumulated, sinkRedactText } from '../vault/sink.js';
 import { owningSession } from '../agents/ownership.js';
 import { reportBack } from '../agents/report-back.js';
+import { agentChildEnv } from '../child-env.js';
 
 /** Lines of a backgrounded command's output its exit notice carries. */
 const EXIT_NOTICE_LINES = 40;
@@ -307,7 +308,7 @@ export async function bash(input: BashInput, signal?: AbortSignal): Promise<Bash
       detached: process.platform !== 'win32',
       // Marked as the agent's shell, so the vault CLI's reveal commands refuse
       // to run from it; plus this call's secret bindings, if any.
-      env: { ...process.env, AICO_AGENT_SHELL: '1', ...(input._env ?? {}) },
+      env: agentChildEnv({ AICO_AGENT_SHELL: '1', ...(input._env ?? {}) }),
     });
 
     let stdout = '';

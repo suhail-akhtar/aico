@@ -121,6 +121,23 @@ const turns = await load(path.join(desktop, 'renderer/src/chat/turns.ts'), 'turn
   ok(turns.groupTurns([{ id: 'u', type: 'user', content: 'x', timestamp: 1 }, { id: 'r', type: 'reasoning', content: 'y', timestamp: 2 }, { id: 'a', type: 'assistant', content: 'z', timestamp: 3 }], false)[0].onlyThought, 'turns: thinking alone says "Thought", not "Worked"');
 }
 
+// ── Steer and Queue in the running turn (web/src/reduce.ts, drawn by chat/Transcript.tsx) ──
+{
+  const reduce = await load(path.join(repo, 'web/src/reduce.ts'), 'reduce');
+  const echo = reduce.withPending(new Map(), 'do the slow thing', 1);
+  let draft = reduce.emptyDraft();
+  draft = { ...draft, tools: new Map([['c1', { id: 'tool-c1', type: 'tool', content: '', toolName: 'Glob', toolArgs: { pattern: '*' }, timestamp: 2 }]]), order: [{ kind: 'tool', key: 'c1' }] };
+  const intents = [{ key: 1, mode: 'steer', content: 'use approach B', id: 's1' }, { key: 2, mode: 'followup', content: 'then summarise', id: 'f1' }];
+  draft = reduce.deliverSteers(draft, intents, [{ id: 's1', step: 2 }], 3);
+  const g = turns.groupTurns(reduce.composeMessages(echo, draft, true, 4), true);
+  ok(g.length === 2 && g[1].user?.content === 'use approach B' && g[1].user?.steered?.step === 2,
+    'steer: a delivered steer shows as the person\'s message, marked with the step that read it', g.map(t => t.user));
+  ok(!g[0].running && g[1].running, 'steer: the work after it is the running part');
+  const left = reduce.reconcileIntents(intents, { nextStep: [], nextTurn: [{ id: 'f1', content: 'then summarise' }] }, () => 9);
+  ok(left.length === 1 && left[0].mode === 'followup', 'queue: once the steer is read only the queued message is still waiting', left);
+  ok(reduce.reconcileIntents(left, { nextStep: [], nextTurn: [] }, () => 9).length === 0, 'queue: it leaves the waiting list when its turn starts (or it is removed)');
+}
+
 // ── Theme ──
 const theme = await load(path.join(desktop, 'renderer/src/theme.ts'), 'theme');
 {

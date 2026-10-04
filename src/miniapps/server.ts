@@ -44,6 +44,25 @@ import type { AicoSettings } from '../settings.js';
 import { getMiniApp, isSafeSlug, listMiniApps, miniAppDir } from './store.js';
 import { RUNTIME_CSS, RUNTIME_JS } from './runtime.js';
 import * as data from './data.js';
+import { readUserSettingsFile } from '../settings-project-policy.js';
+
+const LOOPBACK_HOST = /^(?:127\.\d+\.\d+\.\d+|localhost|::1|\[::1\])$/i;
+
+/**
+ * The address to bind. A non-loopback host puts unauthenticated apps on the
+ * network, so it is honoured only when the person's own settings file names
+ * that same host — never because a project file or an API caller passed one
+ * in `settings` (project layers drop `miniApps`; this holds even if a future
+ * path forgets to). Anything else binds loopback and says so.
+ */
+export function miniAppHost(requested: string | undefined, user: Record<string, unknown> = readUserSettingsFile()): string {
+  if (!requested || LOOPBACK_HOST.test(requested)) return requested || '127.0.0.1';
+  const mine = (user.miniApps as { host?: unknown } | undefined)?.host;
+  if (mine === requested) return requested;
+  process.stderr.write(`  ⚠ Mini Apps host "${requested}" is not set in your own settings; bound to 127.0.0.1 instead.
+`);
+  return '127.0.0.1';
+}
 
 export interface MiniAppServer {
   /** Where apps are reachable, e.g. `http://127.0.0.1:4174`. */
@@ -87,7 +106,7 @@ export async function startMiniAppServer(
 ): Promise<MiniAppServer> {
   const settings = opts.settings;
   const cwd = opts.cwd ?? process.cwd();
-  const host = settings?.miniApps?.host ?? '127.0.0.1';
+  const host = miniAppHost(settings?.miniApps?.host);
   const requestedPort = settings?.miniApps?.port
     ?? (opts.sisterPort ? opts.sisterPort + 1 : 0);
   // The portal on its sister port may frame apps for the workspace preview.

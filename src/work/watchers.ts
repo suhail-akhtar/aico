@@ -31,13 +31,35 @@
  * does not depend on the model choosing to look again, and it keeps going while
  * the agent does something else.
  *
+ * ## Unattended, so guarded here (security review 2026-10, D4/D5)
+ *
+ * The condition is model-chosen and re-checked every few seconds with nobody
+ * watching, so the checks live in this module rather than in the tool that
+ * registers it:
+ *   - `http` goes through the SSRF guard (`guardedFetch`): http(s) only,
+ *     public addresses only, pinned, redirects re-checked, size and time caps.
+ *     Loopback is refused too — the engine's own API lives there. A local dev
+ *     server is waited on with a read-only `command` (`curl -sf …`) instead.
+ *   - `command` is refused when the bash classifier blocks it, and runs
+ *     without a person only when it is read-only (`isBashReadOnly`); anything
+ *     else needs `approvedByPerson`, which only the tool's approval card sets.
+ *     Both checks repeat before every run, together with the person's own
+ *     `disabledTools`, because settings change while a watcher lives. A plain
+ *     command runs through `execFile` (no shell); only one that needs a shell
+ *     (a pipe, a quote, a builtin) gets one.
+ *
  * @module work/watchers
  */
 
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import fs from 'fs';
 import { stat } from 'fs/promises';
+import net from 'net';
 import { pushNotification } from '../background/notifications.js';
+import { guardedFetch, type Fetcher } from '../canvas/deck-media.js';
+import { classifyBashCommand, isBashReadOnly } from '../safety.js';
+import { readUserSettingsFile } from '../settings-project-policy.js';
+import { classifyAddress } from '../tools/ops/ssrf.js';
 import { clearStopHandle, registerStopHandle } from './handles.js';
 import { ledger } from './ledger.js';
 import { pidAlive } from './store.js';
@@ -51,6 +73,93 @@ const DEFAULT_DEBOUNCE_MS = 250;
 
 /** A command watcher that runs longer than this is treated as "not yet". */
 const COMMAND_TIMEOUT_MS = 30_000;
+
+/** Response bytes an `http` watcher reads: only the status matters. */
+const HTTP_MAX_BYTES = 64 * 1024;
+
+let fetcher: Fetcher = guardedFetch;
+
+/** Swap the http watcher's fetcher. Tests only (a live probe's loopback server). */
+export function setWatcherFetcherForTest(next: Fetcher | undefined): void {
+  fetcher = next ?? guardedFetch;
+}
+
+/** Why a watcher may not run this command, or undefined when it may. */
+export interface CommandRefusal {
+  /** `block`: never runs. `needs-person`: runs only once a person approves it. `disabled`: the person switched shell commands off. */
+  kind: 'block' | 'needs-person' | 'disabled';
+  message: string;
+}
+
+/**
+ * Whether a watcher may run `command` now. Checked at creation and again
+ * before every run, so a settings change or a newly blocked pattern stops a
+ * watcher that was armed before it.
+ */
+export function watchCommandRefusal(command: string, approvedByPerson = false): CommandRefusal | undefined {
+  const safety = classifyBashCommand(command);
+  if (safety.level === 'block') {
+    return { kind: 'block', message: `BLOCKED: ${safety.reason}. A watcher will never run this command.` };
+  }
+  const disabled = readUserSettingsFile().disabledTools;
+  if (Array.isArray(disabled) && disabled.includes('Bash')) {
+    return { kind: 'disabled', message: 'Shell commands are disabled in your settings (disabledTools: Bash), so a command watcher cannot run.' };
+  }
+  if (!approvedByPerson && !isBashReadOnly(command)) {
+    return {
+      kind: 'needs-person',
+      message: `\`${command.slice(0, 120)}\` is not a read-only command, and a watcher runs it repeatedly with nobody watching. `
+        + 'Only read-only commands (git status, ls, grep, curl -sf <url>, …) run without a person approving the watcher. '
+        + 'Fix: watch a file, log, process or work item instead, use a read-only command, or ask from a chat where the person can approve it.',
+    };
+  }
+  return undefined;
+}
+
+/**
+ * The synchronous half of the SSRF check for an `http` watcher: scheme,
+ * credentials, and a host that is an address literal or `localhost`. Names
+ * are resolved and checked again by `guardedFetch` on every poll.
+ */
+export function watchUrlRefusal(raw: string): string | undefined {
+  let u: URL;
+  try { u = new URL(raw); } catch { return `not a URL: ${String(raw).slice(0, 80)}`; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return `only http(s) URLs are watched, not ${u.protocol}`;
+  if (u.username || u.password) return 'a URL with credentials in it is not watched';
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+  const cls = host === 'localhost' || host.endsWith('.localhost') ? 'loopback' : net.isIP(host) ? classifyAddress(host) : 'public';
+  if (cls !== 'public') {
+    return `${u.hostname} is a ${cls} address; an http watcher reaches public addresses only. `
+      + 'For a local dev server, watch it with a read-only command instead: {kind:"command",command:"curl -sf <url>"}.';
+  }
+  return undefined;
+}
+
+/** A guard refusal that will not change on the next poll (as opposed to "not up yet"). */
+function permanentFetchRefusal(err: unknown): string | undefined {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/did not resolve/.test(msg)) return undefined;
+  return /^(?:refused:|only http|a URL with credentials|not a URL|too many redirects)/.test(msg) ? msg : undefined;
+}
+
+/**
+ * Run a watcher's command. A command of plain words goes to `execFile` with
+ * an argument array (no shell); one that needs a shell — a pipe, a quote, a
+ * variable, a shell builtin that is not a program on PATH — falls back to it.
+ */
+function runCommand(command: string, cwd: string | undefined, done: (code: number | string) => void): void {
+  const opts = { cwd, timeout: COMMAND_TIMEOUT_MS, windowsHide: true };
+  const viaShell = (): void => {
+    // security-allow: exec-interpolated — the shell is the condition's meaning (pipes, builtins); only reached after watchCommandRefusal passed for this run
+    exec(command, opts, (err) => { done(err ? ((err as NodeJS.ErrnoException & { code?: number }).code ?? 1) : 0); });
+  };
+  if (!/^[\w@+=:,./\\ -]+$/.test(command.trim())) { viaShell(); return; }
+  const [file, ...args] = command.trim().split(/\s+/);
+  execFile(file!, args, { ...opts, shell: false }, (err) => {
+    if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') { viaShell(); return; }
+    done(err ? ((err as NodeJS.ErrnoException & { code?: number }).code ?? 1) : 0);
+  });
+}
 
 /**
  * How a watcher reaches a session.
@@ -99,6 +208,8 @@ interface ActiveWatcher {
    * waited for a second change that never came.
    */
   existedAtArm?: boolean;
+  /** For `command`: a person approved this exact command when the watcher was created. */
+  approvedByPerson: boolean;
   fired: number;
   disposed: boolean;
 }
@@ -112,10 +223,25 @@ const active = new Map<string, ActiveWatcher>();
  * it can be stopped by id, and it is reconciled on restart. A watcher that
  * lived outside the ledger would be the sixth registry this work exists to
  * remove.
+ *
+ * Throws, before anything is recorded, when the condition may not be watched
+ * (an http URL the SSRF guard refuses, a command the classifier blocks or that
+ * is not read-only and no person approved). `approvedByPerson` must only be
+ * set by a caller that showed a person this exact command and got a yes.
  */
 export function watch(spec: WatchSpec, opts: {
-  title?: string; parent?: string; sessionId?: string;
+  title?: string; parent?: string; sessionId?: string; approvedByPerson?: boolean;
 } = {}): string {
+  const cond = spec.condition;
+  if (cond.kind === 'http') {
+    // Skipped only while a test has swapped the fetcher (a loopback probe server).
+    const refused = fetcher === guardedFetch ? watchUrlRefusal(cond.url) : undefined;
+    if (refused) throw new Error(refused);
+  }
+  if (cond.kind === 'command') {
+    const refused = watchCommandRefusal(cond.command, opts.approvedByPerson === true);
+    if (refused) throw new Error(refused.message);
+  }
   const id = ledger.open({
     kind: 'watcher',
     title: opts.title ?? describe(spec.condition),
@@ -127,7 +253,7 @@ export function watch(spec: WatchSpec, opts: {
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
   });
 
-  const watcher: ActiveWatcher = { id, spec, fired: 0, disposed: false };
+  const watcher: ActiveWatcher = { id, spec, approvedByPerson: opts.approvedByPerson === true, fired: 0, disposed: false };
   active.set(id, watcher);
 
   registerStopHandle(id, () => { dispose(id); });
@@ -193,6 +319,15 @@ function poll(watcher: ActiveWatcher, ms: number, check: () => Promise<string | 
   watcher.timer = timer;
 }
 
+/** Stop a watcher the guards no longer allow, recording why and telling the person. */
+function refuse(watcher: ActiveWatcher, reason: string): void {
+  if (watcher.disposed) return;
+  const title = ledger.get(watcher.id)?.title ?? 'Watcher stopped';
+  dispose(watcher.id);
+  ledger.close(watcher.id, 'failed', reason);
+  pushNotification({ title, body: reason, level: 'warning', sourceId: watcher.id });
+}
+
 function arm(watcher: ActiveWatcher): void {
   const c = watcher.spec.condition;
 
@@ -245,8 +380,19 @@ function arm(watcher: ActiveWatcher): void {
   if (c.kind === 'http') {
     const expect = c.expectStatus;
     poll(watcher, c.intervalMs ?? DEFAULT_POLL_MS, async () => {
-      const res = await fetch(c.url, { signal: AbortSignal.timeout(5_000) });
-      if (expect === undefined ? res.ok : res.status === expect) {
+      let res;
+      try {
+        res = await fetcher(c.url, { maxBytes: HTTP_MAX_BYTES, timeoutMs: 5_000 });
+      } catch (err) {
+        // The guard said no (a name that resolves to loopback, metadata, a
+        // redirect into either): that will not change, so stop rather than
+        // re-asking every poll. Anything else is "not up yet".
+        const refused = permanentFetchRefusal(err);
+        if (refused) { refuse(watcher, `http watcher stopped: ${refused}`); return undefined; }
+        throw err;
+      }
+      const ok = res.status >= 200 && res.status < 300;
+      if (expect === undefined ? ok : res.status === expect) {
         return `${c.url} answered ${res.status}`;
       }
       return undefined;
@@ -257,10 +403,11 @@ function arm(watcher: ActiveWatcher): void {
   if (c.kind === 'command') {
     const expectExit = c.expectExit ?? 0;
     poll(watcher, c.intervalMs ?? DEFAULT_POLL_MS, () => new Promise(resolve => {
-      exec(c.command, {
-        cwd: c.cwd, timeout: COMMAND_TIMEOUT_MS, windowsHide: true,
-      }, (err) => {
-        const code = err ? ((err as NodeJS.ErrnoException & { code?: number }).code ?? 1) : 0;
+      // Again before every run: the classifier or the person's settings may
+      // have changed since the watcher was armed.
+      const refused = watchCommandRefusal(c.command, watcher.approvedByPerson);
+      if (refused) { refuse(watcher, `command watcher stopped: ${refused.message}`); resolve(undefined); return; }
+      runCommand(c.command, c.cwd, (code) => {
         resolve(code === expectExit ? `\`${c.command}\` exited ${code}` : undefined);
       });
     }));

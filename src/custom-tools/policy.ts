@@ -76,8 +76,12 @@ export function approvalDecision(name: string, effect: Effect, approval: Approva
 
 /** Tools whose results are untrusted content for the taint rule. */
 export function taints(toolName: string): boolean {
-  return toolName === 'WebFetch' || toolName === 'WebSearch' || toolName.startsWith('mcp__');
+  return toolName === 'WebFetch' || toolName === 'WebSearch' || toolName.startsWith('mcp__')
+    // A response from an API or the output of a command on a remote machine is
+    // as attacker-writable as a web page (security review 2026-10).
+    || TAINTING_OPS_TOOLS.has(toolName);
 }
+const TAINTING_OPS_TOOLS = new Set(['HttpRequest', 'SshExec', 'WinRmExec']);
 
 /** First-use approvals, per session: one yes covers the rest of that session. */
 const firstUse = new Map<string, Set<string>>();

@@ -12,10 +12,10 @@ engineering standard.
 |---|---|
 | Idea | Is there a new capability for the agent, a new listener, a new place secrets flow? If yes → ADR with a threat model (template below). |
 | Design | Default deny. Guards only deny ([ADR 0002](adr/0002-guards-only-deny.md)). Enforce in code, not the prompt. Least privilege for unattended work. |
-| Implement | Rules in this document; `execFile` over shell strings; path containment; redaction at boundaries. |
+| Implement | Rules in this document; `execFile` over shell strings; path containment; redaction at boundaries. The pre-commit security scan runs on what you stage ([Automated security](#automated-security)). |
 | Test | Negative tests for every guard (the refused case is the one that matters); secret-leak canaries; the bash classifier's pattern tests in `test-harness.mjs`. |
 | Review | [Per-change review](#per-change-security-review) below; `/security-review` style pass on anything touching the boundaries. |
-| Release | `check-standards` secret scan in CI; no credentials in release notes or assets. |
+| Release | `check-standards` secret scan, security scan, audit and DAST green in CI; SBOMs attached to the release; no credentials in release notes or assets. |
 | Operate | Advisories triaged within days; fixes land on the latest minor; users told plainly what to do. |
 
 ## Existing controls (know them before changing them)
@@ -79,6 +79,51 @@ else is. Findings print a 6-character prefix and the length, never the value.
 It is a net, not a guarantee: GitHub secret scanning / push protection on the
 repository is the second layer (owner setting).
 
+## Automated security
+
+What runs where ([ADR 0026](adr/0026-shift-left-security.md)). Each layer is
+code, not a request; a finding names its fix.
+
+| Where | What | Fails on |
+|---|---|---|
+| **pre-commit** (`.githooks/pre-commit`) | `security-scan.mjs --staged` over the staged content: secret shapes, dangerous patterns, route and settings-key registries | a finding not in the baseline (~0.1 s) |
+| **pre-push** | `check-standards --fast` (secrets via the same shared patterns) | as before |
+| **CI `security`** | `security-scan.mjs` (full tree) + its tests; `security-deps.mjs lockfiles licences audit` | new scan findings; non-registry/integrity-less lockfile entries; copyleft/unknown production licences; high/critical `npm audit` advisories not allow-listed |
+| **CI `dast`** | `security-dast.mjs`: the built engine in a temp store, attacked over HTTP (~45 s); CycloneDX SBOMs as an artifact | any attack that succeeds and is not a recorded known finding |
+| **CI `test`** | `npm test` includes `security-failsafe-test.mjs` (guards fail closed) and `security-check-test.mjs` | a guard that fails open |
+| **CodeQL** (`codeql.yml`) | `security-extended` JS/TS queries on push/PR and weekly | alerts in the Security tab |
+| **Release** (`desktop.yml`) | SBOMs (`aico-*.cdx.json`) attached beside the installers | — |
+| **Dependabot** (`dependabot.yml`) | weekly grouped npm + Actions updates; security updates as published | — |
+| **The agent** (RunChecks `security`) | on what a turn wrote: secrets and code rules on **added lines**, dependency audit when a manifest changed, bandit/gosec/semgrep if installed | secrets, high findings, high/critical advisories — the completion gate refuses "done" |
+
+Run them locally: `npm run check:security` (scan + lockfiles + licences),
+`npm run test:security`, `npm run audit:deps` (needs the registry),
+`npm run sbom`, `npm run test:security:dast` (builds first). All free.
+
+**Findings files** (`scripts/security/`), each reviewed like code:
+
+- `baseline.json` — pre-existing scan findings, each `accepted` (safe as
+  written, with why) or `open` (a real or suspected problem, printed on every
+  run until fixed). Regenerate with `node scripts/security-scan.mjs
+  --update-baseline`, which keeps notes; never add an entry to make CI green
+  without reviewing it. A single line is waived in place with
+  `// security-allow: <rule> — reason`.
+- `routes.json` — every `/api` route and its gate (`token`, `token+human`,
+  `token+human-on-weaken`, `token+grant`, `token+passphrase`). A new route
+  fails the scan until classified; the DAST suite attacks every route.
+- `settings-keys.json` — settings a cloned repository must never loosen; the
+  scan fails if the project-layer policy (`src/settings-project-policy.ts`)
+  says `allow` for one, or misses a key.
+- `audit-allowlist.json` — reviewed advisories, each with a reason and an
+  **expiry**; `licence-exceptions.json` — reviewed licences.
+- `dast-known.json` — confirmed DAST findings not fixed yet; they print as
+  KNOWN, and as FIXED once the attack stops working (remove the entry then).
+
+The agent's check is `completionGate.security` (default on) and joins only
+projects that already define checks. Its rules are the generic half of
+`shared/security/rules.mjs`, so a user's code is held to the same patterns as
+AICO's own.
+
 ## Untrusted input
 
 Everything the agent reads is **data, never instructions**: file contents, web
@@ -123,6 +168,12 @@ browser page text. Rules for code that handles it:
   (`desktop.yml` needs `contents: write` to attach assets; `ci.yml` needs none).
 - Desktop builds are **not code-signed yet**; auto-update integrity rests on
   the sha512 in `latest.yml` served from GitHub releases. Do not claim otherwise.
+  **Open item (security review 2026-10):** whoever can publish a release (or
+  replace `latest.yml` and the installer together) can ship an update the app
+  will install. Closing it needs the owner's signing key — code-sign the
+  Windows installer and verify the publisher (`publisherName` /
+  `verifyUpdateCodeSignature`) or sign `latest.yml` with a key the app pins.
+  Not done; it cannot be done without that key.
 - Never download and execute from untrusted sources in scripts or tools.
 
 ## Vulnerability handling

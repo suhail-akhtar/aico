@@ -1,7 +1,23 @@
 import { offerToolImage } from '../tools/tool-images.js';
+import { guardPageText, withNotice } from '../../shared/injection-guard.js';
 import {
   CLIENT_INFO, LEGACY_PROTOCOL, MODERN_PROTOCOL, McpRpcError, PROBE_TIMEOUT_MS, classifyProbe, headerParams, modernMeta, paramHeaders,
 } from './protocol.js';
+
+/**
+ * Run text an MCP server wrote (a tool result, a tool description, its
+ * instructions) through the prompt-injection guard WebFetch uses: invisible
+ * Unicode removed (tag-character smuggling decoded), instruction-like passages
+ * wrapped as untrusted. MCP output used to reach the model untouched, so a
+ * server could hide "ignore your instructions" in zero-width characters that
+ * the person approving the server never saw. `notice` leads a result with the
+ * guard's one-line warning; a description gets the wrapped text alone.
+ */
+export function guardMcpText(text: string, what: string, notice = true): string {
+  if (!text) return text;
+  const guarded = guardPageText(text, { what });
+  return notice ? withNotice(guarded) : guarded.text;
+}
 
 /** What a transport's `send` may be told beyond the method and params. */
 export interface SendOptions {
@@ -302,7 +318,9 @@ export abstract class McpBaseClient {
 
   private adopt(hello: ServerHello | undefined): void {
     if (typeof hello?.instructions === 'string' && hello.instructions.trim()) {
-      this.instructions = hello.instructions.trim().slice(0, MAX_INSTRUCTIONS);
+      // Read by the model as guidance: invisible characters out, instruction-like
+      // passages wrapped, like any other text a third party wrote (guardMcpText).
+      this.instructions = guardMcpText(hello.instructions.trim().slice(0, MAX_INSTRUCTIONS), 'MCP server instructions', false);
     }
     if (hello?.capabilities && typeof hello.capabilities === 'object') {
       this.serverCapabilities = hello.capabilities as Record<string, unknown>;
@@ -463,6 +481,8 @@ export abstract class McpBaseClient {
     if (result?.structuredContent !== undefined && result.structuredContent !== null) {
       try { body = JSON.stringify(result.structuredContent); } catch { body = text; }
     }
+    // A server's output is a third party's text, like a web page: the same guard.
+    body = guardMcpText(body, 'MCP tool result');
     // A tool's own failure (`isError`) used to come back as an ordinary
     // result; thrown, it reaches the model as the error it is.
     if (result?.isError) throw new Error(body || `MCP tool ${name} reported an error with no message.`);

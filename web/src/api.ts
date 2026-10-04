@@ -446,11 +446,13 @@ export const api = {
     project: string;
   }>(`session?id=${encodeURIComponent(id)}${project ? `&project=${encodeURIComponent(project)}` : ''}`),
 
-  submit: (opts: SubmitOptions) => post<{ accepted: boolean }>('submit', opts),
+  // As the person: a mode above the chat's last (full, L4) needs proof of one (engine: server/http-guards).
+  submit: (opts: SubmitOptions) => postAsPerson<{ accepted: boolean }>('submit', opts as unknown as Record<string, unknown>),
   /** Move work to a full chat and start it there — the copilot's "Hand off to chat". */
   handOff: (req: ChatHandOffRequest) => post<({ ok: true } & ChatHandOff) | { ok: false; error: string; candidates?: Array<{ title: string; project?: string }> }>('chat/handoff', req),
   cancel: (sessionId: string) => post<{ cancelled: boolean }>('cancel', { sessionId }),
-  steer: (sessionId: string, content: string) => post<{ ok: boolean }>('steer', { sessionId, content }),
+  /** `id` names the message in the `inbox` frames, so the client can follow it to delivery. */
+  steer: (sessionId: string, content: string) => post<{ ok: boolean; id?: string }>('steer', { sessionId, content }),
   /** Resolve the question a blocked turn is waiting on. */
   answer: (sessionId: string, content: string) => post<{ ok: boolean }>('answer', { sessionId, content }),
 
@@ -549,7 +551,7 @@ export const api = {
       'skills/upload', { files, overwrite, authored: true }),
 
   createSkill: (name: string, description: string, body: string) =>
-    post<{ ok: boolean; name?: string; error?: string }>('skills/create', { name, description, body }),
+    postAsPerson<{ ok: boolean; name?: string; error?: string }>('skills/create', { name, description, body }),
   removeSkill: (name: string) =>
     post<{ ok: boolean; error?: string }>('skills/remove', { name }),
 
@@ -568,7 +570,7 @@ export const api = {
 
   // ── mcp ────────────────────────────────────────────────────────────
   addMcpServer: (config: Record<string, unknown>) =>
-    post<{ ok: boolean; result?: string; error?: string }>('mcp/add', config),
+    postAsPerson<{ ok: boolean; result?: string; error?: string }>('mcp/add', config),
   removeMcpServer: (name: string) =>
     post<{ ok: boolean; result?: string; error?: string }>('mcp/remove', { name }),
   reloadMcpServers: () =>
@@ -582,7 +584,7 @@ export const api = {
   // agent uses. The panel is a second front door to one implementation rather
   // than a parallel one that has to be kept in step.
   manage: (registry: 'skills' | 'agents' | 'mcp' | 'memory' | 'tools', input: Record<string, unknown>) =>
-    post<ManageResult>('manage', { registry, ...input }),
+    postAsPerson<ManageResult>('manage', { registry, ...input }),
 
   // ── custom tools (Settings → Tools) ────────────────────────────────
   customTools: () => get<{ tools: CustomToolRow[] }>('custom-tools'),
@@ -621,7 +623,7 @@ export const api = {
       `learning/list?status=${status}${cwd ? `&cwd=${encodeURIComponent(cwd)}` : ''}`),
   /** Keep a proposal, with edits: writes knowledge, a profile fact, or a line about the user. */
   adoptProposal: (cwd: string | undefined, id: string, edits: { trigger?: string; content?: string; scope?: 'project' | 'global' }) =>
-    post<{ ok: true; wrote: string }>('learning/adopt', { cwd, id, ...edits }),
+    postAsPerson<{ ok: true; wrote: string }>('learning/adopt', { cwd, id, ...edits }),
   dismissProposal: (cwd: string | undefined, id: string) =>
     post<{ ok: true; id: string }>('learning/dismiss', { cwd, id }),
 
@@ -767,7 +769,9 @@ export const api = {
   revert: (sessionId: string, file: string, deleteUntracked = false) =>
     post<{ ok: boolean; deleted?: boolean; error?: string }>(
       'changes/revert', { sessionId, path: file, deleteUntracked }),
-  followup: (sessionId: string, content: string) => post<{ ok: boolean }>('followup', { sessionId, content }),
+  followup: (sessionId: string, content: string) => post<{ ok: boolean; id?: string }>('followup', { sessionId, content }),
+  /** Take a queued message back before its turn starts. False when it already started. */
+  withdrawFollowup: (sessionId: string, id: string) => post<{ ok: boolean }>('followup', { sessionId, withdraw: id }),
 
   trajectory: (sessionId: string, opts: { limit?: number; before?: number } = {}) => {
     const params = new URLSearchParams({ id: sessionId });
@@ -908,10 +912,11 @@ export const api = {
     post<ProviderTestResult>('providers/test', draft),
 
   settings: () => request<Record<string, unknown>>('settings'),
-  saveSettings: (patch: Record<string, unknown>) => post<Record<string, unknown>>('settings', patch),
+  // As the person: a write that widens what the agent may do needs proof of one (engine: api-system safetyWeakening).
+  saveSettings: (patch: Record<string, unknown>) => postAsPerson<Record<string, unknown>>('settings', patch),
   /** One value by dotted path, in the user's own file only; `undefined` removes it. */
   saveSettingPath: (path: string, value: unknown) =>
-    post<Record<string, unknown>>('settings/path', { path, value: value === undefined ? null : value }),
+    postAsPerson<Record<string, unknown>>('settings/path', { path, value: value === undefined ? null : value }),
 
   /** What the server believes this model's window is, and why. */
   contextWindow: (model: string) =>

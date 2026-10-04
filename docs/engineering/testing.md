@@ -20,6 +20,10 @@ Times measured 2026-09-30 on a Windows dev laptop; counts from the same run.
 | `npm --prefix desktop run typecheck` | desktop main + renderer types | |
 | `npm run check:standards` | machine-checked standards | < 1 s |
 | `npm run test:standards` | the checker's own tests (temp git repos from `scripts/fixtures/check-standards/`) | 41, ~15 s |
+| `npm run check:security` | static security scan (new findings vs the reviewed baseline) + lockfile integrity + production licences — [security.md § automated](security.md#automated-security) | < 2 s, free |
+| `npm run test:security` | the scanner's own tests | 58, < 2 s |
+| `npm run audit:deps` | `npm audit --omit=dev` for every shipped lockfile (needs the registry) | ~10 s, free |
+| `npm run test:security:dast` | build, then attack the real engine in a temp store (auth, Origin/Host, traversal, SSRF, canaries, fuzz) | ~1,100 checks, ~45 s, free |
 
 `npm test` does **not** include `test:web:unit` or the desktop suites; CI runs
 all of them. Run all three before saying "tests pass".

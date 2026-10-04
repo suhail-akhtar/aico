@@ -202,13 +202,21 @@ export class ToolPipeline {
       return this.normalizedFailure(ctx, err, 'pre-execute');
     }
 
+    // Fail closed on a malformed decision: anything other than an explicit
+    // allow or deny used to skip the guards AND run the body.
+    if (!decision || (decision.kind !== 'allow' && decision.kind !== 'deny')) {
+      decision = { kind: 'deny', reason: `Refused: a pre-execute stage returned an unrecognised decision for ${ctx.name}, so the call was not run.` };
+    }
+
     // ── guards (monotonic: they may deny, never grant) ────────────────
     if (decision.kind === 'allow') {
       try {
         for (const guard of this.guards) {
           const verdict = await guard.fn(ctx);
-          if (verdict.kind === 'deny') {
-            decision = { kind: 'deny', reason: verdict.reason };
+          // Only an explicit abstain lets the call continue; a malformed
+          // verdict denies rather than passes.
+          if (!verdict || verdict.kind !== 'abstain') {
+            decision = { kind: 'deny', reason: verdict?.kind === 'deny' ? verdict.reason : `Refused: guard "${guard.name}" returned an unrecognised verdict.` };
             break;
           }
         }

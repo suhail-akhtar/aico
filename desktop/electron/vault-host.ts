@@ -38,6 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { DesktopContext } from './context';
 import { openSecurePrompt, type SecureField } from './secure-prompt';
+import { safeStorageProblem } from './security-core';
 
 /** What the engine's ApprovalRequest looks like (src/vault/human.ts). */
 export interface ApprovalRequest {
@@ -117,15 +118,13 @@ export function registerVaultHost(ctx: DesktopContext): VaultHost {
 
   /** Why safeStorage cannot protect a key here (Linux's fixed-key fallback protects nothing). */
   const safeProblem = (): string | undefined => {
-    if (!app.isReady()) return 'The app is still starting.';
-    if (!safeStorage.isEncryptionAvailable()) return 'This computer offers no OS keychain to seal the vault key with.';
+    if (!app.isReady()) return safeStorageProblem({ ready: false, available: false, platform: process.platform });
+    let backend: string | undefined;
     if (process.platform === 'linux') {
-      try {
-        const backend = (safeStorage as unknown as { getSelectedStorageBackend?: () => string }).getSelectedStorageBackend?.();
-        if (backend === 'basic_text' || backend === 'unknown') return 'No system keyring (GNOME Keyring or KWallet) is running.';
-      } catch { /* older Electron: trust isEncryptionAvailable */ }
+      try { backend = (safeStorage as unknown as { getSelectedStorageBackend?: () => string }).getSelectedStorageBackend?.(); } catch { /* older Electron: trust isEncryptionAvailable */ }
     }
-    return undefined;
+    // One rule for the vault key and the autofill profile (security-core.ts).
+    return safeStorageProblem({ ready: true, available: safeStorage.isEncryptionAvailable(), platform: process.platform, backend });
   };
 
   /** The master key: unsealed from disk, or made and sealed on first run. Never kept beyond sending. */

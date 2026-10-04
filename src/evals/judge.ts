@@ -26,7 +26,7 @@
 import type { AicoSettings } from '../settings.js';
 import type { ProviderAPI } from '../providers/types.js';
 import { createTokenTracker } from '../tokens.js';
-import { recordRoleSpend, resolveRole } from '../models/roles.js';
+import { localOnlyRefusal, recordRoleSpend, resolveRole } from '../models/roles.js';
 
 export const DEFAULT_JUDGE_MODEL = 'deepseek-v4-pro';
 
@@ -74,6 +74,10 @@ export async function judge(o: {
   provider?: ProviderAPI;
   signal?: AbortSignal;
 }): Promise<JudgeVerdict> {
+  // Keep-local (models/roles): the answer under review is the person's work,
+  // so a judge off this machine is never asked; the check fails and says why.
+  const refusal = localOnlyRefusal('judge', o.model, o.settings);
+  if (refusal) return { pass: false, reason: `not judged: ${refusal}`, costUsd: 0 };
   // Lazy for the reason optimize.ts gives: the provider registry loads every adapter.
   const provider = o.provider ?? (await import('../providers/index.js')).selectProvider(o.model, o.settings);
   const tracker = createTokenTracker();

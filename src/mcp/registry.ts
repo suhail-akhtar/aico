@@ -5,8 +5,9 @@ import { McpHttpClient } from './http.js';
 import { McpSseClient } from './sse.js';
 import type { McpBaseClient } from './base.js';
 import { currentRunContext } from '../run-context.js';
-import { reviewServerTools, approveTools, type HeldTool } from './pins.js';
+import { reviewServerTools, approveTools, serverIdentity, type HeldTool } from './pins.js';
 import { resolveConfigSecrets } from './secrets.js';
+import { guardMcpText } from './base.js';
 
 /**
  * What the hosting process is told with each tool call: the calling session.
@@ -121,7 +122,9 @@ class McpServerRegistry {
     this._listed.set(name, listed);
     let allowed = listed;
     if (!(name in this._host)) {
-      const review = reviewServerTools(name, listed, { trusted: this._configs.get(name)?.trust === 'trusted' });
+      const config = this._configs.get(name);
+      const identity = serverIdentity(config);
+      const review = reviewServerTools(name, listed, { trusted: config?.trust === 'trusted', ...(identity ? { identity } : {}) });
       allowed = review.allowed;
       this._held.set(name, review.held);
     } else {
@@ -175,7 +178,7 @@ class McpServerRegistry {
     const held = this._held.get(name) ?? [];
     const chosen = held.filter(h => !tools?.length || tools.includes(h.tool.name)).map(h => h.tool);
     if (!chosen.length) return [];
-    const pinned = approveTools(name, chosen);
+    const pinned = approveTools(name, chosen, serverIdentity(this._configs.get(name)));
     await this.refreshTools(name);
     return pinned;
   }
@@ -211,7 +214,9 @@ class McpServerRegistry {
       for (const t of tools) {
         result.push({
           name: `mcp__${serverName}__${t.name}`,
-          description: `[MCP:${serverName}] ${t.description}`,
+          // Guarded at offer time, not at listing: the pin hashes what the
+          // server actually said, so a hidden change is still a change.
+          description: `[MCP:${serverName}] ${guardMcpText(t.description, 'MCP tool description', false)}`,
           inputSchema: t.inputSchema,
           // Checked at call time too: a handler built before a refresh held
           // this tool back must not still reach the server.

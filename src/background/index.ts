@@ -7,6 +7,7 @@ import type { SubAgentType } from '../tools/index.js';
 import type { AutonomyLevel } from '../autonomy/levels.js';
 import type { ActionOrigin } from '../autonomy/inbox.js';
 import { humaniseStep } from '../../shared/tasks.js';
+import { isReadOnlyMcpTool } from '../mcp/policy.js';
 
 export interface BackgroundAgentRecord {
   agentId: string;
@@ -99,12 +100,35 @@ export function cancelBackgroundAgent(agentId: string): boolean {
  */
 export type BackgroundPermissions = 'inherit' | 'readonly' | 'full';
 
-/** Tools that do something irreversible and therefore need a decision. */
-const GATED_TOOLS = new Set([
-  'Bash', 'Write', 'Edit', 'MultiEdit', 'McpAddServer', 'McpRemoveServer',
-  'McpReloadServers', 'WorkspaceSetPath', 'WorkspaceWrite', 'AgentCreate',
-  'CodeRewrite', 'Refactor',
+/**
+ * The tools an unattended job may use when nobody can approve anything: the
+ * read-only built-ins, and orchestration that changes nothing outside the run.
+ *
+ * An ALLOW-list on purpose (security review 2026-10). This used to be a list
+ * of tools that NEEDED a decision, and every tool not on it was approved —
+ * so `Terminal`, `NotebookEdit`, `Git` (commit, push), `HttpRequest` (POST,
+ * DELETE), the ops tools and `Task` all ran in a "readonly" job, and in a job
+ * whose user had not turned on auto-approve. A tool added later now defaults
+ * to needing a person instead of defaulting to allowed.
+ */
+const HEADLESS_ALLOWED = new Set([
+  'Read', 'Glob', 'Grep', 'LS', 'Pwd', 'WebFetch', 'WebSearch',
+  'TodoRead', 'TodoWrite', 'Skill', 'LoadTools', 'WidgetSpec',
+  'Places', 'Weather', 'CurrencyRates', 'SportsScores',
+  'CodebaseMap', 'CodeSearch', 'VSCodeDiagnostics', 'ContextWindow', 'ProposePlan', 'Recall',
+  'WorkspaceInfo', 'WorkspaceRead', 'WorkspaceList', 'ReadAttachment',
+  'ListMcpResources', 'ReadMcpResource', 'CapabilityReport', 'AgentList', 'AgentRead',
+  'CredentialList', 'DependencyAudit',
+  // Talking to the person (who is absent: the answer says so) changes nothing.
+  'AskUserQuestion', 'PushNotification',
 ]);
+
+/** Whether `toolName` may run in a job with nobody to approve it. */
+function headlessAllowed(toolName: string): boolean {
+  if (HEADLESS_ALLOWED.has(toolName)) return true;
+  // An MCP tool only when its server (or the tool's policy) is marked read-only.
+  return toolName.startsWith('mcp__') && isReadOnlyMcpTool(toolName);
+}
 
 /**
  * Decide a permission with no human present.
@@ -132,7 +156,7 @@ export function decideHeadlessPermission(
   permissions: BackgroundPermissions,
   autoApprove: boolean,
 ): { allowed: boolean; reason?: string } {
-  if (!GATED_TOOLS.has(toolName)) return { allowed: true };
+  if (headlessAllowed(toolName)) return { allowed: true };
   if (permissions === 'full') return { allowed: true };
   if (permissions === 'readonly') {
     return {

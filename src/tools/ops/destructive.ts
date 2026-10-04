@@ -32,8 +32,9 @@ export interface DestructiveVerdict {
 
 const RULES: Array<{ re: RegExp; reason: string }> = [
   // Deleting data
-  { re: /\brm\s+(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b/, reason: 'recursive delete' },
-  { re: /\brm\s+-[a-zA-Z]*f[a-zA-Z]*\s+[^|;&]*[*?]/, reason: 'forced delete of a wildcard' },
+  // Flags in any order and spelling: `rm -f -r`, `rm --force --recursive`.
+  { re: /\brm\s+(?:-\S+\s+)*(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b/, reason: 'recursive delete' },
+  { re: /\brm\s+(?:-\S+\s+)*(?:-[a-zA-Z]*f[a-zA-Z]*|--force)\s+[^|;&]*[*?]/, reason: 'forced delete of a wildcard' },
   { re: /\bfind\b[^|;&]*\s-delete\b/, reason: 'find -delete' },
   { re: /\bshred\b|\bwipefs\b|\bblkdiscard\b/, reason: 'wiping data' },
   { re: /\bmkfs(?:\.\w+)?\b|\bmke2fs\b|\bFormat-Volume\b|\bClear-Disk\b|\bInitialize-Disk\b|\bformat\s+[a-z]:/i, reason: 'formatting a disk' },
@@ -42,18 +43,23 @@ const RULES: Array<{ re: RegExp; reason: string }> = [
   { re: /\b(?:fdisk|sfdisk|sgdisk|parted|gdisk)\b|\bRemove-Partition\b/i, reason: 'changing partitions' },
   { re: /\b(?:lvremove|vgremove|pvremove)\b|\bzpool\s+(?:destroy|labelclear)\b|\bzfs\s+destroy\b/, reason: 'destroying a volume' },
   { re: /\btruncate\s+(?:-s\s*0|--size[= ]0)\b/, reason: 'truncating a file to zero' },
-  { re: /\bRemove-Item\b[^|;]*-Recurse\b|\brd\s+\/s\b|\brmdir\s+\/s\b|\bdel\s+\/[sq]\b/i, reason: 'recursive delete' },
+  // PowerShell's Remove-Item by its aliases (ri, rm, del, erase, rd, rmdir)
+  // and any unambiguous prefix of -Recurse; cmd's /s and /q in any position.
+  { re: /\b(?:Remove-Item|ri|rm|del|erase|rd|rmdir)\b[^|;]*\s-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?\b/i, reason: 'recursive delete' },
+  { re: /\b(?:rd|rmdir)\b[^|;&]*\s\/s\b|\b(?:del|erase)\b[^|;&]*\s\/[sq]\b/i, reason: 'recursive delete' },
   // Databases
-  { re: /\bdrop\s+(?:database|schema|table|user|role)\b/i, reason: 'dropping a database object' },
+  { re: /\bdrop\s+(?:database|schema|table|user|role|index|view|function|procedure|trigger|sequence|collection|keyspace)\b/i, reason: 'dropping a database object' },
   { re: /\btruncate\s+(?:table\s+)?[`"\w.]+\s*;?/i, reason: 'truncating a table', },
-  { re: /\bdelete\s+from\s+[`"\w.]+\s*(?:;|$|")/i, reason: 'deleting every row of a table' },
+  // Anywhere in the command, not only at its end (`… "DELETE FROM t" && x`),
+  // unless a WHERE clause follows the table name.
+  { re: /\bdelete\s+from\s+[`\w.[\]]+\b(?!\s+where\b)/i, reason: 'deleting every row of a table' },
   { re: /\bdropdb\b|\bdropuser\b|\bmysqladmin\b[^|;&]*\bdrop\b/, reason: 'dropping a database' },
   { re: /\bredis-cli\b[^|;&]*\bflush(?:all|db)\b|\bFLUSHALL\b/i, reason: 'flushing a datastore' },
   { re: /\bdb\.dropDatabase\(|\.drop\(\)/, reason: 'dropping a database' },
   // Services, containers, clusters
   { re: /\bsystemctl\s+(?:[-\w]+\s+)*(?:stop|disable|mask|kill|isolate)\b/, reason: 'stopping or disabling a service' },
   { re: /\bservice\s+\S+\s+stop\b|\/etc\/init\.d\/\S+\s+stop\b|\brc-service\s+\S+\s+stop\b/, reason: 'stopping a service' },
-  { re: /\bStop-Service\b|\bSet-Service\b[^|;]*-StartupType\s+Disabled\b|\bsc(?:\.exe)?\s+(?:stop|delete)\b/i, reason: 'stopping a service' },
+  { re: /\bStop-Service\b|\bspsv\b|\bSet-Service\b[^|;]*-StartupType\s+Disabled\b|\bsc(?:\.exe)?\s+(?:stop|delete)\b/i, reason: 'stopping a service' },
   { re: /\bdocker\s+(?:container\s+)?(?:stop|kill|rm|rmi)\b|\bdocker\s+(?:system|volume|image|container|network)\s+(?:prune|rm)\b|\bdocker[- ]compose\b[^|;&]*\b(?:down|rm|kill|stop)\b/, reason: 'stopping or removing containers' },
   { re: /\bkubectl\s+(?:delete|drain|cordon|scale\b[^|;&]*--replicas[= ]0)\b|\bhelm\s+(?:uninstall|delete)\b/, reason: 'removing cluster resources' },
   { re: /\bkill\s+-(?:9|KILL)\s+1\b|\bkillall\b|\bpkill\b/, reason: 'killing processes' },
@@ -76,11 +82,19 @@ const RULES: Array<{ re: RegExp; reason: string }> = [
   { re: /\bchmod\s+-R\s+[0-7]*7[0-7]{0,2}\s+\/(?:\s|$)|\bchown\s+-R\s+\S+\s+\/(?:\s|$)/, reason: 'changing ownership or permissions of /' },
 ];
 
-/** Normalise enough that `sudo`, quoting and line continuations do not hide a command. */
+/**
+ * Normalise enough that `sudo`, quoting, escapes and line continuations do not
+ * hide a command. Quotes and escaping backslashes are DELETED, not turned into
+ * spaces: a space split `r"m" -rf` into `r m -rf`, which nothing matched, where
+ * the shell runs `rm -rf` (security review 2026-10). A backslash before a
+ * letter at a word start (`\rm`) and PowerShell's backtick escape go too.
+ */
 function normalise(command: string): string {
   return command
-    .replace(/\\\r?\n/g, ' ')
-    .replace(/(?<![\\])["']/g, ' ')
+    .replace(/[\\`]\r?\n/g, ' ')
+    .replace(/["']/g, '')
+    .replace(/(^|[\s;&|(])[\\`]+(?=[A-Za-z])/g, '$1')
+    .replace(/`(?=[A-Za-z])/g, '')
     .replace(/\s+/g, ' ');
 }
 

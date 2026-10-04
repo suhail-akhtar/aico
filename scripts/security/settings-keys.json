@@ -1,0 +1,20 @@
+{
+  "about": "Settings a cloned repository's .aico/settings.json must never be able to LOOSEN. scripts/security-scan.mjs reads the project-layer policy table (PROJECT_POLICY in src/settings-project-policy.ts) and fails if any key below is 'allow' there, or if any AicoSettings key is missing from the table. Without that table it reports each key below as unfiltered. Add a key here when it carries credentials, decides where data goes, opens a listener, or switches a guard off.",
+  "critical": {
+    "autoApprove": "switches off every permission prompt",
+    "provider": "chooses where prompts (and the key) go",
+    "activeProvider": "chooses where prompts (and the key) go",
+    "providers": "baseUrl redirects the person's API key to a host the repository chose",
+    "providerInstances": "defines endpoints prompts and keys are sent to",
+    "sandbox": "danger-full-access lifts write confinement",
+    "safetyLimits": "spend ceilings",
+    "modelPricing": "a zero price disarms the spend ceilings",
+    "miniApps": "can bind the Mini Apps host to 0.0.0.0",
+    "vault": "can stop pasted secrets being vaulted",
+    "sentinel": "the independent reviewer of high-risk calls",
+    "completionGate": "enabled:false switches off the checks gate, including the security check",
+    "hooks": "runs commands",
+    "env": "sets the process environment",
+    "mcpServers": "spawns processes / connects out"
+  }
+}

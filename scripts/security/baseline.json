@@ -1,0 +1,240 @@
+{
+  "version": 1,
+  "about": "Findings of scripts/security-scan.mjs that existed when recorded. status: accepted (reviewed, safe as written) | open (real or suspected issue, still to fix) | unreviewed. CI fails only on findings not listed here. Never add an entry to make CI pass without reviewing it.",
+  "findings": [
+    {
+      "rule": "sql-interpolated",
+      "file": "desktop/electron/browser-import-read.ts",
+      "line": 113,
+      "source": "const rows = db.prepare(`SELECT guid, type, value FROM ${tokens} WHERE guid IN (SELECT guid FROM ${addr})`).all() as Array<Record<string, unknown>>;",
+      "fingerprint": "41661243daef21ca",
+      "status": "accepted",
+      "note": "table names come from the imported browser profile schema read by this code, not from a person or page; read-only copy of the database"
+    },
+    {
+      "rule": "sql-interpolated",
+      "file": "desktop/electron/browser-import-read.ts",
+      "line": 119,
+      "source": "const all = (table: string): Array<Record<string, unknown>> => (t.has(table) ? db.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>> : []);",
+      "fingerprint": "33c2383bf05c5c9c",
+      "status": "accepted",
+      "note": "table names come from the imported browser profile schema read by this code, not from a person or page; read-only copy of the database"
+    },
+    {
+      "rule": "electron-unsafe-prefs",
+      "file": "desktop/electron/browser.ts",
+      "line": 861,
+      "source": "nodeIntegrationInSubFrames: true,",
+      "fingerprint": "eb6559b981d526b7",
+      "status": "accepted",
+      "note": "nodeIntegrationInSubFrames with sandbox:true, contextIsolation:true, nodeIntegration:false only lets the dialog preload reach iframes (comment on the line above)"
+    },
+    {
+      "rule": "inner-html",
+      "file": "shared/ui/canvas/BlockEditors.tsx",
+      "line": 103,
+      "source": "node.innerHTML = parsed ? blocksToHtml(parsed) : '<p><br></p>';",
+      "fingerprint": "faf4165916bee7fe",
+      "status": "accepted",
+      "note": "blocksToHtml escapes text it emits"
+    },
+    {
+      "rule": "inner-html",
+      "file": "shared/ui/canvas/DeckSlide.tsx",
+      "line": 139,
+      "source": "<div className=\"adk-slidescale\" style={{ transform: `scale(${scale})` }} dangerouslySetInnerHTML={{ __html: html }} />",
+      "fingerprint": "b480262d0e9dd498",
+      "status": "accepted",
+      "note": "slideHtml builds from layout fields through the deck renderer escapes"
+    },
+    {
+      "rule": "inner-html",
+      "file": "shared/ui/canvas/DocBlocks.tsx",
+      "line": 61,
+      "source": "return <div className=\"adoc-docblock\" dangerouslySetInnerHTML={{ __html: docBlockHtml(v) }} />;",
+      "fingerprint": "bb9023fcd6b1e67c",
+      "status": "accepted",
+      "note": "docBlockHtml escapes every field (esc/inlineMd)"
+    },
+    {
+      "rule": "inner-html",
+      "file": "shared/ui/Diagram.tsx",
+      "line": 209,
+      "source": "dangerouslySetInnerHTML={{ __html: svg }}",
+      "fingerprint": "b14ef208801e3ea4",
+      "status": "accepted",
+      "note": "SVG produced by mermaid render; review if mermaid securityLevel is ever loosened"
+    },
+    {
+      "rule": "inner-html",
+      "file": "shared/ui/MathBlock.tsx",
+      "line": 112,
+      "source": "dangerouslySetInnerHTML={{ __html: html }}",
+      "fingerprint": "06019e21644c4d81",
+      "status": "accepted",
+      "note": "KaTeX renderToString output (trust off)"
+    },
+    {
+      "rule": "inner-html",
+      "file": "src/canvas/visuals.ts",
+      "line": 246,
+      "source": "box.innerHTML = c.svg;",
+      "fingerprint": "a776415667c50082",
+      "status": "accepted",
+      "note": "runs inside the headless export page; svg is produced by the chart renderer"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/context-window.ts",
+      "line": 736,
+      "source": "const res = await fetch(",
+      "fingerprint": "8db7177ab029cb28",
+      "status": "accepted",
+      "note": "provider /models endpoint from the person's own provider settings (project layers cannot set providers: settings-project-policy.ts)"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/context-window.ts",
+      "line": 756,
+      "source": "const res = await fetch(url, { headers });",
+      "fingerprint": "df671f870280a46f",
+      "status": "accepted",
+      "note": "provider /models endpoint from the person's own provider settings (project layers cannot set providers: settings-project-policy.ts)"
+    },
+    {
+      "rule": "shell-true",
+      "file": "src/hooks.ts",
+      "line": 95,
+      "source": "child = spawn(cmd, { cwd: process.cwd(), env: { ...process.env, ...env }, shell: true, stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true });",
+      "fingerprint": "cfcc14bbeafb2d1e",
+      "status": "accepted",
+      "note": "hooks are commands the person configured; project hooks are trust-gated"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/mcp/http.ts",
+      "line": 85,
+      "source": "const resp = await fetch(this.url, {",
+      "fingerprint": "a2c3bad91f98b1a4",
+      "status": "accepted",
+      "note": "MCP server URL from settings; project mcpServers are trust-gated"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/mcp/http.ts",
+      "line": 107,
+      "source": "const resp = await fetch(this.url, {",
+      "fingerprint": "a2c3bad91f98b1a4",
+      "status": "accepted",
+      "note": "MCP server URL from settings; project mcpServers are trust-gated"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/mcp/sse.ts",
+      "line": 41,
+      "source": "const resp = await fetch(this.url, {",
+      "fingerprint": "d3088ec4950f4e18",
+      "status": "accepted",
+      "note": "MCP server URL from settings; project mcpServers are trust-gated"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/mcp/sse.ts",
+      "line": 143,
+      "source": "return fetch(this.url, { method: 'POST', headers: this.headers, body: JSON.stringify(message) });",
+      "fingerprint": "622d1b529b8809ed",
+      "status": "accepted",
+      "note": "MCP server URL from settings; project mcpServers are trust-gated"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/mcp/sse.ts",
+      "line": 162,
+      "source": "fetch(this.url, {",
+      "fingerprint": "5dcefb73c069b402",
+      "status": "accepted",
+      "note": "MCP server URL from settings; project mcpServers are trust-gated"
+    },
+    {
+      "rule": "sql-interpolated",
+      "file": "src/miniapps/data.ts",
+      "line": 369,
+      "source": "return db.prepare(`SELECT * FROM ${ident(table)} WHERE rowid = ?`)",
+      "fingerprint": "4db8b75bccb087d4",
+      "status": "accepted",
+      "note": "identifiers quoted by ident(); values bound as parameters"
+    },
+    {
+      "rule": "sql-interpolated",
+      "file": "src/miniapps/data.ts",
+      "line": 390,
+      "source": "return db.prepare(`SELECT * FROM ${ident(table)} WHERE ${ident(key.name)} = ?`)",
+      "fingerprint": "3fb8611b27df6e50",
+      "status": "accepted",
+      "note": "identifiers quoted by ident(); values bound as parameters"
+    },
+    {
+      "rule": "shell-true",
+      "file": "src/miniapps/process.ts",
+      "line": 231,
+      "source": "const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { shell: true });",
+      "fingerprint": "835904a04b9daf9a",
+      "status": "accepted",
+      "note": "constant taskkill arguments and a numeric pid"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/providers/connection-test.ts",
+      "line": 185,
+      "source": "const res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });",
+      "fingerprint": "545b92d6cb809023",
+      "status": "accepted",
+      "note": "the probe must reach whatever endpoint a person configures, loopback included (Ollama, vLLM, LM Studio). The stored-key leak this was open for is fixed: providers/test attaches a stored key only when the draft's type and baseUrl match the stored instance (api-system.ts sameEndpoint; security-server-test D1)"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/recall/embed.ts",
+      "line": 59,
+      "source": "const res = await fetch(url, {",
+      "fingerprint": "3cd301e4d592f144",
+      "status": "accepted",
+      "note": "embedding endpoint from the person's settings"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/tools/webfetch.ts",
+      "line": 12,
+      "source": "const response = await fetch(input.url, {",
+      "fingerprint": "438a20d323588ea2",
+      "status": "open",
+      "note": "documented as unrestricted (security.md), but that includes cloud metadata (169.254.169.254) and AICO's own loopback API on a prompt injection. At least refuse metadata and the engine port"
+    },
+    {
+      "rule": "fetch-unguarded",
+      "file": "src/tools/websearch.ts",
+      "line": 26,
+      "source": "const response = await fetch(url, {",
+      "fingerprint": "af54d93a547a00c9",
+      "status": "accepted",
+      "note": "fixed search API host; the query is a parameter"
+    },
+    {
+      "rule": "open-external-unchecked",
+      "file": "vscode-extension/src/extension.ts",
+      "line": 186,
+      "source": "if (running) await vscode.env.openExternal(vscode.Uri.parse(running.url));",
+      "fingerprint": "8d3926ebad2b7bc0",
+      "status": "accepted",
+      "note": "running.url is the local engine URL the extension started"
+    },
+    {
+      "rule": "inner-html",
+      "file": "web/src/export-render.ts",
+      "line": 64,
+      "source": "box.innerHTML = svg;",
+      "fingerprint": "ab41aee307460ed1",
+      "status": "accepted",
+      "note": "export renderer output (mermaid/vega SVG)"
+    }
+  ]
+}

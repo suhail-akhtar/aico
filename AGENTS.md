@@ -49,6 +49,7 @@ Map with responsibilities and dependency rules: [architecture.md](docs/engineeri
 | `npm --prefix desktop run typecheck` | desktop main + renderer types | free |
 | `npm run check:standards` | the machine-checked rules in §4 (full) | <1 s, free |
 | `npm run test:standards` | tests for that checker | ~15 s, free |
+| `npm run check:security` / `test:security:dast` | security scan + lockfiles + licences / DAST against the real engine (ADR 0026) | <2 s / ~45 s, free |
 | `npm run test:live`, `npm run test:web`, `test:mcp:model`, `test:skills:live`, `test:apps:build`, `test:supervision`, `test:cron` | real-model behaviour | **cost money** — only when the owner asks |
 
 Full table (every `test:*` script, what it proves, cost): [testing.md](docs/engineering/testing.md).

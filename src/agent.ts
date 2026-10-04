@@ -18,7 +18,7 @@ import { taskToolDefinition, runTask, agentResumeSpec } from './tools/task.js';
 import { rememberSessionInbox } from './agents/report-back.js';
 import { mcpRegistry } from './mcp.js';
 import { checkPermission } from './permissions.js';
-import { classifyBashCommand, isBashReadOnly } from './safety.js';
+import { classifyBashCommand, isBashReadOnly, shellCommandOf } from './safety.js';
 import { canAskUser, setAskUserCallback } from './tools/askuser.js';
 import { getOpenTodoCount, pendingTodoLines, readTodos, todoChecklist } from './tools/todo.js';
 import {
@@ -91,7 +91,7 @@ function getExecutionMode(name: string): ExecutionMode {
   return 'exclusive';
 }
 import { getWorkspaceInfo, setWorkspaceRuntime } from './workspace.js';
-import { currentRunContext, runInContext, type HostBridge, type HandOffBridge } from './run-context.js';
+import { currentRunContext, markTainted, runInContext, type HostBridge, type HandOffBridge } from './run-context.js';
 import { isHostTool } from '../shared/host-tools.js';
 import { HANDOFF_TOOL } from '../shared/chat-handoff.js';
 import type { FileWriter } from './tools/file-writer.js';
@@ -139,8 +139,10 @@ import { activeJob, isLongEstimate, pendingJob, propose, proposalResult, subAgen
 import { longJobDefinition, longJobTool } from './tools/long-job.js';
 import { proposePlan, type PlanInput } from './tools/plan.js';
 import {
-  defaultSentinelModel, installSentinel, mergeRequests, recentCallsOf, sentinelActive, sentinelParker, untrustedSourcesOf, userRequestsOf,
+  defaultSentinelModel, HUMAN_APPROVED, installSentinel, mergeRequests, recentCallsOf, sentinelActive, sentinelParker, untrustedSourcesOf, userRequestsOf,
 } from './sentinel/index.js';
+import { configWriteDenial } from './tools/config-write-guard.js';
+import { aicoHome } from './home.js';
 import { recordRoleSpend, resolveRole } from './models/roles.js';
 import { costFor } from './tokens.js';
 import { describedImageNote, describeImagesWith, visionDescriber, type ImageDescriber } from './models/vision.js';
@@ -1110,8 +1112,9 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
 
   pipeline.onPreExecute('hooks:pre-tool-use', async (ctx, next) => {
     if (!opts.settings) return next();
-    // Isolated: a throwing hook must not mask the real tool result — degrade to
-    // a warning and proceed with the call.
+    // Fails CLOSED: a PreToolUse hook is a guard the user installed, and a
+    // guard that waves the call through whenever it breaks is no guard. A hook
+    // that throws, times out or cannot be started blocks the call (runHooks).
     let hookResult: string | undefined;
     try {
       hookResult = await runHooks(
@@ -1121,10 +1124,11 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
       );
     } catch (hookErr) {
       const reason = hookErr instanceof Error ? hookErr.message : String(hookErr);
-      if (!opts.silent) showError(`PreToolUse hook for ${ctx.name} failed: ${reason} (continuing)`);
+      if (!opts.silent) showError(`PreToolUse hook for ${ctx.name} failed: ${reason} (call blocked)`);
+      hookResult = 'block';
     }
     if (hookResult === 'block') {
-      return { kind: 'deny', reason: 'Blocked by PreToolUse hook' };
+      return { kind: 'deny', reason: 'Blocked by PreToolUse hook: the hook refused this call, or it failed or timed out (a failing guard hook blocks rather than passes). Fix or remove the hook in settings to proceed.' };
     }
     return next();
   });
@@ -1147,7 +1151,8 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
 
   if (opts.planMode) {
     pipeline.onGuard('plan-mode', (ctx) => {
-      if (ctx.name === 'Bash' && ctx.arguments.command && !isBashReadOnly(String(ctx.arguments.command))) {
+      const planCommand = shellCommandOf(ctx.name, ctx.arguments);
+      if (planCommand !== undefined && !isBashReadOnly(planCommand)) {
         return {
           kind: 'deny',
           reason: 'Plan mode: only read-only commands allowed. This command may modify files.',
@@ -1170,8 +1175,11 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
   if (opts.customTools && opts.customTools.tools.size > 0) installCustomToolGuards(pipeline, opts.customTools);
 
   pipeline.onGuard('bash-safety', (ctx) => {
-    if (ctx.name !== 'Bash' || !ctx.arguments.command) return { kind: 'abstain' };
-    const safety = classifyBashCommand(String(ctx.arguments.command));
+    // Every tool that runs a shell command, not only `Bash`: Terminal and the
+    // desktop's ide_terminal_run used to skip these hard blocks entirely.
+    const command = shellCommandOf(ctx.name, ctx.arguments);
+    if (command === undefined) return { kind: 'abstain' };
+    const safety = classifyBashCommand(command);
     if (safety.level === 'block') {
       return {
         kind: 'deny',
@@ -1645,6 +1653,8 @@ export async function runAgent(rawOpts: AgentOptions): Promise<string> {
       ...(level ? { autonomy: level } : {}),
       ...((opts.parkFrom ?? parentRun?.parkFrom) ? { parkFrom: opts.parkFrom ?? parentRun!.parkFrom! } : {}),
       ...(harness ? { evalHarness: harness } : {}),
+      // Starts tainted when the delegating run already is; see RunContext.taint.
+      taint: { tainted: Boolean(parentRun?.taint?.tainted), ...(parentRun?.taint ? { parent: parentRun.taint } : {}) },
       // What the person asked for — the Sentinel's only authority. A delegated
       // run inherits its root's rather than trusting the brief it was given.
       userRequests: parentRun?.userRequests ?? userRequestsOf(opts.session?.events, opts.conversationHistory, opts.task),
@@ -2004,7 +2014,11 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   setMcpGroups(mcpRegistry.getToolsForAgent().filter(t => mcpToolAllowed(t.name, { scope, planMode: opts.planMode, settings })));
   // The taint rule (design §4.2): web or MCP content seen in this session,
   // read from the log and kept current as calls are dispatched.
-  let tainted = (opts.session?.events ?? []).some(e => e.type === 'tool/call' && taints(String((e.data as { name?: string }).name ?? '')));
+  // A run delegated by a tainted run starts tainted (RunContext.taint).
+  const taintCell = currentRunContext()?.taint;
+  let tainted = Boolean(taintCell?.tainted)
+    || (opts.session?.events ?? []).some(e => e.type === 'tool/call' && taints(String((e.data as { name?: string }).name ?? '')));
+  if (tainted) markTainted(taintCell);
   // Who a custom tool's approval asks: this run's permission card, else the
   // always-ask channel (inherited by sub-agents), else the terminal. Nobody,
   // for a headless run — its calls that need a person are refused.
@@ -2249,6 +2263,18 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(bounds?.name ? { agentName: bounds.name } : {}),
     ...(runLevel ? { level: runLevel } : {}),
+  });
+  /*
+    The file tools may not write AICO's own settings, hooks, tools, agents or
+    trust files unless a person approved this exact call (the Sentinel's
+    escalation sets HUMAN_APPROVED). Registered after the Sentinel so its
+    approval is visible here; scoped to this run like the Sentinel.
+  */
+  pipeline.onGuard('aico-config-write', (ctx) => {
+    if (ctx.agentId !== agentId) return { kind: 'abstain' };
+    if (ctx.state.get(HUMAN_APPROVED) === true) return { kind: 'abstain' };
+    const denial = configWriteDenial(ctx.name, ctx.arguments, aicoHome(), runCwd);
+    return denial ? { kind: 'deny', reason: denial } : { kind: 'abstain' };
   });
 
   // Add Task tool (sub-agent dispatch) if within depth limit. Browser QA
@@ -3475,7 +3501,7 @@ const GOAL_REMINDER_EVERY = 6;
             // call is recorded — so a LoadTools (or a call to a deferred tool
             // by name) offers its group from the next step of this turn.
             if (loadedGroups) for (const g of groupsLoadedBy(call.name, call.input, extraGroups)) loadedGroups.add(g);
-            if (taints(call.name)) tainted = true;
+            if (taints(call.name)) { tainted = true; markTainted(taintCell); }
           },
           dispatch: async (call) => {
             const handler = handlers.get(call.name);

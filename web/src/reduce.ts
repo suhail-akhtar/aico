@@ -297,12 +297,19 @@ export interface Draft {
   reasoning: Map<number, ReasoningBurst>;
   /** Tool cards for the running turn, keyed by the provider's own call id. */
   tools: Map<string, ChatMessage>;
+  /**
+   * Steers the loop has read during the running turn, keyed by inbox id.
+   *
+   * The log carries them, but the log reaches a client only when the turn
+   * ends; until then this is where they appear, in the place they were read.
+   */
+  steers: Map<string, ChatMessage>;
   /** Order in which live entries appeared, so they render as they happened. */
-  order: Array<{ kind: 'reasoning'; key: number } | { kind: 'tool'; key: string }>;
+  order: Array<{ kind: 'reasoning'; key: number } | { kind: 'tool'; key: string } | { kind: 'steer'; key: string }>;
 }
 
 export const emptyDraft = (): Draft => ({
-  text: '', reasoning: new Map(), tools: new Map(), order: [],
+  text: '', reasoning: new Map(), tools: new Map(), steers: new Map(), order: [],
 });
 
 /**
@@ -339,6 +346,9 @@ export function composeMessages(
         ...(burst.endedAt !== undefined ? { durationMs: burst.endedAt - burst.startedAt } : {}),
         timestamp: burst.startedAt,
       });
+    } else if (entry.kind === 'steer') {
+      const steer = draft.steers.get(entry.key);
+      if (steer) live.push(steer);
     } else {
       const tool = draft.tools.get(entry.key);
       if (tool) live.push(tool);
@@ -410,4 +420,127 @@ export function dropPending(logged: Map<number, ChatMessage>): Map<number, ChatM
   const next = new Map(logged);
   next.delete(PENDING_KEY);
   return next;
+}
+
+// ── Steer and Queue ────────────────────────────────────────────────────
+
+/**
+ * A message the person sent while a turn was running, not yet in the log.
+ *
+ * `id` arrives with the server's acknowledgement and names it in the `inbox`
+ * frames; until then it is only on this screen ("sending").
+ */
+export interface PendingIntent {
+  key: number;
+  mode: 'steer' | 'followup';
+  content: string;
+  id?: string;
+  /** Being taken back: its leaving the queue is not its turn starting. */
+  withdrawing?: boolean;
+}
+
+/** The engine's `inbox` frame: what is waiting, and which steers were just read. */
+export interface InboxFrame {
+  nextStep?: Array<{ id: string; content: string }>;
+  nextTurn?: Array<{ id: string; content: string }>;
+  delivered?: Array<{ id: string; step: number }>;
+}
+
+/**
+ * Bring the on-screen intents in line with the server's queues.
+ *
+ * The server is the truth for anything it has acknowledged: an id it no
+ * longer lists was read (a steer), started (a queued turn) or withdrawn, and
+ * an id it lists that this screen does not know — another tab, a reload — is
+ * drawn too. Intents still being sent have no id yet and are kept as they are.
+ * Keys are kept for ids already drawn so React does not remount them.
+ */
+export function reconcileIntents(
+  local: PendingIntent[],
+  frame: InboxFrame,
+  nextKey: () => number,
+): PendingIntent[] {
+  const byId = new Map(local.filter(p => p.id).map(p => [p.id!, p]));
+  // The frame usually beats the reply that names the message: an unknown id
+  // whose text matches one still being sent is that one, not a second copy.
+  const sending = local.filter(p => !p.id);
+  const fromServer = (items: InboxFrame['nextStep'], mode: PendingIntent['mode']): PendingIntent[] =>
+    (items ?? []).map(m => {
+      const known = byId.get(m.id);
+      if (known) return { ...known, mode };
+      const at = sending.findIndex(p => p.mode === mode && p.content.trim() === m.content.trim());
+      if (at >= 0) return { ...sending.splice(at, 1)[0]!, id: m.id };
+      return { key: nextKey(), mode, content: m.content, id: m.id };
+    });
+  const listed = [...fromServer(frame.nextStep, 'steer'), ...fromServer(frame.nextTurn, 'followup')];
+  return [...sending, ...listed];
+}
+
+/**
+ * The queued message whose turn is starting, if this frame says one did.
+ *
+ * The server claims a queued message just before it starts its turn, so its
+ * id leaving `nextTurn` is the earliest sign — earlier than `turn-start`,
+ * which can fall in the gap while the stream reconnects after the last turn.
+ * One at a time: the server starts one queued turn at a time.
+ */
+export function startedFollowup(local: PendingIntent[], frame: InboxFrame): PendingIntent | undefined {
+  const still = new Set((frame.nextTurn ?? []).map(m => m.id));
+  return local.find(p => p.mode === 'followup' && p.id && !p.withdrawing && !still.has(p.id));
+}
+
+/**
+ * Put the steers the loop just read into the running turn, where they were read.
+ *
+ * Only intents this screen holds can be drawn (the frame carries ids, not
+ * text). Returns the same draft when nothing was delivered.
+ */
+export function deliverSteers(
+  draft: Draft,
+  intents: PendingIntent[],
+  delivered: InboxFrame['delivered'],
+  now = Date.now(),
+): Draft {
+  if (!delivered?.length) return draft;
+  let steers = draft.steers;
+  let order = draft.order;
+  for (const { id, step } of delivered) {
+    const intent = intents.find(p => p.id === id && p.mode === 'steer');
+    if (!intent || steers.has(id)) continue;
+    if (steers === draft.steers) { steers = new Map(steers); order = [...order]; }
+    steers.set(id, {
+      id: `steer-${id}`, type: 'user', content: intent.content, steered: { step }, timestamp: now,
+    });
+    order.push({ kind: 'steer', key: id });
+  }
+  return steers === draft.steers ? draft : { ...draft, steers, order };
+}
+
+/** Where the replayed log stands: the open turn and its last step. */
+export interface LogCursor { turn: number; step: number }
+
+/**
+ * Follow the log's turn and step boundaries, and mark a person's message read
+ * mid-turn as a steer.
+ *
+ * A human message recorded after a step of its own turn can only have come
+ * from the inbox at a step boundary — the turn's own request is recorded
+ * before its first step — so it is marked with the step that read it. Same
+ * answer live and on replay, because both read the same events.
+ */
+export function followLog(
+  cursor: LogCursor | null,
+  logged: Map<number, ChatMessage>,
+  seq: number,
+  data: Record<string, unknown>,
+): { cursor: LogCursor | null; logged: Map<number, ChatMessage> } {
+  const type = String(data.type ?? '');
+  if (type === 'turn/start') return { cursor: { turn: Number(data.turn ?? 0), step: 0 }, logged };
+  if (type === 'step/start') return { cursor: { turn: Number(data.turn ?? 0), step: Number(data.step ?? 0) }, logged };
+  if (type !== 'user/message' || !cursor || cursor.step < 1 || Number(data.turn) !== cursor.turn) return { cursor, logged };
+  const message = logged.get(seq);
+  if (!message || message.type !== 'user') return { cursor, logged };
+  const next = new Map(logged);
+  next.set(seq, { ...message, steered: { step: cursor.step + 1 } });
+  return { cursor, logged: next };
 }

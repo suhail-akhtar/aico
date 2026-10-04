@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only by default; no job here writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   # The engineering standards a machine can check (scripts/check-standards.mjs):
   # no AI attribution in commits or docs, versions and release stamps agree,
@@ -88,3 +92,62 @@ jobs:
 
       - name: Desktop unit tests
         run: npm --prefix desktop test
+
+  # Shift-left security, the fast half (ADR 0026, docs/engineering/security.md
+  # "Automated security"): the static scan (new findings only — the reviewed
+  # baseline is scripts/security/baseline.json), the scanner's own tests,
+  # lockfile integrity, production licences, and npm audit of every shipped
+  # package (high/critical fail unless allow-listed with a reason and expiry).
+  # Node and git only, like the standards job; audit needs the registry.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Static security scan
+        run: node scripts/security-scan.mjs
+
+      - name: Test the scanner
+        run: node scripts/test-security-scan.mjs
+
+      - name: Lockfiles and licences
+        run: node scripts/security-deps.mjs lockfiles licences
+
+      - name: npm audit (production dependencies)
+        run: node scripts/security-deps.mjs audit
+
+  # The dynamic half: the real engine, started in a throwaway store, attacked
+  # over HTTP (auth on every route, Origin/Host, CSRF, traversal, bodies, SSRF,
+  # human-only decisions, canary secrets, a seeded fuzz pass). Offline and
+  # free; about a minute. Also writes the CycloneDX SBOMs for the build.
+  dast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Attack the engine
+        run: node scripts/security-dast.mjs
+
+      - name: SBOM (CycloneDX)
+        run: node scripts/security-deps.mjs sbom --out sbom
+
+      - name: Keep the SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/*.cdx.json
+          if-no-files-found: error

@@ -34,7 +34,8 @@ export interface DeckVisualRouteDeps {
   send: (res: http.ServerResponse, status: number, body: unknown) => void;
 }
 
-const SESSION = /^[\w.-]{1,120}$/;
+// No `..` and no leading dot: a session id names one folder in the store (session/persistence isValidSessionId).
+const SESSION = /^(?!.*\.\.)[\w-][\w.-]{0,119}$/;
 const PICTURE = /\.(png|jpe?g|gif)$/i;
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'out', 'coverage', '.venv', '__pycache__']);
 

@@ -9,6 +9,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/app.css';
+import './lib/intent-transport';
 import { useStore } from '@web/store';
 import { App } from './App';
 import { desktop, isDesktop, on, platform } from './desktop';

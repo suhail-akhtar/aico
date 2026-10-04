@@ -182,6 +182,7 @@ export function Transcript({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
           <TurnView key={t.key} turn={t} last={i === turns.length - 1} verbose={verbose}
             onFix={onFix} widgetFixes={widgetFixes} versions={versions} setVersion={setVersion} onJumpToStart={jumpToStart} />
         ))}
+        <PendingIntents />
       </div>
       <div className="pointer-events-none sticky bottom-0 z-20 h-0" data-jump-dock>
         <div className="transcript-fade absolute inset-x-0 bottom-0 h-20" />
@@ -318,6 +319,11 @@ function UserMessage({ message, version, setVersion }: {
           {text}
         </div>
       )}
+      {message.steered && (
+        <span className="mt-1 text-[11.5px] text-aico-muted" data-steered>
+          Sent while working · delivered at step {message.steered.step}
+        </span>
+      )}
       <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
         {version && version.total > 1 && (
           <span className="mr-1 flex items-center text-[12px] text-aico-muted">
@@ -333,6 +339,50 @@ function UserMessage({ message, version, setVersion }: {
             onClick={() => void forkSession(sessionId, message.turn! - 1, text)}><Icon name="git-branch" size={14} /></button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the person sent while the agent worked and the transcript has not
+ * reached yet: a steer waiting for the next step, a message queued to run next.
+ *
+ * Steer and Queue were reported as doing nothing because, here, they showed
+ * nothing — the composer cleared, and the message appeared only when the turn
+ * ended. Drawn under the running turn, where the real message will appear; a
+ * queued one can be edited (taken back into the composer) or removed until
+ * its turn starts.
+ */
+function PendingIntents(): React.ReactElement | null {
+  const intents = useStore(s => s.pendingIntents);
+  const unqueue = useStore(s => s.unqueue);
+  if (intents.length === 0) return null;
+  return (
+    <div className="mb-8 space-y-3" aria-label="Waiting to be sent">
+      {intents.map(intent => (
+        <div key={intent.key} className="flex flex-col items-end" data-intent={intent.mode}>
+          <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-3xl border border-dashed border-aico-border px-4 py-2.5 text-[15px] leading-relaxed text-aico-secondary">
+            {intent.content}
+          </div>
+          <div className="mt-1 flex items-center gap-1 text-[11.5px] text-aico-muted">
+            {intent.mode === 'steer' ? (
+              <span>{intent.id ? 'Sent while working · waiting for the next step' : 'Sending…'}</span>
+            ) : (
+              <>
+                <span className="rounded-full bg-aico-hover px-2 py-0.5 text-aico-secondary">{intent.id ? 'Queued — runs next' : 'Queuing…'}</span>
+                {intent.id && (
+                  <>
+                    <button className="icon-btn-sm" title="Edit — back to the composer" aria-label="Edit queued message"
+                      onClick={() => void unqueue(intent.key, true)}><Icon name="edit" size={13} /></button>
+                    <button className="icon-btn-sm" title="Remove from the queue" aria-label="Remove queued message"
+                      onClick={() => void unqueue(intent.key)}><Icon name="x" size={13} /></button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

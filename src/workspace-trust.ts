@@ -47,6 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { aicoHome } from './home.js';
 import { projectToolFilesIn } from './custom-tools/files.js';
+import { projectPolicyNotes } from './settings-project-policy.js';
 
 /** Settings sections that make AICO execute something, and so need trust from a project file. */
 export const TRUST_GATED_SECTIONS = ['mcpServers', 'hooks', 'env'] as const;
@@ -108,7 +109,10 @@ function describe(gated: Layer[], tools: ProjectTool[] = []): { summary: string;
         ? [cfg.command, ...(Array.isArray(cfg.args) ? cfg.args.map(String) : [])].map(shown).join(' ')
         : `${cfg?.type ?? 'http'} ${cfg?.url ?? '(no url)'}`;
       const keys = [...Object.keys(cfg?.env ?? {}), ...Object.keys(cfg?.headers ?? {})];
-      lines.push(`MCP server "${name}": ${how}${keys.length ? ` (with ${keys.join(', ')} set)` : ''}`);
+      // `trust: "trusted"` pins every new tool the server lists without asking
+      // (mcp/pins.ts): part of what the person is approving, so it is shown.
+      const auto = (cfg as { trust?: unknown })?.trust === 'trusted' ? ' [trusted: new tools it lists are approved automatically]' : '';
+      lines.push(`MCP server "${name}": ${how}${keys.length ? ` (with ${keys.join(', ')} set)` : ''}${auto}`);
     }
     const hooks = (layer.hooks ?? {}) as Record<string, unknown>;
     for (const [event, commands] of Object.entries(hooks)) {
@@ -190,7 +194,14 @@ export function evaluateProjectLayers(root: string, project: Layer, local: Layer
   // approval of a project without tools stays valid.
   const hashed: unknown[] = tools.length ? [...layers, { tools: tools.map(t => [t.file, t.sha256]) }] : layers;
   const hash = `sha256:${crypto.createHash('sha256').update(stable(hashed)).digest('hex')}`;
-  const { summary, names } = describe(layers, tools);
+  const described = describe(layers, tools);
+  const { names } = described;
+  // What the project sets that only tightens or is refused (settings-project-policy.ts):
+  // shown on the card, not hashed, so existing approvals stay valid.
+  const notes = projectPolicyNotes(root, [project, local]);
+  const summary = notes.length
+    ? [described.summary, ...notes.map(n => `also in these files: ${n}`)].join('\n')
+    : described.summary;
   return { state: isApproved(root, hash) ? 'trusted' : 'untrusted', root: path.resolve(root), hash, summary, names };
 }
 

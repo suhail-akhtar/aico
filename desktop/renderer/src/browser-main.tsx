@@ -18,6 +18,7 @@
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/app.css';
+import './lib/intent-transport';
 import '@/browser/browser.css';
 import { useStore } from '@web/store';
 import { invoke, on, platform } from './desktop';

@@ -279,6 +279,12 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **Save as…** turns commands into a script, a custom tool or a scheduled job.
 - **SSH tabs from the vault** — the password never reaches the window, and a new host key is yours to accept. The agent reads your terminals only on request, masked, and never types into yours.
 
+### 🛡 Security built into every change
+
+- **Shift-left by default:** a security scan on every commit, CodeQL, dependency/lockfile/licence checks and an SBOM on every release, and a pen-test suite (1,100+ attacks on the real engine: auth, forged origins, DNS rebinding, path traversal, SSRF, secret leaks, fuzzing) in CI.
+- **Fail-safe:** every guard denies when something breaks; a cloned repo's settings can only tighten safety; turning on full autonomy or loosening safety needs a real person, never the API token alone.
+- **Code AICO writes gets the same checks:** secrets, risky patterns and vulnerable dependencies in its own changes block "done".
+
 ### 🔐 Credentials the agent uses but never sees
 
 Ask AICO to set up a server and it creates the service's admin account itself —

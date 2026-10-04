@@ -36,6 +36,7 @@ import {
   progressReporter, useCredential, validHost, validPort,
 } from './common.js';
 import { classifyRemoteCommand } from './destructive.js';
+import { agentChildEnv } from '../../child-env.js';
 
 export interface WinRmExecInput {
   host: string;
@@ -47,7 +48,10 @@ export interface WinRmExecInput {
   timeout?: number;
 }
 
-const AUTH_MODES: Record<string, string> = { negotiate: 'Negotiate', kerberos: 'Kerberos', basic: 'Basic', credssp: 'Credssp' };
+/** Plain-HTTP targets a person has approved once in this process (see winRmExec). */
+const approvedHttpTargets = new Set<string>();
+
+const AUTH_MODES: Record<string, string> ={ negotiate: 'Negotiate', kerberos: 'Kerberos', basic: 'Basic', credssp: 'Credssp' };
 
 /** PowerShell single-quoted literal. */
 export function psQuote(s: string): string {
@@ -134,7 +138,7 @@ export function runPowerShellDriver(driver: string, lines: string[], opts: { tim
     const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-EncodedCommand', Buffer.from(driver, 'utf16le').toString('base64')], {
       windowsHide: true,
-      env: { ...process.env, AICO_AGENT_SHELL: '1' },
+      env: agentChildEnv({ AICO_AGENT_SHELL: '1' }),
     });
     let stdout = '';
     let stderr = '';
@@ -199,8 +203,18 @@ export async function winRmExec(input: WinRmExecInput, signal?: AbortSignal): Pr
   const op = openOp({ tool: 'WinRmExec', target, credential: credentialLabel(input.credential ?? ''), summary });
   const lines: string[] = [];
   try {
-    const purpose = `${verdict.destructive ? `DESTRUCTIVE (${verdict.reasons.join(', ')}). ` : ''}WinRmExec on ${target}${useSsl ? ' (https)' : ''}: ${input.script}`;
-    const secret = await useCredential(input.credential, { tool: 'WinRmExec', host: target, purpose, requireApproval: verdict.destructive });
+    /*
+      Plain HTTP has no server authentication: NTLM over 5985 will hand its
+      challenge response to whoever answers at that address. SSH asks a person
+      before a host key it has never seen; this asks before the first plain-
+      HTTP connection to a host in this process (security review 2026-10).
+    */
+    const firstHttp = !useSsl && !approvedHttpTargets.has(target.toLowerCase());
+    const purpose = `${verdict.destructive ? `DESTRUCTIVE (${verdict.reasons.join(', ')}). ` : ''}`
+      + `${firstHttp ? `FIRST plain-HTTP connection to ${target}: the host is not authenticated by TLS, so confirm it is the machine you mean (use_ssl avoids this). ` : ''}`
+      + `WinRmExec on ${target}${useSsl ? ' (https)' : ''}: ${input.script}`;
+    const secret = await useCredential(input.credential, { tool: 'WinRmExec', host: target, purpose, requireApproval: verdict.destructive || firstHttp });
+    if (firstHttp) approvedHttpTargets.add(target.toLowerCase());
     let user: string | undefined;
     let skipCertChecks = false;
     try {

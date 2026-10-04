@@ -40,6 +40,7 @@ import path from 'node:path';
 import type { DesktopContext } from './context';
 import type { VaultForPage, VaultOffer, VaultStatus } from '../shared/browser-types';
 import { canFill, isSecureOrigin, loginOrigin, openVault, type VaultCipher } from './browser-vault-core';
+import { sameFrame } from './security-core';
 import { BROWSER_TAG, credentialNameFor, loginCreateBody, planMigration, verifyMigration, webOrigin, type ExistingCredential, type LegacyEntry } from './browser-vault-unify';
 
 export const VAULT_CHANNEL = 'aico-vault';
@@ -265,7 +266,8 @@ export function registerVault(ctx: DesktopContext, deps: VaultDeps): VaultServic
 
   // ── Filling a page (the person's own fill) ──
   const filled = new Set<number>();
-  const waiting = new Map<string, (n: number) => void>();
+  /** A fill's token → who answers it: only the frame it was sent to may say how many fields it filled. */
+  const waiting = new Map<string, { resolve: (n: number) => void; frame: { processId: number; routingId: number } }>();
   let fillSeq = 0;
   const markFilled = (wc: WebContents): void => {
     if (filled.has(wc.id)) return;
@@ -295,7 +297,7 @@ export function registerVault(ctx: DesktopContext, deps: VaultDeps): VaultServic
     for (const f of frames) {
       const token = `f${++fillSeq}`;
       const done = new Promise<number>((resolve) => {
-        waiting.set(token, resolve);
+        waiting.set(token, { resolve, frame: { processId: f.processId, routingId: f.routingId } });
         setTimeout(() => { waiting.delete(token); resolve(0); }, 1500);
       });
       try { f.send(FILL_CHANNEL, { token, origin: login.origin, username: login.username, password: login.password }); } catch { waiting.delete(token); continue; }
@@ -330,7 +332,8 @@ export function registerVault(ctx: DesktopContext, deps: VaultDeps): VaultServic
   ipcMain.on(VAULT_CHANNEL, (e, msg: { op?: string; username?: unknown; password?: unknown; token?: unknown; n?: unknown; rect?: { x?: unknown; y?: unknown; w?: unknown } }) => {
     if (msg?.op === 'filled') {
       const r = typeof msg.token === 'string' ? waiting.get(msg.token) : undefined;
-      if (r) { waiting.delete(msg.token as string); r(Number(msg.n) || 0); }
+      // The frame the fill went to, and no other (a sibling frame that saw the token cannot fake a fill).
+      if (r && sameFrame(r.frame, e.senderFrame)) { waiting.delete(msg.token as string); r.resolve(Math.max(0, Math.min(50, Number(msg.n) || 0))); }
       return;
     }
     const tab = deps.tabOf(e.sender.id);

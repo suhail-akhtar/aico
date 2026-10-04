@@ -158,15 +158,26 @@ export async function openSshTerminal(deps: SshTerminalDeps, req: SshTerminalReq
 
   // 3. Connection, accepting only the checked key.
   let presented: Buffer | undefined;
+  const otherPrompts: string[] = [];
   let client: Client;
   try {
     client = await new Promise<Client>((resolve, reject) => {
       const c = new deps.ssh2.Client();
       let settled = false;
       c.on('ready', () => { if (!settled) { settled = true; resolve(c); } });
-      c.on('error', (err: Error) => { if (!settled) { settled = true; reject(explain(err, host, port)); } });
+      c.on('error', (err: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(otherPrompts.length
+          ? new SshTerminalError(`${host} asked for more than a password ("${otherPrompts[0]!.slice(0, 80)}") — a one-time code or second factor is yours to enter, and AICO never answers it with a stored secret. Sign in with your own ssh client in a terminal tab for this server.`)
+          : explain(err, host, port));
+      });
+      // Runs after the host key was verified (key exchange comes first). The stored password answers only a
+      // plain "Password:" prompt; a one-time code, passcode or anything else is the person's (keyboardInteractiveAnswers).
       c.on('keyboard-interactive', (_n: string, _i: string, _l: string, prompts: Array<{ prompt: string }>, finish: (r: string[]) => void) => {
-        finish(prompts.map(p => (password && /pass(word|code)?/i.test(p.prompt) ? password : '')));
+        const r = keyboardInteractiveAnswers(prompts, password);
+        if (r.forPerson.length) otherPrompts.push(...r.forPerson);
+        finish(r.answers);
       });
       c.connect({
         host, port, username: user, readyTimeout: CONNECT_TIMEOUT_MS, algorithms: { cipher: CIPHERS as never },
@@ -236,3 +247,20 @@ function wipe(s: SshSecret): void {
   for (const k of Object.keys(s.fields)) s.fields[k] = '';
 }
 
+
+/**
+ * Answers to an SSH keyboard-interactive round: the stored password goes only
+ * to a prompt that is plainly a password prompt ("Password:", "password"),
+ * never to "Verification code:", "Passcode:", "OTP" or a question — those are
+ * a second factor or something unknown, and a stored secret must not be
+ * typed into them. Those prompts are returned for the person.
+ */
+export function keyboardInteractiveAnswers(prompts: ReadonlyArray<{ prompt: string }>, password: string | undefined): { answers: string[]; forPerson: string[] } {
+  const forPerson: string[] = [];
+  const answers = prompts.map((p) => {
+    if (password && /^\s*password\s*:?\s*$/i.test(p.prompt)) return password;
+    forPerson.push(p.prompt.trim());
+    return '';
+  });
+  return { answers, forPerson };
+}

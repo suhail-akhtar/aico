@@ -1,0 +1,21 @@
+{
+  "about": "Reviewed high/critical npm advisories that are not reachable in AICO. Each entry: package, id (GHSA id from the advisory URL), reason (why the path is unreachable or what mitigates it), expires (YYYY-MM-DD; after it the advisory fails CI again so the decision is re-made). Never add an entry just to make CI green.",
+  "advisories": [
+    {
+      "package": "braces",
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "reason": "GHSA-vfj7-8cjw-p6xm: braces <=3.0.3 stack exhaustion on deeply nested brace patterns; no fixed version published (fixAvailable false, 2026-10-04). Reachable: the Glob tool passes model-chosen patterns to fast-glob -> micromatch -> braces, so an injected pattern can crash the engine process (self-DoS, no data exposure). Mitigated: Glob and Grep refuse patterns over 500 characters, with more than 10 brace groups, or with a numeric range wider than 100 (tools/glob.ts globPatternProblem). Re-check for a fixed braces on expiry.",
+      "expires": "2026-11-04"
+    },
+    {
+      "package": "micromatch",
+      "reason": "same advisory via braces (GHSA-vfj7-8cjw-p6xm)",
+      "expires": "2026-11-04"
+    },
+    {
+      "package": "fast-glob",
+      "reason": "same advisory via micromatch -> braces (GHSA-vfj7-8cjw-p6xm)",
+      "expires": "2026-11-04"
+    }
+  ]
+}

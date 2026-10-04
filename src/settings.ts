@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { aicoHome } from './home.js';
+import { registerSettingsSecrets, type SecretBearingSettings } from './child-env.js';
 import type { McpServerConfig } from './mcp.js';
 import {
   carryTrustAcrossOwnWrite, evaluateProjectLayers, projectTrustStatus, stripGated, untrustedNotice,
@@ -10,6 +11,7 @@ import type { ProviderInstance } from './providers/instances.js';
 import { tightenOnlySentinel, type SentinelSettings } from './sentinel/policy.js';
 import type { BriefSettings } from './brief/core.js';
 import { dropProjectModelChoices, type ModelsSettings } from './models/roles.js';
+import { filterProjectLayer } from './settings-project-policy.js';
 
 export interface AicoSettings {
   model?: string;
@@ -486,6 +488,12 @@ export interface AicoSettings {
    */
   completionGate?: {
     enabled?: boolean;          // default: true
+    /**
+     * The built-in `security` check (secret scan, code rules, dependency
+     * audit on what a turn wrote — security/project-scan.ts) joins a project's
+     * checks. Default: true.
+     */
+    security?: boolean;
   };
   /**
    * Cost circuit breaker. Evaluated at the top of every step, so a breach stops
@@ -864,6 +872,16 @@ export async function loadSettings(): Promise<AicoSettings> {
     stripGated(local as Record<string, unknown>);
     warnOnce(`trust:${trust.root}:${trust.hash}`, `  ⚠ ${untrustedNotice(trust)}`);
   }
+  // What a project may set at all is an allow-list (settings-project-policy.ts):
+  // credentials and where they go, autoApprove, Mini Apps and every key not
+  // yet classified are the person's alone; sandbox, spend ceilings and skill
+  // folders may only tighten.
+  for (const [name, layer] of [['settings.json', project], ['settings.local.json', local]] as const) {
+    const dropped = filterProjectLayer(layer as Record<string, unknown>, global_ as Record<string, unknown>, cwd);
+    if (dropped.length) {
+      warnOnce(`policy:${cwd}:${name}:${dropped.join(',')}`, `  ⚠ .aico/${name} may not set ${dropped.join(', ')}; ignored (only your own settings can).`);
+    }
+  }
   // The safety reviewer may be tightened by a project, never loosened: the
   // agent can write these files, and a cloned repository brings its own.
   tightenOnlySentinel(project as Record<string, unknown>);
@@ -909,6 +927,10 @@ export async function loadSettings(): Promise<AicoSettings> {
   if (p?.gemini?.apiKey     && !process.env.GEMINI_API_KEY)     process.env.GEMINI_API_KEY     = p.gemini.apiKey;
   if (p?.zai?.apiKey        && !process.env.ZAI_API_KEY)        process.env.ZAI_API_KEY        = p.zai.apiKey;
   if (p?.kimi?.apiKey       && !process.env.MOONSHOT_API_KEY)   process.env.MOONSHOT_API_KEY   = p.kimi.apiKey;
+
+  // The engine needs these in its own environment; the agent's children must
+  // not inherit them, and any copy that reaches output is redacted (child-env.ts).
+  registerSettingsSecrets(merged as SecretBearingSettings);
 
   return merged;
 }

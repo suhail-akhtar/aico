@@ -233,7 +233,7 @@ export function createTools(ctx: DesktopContext): Tool[] {
       run: async (a) => {
         const m = savePlugin(ctx, a.manifest, (a.files ?? {}) as Record<string, string>);
         setPluginEnabled(ctx, m.id, true);
-        return json({ saved: m.id, contributes: Object.fromEntries(Object.entries(m.contributes).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])), note: 'Installed and enabled. Frame views and widgets ask the user to trust them the first time.' });
+        return json({ saved: m.id, contributes: Object.fromEntries(Object.entries(m.contributes).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])), note: 'Installed and enabled. Frame views and widgets ask the user to trust them before they run — again after every save, since trust is given to the files as they were.' });
       },
     },
     {

@@ -73,12 +73,14 @@ const server = spawn(process.execPath, [path.join(repoRoot, 'dist', 'index.js'),
 server.stderr.on('data', d => fs.appendFileSync(path.join(OUT, 'server.log'), d));
 const url = await new Promise((resolve, reject) => {
   const t = setTimeout(() => reject(new Error('serve never printed a URL')), 90_000);
-  server.stdout.on('data', d => { fs.appendFileSync(path.join(OUT, 'server.log'), d); const m = d.toString().match(/http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9_-]+/); if (m) { clearTimeout(t); resolve(m[0]); } });
+  server.stdout.on('data', d => { fs.appendFileSync(path.join(OUT, 'server.log'), d); const m = d.toString().match(/http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9_-]+(?:#ui=[A-Za-z0-9_-]+)?/); if (m) { clearTimeout(t); resolve(m[0]); } });
 });
-const token = url.split('token=')[1];
+const token = url.split('token=')[1].split('#')[0];
+// The UI key (after #ui=) is the person's proof: adopting a learned rule needs it, not the token alone.
+const uiKey = url.split('#ui=')[1] ?? '';
 const base = url.split('/?')[0];
-const api = async (route, body, method) => {
-  const res = await fetch(`${base}/api/${route}`, { method: method ?? (body ? 'POST' : 'GET'), headers: { 'x-aico-token': token, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+const api = async (route, body, method, extra = {}) => {
+  const res = await fetch(`${base}/api/${route}`, { method: method ?? (body ? 'POST' : 'GET'), headers: { 'x-aico-token': token, 'content-type': 'application/json', ...extra }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
   try { return JSON.parse(text); } catch { return { raw: text, status: res.status }; }
 };
@@ -214,7 +216,7 @@ for (let i = 2; i <= TURNS; i++) {
     const fromFeedback = all.find(p => /tabular-nums|page header/i.test(JSON.stringify(p)));
     check(Boolean(fromFeedback), `learning: the rating became a proposal (${all.length} open)`);
     if (fromFeedback) {
-      const kept = await api('learning/adopt', { id: fromFeedback.id, cwd: appDir });
+      const kept = await api('learning/adopt', { id: fromFeedback.id, cwd: appDir }, 'POST', { 'x-aico-ui-key': uiKey });
       check(kept.ok !== false && !kept.error, `learning: the proposal was kept (${kept.error ?? 'ok'})`);
       const knowledge = path.join(appDir, '.aico', 'knowledge.json');
       const anywhere = fs.existsSync(knowledge) ? fs.readFileSync(knowledge, 'utf8') : JSON.stringify(await api(`learning/list?cwd=${encodeURIComponent(appDir)}&status=adopted`));

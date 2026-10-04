@@ -67,7 +67,8 @@ export interface CanvasRouteDeps {
   modelFor?: (sessionId: string) => Promise<string | undefined> | string | undefined;
 }
 
-const SESSION = /^[\w.-]{1,160}$/;
+// No `..` and no leading dot: a session id names one folder in the store (session/persistence isValidSessionId).
+const SESSION = /^(?!.*\.\.)[\w-][\w.-]{0,159}$/;
 const NESTED = /^canvas\/([^/]+)\/(comments|export)(?:\/([\w-]{1,40})\/(replies|resolve))?$/;
 
 /** The turn a comment to the agent becomes. The first sentence is the contract's wording. */

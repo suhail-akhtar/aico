@@ -11,6 +11,7 @@
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import type { EngineHost } from './engine-host';
 import type { PrefsStore } from './prefs';
+import { appFrameAllowed } from './security-core';
 
 export interface DesktopPaths {
   /** `~/.aico` (or `AICO_HOME`). */
@@ -78,9 +79,20 @@ export interface DesktopContext {
   revealBrowser(): void;
 }
 
+/**
+ * Every handler answers only the top frame of a page on `aico://app` (the AICO
+ * window, the browser's own window, the copilot overlay) — never an iframe in
+ * it, a plugin or preview frame, or a web page (security-core.ts appFrameAllowed).
+ */
 export function makeHandle(): DesktopContext['handle'] {
   return (channel, fn) => {
     ipcMain.removeHandler(channel);
-    ipcMain.handle(channel, (_e: IpcMainInvokeEvent, ...args: unknown[]) => fn(...(args as never)));
+    ipcMain.handle(channel, (e: IpcMainInvokeEvent, ...args: unknown[]) => {
+      const f = e.senderFrame;
+      if (!appFrameAllowed(f ? { url: f.url, isTopFrame: f.parent === null } : null)) {
+        throw new Error(`Refused: "${channel}" answers only the AICO window.`);
+      }
+      return fn(...(args as never));
+    });
   };
 }

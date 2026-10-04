@@ -315,8 +315,10 @@ export function redactForReview(text: string): string {
 
 /** Untrusted text in: invisible characters removed, instruction-like passages wrapped, our tags defused. */
 function guarded(text: string, max: number): string {
-  const clipped = text.length > max ? `${text.slice(0, max)}… (${text.length - max} more characters)` : text;
-  return guardPageText(redactForReview(clipped), { what: 'text' }).text.replace(/<\/?(?=[a-z_]+>)/gi, '‹');
+  // Redacted before clipping: a secret cut by the clip no longer matches.
+  const safe = redactForReview(text);
+  const clipped = safe.length > max ? `${safe.slice(0, max)}… (${safe.length - max} more characters)` : safe;
+  return guardPageText(clipped, { what: 'text' }).text.replace(/<\/?(?=[a-z_]+>)/gi, '‹');
 }
 
 export interface ReviewInput {
@@ -369,12 +371,16 @@ export function buildReviewInput(input: ReviewInput): string {
     // serves, and a long message cut at 1,200 characters hid what was asked.
     ? requests.map((r, i) => {
       const max = i === requests.length - 1 ? 4000 : 1200;
-      return `${i + 1}. ${redactForReview(r.length > max ? `${r.slice(0, max)}…` : r)}`;
+      const safe = redactForReview(r);
+      return `${i + 1}. ${safe.length > max ? `${safe.slice(0, max)}…` : safe}`;
     }).join('\n')
     : '(none recorded — treat every effect as unrequested)';
   let args = '';
   try { args = JSON.stringify(input.args ?? {}, null, 1); } catch { args = String(input.args); }
-  const recent = (input.recent ?? []).slice(-8).map(r => `- ${r.name} ${r.args.length > 200 ? `${r.args.slice(0, 200)}…` : r.args}`).join('\n');
+  const recent = (input.recent ?? []).slice(-8).map(r => {
+    const a = redactForReview(r.args);
+    return `- ${r.name} ${a.length > 200 ? `${a.slice(0, 200)}…` : a}`;
+  }).join('\n');
   const parts = [
     `<user_requests>\n${req}\n</user_requests>`,
     `<proposed_call tool="${input.tool}" effect="${input.trigger.effect}" why_reviewed="${input.trigger.why.replace(/"/g, "'")}">\n${guarded(args, 2500)}\n</proposed_call>`,
@@ -397,7 +403,8 @@ export function parseSentinelReply(text: string): { verdict: SentinelVerdict; re
   try {
     const json = /\{[\s\S]*\}/.exec(text.replace(/```(?:json)?/g, ''))?.[0] ?? '';
     const p = JSON.parse(json) as { verdict?: unknown; reason?: unknown };
-    const v = String(p.verdict ?? '').trim().toLowerCase();
+    // A string only: String(['allow']) is 'allow', and an array or object is not a verdict.
+    const v = typeof p.verdict === 'string' ? p.verdict.trim().toLowerCase() : '';
     const reason = String(p.reason ?? '').replace(/\s+/g, ' ').trim().slice(0, 400);
     if (v === 'allow' || v === 'deny' || v === 'escalate') return { verdict: v, reason: reason || `(${v}, no reason given)`, parsed: true };
     return { verdict: 'escalate', reason: 'the reviewer gave no allow/deny/escalate verdict', parsed: false };

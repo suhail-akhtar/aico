@@ -3,6 +3,7 @@ import { currentCwd } from '../run-context.js';
 import path from 'path';
 import fastGlob from 'fast-glob';
 import { resolveForReading } from './path.js';
+import { globPatternProblem } from './glob.js';
 
 export interface GrepInput {
   pattern: string;
@@ -21,6 +22,8 @@ interface GrepMatch {
 export async function grepFiles(input: GrepInput): Promise<string> {
   const basePath = input.path ? resolveForReading(input.path, 'path') : currentCwd();
   const globPattern = input.glob ?? '**/*';
+  const problem = globPatternProblem(globPattern, 'glob');
+  if (problem) throw new Error(problem);
 
   const files = await fastGlob(globPattern, {
     cwd: basePath,

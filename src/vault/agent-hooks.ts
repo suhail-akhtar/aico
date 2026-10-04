@@ -18,6 +18,7 @@
 
 import { getVault } from './index.js';
 import { sinkRedact, sinkRedactAccumulated, sinkRedactText } from './sink.js';
+import { scanForSecrets, type DetectedSecret } from './scan.js';
 
 interface RunCallbacks {
   task: string;
@@ -38,8 +39,11 @@ export function scanningEnabled(settings: RunCallbacks['settings']): boolean {
 }
 
 /**
- * Vault what a person typed, if scanning is on. Never throws: a scan that
- * fails leaves the text as it was rather than losing the message.
+ * Vault what a person typed, if scanning is on. Never throws, and fails
+ * CLOSED: if quarantining throws, every span the pure scanner recognises is
+ * withheld from the text, and if even that throws the whole text is. It used to
+ * pass the text through unchanged — so the one failure mode of the scan was to
+ * send the pasted key to the model.
  */
 export async function quarantineIfEnabled(
   text: string,
@@ -50,7 +54,19 @@ export async function quarantineIfEnabled(
   try {
     return await getVault().quarantineUserText(text, sessionId ? { sessionId } : {});
   } catch {
-    return { text, stored: [], dropped: 0 };
+    return withholdDetected(text);
+  }
+}
+
+/** The fail-closed path of {@link quarantineIfEnabled}. Exported for its test. */
+export function withholdDetected(text: string, scan: (t: string) => DetectedSecret[] = scanForSecrets): { text: string; stored: []; dropped: number } {
+  try {
+    const found = [...scan(text)].sort((a, b) => b.start - a.start);
+    let out = text;
+    for (const d of found) out = out.slice(0, d.start) + '[secret withheld: the vault could not store it]' + out.slice(d.end);
+    return { text: out, stored: [], dropped: found.length };
+  } catch {
+    return { text: '[message withheld: it could not be checked for secrets]', stored: [], dropped: 1 };
   }
 }
 
@@ -70,6 +86,11 @@ export async function guardAgentRun<T extends RunCallbacks>(opts: T): Promise<T>
     ...(o.onChunk ? { onChunk: (t: string) => o.onChunk!(sinkRedactAccumulated(t)) } : {}),
     ...(o.onReasoning ? { onReasoning: (t: string, step: number) => o.onReasoning!(sinkRedactAccumulated(t), step) } : {}),
     ...(o.onNotice ? { onNotice: (t: string) => o.onNotice!(sinkRedactText(t)) } : {}),
-    ...(o.onAskUser ? { onAskUser: (q: string) => o.onAskUser!(sinkRedactText(q)) } : {}),
+    // The answer to AskUser is typed by a person exactly like a message, so it
+    // is scanned like one — here, in the loop, for every client at once.
+    ...(o.onAskUser ? {
+      onAskUser: async (q: string) =>
+        (await quarantineIfEnabled(await o.onAskUser!(sinkRedactText(q)), o.settings, o.sessionId)).text,
+    } : {}),
   };
 }

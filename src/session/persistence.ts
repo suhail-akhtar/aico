@@ -36,8 +36,19 @@ interface EventLogHeaderLine {
   name?: string;
 }
 
-/** Absolute path of a session's event log. */
+/**
+ * A session id that names a file in the sessions directory and nothing else:
+ * word characters, `-` and `.`, not starting with `.`, no `..`, at most 160.
+ * Every id AICO mints passes (`web-…`, `sub-<uuid>`, `fork-…`, the CLI's hex);
+ * `../../settings` — which an HTTP caller used to be able to send — does not.
+ */
+export function isValidSessionId(id: unknown): id is string {
+  return typeof id === 'string' && /^[\w-][\w.-]{0,159}$/.test(id) && !id.includes('..');
+}
+
+/** Absolute path of a session's event log. Throws on an id that could leave the directory. */
 export function eventLogPath(sessionId: string, cwd: string): string {
+  if (!isValidSessionId(sessionId)) throw new Error('invalid session id');
   return path.join(getSessionDir(cwd), `${sessionId}.events.jsonl`);
 }
 

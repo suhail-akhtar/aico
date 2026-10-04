@@ -40,7 +40,12 @@ export interface DesktopPrefs {
   launchAtLogin: boolean;
   notifications: { turnEnd: boolean; attention: boolean; background: boolean; sound: boolean };
   sidebar: { collapsed: boolean; width: number };
-  plugins: { disabled: string[]; trusted: string[] };
+  /**
+   * `trustedHashes`: the content hash each trusted plugin had when the person
+   * trusted it (security-core.ts pluginContentHash). Files that change after
+   * that — the agent's ide_plugin_save, a hand edit — revoke the trust.
+   */
+  plugins: { disabled: string[]; trusted: string[]; trustedHashes?: Record<string, string> };
   window: { x?: number; y?: number; width: number; height: number; maximized: boolean };
   /** Where the browser's home button goes. */
   browserHome: string;

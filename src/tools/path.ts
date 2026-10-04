@@ -24,6 +24,7 @@
  * @module tools/path
  */
 
+import fs from 'fs';
 import path from 'path';
 import { currentCwd } from '../run-context.js';
 import { aicoHome } from '../home.js';
@@ -35,6 +36,38 @@ import { getWorkspaceRuntime } from '../workspace.js';
 function isInside(parent: string, target: string): boolean {
   const relative = path.relative(parent, target);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/**
+ * Where `p` really is on disk: symlinks and junctions in every existing part
+ * of it resolved. For a path that does not exist yet (a new file), the nearest
+ * existing ancestor is resolved and the rest appended.
+ *
+ * WHY: the containment check was lexical only, so a symlink or junction inside
+ * the project pointing outside it let Read, Write and Edit reach anything
+ * through `link/...` (security review 2026-10). The check now holds for the
+ * real location as well as the written one.
+ */
+function realLocation(p: string): string {
+  let head = path.resolve(p);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(head), ...rest);
+    } catch {
+      const parent = path.dirname(head);
+      if (parent === head) return path.resolve(p);
+      rest.unshift(path.basename(head));
+      head = parent;
+    }
+  }
+}
+
+/** Inside one of `roots` both as written and where it really is on disk. */
+function insideRoots(roots: string[], resolved: string): boolean {
+  if (!roots.some(root => isInside(root, resolved))) return false;
+  const real = realLocation(resolved);
+  return roots.some(root => isInside(realLocation(root), real));
 }
 
 /**
@@ -131,7 +164,7 @@ export function resolveForReading(inputPath: string, label = 'path'): string {
   const resolved = path.resolve(cwd, inputPath);
   const roots = readableRoots(cwd);
 
-  if (roots.some(root => isInside(root, resolved))) return resolved;
+  if (insideRoots(roots, resolved)) return resolved;
 
   throw new Error(
     `${label} must stay inside the project, the AICO workspace, or the skills directories.\n` +
@@ -155,7 +188,7 @@ export function resolveInsideWorkspace(inputPath: string, label = 'path'): strin
   const resolved = path.resolve(cwd, inputPath);
   const roots = writableRoots(cwd);
 
-  if (roots.some(root => isInside(root, resolved))) return resolved;
+  if (insideRoots(roots, resolved)) return resolved;
 
   throw new Error(
     `${label} must stay inside the project or the AICO workspace.\n` +

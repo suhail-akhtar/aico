@@ -165,6 +165,28 @@ export interface RunContext {
    * and recorded too. Absent in every normal run.
    */
   evalHarness?: EvalHarness;
+  /**
+   * Whether this run has read untrusted content (the taint rule: web pages,
+   * MCP results, remote command output). A cell rather than a flag because it
+   * changes mid-run, and linked to the delegating run's cell: a child of a
+   * tainted parent starts tainted (it acts on a brief the parent may have
+   * written under injected instructions), and a child that reads untrusted
+   * content taints its parent too, whose next step reads the child's report.
+   * Before this a sub-agent — or a background agent — started clean and so
+   * skipped every taint-gated check (security review 2026-10).
+   */
+  taint?: TaintCell;
+}
+
+/** See {@link RunContext.taint}. */
+export interface TaintCell {
+  tainted: boolean;
+  parent?: TaintCell;
+}
+
+/** Mark `cell` and every run above it as having read untrusted content. */
+export function markTainted(cell: TaintCell | undefined): void {
+  for (let c = cell; c && !c.tainted; c = c.parent) c.tainted = true;
 }
 
 /**

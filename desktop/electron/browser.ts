@@ -46,7 +46,7 @@
  * @module desktop/electron/browser
  */
 
-import { app, dialog, ipcMain, shell, WebContentsView, session as electronSession, type BrowserWindow, type WebContents, type Session } from 'electron';
+import { app, dialog, ipcMain, WebContentsView, session as electronSession, type BrowserWindow, type WebContents, type Session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -89,6 +89,9 @@ import { isPrivateOrigin, loginOrigin } from './browser-vault-core';
 import { PAGE_SIGNALS_JS, type PageSignals } from '../shared/page-signals';
 import { busyMessage, ownerHue, personTookOver, TabLeases, TabOwners, type Caller, type Intent, type World } from './browser-owners';
 import { registerTeach, teachPageJs } from './browser-teach';
+import { agentNavigationAllowed, agentOpenRefusal, dialogSource, evaluateRefusal, normaliseAddress, uploadVerdict } from './security-core';
+import { openedRoots } from './opened-roots';
+import { openExternalLink } from './external-link';
 
 /** The profile's older home (Electron's partition); it now lives in <AICO_HOME>/desktop/browser/profile — see browser-session.ts. */
 export const BROWSER_PARTITION = 'persist:aico-browser';
@@ -832,12 +835,13 @@ export function registerBrowser(ctx: DesktopContext): void {
 
   const dialogOpenMessage = (d: DialogRequest): string => `A JavaScript ${d.type} dialog is open on this page ("${d.message.slice(0, 200)}"). The page is paused until it is answered: call browser_dialog with accept true/false${d.type === 'prompt' ? ' (and text)' : ''}.`;
 
-  async function evaluate<T = unknown>(wc: WebContents, expression: string, timeoutMs = 15_000): Promise<T> {
+  /** `userGesture: false` for script the agent wrote (browser_evaluate): it must not unlock what needs a click. */
+  async function evaluate<T = unknown>(wc: WebContents, expression: string, timeoutMs = 15_000, opts?: { userGesture?: boolean }): Promise<T> {
     const t = byWc.get(wc.id);
     if (t?.dialog) throw new Error(dialogOpenMessage(t.dialog));
     const r = await Promise.race([
       cdp<{ result: { value?: T; description?: string }; exceptionDetails?: { text: string; exception?: { description?: string } } }>(
-        wc, 'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true },
+        wc, 'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: opts?.userGesture ?? true },
       ),
       sleep(timeoutMs).then(() => { throw new Error(t?.dialog ? dialogOpenMessage(t.dialog) : 'The page did not answer in time (it may be busy or navigating). Try again.'); }),
     ]);
@@ -908,6 +912,16 @@ export function registerBrowser(ctx: DesktopContext): void {
       history.set(touchVisit(history.get(), wc.getURL(), { title }));
       pushState();
     });
+    // A tab the agent drives (or a chat owns) follows links and redirects only to web pages:
+    // a page cannot walk the agent onto file:, data: or browser-internal addresses (security-core.ts).
+    const refuseAgentNav = (e: { preventDefault(): void }, url: string): void => {
+      if ((agentDriving(tab) || Boolean(owners.ownerOf(tab.id))) && !agentNavigationAllowed(url)) {
+        e.preventDefault();
+        tab.console.push({ level: 'warning', text: `AICO blocked a navigation to ${url.slice(0, 200)}: an agent-driven tab opens only web pages.`, at: Date.now() });
+      }
+    };
+    wc.on('will-navigate', (e) => refuseAgentNav(e, e.url));
+    wc.on('will-redirect', (e) => refuseAgentNav(e, e.url));
     wc.on('did-start-navigation', (d) => {
       if (!d.isMainFrame || d.isSameDocument) return;
       tab.error = undefined; tab.certError = undefined; tab.humanCheck = false; tab.favicon = undefined;
@@ -1008,9 +1022,11 @@ export function registerBrowser(ctx: DesktopContext): void {
         // did not reach falls back to Electron's native box, which the user answers; this only records it
         // so the agent's tools do not wait on a paused page.
         if (tab.dialog) return;
+        const src = dialogSource(typeof params.url === 'string' ? params.url : undefined, wc.getURL());
         const d: DialogRequest = {
           id: askId('j'), tabId: tab.id, type, message: String(params.message ?? ''),
           ...(type === 'prompt' ? { defaultPrompt: String(params.defaultPrompt ?? '') } : {}), byAgent: agentDriving(tab),
+          source: src.host, embedded: src.embedded,
         };
         raiseDialog(tab, d, { emit: false });
       } else if (method === 'Page.javascriptDialogClosed') {
@@ -1066,13 +1082,8 @@ export function registerBrowser(ctx: DesktopContext): void {
     return t;
   };
 
-  function normalise(u: string): string {
-    const s = u.trim();
-    if (/^(https?|file|about|data):/i.test(s) || /^view-source:https?:/i.test(s)) return s;
-    if (/^localhost(:\d+)?(\/|$)|^127\.0\.0\.1|^\[::1\]/.test(s)) return `http://${s}`;
-    if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(s)) return `https://${s}`;
-    return `https://duckduckgo.com/?q=${encodeURIComponent(s)}`;
-  }
+  /** The address bar's rule (security-core.ts); what the agent may open is narrowed in openUrl. */
+  function normalise(u: string): string { return normaliseAddress(u); }
 
   async function waitLoad(wc: WebContents, timeoutMs = 15000): Promise<void> {
     if (!wc.isLoading()) { await sleep(150); return; }
@@ -1185,8 +1196,15 @@ export function registerBrowser(ctx: DesktopContext): void {
     }
   }
 
-  /** `tab`: load into that tab (a chat's own, in the background) and leave the one in front alone. */
-  async function openUrl(url: string, opts?: { newTab?: boolean; tab?: Tab }): Promise<TabInfo> {
+  /**
+   * `tab`: load into that tab (a chat's own, in the background) and leave the one in front alone.
+   * `agent`: the agent asked (browser_open) — only http(s) and about:blank, checked before any tab is touched.
+   */
+  async function openUrl(url: string, opts?: { newTab?: boolean; tab?: Tab; agent?: boolean }): Promise<TabInfo> {
+    if (opts?.agent) {
+      const refusal = agentOpenRefusal(normalise(url));
+      if (refusal) throw new Error(refusal);
+    }
     let t: Tab;
     if (opts?.tab) t = opts.tab;
     else {
@@ -1360,7 +1378,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     if (t0) agentEvent(t0, 'open', 'start', url);
     let r: TabInfo;
     try {
-      r = await openUrl(url, into ? { tab: into } : opts);
+      r = await openUrl(url, { ...(into ? { tab: into } : opts), agent: true });
     } catch (err) {
       // A URL that is a file, not a page: Chromium cancels the navigation and downloads it instead.
       await sleep(400);
@@ -1694,7 +1712,33 @@ export function registerBrowser(ctx: DesktopContext): void {
     },
     async evaluate(expression) {
       let out: unknown;
-      await act('evaluate', { gate: true }, async (t) => { vault.guardAgent(t.view.webContents); out = await evaluate(t.view.webContents, expression); return ''; });
+      await act('evaluate', { gate: true }, async (t) => {
+        vault.guardAgent(t.view.webContents);
+        const wc = t.view.webContents;
+        // Never on a checkout/payment page or beside a filled password (security-core.ts evaluateRefusal) ...
+        const facts = await evaluate<{ cardFields: number; filledPasswords: number }>(wc, `(() => ({
+          cardFields: Array.from(document.querySelectorAll('input')).filter(i => /cc-(number|csc|exp)/.test(i.getAttribute('autocomplete') || '')).length,
+          filledPasswords: Array.from(document.querySelectorAll('input[type=password]')).filter(i => i.value).length,
+        }))()`, 4000).catch(() => null);
+        const sig = await evaluate<PageSignals>(wc, PAGE_SIGNALS_JS, 4000).catch(() => null);
+        if (!facts || !sig) throw new Error('Refused: AICO could not check this page (it may be loading). browser_evaluate runs only on a page it has checked — try again.');
+        const refusal = evaluateRefusal({ checkout: Boolean(sig.cues.checkout || sig.cues.placeOrder), cardFields: facts.cardFields, filledPasswords: facts.filledPasswords });
+        if (refusal) throw new Error(refusal);
+        // ... and elsewhere only with the person's Allow: a page script acts as them.
+        const origin = originOf(wc.getURL()) || wc.getURL();
+        const c = confirm({
+          kind: 'commit', origin, danger: true, okLabel: 'Allow script', cancelLabel: 'Don’t allow',
+          title: `Let the agent run a script on ${origin}?`,
+          detail: `The agent wants to run its own JavaScript in this page, with your signed-in session:\n\n${expression.slice(0, 600)}${expression.length > 600 ? '…' : ''}`,
+        });
+        agentEvent(t, 'confirm', 'blocked', `Run a script on ${origin}`);
+        const waitMs = Math.min(10 * 60_000, Math.max(22_000, calls.getStore()?.approvalWaitMs ?? 22_000));
+        const answer = await Promise.race([c.done, sleep(waitMs).then(() => null)]);
+        if (answer === null) { c.cancel(); throw new Error(`Refused: the user did not answer within ${Math.round(waitMs / 1000)} seconds. browser_evaluate needs their Allow in AICO each time; prefer browser_snapshot / browser_text, or ask them and try again.`); }
+        if (!answer) throw new Error('Refused: the user did not allow the script. Do not retry; use browser_snapshot / browser_text, or ask the user.');
+        out = await evaluate(wc, expression, 15_000, { userGesture: false });
+        return '';
+      });
       return out;
     },
     screenshot(opts) {
@@ -1921,10 +1965,20 @@ export function registerBrowser(ctx: DesktopContext): void {
       return act('upload', { gate: true, diff: false, label: `Uploading ${files.length} file(s)` }, async (t) => {
         if (!files.length) throw new Error('Give at least one file path.');
         const abs = files.map(f => path.resolve(f));
+        // Never a dotfile, key or AICO's own store; files outside the projects and Downloads are named to the person (security-core.ts).
+        const roots = await openedRoots(ctx).list().catch(() => [] as string[]);
+        let downloadsDir: string | undefined;
+        try { downloadsDir = app.getPath('downloads'); } catch { /* none on this system */ }
+        const outside: string[] = [];
         for (const f of abs) {
           let st: fs.Stats;
           try { st = fs.statSync(f); } catch { throw new Error(`No such file: ${f}`); }
           if (!st.isFile()) throw new Error(`Not a file: ${f}`);
+          let real = f;
+          try { real = fs.realpathSync.native(f); } catch { /* checked as given */ }
+          const v = uploadVerdict(real, { roots: roots.filter(r => r !== ctx.paths.aicoHome), downloads: downloadsDir, aicoHome: ctx.paths.aicoHome });
+          if (v.kind === 'refuse') throw new Error(v.reason);
+          if (v.kind === 'outside') outside.push(f);
         }
         const at = await locate(t, target, 'AICO: upload here');
         let ref = at.ref;
@@ -1948,9 +2002,10 @@ export function registerBrowser(ctx: DesktopContext): void {
         const origin = originOf(t.view.webContents.getURL()) || t.view.webContents.getURL();
         const names = abs.map(f => path.basename(f));
         const c = confirm({
-          kind: 'upload', origin, files: abs,
+          kind: 'upload', origin, files: abs, ...(outside.length ? { danger: true } : {}),
           title: `Let the agent upload ${names.length === 1 ? names[0] : `${names.length} files`} to ${origin}?`,
-          detail: `The agent wants to attach ${names.join(', ')} to a form on ${origin}. The file${names.length > 1 ? 's' : ''} will be sent to that site when the form is submitted.`,
+          detail: `The agent wants to attach ${names.join(', ')} to a form on ${origin}. The file${names.length > 1 ? 's' : ''} will be sent to that site when the form is submitted.`
+            + (outside.length ? `\n\nOutside your projects and Downloads — check each one:\n${outside.map(f => `• ${f}`).join('\n')}` : ''),
         });
         const u = { state: 'pending' as 'pending' | 'allowed' | 'denied' | 'done' | 'failed', result: undefined as string | undefined, tabId: t.id, ref, files: abs };
         uploads.set(c.id, u);
@@ -2055,9 +2110,12 @@ export function registerBrowser(ctx: DesktopContext): void {
     burst.push(now);
     dialogBursts.set(t.id, burst);
     if (burst.length > 15 || t.dialog) { e.returnValue = { accept: false }; return; }
+    // Named by the frame that raised it, not the tab (an embedded frame cannot speak as the site).
+    const src = dialogSource(e.senderFrame?.url, t.view.webContents.getURL());
     const d: DialogRequest = {
       id: askId('j'), tabId: t.id, type, message: String(req.message ?? '').slice(0, 5000),
       ...(type === 'prompt' ? { defaultPrompt: String(req.defaultPrompt ?? '') } : {}), byAgent: agentDriving(t),
+      source: src.host, embedded: src.embedded,
     };
     let done = false;
     raiseDialog(t, d, {
@@ -2095,7 +2153,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     return next;
   });
   ctx.handle('browser:devtools', () => active().view.webContents.toggleDevTools());
-  ctx.handle('browser:external', () => { const u = active().view.webContents.getURL(); if (/^https?:/.test(u)) void shell.openExternal(u); });
+  ctx.handle('browser:external', () => { const u = active().view.webContents.getURL(); if (/^https?:/i.test(u)) void openExternalLink(u, 'browser:external').catch(() => {}); });
   // The interface lays the page over its placeholder, in CSS pixels; a zoomed interface needs them scaled to the window's.
   // Covering the page (a menu, a dialog) hides it: while it is still on screen it is captured, so the reply
   // carries a still for the interface to draw in its place. Capturing a *hidden* view can hang, so it never is.

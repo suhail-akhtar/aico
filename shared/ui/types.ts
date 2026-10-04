@@ -108,6 +108,12 @@ export interface ChatMessage {
    * adaptive thinking is the model's decision and most providers say nothing.
    */
   reasoning?: string;
+  /**
+   * For user messages: sent while a turn was running (Steer), and the step
+   * that read it. Shown on the bubble, because a message that appears in the
+   * middle of the agent's work otherwise reads as if the turn started there.
+   */
+  steered?: { step: number };
 }
 
 /** Rolled-up usage for a session, as both clients display it. */

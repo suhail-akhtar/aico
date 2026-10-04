@@ -55,15 +55,20 @@ import {
 
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07/g;
 
-/** Secrets out, terminal escapes out, clipped. `tail` keeps the end (output), otherwise the start. */
+/**
+ * Secrets out, terminal escapes out, clipped. `tail` keeps the end (output),
+ * otherwise the start. Redacted BEFORE clipping: a secret cut in half by the
+ * clip no longer matches the redactor or the scanner, so its surviving half
+ * used to be shown verbatim.
+ */
 export function clean(text: string | undefined, max: number, tail = false): string | undefined {
   if (!text) return undefined;
   let t = text.replace(ANSI, '').replace(/\r(?!\n)/g, '\n');
-  if (t.length > max) t = tail ? `…${t.slice(-max)}` : `${t.slice(0, max)}…`;
   t = sinkRedactText(t);
   const found = scanForSecrets(t);
   if (found.length) t = replaceDetected(t, found, d => `[redacted ${d.label}]`);
   t = t.replace(/\b(bearer|token|basic)\s+[A-Za-z0-9._~+/-]{16,}=*/gi, '$1 [redacted]');
+  if (t.length > max) t = tail ? `…${t.slice(-max)}` : `${t.slice(0, max)}…`;
   return t.trim() || undefined;
 }
 

@@ -91,6 +91,11 @@ export const MessageBubble = React.memo(function MessageBubble({
             {stripFixMarker(message.content)}
           </p>
         </div>}
+        {message.steered && (
+          <span className="mt-1 text-[11px] text-aico-muted">
+            Sent while working · delivered at step {message.steered.step}
+          </span>
+        )}
       </div>
     );
   }

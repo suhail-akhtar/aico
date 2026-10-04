@@ -1,0 +1,7 @@
+#!/bin/sh
+# AICO pre-commit hook: the fast security scan over the files being committed
+# (their staged content) — secrets, dangerous patterns, unclassified routes and
+# settings keys. Findings already reviewed in scripts/security/baseline.json do
+# not block; a new one does, with the fix named. See docs/engineering/security.md
+# "Automated security". Installed by `node scripts/install-hooks.mjs`.
+exec node "$(git rev-parse --show-toplevel)/scripts/security-scan.mjs" --staged --quiet

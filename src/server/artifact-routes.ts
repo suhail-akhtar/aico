@@ -87,7 +87,8 @@ const PREVIEW_ROWS = 1000;
 const PREVIEW_COLS = 60;
 const PREVIEW_HTML = 400_000;
 
-const SESSION = /^[\w.-]{1,160}$/;
+// No `..` and no leading dot: a session id names one folder in the store (session/persistence isValidSessionId).
+const SESSION = /^(?!.*\.\.)[\w-][\w.-]{0,159}$/;
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
 const MAX_FILES = 300;
 const SERVED: Record<string, string> = {

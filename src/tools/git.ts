@@ -52,6 +52,12 @@ const SECRET_PATTERNS = [
   /(^|\/)service-account.*\.json$/i,
 ];
 
+/** Whether a repository-relative path looks like a credentials file. */
+export function looksLikeSecretPath(p: string): boolean {
+  const f = p.replace(/\\/g, '/');
+  return SECRET_PATTERNS.some(rx => rx.test(f));
+}
+
 export interface GitInput {
   action?: 'status' | 'diff' | 'log' | 'branch' | 'commit' | 'push' | 'pr';
   /** Commit message, branch name, or PR title depending on the action. */
@@ -217,6 +223,17 @@ async function commit(input: GitInput): Promise<string> {
 
   const anything = await git(['diff', '--staged', '--name-only']);
   if (!anything.out) return 'Nothing staged to commit.';
+
+  // And again on what staging actually produced: `paths: ['.']` or a
+  // directory names no secret file itself, yet stages every `.env` under it
+  // (security review 2026-10). Unstage them and refuse, so nothing half-made
+  // is committed and the index is left as it was before for those files.
+  const stagedSecrets = anything.out.split('\n').map(s => s.trim()).filter(Boolean).filter(looksLikeSecretPath);
+  if (stagedSecrets.length > 0) {
+    await git(['reset', '-q', '--', ...stagedSecrets]);
+    return `Refusing to commit what looks like credentials: ${stagedSecrets.join(', ')} (staged by the paths you gave; `
+      + 'they have been unstaged again). Add them to .gitignore, or commit them yourself if they are genuinely safe.';
+  }
 
   const result = await git(['commit', '-m', message]);
   if (!result.ok) return `Commit failed: ${result.out}`;

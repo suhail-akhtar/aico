@@ -20,13 +20,35 @@
  * @module vault/sink
  */
 
-import { Redactor, type StreamRedactor } from './redact.js';
+import { Redactor, type SecretEntry, type StreamRedactor } from './redact.js';
 
 let active: Redactor = Redactor.EMPTY;
+/** What the vault published, before the extras are merged in. */
+let vaultRedactor: Redactor = Redactor.EMPTY;
+/**
+ * Secrets the engine holds outside the vault — provider keys, `settings.env`,
+ * MCP server env/headers (see child-env.ts) — keyed by who registered them.
+ * They were never indexed before, so `printenv` in the agent's shell wrote the
+ * user's API key straight into the log.
+ */
+const extras = new Map<string, SecretEntry[]>();
+
+function rebuild(): void {
+  const more = [...extras.values()].flat();
+  active = more.length ? new Redactor([...vaultRedactor.entries, ...more]) : vaultRedactor;
+}
 
 /** Publish the redactor the sinks use. Called by the vault service only. */
 export function setActiveRedactor(redactor: Redactor): void {
-  active = redactor;
+  vaultRedactor = redactor;
+  rebuild();
+}
+
+/** Replace the extra (non-vault) secrets registered under `source`. */
+export function setExtraRedactions(source: string, entries: SecretEntry[]): void {
+  if (entries.length) extras.set(source, entries);
+  else extras.delete(source);
+  rebuild();
 }
 
 /** The redactor in force now. */

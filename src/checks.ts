@@ -56,6 +56,11 @@ export interface Check {
    * prints unformatted files. Any output is then a failure.
    */
   failOnOutput?: boolean;
+  /**
+   * Run in-process instead of as a command: `security` is the built-in
+   * security check (security/project-scan.ts). `command` is then only shown.
+   */
+  builtin?: 'security';
 }
 
 /** Manifest files that mark the root a set of checks belongs to. */
@@ -294,6 +299,11 @@ export function recordCheck(result: CheckResult): void {
 /** Everything recorded this turn. */
 export function checkResults(): CheckResult[] {
   return [...state.get().results.values()];
+}
+
+/** Every file this turn wrote, source or not (manifests, configs) — what the security check scans. */
+export function writtenFiles(): string[] {
+  return [...state.get().written];
 }
 
 /** Source files this turn changed. Exposed for the gate's message and for tests. */

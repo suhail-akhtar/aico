@@ -11,12 +11,13 @@
  * @module desktop/electron/context-menu
  */
 
-import { app, BrowserWindow, clipboard, dialog, Menu, shell, type WebContents, type ContextMenuParams, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, Menu, type WebContents, type ContextMenuParams, type MenuItemConstructorOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DesktopContext } from './context';
 import { isBrowserSession } from './browser-session';
 import { askFor, buildContextMenuTemplate, SEARCH_URL, type MenuAction, type MenuSpec } from './context-menu-template';
+import { openExternalLink } from './external-link';
 
 const safeName = (s: string): string => s.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
 
@@ -97,7 +98,8 @@ export function registerContextMenus(ctx: DesktopContext): void {
       case 'pasteAsPlain': wc.pasteAndMatchStyle(); break;
       case 'selectAll': wc.selectAll(); break;
       case 'addToDictionary': wc.session.addWordToSpellCheckerDictionary(p.misspelledWord); break;
-      case 'openLinkExternal': void shell.openExternal(p.linkURL); break;
+      // The link is the page's: only http(s)/mailto: reach the OS (external-link.ts).
+      case 'openLinkExternal': void openExternalLink(p.linkURL, 'context menu').catch(() => {}); break;
       case 'openLinkNewTab': openTab(wc, p.linkURL); break;
       case 'openLinkBackground': openTab(wc, p.linkURL, true); break;
       case 'openLinkInBrowser':

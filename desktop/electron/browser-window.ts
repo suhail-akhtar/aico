@@ -35,13 +35,14 @@
  * @module desktop/electron/browser-window
  */
 
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, screen, type IpcMainInvokeEvent } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DesktopContext } from './context';
 import { APP_ORIGIN } from './protocol';
 import { JsonFile } from './browser-store';
 import { DEFAULT_WINDOW, MIN_SIZE, normaliseWindowState, placeWindow, type SavedBrowserWindow } from './browser-window-core';
+import { openExternalLink } from './external-link';
 
 export const BROWSER_WINDOW_URL = `${APP_ORIGIN}/browser.html`;
 const TITLE_BAR = 40;
@@ -170,7 +171,7 @@ export function registerBrowserWindow(ctx: DesktopContext): void {
     const openLink = (url: string): void => { if (/^https?:/i.test(url)) void ctx.services.browser?.openForUser(url).catch(() => {}); };
     w.webContents.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
     w.webContents.on('will-navigate', (e, url) => {
-      if (url.split('#')[0] !== BROWSER_WINDOW_URL) { e.preventDefault(); if (/^https?:/i.test(url)) openLink(url); else if (/^mailto:/i.test(url)) void shell.openExternal(url); }
+      if (url.split('#')[0] !== BROWSER_WINDOW_URL) { e.preventDefault(); if (/^https?:/i.test(url)) openLink(url); else if (/^mailto:/i.test(url)) void openExternalLink(url, 'browser window').catch(() => {}); }
     });
     w.webContents.on('render-process-gone', (_e, d) => { if (d.reason !== 'clean-exit' && !w.isDestroyed()) void w.loadURL(BROWSER_WINDOW_URL).catch(() => {}); });
 

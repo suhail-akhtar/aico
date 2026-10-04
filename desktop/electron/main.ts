@@ -9,7 +9,7 @@
  * @module desktop/electron/main
  */
 
-import { app, BrowserWindow, Menu, nativeTheme, screen, shell, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, Menu, nativeTheme, screen, Tray, nativeImage } from 'electron';
 import { session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +23,7 @@ import { applyPowerPrefs, registerCoreIpc } from './core-ipc';
 import { registerFeatures } from './features';
 import { startMcp, MCP_NAME } from './mcp';
 import { eventRoute } from './browser-window-core';
+import { openExternalLink } from './external-link';
 
 const distDir = __dirname;
 const aicoHome = process.env.AICO_HOME || path.join(os.homedir(), '.aico');
@@ -170,13 +171,13 @@ function createWindow(): void {
 
   // Links leave the app; the app never navigates away from itself.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) void shell.openExternal(url);
+    void openExternalLink(url, 'window.open').catch(() => {});
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (e, url) => {
     if (!url.startsWith(APP_ORIGIN)) {
       e.preventDefault();
-      if (/^https?:/i.test(url)) void shell.openExternal(url);
+      void openExternalLink(url, 'navigation').catch(() => {});
     }
   });
   mainWindow.webContents.on('render-process-gone', (_e, details) => {

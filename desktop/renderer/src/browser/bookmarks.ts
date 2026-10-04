@@ -237,9 +237,10 @@ export function wouldNest(folderId: string): boolean {
 function titleFromHtml(html: string): string {
   const m = /<a\b[^>]*>([\s\S]*?)<\/a>/i.exec(html);
   if (!m) return '';
-  const div = document.createElement('div');
-  div.innerHTML = m[1]!;
-  return (div.textContent ?? '').replace(/\s+/g, ' ').trim();
+  // Dropped/imported markup is the page's: parse it in an inert DOMParser document
+  // (no scripts, no image loads, so no <img onerror>), never via innerHTML on a live node.
+  const doc = new DOMParser().parseFromString(m[1]!, 'text/html');
+  return (doc.body.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 
 /** Carry out a drop into `parentId` at `index`: move bookmarks, or bookmark a page or link. */

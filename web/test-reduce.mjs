@@ -14,6 +14,7 @@ import {
   applyLogEvent, readReasoning, parseArgs, orderMessages,
   withPending, dropPending, PENDING_KEY,
   attachmentsOf, stripAttachmentManifest,
+  emptyDraft, composeMessages, reconcileIntents, deliverSteers, followLog, startedFollowup,
 } from './dist-test/reduce.mjs';
 
 let pass = 0, fail = 0;
@@ -359,6 +360,92 @@ test('the optimistic echo carries the attachments too', () => {
   const logged = withPending(new Map(), 'look', 0, [{ id: 'x', name: 'a.png', mimeType: 'image/png', bytes: 1, kind: 'image' }]);
   const echo = [...logged.values()][0];
   assert.equal(echo.attachments.length, 1);
+});
+
+// ── Steer and Queue: what the screen shows while a turn runs ─────────
+section('Steer and Queue are shown, and follow the server');
+
+let keySeq = 100;
+const nextKey = () => ++keySeq;
+
+test('an acknowledged intent the server still lists keeps its key; one it dropped goes', () => {
+  const local = [
+    { key: 1, mode: 'steer', content: 'go left', id: 's1' },
+    { key: 2, mode: 'followup', content: 'then this', id: 'f1' },
+    { key: 3, mode: 'followup', content: 'still sending' },
+  ];
+  const next = reconcileIntents(local, { nextStep: [], nextTurn: [{ id: 'f1', content: 'then this' }] }, nextKey);
+  assert.deepEqual(next.map(p => [p.key, p.mode, p.id]), [[3, 'followup', undefined], [2, 'followup', 'f1']]);
+});
+
+test('a frame that beats the send\'s own reply adopts the message being sent, not a second copy', () => {
+  const local = [{ key: 7, mode: 'followup', content: 'then this' }];
+  const next = reconcileIntents(local, { nextStep: [], nextTurn: [{ id: 'f1', content: 'then this' }] }, nextKey);
+  assert.deepEqual(next.map(p => [p.key, p.id]), [[7, 'f1']]);
+});
+
+test('a queued message leaving the queue is its turn starting — unless it is being removed', () => {
+  const local = [
+    { key: 1, mode: 'followup', content: 'first', id: 'f1' },
+    { key: 2, mode: 'followup', content: 'second', id: 'f2' },
+  ];
+  assert.equal(startedFollowup(local, { nextTurn: [{ id: 'f2', content: 'second' }] })?.content, 'first');
+  assert.equal(startedFollowup(local, { nextTurn: [{ id: 'f1', content: 'first' }, { id: 'f2', content: 'second' }] }), undefined);
+  const removing = [{ ...local[0], withdrawing: true }, local[1]];
+  assert.equal(startedFollowup(removing, { nextTurn: [{ id: 'f2', content: 'second' }] }), undefined);
+});
+
+test('a queued message from another tab (or before a reload) is drawn too', () => {
+  const next = reconcileIntents([], { nextStep: [{ id: 's9', content: 'hurry' }], nextTurn: [{ id: 'f9', content: 'later' }] }, nextKey);
+  assert.deepEqual(next.map(p => [p.mode, p.content, p.id]), [['steer', 'hurry', 's9'], ['followup', 'later', 'f9']]);
+  assert.ok(next.every(p => p.key > 100), 'fresh keys');
+});
+
+test('a delivered steer becomes a user bubble in the running turn, after the work it followed', () => {
+  let draft = emptyDraft();
+  draft = { ...draft, tools: new Map([['c1', { id: 'tool-c1', type: 'tool', content: '', toolName: 'Glob', timestamp: 1 }]]), order: [{ kind: 'tool', key: 'c1' }] };
+  const intents = [{ key: 1, mode: 'steer', content: 'use approach B', id: 's1' }];
+  const next = deliverSteers(draft, intents, [{ id: 's1', step: 2 }], 5);
+  const live = composeMessages(new Map(), next, true, 5);
+  assert.deepEqual(live.map(m => m.type), ['tool', 'user']);
+  assert.equal(live[1].content, 'use approach B');
+  assert.deepEqual(live[1].steered, { step: 2 });
+  assert.equal(deliverSteers(next, intents, [{ id: 's1', step: 2 }]), next, 'delivering twice changes nothing');
+  assert.equal(deliverSteers(draft, intents, []), draft, 'nothing delivered: same draft');
+  assert.equal(deliverSteers(draft, intents, [{ id: 'unknown', step: 2 }]), draft, 'an id this screen never held is not invented');
+});
+
+test("on replay, a person's message read mid-turn is marked with the step that read it", () => {
+  const events = [
+    [1, { type: 'turn/start', turn: 1 }],
+    [2, { type: 'user/message', turn: 1, content: 'do it', source: { kind: 'human' } }],
+    [3, { type: 'step/start', turn: 1, step: 1 }],
+    [4, { type: 'tool/call', turn: 1, callId: 'a', name: 'Glob', arguments: '{}' }],
+    [5, { type: 'user/message', turn: 1, content: 'use approach B', source: { kind: 'human' } }],
+    [6, { type: 'step/start', turn: 1, step: 2 }],
+    [7, { type: 'turn/start', turn: 2 }],
+    [8, { type: 'user/message', turn: 2, content: 'queued one', source: { kind: 'human' } }],
+  ];
+  let logged = new Map();
+  let cursor = null;
+  for (const [seq, data] of events) {
+    logged = applyLogEvent(logged, seq, data, 1);
+    ({ cursor, logged } = followLog(cursor, logged, seq, data));
+  }
+  assert.equal(logged.get(2).steered, undefined, "the turn's own request is not a steer");
+  assert.deepEqual(logged.get(5).steered, { step: 2 });
+  assert.equal(logged.get(8).steered, undefined, "a queued message is its own turn's request");
+});
+
+test("a fresh replay of another session cannot inherit the last one's step", () => {
+  const stale = { turn: 1, step: 5 };
+  let logged = new Map();
+  let cursor = stale;
+  for (const [seq, data] of [[1, { type: 'turn/start', turn: 1 }], [2, { type: 'user/message', turn: 1, content: 'hi' }]]) {
+    logged = applyLogEvent(logged, seq, data, 1);
+    ({ cursor, logged } = followLog(cursor, logged, seq, data));
+  }
+  assert.equal(logged.get(2).steered, undefined);
 });
 
 console.log(`  WEB REDUCER: ${pass} passed, ${fail} failed`);

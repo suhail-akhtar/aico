@@ -13,6 +13,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import type { DesktopContext } from './context';
+import { openedRoots } from './opened-roots';
+import { isExecutablePath } from './security-core';
+import { openExternalLink } from './external-link';
 
 declare const __AICO_VERSION__: string;
 declare const __DESKTOP_VERSION__: string;
@@ -94,17 +97,33 @@ export function registerCoreIpc(ctx: DesktopContext): void {
   ctx.handle('win:devtools', () => ctx.window()?.webContents.toggleDevTools());
 
   // ── Shell ──
-  ctx.handle('shell:openExternal', (url: string) => {
-    if (!/^(https?|mailto):/i.test(url)) throw new Error('Only web and mail links open externally.');
-    return shell.openExternal(url);
+  ctx.handle('shell:openExternal', async (url: string) => {
+    if (!(await openExternalLink(url, 'shell:openExternal'))) throw new Error('Only web and mail links open externally.');
   });
   ctx.handle('shell:showItemInFolder', (p: string) => shell.showItemInFolder(path.resolve(p)));
-  ctx.handle('shell:openPath', (p: string) => shell.openPath(path.resolve(p)));
+  // Only inside the folders open in AICO; a program or script is run only after the person says so.
+  ctx.handle('shell:openPath', async (p: string) => {
+    const target = await openedRoots(ctx).check(p, 'Cannot open');
+    let isDir = false;
+    try { isDir = fs.statSync(target).isDirectory(); } catch { /* shell.openPath reports a missing file */ }
+    if (!isDir && isExecutablePath(target)) {
+      const w = ctx.window();
+      const opts: Electron.MessageBoxOptions = {
+        type: 'warning', title: 'Run this file?', message: `${path.basename(target)} is a program or script. Opening it runs it.`,
+        detail: target, buttons: ['Run it', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+      };
+      const r = w ? await dialog.showMessageBox(w, opts) : await dialog.showMessageBox(opts);
+      if (r.response !== 0) return 'Not opened.';
+    }
+    return shell.openPath(target);
+  });
 
   // ── Dialogs ──
   ctx.handle('dialog:pickFolder', async (title?: string) => {
     const w = ctx.window();
     const r = await dialog.showOpenDialog(w!, { title: title ?? 'Choose a folder', properties: ['openDirectory', 'createDirectory'] });
+    // The person picked it: the file handlers may work in it (opened-roots.ts).
+    if (!r.canceled && r.filePaths[0]) openedRoots(ctx).add(r.filePaths[0]);
     return r.canceled ? null : r.filePaths[0] ?? null;
   });
   ctx.handle('dialog:pickFiles', async (opts?: { title?: string; multi?: boolean; filters?: Electron.FileFilter[] }) => {
@@ -115,6 +134,7 @@ export function registerCoreIpc(ctx: DesktopContext): void {
       filters: opts?.filters,
     });
     if (r.canceled) return [];
+    for (const p of r.filePaths) openedRoots(ctx).add(p);
     return r.filePaths.map(p => {
       const st = fs.statSync(p);
       return { path: p, name: path.basename(p), size: st.size };
@@ -134,6 +154,7 @@ export function registerCoreIpc(ctx: DesktopContext): void {
     });
     if (r.canceled || !r.filePath) return null;
     fs.writeFileSync(r.filePath, Buffer.from(o.content, o.encoding ?? 'utf8'));
+    openedRoots(ctx).add(r.filePath);
     return r.filePath;
   });
   ctx.handle('dialog:confirm', async (o: { title: string; message: string; detail?: string; ok?: string; cancel?: string; danger?: boolean }) => {

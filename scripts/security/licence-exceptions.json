@@ -1,0 +1,21 @@
+{
+  "about": "Production dependencies whose licence the checker cannot accept on its own, each reviewed. `licence` pins the declared value the review covered: if the package changes its licence, the exception stops applying and the check fails again.",
+  "exceptions": {
+    "ssh2": {
+      "licence": null,
+      "reason": "MIT (LICENSE file in the package); lockfile entry has no license field. ADR 0007."
+    },
+    "cpu-features": {
+      "licence": null,
+      "reason": "MIT (LICENSE file); optional native helper of ssh2, no license field in the lockfile."
+    },
+    "buildcheck": {
+      "licence": null,
+      "reason": "MIT (LICENSE file); build helper of cpu-features, no license field in the lockfile."
+    },
+    "duck": {
+      "licence": "BSD",
+      "reason": "declared as bare \"BSD\"; LICENSE file is the 2-clause BSD text (no endorsement clause). Dependency of mammoth."
+    }
+  }
+}

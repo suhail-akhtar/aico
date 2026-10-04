@@ -75,12 +75,30 @@ function request(u: URL, address: string, opts: { maxBytes: number; headers: Rec
  * GET a public http(s) URL through the SSRF guard: only public addresses,
  * pinned, at most 4 redirects each re-checked, a byte cap and a deadline.
  */
+/**
+ * The headers to send after a redirect. A picture provider's API key
+ * (`Authorization` for Pexels and Unsplash) was sent on to wherever the
+ * provider redirected — a CDN, or any host a redirect named. Once the origin
+ * differs from the one the caller addressed, credential-bearing headers go.
+ */
+export function headersForHop(headers: Record<string, string>, fromOrigin: string, toOrigin: string): Record<string, string> {
+  if (fromOrigin === toOrigin) return headers;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (/^(?:authorization|proxy-authorization|cookie)$|api-?key|token|secret|credential|auth/i.test(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 export const guardedFetch: Fetcher = async (raw, opts = {}) => {
   const maxBytes = opts.maxBytes ?? 2 * 1024 * 1024;
   const deadline = AbortSignal.timeout(opts.timeoutMs ?? 20_000);
   const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline;
   let u: URL;
   try { u = new URL(raw); } catch { throw new Error(`not a URL: ${String(raw).slice(0, 80)}`); }
+  const origin = u.origin;
+  let headers: Record<string, string> = { ...(opts.accept ? { Accept: opts.accept } : {}), ...(opts.headers ?? {}) };
   for (let hop = 0; hop < 5; hop++) {
     if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(`only http(s) is fetched, not ${u.protocol}`);
     if (u.username || u.password) throw new Error('a URL with credentials in it is not fetched');
@@ -91,9 +109,10 @@ export const guardedFetch: Fetcher = async (raw, opts = {}) => {
       credentialAdmits: false, knownTarget: false, tunnelPort: false,
     });
     if (!decision.allowed) throw new Error(`refused: ${decision.reason}`);
-    const res = await request(u, decision.address, { maxBytes, headers: { ...(opts.accept ? { Accept: opts.accept } : {}), ...(opts.headers ?? {}) }, signal });
+    const res = await request(u, decision.address, { maxBytes, headers, signal });
     if (res.status >= 300 && res.status < 400 && res.headers.location) {
       u = new URL(String(res.headers.location), u);
+      headers = headersForHop(headers, origin, u.origin);
       continue;
     }
     return res;

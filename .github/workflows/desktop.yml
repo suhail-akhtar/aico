@@ -57,6 +57,12 @@ jobs:
           # go looking for one.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      # What the release is made of (ADR 0026): CycloneDX SBOMs from the
+      # lockfiles via npm's own `npm sbom`, attached beside the installers.
+      - name: SBOM (CycloneDX)
+        if: matrix.target == 'linux'
+        run: node scripts/security-deps.mjs sbom --out desktop/release
+
       - name: Keep the installers
         uses: actions/upload-artifact@v4
         with:
@@ -67,6 +73,7 @@ jobs:
             desktop/release/*.deb
             desktop/release/latest*.yml
             desktop/release/*.blockmap
+            desktop/release/*.cdx.json
           if-no-files-found: error
 
       - name: Attach to the release
@@ -82,7 +89,7 @@ jobs:
           for i in $(seq 1 30); do gh release view "$TAG" >/dev/null 2>&1 && break; sleep 20; done
           # latest*.yml and the blockmaps are what installed copies read to
           # find, verify and (differentially) download an update.
-          gh release upload "$TAG" $(ls desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb desktop/release/latest*.yml desktop/release/*.blockmap 2>/dev/null) --clobber
+          gh release upload "$TAG" $(ls desktop/release/*.exe desktop/release/*.AppImage desktop/release/*.deb desktop/release/latest*.yml desktop/release/*.blockmap desktop/release/*.cdx.json 2>/dev/null) --clobber
 
   # Installed copies read the LATEST published release's latest*.yml. 0.37.0 was
   # published ~24 minutes before its feed was attached, so an update check in

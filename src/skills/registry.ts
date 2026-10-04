@@ -223,10 +223,20 @@ export class SkillRegistry {
    * until a person reviews and enables it.
    */
   async install(url: string): Promise<Skill> {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}`);
-    const content = await resp.text();
-    if (content.length > 1024 * 1024) throw new Error('That file is over 1 MB — not a SKILL.md.');
+    // Through the SSRF guard (security review 2026-10, D4): the URL is the
+    // caller's choice, often a model's, so http(s) to public addresses only,
+    // pinned, redirects re-checked, 1 MB and 30 s at most. Loopback (the
+    // engine's own API) and cloud metadata are refused before any request.
+    const { guardedFetch } = await import('../canvas/deck-media.js');
+    let resp;
+    try {
+      resp = await guardedFetch(url, { maxBytes: 1024 * 1024, timeoutMs: 30_000, accept: 'text/markdown,text/plain,*/*' });
+    } catch (err) {
+      throw new Error(`Failed to fetch skill: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (resp.status < 200 || resp.status >= 300) throw new Error(`Failed to fetch skill: HTTP ${resp.status}`);
+    if (resp.truncated) throw new Error('That file is over 1 MB — not a SKILL.md.');
+    const content = resp.body.toString('utf8');
 
     const skill = parseSkillFile(content, url, false);
     if (!skill) throw new Error('Invalid skill file — missing or invalid frontmatter');

@@ -311,6 +311,13 @@ export async function handleSystemRoute(
       const cwd = path.resolve(typeof body.cwd === 'string' && body.cwd ? body.cwd : process.cwd());
       const id = String(body.id ?? '');
       if (!id) return { status: 400, body: { error: 'id required' } };
+      // Adopting writes what a proposal says (with any edits in the body) into
+      // knowledge the model reads every turn: prompt text, so a person's act —
+      // never the token alone, which the model may hold.
+      {
+        const person = await human();
+        if (!person.ok) return needsHuman(person.reason);
+      }
       const edits = {
         ...(typeof body.trigger === 'string' ? { trigger: body.trigger } : {}),
         ...(typeof body.content === 'string' ? { content: body.content } : {}),
@@ -861,11 +868,22 @@ export async function handleSystemRoute(
 
     case 'skills/create': {
       if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
-      const name = String(body.name ?? '').trim();
-      const description = String(body.description ?? '').trim();
+      // Front-matter fields are one line each: a newline in either would let
+      // the caller write fields of its own (`allowed-tools:`, a second `---`).
+      const name = String(body.name ?? '').replace(/[\r\n]+/g, ' ').trim();
+      const description = String(body.description ?? '').replace(/[\r\n]+/g, ' ').trim();
       const content = String(body.body ?? '').trim();
       if (!name || !description) {
         return { status: 400, body: { error: 'name and description are both required' } };
+      }
+      // A name is one folder under the skills directory, never a path.
+      if (/[\\/]/.test(name) || /^\.+$/.test(name) || name.includes('..')) {
+        return { status: 400, body: { error: 'a skill name cannot contain path separators or dots-only segments' } };
+      }
+      // A skill is instructions the model follows: written by a person, not the token alone.
+      {
+        const person = await human();
+        if (!person.ok) return needsHuman(person.reason);
       }
       const fs = await import('fs');
       const path = await import('path');
@@ -904,6 +922,12 @@ ${content || 'Describe the procedure here.'}
     // ── MCP ──────────────────────────────────────────────────────────
     case 'mcp/add': {
       if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      // Adding a server starts its command (or calls its URL with its
+      // headers): a person's act, never the token alone, which the model may hold.
+      {
+        const person = await human();
+        if (!person.ok) return needsHuman(person.reason);
+      }
       const { addMcpServer } = await import('../mcp/manage.js');
       try {
         const out = await addMcpServer(body as never);
@@ -960,6 +984,8 @@ ${content || 'Describe the procedure here.'}
       const registry = String(body.registry ?? '');
       const input = { ...body };
       delete (input as Record<string, unknown>).registry;
+      // The web client's proof of a person rides in the body; it is not an argument.
+      delete (input as Record<string, unknown>).client;
 
       try {
         let result: string;
@@ -992,6 +1018,13 @@ ${content || 'Describe the procedure here.'}
             // Approving a changed tool and rewriting settings to move secrets
             // are a person's acts (design §5.3): only a proven person passes.
             const wantsHuman = input.action === 'approve' || input.action === 'secure';
+            // Adding, changing, pasting, importing or enabling a server starts
+            // a command or calls a URL with its headers: refused outright
+            // without a person, the same rule as `mcp/add`.
+            if (['add', 'update', 'paste', 'import', 'enable'].includes(String(input.action))) {
+              const verdict = await human();
+              if (!verdict.ok) return needsHuman(verdict.reason);
+            }
             const person = wantsHuman ? (await human()).ok : false;
             result = await executeMcpManage(input as never, { human: person });
             break;
@@ -1330,16 +1363,23 @@ ${content || 'Describe the procedure here.'}
       const type = String(body.type ?? body.provider ?? '');
       if (!type) return { status: 400, body: { error: 'type or id required' } };
       let apiKey = typeof body.apiKey === 'string' ? body.apiKey : '';
+      const baseUrl = typeof body.baseUrl === 'string' && body.baseUrl ? body.baseUrl : undefined;
       if (!apiKey) {
         // Blank means "use what is already configured", so a user can verify a
-        // stored or environment key without retyping a secret.
-        const existing = listInstances(settings).find(i => i.type === type);
+        // stored or environment key without retyping a secret — but only
+        // against the endpoint it is stored with. The draft's URL is the
+        // caller's choice; lending it the stored key let anything holding the
+        // API token (a model that read it included) collect that key at a URL
+        // of its own (DAST D1). A new endpoint needs the key typed again.
+        const sameType = listInstances(settings).filter(i => i.type === type);
+        const existing = sameType.find(i => sameEndpoint(i.baseUrl, baseUrl));
         if (existing) {
           const { resolveApiKey } = await import('../providers/instances.js');
           apiKey = resolveApiKey(existing);
+        } else if (sameType.length > 0) {
+          return { status: 200, body: { ok: false, error: 'A stored key is only sent to the endpoint it is saved with. Type the API key to test a different base URL.' } };
         }
       }
-      const baseUrl = typeof body.baseUrl === 'string' && body.baseUrl ? body.baseUrl : undefined;
       const tested = await testProvider(type, apiKey, baseUrl);
       // What the models take is a fact about the models, true whether or not
       // this draft is saved.
@@ -1378,12 +1418,18 @@ ${content || 'Describe the procedure here.'}
         return { status: 200, body: redactSettings(settings) };
       }
       if (method !== 'POST') return { status: 405, body: { error: 'GET or POST' } };
+      // The web client's proof of a person rides in the body; it is not a setting.
+      const { client: _client, ...sent } = body as Record<string, unknown>;
+      void _client;
+      // A redacted view posted back keeps what is stored: a masked value is
+      // never written over the real one (and so is not a change at all).
+      const patch = restoreRedacted(sent, await readUserSettingsFile()) as Record<string, unknown>;
       {
-        const weakens = safetyWeakening(settings, body as Record<string, unknown>);
+        const weakens = safetyWeakening(settings, patch);
         if (weakens) { const h = await human(); if (!h.ok) return needsHuman(`${weakens} needs a person in the AICO window; the API token alone cannot do it.`); }
       }
       // Applied key by key so a partial update cannot blank the rest of the file.
-      for (const [key, value] of Object.entries(body)) {
+      for (const [key, value] of Object.entries(patch)) {
         await saveUserSetting(key, value);
       }
       return { status: 200, body: redactSettings(await loadSettings()) };
@@ -1395,8 +1441,14 @@ ${content || 'Describe the procedure here.'}
       const { path: dotted, value } = body as { path?: unknown; value?: unknown };
       if (typeof dotted !== 'string' || !dotted.trim()) return { status: 400, body: { error: 'path required' } };
       {
-        const patch = dotted.split('.').reduceRight<unknown>((acc, k) => ({ [k]: acc }), value ?? null) as Record<string, unknown>;
-        const weakens = safetyWeakening(await loadSettings(), patch);
+        // The whole new value of the root this leaf lives under, so the check
+        // compares like with like (a path write changes one leaf, not the root).
+        const current = await loadSettings();
+        const keys = dotted.split('.').filter(Boolean);
+        const root = keys[0]!;
+        const next = withLeaf((current as Record<string, unknown>)[root], keys.slice(1), value ?? null);
+        const patch = { [root]: next } as Record<string, unknown>;
+        const weakens = safetyWeakening(current, patch);
         if (weakens) { const h = await human(); if (!h.ok) return needsHuman(`${weakens} needs a person in the AICO window; the API token alone cannot do it.`); }
       }
       try {
@@ -1487,6 +1539,21 @@ ${content || 'Describe the procedure here.'}
 }
 
 /**
+ * Whether a draft's base URL names the endpoint a stored key belongs to.
+ * Both absent counts as the same (the vendor's built-in endpoint). Compared
+ * after URL parsing and without trailing slashes, so `…/v1/` is `…/v1`; any
+ * other difference — host, port, path, scheme — is a different endpoint.
+ */
+function sameEndpoint(stored: string | undefined, draft: string | undefined): boolean {
+  const norm = (u: string | undefined): string => {
+    const s = (u ?? '').trim();
+    if (!s) return '';
+    try { return new URL(s).href.replace(/\/+$/, ''); } catch { return s.replace(/\/+$/, ''); }
+  };
+  return norm(stored) === norm(draft);
+}
+
+/**
  * Strip every secret before settings cross the wire.
  *
  * Recursive, and keyed on the *field name* rather than on a list of known
@@ -1500,27 +1567,165 @@ ${content || 'Describe the procedure here.'}
  * needs to know whether something is configured; it never needs the value.
  */
 function redactSettings(settings: AicoSettings): Record<string, unknown> {
-  return redactDeep(settings) as Record<string, unknown>;
+  return redactDeep(settings, []) as Record<string, unknown>;
 }
 
-/** Field names whose values never leave the server, at any depth. */
-const SECRET_FIELDS = new Set(['apiKey', 'api_key', 'token', 'secret', 'password']);
+/**
+ * Field names whose values never leave the server, at any depth (compared
+ * lower-case). `authorization` … `private_key` were added after a review found
+ * header and key material in MCP and hook configs reaching the client.
+ */
+const SECRET_FIELDS = new Set([
+  'apikey', 'api_key', 'token', 'secret', 'password',
+  'authorization', 'bearer', 'cookie', 'cookies', 'credential', 'credentials', 'private_key', 'privatekey',
+]);
 
-function redactDeep(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactDeep);
+/**
+ * What a masked value reads as. A settings PUT that carries it back keeps the
+ * stored value (`restoreRedacted`), so a client that round-trips the view it
+ * was given cannot overwrite a real secret with this string.
+ */
+export const REDACTED_MARK = '[redacted]';
+
+/** Token shapes inside free text (a hook's command line, an arg): masked wherever they appear. */
+const SECRET_IN_TEXT: RegExp[] = [
+  /\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{6,}/gi,
+  /\bsk-[A-Za-z0-9_-]{8,}/g,
+  /\bgh[pousr]_[A-Za-z0-9]{16,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{16,}/g,
+  /\bxox[abposr]-[A-Za-z0-9-]{6,}/g,
+];
+
+function maskText(text: string): string {
+  let out = text;
+  for (const re of SECRET_IN_TEXT) {
+    out = out.replace(re, (m: string, scheme?: string) => (typeof scheme === 'string' && /^(bearer|basic|token)$/i.test(scheme) ? `${scheme} ${REDACTED_MARK}` : REDACTED_MARK));
+  }
+  return out;
+}
+
+/**
+ * A hook is a shell command line, and people paste credentials into those in
+ * shapes the vendor prefixes above do not cover: a `--token x` flag, a
+ * `TOKEN=x` assignment, a password in a URL, an opaque generated token (DAST
+ * D3 found `echo <token>` reaching every client verbatim). Applied to strings
+ * under `hooks` only — the long-run rule would mask ids elsewhere. The rest
+ * of the command stays readable; a posted-back masked command keeps the
+ * stored one (`restoreRedacted`).
+ */
+const SECRET_IN_HOOK: Array<[RegExp, string]> = [
+  // --token x, --api-key=x, --password x …: the flag stays, the value goes.
+  [/(--?(?:token|access-token|auth-token|api-?key|key|secret|client-secret|password|passwd|pass|pwd|auth)(?:=|\s+))(?!-)("[^"]*"|'[^']*'|\S+)/gi, `$1${REDACTED_MARK}`],
+  // NAME_TOKEN=x, API_KEY=x …: a secret-named assignment.
+  [/\b([A-Za-z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PWD|PASS|AUTH|CREDENTIALS?)[A-Za-z0-9_]*=)("[^"]*"|'[^']*'|\S+)/gi, `$1${REDACTED_MARK}`],
+  // scheme://user:password@host — the user stays, the password goes.
+  [/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+):[^\s@/]+@/gi, `$1:${REDACTED_MARK}@`],
+  // An opaque generated token: 20+ letters and digits, mixed.
+  [/\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{20,}\b/g, REDACTED_MARK],
+];
+
+function maskHookText(text: string): string {
+  let out = maskText(text);
+  for (const [re, to] of SECRET_IN_HOOK) out = out.replace(re, to);
+  return out;
+}
+
+/** Where every value is a secret whatever its name: `env`, and an MCP server's `env` and `headers`. */
+function isValueMap(trail: readonly string[]): boolean {
+  return (trail.length === 1 && trail[0] === 'env')
+    || (trail.length === 3 && trail[0] === 'mcpServers' && (trail[2] === 'env' || trail[2] === 'headers'));
+}
+
+function redactDeep(value: unknown, trail: readonly string[]): unknown {
+  if (typeof value === 'string') return trail[0] === 'hooks' ? maskHookText(value) : maskText(value);
+  if (Array.isArray(value)) return value.map(v => redactDeep(v, [...trail, '#']));
   if (!value || typeof value !== 'object') return value;
 
   const out: Record<string, unknown> = {};
+  const valueMap = isValueMap(trail);
   for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
-    if (SECRET_FIELDS.has(key)) {
+    if (valueMap) {
+      // Names stay (a settings screen lists them); values are only "set".
+      out[key] = inner === undefined || inner === null || inner === '' ? inner : REDACTED_MARK;
+      continue;
+    }
+    if (SECRET_FIELDS.has(key.toLowerCase())) {
       // Recorded as a boolean beside the field it replaces, so a caller can
       // tell "configured" from "absent" without ever seeing the value.
       if (inner) out[`has${key.charAt(0).toUpperCase()}${key.slice(1)}`] = true;
       continue;
     }
-    out[key] = redactDeep(inner);
+    out[key] = redactDeep(inner, [...trail, key]);
   }
   return out;
+}
+
+/** Marks a key to leave out of the restored patch. */
+const DROP = Symbol('drop');
+
+/**
+ * Undo redaction in a settings patch before it is written: wherever the
+ * patch carries the mask (or a synthetic `hasX` flag in place of a secret
+ * field), the stored value at the same place is kept. A masked string with
+ * nothing stored behind it is dropped rather than written as a literal.
+ */
+export function restoreRedacted(patch: unknown, stored: unknown): unknown {
+  const out = restore(patch, stored);
+  return out === DROP ? undefined : out;
+}
+
+function restore(patch: unknown, stored: unknown): unknown {
+  if (typeof patch === 'string') {
+    if (!patch.includes(REDACTED_MARK)) return patch;
+    return typeof stored === 'string' ? stored : DROP;
+  }
+  if (Array.isArray(patch)) {
+    const st = Array.isArray(stored) ? stored : [];
+    return patch.map((v, i) => restore(v, st[i])).filter(v => v !== DROP);
+  }
+  if (!patch || typeof patch !== 'object') return patch;
+  const st = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored as Record<string, unknown> : {};
+  const out: Record<string, unknown> = {};
+  for (const [key, inner] of Object.entries(patch as Record<string, unknown>)) {
+    const flag = /^has([A-Z].*)$/.exec(key);
+    if (flag && typeof inner === 'boolean') {
+      const field = `${flag[1]!.charAt(0).toLowerCase()}${flag[1]!.slice(1)}`;
+      const original = Object.keys(st).find(k => k === field || k === flag[1]);
+      if (original && SECRET_FIELDS.has(original.toLowerCase())) {
+        // The view said "set": keep what is stored unless the patch sent a new value.
+        if (inner && !(original in (patch as Record<string, unknown>))) out[original] = st[original];
+        continue;
+      }
+      if (SECRET_FIELDS.has(field.toLowerCase())) continue;
+    }
+    const r = restore(inner, st[key]);
+    if (r !== DROP) out[key] = r;
+  }
+  return out;
+}
+
+/** The user's own settings file, raw (no project layers, no defaults). Empty when absent or unreadable. */
+async function readUserSettingsFile(): Promise<Record<string, unknown>> {
+  const { aicoHome } = await import('../home.js');
+  const { readFile } = await import('fs/promises');
+  const { default: path } = await import('path');
+  try {
+    const parsed = JSON.parse(await readFile(path.join(aicoHome(), 'settings.json'), 'utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+/** `root` with the leaf at `keys` set to `value` (`null` removes it). Pure: the input is not changed. */
+function withLeaf(root: unknown, keys: readonly string[], value: unknown): unknown {
+  if (keys.length === 0) return value;
+  const base = root && typeof root === 'object' && !Array.isArray(root) ? { ...(root as Record<string, unknown>) } : {};
+  const [head, ...rest] = keys;
+  const next = withLeaf(base[head!], rest, value);
+  if (next === null || next === undefined) delete base[head!];
+  else base[head!] = next;
+  return base;
 }
 
 /**
@@ -1623,6 +1828,109 @@ export function safetyWeakening(current: object | undefined, patch: Record<strin
     const wasLocal = was.localOnlyPersonal === true || was.preset === 'private';
     const nowLocal = (models.localOnlyPersonal ?? was.localOnlyPersonal) === true || (models.preset ?? was.preset) === 'private';
     if (wasLocal && !nowLocal) return 'Letting personal data leave this machine';
+  }
+  return widening(cur, patch);
+}
+
+/** Absent, null and undefined are the same "not set" for these comparisons. */
+function same(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown): unknown => (v === null || v === undefined ? undefined : v);
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+}
+
+/**
+ * The rest of what a settings write may not do on the token alone (security
+ * review 2026-10): anything that makes AICO run something new (hooks, MCP
+ * servers, custom tools, the environment every command inherits), lets a tool
+ * back in, approves without asking, loosens the sandbox, raises or removes a
+ * spending ceiling, or widens what agents may do unattended. `patch` holds
+ * whole new values for the top-level keys it names. Stricter needs nothing.
+ */
+function widening(cur: Record<string, unknown>, patch: Record<string, unknown>): string | undefined {
+  const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
+  const has = (k: string): boolean => Object.prototype.hasOwnProperty.call(patch, k);
+
+  // Anything here runs or reaches something: any change at all needs a person.
+  const RUNS: Record<string, string> = {
+    hooks: 'Changing hooks (commands AICO runs)',
+    mcpServers: 'Changing MCP servers (commands AICO starts)',
+    env: 'Changing the environment every command inherits',
+    customTools: 'Changing custom tools',
+    toolPacks: 'Changing tool packs',
+    tools: 'Changing tool definitions',
+    permissions: 'Changing permission rules',
+    trust: 'Changing workspace trust',
+    mcpSecurity: 'Changing MCP security settings',
+  };
+  for (const [key, what] of Object.entries(RUNS)) if (has(key) && !same(patch[key], cur[key])) return what;
+
+  // Where the user's key and prompts go: a different provider, a new or
+  // changed endpoint, a new or retyped instance can send both elsewhere.
+  for (const key of ['provider', 'activeProvider']) {
+    if (has(key) && !same(patch[key], cur[key])) return 'Changing the active provider';
+  }
+  if (has('providers')) {
+    const was = obj(cur.providers);
+    for (const [vendor, conf] of Object.entries(obj(patch.providers))) {
+      if (!same(obj(conf).baseUrl, obj(was[vendor]).baseUrl)) return 'Changing a provider\'s endpoint';
+    }
+  }
+  if (has('providerInstances')) {
+    const was = new Map((Array.isArray(cur.providerInstances) ? cur.providerInstances : []).map(i => [String(obj(i).id), obj(i)]));
+    for (const inst of Array.isArray(patch.providerInstances) ? patch.providerInstances : []) {
+      const prev = was.get(String(obj(inst).id));
+      if (!prev) return 'Adding a provider';
+      if (!same(obj(inst).baseUrl, prev.baseUrl) || !same(obj(inst).type, prev.type)) return 'Changing a provider\'s endpoint';
+    }
+  }
+
+  if (has('disabledTools')) {
+    const next = new Set(Array.isArray(patch.disabledTools) ? patch.disabledTools.map(String) : []);
+    const was = Array.isArray(cur.disabledTools) ? cur.disabledTools.map(String) : [];
+    if (was.some(t => !next.has(t))) return 'Turning a disabled tool back on';
+  }
+  if (has('autoApprove') && patch.autoApprove === true && cur.autoApprove !== true) return 'Approving every tool call without asking';
+
+  if (has('sandbox')) {
+    const RANK: Record<string, number> = { 'read-only': 0, 'workspace-write': 1, 'danger-full-access': 2 };
+    const was = obj(cur.sandbox);
+    const next = obj(patch.sandbox);
+    const wasRank = RANK[String(was.mode ?? 'workspace-write')] ?? 1;
+    const nextRank = RANK[String(next.mode ?? 'workspace-write')] ?? 2;
+    if (nextRank > wasRank) return 'Loosening the sandbox';
+    const roots = new Set(Array.isArray(was.additionalWritableRoots) ? was.additionalWritableRoots.map(String) : []);
+    if (Array.isArray(next.additionalWritableRoots) && next.additionalWritableRoots.some(r => !roots.has(String(r)))) return 'Adding a writable folder outside the workspace';
+  }
+
+  if (has('safetyLimits')) {
+    const was = obj(cur.safetyLimits);
+    const next = obj(patch.safetyLimits);
+    for (const [k, v] of Object.entries(was)) {
+      if (typeof v !== 'number') continue;
+      const n = next[k];
+      if (typeof n !== 'number' || n > v) return 'Raising or removing a spending limit';
+    }
+  }
+
+  if (has('agents')) {
+    const was = obj(cur.agents);
+    const next = obj(patch.agents);
+    // maxConcurrent only queues more work, and directChat is a picker: neither widens.
+    if (was.wakeOnResult === false && next.wakeOnResult !== false) return 'Letting background agents start turns by themselves';
+    if (was.resumeAfterRestart === false && next.resumeAfterRestart !== false) return 'Resuming background agents after a restart';
+    if (typeof next.resumeWithinHours === 'number' && next.resumeWithinHours > (typeof was.resumeWithinHours === 'number' ? was.resumeWithinHours : 24)) return 'Resuming older background agents';
+    const KNOWN = new Set(['directChat', 'maxConcurrent', 'wakeOnResult', 'resumeAfterRestart', 'resumeWithinHours']);
+    if (Object.keys({ ...was, ...next }).some(k => !KNOWN.has(k) && !same(was[k], next[k]))) return 'Changing what agents may do';
+  }
+
+  if (has('skills')) {
+    const dirs = new Set(Array.isArray(obj(cur.skills).dirs) ? (obj(cur.skills).dirs as unknown[]).map(String) : []);
+    const next = obj(patch.skills).dirs;
+    if (Array.isArray(next) && next.some(d => !dirs.has(String(d)))) return 'Adding a skills folder';
+  }
+
+  if (has('vault') && obj(cur.vault).scanUserMessages !== false && obj(patch.vault).scanUserMessages === false) {
+    return 'Turning off secret scanning of your messages';
   }
   return undefined;
 }

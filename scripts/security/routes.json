@@ -1,0 +1,548 @@
+{
+  "about": "Every /api route of aico serve and the gate it sits behind. Every route needs the startup token (and a same-origin or absent Origin) — src/server/index.ts handle(). token+human: the token is not enough to say yes for a person (decision-gate.ts). token+grant / token+passphrase: the vault. scripts/security-scan.mjs fails on a route that is not listed here; scripts/security-dast.mjs attacks every listed route. Classify a new route deliberately: what can a holder of only the token do with it?",
+  "routes": {
+    "agent": {
+      "gate": "token"
+    },
+    "agents": {
+      "gate": "token"
+    },
+    "agents/recommendation": {
+      "gate": "token"
+    },
+    "agents/resume": {
+      "gate": "token"
+    },
+    "agents/stop": {
+      "gate": "token"
+    },
+    "answer": {
+      "gate": "token"
+    },
+    "apps": {
+      "gate": "token"
+    },
+    "apps/create": {
+      "gate": "token"
+    },
+    "apps/delete": {
+      "gate": "token"
+    },
+    "apps/deploy": {
+      "gate": "token"
+    },
+    "apps/duplicate": {
+      "gate": "token"
+    },
+    "apps/events": {
+      "gate": "token (SSE)"
+    },
+    "apps/file": {
+      "gate": "token"
+    },
+    "apps/files": {
+      "gate": "token"
+    },
+    "apps/run": {
+      "gate": "token"
+    },
+    "apps/session": {
+      "gate": "token"
+    },
+    "apps/suggest": {
+      "gate": "token"
+    },
+    "apps/templates": {
+      "gate": "token"
+    },
+    "artifacts/file": {
+      "gate": "token"
+    },
+    "artifacts/list": {
+      "gate": "token"
+    },
+    "artifacts/preview": {
+      "gate": "token"
+    },
+    "artifacts/rename": {
+      "gate": "token"
+    },
+    "attachments/file": {
+      "gate": "token"
+    },
+    "attachments/remove": {
+      "gate": "token"
+    },
+    "attachments/upload": {
+      "gate": "token"
+    },
+    "background/cancel": {
+      "gate": "token"
+    },
+    "brief/*": {
+      "gate": "token"
+    },
+    "cancel": {
+      "gate": "token"
+    },
+    "canvas/create": {
+      "gate": "token"
+    },
+    "canvas/edit-part": {
+      "gate": "token"
+    },
+    "canvas/get": {
+      "gate": "token"
+    },
+    "canvas/import": {
+      "gate": "token"
+    },
+    "canvas/list": {
+      "gate": "token"
+    },
+    "canvas/rename": {
+      "gate": "token"
+    },
+    "canvas/restore": {
+      "gate": "token"
+    },
+    "canvas/save": {
+      "gate": "token"
+    },
+    "canvas/settings": {
+      "gate": "token"
+    },
+    "canvas/tabs": {
+      "gate": "token"
+    },
+    "canvas/templates": {
+      "gate": "token"
+    },
+    "changes": {
+      "gate": "token"
+    },
+    "changes/diff": {
+      "gate": "token"
+    },
+    "changes/revert": {
+      "gate": "token"
+    },
+    "chat/handoff": {
+      "gate": "token"
+    },
+    "chat/handoff/events": {
+      "gate": "token (SSE)"
+    },
+    "context-window": {
+      "gate": "token"
+    },
+    "cron/delete": {
+      "gate": "token"
+    },
+    "cron/pause": {
+      "gate": "token"
+    },
+    "cron/resume": {
+      "gate": "token"
+    },
+    "custom-tools": {
+      "gate": "token"
+    },
+    "deck-media/*": {
+      "gate": "token"
+    },
+    "deck/brand": {
+      "gate": "token"
+    },
+    "deck/images/place": {
+      "gate": "token"
+    },
+    "deck/images/project": {
+      "gate": "token"
+    },
+    "deck/images/search": {
+      "gate": "token"
+    },
+    "deck/images/thumb": {
+      "gate": "token"
+    },
+    "deck/images/upload": {
+      "gate": "token"
+    },
+    "edit": {
+      "gate": "token"
+    },
+    "events": {
+      "gate": "token (SSE)"
+    },
+    "feedback": {
+      "gate": "token"
+    },
+    "followup": {
+      "gate": "token"
+    },
+    "fs/browse": {
+      "gate": "token"
+    },
+    "goal": {
+      "gate": "token"
+    },
+    "groups": {
+      "gate": "token"
+    },
+    "groups/create": {
+      "gate": "token"
+    },
+    "groups/delete": {
+      "gate": "token"
+    },
+    "groups/update": {
+      "gate": "token"
+    },
+    "host-answer": {
+      "gate": "token"
+    },
+    "inbox/decide": {
+      "gate": "token+human",
+      "note": "approving a parked call needs human()"
+    },
+    "inbox/list": {
+      "gate": "token"
+    },
+    "knowledge/add": {
+      "gate": "token"
+    },
+    "learning/adopt": {
+      "gate": "token"
+    },
+    "learning/dismiss": {
+      "gate": "token"
+    },
+    "learning/list": {
+      "gate": "token"
+    },
+    "learning/preferences": {
+      "gate": "token"
+    },
+    "learning/preferences/act": {
+      "gate": "token+human",
+      "note": "activating a rule (prompt text) needs human()"
+    },
+    "learning/preferences/export": {
+      "gate": "token"
+    },
+    "longjob/control": {
+      "gate": "token+human",
+      "note": "resume needs human()"
+    },
+    "longjob/decide": {
+      "gate": "token+human",
+      "note": "approving a long job needs human()"
+    },
+    "longjob/list": {
+      "gate": "token"
+    },
+    "manage": {
+      "gate": "token+human-on-weaken",
+      "note": "enabling via the registries needs human()"
+    },
+    "mcp/add": {
+      "gate": "token"
+    },
+    "mcp/reload": {
+      "gate": "token"
+    },
+    "mcp/remove": {
+      "gate": "token"
+    },
+    "mcp/validate": {
+      "gate": "token"
+    },
+    "memory": {
+      "gate": "token"
+    },
+    "miniapps": {
+      "gate": "token"
+    },
+    "miniapps/delete": {
+      "gate": "token"
+    },
+    "miniapps/events": {
+      "gate": "token (SSE)"
+    },
+    "miniapps/run": {
+      "gate": "token"
+    },
+    "miniapps/session": {
+      "gate": "token"
+    },
+    "model": {
+      "gate": "token"
+    },
+    "models/probe": {
+      "gate": "token"
+    },
+    "models/roles": {
+      "gate": "token"
+    },
+    "permission": {
+      "gate": "token+human",
+      "note": "allow:true needs the UI key / connected client nonce (decision-gate.ts); a no needs only the token"
+    },
+    "profile": {
+      "gate": "token"
+    },
+    "profile/*": {
+      "gate": "token"
+    },
+    "project/git-action": {
+      "gate": "token"
+    },
+    "project/git-branches": {
+      "gate": "token"
+    },
+    "project/git-diff": {
+      "gate": "token"
+    },
+    "project/git-log": {
+      "gate": "token"
+    },
+    "project/git-show": {
+      "gate": "token"
+    },
+    "project/git-stashes": {
+      "gate": "token"
+    },
+    "project/git-status": {
+      "gate": "token"
+    },
+    "project/profile": {
+      "gate": "token"
+    },
+    "project/stats": {
+      "gate": "token"
+    },
+    "projects": {
+      "gate": "token"
+    },
+    "projects/add": {
+      "gate": "token"
+    },
+    "projects/remove": {
+      "gate": "token"
+    },
+    "projects/rename": {
+      "gate": "token"
+    },
+    "projects/update": {
+      "gate": "token"
+    },
+    "provider-test": {
+      "gate": "token"
+    },
+    "providers": {
+      "gate": "token"
+    },
+    "providers/activate": {
+      "gate": "token"
+    },
+    "providers/delete": {
+      "gate": "token"
+    },
+    "providers/models": {
+      "gate": "token"
+    },
+    "providers/save": {
+      "gate": "token"
+    },
+    "providers/test": {
+      "gate": "token"
+    },
+    "providers/tuning": {
+      "gate": "token"
+    },
+    "recall/*": {
+      "gate": "token"
+    },
+    "sentinel/list": {
+      "gate": "token"
+    },
+    "session": {
+      "gate": "token"
+    },
+    "session/archive": {
+      "gate": "token"
+    },
+    "session/export": {
+      "gate": "token"
+    },
+    "session/fork": {
+      "gate": "token"
+    },
+    "session/group": {
+      "gate": "token"
+    },
+    "session/rename": {
+      "gate": "token"
+    },
+    "sessions": {
+      "gate": "token"
+    },
+    "sessions/delete": {
+      "gate": "token"
+    },
+    "settings": {
+      "gate": "token+human-on-weaken",
+      "note": "changes listed as weakening need human(); see dast for which"
+    },
+    "settings/path": {
+      "gate": "token+human-on-weaken",
+      "note": "as settings"
+    },
+    "skill-eval/adopt": {
+      "gate": "token"
+    },
+    "skill-eval/cancel": {
+      "gate": "token"
+    },
+    "skill-eval/job": {
+      "gate": "token"
+    },
+    "skill-eval/optimize": {
+      "gate": "token"
+    },
+    "skill-eval/run": {
+      "gate": "token"
+    },
+    "skill-eval/tasks": {
+      "gate": "token"
+    },
+    "skills": {
+      "gate": "token"
+    },
+    "skills/create": {
+      "gate": "token"
+    },
+    "skills/discard": {
+      "gate": "token"
+    },
+    "skills/export": {
+      "gate": "token"
+    },
+    "skills/import": {
+      "gate": "token+human-on-weaken",
+      "note": "importing with enable/authored needs human()"
+    },
+    "skills/install": {
+      "gate": "token+human",
+      "note": "enabling an imported skill needs human()"
+    },
+    "skills/read": {
+      "gate": "token"
+    },
+    "skills/remove": {
+      "gate": "token"
+    },
+    "skills/review": {
+      "gate": "token"
+    },
+    "skills/upload": {
+      "gate": "token+human-on-weaken",
+      "note": "enable needs human()"
+    },
+    "steer": {
+      "gate": "token"
+    },
+    "submit": {
+      "gate": "token"
+    },
+    "system": {
+      "gate": "token"
+    },
+    "tasks": {
+      "gate": "token"
+    },
+    "tasks/events": {
+      "gate": "token (SSE)"
+    },
+    "trajectory": {
+      "gate": "token"
+    },
+    "ui/attach": {
+      "gate": "token+human",
+      "note": "trades the UI key for a nonce; refused without the key or cross-site"
+    },
+    "vault/approve": {
+      "gate": "token+grant",
+      "note": "approval needs a grant or the passphrase"
+    },
+    "vault/audit": {
+      "gate": "token"
+    },
+    "vault/create": {
+      "gate": "token"
+    },
+    "vault/delete": {
+      "gate": "token+grant",
+      "note": "grant"
+    },
+    "vault/export": {
+      "gate": "token+grant",
+      "note": "grant + passphrase"
+    },
+    "vault/fulfil": {
+      "gate": "token"
+    },
+    "vault/generate": {
+      "gate": "token"
+    },
+    "vault/get": {
+      "gate": "token"
+    },
+    "vault/grant": {
+      "gate": "token+passphrase",
+      "note": "mints a grant from the passphrase"
+    },
+    "vault/import": {
+      "gate": "token"
+    },
+    "vault/list": {
+      "gate": "token"
+    },
+    "vault/lock": {
+      "gate": "token"
+    },
+    "vault/match": {
+      "gate": "token"
+    },
+    "vault/policy": {
+      "gate": "token+grant",
+      "note": "grant"
+    },
+    "vault/reveal": {
+      "gate": "token+grant",
+      "note": "one-time grant from a passphrase"
+    },
+    "vault/rotate": {
+      "gate": "token+grant",
+      "note": "grant"
+    },
+    "vault/status": {
+      "gate": "token"
+    },
+    "vault/unlock": {
+      "gate": "token+passphrase",
+      "note": "passphrase"
+    },
+    "vault/update": {
+      "gate": "token+grant",
+      "note": "grant"
+    },
+    "work/ack": {
+      "gate": "token"
+    },
+    "work/stop": {
+      "gate": "token"
+    }
+  }
+}

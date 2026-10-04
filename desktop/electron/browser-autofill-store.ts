@@ -6,8 +6,11 @@
  *
  * The profile is the person's own, on this machine only:
  * `<AICO_HOME>/desktop/browser/autofill.json`, encrypted with the OS keychain
- * (`safeStorage`) when it is available and plain JSON when it is not (the
- * settings page says which). It holds no passwords or payment details — see
+ * (`safeStorage`). Where the keychain cannot protect it — none at all, or
+ * Linux's fixed-key "basic_text" fallback — autofill stays off: nothing is
+ * saved, nothing is filled, and the settings page says why (the same check as
+ * the vault key, security-core.ts safeStorageProblem). A plain-JSON profile
+ * an unprotected machine wrote earlier is no longer read. It holds no passwords or payment details — see
  * browser-autofill.ts for what is filled and what never is.
  *
  * The page is read and filled in an isolated world: the page's own scripts
@@ -17,7 +20,7 @@
  * @module desktop/electron/browser-autofill-store
  */
 
-import { safeStorage, type WebContents } from 'electron';
+import { app, safeStorage, type WebContents } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DesktopContext } from './context';
@@ -26,6 +29,7 @@ import {
   type AfField, type AutofillPlan, type AutofillProfile,
 } from './browser-autofill';
 import { AICO_WORLD } from './browser-session';
+import { safeStorageProblem } from './security-core';
 
 export interface AutofillResult { filled: number; fields: Array<{ label: string; what: string }>; skipped: AutofillPlan['skipped']; address?: string; empty?: boolean }
 
@@ -48,21 +52,30 @@ export function registerAutofill(ctx: DesktopContext, activeWc: () => WebContent
   const file = path.join(ctx.paths.desktopDir, 'browser', 'autofill.json');
   let cache: AutofillProfile | null = null;
 
+  /** Why the OS keychain cannot protect the profile here; autofill is off while there is one. */
+  const problem = (): string | undefined => {
+    let backend: string | undefined;
+    try { backend = (safeStorage as unknown as { getSelectedStorageBackend?: () => string }).getSelectedStorageBackend?.(); } catch { /* older Electron */ }
+    return safeStorageProblem({ ready: app.isReady(), available: safeStorage.isEncryptionAvailable(), platform: process.platform, backend });
+  };
+  const empty = (): AutofillProfile => ({ ...EMPTY_PROFILE, addresses: [] });
+
   const read = (): AutofillProfile => {
+    if (problem()) return empty();
     if (cache) return cache;
     try {
       const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { enc?: string; data?: string; profile?: unknown };
-      if (raw.enc === 'safeStorage' && raw.data) cache = normaliseProfile(JSON.parse(safeStorage.decryptString(Buffer.from(raw.data, 'base64'))));
-      else cache = normaliseProfile(raw.profile);
-    } catch { cache = { ...EMPTY_PROFILE, addresses: [] }; }
+      // Only a sealed profile: a plain one is what an unprotected machine wrote, and stays unread.
+      cache = raw.enc === 'safeStorage' && raw.data ? normaliseProfile(JSON.parse(safeStorage.decryptString(Buffer.from(raw.data, 'base64')))) : empty();
+    } catch { cache = empty(); }
     return cache;
   };
 
   const write = (p: AutofillProfile): AutofillProfile => {
+    const why = problem();
+    if (why) throw new Error(`Autofill is off on this computer: ${why} Your details are not saved unprotected.`);
     const next = normaliseProfile({ ...p, updatedAt: Date.now() });
-    const body = safeStorage.isEncryptionAvailable()
-      ? { v: 1, enc: 'safeStorage', data: safeStorage.encryptString(JSON.stringify(next)).toString('base64') }
-      : { v: 1, enc: 'none', profile: next };
+    const body = { v: 1, enc: 'safeStorage', data: safeStorage.encryptString(JSON.stringify(next)).toString('base64') };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(`${file}.tmp`, JSON.stringify(body));
     fs.renameSync(`${file}.tmp`, file);
@@ -115,7 +128,8 @@ export function registerAutofill(ctx: DesktopContext, activeWc: () => WebContent
   ctx.handle('browser:autofill:set', (p: unknown) => write(normaliseProfile(p)));
   ctx.handle('browser:autofill:status', () => {
     const p = read();
-    return { encrypted: safeStorage.isEncryptionAvailable(), empty: profileIsEmpty(p), addresses: p.addresses.map(a => ({ id: a.id, label: a.label })) };
+    const why = problem();
+    return { encrypted: !why, ...(why ? { problem: `Autofill is off: ${why}` } : {}), empty: profileIsEmpty(p), addresses: p.addresses.map(a => ({ id: a.id, label: a.label })) };
   });
   ctx.handle('browser:autofill:scan', async () => { const wc = activeWc(); return wc ? service.scan(wc) : { filled: 0, fields: [], skipped: [] }; });
   ctx.handle('browser:autofill:fill', async (opts?: { addressId?: string }) => {

@@ -59,7 +59,8 @@ let appsHandle: ReturnType<typeof streamApps> | null = null;
 let appsRefs = 0;
 import {
   applyLogEvent, withPending, dropPending, emptyDraft, attachmentUrl,
-  type Draft, type ReasoningBurst,
+  reconcileIntents, deliverSteers, followLog, startedFollowup, stripAttachmentManifest, PENDING_KEY,
+  type Draft, type ReasoningBurst, type PendingIntent, type InboxFrame, type LogCursor,
 } from './reduce';
 import { merge as mergeSessions, promote } from './grouping';
 
@@ -205,7 +206,9 @@ interface AppState {
    * A steer lands at the next step boundary and a queued message when its turn
    * starts; until then this is the only evidence either was received.
    */
-  pendingIntents: Array<{ key: number; mode: 'steer' | 'followup'; content: string }>;
+  pendingIntents: PendingIntent[];
+  /** The replayed log's open turn and step, to mark a steer with the step that read it. */
+  logCursor: LogCursor | null;
   model: string | null;
   /** The configured default, for sessions that never expressed a preference. */
   defaultModel: string | null;
@@ -411,6 +414,8 @@ interface AppState {
   answer: (content: string) => Promise<void>;
   steer: (content: string) => Promise<void>;
   followup: (content: string) => Promise<void>;
+  /** Take a queued message back before its turn starts; `edit` puts it back in the composer. */
+  unqueue: (key: number, edit?: boolean) => Promise<void>;
   refreshSessions: () => Promise<void>;
   refreshProjects: () => Promise<void>;
   /** Work in this directory from now on. */
@@ -511,6 +516,7 @@ export const useStore = create<AppState>((set, get) => ({
   lastActivityAt: 0,
   usage: NO_USAGE,
   pendingIntents: [],
+  logCursor: null,
   model: null,
   defaultModel: null,
   error: null,
@@ -555,6 +561,8 @@ export const useStore = create<AppState>((set, get) => ({
       question: null, permission: null, edit: null, hostCall: null, notice: null,
       vaultRequest: null, vaultApproval: null, vaultNotice: null,
       lastSeq: 0, usage: NO_USAGE, busy: false,
+      // Another chat's queue is not this one's; `caught-up` restores this one's.
+      pendingIntents: [], logCursor: null,
       turnStartedAt: null, lastActivityAt: 0,
       goal: null, feedback: {}, deliverables: [], turnSummary: null,
       // Another session's delegations are not this one's.
@@ -916,7 +924,7 @@ export const useStore = create<AppState>((set, get) => ({
   steer: async (content) => {
     const key = nextIntentKey();
     set(s => ({ pendingIntents: [...s.pendingIntents, { key, mode: 'steer', content }] }));
-    try { await api.steer(get().sessionId, content); }
+    try { acknowledge(set, key, await api.steer(get().sessionId, content)); }
     catch (err) {
       set(s => ({
         error: (err as Error).message,
@@ -928,13 +936,31 @@ export const useStore = create<AppState>((set, get) => ({
   followup: async (content) => {
     const key = nextIntentKey();
     set(s => ({ pendingIntents: [...s.pendingIntents, { key, mode: 'followup', content }] }));
-    try { await api.followup(get().sessionId, content); }
+    try { acknowledge(set, key, await api.followup(get().sessionId, content)); }
     catch (err) {
       set(s => ({
         error: (err as Error).message,
         pendingIntents: s.pendingIntents.filter(p => p.key !== key),
       }));
     }
+  },
+
+  unqueue: async (key, edit = false) => {
+    const intent = get().pendingIntents.find(p => p.key === key);
+    if (!intent || intent.mode !== 'followup' || !intent.id) return;
+    const mark = (withdrawing: boolean): void =>
+      set(s => ({ pendingIntents: s.pendingIntents.map(p => (p.key === key ? { ...p, withdrawing } : p)) }));
+    // Marked first: the `inbox` frame for the removal arrives before this
+    // request returns, and must not be read as the message's turn starting.
+    mark(true);
+    let ok = false;
+    try { ok = (await api.withdrawFollowup(get().sessionId, intent.id)).ok; }
+    catch (err) { mark(false); set(() => ({ error: (err as Error).message })); return; }
+    // Not ok means its turn already started: the message is in the transcript
+    // now, and putting it in the composer too would invite sending it twice.
+    if (!ok) { mark(false); return; }
+    set(s => ({ pendingIntents: s.pendingIntents.filter(p => p.key !== key) }));
+    if (edit) get().prefillComposer(intent.content);
   },
 
   refreshSessions: async () => {
@@ -1313,6 +1339,10 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
           const arrived = String(data.content ?? '').trim();
           patch.pendingIntents = state.pendingIntents.filter(p => p.content.trim() !== arrived);
         }
+        // A person's message read mid-turn is a steer: say so on the bubble.
+        const followed = followLog(state.logCursor, patch.logged!, event.seq ?? 0, data);
+        patch.logged = followed.logged;
+        patch.logCursor = followed.cursor;
         // Goal, feedback and the title are projections of the same log, so
         // replaying it restores them for free — a reopened session shows its
         // goal without a second request.
@@ -1372,10 +1402,38 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
         // reload must not turn a pause into a hang with nothing on screen.
         hostCall: (data as { hostCall?: HostCall | null }).hostCall ?? null,
         draft: (data as { busy?: boolean }).busy ? state.draft : emptyDraft(),
-        // Drop the optimistic echo now that the real user message has replayed.
-        logged: dropPending(state.logged),
+        // Drop the optimistic echo now that the real user message has replayed —
+        // unless a turn is running whose request is not in the log yet (a queued
+        // message that started as this stream reconnected): then it is still
+        // the only evidence of what that turn is doing.
+        logged: keepEchoFor(echoStarted(state, data), Boolean((data as { busy?: boolean }).busy)),
+        // A turn running now that this screen thought was over is a new one
+        // (queued, started while the stream reconnected) — the old draft is
+        // the previous turn's, already in the log, and showing it would draw
+        // that turn twice.
+        ...((data as { busy?: boolean }).busy && !state.busy ? { draft: emptyDraft(), turnStartedAt: Date.now() } : {}),
+        // What this chat has waiting, from the server rather than memory.
+        pendingIntents: reconcileIntents(state.pendingIntents,
+          ((data as { inbox?: InboxFrame | null }).inbox ?? {}) as InboxFrame, nextIntentKey),
       }));
       return;
+
+    case 'inbox': {
+      // The queues changed: a steer was read, a queued message started or was
+      // withdrawn, or another tab added one (engine: RunManager.watchInbox).
+      const frame = data as InboxFrame;
+      set(state => {
+        // A queued message leaving the queue is its turn starting: show it as
+        // that turn's request now (turn-start may fall in a reconnect gap).
+        const started = startedFollowup(state.pendingIntents, frame);
+        return {
+          draft: deliverSteers(state.draft, state.pendingIntents, frame.delivered),
+          pendingIntents: reconcileIntents(state.pendingIntents, frame, nextIntentKey),
+          ...(started ? { logged: withPending(state.logged, started.content) } : {}),
+        };
+      });
+      return;
+    }
 
     // ── ephemeral: the live turn ────────────────────────────────────
     case 'agent':
@@ -1473,6 +1531,9 @@ function applyEvent(set: Set, get: Get, event: StreamEvent): void {
       // not every time an old log is re-read.
       set(state => ({
         busy: true, draft: emptyDraft(), error: null, turnSummary: null,
+        // A queued message becomes this turn's request: shown as one now,
+        // rather than when the turn ends and the log replays it.
+        ...(startedFromQueue(state, data) ? { logged: withPending(state.logged, String((data as { task?: string }).task)) } : {}),
         // Last turn's children are done; showing them beside a new turn's
         // work would read as if they had started again.
         subAgents: [],
@@ -1726,3 +1787,50 @@ useStore.subscribe((state, previous) => {
   }
   if (state.targetGroup !== previous.targetGroup) rememberTargetGroup(state.targetGroup);
 });
+
+/** Attach the server's id to an intent it accepted, so `inbox` frames can follow it. */
+function acknowledge(set: Set, key: number, reply: { ok: boolean; id?: string }): void {
+  if (!reply.ok) throw new Error('The session is not open on the server; nothing was sent.');
+  if (!reply.id) return;
+  // The `inbox` frame for this message usually arrives before the reply that
+  // names it, and has already drawn it under the server's id: keep that one.
+  set(s => ({
+    pendingIntents: s.pendingIntents.some(p => p.id === reply.id && p.key !== key)
+      ? s.pendingIntents.filter(p => p.key !== key)
+      : s.pendingIntents.map(p => (p.key === key ? { ...p, id: reply.id } : p)),
+  }));
+}
+
+/** A turn started by the server for a queued message (not by this screen's send, not by a plugin). */
+function startedFromQueue(state: AppState, data: Record<string, unknown>): boolean {
+  if (data.source || typeof data.task !== 'string' || !data.task) return false;
+  // An echo of this very request (this screen's send, or the queued message
+  // the `inbox` frame already put up) stays as it is, attachments and all; one
+  // left over from the turn before is replaced.
+  const echo = state.logged.get(PENDING_KEY);
+  return !echo || echo.content.trim() !== stripAttachmentManifest(data.task).trim();
+}
+
+/**
+ * At `caught-up`: a queued message whose turn started while the stream was
+ * away is that turn's request — put it up, and let `keepEchoFor` take it down
+ * again if the replay already holds it.
+ */
+function echoStarted(state: AppState, data: Record<string, unknown>): Map<number, ChatMessage> {
+  const frame = (data as { inbox?: InboxFrame | null }).inbox;
+  if (!(data as { busy?: boolean }).busy || state.busy || !frame) return state.logged;
+  const started = startedFollowup(state.pendingIntents, frame);
+  return started ? withPending(state.logged, started.content) : state.logged;
+}
+
+/** `dropPending`, except while a running turn's own request has not replayed yet. */
+function keepEchoFor(logged: Map<number, ChatMessage>, busy: boolean): Map<number, ChatMessage> {
+  const echo = logged.get(PENDING_KEY);
+  if (!echo || !busy) return dropPending(logged);
+  // In the log already if the latest turn the log holds asked it.
+  let lastTurn = -1;
+  for (const [key, m] of logged) if (key !== PENDING_KEY && m.type === 'user' && typeof m.turn === 'number') lastTurn = Math.max(lastTurn, m.turn);
+  const recorded = [...logged].some(([key, m]) => key !== PENDING_KEY && m.type === 'user'
+    && m.turn === lastTurn && m.content.trim() === echo.content.trim());
+  return recorded ? dropPending(logged) : logged;
+}

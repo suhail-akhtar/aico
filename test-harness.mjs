@@ -4383,7 +4383,7 @@ console.log('  -- RunChecks does not spend the minute twice on unchanged code --
     const first = await executeTool('RunChecks', {});
     assert(/^PASSED/.test(first) && /PASS\s+typecheck/.test(first), `the first run runs the checks (${first.split('\n')[0]})`);
     const second = await executeTool('RunChecks', {});
-    assert(/unchanged since the last green run/.test(second) && /typecheck, test still green/.test(second), `an unchanged project answers with the last result (${second.split('\n')[0]})`);
+    assert(/unchanged since the last green run/.test(second) && /typecheck, test(?:, security)? still green/.test(second), `an unchanged project answers with the last result (${second.split('\n')[0]})`);
     const forced = await executeTool('RunChecks', { force: true });
     assert(/PASS\s+typecheck/.test(forced), 'force runs them anyway');
     await new Promise(r => setTimeout(r, 20));
@@ -14298,6 +14298,10 @@ console.log('\n══ TOOL-PRODUCED IMAGES AND LEARNED CAPABILITIES ══');
       res.writeHead(200, { 'content-type': 'image/svg+xml' }); res.end('<svg xmlns="http://www.w3.org/2000/svg"/>');
     });
     await new Promise(r => server.listen(0, '127.0.0.1', r));
+    // The fixture is on loopback, which the real WebFetch refuses (SSRF guard);
+    // this block is about images, so it is served directly.
+    const { setWebFetchTransportForTest } = await import('./dist-test/test-exports.js');
+    setWebFetchTransportForTest((u) => fetch(u));
     const base = `http://127.0.0.1:${server.address().port}`;
     const sink = createToolImageSink({ model: 'claude-opus-5' });
     const seen = await runInContext({ cwd: workDir, toolImages: sink }, () => webFetch({ url: `${base}/pic.png` }));
@@ -14310,6 +14314,7 @@ console.log('\n══ TOOL-PRODUCED IMAGES AND LEARNED CAPABILITIES ══');
     const svg = await webFetch({ url: `${base}/logo.svg` });
     assert(svg.includes('<svg'), 'an SVG is still returned as text');
     server.close();
+    setWebFetchTransportForTest();
   }
 
   // Every wire format accepts the picture after the tool results.

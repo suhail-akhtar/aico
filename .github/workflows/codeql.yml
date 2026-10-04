@@ -1,0 +1,53 @@
+name: CodeQL
+
+# The deep half of static analysis (ADR 0026): GitHub's CodeQL with the
+# security-extended query suite over the engine, the web, desktop and VS Code
+# clients. Taint tracking across files catches what the fast line-level scan
+# (scripts/security-scan.mjs, pre-commit + CI) cannot; that one catches in
+# under a second what this needs minutes for. Findings land in the
+# repository's Security tab (code scanning alerts).
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so new queries run over unchanged code too.
+    - cron: '27 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # No build step needed for JS/TS; extraction reads the sources.
+          build-mode: none
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - '**/node_modules/**'
+              - dist
+              - dist-test
+              - web-dist
+              - '**/dist/**'
+              - benchmarks
+              - docs/assets
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript

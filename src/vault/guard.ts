@@ -79,13 +79,31 @@ const SHELL_BLOCKS: Array<{ re: RegExp; reason: string }> = [
   { re: /\b(?:gdb|lldb)\s+(?:-p|--pid|attach)\b|\bprocdump\b/i, reason: 'attaching to a running process' },
   { re: /\baico\s+vault\s+(?:show|export|reveal|grant-passphrase)\b/i, reason: 'revealing vault contents from the agent\'s shell' },
   { re: /\bAICO_VAULT_(?:KEY|MASTER)\b/i, reason: 'looking for a vault key in the environment' },
+  // Whole-environment dumps. The agent's children no longer inherit provider
+  // keys or settings.env (child-env.ts); this names the attempt anyway, since a
+  // dump is how such a value was leaked into the log in the first place. Only
+  // the bare, argument-less forms — `env NODE_ENV=x cmd` and `set -e` are fine.
+  { re: /\bprintenv\b/i, reason: 'dumping the environment' },
+  {
+    re: /(?:^|[;&|(\n`]|\$\()\s*(?:command\s+|builtin\s+)?(?:env|set|export(?:\s+-p)?|declare\s+-[a-z]*[px][a-z]*|typeset\s+-x|compgen\s+-e)\s*(?=$|[|;&>)\n`])/im,
+    reason: 'dumping the environment',
+  },
+  {
+    re: /\b(?:Get-ChildItem|gci|dir|ls|Get-Item|gi)\s+(?:-(?:Literal)?Path\s+)?['"]?env:|\[(?:System\.)?Environment\]::GetEnvironmentVariables\b/i,
+    reason: 'dumping the environment',
+  },
+  // AICO's own settings files hold provider keys and settings.env values.
+  { re: /(?:\.aico|AICO_HOME[}%]?)[\\/]+settings[\w.-]*\.json\b/i, reason: 'reading AICO\'s settings, which hold API keys' },
   // The engine's own decision routes, driven with its token: a model approving
   // its own tool calls or credential uses. The routes refuse that anyway
   // (server/decision-gate.ts, vault/http.ts); this turns the attempt into a
   // named refusal. Needs both the route and the token, so a project of the
   // user's with its own /api/permission route is not caught.
   {
-    re: /^(?=[\s\S]*\/api\/(?:permission|ui\/attach|inbox\/decide|longjob\/(?:decide|control)|vault\/(?:approve|reveal|grant|export)))(?=[\s\S]*(?:x-aico-(?:token|ui-key|client)|[?&]token=))/i,
+    // Also the routes that widen what the agent may do or start a process
+    // (MCP servers, settings, skills, learned rules, registry management) —
+    // each refuses the token alone too (server/api-system.ts).
+    re: /^(?=[\s\S]*\/api\/(?:permission|ui\/attach|inbox\/decide|longjob\/(?:decide|control)|vault\/(?:approve|reveal|grant|export)|mcp\/(?:add|update)|settings(?:\/path)?\b|skills\/(?:create|install|upload|import)|learning\/(?:adopt|preferences\/act)|manage\b|profile\/(?:act|add|run|settings)))(?=[\s\S]*(?:x-aico-(?:token|ui-key|client|grant)|[?&]token=))/i,
     reason: 'answering AICO\'s own approval prompts from the agent\'s shell',
   },
 ];

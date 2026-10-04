@@ -39,6 +39,9 @@ import {
 import { checksFor } from '../project/profile.js';
 import { formatTestSummary, parseJUnitXml, parseTestOutput, relativeTo, type TestSummary } from '../test-results.js';
 import { selects, styleChecks } from '../style-tools.js';
+import { writtenFiles } from '../checks.js';
+import { currentRunContext } from '../run-context.js';
+import { securityCheck } from '../security/project-scan.js';
 
 /**
  * Every check this turn is held to: the project's own (profile first, manifest
@@ -50,8 +53,24 @@ export function gateChecks(root = projectRoot()): Check[] {
   const extra = detectChecksFor(touchedFiles(), root)
     .filter(group => group.root !== path.resolve(root))
     .flatMap(group => group.checks.map(c => ({ ...c, name: `${path.relative(root, group.root).replace(/\\/g, '/')}:${c.name}` })));
-  return [...own, ...extra];
+  const checks = [...own, ...extra];
+  // The built-in security check rides with a project's own checks (ADR 0026):
+  // where the project defines what "working" means, "safe to hand over" is
+  // part of it. A project with no checks gets none — the gate stays silent
+  // there by design (checks.ts), and this does not change that.
+  if (checks.length > 0 && currentRunContext()?.settings?.completionGate?.security !== false) {
+    checks.push(SECURITY_CHECK);
+  }
+  return checks;
 }
+
+/** The in-process security check (security/project-scan.ts), last: cheapest to read once the build is green. */
+export const SECURITY_CHECK: Check = {
+  name: 'security',
+  command: 'built-in: secrets, code rules, dependency audit',
+  weight: 5,
+  builtin: 'security',
+};
 
 /** How much of a failing command's output to keep. The tail is the useful half. */
 const OUTPUT_TAIL = 4000;
@@ -178,6 +197,17 @@ export async function runChecks(input: RunChecksInput = {}): Promise<string> {
   for (const check of wanted) {
     const started = Date.now();
     const cwd = check.cwd ?? root;
+    if (check.builtin === 'security') {
+      const sec = await securityCheck(root, writtenFiles().filter(f => !path.relative(root, f).startsWith('..')));
+      const ms = Date.now() - started;
+      const record: CheckResult = { name: check.name, command: check.command, passed: sec.passed, ms, output: sec.output, at: Date.now(), sourceMtimeMs };
+      recordCheck(record);
+      results.push(record);
+      lines.push(`${sec.passed ? 'PASS' : 'FAIL'}  ${check.name.padEnd(10)} ${check.command}  (${(ms / 1000).toFixed(1)}s)`);
+      if (sec.passed && sec.counts.medium > 0) notes.push(sec.output);
+      if (!sec.passed) { failedAt = check; break; }
+      continue;
+    }
     const result = await bash({
       command: check.command,
       timeout: input.timeout ?? 600,

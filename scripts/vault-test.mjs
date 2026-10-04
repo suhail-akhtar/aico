@@ -628,7 +628,7 @@ console.log('\n══ V13. CANARY THROUGH EVERY SINK (a real turn, persisted) �
 
   const hookOut = path.join(tmp, 'hook-input.txt');
   process.env.AICO_VAULT_HOOK_OUT = hookOut;
-  const hookCmd = 'node -e "require(\'fs\').appendFileSync(process.env.AICO_VAULT_HOOK_OUT, (process.env.AICO_HOOK_CONTEXT||\'\')+String.fromCharCode(10))"';
+  const hookCmd = 'node -e "require(\'fs\').appendFileSync(process.env.AICO_VAULT_HOOK_OUT, require(\'fs\').readFileSync(0,\'utf8\')+String.fromCharCode(10))"';
   freezeHooks({ hooks: { PostToolUse: [hookCmd], UserPromptSubmit: [hookCmd], PreToolUse: [hookCmd] } });
 
   const session = new Session({ id: `vault-canary-${Date.now()}`, cwd: project, startedAt: Date.now() });

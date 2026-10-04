@@ -13,8 +13,14 @@
  * API KEYS ARE LEFT OUT BY DEFAULT. A backup file gets copied to USB sticks
  * and cloud folders. Stripping removes every credential-shaped key (`apiKey`,
  * `token`, `…_API_KEY`, an `Authorization` header) wherever it sits in
- * `settings.json`. Restoring a stripped backup then keeps the keys this
- * machine already has, rather than wiping them because the file had none.
+ * `settings.json` — and, since a privacy review found tokens surviving in
+ * other places, every other string is scrubbed too: `user:pass@` in URLs,
+ * sensitive query parameters (`?token=`), the value after a `--token` style
+ * flag in an argument list (an MCP server's `args`), and anything the secret
+ * shapes in `shared/terminal-redact.ts` recognise (a `ghp_…` in a hook
+ * command). Those become `[masked …]`. Restoring a stripped backup then keeps
+ * the keys this machine already has (and its value wherever the backup says
+ * `[masked …]`), rather than wiping them because the file had none.
  *
  * Layout: `manifest.json` at the root and every file under `home/<path>`.
  *
@@ -24,6 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ZipReader, ZipWriter, walk, safeEntryPath } from './zip';
+import { maskSecrets } from '../shared/terminal-redact';
 
 export const BACKUP_FORMAT = 'aico-backup';
 export const BACKUP_VERSION = 1;
@@ -80,11 +87,49 @@ export function isSecretKey(key: string): boolean {
   return SECRET_NAME.test(key);
 }
 
-/** A copy of `value` with every credential removed, and how many were. */
+/** A command-line flag that is followed by a credential (`--token X`, `--api-key X`, `-p X` is too vague and is left). */
+const SECRET_FLAG = /^--?(?:api[-_]?key|apikey|token|access[-_]?token|auth[-_]?token|bearer|secret|client[-_]?secret|password|passwd|pat|private[-_]?key)$/i;
+/** Query parameters that carry credentials. */
+const SECRET_PARAM = /^(?:token|access_token|refresh_token|id_token|auth|auth_token|api[-_]?key|apikey|key|secret|client_secret|password|passwd|pwd|sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token|code)$/i;
+/** A value that is a reference, not a secret: `${VAR}`, `$VAR`, `{{secret:name}}`, `%VAR%`. */
+const REFERENCE = /^(?:\$\{[^}]+\}|\$[A-Za-z_]\w*|\{\{[^}]+\}\}|%[A-Za-z_]\w*%)$/;
+export const MASK = /\[masked [^\]]*\]/;
+
+/** One string with URL userinfo, sensitive query values and secret-shaped values masked. */
+export function scrubString(text: string): { text: string; masked: number } {
+  let masked = 0;
+  // scheme://user:pass@host and scheme://token@host
+  let out = text.replace(/\b([a-z][a-z0-9+.-]{1,20}:\/\/)([^\s/@"'<>]{1,256})@(?=[A-Za-z0-9[])/gi, (_m, scheme: string, info: string) => {
+    if (MASK.test(info) || REFERENCE.test(info)) return `${scheme}${info}@`;
+    masked++;
+    return `${scheme}[masked url-credentials]@`;
+  });
+  // ?token=…&key=…
+  out = out.replace(/([?&])([A-Za-z0-9_.-]{1,40})=([^&#\s"'<>]+)/g, (m, sep: string, name: string, value: string) => {
+    if (!SECRET_PARAM.test(name) || MASK.test(value) || REFERENCE.test(value)) return m;
+    masked++;
+    return `${sep}${name}=[masked query-${name.toLowerCase()}]`;
+  });
+  const shaped = maskSecrets(out);
+  return { text: shaped.text, masked: masked + shaped.masked };
+}
+
+/** A copy of `value` with every credential removed or masked, and how many were. */
 export function stripCredentials<T>(value: T): { value: T; removed: number } {
   let removed = 0;
+  const str = (s: string): string => { const r = scrubString(s); removed += r.masked; return r.text; };
   const visit = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(visit);
+    if (typeof v === 'string') return str(v);
+    if (Array.isArray(v)) {
+      return v.map((item, i) => {
+        const prev = i > 0 ? v[i - 1] : undefined;
+        if (typeof item === 'string' && typeof prev === 'string' && SECRET_FLAG.test(prev.trim()) && item && !REFERENCE.test(item.trim()) && !MASK.test(item)) {
+          removed++;
+          return '[masked argument]';
+        }
+        return visit(item);
+      });
+    }
     if (!v || typeof v !== 'object') return v;
     const out: Record<string, unknown> = {};
     for (const [k, child] of Object.entries(v as Record<string, unknown>)) {
@@ -113,6 +158,11 @@ function identity(v: unknown): string | null {
 export function restoreCredentials<T>(incoming: T, current: unknown): { value: T; kept: number } {
   let kept = 0;
   const merge = (inc: unknown, cur: unknown): unknown => {
+    // A value the backup masked: this machine's own value, where it has one.
+    if (typeof inc === 'string' && MASK.test(inc)) {
+      if (typeof cur === 'string' && cur && !MASK.test(cur)) { kept++; return cur; }
+      return inc;
+    }
     if (Array.isArray(inc) && Array.isArray(cur)) {
       return inc.map((item, i) => {
         const id = identity(item);

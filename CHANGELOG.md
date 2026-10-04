@@ -3,6 +3,152 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Fixed
+
+- **Steer and Queue now show what happened to your message.** Both reached
+  the engine and worked, but the transcript only learned of them when the
+  turn ended, so they looked broken. The engine now sends a live `inbox`
+  frame (and restores it on reconnect): a steer appears as your message in
+  the running turn, marked "Sent while working · delivered at step N"; a
+  queued message shows "Queued — runs next" under the running turn with
+  Edit and Remove, and becomes the next turn's message when it starts. A
+  queued turn that started while the stream reconnected no longer redraws
+  the previous turn's work. Desktop and web.
+
+### Security
+
+- **Automated, shift-left security (ADR 0026).** A fast static scan
+  (`npm run check:security`) runs in a new pre-commit hook on the files being
+  committed and in CI over the whole tree: secrets, command/SQL injection,
+  eval, unsanitised HTML, TLS off, Electron isolation, `openExternal` without
+  a scheme check, engine `fetch` outside the SSRF guard, and every `/api`
+  route and critical settings key classified on purpose. Pre-existing
+  findings sit in a reviewed baseline (8 still open, printed on every run);
+  CI fails only on new ones. CodeQL (`security-extended`) runs on every push
+  and weekly. Lockfiles must resolve from the npm registry with sha512
+  integrity, production licences must be permissive, `npm audit` gates high
+  and critical advisories (reviewed exceptions expire), Dependabot keeps npm
+  and Actions current, and every release carries CycloneDX SBOMs. A DAST
+  suite starts the real engine in a throwaway store and attacks it (about
+  1,100 checks in under a minute in CI). Guards that must fail closed are
+  pinned by tests.
+- **AICO checks the code it writes for you.** A built-in `security` check
+  joins RunChecks in projects that define checks. It scans what the turn
+  wrote for secrets and dangerous patterns on the lines it added (JS/TS,
+  Python, Go), audits dependencies when a manifest changed, and runs bandit,
+  gosec or semgrep if you have them installed. A key in a file or a SQL
+  string built by interpolation now blocks "done" the way a failing test
+  does. Turn it off with `completionGate.security: false`.
+
+- **Desktop: the agent's browser opens only web pages.** browser_open (and
+  every agent route into it) accepts http(s) and about:blank only — no
+  `file:`, `data:`, `view-source:`, `chrome:` or `devtools:`; a tab the agent
+  drives or a chat owns refuses links and redirects to anything else. The
+  person may still type a `file:` address.
+- **Desktop: plugin frames cannot mint a person's grant.** The app and plugin
+  content-security policies add `form-action 'none'`, and main attaches a
+  human grant only to the app's own JSON request carrying `x-aico-intent`
+  (the desktop's API transport adds it). Trusting a plugin is tied to a hash
+  of its files: `ide_plugin_save` or a hand edit makes it untrusted until the
+  person trusts it again.
+- **Desktop: browser_evaluate needs the person.** Every run asks in AICO; it
+  is refused on checkout/payment pages and while a password field holds a
+  value, and it no longer runs with a simulated user gesture.
+- **Desktop: browser_upload refuses keys and dotfiles** (`.ssh`, `.env`,
+  `*.pem`, `id_*`, AICO's own store) and names to the person any file outside
+  the open projects and Downloads.
+- **Desktop: IPC and file handlers are scoped.** Handlers answer only the top
+  frame of an `aico://app` window; `fs:read`/`fs:write` (and create, rename,
+  trash, preview) and `shell:openPath` work only inside folders open in AICO
+  (projects, AICO's store, folders picked in a dialog), and opening a program
+  or script asks first.
+- **Desktop: smaller fixes.** Autofill stays off where the OS keychain cannot
+  protect it (the vault key's check, including Linux `basic_text`); a
+  JavaScript dialog names the frame that raised it; the password vault's
+  fill reply is accepted only from the frame it was sent to; an SSH terminal
+  answers only a plain `Password:` prompt with the stored password — one-time
+  codes are the person's.
+- **Desktop backups without API keys scrub more.** Tokens in argument lists
+  (`--token …`), `user:pass@` in URLs, sensitive query parameters and
+  secret-shaped values in hook commands are masked; restoring on a machine
+  that has the values keeps its own.
+- **The engine API checks Host and Origin exactly.** `aico serve` refuses a
+  request whose Host is not 127.0.0.1, localhost or [::1] on its own port
+  (DNS rebinding), and matches Origin exactly instead of by prefix. Error
+  responses no longer carry absolute paths or stack traces.
+- **The API token alone no longer widens what the agent can do.** Adding or
+  changing an MCP server (any scope or form), creating a skill and adopting a
+  learned rule need a person. So do settings writes that change hooks, MCP
+  servers, env, custom tools, permissions, trust or the provider (provider,
+  endpoint, a new or changed instance), re-enable a disabled tool, turn on
+  autoApprove, loosen the sandbox, raise or remove a spending limit, or widen
+  agents or skill folders. Submitting with full autonomy or L4 needs a person;
+  otherwise a chat is held to the mode a person last chose.
+- **Settings reach clients with secrets masked**: env, MCP env and headers,
+  credential-named fields and token-shaped strings in hooks. A masked value
+  posted back keeps the stored one. Session ids are validated on every route
+  and in the log store; ids that try to leave it get 400.
+- **Project settings may only set what a project should.** A repository's
+  `.aico/settings.json` can no longer set autoApprove, the provider, a
+  provider endpoint or instance, or mini-app hosting; sandbox settings only
+  tighten; skill folders outside the repository are refused. Which keys a
+  project may set is an allow-list, so a new setting defaults to user-only.
+- **Agent processes no longer inherit API keys.** Shells, terminals, custom
+  tools and MCP servers start without provider keys or settings `env` values,
+  which are also redacted from tool output; environment dumps and reads of
+  AICO's settings files from a shell are refused. AskUser answers are scanned
+  for secrets like any message, the scanner knows more token formats, and a
+  scanner error withholds text instead of passing it through.
+- **Shell commands are judged as the shell runs them.** Quotes and escapes no
+  longer hide a command (`r"m" -rf /`), download-into-shell and encoded
+  PowerShell are refused, secret files are refused to every reader, and git
+  clean/checkout ./restore . and recursive PowerShell/cmd deletes warn. The
+  hard blocks apply to Terminal and the desktop's terminal tool, not only Bash.
+  A command counts as read-only only if every part of it is.
+- **The file tools cannot rewrite AICO's own settings, hooks, tools, agents
+  or trust files** without a person approving that exact call.
+- **WebFetch reaches public addresses only.** It went straight to any URL,
+  so a page could have it read AICO's own API, cloud metadata or a LAN admin
+  page (also via a redirect or a decimal, hex or IPv4-mapped address). It now
+  uses the SSRF guard: http(s) only, every resolved address and redirect hop
+  checked, pinned, size- and time-capped. The address classifier also treats
+  6to4 by its embedded IPv4 address, and Teredo and site-local as non-public.
+- **Links cannot carry the file tools out of the project.** A symlink or
+  junction inside the project that points elsewhere no longer lets Read,
+  Write, Edit, LS, Glob or Grep reach outside it; NotebookEdit, which had no
+  path check at all, is confined like Write.
+- **Glob and Grep cap their patterns** (length, brace groups, numeric
+  ranges) before brace expansion, which has an unfixed resource-exhaustion
+  advisory (GHSA-vfj7-8cjw-p6xm), and refuse patterns that climb out of the
+  search folder with `..` or are absolute.
+- **Unattended work runs from an allow-list.** A background or detached job
+  with nobody to approve can use only read-only tools (and MCP tools marked
+  read-only), unless the user chose full or auto-approve; Terminal, Git,
+  HTTP requests and the ops tools were previously let through.
+- **Taint follows delegation.** A sub-agent of a run that read untrusted
+  content starts tainted and taints its parent; HTTP responses and SSH/WinRM
+  output now count as untrusted content.
+- **Fail closed.** A PreToolUse hook that fails, times out or cannot start
+  blocks the call, and gets its context on stdin instead of in environment
+  variables. A malformed pipeline decision or Sentinel verdict denies or
+  escalates instead of allowing.
+- **Remote commands**: the destructive classifier sees `rm -f -r`, long
+  flags, quoted or escaped commands, a DELETE without WHERE anywhere in the
+  command, and PowerShell aliases. WinRM's first plain-HTTP connection to a
+  host needs a person.
+- **Git**: a commit or worktree finish that would stage `.env`, keys or
+  credentials (through `.` or `add -A`) is refused and the files unstaged.
+- **Smaller fixes.** The local-only/private preset keeps the Sentinel,
+  judge, inline-edit, vision and compaction roles local too, and Ollama
+  `:cloud` models no longer count as local. MCP tool descriptions and results
+  pass through the injection guard; MCP pins also cover titles and
+  annotations; Windows MCP launches refuse shell metacharacters in arguments.
+  Deck picture fetches drop credentials on a cross-origin redirect, task and
+  Sentinel text is redacted before it is clipped, and vault decryption pins
+  the GCM tag length.
+
 ## 0.39.1 — 2026-10-04
 
 ### Added

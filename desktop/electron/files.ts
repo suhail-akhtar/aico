@@ -6,6 +6,9 @@
  * asked to open. Folder watches tell the interface when something changed on
  * disk — the agent writing a file shows up in an open editor tab.
  *
+ * Reading, writing, creating, renaming and trashing are scoped to the folders
+ * the person opened in AICO (opened-roots.ts): a path outside is refused.
+ *
  * @module desktop/electron/files
  */
 
@@ -15,6 +18,7 @@ import { shell } from 'electron';
 import fg from 'fast-glob';
 import type { DesktopContext } from './context';
 import { zipDirectory } from './zip';
+import { openedRoots } from './opened-roots';
 
 const MAX_READ = 8 * 1024 * 1024;
 const HIDDEN_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.turbo', '.cache', 'coverage', '__pycache__', '.venv', 'venv', 'target', '.idea', '.vscode-test']);
@@ -62,7 +66,9 @@ export function registerFiles(ctx: DesktopContext): void {
     return out.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   });
 
-  ctx.handle('fs:read', (file: string) => {
+  const roots = openedRoots(ctx);
+  ctx.handle('fs:read', async (file: string) => {
+    await roots.check(file, 'Cannot open');
     const st = fs.statSync(file);
     if (st.isDirectory()) throw new Error('That is a folder.');
     if (st.size > MAX_READ) return { binary: false, tooLarge: true, size: st.size, content: '' };
@@ -72,7 +78,8 @@ export function registerFiles(ctx: DesktopContext): void {
     return { binary: false, tooLarge: false, size: st.size, mtime: st.mtimeMs, content: text, eol: text.includes('\r\n') ? 'crlf' : 'lf' };
   });
 
-  ctx.handle('fs:readDataUrl', (file: string) => {
+  ctx.handle('fs:readDataUrl', async (file: string) => {
+    await roots.check(file, 'Cannot preview');
     const st = fs.statSync(file);
     if (st.size > 30 * 1024 * 1024) throw new Error('Too large to preview.');
     const ext = path.extname(file).slice(1).toLowerCase();
@@ -80,7 +87,8 @@ export function registerFiles(ctx: DesktopContext): void {
     return `data:${mime};base64,${fs.readFileSync(file).toString('base64')}`;
   });
 
-  ctx.handle('fs:write', (file: string, content: string) => {
+  ctx.handle('fs:write', async (file: string, content: string) => {
+    await roots.check(file, 'Cannot save');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.aico-${process.pid}.tmp`;
     fs.writeFileSync(tmp, content, 'utf8');
@@ -88,21 +96,24 @@ export function registerFiles(ctx: DesktopContext): void {
     return fs.statSync(file).mtimeMs;
   });
 
-  ctx.handle('fs:create', (target: string, kind: 'file' | 'dir') => {
+  ctx.handle('fs:create', async (target: string, kind: 'file' | 'dir') => {
+    await roots.check(target, 'Cannot create');
     if (fs.existsSync(target)) throw new Error(`${path.basename(target)} already exists.`);
     if (kind === 'dir') fs.mkdirSync(target, { recursive: true });
     else { fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, ''); }
     return target;
   });
 
-  ctx.handle('fs:rename', (from: string, to: string) => {
+  ctx.handle('fs:rename', async (from: string, to: string) => {
+    await roots.check(from, 'Cannot rename');
+    await roots.check(to, 'Cannot rename');
     if (fs.existsSync(to)) throw new Error(`${path.basename(to)} already exists.`);
     fs.renameSync(from, to);
     return to;
   });
 
   /** To the recycle bin / trash — recoverable, on purpose. */
-  ctx.handle('fs:trash', async (target: string) => { await shell.trashItem(target); return true; });
+  ctx.handle('fs:trash', async (target: string) => { await roots.check(target, 'Cannot delete'); await shell.trashItem(target); return true; });
 
   /**
    * Zip a folder to a file. With `rootName` every entry sits under that one
