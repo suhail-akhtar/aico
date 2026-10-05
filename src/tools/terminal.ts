@@ -101,6 +101,16 @@ function shellKey(): string {
   return currentRunContext()?.sessionId ?? 'default';
 }
 
+/**
+ * Where this session's persistent shell is now, when one is open. The shell
+ * confinement guard resolves a Terminal command's relative paths against it:
+ * a `cd ..` in one call moves where the next call writes.
+ */
+export function terminalCwd(): string | undefined {
+  const shell = shells.get(shellKey());
+  return shell && shell.child.exitCode === null && !shell.child.killed ? shell.cwd : undefined;
+}
+
 const isWindows = process.platform === 'win32';
 
 /** Start a shell and leave it running. */

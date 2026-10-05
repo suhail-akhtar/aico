@@ -57,7 +57,8 @@ export const PROJECT_POLICY = {
   hooks: 'trust-gated',
   env: 'trust-gated',
   mcpServers: 'trust-gated',
-  workspace: 'allow',
+  // Its path is a folder shell writes are allowed into (ADR 0027): inside the repository only.
+  workspace: 'tighten',
   // Per-person lists: folders, groups, and the instructions they carry.
   projects: 'user-only',
   groups: 'user-only',
@@ -84,9 +85,13 @@ export const PROJECT_POLICY = {
   agentModels: 'allow',
   disabledTools: 'allow',
   dependencyAudit: 'allow',
+  // Layering rules for the code graph: per-project data, runs nothing.
+  codeGraph: 'allow',
   deferTools: 'allow',
   imageGeneration: 'allow',
   sandbox: 'tighten',
+  // Where shell commands may write and whether they may download/install (ADR 0027): the person's alone.
+  shell: 'user-only',
   // The vault says settings cannot loosen it; turning off the message scan would.
   vault: 'user-only',
   repeatGuard: 'allow',
@@ -168,6 +173,18 @@ export function tightenProjectLayer(layer: Layer, user: Layer, root: string): st
       else dropped.push(`skills.${k}`);
     }
     if (Object.keys(kept).length) layer.skills = kept; else delete layer.skills;
+  }
+
+  // workspace.path: inside the repository only. It is one of the roots the
+  // shell may write to, so a repo pointing it at ~/bin would widen that.
+  if ('workspace' in layer) {
+    const p = isObj(layer.workspace) ? layer.workspace : {};
+    const kept: Layer = {};
+    for (const [k, v] of Object.entries(p)) {
+      if (k === 'path' && typeof v === 'string' && insideRoot(root, v)) kept.path = path.resolve(root, v);
+      else dropped.push(`workspace.${k}`);
+    }
+    if (Object.keys(kept).length) layer.workspace = kept; else delete layer.workspace;
   }
 
   // completionGate: a project may switch the gate or its security check on,

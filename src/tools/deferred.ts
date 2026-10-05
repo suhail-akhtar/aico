@@ -130,6 +130,14 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ['CodeSearch', 'CodeRewrite', 'Refactor'],
   },
   {
+    // ADR 0028. Loaded outright by a request about impact, callers, usages, paths or
+    // architecture (REQUEST_LOADS): the benchmark found models rarely call a graph tool
+    // they must remember exists.
+    id: 'graph',
+    summary: 'who uses a file or symbol, impact, paths, architecture',
+    tools: ['CodeGraph'],
+  },
+  {
     id: 'audit',
     summary: 'dependency vulnerabilities and licences',
     tools: ['DependencyAudit'],
@@ -187,6 +195,12 @@ const REQUEST_LOADS: Array<{ re: RegExp; groups: readonly string[] }> = [
   {
     re: /\b(?:renam(?:e|ing)|refactor(?:ing)?|codemod|(?:move|relocate) (?:the |this |a )?(?:file|module|component|class|function)s?|find (?:all )?references|(?:every|all) (?:the )?(?:call[- ]?sites?|callers|usages?|occurrences|references|imports)|across (?:all|every|the (?:whole|entire)) (?:files?|codebase|repo(?:sitory)?|project))\b/i,
     groups: ['refactor'],
+  },
+  {
+    // Impact, callers, usages, dependencies, paths, architecture (ADR 0028). Also every
+    // rename/signature change: that is when a missed caller costs most.
+    re: /\b(?:impact|blast radius|what (?:uses|calls|imports|depends on|breaks)|who (?:uses|calls|imports)|where (?:is|are) [\w.$#/-]+ (?:used|called|imported)|(?:every|all|each) (?:the )?(?:callers?|call[- ]?sites?|usages?|uses|importers?|dependents?)\b|callers? of|usages? of|depend(?:s|encies|ents)? (?:on|of)|dependency (?:graph|tree|map)|call (?:graph|path|chain)|code ?(?:graph|map)|how does [\w ./-]{1,60} (?:reach|get to|call)|requests? (?:path|flow)|reach(?:es|ing)? (?:the )?(?:database|db|data ?store|storage|repository)|architecture|module (?:structure|boundaries)|circular (?:imports?|dependenc)|import cycles?|dead (?:code|files?)|(?:change|changing) (?:the )?signature|add(?:ing)? (?:a )?(?:required )?(?:parameter|argument)|renam(?:e|ing))\b/i,
+    groups: ['graph'],
   },
   {
     // A question about earlier work: the same "cannot ask for what it cannot see" reason.

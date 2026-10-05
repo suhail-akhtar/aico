@@ -167,6 +167,7 @@ function safeParse(text: string): unknown {
 }
 
 import type { ParkedAction } from './inbox';
+import type { CgFileDetail, CgPayload, CgSymbolDetail } from './components/codegraph/model';
 import type { BriefLatest, Brief, BriefSummaryRow } from './brief';
 export type { ParkedAction } from './inbox';
 
@@ -737,6 +738,23 @@ export const api = {
   /** Totals across every session a workspace has ever had. */
   projectStats: (path: string) =>
     get<ProjectStats>(`project/stats?path=${encodeURIComponent(path)}`),
+  /** The Code map (engine codegraph routes, ADR 0028): registered projects only. */
+  codeGraph: (path: string, refresh = false) =>
+    get<CgPayload>(`codegraph/graph?path=${encodeURIComponent(path)}${refresh ? '&refresh=1' : ''}`),
+  codeGraphVersion: (path: string) =>
+    get<{ version: string; files: number }>(`codegraph/version?path=${encodeURIComponent(path)}`),
+  codeGraphFile: (path: string, file: number) =>
+    get<CgFileDetail>(`codegraph/file?path=${encodeURIComponent(path)}&file=${file}`),
+  codeGraphSymbol: (path: string, file: number, name: string) =>
+    get<CgSymbolDetail>(`codegraph/symbol?path=${encodeURIComponent(path)}&file=${file}&name=${encodeURIComponent(name)}`),
+  codeGraphSymbols: (path: string, q: string) =>
+    get<{ symbols: Array<{ file: number; name: string; kind: string; line: number }> }>(`codegraph/symbols?path=${encodeURIComponent(path)}&q=${encodeURIComponent(q)}`),
+  codeGraphDiff: (path: string) =>
+    get<{ changed: string[]; ids: number[] }>(`codegraph/diff?path=${encodeURIComponent(path)}`),
+  codeGraphMermaid: (path: string) =>
+    get<{ mermaid: string }>(`codegraph/mermaid?path=${encodeURIComponent(path)}`),
+  codeGraphContext: (path: string, ids: number[]) =>
+    get<{ text: string }>(`codegraph/context?path=${encodeURIComponent(path)}&ids=${ids.join(',')}`),
   /**
    * Make an app from a template. The server also binds its conversation and,
    * for a process app, starts the install in the background — so the answer

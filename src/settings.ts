@@ -571,6 +571,15 @@ export interface AicoSettings {
    */
   dependencyAudit?: { allowLicenses?: string[] };
   /**
+   * The code graph (ADR 0028). `rules` are layering rules: files matching
+   * `from` must not depend on files matching `to` (globs over project-relative
+   * paths); violations show in `CodeGraph overview` and the Code map view.
+   * Usually set per project, in `.aico/settings.json`.
+   *
+   * Example: { "codeGraph": { "rules": [{ "from": "src/ui/**", "to": "src/db/**", "reason": "UI goes through the API" }] } }
+   */
+  codeGraph?: { rules?: Array<{ from: string; to: string; reason?: string }> };
+  /**
    * Offer rarely used tool groups on demand (default true).
    *
    * The remote-ops, credential, registry, cron, world-lookup, image,
@@ -623,6 +632,20 @@ export interface AicoSettings {
     additionalWritableRoots?: string[];
     /** Warn when a tool's confinement is only partially enforced. Default: true. */
     warnOnPartial?: boolean;
+  };
+  /**
+   * Shell confinement (ADR 0027, tools/shell-confinement). A shell command
+   * that writes outside the project, AICO's workspace and temp, downloads a
+   * program or archive, installs software globally, or runs what it
+   * downloaded needs a person in every mode — full autonomy included. These
+   * are the person's escape hatches, user settings only (a project file
+   * cannot set them), and widening either needs a person in the AICO window.
+   */
+  shell?: {
+    /** Extra folders shell commands may write to without asking. Absolute paths (`~` allowed). */
+    allowedWriteRoots?: string[];
+    /** Let shell commands download programs/archives and install globally without asking. Default: false. */
+    allowDownloads?: boolean;
   };
   /**
    * The credential vault (docs/security/credential-broker.md). Settings are

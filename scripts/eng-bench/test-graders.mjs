@@ -19,7 +19,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { createChecks, readText } from './lib/util.mjs';
+import { spawnSync } from 'child_process';
+import { createChecks, listFiles, readText, sha256 } from './lib/util.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const only = process.argv[2];
@@ -112,6 +113,53 @@ if (!only || only === 'large-refactor') {
     edit(p, 'test/money.test.ts', "test('formats a price band'", "test('formats euros', () => {\n  assert.equal(formatMoney(1, 'EUR'), '€1.00');\n});\n\ntest('formats a price band'");
   });
   expect(addedTest.passed === addedTest.total, `acceptable: a test added for the new parameter still scores 100% (${addedTest.passed}/${addedTest.total})${addedTest.failed.length ? `: ${addedTest.failed.join('; ')}` : ''}`);
+}
+
+// The code-graph tasks (generated repositories, like large-refactor) carry
+// their own self-test spec: what the untouched fixture must fail, and
+// mutants of the reference — the decoy touched, the alias missed, the check
+// put in the wrong layer — that must lose named checks, plus acceptable
+// variations that must not. Each is also set up twice to prove the fixture is
+// deterministic (same bytes; for cochange-fix, the same commit ids).
+const GRAPH_TASKS = ['next-alias-impact', 'py-same-name', 'go-request-path', 'ts-py-impact', 'cochange-fix'];
+for (const id of GRAPH_TASKS) {
+  if (only && only !== id) continue;
+  console.log(`\n${id}`);
+  const task = await load(id);
+  const run = async (mutate) => {
+    const project = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), `eng-bench-grader-${id}-`));
+    task.setup(project);
+    if (mutate) mutate(project);
+    const checks = createChecks(quiet);
+    await task.grade({ project, check: checks.check, log: quiet });
+    const s = checks.summary();
+    try { fs.rmSync(project, { recursive: true, force: true }); } catch { /* Windows file locks; temp dir */ }
+    return { ...s, failed: s.checks.filter((c) => !c.ok).map((c) => `${c.id}${c.detail ? ` (${c.detail.slice(0, 160)})` : ''}`) };
+  };
+  const fingerprint = () => {
+    const project = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), `eng-bench-determinism-${id}-`));
+    task.setup(project);
+    const files = listFiles(project).filter((f) => !f.startsWith('node_modules/')).sort();
+    const hash = sha256(files.map((f) => `${f}\0${readText(path.join(project, f))}`).join('\0'));
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).stdout.trim();
+    try { fs.rmSync(project, { recursive: true, force: true }); } catch { /* temp dir */ }
+    return { files: files.length, hash, head };
+  };
+  const a = fingerprint();
+  const b = fingerprint();
+  expect(a.hash === b.hash && a.head === b.head, `fixture is deterministic (${a.files} files, HEAD ${a.head.slice(0, 8)})`);
+  const before = await run(null);
+  expect(before.passed < before.total, `fixture alone fails (${before.passed}/${before.total})`);
+  for (const c of task.selfTest.fixtureMustFail) expect(before.failed.some((f) => f.startsWith(c)), `fixture alone fails "${c}"`);
+  const after = await run((p) => task.applyReference(p));
+  expect(after.passed === after.total, `reference solution scores 100% (${after.passed}/${after.total})`);
+  for (const f of after.failed) console.log(`        reference failed: ${f}`);
+  for (const m of task.selfTest.mutants) {
+    const r = await run((p) => { task.applyReference(p); m.apply(p); });
+    if (m.mustPass) expect(r.passed === r.total, `${m.label}: still scores 100% (${r.passed}/${r.total})${r.failed.length ? `: ${r.failed.join('; ')}` : ''}`);
+    for (const c of m.mustFail ?? []) expect(r.failed.some((f) => f.startsWith(c)), `${m.label}: loses "${c}"`);
+    if (m.mustFail && r.failed.length) console.log(`        (${m.label} failed: ${r.failed.map((f) => f.slice(0, 90)).join('; ')})`);
+  }
 }
 
 // Plausible-but-wrong solutions: the tempting fix, a missed scope, an early

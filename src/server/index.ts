@@ -50,6 +50,7 @@ import { handleSystemRoute } from './api-system.js';
 import { handleCanvasRoute } from './canvas-routes.js';
 import { handleArtifactRoute } from './artifact-routes.js';
 import { handleDeckVisualRoute } from './deck-visual-routes.js';
+import { handleCodeGraphRoute } from './codegraph-routes.js';
 import { onCanvasActivity, onCanvasChange, onCanvasComments } from '../canvas/store.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
@@ -1335,6 +1336,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       // An inline AI edit (ADR 0024) defaults to the model this chat runs on.
       modelFor: async sessionId => runs.modelOf(sessionId) ?? await currentDefaultModel(),
     })) return;
+
+    // The Code map view (server/codegraph-routes, ADR 0028): registered projects only.
+    if (await handleCodeGraphRoute(route, req, res, url, { send, isKnownProject: dir => isKnownProject(cwd, dir) })) return;
 
     // The Artifacts panel: everything this chat made or opened (server/artifact-routes).
     if (await handleArtifactRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;

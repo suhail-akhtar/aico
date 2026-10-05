@@ -16,7 +16,7 @@ import { MarkdownRenderer } from '@aico/ui';
 import { useStore } from '@web/store';
 import { useProjects } from '@/lib/projects';
 import { invoke, on, desktop } from '@/desktop';
-import { useDesk, toast } from '@/state/desk';
+import { useDesk, toast, go } from '@/state/desk';
 import { Icon } from '@/lib/icons';
 import { basename, bytes, cls, dirname } from '@/lib/util';
 import { MenuItem, MenuSep, Popover } from '@/shell/Popover';
@@ -313,6 +313,9 @@ function Tree({ root, onOpen, active, version, onChanged }: { root: string; onOp
                     if (n?.trim() && n !== e.name) void invoke('fs:rename', e.path, `${dirname(e.path)}/${n.trim()}`).then(onChanged).catch((er: Error) => toast.error('Rename failed', er.message));
                   }} />
                   <MenuItem icon="copy" label="Copy path" onClick={() => { close(); void navigator.clipboard.writeText(e.path); }} />
+                  {!e.dir && /\.(?:[cm]?[jt]sx?|py|go|java|kt|cs|php|rb|rs)$/i.test(e.name) && (
+                    <MenuItem icon="map" label="Show in code map" onClick={() => { close(); go('codemap', { path: root, file: relativeTo(root, e.path) }); }} />
+                  )}
                   <MenuItem icon="sparkles" label="Ask AI about it" onClick={() => { close(); useStore.getState().prefillComposer(`About \`${e.path}\`: `); useDesk.getState().navigate({ view: 'chat', params: { id: useStore.getState().sessionId } }); }} />
                   <MenuItem icon="terminal" label="Open terminal here" onClick={() => { close(); useDesk.getState().setPanel({ open: true, tab: 'terminal' }); window.dispatchEvent(new CustomEvent('desk:terminal', { detail: { cwd: dir } })); }} />
                   <MenuItem icon="external" label="Reveal in file manager" onClick={() => { close(); void desktop.shell.showItemInFolder(e.path); }} />
@@ -443,4 +446,12 @@ function QuickOpen({ open, root, onClose, onPick }: { open: boolean; root: strin
       </div>
     </Modal>
   );
+}
+
+/** A path inside `root`, relative and with forward slashes (the code map's spelling). */
+function relativeTo(root: string, file: string): string {
+  const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const r = norm(root);
+  const f = norm(file);
+  return f.toLowerCase().startsWith(`${r.toLowerCase()}/`) ? f.slice(r.length + 1) : f;
 }

@@ -18,6 +18,8 @@ import { observe, blockedReason } from './observation.js';
 import { proposePlan, proposePlanDefinition } from './plan.js';
 import { runChecks, runChecksDefinition } from './run-checks.js';
 import { codeMap, codeMapDefinition } from './codemap.js';
+import { codeGraphTool, codeGraphDefinition } from './codegraph.js';
+import { afterRead, afterWrite, beforeWrite } from '../codegraph/edit-note.js';
 import { gitTool, gitDefinition } from './git.js';
 import { knowledgeTool, knowledgeDefinition } from './knowledge.js';
 import { recallTool, recallDefinition } from './recall.js';
@@ -177,29 +179,29 @@ export type SubAgentType =
 const SUBAGENT_TOOL_SETS: Record<SubAgentType, Set<string> | 'all'> = {
   // Core
   general: 'all',
-  explore: new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd']),
-  plan: new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  explore: new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd']),
+  plan: new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
   // VerifyApp included: an agent whose only job is verification could not, until
   // now, open the page it was asked to verify.
   verification: new Set(['Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp']),
-  'security-audit': new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  'security-audit': new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
   // Project orchestrator — full access (it spawns specialists)
   project: 'all',
   // DevOps — full access to create IaC files + run infrastructure commands
   devops: 'all',
   // DevSecOps — read-only + Bash for running scanners (no file modification)
-  devsecops: new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
+  devsecops: new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'Pwd', 'TodoRead', 'TodoWrite']),
   // Code review — read-only + Bash for running linters/tests
-  review: new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite']),
+  review: new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite']),
   // Studio — implementation agents (full access)
   frontend: 'all',
   backend: 'all',
   healer: 'all',
   'tech-writer': 'all',
   // Studio — constrained agents
-  qa: new Set(['CodebaseMap', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers', 'ListMcpResources', 'ReadMcpResource', 'WorkspaceInfo', 'WorkspaceWrite', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead']),
-  architect: new Set(['CodebaseMap', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite']),
-  'product-owner': new Set(['CodebaseMap', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch']),
+  qa: new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite', 'McpAddServer', 'McpRemoveServer', 'McpReloadServers', 'ListMcpResources', 'ReadMcpResource', 'WorkspaceInfo', 'WorkspaceWrite', 'WorkspaceRead', 'WorkspaceList', 'CapabilityReport', 'AgentList', 'AgentRead']),
+  architect: new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite']),
+  'product-owner': new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Grep', 'Glob', 'LS', 'Bash', 'Write', 'Edit', 'Pwd', 'WebFetch', 'WebSearch']),
 };
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -305,6 +307,8 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...codeSearchDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
   { ...codeRewriteDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   { ...refactorDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
+  // The deferred `graph` group (tools/codegraph, ADR 0028): reads a cached index, so it may overlap.
+  { ...codeGraphDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
   { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...contextWindowToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 5_000 },
   { ...agentCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
@@ -594,6 +598,8 @@ export async function executeTool(
     case 'Read':
       result = await readFile(args as unknown as Parameters<typeof readFile>[0]);
       observe(String((args as Record<string, unknown>).file_path ?? ''));
+      // Ready the code graph for the edit that usually follows (git repositories only).
+      afterRead(String((args as Record<string, unknown>).file_path ?? ''));
       break;
     // Declared in toolDefinitions but never dispatched, which is the worst of
     // the three possible states: the model is offered the tool, calls it, and
@@ -609,7 +615,10 @@ export async function executeTool(
       const target = String((args as Record<string, unknown>).file_path ?? '');
       const blocked = target ? blockedReason(target, 'overwrite') : undefined;
       if (blocked) throw new Error(blocked);
+      beforeWrite(target);
       result = await writeFile(args as unknown as Parameters<typeof writeFile>[0]);
+      // A changed exported signature: name the users not yet updated (codegraph/edit-note).
+      if (typeof result === 'string') result += await afterWrite(target) ?? '';
       // Writing a file is the most direct way of knowing what is in it.
       observe(target);
       // Noted here rather than reconstructed at the end of the turn: by then a
@@ -623,7 +632,9 @@ export async function executeTool(
       const target = String((args as Record<string, unknown>).file_path ?? '');
       const blocked = target ? blockedReason(target, 'edit') : undefined;
       if (blocked) throw new Error(blocked);
+      beforeWrite(target);
       result = await editFile(args as unknown as Parameters<typeof editFile>[0]);
+      if (typeof result === 'string') result += await afterWrite(target) ?? '';
       observe(target);
       noteFileWritten(target);
       noteSourceChanged(target);
@@ -686,6 +697,9 @@ export async function executeTool(
       break;
     case 'RunChecks':
       result = await runChecks(args as unknown as Parameters<typeof runChecks>[0]);
+      break;
+    case 'CodeGraph':
+      result = await codeGraphTool(args as unknown as Parameters<typeof codeGraphTool>[0]);
       break;
     case 'CodebaseMap':
       result = await codeMap(args as unknown as Parameters<typeof codeMap>[0]);

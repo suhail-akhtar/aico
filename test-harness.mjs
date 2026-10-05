@@ -15833,7 +15833,9 @@ console.log('\n══ ENGINEERING: ON-DEMAND TOOLS, THE DELEGATION CONTRACT, DEL
   assert(tokens(lean) < tokens(full) * 0.6, `the default request carries well under 60% of the schema tokens (${tokens(lean)} vs ${tokens(full)})`);
   // A budget, not a target: the next tool added to the always-sent set should
   // have to argue its way past this line.
-  assert(tokens(lean) < 11_000, `always-sent built-in schemas stay under ~11K tokens (${tokens(lean)})`);
+  // 11,100 since ADR 0028: the `graph` group's one LoadTools line (~21 tokens) is the price of the
+  // CodeGraph tool being discoverable; its schema itself is deferred.
+  assert(tokens(lean) < 11_100, `always-sent built-in schemas stay under ~11.1K tokens (${tokens(lean)})`);
 
   const withRemote = T.buildToolDefs({ settings: {}, loadedGroups: new Set(['remote']) });
   assert(names(withRemote).includes('SshExec') && !/\bremote:/.test(withRemote.find(d => d.name === T.LOAD_TOOLS).description),
@@ -15859,8 +15861,9 @@ console.log('\n══ ENGINEERING: ON-DEMAND TOOLS, THE DELEGATION CONTRACT, DEL
   logged.append('tool/call', { turn: 1, step: 1, callId: 'b', name: 'CronList', arguments: '{}' });
   logged.append('tool/call', { turn: 1, step: 1, callId: 'c', name: 'LoadTools', arguments: '{not json' });
   assert([...T.loadedGroupsFromLog(logged.events)].sort().join() === 'schedule,world', 'the loaded set is read from the log, and a malformed call does not break it');
-  assert(T.groupsForRequest('Rename formatPrice to formatMoney across the codebase').join() === 'refactor'
-    && T.groupsForRequest('update every call site of parseDate').join() === 'refactor'
+  // A wide change also offers the code graph (ADR 0028): who uses what is the question it raises.
+  assert(T.groupsForRequest('Rename formatPrice to formatMoney across the codebase').sort().join() === 'graph,refactor'
+    && T.groupsForRequest('update every call site of parseDate').sort().join() === 'graph,refactor'
     && T.groupsForRequest('fix the typo in the header').length === 0 && T.groupsForRequest(undefined).length === 0,
     'a request that names a wide change offers the refactor tools; an ordinary one does not');
   logged.append('user/message', { content: 'now refactor the shipping module', source: { kind: 'human' } });

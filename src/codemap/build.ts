@@ -35,7 +35,7 @@ import { extractPurpose, extractSymbols, languageFor } from './extract.js';
  * Chasing directory names by hand is a list that is permanently one project
  * behind.
  */
-const IGNORED = [
+export const IGNORED = [
   '**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/out/**',
   '**/.next/**', '**/.nuxt/**', '**/coverage/**', '**/vendor/**', '**/target/**',
   '**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/.mypy_cache/**',
@@ -76,7 +76,7 @@ export interface BuildOptions {
  * ignore costs a few noisy entries in the map; over-applying one costs the
  * agent a file it needed.
  */
-async function gitignorePatterns(root: string): Promise<string[]> {
+export async function gitignorePatterns(root: string): Promise<string[]> {
   let text: string;
   try {
     text = await readFile(path.join(root, '.gitignore'), 'utf8');

@@ -19,6 +19,12 @@
  *   6 delegation-security  five independent security fixes; records how sub-agents were briefed
  *   7 large-refactor       rename an API + add a defaulted parameter across a generated ~200-file TS repo
  *
+ * Five more tasks, not in the default set, measure code-graph tools (Phase 0
+ * of the graph study; run them with `--tasks`): next-alias-impact,
+ * py-same-name, go-request-path, ts-py-impact, cochange-fix — generated
+ * 100–170-file repositories with aliases, same-named decoys, a misleading
+ * package name, a cross-language field and a git-history-only relation.
+ *
  * Each task runs in a fresh temp project with its own AICO_HOME (the real
  * ~/.aico/settings.json is copied for provider keys, never written), through
  * `aico serve` exactly as a client drives it, one turn, capped by
@@ -42,6 +48,13 @@
  * (0.3) --soft-minutes (25) --hard-minutes (40) --work <dir> --label <name>
  * --disable-tools <A,B> (written into the bench settings' disabledTools: a
  * before/after for a tool, e.g. CodeSearch,CodeRewrite,Refactor).
+ * --arm <file.json>: an experiment arm, `{ label, settings, index }`.
+ * `settings` is merged into every task's bench settings (e.g. `mcpServers`;
+ * the string `{project}` anywhere in it becomes the task's project path), and
+ * `index` is a list of `{ command, args }` run in the project after setup and
+ * before the agent starts — timed and recorded per run, never hidden in the
+ * agent's numbers — with every credential-shaped variable removed from its
+ * environment so an indexer cannot reach a model provider.
  */
 // A store of this process's own; must stay first. Each task then gets a fresh
 // store of its own, seeded from this one's copy of settings.json.
@@ -64,11 +77,13 @@ const arg = (name, fallback) => {
   return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : fallback;
 };
 
-const TASK_ORDER = ['enterprise-api', 'bugfix-export', 'refactor-shipping', 'architecture-doc', 'fullstack-comments', 'delegation-security', 'large-refactor'];
+const DEFAULT_TASKS = ['enterprise-api', 'bugfix-export', 'refactor-shipping', 'architecture-doc', 'fullstack-comments', 'delegation-security', 'large-refactor'];
+const GRAPH_TASKS = ['next-alias-impact', 'py-same-name', 'go-request-path', 'ts-py-impact', 'cochange-fix'];
+const TASK_ORDER = [...DEFAULT_TASKS, ...GRAPH_TASKS];
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const opts = {
   entry: path.resolve(arg('aico', path.join(repoRoot, 'dist', 'index.js'))),
-  tasks: (arg('tasks', TASK_ORDER.join(','))).split(',').map((s) => s.trim()).filter(Boolean),
+  tasks: (arg('tasks', DEFAULT_TASKS.join(','))).split(',').map((s) => s.trim()).filter(Boolean),
   runs: Number(arg('runs', '1')),
   model: arg('model', 'deepseek-flash'),
   judgeModel: arg('judge-model', 'deepseek-v4-pro'),
@@ -82,7 +97,9 @@ const opts = {
   label: arg('label', null),
   compare: arg('compare', null),
   disableTools: (arg('disable-tools', '') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  arm: arg('arm', null) ? JSON.parse(fs.readFileSync(path.resolve(arg('arm', null)), 'utf8')) : null,
 };
+opts.label ??= opts.arm?.label ?? null;
 
 const unknown = opts.tasks.filter((t) => !TASK_ORDER.includes(t));
 if (unknown.length) { console.error(`unknown task(s): ${unknown.join(', ')} — choices: ${TASK_ORDER.join(', ')}`); process.exit(2); }
@@ -123,6 +140,41 @@ const overlay = {
   ...(opts.disableTools.length ? { disabledTools: opts.disableTools } : {}),
 };
 
+/** The arm's settings for one project: `{project}` substituted, disabledTools unioned with --disable-tools. */
+function armOverlay(project) {
+  if (!opts.arm?.settings) return overlay;
+  const subst = (v) => (typeof v === 'string' ? v.replaceAll('{project}', project)
+    : Array.isArray(v) ? v.map(subst) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, subst(x)])) : v);
+  const s = subst(opts.arm.settings);
+  const disabled = [...new Set([...(overlay.disabledTools ?? []), ...(s.disabledTools ?? [])])];
+  return { ...overlay, ...s, ...(disabled.length ? { disabledTools: disabled } : {}) };
+}
+
+/** An environment with nothing credential-shaped in it, for an arm's indexer. */
+function scrubbedEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (/KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_BASE_URL$|^AICO_/i.test(k)) continue;
+    env[k] = v;
+  }
+  return env;
+}
+
+/** Run the arm's index commands in the project; the time is reported separately from the agent's. */
+function runIndex(project, tlog) {
+  if (!opts.arm?.index?.length) return null;
+  const started = Date.now();
+  const steps = [];
+  for (const step of opts.arm.index) {
+    const args = (step.args ?? []).map((a) => a.replaceAll('{project}', project));
+    const t0 = Date.now();
+    const r = spawnSync(step.command, args, { cwd: project, encoding: 'utf8', windowsHide: true, timeout: 600_000, env: scrubbedEnv(), maxBuffer: 64 * 1024 * 1024 });
+    steps.push({ command: [step.command, ...args].join(' '), code: r.status, ms: Date.now() - t0, tail: `${r.stdout ?? ''}${r.stderr ?? ''}`.slice(-600) });
+    tlog(`index: ${path.basename(step.command)} exit ${r.status} in ${Date.now() - t0} ms`);
+  }
+  return { ms: Date.now() - started, ok: steps.every((x) => x.code === 0), steps, llmTokens: 0 };
+}
+
 const version = spawnSync(process.execPath, [opts.entry, '--version'], { encoding: 'utf8', env: { ...process.env, AICO_HOME: path.join(opts.work, 'version-home', '.aico') } }).stdout?.trim();
 const gitOf = (dir) => {
   const head = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: dir, encoding: 'utf8' });
@@ -136,7 +188,7 @@ const doc = {
     label: opts.label, startedAt: new Date().toISOString(), finishedAt: null,
     entry: opts.entry, aicoVersion: version, git: gitOf(path.dirname(opts.entry)),
     node: process.version, platform: `${process.platform} ${os.release()}`,
-    judgeModel: opts.judgeModel, runs: opts.runs, tasks: opts.tasks,
+    judgeModel: opts.judgeModel, runs: opts.runs, tasks: opts.tasks, arm: opts.arm,
     softMinutes: opts.softMinutes, hardMinutes: opts.hardMinutes, work: opts.work, settings: null,
   },
   results: [],
@@ -211,7 +263,8 @@ for (let run = 1; run <= opts.runs; run++) {
     const record = { run, task: task.id, title: task.title, soft: task.soft, error: null, turn: null, metrics: null, grade: null, paths: { project, logs: logsOut } };
     try {
       task.setup(project);
-      const effective = prepareHome(home, overlay);
+      record.index = runIndex(project, tlog);
+      const effective = prepareHome(home, armOverlay(project));
       doc.meta.settings ??= effective;
       tlog('starting engine');
       const engine = await startEngine({ entry: opts.entry, home, cwd: dir, logFile: path.join(logsOut, 'server.log') });

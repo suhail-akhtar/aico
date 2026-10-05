@@ -237,7 +237,7 @@ await block("F2. Delegation is bounded by the delegator", async () => {
   const WRITERS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Terminal', 'Git', 'AppManage'];
   assert(childTools.length > 0 && !childTools.some(n => WRITERS.includes(n)),
     `a review agent's tools:'all' child has no writing tool (got: ${childTools.filter(n => WRITERS.includes(n)).join(', ') || 'none'})`);
-  const REVIEW = new Set(['CodebaseMap', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite', 'Task', 'Investigate', 'LoadTools']);
+  const REVIEW = new Set(['CodebaseMap', 'CodeGraph', 'Read', 'Glob', 'Grep', 'LS', 'Bash', 'Pwd', 'VerifyApp', 'TodoRead', 'TodoWrite', 'Task', 'Investigate', 'LoadTools']);
   const beyond = childTools.filter(n => !REVIEW.has(n) && !n.startsWith('mcp__docs__'));
   assert(beyond.length === 0, `and nothing beyond the review set (extra: ${beyond.join(', ') || 'none'})`);
   assert(!childTools.some(n => n.startsWith('mcp__fake__')), 'not even a write-capable MCP tool');

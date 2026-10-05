@@ -18,6 +18,7 @@ import type { ViewProps } from '@/plugins/registry';
 
 const SourceControl = lazy(() => import('@/ide/GitPage').then(m => ({ default: m.SourceControl })));
 const FilesPage = lazy(() => import('@/ide/FilesPage').then(m => ({ default: m.FilesPage })));
+const CodeGraphMount = lazy(() => import('@/pages/CodeMapPage').then(m => ({ default: m.CodeGraphMount })));
 
 export function ProjectPage({ params }: ViewProps): React.ReactElement {
   const path = params?.path ?? '';
@@ -27,7 +28,7 @@ export function ProjectPage({ params }: ViewProps): React.ReactElement {
   const targetGroup = useStore(s => s.targetGroup);
   const selectTarget = useStore(s => s.selectTarget);
   const newSessionIn = useStore(s => s.newSessionIn);
-  const [tab, setTab] = useState<'chats' | 'files' | 'git'>((params?.tab as 'chats') ?? 'chats');
+  const [tab, setTab] = useState<'chats' | 'files' | 'git' | 'map'>((params?.tab as 'chats') ?? 'chats');
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const chats = useMemo(() => sessions.filter(s => samePath(s.project, path)).sort((a, b) => b.updatedAt - a.updatedAt), [sessions, path]);
 
@@ -70,7 +71,7 @@ export function ProjectPage({ params }: ViewProps): React.ReactElement {
           ))}
         </div>
         <div className="mt-4 flex gap-1">
-          {([['chats', 'Chats', 'chat'], ['files', 'Files', 'code'], ['git', 'Source control', 'git']] as const).map(([id, label, icon]) => (
+          {([['chats', 'Chats', 'chat'], ['files', 'Files', 'code'], ['git', 'Source control', 'git'], ['map', 'Code map', 'map']] as const).map(([id, label, icon]) => (
             <button key={id} className={cls('-mb-px flex items-center gap-1.5 border-b-2 px-3 pb-2.5 pt-1 text-[13.5px]', tab === id ? 'border-aico-primary font-medium text-aico-primary' : 'border-transparent text-aico-muted hover:text-aico-primary')} onClick={() => setTab(id)}>
               <Icon name={icon} size={14} />{label}
             </button>
@@ -81,6 +82,7 @@ export function ProjectPage({ params }: ViewProps): React.ReactElement {
         {tab === 'chats' && <ChatTable chats={chats} project={path} />}
         {tab === 'files' && <FilesPage params={{ root: path }} />}
         {tab === 'git' && <SourceControl path={path} embedded />}
+        {tab === 'map' && <CodeGraphMount path={path} name={project.name} />}
       </Suspense>
     </div>
   );

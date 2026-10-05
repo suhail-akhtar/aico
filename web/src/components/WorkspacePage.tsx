@@ -22,6 +22,7 @@ import { GitPanel } from './GitPanel';
 import { ProjectCommands } from './ProjectCommands';
 import { ProjectSettings } from './ProjectSettings';
 import { Icon } from './Icon';
+import { CodeGraphView } from './codegraph/CodeGraphView';
 
 interface Props {
   projectPath: string;
@@ -43,6 +44,8 @@ export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactEl
   const label = project?.name ?? basename(projectPath);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const prefillComposer = useStore(s => s.prefillComposer);
   const [stats, setStats] = useState<ProjectStats | null>(null);
 
   // Keyed on the path, not the project object, so switching workspaces always
@@ -98,6 +101,14 @@ export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactEl
               {isTarget ? 'Default for new chats ✓' : 'Use for new chats'}
             </button>
             <button
+              onClick={() => setMapOpen(true)}
+              title="The project's dependency graph: modules, impact, paths, cycles, hotspots"
+              className="rounded-full border border-aico-border px-3 py-1.5 text-[12px] text-aico-primary
+                         transition-colors hover:bg-aico-hover"
+            >
+              Code map
+            </button>
+            <button
               onClick={() => setSettingsOpen(true)}
               className="rounded-full border border-aico-border px-3 py-1.5 text-[12px] text-aico-primary
                          transition-colors hover:bg-aico-hover"
@@ -121,6 +132,22 @@ export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactEl
           <GitPanel path={projectPath} />
         </Section>
       </div>
+
+      {mapOpen && (
+        // The Code map (ADR 0028), full screen over the page; "Ask AICO" starts a chat here with the context ready.
+        <div className="fixed inset-0 z-40 flex flex-col bg-aico-bg" role="dialog" aria-label="Code map">
+          <div className="flex justify-end border-b border-aico-border px-3 py-1.5">
+            <button onClick={() => setMapOpen(false)} className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-aico-secondary hover:bg-aico-hover">
+              <Icon name="close" size={13} /> Close
+            </button>
+          </div>
+          <CodeGraphView
+            projectPath={projectPath}
+            projectName={label}
+            host={{ ask: prompt => { setMapOpen(false); newSessionIn(projectPath); prefillComposer(prompt); onOpenChat(); } }}
+          />
+        </div>
+      )}
 
       {settingsOpen && project && (
         <ProjectSettings

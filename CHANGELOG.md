@@ -3,6 +3,59 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Code map and code graph (ADR 0028).** AICO now builds an accurate
+  dependency graph of your project — no model, no new dependency, stored
+  under the AICO home and never in your repository. Imports resolve the way
+  the compiler does: `tsconfig`/`jsconfig` paths and `@/` aliases (with
+  `extends`), barrels and renaming re-exports, namespace imports, `.js`→`.ts`,
+  workspace packages through `exports`, Python packages and relative imports,
+  Go module paths and package clauses, Java/Kotlin packages, C# namespaces,
+  PHP PSR-4, Ruby and Rust. Same-named functions elsewhere are never mixed in.
+  Git history adds co-change (files that change together with no import
+  between them), churn, owners and hotspots. It refreshes itself on change.
+  - **Code map page** (desktop: project page → Code map, file explorer →
+    "Show in code map", palette `Ctrl+Shift+M`; web: workspace page → Code
+    map): architecture (modules, open one by clicking), files, impact by
+    depth, path between two files, cycles, hotspots heatmap, co-change,
+    "what does my uncommitted change affect", symbol users; search, filters,
+    minimap, legend, details panel (exports and who uses each, importers,
+    history), keyboard navigation, light/dark, PNG/SVG export and the
+    architecture as Mermaid. **Ask AICO about this** starts a chat with the
+    selection and its neighbourhood as precise context.
+  - **`CodeGraph` tool** (deferred group `graph`, loaded automatically by
+    requests about callers, usages, impact, paths, renames and architecture):
+    impact, dependents, dependencies, path, cycles, hotspots, entrypoints,
+    cochange, changes, overview, diagram. Read-only sub-agents and plan mode
+    get it too.
+  - **Edit check, in the loop:** when an `Edit` or `Write` changes an exported
+    symbol's signature or removes/renames it, the result lists the files that
+    use it and have not been changed in this turn (aliases and re-exports
+    included); editing a file that git history says always changes with
+    another, unlinked file says so once.
+  - Layering rules per project: `codeGraph.rules` in `.aico/settings.json`.
+
+### Security
+
+- **Shell commands are confined to the project (ADR 0027).** In an
+  auto-approve benchmark turn the agent downloaded a Go toolchain and began
+  writing shims into `~/bin`; the file tools were confined but Bash,
+  PowerShell, Terminal and `ide_terminal_run` were not. Every shell command is
+  now read before it runs: a write outside the project, the AICO workspace
+  and temp, a download of a program or archive, a global install (`npm -g`,
+  pip outside a venv, winget, brew…), running what was downloaded, or a
+  lasting system change (setx, registry, scheduled tasks, services) needs a
+  person — in every mode, full autonomy included. Ask/edits modes show it on
+  the normal card ("writes outside the project: …"); auto asks on the
+  approval card; unattended runs refuse it and say how to fix it. Project
+  installs, builds, git in the repo and temp files ask nothing new. Two new
+  settings, user-only and person-gated, in Settings → Permissions:
+  `shell.allowedWriteRoots` and `shell.allowDownloads`. The Sentinel also
+  reviews these commands, and now the `PowerShell` tool too.
+
 ## 0.40.1 — 2026-10-05
 
 ### Security

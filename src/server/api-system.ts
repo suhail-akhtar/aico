@@ -1902,6 +1902,16 @@ function widening(cur: Record<string, unknown>, patch: Record<string, unknown>):
     if (Array.isArray(next.additionalWritableRoots) && next.additionalWritableRoots.some(r => !roots.has(String(r)))) return 'Adding a writable folder outside the workspace';
   }
 
+  // Shell confinement's escape hatches (ADR 0027): a new folder shell commands
+  // may write to, or downloads/global installs without asking.
+  if (has('shell')) {
+    const was = obj(cur.shell);
+    const next = obj(patch.shell);
+    if (next.allowDownloads === true && was.allowDownloads !== true) return 'Letting shell commands download and install programs without asking';
+    const roots = new Set(Array.isArray(was.allowedWriteRoots) ? was.allowedWriteRoots.map(String) : []);
+    if (Array.isArray(next.allowedWriteRoots) && next.allowedWriteRoots.some(r => !roots.has(String(r)))) return 'Letting shell commands write to a folder outside the project';
+  }
+
   if (has('safetyLimits')) {
     const was = obj(cur.safetyLimits);
     const next = obj(patch.safetyLimits);

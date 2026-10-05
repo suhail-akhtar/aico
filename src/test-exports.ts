@@ -755,3 +755,23 @@ export { writtenFiles } from './checks.js';
 export { setWebFetchTransportForTest } from './tools/webfetch.js';
 // -- Security review 2026-10: D4/D5 watcher guards (scripts/security-pipeline-fixes-test.mjs, scripts/watcher-live.mjs) --
 export { setWatcherFetcherForTest, watchCommandRefusal, watchUrlRefusal } from './work/watchers.js';
+// -- Shell confinement (ADR 0027): scripts/shell-confinement-test.mjs --
+export { assessShellCommand, describeFindings, newDownloadTracker } from './tools/shell-confinement.js';
+export { createShellConfinement, SHELL_CONFINEMENT_SHOWN } from './tools/shell-confinement-guard.js';
+// -- Code graph (ADR 0028): scripts/codegraph-test.mjs, scripts/codegraph-perf.mjs --
+export {
+  getCodeGraph, resetCodeGraphCache, peekCodeGraph, findFile as cgFindFile, findSymbolDecls as cgFindSymbolDecls,
+  symbolUsers as cgSymbolUsers, danglingUsers as cgDanglingUsers,
+} from './codegraph/index.js';
+export { parseSource as cgParseSource, langOf as cgLangOf, isTestPath as cgIsTestPath, entryFromPath as cgEntryFromPath } from './codegraph/parse/index.js';
+export { mask as cgMask } from './codegraph/lex.js';
+export {
+  impactLayers as cgImpactLayers, shortestPath as cgShortestPath, cycles as cgCycles, orphans as cgOrphans,
+  layerViolations as cgLayerViolations, globToRegExp as cgGlobToRegExp, mermaidArchitecture as cgMermaid,
+} from './codegraph/analyze.js';
+export { parseLog as cgParseLog } from './codegraph/git.js';
+export { resolveTarget as cgResolveTarget } from './codegraph/report.js';
+export { codeGraphTool, codeGraphDefinition } from './tools/codegraph.js';
+export { beforeWrite as cgBeforeWrite, afterWrite as cgAfterWrite, resetEditNotes as cgResetEditNotes, changedSymbols as cgChangedSymbols } from './codegraph/edit-note.js';
+export { codeGraphAnswer, projectLayerRules } from './server/codegraph-routes.js';
+export { viewPayload as cgViewPayload, selectionContext as cgSelectionContext } from './codegraph/view.js';

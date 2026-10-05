@@ -56,6 +56,7 @@ const BrowserView = lazyPage(() => import('@/ide/BrowserPane'), 'BrowserView');
 const GitPage = lazyPage(() => import('@/ide/GitPage'), 'GitPage');
 const GitHubPage = lazyPage(() => import('@/ide/GitHubPage'), 'GitHubPage');
 const FilesPage = lazyPage(() => import('@/ide/FilesPage'), 'FilesPage');
+const CodeMapPage = lazyPage(() => import('@/pages/CodeMapPage'), 'CodeMapPage');
 
 function manifest(m: Omit<PluginManifest, 'version' | 'contributes'> & { contributes?: PluginManifest['contributes'] }): PluginManifest {
   return { version: __DESKTOP_VERSION__, contributes: {}, ...m } as PluginManifest;
@@ -158,6 +159,12 @@ export const BUILTINS: BuiltinPlugin[] = [
       { id: 'group', title: 'Group', icon: 'stack', component: GroupPage },
       { id: 'changes', title: 'Changes', icon: 'file-text', component: ChangesPage },
       { id: 'trajectory', title: 'Trajectory', icon: 'activity', component: TrajectoryPage },
+      // The project's dependency graph (ADR 0028): params path, file, mode.
+      { id: 'codemap', title: 'Code map', icon: 'map', component: CodeMapPage },
+    ],
+    commands: [
+      { id: 'codemap.open', title: 'Code map: open for the current project', category: 'Projects', icon: 'map', keybinding: 'Ctrl+Shift+M', run: () => go('codemap', { path: useStore.getState().project ?? '' }) },
+      { id: 'codemap.changes', title: 'Code map: what my uncommitted change affects', category: 'Projects', icon: 'map', run: () => go('codemap', { path: useStore.getState().project ?? '', mode: 'changes' }) },
     ],
   },
   {

@@ -115,7 +115,7 @@ const HEADLESS_ALLOWED = new Set([
   'Read', 'Glob', 'Grep', 'LS', 'Pwd', 'WebFetch', 'WebSearch',
   'TodoRead', 'TodoWrite', 'Skill', 'LoadTools', 'WidgetSpec',
   'Places', 'Weather', 'CurrencyRates', 'SportsScores',
-  'CodebaseMap', 'CodeSearch', 'VSCodeDiagnostics', 'ContextWindow', 'ProposePlan', 'Recall',
+  'CodebaseMap', 'CodeGraph', 'CodeSearch', 'VSCodeDiagnostics', 'ContextWindow', 'ProposePlan', 'Recall',
   'WorkspaceInfo', 'WorkspaceRead', 'WorkspaceList', 'ReadAttachment',
   'ListMcpResources', 'ReadMcpResource', 'CapabilityReport', 'AgentList', 'AgentRead',
   'CredentialList', 'DependencyAudit',

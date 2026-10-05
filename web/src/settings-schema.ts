@@ -408,7 +408,7 @@ export const PANES: Pane[] = [
     groups: [
       {
         title: 'Permission',
-        hint: 'Governs AICO’s own file tools completely, and processes it spawns not at all — a shell command can still write anywhere you can. Defence in depth, not a jail.',
+        hint: 'Governs AICO’s own file tools completely, and processes it spawns not at all. Shell commands that write outside the project, download or install programs ask you first (see Tools and folders). Defence in depth, not a jail.',
         fields: [
           {
             path: 'sandbox.mode',
@@ -575,6 +575,22 @@ export const PANES: Pane[] = [
             kind: 'list',
             placeholder: 'none',
             keywords: 'sandbox writable folders paths',
+          },
+          {
+            path: 'shell.allowedWriteRoots',
+            label: 'Extra folders shell commands may write to',
+            hint: 'A shell command that writes outside the project, the workspace and temp asks you first, in every mode. Folders listed here do not. Comma-separated absolute paths.',
+            kind: 'list',
+            placeholder: 'none',
+            keywords: 'shell bash powershell terminal confinement outside write folders paths',
+          },
+          {
+            path: 'shell.allowDownloads',
+            label: 'Let shell commands download and install programs',
+            hint: 'Off: downloading a program or archive, a global install (npm -g, pip outside a venv, winget, brew…) or running what was downloaded asks you first, even in full autonomy.',
+            kind: 'toggle',
+            fallback: false,
+            keywords: 'shell download install global npm pip winget curl toolchain',
           },
           {
             path: 'sandbox.warnOnPartial',

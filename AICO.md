@@ -41,9 +41,13 @@ them (`src/tools/deferred.ts`); a load costs one prefix miss, never one per step
 — hooks, plan mode, bash safety, sandbox, permission.
 
 **Honest sandbox scope.** `sandbox.mode` governs AICO's own file tools
-completely and spawned processes not at all. A Bash command can still write
-anywhere the user can. Defence in depth, not a jail — say so rather than
-implying otherwise.
+completely and spawned processes not at all. Shell confinement (ADR 0027,
+`src/tools/shell-confinement*.ts`) reads each shell command line and requires a
+person — at every autonomy level, full autonomy included — for writes outside
+the project/workspace/temp, executable downloads, global installs, running
+what was downloaded and lasting system changes. It reads command text, so a
+write made inside a program (`node -e …`, a script) is not seen. Defence in
+depth, not a jail — say so rather than implying otherwise.
 
 **The model uses secrets by name, never by value.** `src/vault/` is the
 credential broker: the model writes `{{secret:name}}`, trusted code resolves it

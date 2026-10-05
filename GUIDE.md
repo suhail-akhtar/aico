@@ -453,6 +453,30 @@ your project's checks run; if they fail you see why, and one call
 dependency: if your platform skipped it, install it in the project
 (`npm i -D @ast-grep/cli`) or put `ast-grep` on PATH.
 
+## The code map
+
+AICO keeps a dependency graph of each project — which file imports what,
+which files use each exported symbol (through `@/` aliases, barrels, renamed
+re-exports and namespaces, never confusing two functions that share a name),
+and which files change together in git history. It costs no model tokens,
+lives in the AICO home rather than your repository, and refreshes itself.
+
+- **See it:** desktop — a project's **Code map** tab, "Show in code map" on a
+  file, or `Ctrl+Shift+M`; web — **Code map** on a workspace page. Views:
+  architecture (modules; click one to open it), files, impact of a file or
+  symbol by depth, the path from one file to another, import cycles,
+  hotspots, co-change, and what your uncommitted change affects. `/` searches
+  files and symbols; arrows walk the edges; Enter opens the file.
+- **Ask about it:** select files, a symbol, a path or an impact and press
+  **Ask AICO about this** — a chat starts with exactly that context.
+- **The agent uses it:** asking about callers, usages, impact, a rename or the
+  architecture gives the agent the `CodeGraph` tool, and when it changes an
+  exported function's signature, the edit's result lists the files that still
+  call it the old way.
+- **Rules:** put layering rules in `.aico/settings.json` —
+  `{"codeGraph": {"rules": [{"from": "src/ui/**", "to": "src/db/**"}]}}` — and
+  violations show in the map and the agent's overview.
+
 ## Sheets, and everything a chat made
 
 Ask for a spreadsheet ("make a BOQ sheet with quantities × rates and

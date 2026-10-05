@@ -51,6 +51,8 @@ in the module header of the code they govern.
 | [0024](0024-inline-scoped-edits.md) | Ask AICO edits one part of a document: a typed patch for that part, validated in code (scope, shape, figures, references), reviewed as a diff, accepted as one version | Accepted |
 | [0025](0025-deck-visual-system.md) | Deck visuals: a parametric infographic library as native PowerPoint shapes, licensed picture search behind the SSRF guard, a vendored icon set, design briefs with brand palettes, and presentation rules enforced by the validator | Accepted |
 | [0026](0026-shift-left-security.md) | Shift-left security: a fast static scan with a reviewed baseline (pre-commit + CI), CodeQL, lockfile/licence/audit gates with SBOMs on releases, a DAST suite against the real engine, and a `security` check in the agent's own completion gate | Accepted |
+| [0027](0027-shell-confinement.md) | Confine shell commands: writes outside the project, executable downloads, global installs, running what was downloaded and lasting system changes need a person at every autonomy level; user-only escape hatches | Accepted |
+| [0028](0028-code-graph.md) | A native, accurate code graph (resolved imports, symbol references through re-exports, git co-change) for the agent's deferred `CodeGraph` tool, an in-loop edit check and the Code map view; no parser dependency | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

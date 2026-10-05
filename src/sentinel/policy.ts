@@ -16,6 +16,10 @@
  *  - Bash/Terminal commands the existing classifiers call risky
  *    (`classifyBashCommand` warn, the ops `classifyRemoteCommand`), deploy and
  *    publish commands, and commands that send data off the machine;
+ *  - shell downloads of programs/archives, global installs, running what was
+ *    downloaded and lasting system changes (`tools/shell-confinement`, ADR
+ *    0027 — a person is required for these anyway unless their settings
+ *    allow them, and then the reviewer still looks);
  *  - the desktop browser's commit-looking actions (buy, pay, send, delete…),
  *    `browser_login` (credential use), uploads and page script;
  *  - any `{{secret:…}}` in the arguments (credential use);
@@ -36,8 +40,10 @@
  * @module sentinel/policy
  */
 
+import os from 'node:os';
 import path from 'node:path';
 import { classifyBashCommand, isBashReadOnly } from '../safety.js';
+import { assessShellCommand } from '../tools/shell-confinement.js';
 import { classifyRemoteCommand } from '../tools/ops/destructive.js';
 import { sinkRedactText } from '../vault/sink.js';
 import { replaceDetected, scanForSecrets } from '../vault/scan.js';
@@ -146,7 +152,7 @@ export interface TriggerFacts {
 
 const SECRET_REF = /\{\{secret(?:-file)?:[^}]+\}\}/;
 const OPS_EXEC = new Set(['SshExec', 'SshCopy', 'SshTunnel', 'WinRmExec']);
-const SHELLS = new Set(['Bash', 'Terminal']);
+const SHELLS = new Set(['Bash', 'Terminal', 'PowerShell']);
 const FILE_WRITERS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
 /** Deploy, publish, remote and data-out commands. `destructive` ones remove or overwrite. */
@@ -175,10 +181,26 @@ const NETWORK_COMMAND = /\b(?:curl|wget|nc|ncat|netcat|socat|ssh|scp|rsync|ftp|s
 /** Words on a browser control that commit someone to something (the desktop commit gate's list, compressed). */
 const COMMIT_WORDS = /\b(?:buy|pay|purchase|checkout|place (?:the )?order|order now|confirm (?:order|booking|purchase|payment)|book now|send|post|publish|submit (?:order|payment)|delete|remove account|close account|transfer|wire|donate|subscribe|unsubscribe)\b/i;
 
-function shellTrigger(command: string, tainted: boolean): SentinelTrigger | undefined {
+/**
+ * Downloads of programs, global installs, running what was downloaded and
+ * lasting system changes (ADR 0027). The shell-confinement guard already
+ * requires a person for these; this makes the reviewer see them too when the
+ * person's `shell.allowDownloads` lets them through without asking.
+ */
+function confinementTrigger(command: string, cwd: string): SentinelTrigger | undefined {
+  const tmp = os.tmpdir();
+  const found = assessShellCommand(command, { cwd, roots: [cwd, tmp], projectRoot: cwd, scratchRoots: [tmp], home: os.homedir(), env: process.env, tmpdir: tmp })
+    .find(f => f.kind !== 'write-outside');
+  if (!found) return undefined;
+  return { effect: found.kind === 'download' ? 'external' : 'exec', why: `the command ${found.what}` };
+}
+
+function shellTrigger(command: string, tainted: boolean, cwd = process.cwd()): SentinelTrigger | undefined {
   const remote = classifyRemoteCommand(command);
   if (remote.destructive) return { effect: 'destructive', why: `the command looks destructive (${remote.reasons.slice(0, 2).join(', ')})` };
   for (const rule of SHELL_RULES) if (rule.re.test(command)) return { effect: rule.effect, why: `the command ${rule.why}` };
+  const confined = confinementTrigger(command, cwd);
+  if (confined) return confined;
   const safety = classifyBashCommand(command);
   if (safety.level === 'warn') return { effect: 'exec', why: `the shell classifier flags it: ${safety.reason ?? 'risky'}` };
   if (tainted && NETWORK_COMMAND.test(command)) return { effect: 'external', why: 'it reaches the network after the session read untrusted content' };
@@ -249,7 +271,7 @@ export function sentinelTrigger(name: string, args: Record<string, unknown>, fac
 
   if (SHELLS.has(name)) {
     const cmd = str('command');
-    return cmd ? shellTrigger(cmd, facts.tainted) : undefined;
+    return cmd ? shellTrigger(cmd, facts.tainted, facts.cwd) : undefined;
   }
 
   if (name === 'Git') {

@@ -68,12 +68,12 @@ await block('Every top-level setting has a project policy; new keys default to u
   const expected = {
     model: 'allow', provider: 'user-only', providerInstances: 'user-only', activeProvider: 'user-only', providers: 'user-only',
     sessionTitles: 'allow', learning: 'allow', autoApprove: 'user-only', agentTimeout: 'allow', bashTimeout: 'allow',
-    hooks: 'trust-gated', env: 'trust-gated', mcpServers: 'trust-gated', workspace: 'allow', projects: 'user-only', groups: 'user-only',
+    hooks: 'trust-gated', env: 'trust-gated', mcpServers: 'trust-gated', workspace: 'tighten', projects: 'user-only', groups: 'user-only',
     autoCompact: 'allow', contextManagement: 'allow', mcpSecurity: 'allow', agents: 'allow', skills: 'tighten', memory: 'allow',
     miniApps: 'user-only', cron: 'allow', promptCaching: 'allow', theme: 'allow', contextWindows: 'allow', modelPricing: 'user-only',
     modelCapabilities: 'allow', maxIterations: 'allow', maxParallelToolCalls: 'allow', completionGate: 'tighten', safetyLimits: 'tighten',
-    agentModels: 'allow', disabledTools: 'allow', dependencyAudit: 'allow', deferTools: 'allow', imageGeneration: 'allow',
-    sandbox: 'tighten', vault: 'user-only', repeatGuard: 'allow', longJobs: 'allow', sentinel: 'tighten', brief: 'allow',
+    agentModels: 'allow', disabledTools: 'allow', dependencyAudit: 'allow', codeGraph: 'allow', deferTools: 'allow', imageGeneration: 'allow',
+    sandbox: 'tighten', shell: 'user-only', vault: 'user-only', repeatGuard: 'allow', longJobs: 'allow', sentinel: 'tighten', brief: 'allow',
     profile: 'user-only', models: 'user-only',
   };
   // The interface itself, read from source: a key added there without a policy fails here too.
@@ -90,6 +90,14 @@ await block('Every top-level setting has a project policy; new keys default to u
   const unreviewed = keys.filter(k => !(k in expected));
   assert(unreviewed.length === 0, `this test reviews every key (new: ${unreviewed.join(', ') || 'none'})`);
   assert(T.projectPolicyOf('someSettingAddedNextYear') === 'user-only', 'an unclassified key is user-only (fails closed)');
+});
+
+await block('workspace.path from a project stays inside the repository (a shell write root, ADR 0027)', async () => {
+  const project = fs.mkdtempSync(path.join(tmp, 'ws-'));
+  let r = await loadIn(project, {}, { 'settings.json': { workspace: { path: path.join(os.homedir(), 'bin') } } });
+  assert(!r.s.workspace?.path, `a workspace outside the repo is dropped (${r.s.workspace?.path})`);
+  r = await loadIn(project, {}, { 'settings.json': { workspace: { path: 'build/work' } } });
+  assert(r.s.workspace?.path === path.resolve(project, 'build/work'), 'one inside the repo is kept');
 });
 
 await block('T1/T2/T3: a hostile project cannot auto-approve, redirect providers or open Mini Apps', async () => {

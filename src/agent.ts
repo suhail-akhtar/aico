@@ -19,6 +19,7 @@ import { rememberSessionInbox } from './agents/report-back.js';
 import { mcpRegistry } from './mcp.js';
 import { checkPermission } from './permissions.js';
 import { classifyBashCommand, isBashReadOnly, shellCommandOf } from './safety.js';
+import { createShellConfinement, SHELL_CONFINEMENT_SHOWN, type ShellConfinement } from './tools/shell-confinement-guard.js';
 import { canAskUser, setAskUserCallback } from './tools/askuser.js';
 import { getOpenTodoCount, pendingTodoLines, readTodos, todoChecklist } from './tools/todo.js';
 import {
@@ -122,6 +123,7 @@ import { splitMemories, recalledMemoryBlock } from './recall/inject.js';
 import { embedderFromSettings } from './recall/embed.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
+import { resetEditNotes } from './codegraph/edit-note.js';
 import { sinkRedact, sinkRedactText } from './vault/sink.js';
 import { guardAgentRun } from './vault/agent-hooks.js';
 import { installVaultStages } from './vault/pipeline.js';
@@ -708,6 +710,12 @@ interface ToolHandlerOpts {
   signal?: AbortSignal;
   /** What this run may use, enforced by the `agent-scope` guard. See `agents/effective`. */
   scope?: ToolScope;
+  /**
+   * Shell confinement (ADR 0027): the permission card names what a shell
+   * command would change outside the project, and marks the call as shown so
+   * the `shell-confinement` guard does not ask the same person twice.
+   */
+  shellConfinement?: ShellConfinement;
 }
 
 /** What a tool handler returns: the result plus anything to inject after it. */
@@ -1062,6 +1070,8 @@ const PLAN_MODE_TOOLS = new Set([
   // it out would make planning the one mode that still has to Glob its way
   // around a project it could have asked about once.
   'CodebaseMap',
+  // The dependency graph only reads (ADR 0028); "what does this change affect" is a planning question.
+  'CodeGraph',
   // Structural search only reads, and finding every site is what planning a
   // wide change starts with. Its writing siblings are not here.
   'CodeSearch',
@@ -1208,9 +1218,12 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
     if (opts.onPermissionRequest) {
       // An MCP call's arguments have no fixed shape, so the person is shown
       // which server, which tool, and the arguments themselves.
-      const detail = mcp
+      const plain = mcp
         ? `${mcp.server} → ${mcp.tool} ${JSON.stringify(args)}`
         : String(args.command ?? args.file_path ?? args.path ?? args.pattern ?? args.url ?? args.name ?? '');
+      // A shell command that reaches outside the project says so first (ADR 0027).
+      const outside = ctx.agentId === opts.agentId ? opts.shellConfinement?.note(ctx.name, args) : undefined;
+      const detail = outside ? `${outside} · ${plain}` : plain;
       // For Edit/Write, build a diff preview so the UI can show what changes
       // before the user approves.
       let fileDiff: { path: string; added?: string[]; removed?: string[]; preview?: string } | undefined;
@@ -1237,7 +1250,8 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
           }
         } catch { /* diff is best-effort */ }
       }
-      allowed = await opts.onPermissionRequest(ctx.name, detail.slice(0, mcp ? 300 : 100), fileDiff);
+      allowed = await opts.onPermissionRequest(ctx.name, detail.slice(0, mcp || outside ? 300 : 100), fileDiff);
+      if (allowed && outside) ctx.state.set(SHELL_CONFINEMENT_SHOWN, true);
     } else if (mcp && isReadOnlyMcpTool(ctx.name)) {
       // The terminal asks only before tools that change things, and the person
       // said this server only reads.
@@ -2044,7 +2058,19 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     }
     : undefined;
 
+  // Shell confinement (ADR 0027): writes outside the project, downloads,
+  // global installs and running what was downloaded need a person at every
+  // level. The note goes on the permission card; the guard is installed
+  // before the Sentinel, below.
+  const shellConfinement = createShellConfinement({
+    agentId, cwd: () => runCwd, settings, ask: askPerson,
+    unattended: runLevel === 'L4' || Boolean(opts.headless),
+    approvedKey: HUMAN_APPROVED,
+    sessionId: opts.sessionId,
+  });
+
   const handlerOpts: ToolHandlerOpts & { toolProfile: AgentToolProfile; agentSpecTools?: string[] | 'all' | 'readonly'; depth?: number } = {
+    shellConfinement,
     autoApprove, verbose, settings, onToolCall, onToolDone,
     onPermissionRequest, onAskUser, silent,
     agentType: opts.agentType, planMode: opts.planMode, toolProfile,
@@ -2234,6 +2260,9 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   let stepIntent = '';
   const runRequests = currentRunContext()?.userRequests ?? [task];
   const sentinelPossible = !currentRunContext()?.evalHarness && !(opts.provider && !settings?.sentinel);
+  // Deterministic, so before the reviewer: a call it refuses costs no review,
+  // and a person's yes here (HUMAN_APPROVED) is not asked again there.
+  shellConfinement.install(pipeline);
   installSentinel(pipeline, {
     agentId,
     active: () => sentinelPossible && sentinelActive({
@@ -2905,6 +2934,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // artifact, so the evidence starts empty every time.
   resetVerification();
   resetObservations();
+  resetEditNotes();
   resetChecks();
   // The user's own words are the standard the work is held to. Taken from the
   // task rather than from anything the model writes: a model that authors its

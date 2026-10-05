@@ -279,6 +279,12 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **Save as…** turns commands into a script, a custom tool or a scheduled job.
 - **SSH tabs from the vault** — the password never reaches the window, and a new host key is yours to accept. The agent reads your terminals only on request, masked, and never types into yours.
 
+### 🗺 Code map — see how your project fits together
+
+- **An accurate map of your project** (TypeScript/JavaScript with `@/` aliases and barrels, Python, Go, Java, C#, PHP, Rust and more): architecture, files, symbols, impact ("what breaks if I change this"), paths between files, cycles, hotspots, files that change together, and what your uncommitted changes affect. It runs locally, indexes 5,000 files in about a second, and updates as you edit.
+- **Ask AICO about any part of it** — the selected files and their neighbourhood go to the chat as precise context.
+- **The agent checks its own edits against it:** change an exported function and it is told which callers it has not updated yet.
+
 ### 🛡 Security built into every change
 
 - **Shift-left by default:** a security scan on every commit, CodeQL, dependency/lockfile/licence checks and an SBOM on every release, and a pen-test suite (1,100+ attacks on the real engine: auth, forged origins, DNS rebinding, path traversal, SSRF, secret leaks, fuzzing) in CI.
@@ -587,7 +593,7 @@ produces one. Tests never touch your real `~/.aico`.
 <details>
 <summary><b>Honest limitations</b></summary>
 
-- **`Bash` is not confined** by the sandbox — AICO's own file tools are; spawned processes are not.
+- **Shell commands are confined by reading them, not by a jail.** AICO's own file tools are confined by real path; a shell command that writes outside the project, downloads or installs a program asks you first (in every mode), but a write made inside a program it runs (a script, `node -e …`) is not seen.
 - **Verification covers the web.** A CLI, a library or a server has no browser gate; its checks are the tests the agent ran.
 - **Desktop builds are not code-signed yet**; there is no macOS build yet.
 - **Map data is OpenStreetMap** — real places, hours and phones, but no ratings or photos, and thin in some regions.
