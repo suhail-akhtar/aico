@@ -284,6 +284,8 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **An accurate map of your project** (TypeScript/JavaScript with `@/` aliases and barrels, Python, Go, Java, C#, PHP, Rust and more): architecture, files, symbols, impact ("what breaks if I change this"), paths between files, cycles, hotspots, files that change together, and what your uncommitted changes affect. It runs locally, indexes 5,000 files in about a second, and updates as you edit.
 - **Ask AICO about any part of it** — the selected files and their neighbourhood go to the chat as precise context.
 - **The agent checks its own edits against it:** change an exported function and it is told which callers it has not updated yet.
+- **Methods and interfaces, not just files:** calls are linked by the receiver's type (TypeScript through the TypeScript checker), so `BillingService.process` lists exactly its callers — never a same-named method elsewhere. Interfaces show which types implement them and why (Go by exact method sets); "Exact only" hides anything less than certain.
+- **In your morning brief:** new import cycles, broken layering rules, sudden hotspots and files nothing uses any more — with **Show in Code map** and **Ask AICO to fix**. In the web client files open in VS Code (or your editor) at the line, or in a built-in viewer.
 
 ### 🛡 Security built into every change
 

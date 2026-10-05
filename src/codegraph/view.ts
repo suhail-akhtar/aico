@@ -11,14 +11,20 @@
  * imports, users and history in a few thousand characters — precise context
  * a person picked, sent to a chat as text.
  *
+ * Interfaces carry their explanation with them: which types implement one,
+ * whether declared or by matching method sets (Go, TypeScript), each method
+ * with where the implementation has it and whether only the pointer type
+ * does — so "inferred" is never the whole answer.
+ *
  * @module codegraph/view
  */
 
 import { cycles, orphans, layerViolations, type LayerRule } from './analyze.js';
 import { recentCommits, symbolUsers, danglingUsers } from './index.js';
-import type { CodeGraph, EdgeKind } from './types.js';
+import type { CodeGraph, EdgeKind, Implementation } from './types.js';
+import type { OnDemandResult } from './ts-ondemand.js';
 
-export const EDGE_KIND_CODE: Record<EdgeKind, number> = { import: 0, reexport: 1, package: 2, inferred: 3, dynamic: 4 };
+export const EDGE_KIND_CODE: Record<EdgeKind, number> = { import: 0, reexport: 1, package: 2, inferred: 3, dynamic: 4, call: 5 };
 
 export interface ViewFile {
   path: string;
@@ -40,8 +46,8 @@ export interface ViewPayload {
   root: string;
   builtAt: number;
   files: ViewFile[];
-  /** [from, to, kind code, symbols used, passThrough 0/1, inferred 0/1] */
-  edges: Array<[number, number, number, number, number, number]>;
+  /** [from, to, kind code, symbols used, passThrough 0/1, inferred 0/1, through an interface 0/1] */
+  edges: Array<[number, number, number, number, number, number, number]>;
   communities: Array<{ id: number; label: string; files: number[] }>;
   /** [a, b, commits together, confidence] */
   cochange: Array<[number, number, number, number]>;
@@ -51,6 +57,8 @@ export interface ViewPayload {
   external: Array<[string, number]>;
   git: CodeGraph['git'];
   stats: CodeGraph['stats'];
+  /** How many interface → implementation pairs, and how many of them are structural (method sets). */
+  implementations: { total: number; structural: number };
 }
 
 export function viewPayload(g: CodeGraph, rules: LayerRule[] = []): ViewPayload {
@@ -63,7 +71,7 @@ export function viewPayload(g: CodeGraph, rules: LayerRule[] = []): ViewPayload 
       hotspot: f.hotspot, community: f.community, exports: f.exports.filter(e => !e.internal).length,
       ...(f.isTest ? { test: 1 as const } : {}), ...(f.entry ? { entry: f.entry } : {}),
     })),
-    edges: g.edges.map(e => [e.from, e.to, EDGE_KIND_CODE[e.kind], e.names.length, e.passThrough ? 1 : 0, e.confidence === 'inferred' ? 1 : 0]),
+    edges: g.edges.map(e => [e.from, e.to, EDGE_KIND_CODE[e.kind], e.names.length, e.passThrough ? 1 : 0, e.confidence === 'inferred' ? 1 : 0, e.viaInterface ? 1 : 0]),
     communities: g.communities.map(c => ({ id: c.id, label: c.label, files: c.files })),
     cochange: g.cochange.slice(0, 2_000).map(c => [c.a, c.b, c.count, c.confidence]),
     cycles: cycles(g).slice(0, 100),
@@ -72,7 +80,48 @@ export function viewPayload(g: CodeGraph, rules: LayerRule[] = []): ViewPayload 
     external: [...g.external.entries()].map(([p, ids]) => [p, ids.length] as [string, number]).sort((a, b) => b[1] - a[1]).slice(0, 60),
     git: g.git,
     stats: g.stats,
+    implementations: { total: g.implementations.length, structural: g.implementations.filter(i => i.how === 'structural').length },
   };
+}
+
+/** One implementation as a client shows it: who, how, and the methods that make it one. */
+export interface ImplView {
+  iface: { id: number; name: string };
+  impl: { id: number; name: string };
+  how: Implementation['how'];
+  pointer?: boolean;
+  methods: Array<{ name: string; id: number; line: number; ptr?: boolean }>;
+  /** A sentence: why this type satisfies this interface. */
+  why: string;
+}
+
+export function implView(g: CodeGraph, i: Implementation): ImplView {
+  const ptrs = i.methods.filter(m => m.ptr).map(m => m.name);
+  const names = i.methods.map(m => m.name);
+  const lang = g.files[i.impl.file]?.lang;
+  const why = i.how === 'structural'
+    ? `${i.pointer ? `*${i.impl.name}` : i.impl.name} has every method of ${i.iface.name} with the same parameter and result types: ${names.join(', ') || '(none)'}${ptrs.length ? ` — ${ptrs.join(', ')} ${ptrs.length === 1 ? 'has a pointer receiver' : 'have pointer receivers'}, so only *${i.impl.name} satisfies it` : ''}${lang === 'ts' || lang === 'js' ? ' (TypeScript: assignable without `implements`)' : ''}.`
+    : `${i.impl.name} declares ${i.iface.name} as a supertype${names.length ? ` and has ${names.join(', ')}` : ''}.`;
+  return {
+    iface: { id: i.iface.file, name: i.iface.name },
+    impl: { id: i.impl.file, name: i.impl.name },
+    how: i.how,
+    ...(i.pointer ? { pointer: true } : {}),
+    methods: i.methods.map(m => ({ name: m.name, id: m.file, line: m.line, ...(m.ptr ? { ptr: true } : {}) })),
+    why,
+  };
+}
+
+/** A graph with only what is certain: no edge or user that rests on an interface or a unique name. */
+const exactMemo = new WeakMap<CodeGraph, CodeGraph>();
+export function exactOnly(g: CodeGraph): CodeGraph {
+  const held = exactMemo.get(g);
+  if (held) return held;
+  const keep = (via: string): boolean => via !== 'interface' && via !== 'inferred';
+  const symbols = new Map([...g.symbols].map(([k, refs]) => [k, refs.filter(r => keep(r.via))] as const).filter(([, refs]) => refs.length > 0));
+  const out: CodeGraph = { ...g, edges: g.edges.filter(e => e.confidence !== 'inferred'), symbols };
+  exactMemo.set(g, out);
+  return out;
 }
 
 export interface FileDetail {
@@ -88,8 +137,12 @@ export interface FileDetail {
   community: string;
   authors: Array<[string, number]>;
   exports: Array<{ name: string; kind: string; line: number; sig: string; users: number }>;
-  importers: Array<{ id: number; names: string[]; kind: string; inferred: boolean }>;
-  imports: Array<{ id: number; names: string[]; kind: string; inferred: boolean }>;
+  importers: Array<{ id: number; names: string[]; kind: string; inferred: boolean; viaInterface?: boolean }>;
+  imports: Array<{ id: number; names: string[]; kind: string; inferred: boolean; viaInterface?: boolean }>;
+  /** Interfaces declared here and the types that implement them. */
+  implementedBy: ImplView[];
+  /** Types declared here and the interfaces they implement. */
+  implementing: ImplView[];
   external: string[];
   cochange: Array<{ id: number; count: number; confidence: number }>;
   commits: Array<{ hash: string; at: number; author: string; subject: string }>;
@@ -103,21 +156,43 @@ export function fileDetail(g: CodeGraph, id: number): FileDetail {
     churn: f.churn, hotspot: f.hotspot, community: g.communities.find(c => c.id === f.community)?.label ?? '',
     authors: f.authors,
     exports: f.exports.filter(e => !e.internal).slice(0, 200).map(e => ({ name: e.name, kind: e.kind, line: e.line, sig: e.sig, users: symbolUsers(g, id, e.name).filter(u => u.via !== 'reexport').length })),
-    importers: g.edges.filter(e => e.to === id && !e.passThrough).map(e => ({ id: e.from, names: e.names.slice(0, 12), kind: kindName(e.kind), inferred: e.confidence === 'inferred' })),
-    imports: g.edges.filter(e => e.from === id && !e.passThrough).map(e => ({ id: e.to, names: e.names.slice(0, 12), kind: kindName(e.kind), inferred: e.confidence === 'inferred' })),
+    importers: g.edges.filter(e => e.to === id && !e.passThrough).map(e => ({ id: e.from, names: e.names.slice(0, 12), kind: kindName(e.kind), inferred: e.confidence === 'inferred', ...(e.viaInterface ? { viaInterface: true } : {}) })),
+    imports: g.edges.filter(e => e.from === id && !e.passThrough).map(e => ({ id: e.to, names: e.names.slice(0, 12), kind: kindName(e.kind), inferred: e.confidence === 'inferred', ...(e.viaInterface ? { viaInterface: true } : {}) })),
+    implementedBy: g.implementations.filter(i => i.iface.file === id).slice(0, 80).map(i => implView(g, i)),
+    implementing: g.implementations.filter(i => i.impl.file === id).slice(0, 80).map(i => implView(g, i)),
     external: [...g.external.entries()].filter(([, ids]) => ids.includes(id)).map(([p]) => p),
     cochange: g.cochange.filter(c => c.a === id || c.b === id).slice(0, 12).map(c => ({ id: c.a === id ? c.b : c.a, count: c.count, confidence: c.confidence })),
     commits: recentCommits(g.root, f.path),
   };
 }
 
-export function symbolDetail(g: CodeGraph, id: number, name: string): { file: number; name: string; sig?: string; line?: number; users: Array<{ id: number; local: string; lines: number[]; via: string }> } {
+export interface SymbolDetail {
+  file: number;
+  name: string;
+  sig?: string;
+  line?: number;
+  kind?: string;
+  users: Array<{ id: number; local: string; lines: number[]; via: string }>;
+  /** How the users were found: the graph's rules, or exactly on demand by the TypeScript language service (or that attempt, partial). */
+  exactness?: { mode: 'on-demand' | 'partial'; ms: number; cached: boolean; note?: string };
+  /** For an interface (or one of its methods): what implements it, and why. For a type: what it implements. */
+  implementations?: ImplView[];
+  implementing?: ImplView[];
+}
+
+export function symbolDetail(g: CodeGraph, id: number, name: string, onDemand?: OnDemandResult): SymbolDetail {
   const decl = g.files[id]?.exports.find(e => e.name === name);
-  const users = symbolUsers(g, id, name);
+  const users = onDemand?.status === 'exact' ? onDemand.users : symbolUsers(g, id, name);
   const list = users.length ? users : danglingUsers(g, id, name);
+  const typeName = name.includes('.') ? name.slice(0, name.indexOf('.')) : name;
+  const impls = g.implementations.filter(i => i.iface.file === id && i.iface.name === typeName);
+  const implementing = g.implementations.filter(i => i.impl.file === id && i.impl.name === typeName);
   return {
-    file: id, name, ...(decl ? { sig: decl.sig, line: decl.line } : {}),
+    file: id, name, ...(decl ? { sig: decl.sig, line: decl.line, kind: decl.kind } : {}),
     users: list.map(u => ({ id: u.file, local: u.local, lines: u.lines, via: u.via })),
+    ...(onDemand ? { exactness: { mode: onDemand.status === 'exact' ? 'on-demand' as const : 'partial' as const, ms: onDemand.ms, cached: onDemand.cached, ...(onDemand.note ? { note: onDemand.note } : {}) } } : {}),
+    ...(impls.length ? { implementations: impls.slice(0, 80).map(i => implView(g, i)) } : {}),
+    ...(implementing.length ? { implementing: implementing.slice(0, 80).map(i => implView(g, i)) } : {}),
   };
 }
 

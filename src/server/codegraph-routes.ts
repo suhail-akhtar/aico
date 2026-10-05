@@ -22,9 +22,8 @@
 
 import type http from 'node:http';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { aicoHome } from '../home.js';
-import { getCodeGraph, findFile } from '../codegraph/index.js';
+import { exactUsersOnDemand, getCodeGraph, findFile } from '../codegraph/index.js';
+import { codeGraphRules } from '../codegraph/rules.js';
 import { uncommittedFiles } from '../codegraph/git.js';
 import { mermaidArchitecture, type LayerRule } from '../codegraph/analyze.js';
 import { fileDetail, selectionContext, symbolDetail, viewPayload } from '../codegraph/view.js';
@@ -68,7 +67,8 @@ export async function codeGraphAnswer(route: string, params: URLSearchParams, de
       const id = fileParam();
       const name = params.get('name') ?? '';
       if (id === undefined || !name) return { status: 404, body: { error: 'file and name required' } };
-      return { status: 200, body: symbolDetail(g, id, name) };
+      // A project over the whole-project checker's limit: this symbol, exactly, on demand (time-boxed).
+      return { status: 200, body: symbolDetail(g, id, name, await exactUsersOnDemand(g, id, name)) };
     }
     case 'codegraph/diff': {
       const changed = await uncommittedFiles(root);
@@ -105,23 +105,12 @@ export async function codeGraphAnswer(route: string, params: URLSearchParams, de
 }
 
 /**
- * A project's layering rules, read the way settings layer (global, then the
- * project's `.aico/settings.json`, then `.aico/settings.local.json`) for this
- * one data-only key — the server's own settings are its launch folder's, not
- * this project's.
+ * A project's layering rules: the union of the person's own (global and for
+ * this project) and the project's files — a project adds rules, never removes
+ * the person's (codegraph/rules).
  */
 export async function projectLayerRules(dir: string): Promise<LayerRule[]> {
-  const read = async (file: string): Promise<{ codeGraph?: { rules?: unknown } }> => {
-    try { return JSON.parse(await readFile(file, 'utf8')) as { codeGraph?: { rules?: unknown } }; } catch { return {}; }
-  };
-  let rules: unknown;
-  for (const file of [path.join(aicoHome(), 'settings.json'), path.join(dir, '.aico', 'settings.json'), path.join(dir, '.aico', 'settings.local.json')]) {
-    const r = (await read(file)).codeGraph?.rules;
-    if (Array.isArray(r)) rules = r;
-  }
-  return Array.isArray(rules)
-    ? rules.filter((r): r is LayerRule => Boolean(r) && typeof (r as LayerRule).from === 'string' && typeof (r as LayerRule).to === 'string').slice(0, 50)
-    : [];
+  return codeGraphRules(dir);
 }
 
 export async function handleCodeGraphRoute(route: string, req: http.IncomingMessage, res: http.ServerResponse, url: URL, deps: CodeGraphRouteDeps): Promise<boolean> {

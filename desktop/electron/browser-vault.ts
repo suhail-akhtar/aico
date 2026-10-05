@@ -77,6 +77,12 @@ export interface VaultDeps {
   front(): { id: string; wc: WebContents } | null;
   /** Is the agent working in this tab right now? The chooser stays shut while it is. */
   agentDriving(wcId: number): boolean;
+  /**
+   * May a saved password go into a page at this URL, given its certificate?
+   * null = yes; otherwise the reason (a certificate trusted only by an
+   * exception — browser-certs-core.ts; an "always" one asks the person once).
+   */
+  certCheck?(url: string): Promise<string | null>;
 }
 
 /** The page half: in an isolated world of every frame. Exposes nothing to the page. */
@@ -311,6 +317,8 @@ export function registerVault(ctx: DesktopContext, deps: VaultDeps): VaultServic
   const personFill = async (wc: WebContents, name: string): Promise<number> => {
     const origin = loginOrigin(wc.getURL());
     if (!origin) throw new Error('This page has no web address a password can belong to.');
+    const certRefusal = deps.certCheck ? await deps.certCheck(wc.getURL()) : null;
+    if (certRefusal) throw new Error(certRefusal);
     host().expectPersonFill(origin, name);
     const reply = await host().requestFill({ origin, name, tool: 'Browser', purpose: `fill ${name} into ${hostOf(origin)} (you chose it)` });
     if (!reply.ok || !reply.fields) throw new Error(reply.reason ?? 'The vault refused.');

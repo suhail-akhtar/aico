@@ -168,6 +168,14 @@ function SiteInfoPanel({ tab, close }: { tab: TabState; close: () => void }): Re
             : tab.security === 'internal' ? 'It was not loaded over the network.'
               : 'Don’t enter sensitive information — passwords, card numbers — on this site.'}
         </div>
+        {tab.certException && (
+          <div className="mt-2 flex items-center gap-2 text-[12px] text-aico-danger">
+            <span className="min-w-0 flex-1">{tab.certException === 'loopback' ? 'Self-signed certificate allowed on localhost (your setting).' : `You chose to trust this site’s invalid certificate${tab.certException === 'always' ? ' (always)' : ' for this session'}. Saved passwords are not filled here.`}</span>
+            {tab.certException !== 'loopback' && (
+              <button className="btn-ghost btn-sm shrink-0" onClick={() => { void call('browser:certs:remove', host).then(() => { close(); fire('browser:reload'); }).catch(() => {}); }}>Stop trusting</button>
+            )}
+          </div>
+        )}
         {info?.certificate && (
           <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11.5px]">
             <span className="text-aico-muted">Issued to</span><span className="truncate selectable">{info.certificate.subject}</span>

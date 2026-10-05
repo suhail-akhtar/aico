@@ -23,14 +23,18 @@ import { ProjectCommands } from './ProjectCommands';
 import { ProjectSettings } from './ProjectSettings';
 import { Icon } from './Icon';
 import { CodeGraphView } from './codegraph/CodeGraphView';
+import { MODES, type Mode } from './codegraph/model';
+import { openFile } from '../file-open';
 
 interface Props {
   projectPath: string;
   /** The session was opened; switch the destination back to the chat. */
   onOpenChat: () => void;
+  /** Open the Code map at once, on this file and view (the brief's "Show in Code map"). `at` makes each request new. */
+  openMap?: { file?: string; mode?: string; at: number };
 }
 
-export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactElement {
+export function WorkspacePage({ projectPath, onOpenChat, openMap }: Props): React.ReactElement {
   const projects = useStore(s => s.projects);
   const sessions = useStore(s => s.sessions);
   const openSession = useStore(s => s.openSession);
@@ -45,6 +49,13 @@ export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactEl
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+  const [mapAt, setMapAt] = useState<{ file?: string; mode?: Mode } | null>(null);
+  useEffect(() => {
+    if (!openMap) return;
+    const mode = MODES.find(m => m.id === openMap.mode)?.id;
+    setMapAt({ ...(openMap.file ? { file: openMap.file } : {}), ...(mode ? { mode } : {}) });
+    setMapOpen(true);
+  }, [openMap?.at]); // eslint-disable-line react-hooks/exhaustive-deps
   const prefillComposer = useStore(s => s.prefillComposer);
   const [stats, setStats] = useState<ProjectStats | null>(null);
 
@@ -137,14 +148,21 @@ export function WorkspacePage({ projectPath, onOpenChat }: Props): React.ReactEl
         // The Code map (ADR 0028), full screen over the page; "Ask AICO" starts a chat here with the context ready.
         <div className="fixed inset-0 z-40 flex flex-col bg-aico-bg" role="dialog" aria-label="Code map">
           <div className="flex justify-end border-b border-aico-border px-3 py-1.5">
-            <button onClick={() => setMapOpen(false)} className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-aico-secondary hover:bg-aico-hover">
+            <button onClick={() => { setMapOpen(false); setMapAt(null); }} className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-aico-secondary hover:bg-aico-hover">
               <Icon name="close" size={13} /> Close
             </button>
           </div>
           <CodeGraphView
+            key={`${mapAt?.file ?? ''}|${mapAt?.mode ?? ''}`}
             projectPath={projectPath}
             projectName={label}
-            host={{ ask: prompt => { setMapOpen(false); newSessionIn(projectPath); prefillComposer(prompt); onOpenChat(); } }}
+            {...(mapAt?.file ? { initialFile: mapAt.file } : {})}
+            {...(mapAt?.mode ? { initialMode: mapAt.mode } : {})}
+            host={{
+              ask: prompt => { setMapOpen(false); newSessionIn(projectPath); prefillComposer(prompt); onOpenChat(); },
+              // The person's editor when the engine can start one, else the viewer (web/file-open, ADR 0030).
+              openFile: (rel, line) => openFile(rel, line, projectPath),
+            }}
           />
         </div>
       )}

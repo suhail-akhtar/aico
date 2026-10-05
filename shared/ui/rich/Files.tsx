@@ -2,15 +2,16 @@
  * ```files — the files an answer produced, as cards you can act on.
  *
  * In the desktop app the cards open the file and show it in its folder,
- * through the shell. Elsewhere — the browser portal, the VS Code panel — there
- * is no route that serves arbitrary workspace files, so the card offers the
- * path to copy instead of a download that would 404.
+ * through the shell. In the browser portal a card opens the file in the
+ * person's editor when the engine can start one, or in the portal's own
+ * viewer (files of registered projects only — server/editor). Everywhere the
+ * path can be copied.
  *
  * @module shared/ui/rich/Files
  */
 
 import React, { useState } from 'react';
-import { Arriving, copyText, desktopBridge, Icon, useParsed } from './common';
+import { Arriving, copyText, desktopBridge, fileOpener, Icon, useParsed } from './common';
 import { formatBytes, parseFiles, type FileItem, type FileKind, type FilesSpec } from './specs';
 
 export function Files({ source, streaming = false }: { source: string; streaming?: boolean }): React.ReactElement {
@@ -37,6 +38,7 @@ function FilesView({ spec }: { spec: FilesSpec }): React.ReactElement {
 
 function FileCard({ file }: { file: FileItem }): React.ReactElement {
   const bridge = desktopBridge();
+  const opener = bridge ? undefined : fileOpener();
   const [status, setStatus] = useState<string | null>(null);
   const flash = (s: string): void => { setStatus(s); setTimeout(() => setStatus(null), 1800); };
   const open = async (): Promise<void> => {
@@ -66,6 +68,8 @@ function FileCard({ file }: { file: FileItem }): React.ReactElement {
             <button type="button" className="aw-btn" onClick={() => { void open(); }} title="Open with the default app"><Icon name="open" size={12} /> Open</button>
             <button type="button" className="aw-icon-btn" onClick={() => { void reveal(); }} title="Show in folder" aria-label="Show in folder"><Icon name="folder" size={14} /></button>
           </>
+        ) : opener && (file.kind === 'code' || file.kind === 'text' || file.kind === 'markdown' || file.kind === 'csv') ? (
+          <button type="button" className="aw-btn" onClick={() => opener(file.path)} title="Open in your editor (or the viewer when no editor is available)"><Icon name="open" size={12} /> Open</button>
         ) : null}
         <button
           type="button"

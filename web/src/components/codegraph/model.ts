@@ -27,8 +27,8 @@ export interface CgFile {
   exports: number;
 }
 
-/** [from, to, kind code, symbols used, passThrough 0/1, inferred 0/1] — engine EDGE_KIND_CODE. */
-export type CgEdge = [number, number, number, number, number, number];
+/** [from, to, kind code, symbols used, passThrough 0/1, inferred 0/1, through an interface 0/1] — engine EDGE_KIND_CODE. */
+export type CgEdge = [number, number, number, number, number, number, number?];
 
 export interface CgPayload {
   version: string;
@@ -43,7 +43,22 @@ export interface CgPayload {
   violations: Array<{ from: number; to: number; rule: string }>;
   external: Array<[string, number]>;
   git: { available: boolean; head?: string; commits: number; skippedLarge: number };
-  stats: { indexed: number; parsed: number; skipped: number; truncated: boolean; buildMs: number; resolveMs: number };
+  stats: {
+    indexed: number; parsed: number; skipped: number; truncated: boolean; buildMs: number; resolveMs: number;
+    /** How TS/JS method calls were resolved (engine codegraph/ts-check). */
+    methods?: { ts: 'checker' | 'lexical' | 'pending'; note?: string; calls: number };
+  };
+  implementations?: { total: number; structural: number };
+}
+
+/** One interface → implementation pair, with why (engine codegraph/view ImplView). */
+export interface CgImpl {
+  iface: { id: number; name: string };
+  impl: { id: number; name: string };
+  how: 'declared' | 'structural';
+  pointer?: boolean;
+  methods: Array<{ name: string; id: number; line: number; ptr?: boolean }>;
+  why: string;
 }
 
 export interface CgFileDetail {
@@ -59,8 +74,10 @@ export interface CgFileDetail {
   community: string;
   authors: Array<[string, number]>;
   exports: Array<{ name: string; kind: string; line: number; sig: string; users: number }>;
-  importers: Array<{ id: number; names: string[]; kind: string; inferred: boolean }>;
-  imports: Array<{ id: number; names: string[]; kind: string; inferred: boolean }>;
+  importers: Array<{ id: number; names: string[]; kind: string; inferred: boolean; viaInterface?: boolean }>;
+  imports: Array<{ id: number; names: string[]; kind: string; inferred: boolean; viaInterface?: boolean }>;
+  implementedBy?: CgImpl[];
+  implementing?: CgImpl[];
   external: string[];
   cochange: Array<{ id: number; count: number; confidence: number }>;
   commits: Array<{ hash: string; at: number; author: string; subject: string }>;
@@ -71,10 +88,15 @@ export interface CgSymbolDetail {
   name: string;
   sig?: string;
   line?: number;
+  kind?: string;
   users: Array<{ id: number; local: string; lines: number[]; via: string }>;
+  /** Users found exactly on demand by the TypeScript language service, or that attempt timed out (partial). */
+  exactness?: { mode: 'on-demand' | 'partial'; ms: number; cached: boolean; note?: string };
+  implementations?: CgImpl[];
+  implementing?: CgImpl[];
 }
 
-export const EDGE_KINDS = ['import', 'reexport', 'package', 'inferred', 'dynamic'] as const;
+export const EDGE_KINDS = ['import', 'reexport', 'package', 'inferred', 'dynamic', 'call'] as const;
 
 export type Mode = 'architecture' | 'files' | 'impact' | 'path' | 'cycles' | 'hotspots' | 'cochange' | 'changes' | 'symbol';
 
@@ -98,9 +120,26 @@ export interface Filters {
   hideVendor: boolean;
   /** Only files under this folder (prefix); empty = all. */
   folder: string;
+  /** Hide every link that rests on an interface or a unique name: only what is certain. */
+  exactOnly: boolean;
 }
 
-export const DEFAULT_FILTERS: Filters = { langs: [], hideTests: false, hideVendor: true, folder: '' };
+export const DEFAULT_FILTERS: Filters = { langs: [], hideTests: false, hideVendor: true, folder: '', exactOnly: false };
+
+/** The payload without inferred edges (through an interface, or a unique name in scope). */
+export function exactPayload(p: CgPayload): CgPayload {
+  return { ...p, edges: p.edges.filter(e => !e[5]) };
+}
+
+/** Users of a symbol, split into certain ones and those only reached through an interface. */
+export function splitUsers(users: CgSymbolDetail['users'], exactOnly: boolean): { direct: CgSymbolDetail['users']; viaInterface: CgSymbolDetail['users']; reexports: CgSymbolDetail['users'] } {
+  const certain = (u: { via: string }): boolean => u.via !== 'interface' && u.via !== 'inferred';
+  return {
+    direct: users.filter(u => u.via !== 'reexport' && u.via !== 'interface' && (!exactOnly || certain(u))),
+    viaInterface: exactOnly ? [] : users.filter(u => u.via === 'interface'),
+    reexports: users.filter(u => u.via === 'reexport'),
+  };
+}
 
 const VENDOR = /(^|\/)(vendor|third[_-]?party|generated|__generated__|gen|templates?|fixtures?|examples?|chunks|media\/chunks)\//i;
 

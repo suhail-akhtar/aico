@@ -34,13 +34,18 @@
  * constants link only when the name is declared once in the project
  * (`inferred`). Ambiguity is no edge, never several.
  *
+ * Method calls on receivers of a known type, and interfaces to their
+ * implementations, are linked last (codegraph/members), on top of the same
+ * resolution: `call` edges, and `viaInterface` ones for a call or an
+ * implementation through an interface.
+ *
  * @module codegraph/resolve
  */
 
-import type { EdgeKind, FileEdge, ImportBinding, Lang, ParsedFile, RawImport, SymbolRef } from './types.js';
+import type { EdgeKind, FileEdge, Implementation, ImportBinding, Lang, ParsedFile, RawImport, SymbolRef } from './types.js';
 import { baseOf, dirOf, joinRel, keyOf, normRel, stemOf } from './paths.js';
-import { goTypeKey } from './parse/go.js';
 import { isTestPath } from './parse/index.js';
+import { MAX_IMPL_EDGES, resolveMembers, type ExactFile } from './members.js';
 
 export interface ResolveFile {
   path: string;
@@ -54,6 +59,9 @@ export interface Resolution {
   unresolved: Array<{ file: number; spec: string }>;
   /** `${file}:${name}` → bindings that name it although the file does not export it (any more). */
   dangling: Map<string, SymbolRef[]>;
+  implementations: Implementation[];
+  /** Method calls linked (exact and through interfaces); Go interfaces left unchecked. */
+  calls: { exact: number; viaInterface: number; uncheckedIfaces: number };
 }
 
 interface Origin { file: number; name: string }
@@ -657,17 +665,17 @@ function rustModPath(file: string, src: string): string {
 
 // ── Building the edges ──────────────────────────────────────────────────────
 
-const KIND_RANK: Record<EdgeKind, number> = { import: 5, reexport: 4, package: 3, inferred: 2, dynamic: 1 };
+const KIND_RANK: Record<EdgeKind, number> = { import: 6, reexport: 5, package: 4, call: 3, inferred: 2, dynamic: 1 };
 const BARREL = /^(index\.[cm]?[jt]sx?|__init__\.py|mod\.rs)$/;
 
 class EdgeSet {
-  private readonly map = new Map<string, FileEdge & { passCount: number; total: number }>();
-  add(from: number, to: number, kind: EdgeKind, names: string[], opts: { passThrough?: boolean; confidence?: 'resolved' | 'inferred' } = {}): void {
+  private readonly map = new Map<string, FileEdge & { passCount: number; total: number; ifaceCount: number }>();
+  add(from: number, to: number, kind: EdgeKind, names: string[], opts: { passThrough?: boolean; confidence?: 'resolved' | 'inferred'; viaInterface?: boolean } = {}): void {
     if (from === to) return;
     const key = `${from}>${to}`;
     let e = this.map.get(key);
     if (!e) {
-      e = { from, to, kind, names: [], confidence: opts.confidence ?? 'resolved', passCount: 0, total: 0 };
+      e = { from, to, kind, names: [], confidence: opts.confidence ?? 'resolved', passCount: 0, total: 0, ifaceCount: 0 };
       this.map.set(key, e);
     }
     if (KIND_RANK[kind] > KIND_RANK[e.kind]) e.kind = kind;
@@ -675,14 +683,23 @@ class EdgeSet {
     for (const n of names) if (!e.names.includes(n) && e.names.length < 40) e.names.push(n);
     e.total++;
     if (opts.passThrough) e.passCount++;
+    if (opts.viaInterface) e.ifaceCount++;
   }
   list(): FileEdge[] {
-    return [...this.map.values()].map(({ passCount, total, ...e }) => (passCount > 0 && passCount === total ? { ...e, passThrough: true } : e));
+    return [...this.map.values()].map(({ passCount, total, ifaceCount, ...e }) => ({
+      ...e,
+      ...(passCount > 0 && passCount === total ? { passThrough: true } : {}),
+      // Only an interface says these two are linked: possible, not certain.
+      ...(ifaceCount > 0 && ifaceCount === total ? { viaInterface: true } : {}),
+    }));
   }
 }
 
+/** The TypeScript checker's answers, when it has run (codegraph/ts-check). */
+export interface ExactInput { files: Map<number, ExactFile>; implementations: Implementation[] }
+
 /** Resolve every file's imports into edges, symbol references and external usage. */
-export function resolveAll(resolver: Resolver): Resolution {
+export function resolveAll(resolver: Resolver, exact?: ExactInput): Resolution {
   const edges = new EdgeSet();
   const symbols = new Map<string, SymbolRef[]>();
   const external = new Map<string, number[]>();
@@ -697,7 +714,9 @@ export function resolveAll(resolver: Resolver): Resolution {
     const same = list.find(r => r.file === ref.file);
     if (same) {
       for (const l of ref.lines) if (!same.lines.includes(l) && same.lines.length < 5) same.lines.push(l);
-      if (same.via === 'reexport' && ref.via !== 'reexport') { same.via = ref.via; same.local = ref.local; }
+      if (same.lines.length > 1) same.lines.sort((a, b) => a - b);
+      // The surer reason wins: an import or a direct call over a re-export or an interface.
+      if ((same.via === 'reexport' && ref.via !== 'reexport') || (same.via === 'interface' && ref.via === 'call')) { same.via = ref.via; same.local = ref.local; }
     } else list.push(ref);
   };
   const addExternal = (pkg: string, id: number): void => {
@@ -749,59 +768,35 @@ export function resolveAll(resolver: Resolver): Resolution {
     }
   });
 
-  resolveGoImplementations(resolver, edges, addRef);
-  return { edges: edges.list(), symbols, external, unresolved, dangling };
-}
-
-/** Method names too generic to say which type satisfies a one-method interface. */
-const GENERIC_METHODS = new Set(['String', 'Error', 'Close', 'Read', 'Write', 'ServeHTTP', 'Len', 'Less', 'Swap', 'Next', 'Reset', 'Get', 'Set', 'Run', 'Start', 'Stop', 'Do', 'Handle']);
-
-/**
- * Go satisfies interfaces structurally, so "the handler calls the service"
- * goes through an interface no import names. An interface is linked to the
- * types whose method sets contain all of its methods — when that is a short,
- * specific list (at most six types; a one-method interface only when the
- * method name is not a generic one like `Close`). Labelled `inferred`.
- */
-function resolveGoImplementations(r: Resolver, edges: EdgeSet, addRef: (o: Origin, ref: SymbolRef) => void): void {
-  const types = new Map<string, { file: number; type: string; methods: Map<string, string> }>();
-  r.files.forEach((f, id) => {
-    if (f.parsed?.lang !== 'go') return;
-    for (const e of f.parsed.exports) {
-      if (e.kind !== 'method') continue;
-      const [type, method] = e.name.split('.');
-      const key = `${dirOf(f.path)}:${type}`;
-      const t = types.get(key) ?? { file: id, type: type!, methods: new Map<string, string>() };
-      const after = e.sig.indexOf(`${method}(`);
-      t.methods.set(method!, after >= 0 ? goTypeKey(e.sig.slice(after + method!.length)) : '');
-      // Methods may be spread over files; the type's declaring file wins when it is known.
-      if (f.parsed.exports.some(x => x.name === type && x.kind === 'type')) t.file = id;
-      types.set(key, t);
+  // Method calls and implementations (codegraph/members).
+  const mem = resolveMembers(resolver, exact?.files, exact?.implementations);
+  let exactCalls = 0;
+  let viaIface = 0;
+  for (const l of mem.links) {
+    if (l.from === l.file) continue;
+    const iface = l.via === 'interface';
+    if (iface) viaIface++; else exactCalls++;
+    addRef({ file: l.file, name: l.symbol }, { file: l.from, local: l.symbol, lines: [l.line], via: l.inferred && !iface ? 'inferred' : l.via });
+    edges.add(l.from, l.file, 'call', [l.symbol], iface ? { confidence: 'inferred', viaInterface: true } : l.inferred ? { confidence: 'inferred' } : {});
+  }
+  // An interface reaches its implementations: what a directed path through it needs (the
+  // handler → service → store question). Bounded, and labelled as through an interface.
+  const byIface = new Map<string, Implementation[]>();
+  for (const i of mem.implementations) { const k = `${i.iface.file}:${i.iface.name}`; const l = byIface.get(k) ?? []; l.push(i); byIface.set(k, l); }
+  for (const list of byIface.values()) {
+    const ifaceInTest = isTestPath(files[list[0]!.iface.file]!.path);
+    const prod = list.filter(i => ifaceInTest || !isTestPath(files[i.impl.file]!.path));
+    if (prod.length === 0 || prod.length > MAX_IMPL_EDGES) continue;
+    for (const i of prod) {
+      if (i.iface.file === i.impl.file) continue;
+      addRef({ file: i.impl.file, name: i.impl.name }, { file: i.iface.file, local: i.iface.name, lines: [], via: 'interface' });
+      edges.add(i.iface.file, i.impl.file, 'inferred', [i.impl.name], { confidence: 'inferred', viaInterface: true });
     }
-  });
-  if (types.size === 0) return;
-  r.files.forEach((f, id) => {
-    const ifaces = f.parsed?.ifaces;
-    if (!ifaces) return;
-    for (const [iface, entries] of Object.entries(ifaces)) {
-      const methods = entries.map(e => { const [name, key] = e.split('|'); return { name: name!, key: key ?? '' }; });
-      if (methods.length === 1 && GENERIC_METHODS.has(methods[0]!.name)) continue;
-      // A test double (`memStore` in a _test file) is not where production calls go.
-      const ifaceInTest = isTestPath(f.path);
-      let impls = [...types.values()].filter(t => t.file !== id && (ifaceInTest || !isTestPath(r.files[t.file]!.path)) && methods.every(m => t.methods.has(m.name)));
-      // Several types share the method names (every store has Insert): keep those whose
-      // signatures name the same types, if that narrows it.
-      if (impls.length > 1) {
-        const exact = impls.filter(t => methods.every(m => t.methods.get(m.name) === m.key));
-        if (exact.length > 0) impls = exact;
-      }
-      if (impls.length === 0 || impls.length > 6) continue;
-      for (const impl of impls) {
-        addRef({ file: impl.file, name: impl.type }, { file: id, local: iface, lines: [], via: 'inferred' });
-        edges.add(id, impl.file, 'inferred', [impl.type], { confidence: 'inferred' });
-      }
-    }
-  });
+  }
+  return {
+    edges: edges.list(), symbols, external, unresolved, dangling, implementations: mem.implementations,
+    calls: { exact: exactCalls, viaInterface: viaIface, uncheckedIfaces: mem.unchecked },
+  };
 }
 
 interface Sinks {

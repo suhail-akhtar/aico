@@ -18,6 +18,7 @@
 
 import { headerFrom, lineAt, mask, normaliseSig } from '../lex.js';
 import type { ExportDecl, ParsedFile, RawImport } from '../types.js';
+import { extractMembers, withMembers } from './members.js';
 
 export function parseGo(source: string): ParsedFile {
   const m = mask(source, 'go');
@@ -104,10 +105,13 @@ export function parseGo(source: string): ParsedFile {
 
   const entry = pkg === 'main' && /(?:^|\n)func\s+main\s*\(/.test(code) ? 'main'
     : /^(?![ \t]*\/\/).*\.(?:HandleFunc|Handle|Get|Post|Put|Patch|Delete)\s*\(\s*"\//m.test(source) ? 'routes' : undefined;
-  return {
+  const parsed: ParsedFile = {
     lang: 'go', imports, exports, uses: {}, members, ...(pkg ? { pkg } : {}),
     refs: [...refs], ...(entry ? { entry } : {}), ...(Object.keys(ifaces).length ? { ifaces } : {}), loc: m.lineStarts.length,
   };
+  // Package names a file may qualify with: aliases and the last path segment (the clause is checked at resolution).
+  const qualifiers = new Set(imports.map(i => i.ns ?? i.spec.split('/').pop()!).filter(Boolean));
+  return withMembers(parsed, extractMembers(m, source, 'go', qualifiers, skip), m);
 }
 
 /** The named types a signature mentions, package qualifiers dropped, sorted: `(ctx context.Context, o *ordering.Order) error` → `Context,Order`. */

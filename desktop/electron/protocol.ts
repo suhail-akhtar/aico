@@ -129,7 +129,7 @@ export interface ProtocolOptions {
  * and a grant needs the app transport's JSON + `x-aico-intent` request
  * (protocol-policy.ts humanIntent), which a form or a frame cannot make.
  */
-const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit']);
+const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit', '/api/editor/open']);
 
 /**
  * Vault routes the interface may never call: they return a value, or mint

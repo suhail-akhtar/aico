@@ -1,8 +1,9 @@
 /**
  * The desktop's Code map page (ADR 0028): the shared view
  * (web/components/codegraph) with the desktop's own hands — files open in the
- * editor, "Ask AICO about this" starts a chat in the project with the context
- * already in the composer.
+ * built-in editor (and, on request, the person's external editor through the
+ * engine — server/editor, ADR 0030), "Ask AICO about this" starts a chat in
+ * the project with the context already in the composer.
  *
  * Route: `codemap` with `path` (the project; the chat's project when absent),
  * optional `file` (select it) and `mode`. The agent reaches it with
@@ -19,6 +20,7 @@ import { MODES, type Mode } from '@web/components/codegraph/model';
 import { go } from '@/state/desk';
 import { newChat } from '@/chat/actions';
 import { basename } from '@/lib/util';
+import { openExternal } from '@/lib/external-editor';
 import type { ViewProps } from '@/plugins/registry';
 
 export function CodeMapPage({ params }: ViewProps): React.ReactElement {
@@ -52,6 +54,7 @@ export function CodeGraphMount({ path, name, file, mode }: { path: string; name:
       {...(mode ? { initialMode: mode } : {})}
       host={{
         openFile: (rel, line) => go('files', { root: path, open: joinAbs(path, rel), ...(line ? { line: String(line) } : {}) }),
+        openExternal: (rel, line) => openExternal(path, rel, line),
         ask: prompt => newChat({ project: path, prompt }),
       }}
     />

@@ -26,6 +26,7 @@ export const ROUTE_FILES = [
   'src/server/artifact-routes.ts',
   'src/server/canvas-routes.ts',
   'src/server/deck-visual-routes.ts',
+  'src/server/editor.ts',
   'src/vault/http.ts',
 ];
 

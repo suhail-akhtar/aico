@@ -9,7 +9,12 @@
  *
  * Also here, folded away: the history (one line per earlier brief) and the
  * per-project monitor switches (CI on the default branch, review requests,
- * critical advisories) — opt-in, off for every project until switched on.
+ * critical advisories, code structure after a re-index) — opt-in, off for
+ * every project until switched on.
+ *
+ * Code-structure items (new import cycles, broken layering rules, hotspots,
+ * orphans — engine codegraph/alerts) offer "Show in Code map" (the project's
+ * map on that file and view) and "Ask AICO to fix" (prefilled, not sent).
  *
  * The host supplies how to open things (a browser tab in the web client, the
  * OS browser and the Inbox page in the desktop); the defaults suit the web.
@@ -20,7 +25,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
-import { groupByUrgency, URGENCY_LABEL, whenLabel, type Brief, type BriefAction, type BriefItem, type BriefLatest, type BriefSummaryRow } from '../brief';
+import { groupByUrgency, MONITOR_FLAGS, MONITOR_LABEL, noticeActions, URGENCY_LABEL, whenLabel, type Brief, type BriefAction, type BriefItem, type BriefLatest, type BriefSummaryRow, type MonitorFlag } from '../brief';
 
 export interface BriefHost {
   openUrl?: (url: string) => void;
@@ -28,6 +33,8 @@ export interface BriefHost {
   openChat?: (sessionId: string) => void;
   /** A new chat in that folder with the prompt prefilled (never sent). */
   startFix?: (cwd: string | undefined, prompt: string) => void;
+  /** The project's Code map, on a file and view. */
+  openCodeMap?: (cwd: string, file?: string, mode?: string) => void;
 }
 
 const FYI_SHOWN = 3;
@@ -66,6 +73,9 @@ export function BriefCard({ host = {} }: { host?: BriefHost }): React.ReactEleme
     if (a.kind === 'open-url' && a.url) (host.openUrl ?? ((u: string) => window.open(u, '_blank', 'noopener,noreferrer')))(a.url);
     else if (a.kind === 'open-inbox') (host.openInbox ?? (() => window.dispatchEvent(new CustomEvent('aico:navigate', { detail: 'inbox' }))))();
     else if (a.kind === 'open-chat' && a.sessionId) (host.openChat ?? ((id: string) => void useStore.getState().openSession(id)))(a.sessionId);
+    else if (a.kind === 'open-codemap' && a.cwd) {
+      (host.openCodeMap ?? ((cwd: string, file?: string, mode?: string) => window.dispatchEvent(new CustomEvent('aico:navigate', { detail: { destination: 'project', projectPath: cwd, codemap: { ...(file ? { file } : {}), ...(mode ? { mode } : {}) } } }))))(a.cwd, a.file, a.mode);
+    }
     else if (a.kind === 'start-fix' && a.prompt && host.startFix) host.startFix(a.cwd, a.prompt);
     else if (a.kind === 'start-fix' && a.prompt) {
       // A new chat in that project, the prompt in the composer — not sent.
@@ -83,9 +93,9 @@ export function BriefCard({ host = {} }: { host?: BriefHost }): React.ReactEleme
       setLatest(l => (l ? { ...l, generating: true } : l));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
-  const toggleMonitor = async (path: string, flag: 'ci' | 'reviews' | 'advisories', on: boolean): Promise<void> => {
+  const toggleMonitor = async (path: string, flag: MonitorFlag, on: boolean): Promise<void> => {
     const cur = latest?.monitors.find(m => m.path === path) ?? { path };
-    try { await api.setBriefMonitor(path, { ci: cur.ci, reviews: cur.reviews, advisories: cur.advisories, [flag]: on }); refresh(); }
+    try { await api.setBriefMonitor(path, { ci: cur.ci, reviews: cur.reviews, advisories: cur.advisories, codeGraph: cur.codeGraph, [flag]: on }); refresh(); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
 
@@ -115,7 +125,10 @@ export function BriefCard({ host = {} }: { host?: BriefHost }): React.ReactEleme
             <li key={n.key} className="flex items-center gap-2 rounded-lg bg-aico-danger/5 px-2 py-1 text-[12px]">
               <span className="rounded bg-aico-danger/10 px-1.5 text-[10.5px] font-medium uppercase text-aico-danger">Monitor</span>
               <span className="min-w-0 flex-1 truncate text-aico-primary" title={n.body}>{n.title}</span>
-              {n.url && <button className={`${btn} text-aico-accent hover:bg-aico-hover`} onClick={() => act({ kind: 'open-url', label: 'Open', url: n.url })}>Open</button>}
+              {noticeActions(n).map((a, i) => (
+                <button key={i} className={`${btn} ${a.kind === 'start-fix' ? 'text-aico-accent' : 'text-aico-secondary'} hover:bg-aico-hover`} onClick={() => act(a)}
+                  title={a.kind === 'start-fix' ? 'Opens a new chat with the prompt filled in — nothing runs until you send it' : undefined}>{a.label}</button>
+              ))}
             </li>
           ))}
         </ul>
@@ -188,16 +201,16 @@ export function BriefCard({ host = {} }: { host?: BriefHost }): React.ReactEleme
 
       {panel === 'monitors' && (
         <div className="mt-3 border-t border-aico-border pt-2" aria-label="Monitors">
-          <p className="mb-1 text-[11.5px] text-aico-muted">Polled quietly with backoff; you are notified only when something changes{latest.settings.quietHours && latest.settings.quietHours !== 'off' ? ` (held during quiet hours ${latest.settings.quietHours})` : ''}. No model is used.</p>
+          <p className="mb-1 text-[11.5px] text-aico-muted">Polled quietly with backoff; you are notified only when something changes{latest.settings.quietHours && latest.settings.quietHours !== 'off' ? ` (held during quiet hours ${latest.settings.quietHours})` : ''}. No model is used. Code: new import cycles, broken layering rules, hotspots and unused files, checked after each re-index.</p>
           <table className="w-full text-[12px]">
-            <thead><tr className="text-left text-[10.5px] uppercase tracking-wide text-aico-muted"><th className="py-1 font-medium">Project</th><th className="font-medium">CI</th><th className="font-medium">Reviews</th><th className="font-medium">Advisories</th></tr></thead>
+            <thead><tr className="text-left text-[10.5px] uppercase tracking-wide text-aico-muted"><th className="py-1 font-medium">Project</th>{MONITOR_FLAGS.map(f => <th key={f} className="font-medium">{MONITOR_LABEL[f]}</th>)}</tr></thead>
             <tbody>
               {projects.filter(p => p.exists !== false).slice(0, 10).map(p => {
                 const m = latest.monitors.find(x => x.path === p.path);
                 return (
                   <tr key={p.path} title={m?.error ? `Last poll: ${m.error}` : p.path}>
                     <td className="max-w-[220px] truncate py-0.5 text-aico-secondary">{p.name}{m?.error ? ' ⚠' : ''}</td>
-                    {(['ci', 'reviews', 'advisories'] as const).map(f => (
+                    {MONITOR_FLAGS.map(f => (
                       <td key={f}><input type="checkbox" aria-label={`${f} monitor for ${p.name}`} checked={Boolean(m?.[f])} onChange={e => void toggleMonitor(p.path, f, e.target.checked)} /></td>
                     ))}
                   </tr>

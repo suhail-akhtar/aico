@@ -772,6 +772,11 @@ export {
 export { parseLog as cgParseLog } from './codegraph/git.js';
 export { resolveTarget as cgResolveTarget } from './codegraph/report.js';
 export { codeGraphTool, codeGraphDefinition } from './tools/codegraph.js';
-export { beforeWrite as cgBeforeWrite, afterWrite as cgAfterWrite, resetEditNotes as cgResetEditNotes, changedSymbols as cgChangedSymbols } from './codegraph/edit-note.js';
+export { beforeWrite as cgBeforeWrite, afterWrite as cgAfterWrite, resetEditNotes as cgResetEditNotes, changedSymbols as cgChangedSymbols, takeQueuedEditNotes as cgTakeQueuedEditNotes, flushQueuedEditNotes as cgFlushQueuedEditNotes, setEditNoteBudget as cgSetEditNoteBudget } from './codegraph/edit-note.js';
 export { codeGraphAnswer, projectLayerRules } from './server/codegraph-routes.js';
-export { viewPayload as cgViewPayload, selectionContext as cgSelectionContext } from './codegraph/view.js';
+export { viewPayload as cgViewPayload, selectionContext as cgSelectionContext, symbolDetail as cgSymbolDetail, fileDetail as cgFileDetail, exactOnly as cgExactOnly } from './codegraph/view.js';
+export { snapshotOf as cgSnapshotOf, diffSnapshots as cgDiffSnapshots, compareWithLast as cgCompareWithLast, loadSnapshots as cgLoadSnapshots } from './codegraph/alerts.js';
+export { codeGraphRules as cgRules } from './codegraph/rules.js';
+export * as editorServer from './server/editor.js';
+export { exactUsersOnDemand as cgExactUsersOnDemand, tsContentKey as cgTsContentKey } from './codegraph/index.js';
+export { disposeOnDemand as cgDisposeOnDemand } from './codegraph/ts-ondemand.js';

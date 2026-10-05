@@ -229,6 +229,64 @@ test('heat is a ramp; colours are stable per module', () => {
   assert.equal(M.communityColor(3), M.communityColor(3 + M.CATEGORICAL.length));
 });
 
+test('exact only: links through an interface or a unique name are dropped before anything is drawn', () => {
+  const withIface = { ...payload, edges: [...payload.edges, [1, 8, 3, 1, 0, 1, 1], [0, 2, 5, 1, 0, 0, 0]] };
+  const all = new M.GraphModel(withIface);
+  const exact = new M.GraphModel(M.exactPayload(withIface));
+  assert.ok(all.out[1].includes(8) && !exact.out[1].includes(8), 'the interface edge is gone');
+  assert.ok(exact.out[0].includes(2), 'a resolved method-call edge (kind call) stays');
+  assert.equal(M.DEFAULT_FILTERS.exactOnly, false);
+  assert.ok(M.EDGE_KINDS.includes('call'));
+});
+
+test('symbol users: certain ones, through an interface, re-exports — and exact only', () => {
+  const users = [
+    { id: 1, local: 'Svc.run', lines: [3], via: 'call' },
+    { id: 2, local: 'Port.run', lines: [9], via: 'interface' },
+    { id: 3, local: 'run', lines: [], via: 'reexport' },
+    { id: 4, local: 'Svc', lines: [], via: 'inferred' },
+  ];
+  const loose = M.splitUsers(users, false);
+  assert.deepEqual(loose.direct.map(u => u.id), [1, 4]);
+  assert.deepEqual(loose.viaInterface.map(u => u.id), [2]);
+  assert.deepEqual(loose.reexports.map(u => u.id), [3]);
+  const exact = M.splitUsers(users, true);
+  assert.deepEqual(exact.direct.map(u => u.id), [1]);
+  assert.deepEqual(exact.viaInterface, []);
+});
+
+const B = await (async () => {
+  const outfile = path.join(tmp, 'brief.mjs');
+  await build({ entryPoints: [path.join(here, 'src', 'brief.ts')], bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'error' });
+  return import(pathToFileURL(outfile).href);
+})();
+const F = await (async () => {
+  // file-open imports the API client; only its pure part is under test here.
+  const outfile = path.join(tmp, 'file-open.mjs');
+  await build({ entryPoints: [path.join(here, 'src', 'file-open.ts')], bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'error', define: { 'import.meta.env': '{}' } });
+  return import(pathToFileURL(outfile).href);
+})();
+
+test('brief: a code-graph notice offers "Show in Code map" and "Ask AICO to fix"; the monitor has a Code switch', () => {
+  const n = { key: 'k', project: '/p', kind: 'codegraph', title: 'New import cycle (2 files)', body: 'a → b → a', at: 1, file: 'src/a.ts', mode: 'cycles', prompt: 'Break it' };
+  const acts = B.noticeActions(n);
+  assert.deepEqual(acts.map(a => a.kind), ['open-codemap', 'start-fix']);
+  assert.equal(acts[0].file, 'src/a.ts');
+  assert.equal(acts[0].mode, 'cycles');
+  assert.equal(acts[1].prompt, 'Break it');
+  assert.deepEqual(B.noticeActions({ ...n, kind: 'ci', url: 'https://x' }).map(a => a.kind), ['open-url']);
+  assert.deepEqual([...B.MONITOR_FLAGS], ['ci', 'reviews', 'advisories', 'codeGraph']);
+  assert.equal(B.MONITOR_LABEL.codeGraph, 'Code');
+});
+
+test('the file viewer numbers lines and finds the target', () => {
+  const v = F.numbered('a\r\nb\nc\n', 2);
+  assert.deepEqual(v.lines, ['a', 'b', 'c']);
+  assert.equal(v.index, 1);
+  assert.equal(F.numbered('x', 99).index, 0, 'a line past the end lands on the last line');
+  assert.equal(F.numbered('x').index, -1);
+});
+
 console.log(`\ncodegraph view: ${passed} passed, ${failures.length} failed`);
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failures.length) process.exit(1);

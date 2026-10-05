@@ -55,6 +55,9 @@ const project = path.join(world, 'project');
 fs.mkdirSync(home, { recursive: true });
 fs.mkdirSync(project, { recursive: true });
 fs.writeFileSync(path.join(project, 'README.md'), '# dast project\n');
+/** A credentials file in the project: the file viewer (editor/file) must never return it. */
+const DOTENV_MARK = `DOTENV-${crypto.randomBytes(8).toString('hex')}`;
+fs.writeFileSync(path.join(project, '.env'), `TOKEN=${DOTENV_MARK}\n`);
 
 /** A file outside the project that no route may ever return. */
 const OUTSIDE_MARK = `OUTSIDE-${crypto.randomBytes(8).toString('hex')}`;
@@ -265,6 +268,9 @@ const fileRoutes = [
   ['session/export', v => `id=${encodeURIComponent(v)}&format=md`],
   ['trajectory', v => `id=${encodeURIComponent(v)}`],
   ['canvas/get', v => `session=${SESSION}&id=${encodeURIComponent(v)}`],
+  ['editor/file', v => `path=${encodeURIComponent(project)}&file=${encodeURIComponent(v)}`],
+  ['editor/file', v => `file=${encodeURIComponent(v)}`],
+  ['editor/file', v => `path=${encodeURIComponent(v)}&file=README.md`],
 ];
 let traversalLeaks = 0;
 for (const [route, q] of fileRoutes) {
@@ -274,6 +280,12 @@ for (const [route, q] of fileRoutes) {
     if (leaked) traversalLeaks++;
     check(`traversal:${route} ${q(v).slice(0, 60)}`, !leaked && r.status !== 500, `status ${r.status}${leaked ? ' — returned a file outside the project' : ''}`);
   }
+}
+{
+  const env = await api('editor/file', { query: `path=${encodeURIComponent(project)}&file=.env` });
+  check('editor/file: a credentials file in the project is not shown', !env.text.includes(DOTENV_MARK) && env.status === 403, `status ${env.status}`);
+  const ok = await api('editor/file', { query: `path=${encodeURIComponent(project)}&file=README.md` });
+  check('editor/file: control — a project file is shown (the refusals are not vacuous)', ok.status === 200 && ok.text.includes('dast project'), `status ${ok.status}`);
 }
 for (const raw of [`/api/deck-media/..%2f..%2f${path.basename(outsideFile)}`, `/api/deck-media/${encodeURIComponent(outsideFile)}`]) {
   const r = await request({ pathname: raw, headers: H() });
@@ -353,6 +365,7 @@ section('7. human-gated routes with only the token');
     ['settings', { sandbox: { mode: 'danger-full-access' } }],
     ['settings', { sentinel: { mode: 'off' } }],
     ['settings', { hooks: { PreToolUse: [{ matcher: '.*', command: 'echo pwned' }] } }],
+    ['editor/open', { path: project, file: 'README.md', line: 1 }],
   ];
   for (const [route, body] of humanOnly) {
     const r = remember(`human ${route}`, await api(route, { method: 'POST', json: body }));

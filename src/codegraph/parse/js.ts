@@ -18,6 +18,7 @@
 
 import { headerFrom, identifierLines, lineAt, mask, memberLines, normaliseSig, stringAt, type Masked } from '../lex.js';
 import type { ExportDecl, ImportBinding, ParsedFile, RawImport } from '../types.js';
+import { extractMembers, withMembers } from './members.js';
 
 const ID = '[A-Za-z_$][\\w$]*';
 const STMT = '(?:^|[;}\\n])[ \\t]*';
@@ -238,7 +239,7 @@ export function parseJs(source: string, lang: 'ts' | 'js'): ParsedFile {
   const uses = identifierLines(m, bound, skip);
   const members = memberLines(m, bound, skip);
 
-  return {
+  const parsed: ParsedFile = {
     lang,
     imports,
     exports: dedupe(exports),
@@ -248,6 +249,8 @@ export function parseJs(source: string, lang: 'ts' | 'js'): ParsedFile {
     ...(entryOf(source) ? { entry: entryOf(source)! } : {}),
     loc: m.lineStarts.length,
   };
+  // Classes, interfaces and the method calls whose receiver type the text states (parse/members).
+  return withMembers(parsed, extractMembers(m, source, lang, bound, skip), m);
 }
 
 function dedupe(list: ExportDecl[]): ExportDecl[] {

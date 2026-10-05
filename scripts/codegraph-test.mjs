@@ -175,7 +175,7 @@ await block('TS/JS: impact, path, cycles, layering rules, communities, Mermaid',
   const ctx = T.cgSelectionContext(g, [id(g, 'src/lib/format/currency.ts')]);
   assert(ctx.includes('formatAmount (8 users)') && ctx.includes('Used by:'), 'selection context names exports with user counts and users', ctx.slice(0, 300));
   const payload = T.cgViewPayload(g);
-  assert(payload.files.length === g.files.length && payload.edges.every(e => e.length === 6) && payload.cycles.length >= 1, 'the view payload is compact tuples with cycles');
+  assert(payload.files.length === g.files.length && payload.edges.every(e => e.length === 7) && payload.cycles.length >= 1, 'the view payload is compact tuples with cycles');
 });
 
 // ── Python ───────────────────────────────────────────────────────────────────
@@ -423,6 +423,76 @@ await block('Edit note: a co-change partner with no import is named once', async
   });
   assert(String(out.first).includes('Git history: src/edi/partitions.js changed in 4 of the commits') && String(out.first).includes('no import links them'), 'the partner file is named with its history', out.first);
   assert(!String(out.second).includes('Git history'), 'only once per file per turn');
+});
+
+await block('Edit note: no graph within the budget — the check is queued and delivered, never dropped', async () => {
+  T.cgSetEditNoteBudget(0);
+  try {
+    // 1. Delivered with the next tool result.
+    const dir = writeTree(tmp('editq'), TS_FIXTURE);
+    T.resetCodeGraphCache();
+    const ctx = { cwd: dir, sessionId: 'cg-editq' };
+    const out = await T.runInContext(ctx, async () => {
+      T.cgResetEditNotes();
+      await T.executeTool('Read', { file_path: path.join(dir, 'src/lib/format/currency.ts') });
+      const edit = await T.executeTool('Edit', { file_path: path.join(dir, 'src/lib/format/currency.ts'), old_str: 'export function formatAmount(cents: number): string {', new_str: 'export function formatAmount(cents: number, currency: string): string {' });
+      await T.getCodeGraph(dir); // the indexing the edit started
+      // The note is computed after the graph is ready, so under load it can
+      // ride on a later result than the very next one: the promise is that it
+      // is delivered once, not on which call. Read until it arrives (bounded).
+      let next = '';
+      for (let i = 0; i < 20 && !String(next).includes('Code graph check'); i++) {
+        next = await T.executeTool('Read', { file_path: path.join(dir, 'src/features/a.ts') });
+        if (!String(next).includes('Code graph check')) await new Promise(r => setTimeout(r, 100));
+      }
+      const after = await T.executeTool('Read', { file_path: path.join(dir, 'src/features/b.ts') });
+      return { edit, next, after };
+    });
+    assert(String(out.edit).includes('still being indexed') && String(out.edit).includes('`formatAmount`'), 'the edit says its check is pending, not that there is nothing to check', out.edit);
+    assert(String(out.next).includes('`formatAmount` changed its signature') && String(out.next).includes('src/features/c.tsx:2 as money'), 'a following tool result carries the callers', String(out.next).slice(-600));
+    assert(!String(out.after).includes('Code graph check'), 'once delivered, not repeated');
+
+    // 2. The end-of-turn path: nothing else ran, the loop asks for it.
+    const dir2 = writeTree(tmp('editq2'), TS_FIXTURE);
+    T.resetCodeGraphCache();
+    const flushed = await T.runInContext({ cwd: dir2, sessionId: 'cg-editq2' }, async () => {
+      T.cgResetEditNotes();
+      await T.executeTool('Read', { file_path: path.join(dir2, 'src/lib/format/currency.ts') });
+      await T.executeTool('Edit', { file_path: path.join(dir2, 'src/lib/format/currency.ts'), old_str: 'export function plainAmount(', new_str: 'export function rawAmount(' });
+      return T.cgFlushQueuedEditNotes(20_000);
+    });
+    assert(String(flushed).includes('`plainAmount` was removed or renamed') && String(flushed).includes('src/lib/index.ts'), 'flushing waits for the graph and answers the queued check', flushed);
+
+    // 3. In the loop: a model that edits and stops is handed the callers before the turn ends.
+    const dir3 = writeTree(tmp('editq3'), TS_FIXTURE);
+    T.resetCodeGraphCache();
+    const file = path.join(dir3, 'src/lib/format/currency.ts');
+    let step = 0;
+    const seen = [];
+    const provider = {
+      id: 'mock', displayName: 'Mock',
+      async *chat(o) {
+        seen.push(o.messages.map(m => (typeof m.content === 'string' ? m.content : '')).join('\n'));
+        const steps = [
+          [{ type: 'tool_call', id: 'r1', name: 'Read', input: { file_path: file } }, { type: 'finish', reason: 'tool_calls' }],
+          [{ type: 'tool_call', id: 'e1', name: 'Edit', input: { file_path: file, old_str: 'export function formatAmount(cents: number): string {', new_str: 'export function formatAmount(cents: number, currency: string): string {' } }, { type: 'finish', reason: 'tool_calls' }],
+          [{ type: 'text', content: 'Done.' }, { type: 'finish', reason: 'stop' }],
+          [{ type: 'text', content: 'Updating the callers next.' }, { type: 'finish', reason: 'stop' }],
+        ];
+        for (const ev of steps[Math.min(step++, steps.length - 1)]) yield ev;
+      },
+    };
+    const session = new T.Session({ id: 'cg-editq3', cwd: dir3, startedAt: Date.now() });
+    await T.runAgent({
+      task: 'add a currency parameter', model: 'mock', showPlan: false, autoApprove: true, verbose: false, silent: true,
+      conversationHistory: [], sessionId: session.header.id, session, provider, cwd: dir3,
+      settings: { completionGate: { enabled: false }, cron: { enabled: false } },
+    });
+    const note = session.events.find(e => e.type === 'user/message' && e.data.source?.plugin === 'codegraph-edit-note');
+    assert(note && /`formatAmount` changed its signature/.test(note.data.content) && step === 4, 'the loop gives the queued check to the model before the turn may end', note?.data?.content ?? seen.at(-1)?.slice(-400));
+  } finally {
+    T.cgSetEditNoteBudget(4_000);
+  }
 });
 
 // ── HTTP route ───────────────────────────────────────────────────────────────

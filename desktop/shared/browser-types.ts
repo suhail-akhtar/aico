@@ -32,7 +32,11 @@
  *   browser:dialogAnswer    (id, accept, text?)
  *   browser:authAnswer      (id, creds | null)
  *   browser:confirmAnswer   (id, allow)
- *   browser:certAnswer      (tabId, proceed: false)   only "go back" exists — a bad certificate is never accepted
+ *   browser:certAnswer      (tabId, proceed: false)   "Back to safety" on the certificate warning
+ *   browser:certProceed     ({ tabId, token, always })   the person's "Proceed to <host> (unsafe)": main checks the
+ *                           warning's token and a real input event on the AICO window first (browser-certs-core.ts)
+ *   browser:certs:list      ()                  → CertExceptionsView   Privacy & security → Certificate exceptions
+ *   browser:certs:remove    (host, fingerprint?)   browser:certs:localhost (on)   the person's own setting
  *   browser:setBounds       (rect | null, show) → { still?: PageStill }   hiding a page on screen captures it first
  *   browser:still           ()                  → PageStill | null   the active tab's last still; never captures
  *   browser:overlay:*       the floating copilot's view — see shared/copilot-float.ts
@@ -79,6 +83,10 @@ export interface TabState {
   humanCheck: boolean;
   /** The main frame failed to load (DNS, TLS, refused…). A certificate error has code ≤ -200 and > -300. */
   error?: { code: number; description: string; url: string };
+  /** The certificate warning on screen (a certificate error has stopped the main frame): what the person decides on. */
+  cert?: CertWarning;
+  /** This page's certificate is not valid and was let through by an exception (the address bar says "Not secure"). */
+  certException?: 'session' | 'always' | 'loopback';
   /** Extension: pop-ups blocked on this page because no click or key press opened them. */
   popupsBlocked?: number;
   /** Shields: third-party requests that had their cookies removed on this page. */
@@ -108,6 +116,34 @@ export interface TabOwnerInfo {
   /** The chat's run ended: the tab stays open, nobody drives it. */
   released?: boolean;
 }
+
+export interface CertWarning {
+  /** Quoted back by browser:certProceed: main proceeds only for the warning it is showing. */
+  token: string;
+  url: string;
+  host: string;
+  /** `net::ERR_CERT_AUTHORITY_INVALID` and the like. */
+  error: string;
+  issuer: string;
+  subject: string;
+  /** SHA-256 of the certificate (Electron's `sha256/<base64>`). */
+  fingerprint: string;
+  validFrom: number;
+  validTo: number;
+  /** False for revoked certificates, HSTS hosts and errors Chrome does not let you bypass either. */
+  bypassable: boolean;
+  /** Why it cannot be bypassed (when it cannot). */
+  reason?: string;
+  /** A loopback host: the warning offers the "Allow self-signed certificates on localhost" setting. */
+  loopback?: boolean;
+}
+
+export interface CertExceptionView {
+  host: string; fingerprint: string; issuer: string; subject: string; validTo: number; addedAt: number; error: string;
+  scope: 'session' | 'always';
+  credentialsConfirmed?: boolean;
+}
+export interface CertExceptionsView { exceptions: CertExceptionView[]; allowInsecureLocalhost: boolean }
 
 export interface HttpsFallback { httpUrl: string; httpsUrl: string; reason: string }
 
@@ -318,7 +354,7 @@ export interface AuthRequest { id: string; tabId: string; host: string; realm?: 
 
 export interface ConfirmRequest {
   /** `commit`: the agent is about to buy, pay, book, send or delete (browser-commit-gate.ts). */
-  id: string; kind: 'upload' | 'download' | 'tabs' | 'commit'; title: string; detail: string; files?: string[]; origin: string;
+  id: string; kind: 'upload' | 'download' | 'tabs' | 'commit' | 'certificate'; title: string; detail: string; files?: string[]; origin: string;
   /** Extension: button labels ("Keep" / "Discard") and a danger styling for risky downloads. */
   okLabel?: string; cancelLabel?: string; danger?: boolean;
 }

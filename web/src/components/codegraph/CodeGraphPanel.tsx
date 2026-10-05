@@ -7,11 +7,17 @@
  * Every list item selects its file on the map (and every file can be opened
  * in the editor), so the panel and the canvas are two views of one thing.
  *
+ * Interfaces are explained, not just drawn: which types implement one,
+ * whether declared or by matching method sets (Go, TypeScript), and each
+ * method with where the implementation has it — a pointer receiver marked,
+ * since then only `*T` satisfies it. Callers that reach a method only
+ * through an interface are listed apart, and "Exact only" hides them.
+ *
  * @module web/components/codegraph/CodeGraphPanel
  */
 
 import React from 'react';
-import { basename, dirname, type CgFileDetail, type CgPayload, type CgSymbolDetail, type GraphModel, type Mode } from './model';
+import { basename, dirname, splitUsers, type CgFileDetail, type CgImpl, type CgPayload, type CgSymbolDetail, type GraphModel, type Mode } from './model';
 import { CgIcon } from './icons';
 
 interface Props {
@@ -32,8 +38,12 @@ interface Props {
   canAsk: boolean;
   canOpen: boolean;
   askBusy: boolean;
+  /** "Exact only": leave out what rests on an interface or a unique name. */
+  exactOnly?: boolean;
   onSelect: (id: number) => void;
   onOpen: (path: string, line?: number) => void;
+  /** The desktop's "Open in external editor". */
+  onOpenExternal?: (path: string, line?: number) => void;
   onAsk: () => void;
   onMode: (m: Mode) => void;
   onSymbol: (file: number, name: string) => void;
@@ -88,8 +98,13 @@ function FileRow({ p, id, note, line }: { p: Props; id: number; note?: React.Rea
         {note ? <span className="ml-1.5 text-aico-muted">{note}</span> : null}
       </button>
       {p.canOpen && (
-        <button className="invisible shrink-0 rounded p-0.5 text-aico-muted hover:text-aico-primary group-hover:visible" onClick={() => p.onOpen(f.path, line)} title="Open in the editor" aria-label={`Open ${f.path}`}>
+        <button className="invisible shrink-0 rounded p-0.5 text-aico-muted hover:text-aico-primary group-hover:visible" onClick={() => p.onOpen(f.path, line)} title={p.onOpenExternal ? 'Open in the editor here' : 'Open in your editor'} aria-label={`Open ${f.path}`}>
           <CgIcon name="external" size={12} />
+        </button>
+      )}
+      {p.onOpenExternal && (
+        <button className="invisible shrink-0 rounded px-1 text-[10.5px] text-aico-muted hover:text-aico-primary group-hover:visible" onClick={() => p.onOpenExternal!(f.path, line)} title="Open in external editor (VS Code or editor.command)" aria-label={`Open ${f.path} in external editor`}>
+          ext
         </button>
       )}
     </div>
@@ -137,10 +152,9 @@ function ModeSection(p: Props): React.ReactElement | null {
       );
     }
     case 'symbol': {
-      if (!p.symbol) return <Hint>Find a symbol with the search box, or pick one from a file’s exports. Its users are found through imports, aliases and re-exports — same-named symbols elsewhere are not mixed in.</Hint>;
+      if (!p.symbol) return <Hint>Find a symbol with the search box, or pick one from a file’s exports. Its users are found through imports, aliases, re-exports and receiver types (method calls) — same-named symbols elsewhere are not mixed in.</Hint>;
       const s = p.symbol;
-      const direct = s.users.filter(u => u.via !== 'reexport');
-      const reexp = s.users.filter(u => u.via === 'reexport');
+      const { direct, viaInterface, reexports: reexp } = splitUsers(s.users, Boolean(p.exactOnly));
       return (
         <>
           <H>Symbol</H>
@@ -148,11 +162,22 @@ function ModeSection(p: Props): React.ReactElement | null {
           <button className="text-left text-aico-muted hover:text-aico-primary" onClick={() => p.onOpen(model.file(s.file).path, s.line)}>{model.file(s.file).path}{s.line ? `:${s.line}` : ''}</button>
           {s.sig && <pre className="mt-1.5 whitespace-pre-wrap break-words rounded-md bg-aico-surface p-2 font-mono text-[11.5px]">{s.sig}</pre>}
           <H>Used in {direct.length} file(s)</H>
+          {s.exactness?.mode === 'on-demand' && <div className="mb-1 text-[11.5px] text-aico-muted" data-exactness="on-demand"><Badge tone="accent">exact (on demand)</Badge> found by the TypeScript language service for this symbol{s.exactness.cached ? ' (cached)' : ` in ${(s.exactness.ms / 1000).toFixed(1)} s`} — the project is over the whole-project checker’s limit.</div>}
+          {s.exactness?.mode === 'partial' && <div className="mb-1 text-[11.5px] text-aico-warning" data-exactness="partial"><Badge>partial</Badge> {s.exactness.note}</div>}
           {direct.length === 0 && <div className="text-aico-muted">No file uses it through a resolved import.</div>}
           {direct.slice(0, 150).map(u => (
             <FileRow key={u.id} p={p} id={u.id} line={u.lines[0]} note={<>{u.lines[0] ? `:${u.lines[0]}` : ''}{u.local !== s.name ? ` as ${u.local}` : ''}{u.via === 'inferred' || u.via === 'package' ? ` (${u.via})` : ''}</>} />
           ))}
+          {viaInterface.length > 0 && (
+            <>
+              <H>Through an interface · {viaInterface.length}</H>
+              <div className="mb-1 text-aico-muted">Calls on an interface or abstract method this implements: they may reach it, not certainly. “Exact only” hides them.</div>
+              {viaInterface.slice(0, 80).map(u => <FileRow key={u.id} p={p} id={u.id} line={u.lines[0]} note={<>{u.lines[0] ? `:${u.lines[0]}` : ''}{u.local !== s.name ? ` via ${u.local}` : ''}</>} />)}
+            </>
+          )}
           {reexp.length > 0 && <><H>Re-exported by</H>{reexp.map(u => <FileRow key={u.id} p={p} id={u.id} note={u.local !== s.name ? `as ${u.local}` : undefined} />)}</>}
+          {s.implementations && s.implementations.length > 0 && <><H>Implemented by · {s.implementations.length}</H>{s.implementations.map((i, k) => <ImplRow key={k} p={p} impl={i} side="impl" />)}</>}
+          {s.implementing && s.implementing.length > 0 && <><H>Implements · {s.implementing.length}</H>{s.implementing.map((i, k) => <ImplRow key={k} p={p} impl={i} side="iface" />)}</>}
         </>
       );
     }
@@ -239,6 +264,36 @@ function ModeSection(p: Props): React.ReactElement | null {
   }
 }
 
+/**
+ * One implementation, with why: declared, or by method set — each method
+ * linked to where the implementation has it, a pointer receiver marked.
+ */
+function ImplRow({ p, impl, side }: { p: Props; impl: CgImpl; side: 'impl' | 'iface' }): React.ReactElement {
+  const other = side === 'impl' ? impl.impl : impl.iface;
+  return (
+    <div className="mb-1.5 rounded-lg border border-aico-border px-2 py-1.5" data-impl={`${impl.iface.name}>${impl.impl.name}`}>
+      <div className="flex items-center gap-1.5">
+        <button className="min-w-0 flex-1 truncate text-left font-mono text-[12px] font-semibold" onClick={() => p.onSelect(other.id)} title={p.model.file(other.id).path}>
+          {side === 'impl' && impl.pointer ? '*' : ''}{other.name}
+        </button>
+        <Badge tone={impl.how === 'structural' ? 'accent' : undefined}>{impl.how === 'structural' ? 'method set' : 'declared'}</Badge>
+        {impl.pointer ? <Badge>pointer receiver</Badge> : null}
+      </div>
+      <div className="truncate text-[11px] text-aico-muted">{p.model.file(other.id).path}</div>
+      <div className="mt-1 text-[11.5px] text-aico-secondary">{impl.why}</div>
+      {impl.methods.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {impl.methods.map(m => (
+            <button key={m.name} className="rounded border border-aico-border px-1.5 py-px font-mono text-[11px] hover:bg-aico-hover" onClick={() => p.onOpen(p.model.file(m.id).path, m.line)} title={`${p.model.file(m.id).path}:${m.line}${m.ptr ? ' — pointer receiver' : ''}`}>
+              {m.name}{m.ptr ? '*' : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EndRow({ p, label, id }: { p: Props; label: string; id: number }): React.ReactElement {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-aico-border px-2 py-1.5">
@@ -300,11 +355,23 @@ function FileSection(p: Props): React.ReactElement {
               ))}
             </>
           )}
+          {(d.implementedBy?.length ?? 0) > 0 && (
+            <>
+              <H>Interfaces here · implemented by {d.implementedBy!.length}</H>
+              {d.implementedBy!.slice(0, 40).map((i, k) => <div key={k}><div className="px-1 font-mono text-[11px] text-aico-muted">{i.iface.name}</div><ImplRow p={p} impl={i} side="impl" /></div>)}
+            </>
+          )}
+          {(d.implementing?.length ?? 0) > 0 && (
+            <>
+              <H>Implements · {d.implementing!.length}</H>
+              {d.implementing!.slice(0, 40).map((i, k) => <ImplRow key={k} p={p} impl={i} side="iface" />)}
+            </>
+          )}
           <H>Used by · {d.importers.length}</H>
           {d.importers.length === 0 ? <div className="px-1.5 text-aico-muted">Nothing imports it{f.entry ? ' — it is an entry point' : ''}.</div>
-            : d.importers.slice(0, 60).map(x => <FileRow key={x.id} p={p} id={x.id} note={x.names.length ? `[${x.names.slice(0, 3).join(', ')}${x.names.length > 3 ? ', …' : ''}]${x.inferred ? ' inferred' : ''}` : x.inferred ? 'inferred' : undefined} />)}
+            : d.importers.filter(x => !p.exactOnly || !x.inferred).slice(0, 60).map(x => <FileRow key={x.id} p={p} id={x.id} note={x.names.length ? `[${x.names.slice(0, 3).join(', ')}${x.names.length > 3 ? ', …' : ''}]${x.viaInterface ? ' via interface' : x.inferred ? ' inferred' : ''}` : x.viaInterface ? 'via interface' : x.inferred ? 'inferred' : undefined} />)}
           <H>Uses · {d.imports.length}</H>
-          {d.imports.slice(0, 60).map(x => <FileRow key={x.id} p={p} id={x.id} note={x.names.length ? `[${x.names.slice(0, 3).join(', ')}${x.names.length > 3 ? ', …' : ''}]` : undefined} />)}
+          {d.imports.filter(x => !p.exactOnly || !x.inferred).slice(0, 60).map(x => <FileRow key={x.id} p={p} id={x.id} note={x.names.length ? `[${x.names.slice(0, 3).join(', ')}${x.names.length > 3 ? ', …' : ''}]${x.viaInterface ? ' via interface' : ''}` : x.viaInterface ? 'via interface' : undefined} />)}
           {d.external.length > 0 && <><H>Packages</H><div className="flex flex-wrap gap-1">{d.external.map(x => <Badge key={x}>{x}</Badge>)}</div></>}
           {d.cochange.length > 0 && <><H>Changes together with</H>{d.cochange.map(c => <FileRow key={c.id} p={p} id={c.id} note={`${c.count}× · ${Math.round(c.confidence * 100)}%`} />)}</>}
           {(d.authors.length > 0 || d.commits.length > 0) && (

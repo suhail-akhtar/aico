@@ -3,7 +3,9 @@
  * under `aicoHome()/codegraph/`, never inside the user's repository.
  *
  * What is stored is the expensive part — each file's parse, keyed by its
- * content hash — plus the git summary and the HEAD it was read at. The
+ * content hash — plus the git summary and the HEAD it was read at, and the
+ * TypeScript checker's method calls with the file hashes they were computed
+ * for (codegraph/ts-check), so a restart does not re-run the checker. The
  * resolved graph is not stored: it is rebuilt from the parses in memory in
  * tens of milliseconds, and storing it would mean two things to keep in step.
  *
@@ -18,9 +20,21 @@ import path from 'node:path';
 import { aicoHome } from '../home.js';
 import type { FileRecord } from './types.js';
 import { emptyHistory, type GitHistory } from './git.js';
+import type { TsFileResult, TsImpl } from './ts-check.js';
 
 /** Bumped when the parse format changes; an older store is ignored and rebuilt. */
-export const STORE_VERSION = 3;
+export const STORE_VERSION = 4;
+
+/** The checker's answers and what they were computed from. */
+export interface StoredTsExact {
+  /** Hash of every TS/JS file's content hash and the tsconfigs: equal means nothing changed. */
+  env: string;
+  /** Per file: the content hash its calls were computed for. */
+  hashes: Record<string, string>;
+  files: Record<string, TsFileResult>;
+  impls: TsImpl[];
+  at: number;
+}
 
 interface StoredGit {
   available: boolean;
@@ -40,6 +54,7 @@ interface Stored {
   savedAt: number;
   records: FileRecord[];
   git?: StoredGit;
+  tsExact?: StoredTsExact;
 }
 
 export function storePath(root: string): string {
@@ -47,21 +62,21 @@ export function storePath(root: string): string {
   return path.join(aicoHome(), 'codegraph', `${digest}.json`);
 }
 
-export async function loadStore(root: string): Promise<{ records: FileRecord[]; git: GitHistory } | undefined> {
+export async function loadStore(root: string): Promise<{ records: FileRecord[]; git: GitHistory; tsExact?: StoredTsExact } | undefined> {
   try {
     const parsed = JSON.parse(await readFile(storePath(root), 'utf8')) as Stored;
     if (parsed.storeVersion !== STORE_VERSION || !Array.isArray(parsed.records)) return undefined;
-    return { records: parsed.records, git: parsed.git ? reviveGit(parsed.git) : emptyHistory() };
+    return { records: parsed.records, git: parsed.git ? reviveGit(parsed.git) : emptyHistory(), ...(parsed.tsExact ? { tsExact: parsed.tsExact } : {}) };
   } catch {
     return undefined;
   }
 }
 
-export async function saveStore(root: string, records: FileRecord[], git: GitHistory): Promise<void> {
+export async function saveStore(root: string, records: FileRecord[], git: GitHistory, tsExact?: StoredTsExact): Promise<void> {
   try {
     const file = storePath(root);
     await mkdir(path.dirname(file), { recursive: true });
-    const body: Stored = { storeVersion: STORE_VERSION, root: path.resolve(root), savedAt: Date.now(), records, git: storeGit(git) };
+    const body: Stored = { storeVersion: STORE_VERSION, root: path.resolve(root), savedAt: Date.now(), records, git: storeGit(git), ...(tsExact ? { tsExact } : {}) };
     // Write then rename, so a reader never sees half a file.
     const tmp = `${file}.${process.pid}.tmp`;
     await writeFile(tmp, JSON.stringify(body), 'utf8');

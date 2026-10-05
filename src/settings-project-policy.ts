@@ -85,8 +85,10 @@ export const PROJECT_POLICY = {
   agentModels: 'allow',
   disabledTools: 'allow',
   dependencyAudit: 'allow',
-  // Layering rules for the code graph: per-project data, runs nothing.
-  codeGraph: 'allow',
+  // Layering rules for the code graph are checks: a project may add rules, never remove the person's.
+  codeGraph: 'tighten',
+  // Which program "Open in editor" launches: a command line, so the person's alone.
+  editor: 'user-only',
   deferTools: 'allow',
   imageGeneration: 'allow',
   sandbox: 'tighten',
@@ -199,6 +201,21 @@ export function tightenProjectLayer(layer: Layer, user: Layer, root: string): st
     }
     if (!isObj(layer.completionGate)) dropped.push('completionGate');
     if (Object.keys(kept).length) layer.completionGate = kept; else delete layer.completionGate;
+  }
+
+  // codeGraph: a project's layering rules are added to the person's, never in place of
+  // them (an empty list must not switch the person's checks off); nothing else is taken.
+  if ('codeGraph' in layer) {
+    const p = isObj(layer.codeGraph) ? layer.codeGraph : {};
+    const u = isObj(user.codeGraph) ? user.codeGraph : {};
+    const kept: Layer = {};
+    for (const [k, v] of Object.entries(p)) {
+      if (k === 'rules' && Array.isArray(v)) {
+        const valid = v.filter(r => isObj(r) && typeof r.from === 'string' && typeof r.to === 'string');
+        kept.rules = [...(Array.isArray(u.rules) ? u.rules : []), ...valid];
+      } else dropped.push(`codeGraph.${k}`);
+    }
+    if (Object.keys(kept).length) layer.codeGraph = kept; else delete layer.codeGraph;
   }
   return dropped;
 }

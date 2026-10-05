@@ -23,6 +23,15 @@ import { MenuItem, MenuSep, Popover } from '@/shell/Popover';
 import { Modal } from '@/shell/Modal';
 import type { ViewProps } from '@/plugins/registry';
 import { applyEditorTheme, languageFor, monaco } from './monaco';
+import { openExternal } from '@/lib/external-editor';
+
+/** The cursor line of each open file, for "Open in external editor" from the toolbar. */
+const cursorLine = new Map<string, number>();
+
+/** The person's own editor at this file and line, started by the engine (server/editor, ADR 0030). */
+function openInExternalEditor(root: string, abs: string, line?: number): void {
+  openExternal(root, abs, line).then(t => toast.success(t)).catch((err: Error) => toast.error('Could not open an external editor', err.message));
+}
 
 interface Entry { name: string; path: string; dir: boolean; size: number; mtime: number }
 interface OpenFile { path: string; model?: monaco.editor.ITextModel; savedVersion: number; dirty: boolean; kind: 'text' | 'image' | 'binary' | 'large'; dataUrl?: string; size: number; mtime?: number }
@@ -159,6 +168,7 @@ function Workbench({ root, setRoot, openPath, openLine }: { root: string; setRoo
             <div className="flex h-9 items-center gap-1 px-2">
               {languageFor(current.path) === 'markdown' && <button className={cls('btn-ghost btn-sm', preview && 'bg-aico-hover')} onClick={() => setPreview(p => !p)}><Icon name="eye" size={13} />Preview</button>}
               <AskAi file={current} root={root} />
+              <button className="icon-btn-sm" onClick={() => openInExternalEditor(root, current.path, cursorLine.get(current.path))} title="Open in external editor (VS Code, or editor.command in settings)" aria-label="Open in external editor"><Icon name="external" size={14} /></button>
               <button className="icon-btn-sm" onClick={() => void save()} disabled={!current.dirty} title="Save (Ctrl+S)" aria-label="Save"><Icon name="save" size={14} /></button>
             </div>
           )}
@@ -170,7 +180,7 @@ function Workbench({ root, setRoot, openPath, openLine }: { root: string; setRoo
               <div className="text-[13.5px]">Open a file from the explorer, or press <span className="kbd">Ctrl P</span></div>
             </div>
           )}
-          {current?.kind === 'text' && current.model && !preview && <Editor file={current} onDirty={markDirty} onSave={save} />}
+          {current?.kind === 'text' && current.model && !preview && <Editor file={current} root={root} onDirty={markDirty} onSave={save} />}
           {current?.kind === 'text' && current.model && preview && (
             <div className="h-full overflow-y-auto"><div className="transcript mx-auto max-w-column px-8 py-8"><MarkdownRenderer content={current.model.getValue()} /></div></div>
           )}
@@ -189,7 +199,7 @@ function Workbench({ root, setRoot, openPath, openLine }: { root: string; setRoo
   );
 }
 
-function Editor({ file, onDirty, onSave }: { file: OpenFile; onDirty: (p: string, d: boolean) => void; onSave: (p?: string) => Promise<void> }): React.ReactElement {
+function Editor({ file, root, onDirty, onSave }: { file: OpenFile; root: string; onDirty: (p: string, d: boolean) => void; onSave: (p?: string) => Promise<void> }): React.ReactElement {
   const host = useRef<HTMLDivElement>(null);
   const ed = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const mode = useDesk(s => s.mode);
@@ -224,6 +234,7 @@ function Editor({ file, onDirty, onSave }: { file: OpenFile; onDirty: (p: string
     if (vs) e.restoreViewState(vs);
     e.focus();
     const sub = file.model.onDidChangeContent(() => onDirty(file.path, file.model!.getAlternativeVersionId() !== file.savedVersion));
+    const cursor = e.onDidChangeCursorPosition(ev => { cursorLine.set(file.path, ev.position.lineNumber); });
     const cmd = e.addAction({ id: 'aico.save', label: 'Save', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS], run: () => { void onSave(file.path); } });
     const ask = e.addAction({
       id: 'aico.ask', label: 'Ask AI about the selection', contextMenuGroupId: 'navigation', contextMenuOrder: 0,
@@ -236,8 +247,14 @@ function Editor({ file, onDirty, onSave }: { file: OpenFile; onDirty: (p: string
         useDesk.getState().navigate({ view: 'chat', params: { id: useStore.getState().sessionId } });
       },
     });
-    return () => { sub.dispose(); cmd.dispose(); ask.dispose(); };
-  }, [file.path, file.model, file.savedVersion, onDirty, onSave]);
+    const external = e.addAction({
+      id: 'aico.openExternal', label: 'Open in external editor', contextMenuGroupId: 'navigation', contextMenuOrder: 1,
+      run: (editor) => {
+        openInExternalEditor(root, file.path, editor.getPosition()?.lineNumber);
+      },
+    });
+    return () => { sub.dispose(); cmd.dispose(); ask.dispose(); cursor.dispose(); external.dispose(); };
+  }, [file.path, file.model, file.savedVersion, onDirty, onSave, root]);
 
   return <div ref={host} className="absolute inset-0" />;
 }

@@ -27,8 +27,11 @@
  * - Block anything. It is a note; a multi-step change is legitimately
  *   incomplete between steps.
  * - Repeat itself: once per symbol and signature per run.
- * - Wait for a graph. If none is ready within a short budget the note is
- *   skipped and the graph keeps building for the next time.
+ * - Wait long for a graph. If none is ready within a short budget, the check
+ *   is queued instead of dropped: the graph keeps building, and the note is
+ *   appended to the next tool result once it is ready — or, if the model
+ *   stops first, given to it before the turn ends (agent loop). The first
+ *   edit of a project nobody has indexed yet is checked like any other.
  * - Speak for re-exports on a signature change: an `export *` barrel needs no
  *   edit when a parameter is added; on a rename or removal, named re-exports
  *   are listed too.
@@ -40,22 +43,29 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScoped } from '../run-scoped.js';
 import { currentCwd } from '../run-context.js';
-import { danglingUsers, getCodeGraph, findFile, peekCodeGraph, symbolUsers } from './index.js';
+import { danglingUsers, exactUsersOnDemand, getCodeGraph, findFile, peekCodeGraph, symbolUsers } from './index.js';
 import { langOf, parseSource } from './parse/index.js';
 import { keyOf } from './paths.js';
 import type { CodeGraph, ExportDecl } from './types.js';
 
-const GRAPH_BUDGET_MS = 4_000;
+let GRAPH_BUDGET_MS = 4_000;
+
+/** Tests: how long a write waits for a graph before queueing its check. */
+export function setEditNoteBudget(ms: number): void { GRAPH_BUDGET_MS = ms; }
 const MAX_LISTED = 12;
+
+/** A changed API whose callers could not be listed yet: no graph within the budget. */
+interface Pending { root: string; rel: string; key: string; changed: ChangedSymbol[] }
 
 interface NoteState {
   startedAt: number;
   touched: Set<string>;
   noted: Set<string>;
   before: Map<string, ExportDecl[]>;
+  pending: Pending[];
 }
 
-const state = runScoped<NoteState>(() => ({ startedAt: Date.now(), touched: new Set(), noted: new Set(), before: new Map() }));
+const state = runScoped<NoteState>(() => ({ startedAt: Date.now(), touched: new Set(), noted: new Set(), before: new Map(), pending: [] }));
 
 /** Start of a turn: nothing touched, nothing noted. */
 export function resetEditNotes(): void {
@@ -131,43 +141,24 @@ export async function afterWrite(file: string): Promise<string | undefined> {
       ? changedSymbols(before, after).filter(c => !st.noted.has(`${key}#${c.name}#${c.after ?? 'removed'}`))
       : [];
 
-    // Only a changed API is worth waiting for a graph; the co-change hint uses one if it is ready.
     // Only a changed API is worth waiting for a graph. An ordinary write uses one if it is in
     // memory, and otherwise starts one only in a git repository — the co-change hint needs
     // history, and a folder with none is often a scratch or test folder that is about to be
     // deleted (on Windows a git child sitting in it keeps it from being removed).
     const g = changed.length ? await graphWithin(root, GRAPH_BUDGET_MS) : peekOrWarm(root);
-    if (!g) return undefined;
+    for (const c of changed) st.noted.add(`${key}#${c.name}#${c.after ?? 'removed'}`);
+    if (!g) {
+      // Not ready yet: keep the check; it is answered as soon as the graph is (takeQueuedEditNotes).
+      if (!changed.length) return undefined;
+      st.pending.push({ root, rel: rel.split(path.sep).join('/'), key, changed });
+      return `\n\nCode graph check: ${changed.map(c => `\`${c.name}\``).join(', ')} changed; the project is still being indexed, so the files that use ${changed.length === 1 ? 'it' : 'them'} will be listed with a following tool result.`;
+    }
     const id = findFile(g, rel.split(path.sep).join('/')).id;
     if (id === undefined) return undefined;
-    const untouched = (fileId: number): boolean => {
-      const userAbs = path.join(g.root, g.files[fileId]!.path);
-      if (st.touched.has(keyOf(userAbs))) return false;
-      try { return fs.statSync(userAbs).mtimeMs <= st.startedAt; } catch { return false; }
-    };
-
-    const notes: string[] = [];
-    for (const c of changed) {
-      st.noted.add(`${key}#${c.name}#${c.after ?? 'removed'}`);
-      // A graph read before the write still has the symbol; one read after it has the
-      // bindings that now name nothing.
-      const known = symbolUsers(g, id, c.name);
-      const users = (known.length ? known : c.change === 'removed' ? danglingUsers(g, id, c.name) : [])
-        .filter(u => c.change === 'removed' || u.via !== 'reexport');
-      const pending = users.filter(u => untouched(u.file));
-      if (!pending.length) continue;
-      const shown = pending.slice(0, MAX_LISTED).map(u => {
-        const f = g.files[u.file]!.path;
-        const alias = u.local !== c.name ? ` as ${u.local}` : '';
-        return `${f}${u.lines[0] ? `:${u.lines[0]}` : ''}${alias}`;
-      });
-      const what = c.change === 'removed' ? 'was removed or renamed' : 'changed its signature';
-      notes.push(`\`${c.name}\` ${what}; ${users.length} file(s) use it and ${pending.length} have not been changed in this turn: ${shown.join(', ')}${pending.length > shown.length ? `, … ${pending.length - shown.length} more` : ''}.`);
-    }
+    const untouched = untouchedIn(g, st);
     const parts: string[] = [];
-    if (notes.length) {
-      parts.push(`Code graph check (imports resolved through aliases and re-exports; same-named symbols elsewhere excluded):\n${notes.join('\n')}\nCodeGraph {"action":"impact","target":"${g.files[id]!.path}#<name>"} lists every user with its line.`);
-    }
+    const api = await apiNote(g, id, changed, untouched);
+    if (api) parts.push(api);
 
     // Files that history says change with this one, though nothing imports between them —
     // the relation no import graph and no text search shows (ADR 0028).
@@ -189,6 +180,100 @@ export async function afterWrite(file: string): Promise<string | undefined> {
     // A note is advice. Failing to compute it must never fail the write.
     return undefined;
   }
+}
+
+function untouchedIn(g: CodeGraph, st: NoteState): (fileId: number) => boolean {
+  return (fileId: number): boolean => {
+    const userAbs = path.join(g.root, g.files[fileId]!.path);
+    if (st.touched.has(keyOf(userAbs))) return false;
+    try { return fs.statSync(userAbs).mtimeMs <= st.startedAt; } catch { return false; }
+  };
+}
+
+/** "These files use what you changed and have not been touched": the note's text, or undefined. */
+async function apiNote(g: CodeGraph, id: number, changed: ChangedSymbol[], untouched: (fileId: number) => boolean): Promise<string | undefined> {
+  const notes: string[] = [];
+  let exactness = '';
+  for (const c of changed) {
+    // A project over the whole-project checker's limit: this symbol's users exactly, on demand
+    // (codegraph/ts-ondemand), still in the time box; a signature change keeps the symbol, so
+    // the language service finds its callers in the edited code too.
+    const od = c.change === 'signature' ? await exactUsersOnDemand(g, id, c.name) : undefined;
+    if (od) exactness = od.status === 'exact' ? ' Users found exactly on demand by the TypeScript language service.' : ` Partial: ${od.note ?? 'the exact answer was not ready'}.`;
+    // A graph read before the write still has the symbol; one read after it has the
+    // bindings that now name nothing.
+    const known = od?.status === 'exact' ? od.users : symbolUsers(g, id, c.name);
+    const users = (known.length ? known : c.change === 'removed' ? danglingUsers(g, id, c.name) : [])
+      .filter(u => c.change === 'removed' || u.via !== 'reexport');
+    const pending = users.filter(u => untouched(u.file));
+    if (!pending.length) continue;
+    const shown = pending.slice(0, MAX_LISTED).map(u => {
+      const f = g.files[u.file]!.path;
+      const alias = u.local !== c.name ? ` as ${u.local}` : '';
+      const iface = u.via === 'interface' ? ' (via interface)' : '';
+      return `${f}${u.lines[0] ? `:${u.lines[0]}` : ''}${alias}${iface}`;
+    });
+    const what = c.change === 'removed' ? 'was removed or renamed' : 'changed its signature';
+    notes.push(`\`${c.name}\` ${what}; ${users.length} file(s) use it and ${pending.length} have not been changed in this turn: ${shown.join(', ')}${pending.length > shown.length ? `, … ${pending.length - shown.length} more` : ''}.`);
+  }
+  if (!notes.length) return undefined;
+  return `Code graph check (imports resolved through aliases and re-exports, methods through receiver types; same-named symbols elsewhere excluded):${exactness}\n${notes.join('\n')}\nCodeGraph {"action":"impact","target":"${g.files[id]!.path}#<name>"} lists every user with its line.`;
+}
+
+/**
+ * Checks that were waiting for a graph, answered now if it is ready (never
+ * waits). Appended to whatever tool result comes next (tools/index).
+ */
+export async function takeQueuedEditNotes(): Promise<string | undefined> {
+  try {
+    const st = state.get();
+    if (!st.pending.length) return undefined;
+    const out: string[] = [];
+    const keep: Pending[] = [];
+    const ready = st.pending;
+    st.pending = [];
+    for (const p of ready) {
+      const g = peekCodeGraph(p.root);
+      if (!g) { keep.push(p); continue; }
+      const id = findFile(g, p.rel).id;
+      if (id !== undefined) {
+        const note = await apiNote(g, id, p.changed, untouchedIn(g, st));
+        if (note) out.push(note);
+      }
+    }
+    st.pending.push(...keep);
+    return out.length ? `\n\n${out.join('\n\n')}` : undefined;
+  } catch {
+    return undefined; // advice only
+  }
+}
+
+/** Whether a check is still waiting for its graph. */
+export function hasQueuedEditNotes(): boolean {
+  try { return state.get().pending.length > 0; } catch { return false; }
+}
+
+/**
+ * At the end of a turn: wait (bounded) for the graphs the queued checks need,
+ * then answer them. The agent loop gives the result to the model before the
+ * turn may end, so a first edit is never left unchecked.
+ */
+export async function flushQueuedEditNotes(timeoutMs: number): Promise<string | undefined> {
+  const st = state.get();
+  const roots = [...new Set(st.pending.map(p => p.root))];
+  if (!roots.length) return undefined;
+  await Promise.race([
+    Promise.all(roots.map(r => getCodeGraph(r).catch(() => undefined))),
+    new Promise<void>(r => { const t = setTimeout(r, timeoutMs); t.unref?.(); }),
+  ]);
+  const note = await takeQueuedEditNotes();
+  // A graph that never came: say so rather than leave the edit silently unchecked.
+  if (!note && st.pending.length) {
+    const names = st.pending.flatMap(p => p.changed.map(c => `${p.rel}#${c.name}`));
+    st.pending = [];
+    return `Code graph check: the project could not be indexed in time to list who uses ${names.join(', ')}. Search for their users before finishing (Grep, or CodeGraph impact).`;
+  }
+  return note?.trim();
 }
 
 /** The graph in memory; if none and this is a git repository, start one for the next write. */

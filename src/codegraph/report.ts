@@ -25,6 +25,7 @@ import {
 import { findFile, findSymbolDecls, symbolUsers } from './index.js';
 import { dirOf, baseOf } from './paths.js';
 import type { CodeGraph, SymbolRef } from './types.js';
+import type { OnDemandResult } from './ts-ondemand.js';
 
 export const DEFAULT_MAX_CHARS = 6_000;
 
@@ -101,18 +102,20 @@ function notFound(g: CodeGraph, q: string, candidates?: number[]): string {
 }
 
 const VIA_NOTE: Record<SymbolRef['via'], string> = {
-  import: '', namespace: '', reexport: ' (re-export)', package: ' (same package)', inferred: ' (inferred)',
+  import: '', namespace: '', reexport: ' (re-export)', package: ' (same package)', inferred: ' (inferred)', call: '', interface: ' (via interface)', ondemand: '',
 };
 
 /** Who uses a symbol, then what depends on those files. */
-export function reportSymbolImpact(g: CodeGraph, file: number, symbol: string, depth: number, maxChars: number): string {
+export function reportSymbolImpact(g: CodeGraph, file: number, symbol: string, depth: number, maxChars: number, onDemand?: OnDemandResult): string {
   const f = g.files[file]!;
   const decl = f.exports.find(e => e.name === symbol);
-  const users = symbolUsers(g, file, symbol);
-  const direct = users.filter(u => u.via !== 'reexport');
+  // A project too large for the whole-project checker: this one symbol, resolved exactly on demand.
+  const users = onDemand?.status === 'exact' ? onDemand.users : symbolUsers(g, file, symbol);
+  const direct = users.filter(u => u.via !== 'reexport' && u.via !== 'interface');
+  const viaIface = users.filter(u => u.via === 'interface');
   const reexports = users.filter(u => u.via === 'reexport');
   const head = `${symbol} — ${f.path}${decl ? `:${decl.line}` : ''}${decl?.sig ? `\n  ${decl.sig}` : ''}`;
-  if (users.length === 0) {
+  if (users.length === 0 && !g.implementations.some(i => i.iface.file === file || i.impl.file === file)) {
     return `${head}\nNo file uses it through an import the graph resolves. It may be unused, used only in ${f.path}, or reached dynamically — Grep for the name to be sure.`;
   }
   const items = direct.map(u => {
@@ -125,9 +128,14 @@ export function reportSymbolImpact(g: CodeGraph, file: number, symbol: string, d
   const grouped = groupedPaths(items, budget);
   const parts = [
     head,
-    `Used directly in ${direct.length} file(s)${tests ? ` (${tests} tests)` : ''} — resolved through imports, aliases, barrels and namespaces; same-named symbols in other files are not included:`,
+    `Used directly in ${direct.length} file(s)${tests ? ` (${tests} tests)` : ''} — resolved through imports, aliases, barrels, namespaces and receiver types; same-named symbols in other files are not included:`,
     grouped.text + more(items.length, grouped.shown, 'raise maxChars'),
   ];
+  if (viaIface.length) {
+    const ifaceItems = viaIface.map(u => ({ path: g.files[u.file]!.path, note: `${u.lines.length ? `:${u.lines[0]}` : ''}${u.local !== symbol ? ` (${u.local})` : ''}` })).sort((a, b) => a.path.localeCompare(b.path));
+    const gi = groupedPaths(ifaceItems, Math.max(600, Math.floor(budget / 3)));
+    parts.push(`May be reached through an interface (via interface) from ${viaIface.length} file(s) — calls on the interface or abstract method it implements; possible, not certain (exact:true leaves them out):\n${gi.text}${more(ifaceItems.length, gi.shown, 'raise maxChars')}`);
+  }
   if (reexports.length) parts.push(`Re-exported by: ${reexports.map(u => `${g.files[u.file]!.path}${u.local !== symbol ? ` as ${u.local}` : ''}`).join(', ')}`);
   if (depth > 1) {
     const layers = impactLayers(g, [file], depth, direct.map(u => u.file));
@@ -138,9 +146,39 @@ export function reportSymbolImpact(g: CodeGraph, file: number, symbol: string, d
       parts.push(`Then ${count} more file(s) depend on those (depth ≤ ${depth}): ${sample.join(', ')}${count > sample.length ? ', …' : ''}`);
     }
   }
-  if (f.lang === 'ts' || f.lang === 'js') parts.push('Line-exact references: Refactor {"action":"findReferences","path":"' + f.path + '","symbol":"' + symbol + '"} (load the refactor group).');
+  if (onDemand?.status === 'exact') parts.push(`Exact (on demand): users found by the TypeScript language service for this symbol (${onDemand.cached ? 'cached' : `${(onDemand.ms / 1000).toFixed(1)} s`}), because the project is over the whole-project checker's limit.`);
+  else if (onDemand) parts.push(`PARTIAL: ${onDemand.note ?? 'the exact answer is not ready'}.`);
+  else if (symbol.includes('.') && (f.lang === 'ts' || f.lang === 'js')) parts.push(g.stats.methods?.ts === 'checker' ? 'Method calls resolved by the TypeScript checker.' : `Method calls resolved by the lexical rules (${g.stats.methods?.note ?? 'the TypeScript checker has not run'}).`);
+  if (f.lang === 'ts' || f.lang === 'js') parts.push('Line-exact references: Refactor {"action":"findReferences","path":"' + f.path + '","symbol":"' + symbol.slice(symbol.lastIndexOf('.') + 1) + '"} (load the refactor group).');
   else if (direct.some(u => u.via === 'inferred')) parts.push('(inferred) = linked by a unique name in scope, not an explicit import.');
+  const impls = implementationsText(g, file, symbol.includes('.') ? symbol.slice(0, symbol.indexOf('.')) : symbol, 1_500);
+  if (impls) parts.push(impls);
   return parts.join('\n');
+}
+
+/** Implementations of an interface declared in `file` (or the interfaces a type there implements), with the methods that make each one. */
+export function implementationsText(g: CodeGraph, file: number, typeName: string | undefined, maxChars: number): string {
+  const lines: string[] = [];
+  const of = g.implementations.filter(i => i.iface.file === file && (!typeName || i.iface.name === typeName));
+  const by = g.implementations.filter(i => i.impl.file === file && (!typeName || i.impl.name === typeName));
+  const row = (i: (typeof of)[number], side: 'impl' | 'iface'): string => {
+    const other = side === 'impl' ? i.impl : i.iface;
+    const meth = i.methods.map(m => `${m.name}${m.ptr ? '*' : ''}${m.file !== i.impl.file ? ` (${g.files[m.file]!.path}:${m.line})` : `:${m.line}`}`).join(', ');
+    return `  ${g.files[other.file]!.path}#${other.name}${i.pointer ? ' (pointer *' + i.impl.name + ')' : ''} — ${i.how === 'structural' ? 'method set matches' : 'declared'}${meth ? `: ${meth}` : ''}`;
+  };
+  const ifaces = [...new Set(of.map(i => i.iface.name))];
+  for (const n of ifaces) {
+    const list = of.filter(i => i.iface.name === n);
+    lines.push(`${n} is implemented by ${list.length} type(s)${list.some(i => i.how === 'structural') ? ' (structural: every method present with identical parameter and result types; * = pointer receiver, so only the pointer type has it)' : ''}:`);
+    for (const i of list.slice(0, 20)) lines.push(row(i, 'impl'));
+    if (list.length > 20) lines.push(`  … ${list.length - 20} more`);
+  }
+  for (const n of [...new Set(by.map(i => i.impl.name))]) {
+    const list = by.filter(i => i.impl.name === n);
+    lines.push(`${n} implements: ${list.map(i => `${g.files[i.iface.file]!.path}#${i.iface.name}${i.how === 'structural' ? ' (method set)' : ''}`).join(', ')}`);
+  }
+  const text = lines.join('\n');
+  return text.length > maxChars ? `${text.slice(0, maxChars - 2)}…` : text;
 }
 
 /** What depends on a file, by depth, with the tests that reach it. */
@@ -202,7 +240,7 @@ export function reportPath(g: CodeGraph, from: number, to: number): string {
   const hop = (p: number[]): string => p.map((id, i) => {
     if (i === 0) return `  ${g.files[id]!.path}`;
     const e = g.edges.find(x => x.from === p[i - 1] && x.to === id);
-    const how = e ? ` — via ${e.names.slice(0, 4).join(', ') || e.kind}${e.confidence === 'inferred' ? ' (inferred: interface implementation or unique name)' : ''}` : '';
+    const how = e ? ` — via ${e.names.slice(0, 4).join(', ') || e.kind}${e.viaInterface ? ' (through an interface: possible, not certain)' : e.confidence === 'inferred' ? ' (inferred: unique name in scope)' : ''}` : '';
     return `  → ${g.files[id]!.path}${how}`;
   }).join('\n');
   if (path) return `Shortest dependency path ${a} → ${b} (${path.length - 1} hop(s)):\n${hop(path)}`;

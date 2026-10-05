@@ -16,6 +16,17 @@
 
 import { headerFrom, lineAt, mask, normaliseSig, type LexFamily, type Masked } from '../lex.js';
 import type { ExportDecl, ImportBinding, Lang, ParsedFile, RawImport } from '../types.js';
+import { extractMembers, withMembers } from './members.js';
+
+/** The local names a file's imports bind (simple names of imported types, aliases). */
+function importedNames(imports: RawImport[], sep: string): Set<string> {
+  const out = new Set<string>();
+  for (const i of imports) {
+    for (const b of i.names ?? []) out.add(b.local);
+    if (!i.names?.length && i.kind !== 'wildcard') out.add(i.spec.split(sep).pop()!);
+  }
+  return out;
+}
 
 /** Capitalised identifiers used outside `skip`, bounded. */
 function typeRefs(m: Masked, skip: Array<[number, number]>, re = /(?<![\w$])([A-Z][A-Za-z0-9_]*)\b/g): string[] {
@@ -61,7 +72,8 @@ export function parseJvm(source: string, lang: 'java' | 'kotlin'): ParsedFile {
   const entry = /\bstatic\s+void\s+main\s*\(/.test(code) || /(?:^|\n)fun\s+main\s*\(/.test(code) ? 'main'
     : /@SpringBootApplication\b/.test(code) ? 'main'
       : /@(?:RestController|Controller|GetMapping|PostMapping|RequestMapping)\b/.test(code) ? 'routes' : undefined;
-  return { lang, imports, exports, uses: {}, members: {}, ...(pkg ? { pkg } : {}), refs: typeRefs(m, skip), ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  const parsed: ParsedFile = { lang, imports, exports, uses: {}, members: {}, ...(pkg ? { pkg } : {}), refs: typeRefs(m, skip), ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  return withMembers(parsed, extractMembers(m, source, lang, importedNames(imports, '.'), skip), m);
 }
 
 export function parseCSharp(source: string): ParsedFile {
@@ -86,7 +98,8 @@ export function parseCSharp(source: string): ParsedFile {
   const entry = /\bstatic\s+(?:async\s+)?(?:void|int|Task(?:<int>)?)\s+Main\s*\(/.test(code) ? 'main'
     : /\bWebApplication\.CreateBuilder\b|\bapp\.Map(?:Get|Post|Put|Delete)\s*\(/.test(code) ? 'main'
       : /\[(?:ApiController|HttpGet|HttpPost|Route)\b/.test(code) ? 'routes' : undefined;
-  return { lang: 'cs', imports, exports, uses: {}, members: {}, ...(namespaces.length ? { namespaces } : {}), refs: typeRefs(m, skip), ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  const parsed: ParsedFile = { lang: 'cs', imports, exports, uses: {}, members: {}, ...(namespaces.length ? { namespaces } : {}), refs: typeRefs(m, skip), ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  return withMembers(parsed, extractMembers(m, source, 'cs', new Set(imports.flatMap(i => i.names?.map(b => b.local) ?? [])), skip), m);
 }
 
 export function parsePhp(source: string): ParsedFile {
@@ -130,7 +143,8 @@ export function parsePhp(source: string): ParsedFile {
   const refs = new Set(typeRefs(m, skip));
   for (const x of code.matchAll(/\\?((?:[A-Z]\w*\\)+[A-Z]\w*)/g)) refs.add(x[1]!);
   const entry = /\bRoute::(?:get|post|put|patch|delete|resource)\s*\(/.test(code) ? 'routes' : undefined;
-  return { lang: 'php', imports, exports, uses: {}, members: {}, ...(pkg ? { pkg } : {}), refs: [...refs].slice(0, 2000), ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  const parsed: ParsedFile = { lang: 'php', imports, exports, uses: {}, members: {}, ...(pkg ? { pkg } : {}), refs: [...refs].slice(0, 2000), ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  return withMembers(parsed, extractMembers(m, source, 'php', new Set<string>(), skip), m);
 }
 
 export function parseRuby(source: string): ParsedFile {
@@ -155,7 +169,8 @@ export function parseRuby(source: string): ParsedFile {
     const at = x.index! + (x[0].startsWith('\n') ? 1 : 0);
     exports.push(decl(m, code, at, x[1]!, 'function', ['\n']));
   }
-  return { lang: 'rb', imports, exports, uses: {}, members: {}, refs: typeRefs(m, skip), loc: m.lineStarts.length };
+  const parsed: ParsedFile = { lang: 'rb', imports, exports, uses: {}, members: {}, refs: typeRefs(m, skip), loc: m.lineStarts.length };
+  return withMembers(parsed, extractMembers(m, source, 'rb', new Set<string>(), skip), m);
 }
 
 /** Flatten a Rust use tree: `a::b::{c, d::e as f, self}` → paths with optional alias. */
@@ -217,7 +232,9 @@ export function parseRust(source: string): ParsedFile {
     exports.push(decl(m, code, at, x[3]!, x[2]!, ['{', ';', 'where'], !x[1]));
   }
   const entry = /(?:^|\n)\s*(?:async\s+)?fn\s+main\s*\(/.test(code) ? 'main' : undefined;
-  return { lang: 'rs', imports, exports, uses: {}, members: {}, refs: typeRefs(m, skip), ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  const parsed: ParsedFile = { lang: 'rs', imports, exports, uses: {}, members: {}, refs: typeRefs(m, skip), ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  // Module-qualified names (`money::add`) are paths, not variables: the `use`d module names are imports.
+  return withMembers(parsed, extractMembers(m, source, 'rs', new Set<string>(), skip), m);
 }
 
 export const FAMILY: Record<Lang, LexFamily> = { ts: 'js', js: 'js', py: 'py', go: 'go', java: 'java', kotlin: 'kotlin', cs: 'cs', php: 'php', rb: 'rb', rs: 'rs' };

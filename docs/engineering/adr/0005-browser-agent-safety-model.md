@@ -36,6 +36,9 @@ assets; and a model driving a browser can be manipulated by what it reads.
    credential-over-http pages are stopped before load and are look-only for
    the agent (`browser-privacy.ts`); shields (HTTPS-first, third-party cookies
    blocked, GPC/DNT) in `browser-shield.ts`.
+6. **Certificate errors** are the person's to bypass, never the agent's:
+   amended by [ADR 0029](0029-browser-certificate-exceptions.md) (Proceed on
+   the warning, bound to the exact certificate; revoked and HSTS hosts never).
 
 ## Alternatives considered
 

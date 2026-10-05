@@ -469,13 +469,40 @@ lives in the AICO home rather than your repository, and refreshes itself.
   files and symbols; arrows walk the edges; Enter opens the file.
 - **Ask about it:** select files, a symbol, a path or an impact and press
   **Ask AICO about this** — a chat starts with exactly that context.
+- **Methods too:** calls are linked by the receiver's type wherever the code
+  states it (a constructor, a typed parameter or field, a declared return
+  type), so a method's symbol view lists exactly its callers — never those of
+  a same-named method on another class. For TypeScript the TypeScript checker
+  does this when it is installed (the map says which); in very large projects
+  the symbol you look at is resolved exactly on demand ("exact (on demand)",
+  or "partial" if it takes longer than 8 seconds — ask again). Calls through an
+  interface are marked **via interface**; an interface's details list the
+  types that implement it and why (for Go, the exact method set — a pointer
+  receiver means only `*T` satisfies it). The **Exact only** filter hides
+  everything that rests on an interface or a unique name.
+- **Open a file:** in the web client, a file opens in VS Code at the line, or
+  in the editor you set with `editor.command` in your settings (e.g.
+  `"editor": {"command": "cursor -g {file}:{line}"}`, `idea --line {line} {file}`,
+  `subl {file}:{line}`); with none available it opens in the client's own
+  viewer at that line. The desktop opens files in its editor and offers
+  **Open in external editor**.
 - **The agent uses it:** asking about callers, usages, impact, a rename or the
   architecture gives the agent the `CodeGraph` tool, and when it changes an
-  exported function's signature, the edit's result lists the files that still
-  call it the old way.
-- **Rules:** put layering rules in `.aico/settings.json` —
-  `{"codeGraph": {"rules": [{"from": "src/ui/**", "to": "src/db/**"}]}}` — and
-  violations show in the map and the agent's overview.
+  exported function's or method's signature, the edit's result lists the files
+  that still call it the old way — even on the first edit of a project that
+  was not indexed yet (the list follows as soon as the graph is ready).
+- **Rules:** layering rules — files matching `from` must not depend on files
+  matching `to` — come from your settings (`codeGraph.rules`, or
+  `codeGraph.projects["<path>"].rules`), the project's `.aico/settings.json`
+  and a committed `.aico/codegraph.json` (`{"rules": [{"from": "src/ui/**",
+  "to": "src/db/**", "reason": "UI goes through the API"}]}`). They add up: a
+  project can add rules, never remove yours. Violations show in the map and
+  the agent's overview.
+- **In your morning brief:** for projects you have indexed, the brief lists new
+  import cycles, newly broken rules, sudden hotspots and files nothing uses any
+  more, with **Show in Code map** and **Ask AICO to fix**. Switch on the
+  **Code** monitor for a project (brief → Monitors) to hear about them right
+  after the change.
 
 ## Sheets, and everything a chat made
 

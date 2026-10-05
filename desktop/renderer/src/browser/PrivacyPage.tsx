@@ -2,7 +2,9 @@
  * Privacy & security — the browser's settings page: Shields defaults,
  * protected browsing (and whether AICO checks flagged pages by itself),
  * notification prompts, every site's remembered permissions with a reset, the
- * per-site shield exceptions, "Remember what I read" (MemorySearch.tsx),
+ * per-site shield exceptions, certificate exceptions (the certificates you
+ * chose to trust on the warning page, and "Allow self-signed certificates on
+ * localhost" — browser-certs-core.ts), "Remember what I read" (MemorySearch.tsx),
  * insights, and what to clear when AICO closes.
  *
  * @module desktop/renderer/browser/PrivacyPage
@@ -12,7 +14,7 @@ import React, { useEffect, useState } from 'react';
 import { Icon } from '@/lib/icons';
 import { cls } from '@/lib/util';
 import { toast } from '@/state/desk';
-import type { ShieldSet, ShieldSettingsView, SitePermissions } from '@desk/browser-types';
+import type { CertExceptionsView, ShieldSet, ShieldSettingsView, SitePermissions } from '@desk/browser-types';
 import { call, useAvailable } from './ipc';
 import { hostOf } from './urls';
 import { showInternal } from './store';
@@ -114,6 +116,8 @@ export function PrivacyPage(): React.ReactElement {
             ))}
           </Section>
 
+          <CertExceptions />
+
           <MemorySettings />
 
           <Section title="Insights" hint="Time on sites, visits and what was blocked — kept on this device only.">
@@ -135,6 +139,39 @@ export function PrivacyPage(): React.ReactElement {
         </div>
       )}
     </ChromePage>
+  );
+}
+
+const errorMessage = (e: Error): string => e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+
+/** Certificates you chose to trust on the warning page, and the localhost setting. Only you change these; the agent cannot. */
+function CertExceptions(): React.ReactElement | null {
+  const [v, setV] = useState<CertExceptionsView | null | undefined>(undefined);
+  const available = useAvailable('browser:certs:list');
+  const load = (): void => { void call<CertExceptionsView>('browser:certs:list').then(r => setV(r ?? null)).catch(() => setV(null)); };
+  useEffect(load, []);
+  if (!available || !v) return null;
+  return (
+    <Section title="Certificate exceptions" hint="Sites whose invalid certificate you chose to trust. Each is bound to that exact certificate; a different one shows the warning again. They are marked Not secure, and saved passwords are not filled there.">
+      <Toggle label="Allow self-signed certificates on localhost" hint="For development servers on this computer (localhost, 127.0.0.1, ::1, *.localhost): their certificate warnings are skipped for you and the agent. Off by default."
+        on={v.allowInsecureLocalhost}
+        set={on => void call<CertExceptionsView>('browser:certs:localhost', on).then(r => { if (r) setV(r); }).catch((e: Error) => toast.error('Could not change', errorMessage(e)))} />
+      {v.exceptions.length === 0 && <div className="px-2 py-3 text-[12.5px] text-aico-muted">You have not continued past any certificate warning.</div>}
+      {v.exceptions.map(e => (
+        <div key={`${e.scope} ${e.host} ${e.fingerprint}`} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+          <Icon name="alert" size={14} className="shrink-0 text-aico-danger" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px]">{e.host}</span>
+            <span className="block truncate text-[11.5px] text-aico-muted" title={e.fingerprint}>Issued by {e.issuer || 'unknown'} · {e.fingerprint.replace(/^sha256\//, 'SHA-256 ').slice(0, 30)}…</span>
+          </span>
+          <span className="flex flex-wrap gap-1">
+            <Chip>{e.scope === 'always' ? 'Always trusted' : 'This session'}</Chip>
+            {e.credentialsConfirmed && <Chip>Saved passwords allowed</Chip>}
+          </span>
+          <button className="btn-ghost btn-sm" onClick={() => void call<CertExceptionsView>('browser:certs:remove', e.host, e.fingerprint).then(r => { if (r) setV(r); }).catch((err: Error) => toast.error('Could not remove', errorMessage(err)))}>Remove</button>
+        </div>
+      ))}
+    </Section>
   );
 }
 

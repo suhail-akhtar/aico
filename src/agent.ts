@@ -123,7 +123,7 @@ import { splitMemories, recalledMemoryBlock } from './recall/inject.js';
 import { embedderFromSettings } from './recall/embed.js';
 import { currentCwd } from './run-context.js';
 import { resetObservations } from './tools/observation.js';
-import { resetEditNotes } from './codegraph/edit-note.js';
+import { flushQueuedEditNotes, hasQueuedEditNotes, resetEditNotes } from './codegraph/edit-note.js';
 import { sinkRedact, sinkRedactText } from './vault/sink.js';
 import { guardAgentRun } from './vault/agent-hooks.js';
 import { installVaultStages } from './vault/pipeline.js';
@@ -2935,6 +2935,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   resetVerification();
   resetObservations();
   resetEditNotes();
+  let editNoteFlushed = false;
   resetChecks();
   // The user's own words are the standard the work is held to. Taken from the
   // task rather than from anything the model writes: a model that authors its
@@ -3124,6 +3125,9 @@ const MAX_VERIFICATION_NUDGES = 3;
 const MAX_CHECKS_NUDGES = 3;
 
 const MAX_COMPLETION_NUDGES = 2;
+
+/** At the end of a turn, how long a queued edit check may wait for the code graph (codegraph/edit-note). */
+const EDIT_NOTE_FLUSH_MS = 30_000;
 
 /**
  * How often a standing objective is restated inside a long turn.
@@ -3377,6 +3381,18 @@ const GOAL_REMINDER_EVERY = 6;
           // and because it is the objection that applies to most work, most of
           // the time. Silent when the project defines no checks or the turn
           // changed no source.
+          // An edit changed an exported API before the code graph was ready: its callers
+          // are listed now, before the turn may end (codegraph/edit-note). Once per turn.
+          if (!editNoteFlushed && hasQueuedEditNotes()) {
+            editNoteFlushed = true;
+            const note = await flushQueuedEditNotes(EDIT_NOTE_FLUSH_MS);
+            if (note) {
+              transcript.recordAssistant(text, [], stepUsage, stepReasoning);
+              transcript.recordUserMessage(note, { kind: 'plugin', plugin: 'codegraph-edit-note' });
+              if (!silent) startSpinner('Thinking…');
+              continue;
+            }
+          }
           if (completionGateEnabled && checksNudges < MAX_CHECKS_NUDGES) {
             // The bound app's checks when there is one, the project's otherwise —
             // profile first, manifest second — plus any sub-project this turn touched.

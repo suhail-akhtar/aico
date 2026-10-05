@@ -659,7 +659,7 @@ export const api = {
   briefHistory: (limit = 14) => get<{ briefs: BriefSummaryRow[] }>(`brief/history?limit=${limit}`),
   briefById: (id: string) => get<{ brief: Brief }>(`brief/history?id=${encodeURIComponent(id)}`),
   runBrief: () => post<{ ok: boolean; started?: boolean; error?: string }>('brief/run', {}),
-  setBriefMonitor: (path: string, flags: { ci?: boolean; reviews?: boolean; advisories?: boolean }) =>
+  setBriefMonitor: (path: string, flags: { ci?: boolean; reviews?: boolean; advisories?: boolean; codeGraph?: boolean }) =>
     post<{ ok: boolean }>('brief/monitors', { path, ...flags }),
 
   /** The approve-later inbox: calls unattended runs parked for a person (engine: autonomy/inbox). */
@@ -755,6 +755,16 @@ export const api = {
     get<{ mermaid: string }>(`codegraph/mermaid?path=${encodeURIComponent(path)}`),
   codeGraphContext: (path: string, ids: number[]) =>
     get<{ text: string }>(`codegraph/context?path=${encodeURIComponent(path)}&ids=${ids.join(',')}`),
+  /**
+   * Open a file at a line in the person's editor (server/editor): needs a person,
+   * like approving a tool call. `opened: false` comes with the reason; the
+   * client then shows its own viewer.
+   */
+  openInEditor: (file: string, line?: number, project?: string) =>
+    postAsPerson<{ opened: boolean; editor?: string; reason?: string; rel?: string; line?: number }>('editor/open', { file, ...(line ? { line } : {}), ...(project ? { path: project } : {}) }),
+  /** A registered project's text file, for the viewer. */
+  projectFile: (file: string, project?: string) =>
+    get<{ path: string; root: string; text: string; size: number }>(`editor/file?file=${encodeURIComponent(file)}${project ? `&path=${encodeURIComponent(project)}` : ''}`),
   /**
    * Make an app from a template. The server also binds its conversation and,
    * for a process app, starts the install in the background — so the answer

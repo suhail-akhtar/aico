@@ -307,27 +307,96 @@ export function ErrorPage({ tab, error }: { tab: TabState; error: TabError }): R
 }
 
 export function CertErrorPage({ tab, error }: { tab: TabState; error: TabError }): React.ReactElement {
-  const host = hostOf(error.url || tab.url);
+  const w = tab.cert;
+  const host = w?.host || hostOf(error.url || tab.url);
+  const [advanced, setAdvanced] = useState(false);
+  const [always, setAlways] = useState(false);
   const back = (): void => {
     fire('browser:certAnswer', tab.id, false);
     if (tab.canGoBack) fire('browser:back'); else openUrl('about:blank');
   };
+  // Main checks the warning's token and that this click really happened on the AICO window (browser-certs-core.ts).
+  const proceed = (): void => {
+    if (!w) return;
+    void call('browser:certProceed', { tabId: tab.id, token: w.token, always }).catch((e: Error) => toast.error('Could not continue', e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')));
+  };
+  const allowLocalhost = (): void => {
+    void call('browser:certs:localhost', true).then(() => fire('browser:reload')).catch((e: Error) => toast.error('Could not change', e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')));
+  };
+  const code = (w?.error || error.description || 'NET::ERR_CERT_INVALID').replace(/^net::/, 'NET::');
   return (
     <div className="bx-chrome-page" style={{ background: 'color-mix(in srgb, var(--aico-danger) 5%, var(--aico-bg))' }}>
-      <div className="mx-auto flex min-h-full max-w-[600px] flex-col justify-center px-8 py-16">
+      <div className="mx-auto flex min-h-full max-w-[640px] flex-col justify-center px-8 py-16">
         <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-aico-danger/10 text-aico-danger"><Icon name="alert" size={30} /></div>
         <h1 className="text-[26px] font-semibold tracking-tight">Your connection is not private</h1>
         <p className="mt-3 text-[14px] leading-relaxed text-aico-secondary">
           Attackers might be trying to steal your information from <b className="font-medium text-aico-primary">{host}</b> (for example, passwords, messages or credit cards).
           The site’s security certificate could not be trusted.
         </p>
-        <div className="mt-2 font-mono text-[11.5px] text-aico-muted">{error.description || 'NET::ERR_CERT_INVALID'} ({error.code})</div>
-        <p className="mt-4 text-[12.5px] text-aico-muted">AICO does not let you or the agent continue to a site with a broken certificate.</p>
-        <div className="mt-7">
+        <div className="mt-2 font-mono text-[11.5px] text-aico-muted">{code} ({error.code})</div>
+        {w && !w.bypassable && <p className="mt-4 text-[12.5px] leading-relaxed text-aico-secondary">{w.reason}</p>}
+        {!w && <p className="mt-4 text-[12.5px] text-aico-muted">AICO does not let you or the agent continue to a site with a broken certificate.</p>}
+        <div className="mt-7 flex items-center gap-2">
           <button className="btn-accent" onClick={back} autoFocus>Back to safety</button>
+          {w && <button className="btn-ghost" aria-expanded={advanced} onClick={() => setAdvanced(v => !v)}>{advanced ? 'Hide advanced' : 'Advanced'}</button>}
         </div>
+        {w && advanced && (
+          <div className="mt-5 rounded-xl border border-aico-border-subtle bg-aico-bg/70 p-4 text-[12.5px]">
+            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+              <span className="text-aico-muted">Site</span><span className="truncate selectable">{host}</span>
+              <span className="text-aico-muted">Problem</span><span className="selectable">{certProblem(w.error)}</span>
+              <span className="text-aico-muted">Issued to</span><span className="truncate selectable">{w.subject || '—'}</span>
+              <span className="text-aico-muted">Issued by</span><span className="truncate selectable">{w.issuer || '—'}</span>
+              <span className="text-aico-muted">Valid</span><span>{fmtDay(w.validFrom)} – {fmtDay(w.validTo)}</span>
+              <span className="text-aico-muted">SHA-256</span><span className="break-all font-mono text-[11px] selectable">{fingerprintHex(w.fingerprint)}</span>
+            </div>
+            {w.bypassable ? (
+              <>
+                <p className="mt-4 leading-relaxed text-aico-secondary">
+                  AICO can’t confirm that this is really <b className="font-medium text-aico-primary">{host}</b>. Continue only if you know this server — a development server, or one that uses your organisation’s own certificate authority.
+                  The site will be marked <b className="font-medium text-aico-danger">Not secure</b>, AICO will not fill saved passwords there, and the agent can use it only after you continue.
+                </p>
+                {w.loopback && (
+                  <div className="mt-3 rounded-lg bg-aico-hover/70 px-3 py-2">
+                    <div className="text-aico-secondary">This is your own computer. To stop seeing this for local development servers:</div>
+                    <button className="btn-outline btn-sm mt-2" onClick={allowLocalhost}>Allow self-signed certificates on localhost</button>
+                  </div>
+                )}
+                <label className="mt-3 flex cursor-pointer items-center gap-2">
+                  <input type="checkbox" className="accent-[var(--aico-danger)]" checked={always} onChange={e => setAlways(e.target.checked)} />
+                  <span>Always trust this certificate for {host}</span>
+                </label>
+                <div className="mt-1 pl-6 text-[11.5px] text-aico-muted">{always ? 'Remembered until you remove it in Privacy & security → Certificate exceptions. A different certificate shows this warning again.' : 'Until AICO closes, and only for this exact certificate.'}</div>
+                <button className="mt-3 text-[12.5px] font-medium text-aico-danger underline underline-offset-2 hover:opacity-80" onClick={proceed}>Proceed to {host} (unsafe)</button>
+              </>
+            ) : (
+              <p className="mt-4 text-aico-secondary">There is no way to continue to this site from AICO.</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function certProblem(error: string): string {
+  const name = /ERR_[A-Z0-9_]+/.exec(error)?.[0] ?? error;
+  switch (name) {
+    case 'ERR_CERT_AUTHORITY_INVALID': return 'Not issued by an authority AICO trusts (self-signed or a private CA)';
+    case 'ERR_CERT_COMMON_NAME_INVALID': return 'Issued for a different name than this address';
+    case 'ERR_CERT_DATE_INVALID': return 'Expired, or not valid yet';
+    case 'ERR_CERT_REVOKED': return 'Revoked by its issuer';
+    default: return name;
+  }
+}
+
+/** Electron's `sha256/<base64>` as the colon-separated hex other browsers show. */
+function fingerprintHex(fp: string): string {
+  const b64 = fp.replace(/^sha256\//, '');
+  try { return Array.from(atob(b64), c => c.charCodeAt(0).toString(16).padStart(2, '0').toUpperCase()).join(':'); } catch { return fp; }
+}
+
+function fmtDay(ms: number): string {
+  return ms > 0 ? new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 }
 

@@ -3,6 +3,89 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Proceed past a certificate warning in the AICO browser (ADR 0029).** An
+  internal or development site with a self-signed or private-CA certificate
+  (`ERR_CERT_AUTHORITY_INVALID`, a name mismatch or an expired certificate)
+  now shows "Your connection is not private" with **Advanced**: the
+  certificate's subject, issuer, validity and SHA-256 fingerprint, and
+  **Proceed to <host> (unsafe)**. The exception is bound to that exact
+  certificate — for this session, or remembered with "Always trust this
+  certificate" (Privacy & security → Certificate exceptions, with Remove). A
+  different certificate shows the warning again. **Allow self-signed
+  certificates on localhost** (off by default) skips the warning for
+  development servers on this computer.
+- **Method calls in the code graph (ADR 0028 addendum).** "Who calls
+  `BillingService.process`" is now answered per method, not per file: calls
+  are linked by the receiver's type wherever the code states it — `new T()`,
+  `T()`, `T{}`/`NewT()`, `T::new()`, typed parameters, fields, properties,
+  dataclass fields, `self.x = T()`, declared return types, chained — in
+  TypeScript/JavaScript, Python, Go, Java, Kotlin, C#, PHP, Rust and Ruby,
+  through imports, aliases, base classes and embedding. A same-named method on
+  another class is never mixed in; an untyped receiver stays unlinked. For
+  TS/JS the **TypeScript checker** resolves calls when it is available (in a
+  worker, for projects up to 2,500 TS/JS files), including inferred types and
+  classes that satisfy an interface without `implements`. Larger projects get
+  the same exactness **on demand**: the symbol you ask about (impact, the Code
+  map's symbol view, the edit check) is resolved by the TypeScript language
+  service in the background, marked "exact (on demand)", cached, and answered
+  within 8 s or marked "partial". Methods are
+  symbols: `CodeGraph impact` on `file#Class.method`, the Code map's symbol
+  view and the edit check (a changed method signature lists its callers).
+- **Interfaces explained.** Calls through an interface, trait, protocol or
+  abstract method reach the implementations, marked "via interface". Go
+  implementations are found by an **exact method-set check** (identical
+  parameter and result types; pointer receivers mean only `*T` satisfies) —
+  the Code map and `CodeGraph implementations` show which types implement an
+  interface and why, method by method. **Exact only** (Code map filter;
+  `exact: true` on the tool) hides every link that rests on an interface or a
+  unique name.
+- **Code structure in the morning brief and monitors.** For projects already
+  indexed, the brief lists new import cycles, newly broken layering rules,
+  files that suddenly became hotspots and files that lost their last importer
+  — each with **Show in Code map** and **Ask AICO to fix** (prefilled, never
+  sent). A per-project **Code** monitor checks after every re-index. No model
+  call. Layering rules now add up from your settings (global, or per project
+  in `codeGraph.projects`), the project's `.aico/settings.json` and a
+  committed `.aico/codegraph.json`; a project can add rules, never remove
+  yours.
+- **Open in editor from the web client (ADR 0030).** Files in the web Code
+  map and file cards open in VS Code (or the editor in `editor.command`, e.g.
+  `cursor -g {file}:{line}`, `idea --line {line} {file}`) at the line; with no
+  editor available they open in the client's own viewer at that line. The
+  desktop keeps its editor and adds **Open in external editor**.
+
+### Changed
+
+- **The edit check never skips a first edit.** When the code graph is not
+  ready within its few seconds, the check is queued and its result arrives
+  with the next tool result — or before the turn ends, if the agent stops
+  first.
+
+### Security
+
+- Only the person can proceed: main checks the warning's own token and a
+  real click on the AICO window; the agent's browser tools cannot proceed and
+  are told the person must allow the certificate (after which the agent may
+  use that site). Revoked certificates and HSTS hosts (a built-in subset of
+  the preload list plus hosts that sent HSTS) can never be bypassed. Excepted
+  sites show a red **Not secure**; saved passwords are never filled and
+  `browser_login` refuses there, except on an "always trusted" certificate
+  after the person confirms once for the site. Exceptions apply only to the
+  browser's own session, never to AICO's pages or the engine.
+- **Opening an editor needs a person.** `/api/editor/open` starts a program,
+  so it takes the same proof as approving a tool call (the API token alone is
+  refused); the program comes only from your own settings (`editor` is
+  user-only) or VS Code on the PATH, runs without a shell, and only for files
+  inside a registered project by real path. The viewer route serves text
+  files of registered projects up to 2 MB and never credentials-looking files
+  (`.env`, keys). Both are in the DAST suite.
+- `codeGraph` settings are now *tighten-only* from a project: a repository's
+  settings can add layering rules, not drop yours.
+
 ## 0.41.0 — 2026-10-05
 
 ### Added

@@ -169,6 +169,14 @@
     "deck/images/upload": {
       "gate": "token"
     },
+    "editor/file": {
+      "gate": "token",
+      "note": "the web viewer: registered projects only, real path inside the project, text up to 2 MB, credential-looking files refused (server/editor)"
+    },
+    "editor/open": {
+      "gate": "token+human",
+      "note": "starts the person's editor: needs human(); the program comes from the user's own settings or is VS Code on the PATH, never from the request; no shell (server/editor, ADR 0030)"
+    },
     "edit": {
       "gate": "token"
     },

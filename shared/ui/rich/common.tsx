@@ -53,6 +53,20 @@ export function desktopBridge(): DesktopBridge | undefined {
   return b && typeof b.invoke === 'function' ? b : undefined;
 }
 
+/**
+ * The web client's "open this file in the editor" (server/editor, ADR 0030):
+ * the person's editor when the engine can start one, else the client's own
+ * viewer at the line. Registered by the web client at start; absent in the
+ * desktop (which has its own editor and shell) and in the VS Code panel.
+ */
+export type FileOpener = (absPath: string, line?: number) => void;
+
+export function fileOpener(): FileOpener | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const f = (window as unknown as { aicoOpenFile?: FileOpener }).aicoOpenFile;
+  return typeof f === 'function' ? f : undefined;
+}
+
 /** Open a mailto: link: through the shell in the desktop app, by navigation elsewhere. */
 export function openMailto(href: string): void {
   const bridge = desktopBridge();

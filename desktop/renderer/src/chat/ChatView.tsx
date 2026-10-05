@@ -35,6 +35,7 @@ const BRIEF_HOST: BriefHost = {
   openInbox: () => useDesk.getState().navigate({ view: 'inbox' }),
   openChat: (id) => { void openChat(id); },
   startFix: (cwd, prompt) => newChat({ ...(cwd ? { project: cwd } : {}), prompt }),
+  openCodeMap: (cwd, file, mode) => useDesk.getState().navigate({ view: 'codemap', params: { path: cwd, ...(file ? { file } : {}), ...(mode ? { mode } : {}) } }),
 };
 
 function greeting(name: string | undefined): string {

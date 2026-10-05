@@ -315,3 +315,25 @@ export async function mcpItems(sources: BriefMcpSource[], tools: McpToolLike[], 
   }
   return { items, notes };
 }
+
+// ── code graph ───────────────────────────────────────────────────────
+
+/** A structural change the code graph found (codegraph/alerts), as the brief needs it. */
+export interface GraphAlertLike { kind: string; key: string; title: string; detail: string; files: string[]; mode: string; urgency: 'soon' | 'fyi'; prompt: string }
+
+/** One item per alert, with "Show in Code map" and "Ask AICO to fix" (prefilled, never sent). */
+export function graphAlertItems(cwd: string, alerts: GraphAlertLike[], at: number): BriefItem[] {
+  return alerts.map(a => ({
+    key: `codegraph|${cwd}|${a.key}`,
+    source: 'codegraph' as const,
+    urgency: a.urgency,
+    title: a.title,
+    detail: a.detail,
+    project: cwd,
+    at,
+    actions: [
+      { kind: 'open-codemap' as const, label: 'Show in Code map', cwd, ...(a.files[0] ? { file: a.files[0] } : {}), mode: a.mode },
+      { kind: 'start-fix' as const, label: 'Ask AICO to fix', cwd, prompt: a.prompt },
+    ],
+  }));
+}

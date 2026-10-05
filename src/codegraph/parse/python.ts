@@ -13,6 +13,7 @@
 
 import { headerFrom, identifierLines, lineAt, mask, memberLines, normaliseSig } from '../lex.js';
 import type { ExportDecl, ImportBinding, ParsedFile, RawImport } from '../types.js';
+import { extractMembers, withMembers } from './members.js';
 
 const NAME = '[A-Za-z_][\\w]*';
 const DOTTED = `${NAME}(?:\\s*\\.\\s*${NAME})*`;
@@ -85,5 +86,6 @@ export function parsePython(source: string): ParsedFile {
   const entry = /(?:^|\n)if\s+__name__\s*==\s*['"]__main__['"]/.test(source) ? 'main'
     : /@(?:app|router|bp|api|blueprint)\.(?:get|post|put|patch|delete|route|websocket)\s*\(/.test(code) ? 'routes'
       : undefined;
-  return { lang: 'py', imports, exports, uses, members, ...(entry ? { entry } : {}), loc: m.lineStarts.length };
+  // Classes, their methods and fields, and calls on receivers of a known type (parse/members).
+  return withMembers({ lang: 'py', imports, exports, uses, members, ...(entry ? { entry } : {}), loc: m.lineStarts.length }, extractMembers(m, source, 'py', bound, skip), m);
 }

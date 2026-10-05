@@ -12,19 +12,30 @@
  * grouped by folder so a complete caller list fits; ambiguity is answered with
  * the candidates, never merged (codegraph/report).
  *
+ * Method callers (`path#Class.method`) come from receiver types
+ * (codegraph/members); for TS/JS the answer waits briefly for the TypeScript
+ * checker when it is still running, so a caller list is the checker's when it
+ * can be. `exact: true` drops everything that rests on an interface or a
+ * unique name; `implementations` explains which types satisfy an interface
+ * and by which methods.
+ *
  * @module tools/codegraph
  */
 
-import { currentCwd, currentRunContext } from '../run-context.js';
-import { getCodeGraph } from '../codegraph/index.js';
+import { currentCwd } from '../run-context.js';
+import { exactUsersOnDemand, getCodeGraph } from '../codegraph/index.js';
 import { uncommittedFiles } from '../codegraph/git.js';
-import type { LayerRule } from '../codegraph/analyze.js';
+import { codeGraphRules } from '../codegraph/rules.js';
+import { exactOnly } from '../codegraph/view.js';
 import {
-  DEFAULT_MAX_CHARS, mermaidArchitecture, reportChanges, reportCochange, reportCycles, reportDependencies, reportDependents,
+  DEFAULT_MAX_CHARS, implementationsText, mermaidArchitecture, reportChanges, reportCochange, reportCycles, reportDependencies, reportDependents,
   reportEntrypoints, reportFileImpact, reportHotspots, reportOverview, reportPath, reportSymbolImpact, resolveTarget,
 } from '../codegraph/report.js';
 
-export type CodeGraphAction = 'overview' | 'impact' | 'dependents' | 'dependencies' | 'path' | 'cycles' | 'hotspots' | 'entrypoints' | 'cochange' | 'changes' | 'diagram';
+export type CodeGraphAction = 'overview' | 'impact' | 'dependents' | 'dependencies' | 'path' | 'cycles' | 'hotspots' | 'entrypoints' | 'cochange' | 'changes' | 'diagram' | 'implementations';
+
+/** How long an answer waits for the TypeScript checker still running behind the graph. */
+const EXACT_WAIT_MS = 20_000;
 
 export interface CodeGraphInput {
   action?: CodeGraphAction;
@@ -34,19 +45,14 @@ export interface CodeGraphInput {
   limit?: number;
   maxChars?: number;
   refresh?: boolean;
-}
-
-/** Layering rules from the run's settings (`codeGraph.rules`). */
-function layerRules(): LayerRule[] {
-  const rules = (currentRunContext()?.settings as { codeGraph?: { rules?: unknown } } | undefined)?.codeGraph?.rules;
-  return Array.isArray(rules)
-    ? rules.filter((r): r is LayerRule => Boolean(r) && typeof (r as LayerRule).from === 'string' && typeof (r as LayerRule).to === 'string')
-    : [];
+  /** Only what is certain: leave out calls and edges that go through an interface or rest on a unique name. */
+  exact?: boolean;
 }
 
 export async function codeGraphTool(input: CodeGraphInput): Promise<string> {
   const root = currentCwd();
-  const g = await getCodeGraph(root, { force: input.refresh === true });
+  const full = await getCodeGraph(root, { force: input.refresh === true, exact: EXACT_WAIT_MS });
+  const g = input.exact === true ? exactOnly(full) : full;
   const action = input.action ?? 'overview';
   const maxChars = Math.min(20_000, Math.max(1_500, Number(input.maxChars) || DEFAULT_MAX_CHARS));
   const depth = Math.min(6, Math.max(1, Number(input.depth) || (action === 'impact' ? 2 : 3)));
@@ -61,16 +67,16 @@ export async function codeGraphTool(input: CodeGraphInput): Promise<string> {
 
   switch (action) {
     case 'overview':
-      return reportOverview(g, layerRules(), maxChars);
+      return reportOverview(g, await codeGraphRules(root), maxChars);
     case 'impact': {
       const t = need();
       if (typeof t === 'string') return t;
-      return t.symbol ? reportSymbolImpact(g, t.file, t.symbol, depth, maxChars) : reportFileImpact(g, t.file, depth, maxChars);
+      return t.symbol ? reportSymbolImpact(g, t.file, t.symbol, depth, maxChars, await exactUsersOnDemand(full, t.file, t.symbol)) : reportFileImpact(g, t.file, depth, maxChars);
     }
     case 'dependents': {
       const t = need();
       if (typeof t === 'string') return t;
-      return t.symbol ? reportSymbolImpact(g, t.file, t.symbol, 1, maxChars) : reportDependents(g, t.file, maxChars);
+      return t.symbol ? reportSymbolImpact(g, t.file, t.symbol, 1, maxChars, await exactUsersOnDemand(full, t.file, t.symbol)) : reportDependents(g, t.file, maxChars);
     }
     case 'dependencies': {
       const t = need();
@@ -98,10 +104,16 @@ export async function codeGraphTool(input: CodeGraphInput): Promise<string> {
     }
     case 'changes':
       return reportChanges(g, await uncommittedFiles(root), depth, maxChars);
+    case 'implementations': {
+      const t = need();
+      if (typeof t === 'string') return t;
+      const text = implementationsText(full, t.file, t.symbol?.split('.')[0], maxChars);
+      return text || `${full.files[t.file]!.path}${t.symbol ? `#${t.symbol}` : ''}: no interface declared here has an implementation in the project, and no type here implements one the graph knows.`;
+    }
     case 'diagram':
       return `\`\`\`mermaid\n${mermaidArchitecture(g, { maxNodes: limit > 15 ? limit : 18 })}\n\`\`\`\nArchitecture from the real import graph: each box is a module (files that depend on each other), arrows are dependencies with their count.`;
     default:
-      throw new Error('CodeGraph: action must be overview, impact, dependents, dependencies, path, cycles, hotspots, entrypoints, cochange, changes or diagram.');
+      throw new Error('CodeGraph: action must be overview, impact, dependents, dependencies, path, cycles, hotspots, entrypoints, cochange, changes, implementations or diagram.');
   }
 }
 
@@ -111,24 +123,26 @@ export const codeGraphDefinition = {
     'The project\'s dependency graph, resolved like the compiler does: tsconfig `@/` aliases, barrels and re-exports,',
     'renamed imports, namespaces, Python packages/relative imports, Go packages, Java/C# namespaces; same-named',
     'symbols in other files are never mixed in. Use it before a change to know what it affects, instead of Grep.',
-    'target: "path/file.ts", "path/file.ts#symbol", or a symbol name (ambiguous names list their files).',
-    '  impact       — who uses a symbol (every file, with line) or what depends on a file, by depth; tests that reach it',
+    'target: "path/file.ts", "path/file.ts#symbol" (methods: #Class.method), or a symbol name (ambiguous names list their files).',
+    '  impact       — who uses a symbol or calls a method (receiver types resolved; via interface marked), or what depends on a file',
     '  dependents / dependencies — direct importers (with the symbols they use) / what a file imports',
     '  path         — shortest dependency path target → to (e.g. route → database)',
     '  cochange     — files that change together in git history though no import links them',
     '  changes      — what the uncommitted diff affects, and the tests to run',
-    '  overview, entrypoints, hotspots, cycles, diagram (Mermaid architecture for docs)',
+    '  implementations — types implementing an interface (or interfaces a type implements), with the methods; Go by method set',
+    '  overview, entrypoints, hotspots, cycles, diagram (Mermaid architecture for docs). exact:true = certain links only',
   ].join('\n'),
   inputSchema: {
     type: 'object' as const,
     properties: {
-      action: { type: 'string', enum: ['overview', 'impact', 'dependents', 'dependencies', 'path', 'cycles', 'hotspots', 'entrypoints', 'cochange', 'changes', 'diagram'] },
+      action: { type: 'string', enum: ['overview', 'impact', 'dependents', 'dependencies', 'path', 'cycles', 'hotspots', 'entrypoints', 'cochange', 'changes', 'implementations', 'diagram'] },
       target: { type: 'string', description: 'File path, path#symbol, or symbol name.' },
       to: { type: 'string', description: 'path: the destination file or path#symbol.' },
       depth: { type: 'number', description: 'impact/changes: levels of dependents (default 2).' },
       limit: { type: 'number', description: 'Rows for hotspots/cochange (default 15).' },
       maxChars: { type: 'number', description: 'Answer budget (default 6000).' },
       refresh: { type: 'boolean', description: 'Re-index first (files just created).' },
+      exact: { type: 'boolean', description: 'Leave out links through interfaces or unique names.' },
     },
     required: [] as string[],
   },

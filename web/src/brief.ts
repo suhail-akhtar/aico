@@ -13,17 +13,20 @@
 export type BriefUrgency = 'urgent' | 'soon' | 'fyi';
 
 export interface BriefAction {
-  kind: 'open-url' | 'open-chat' | 'open-inbox' | 'start-fix';
+  kind: 'open-url' | 'open-chat' | 'open-inbox' | 'start-fix' | 'open-codemap';
   label: string;
   url?: string;
   sessionId?: string;
   cwd?: string;
   prompt?: string;
+  /** `open-codemap`: the project-relative file to select and the view. */
+  file?: string;
+  mode?: string;
 }
 
 export interface BriefItem {
   key: string;
-  source: 'inbox' | 'longjob' | 'work' | 'cron' | 'github' | 'advisory' | 'git' | 'mcp';
+  source: 'inbox' | 'longjob' | 'work' | 'cron' | 'github' | 'advisory' | 'git' | 'mcp' | 'codegraph';
   urgency: BriefUrgency;
   title: string;
   detail?: string;
@@ -48,15 +51,33 @@ export interface Brief {
 export interface BriefNotice {
   key: string;
   project: string;
-  kind: 'ci' | 'review' | 'advisory';
+  kind: 'ci' | 'review' | 'advisory' | 'codegraph';
   title: string;
   body: string;
   url?: string;
+  /** `codegraph`: what "Show in Code map" selects, and what "Ask AICO to fix" prefills. */
+  file?: string;
+  mode?: string;
+  prompt?: string;
   at: number;
   releasedAt?: number;
 }
 
-export interface BriefMonitor { path: string; ci?: boolean; reviews?: boolean; advisories?: boolean; error?: string; nextAt?: number }
+export interface BriefMonitor { path: string; ci?: boolean; reviews?: boolean; advisories?: boolean; codeGraph?: boolean; error?: string; nextAt?: number }
+
+/** The monitor switches, in table order. `codeGraph`: new cycles, broken layering rules, hotspots, orphans after a re-index. */
+export const MONITOR_FLAGS = ['ci', 'reviews', 'advisories', 'codeGraph'] as const;
+export type MonitorFlag = (typeof MONITOR_FLAGS)[number];
+export const MONITOR_LABEL: Record<MonitorFlag, string> = { ci: 'CI', reviews: 'Reviews', advisories: 'Advisories', codeGraph: 'Code' };
+
+/** The actions a code-graph notice offers (the same two a brief item has). */
+export function noticeActions(n: BriefNotice): BriefAction[] {
+  if (n.kind !== 'codegraph') return n.url ? [{ kind: 'open-url', label: 'Open', url: n.url }] : [];
+  return [
+    { kind: 'open-codemap', label: 'Show in Code map', cwd: n.project, ...(n.file ? { file: n.file } : {}), ...(n.mode ? { mode: n.mode } : {}) },
+    ...(n.prompt ? [{ kind: 'start-fix' as const, label: 'Ask AICO to fix', cwd: n.project, prompt: n.prompt }] : []),
+  ];
+}
 
 export interface BriefLatest {
   brief: Brief | null;

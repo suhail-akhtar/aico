@@ -27,17 +27,20 @@
 
 // ── types ────────────────────────────────────────────────────────────
 
-export type BriefSource = 'inbox' | 'longjob' | 'work' | 'cron' | 'github' | 'advisory' | 'git' | 'mcp';
+export type BriefSource = 'inbox' | 'longjob' | 'work' | 'cron' | 'github' | 'advisory' | 'git' | 'mcp' | 'codegraph';
 export type Urgency = 'urgent' | 'soon' | 'fyi';
 
 /** One click in a client. Never executed by the engine. */
 export interface BriefAction {
-  kind: 'open-url' | 'open-chat' | 'open-inbox' | 'start-fix';
+  kind: 'open-url' | 'open-chat' | 'open-inbox' | 'start-fix' | 'open-codemap';
   label: string;
   url?: string;
   sessionId?: string;
-  /** `start-fix`: the folder the new chat runs in. */
+  /** `start-fix` and `open-codemap`: the project folder. */
   cwd?: string;
+  /** `open-codemap`: the project-relative file to select, and the view. */
+  file?: string;
+  mode?: string;
   /** `start-fix`: the prompt prefilled into the new chat's composer (not sent). */
   prompt?: string;
 }
@@ -74,7 +77,8 @@ export interface Brief {
 /** An MCP tool the person opted in to read for the brief (calendar, email). */
 export interface BriefMcpSource { server: string; tool: string; args?: Record<string, unknown>; label?: string }
 
-export interface BriefMonitorConfig { path: string; ci?: boolean; reviews?: boolean; advisories?: boolean }
+/** `codeGraph`: new cycles, layering violations, hotspots and orphans, checked after indexing (codegraph/alerts). */
+export interface BriefMonitorConfig { path: string; ci?: boolean; reviews?: boolean; advisories?: boolean; codeGraph?: boolean }
 
 export interface BriefSettings {
   /** Master switch for the scheduled brief (default true). Monitors have their own opt-in. */
@@ -96,6 +100,8 @@ export interface BriefSettings {
   notify?: boolean;
   /** Opt-in only: MCP tools to read (calendar, email). Empty by default. */
   mcp?: BriefMcpSource[];
+  /** Structural changes in projects already indexed: new import cycles, broken layering rules, hotspots, orphans (default true; no model). */
+  codeGraph?: boolean;
   /** Per-project monitors; nothing is polled for a project not listed here. */
   monitors?: BriefMonitorConfig[];
 }
@@ -114,6 +120,7 @@ export interface ResolvedBriefSettings {
   notify: boolean;
   mcp: BriefMcpSource[];
   monitors: BriefMonitorConfig[];
+  codeGraph: boolean;
 }
 
 // ── settings and the clock ───────────────────────────────────────────
@@ -157,6 +164,7 @@ export function resolveBriefSettings(s: BriefSettings | undefined): ResolvedBrie
     notify: s?.notify !== false,
     mcp: Array.isArray(s?.mcp) ? s!.mcp.filter(m => m && typeof m.server === 'string' && typeof m.tool === 'string') : [],
     monitors: Array.isArray(s?.monitors) ? s!.monitors.filter(m => m && typeof m.path === 'string' && m.path) : [],
+    codeGraph: s?.codeGraph !== false,
   };
 }
 
@@ -203,7 +211,7 @@ export function inQuietHours(now: number, quiet: { start: number; end: number } 
 // ── dedupe and rule order ────────────────────────────────────────────
 
 const URGENCY_RANK: Record<Urgency, number> = { urgent: 0, soon: 1, fyi: 2 };
-const SOURCE_RANK: Record<BriefSource, number> = { inbox: 0, github: 1, advisory: 2, longjob: 3, work: 4, cron: 5, mcp: 6, git: 7 };
+const SOURCE_RANK: Record<BriefSource, number> = { inbox: 0, github: 1, advisory: 2, codegraph: 3, longjob: 4, work: 5, cron: 6, mcp: 7, git: 8 };
 
 /** One item per key: the most urgent wins, actions merged without repeats. */
 export function dedupeItems(items: BriefItem[]): BriefItem[] {
@@ -214,7 +222,7 @@ export function dedupeItems(items: BriefItem[]): BriefItem[] {
     const winner = URGENCY_RANK[it.urgency] < URGENCY_RANK[prev.urgency] ? { ...it } : { ...prev };
     const seen = new Set<string>();
     winner.actions = [...prev.actions, ...it.actions].filter(a => {
-      const id = `${a.kind}|${a.url ?? ''}|${a.sessionId ?? ''}|${a.prompt ?? ''}`;
+      const id = `${a.kind}|${a.url ?? ''}|${a.sessionId ?? ''}|${a.prompt ?? ''}|${a.file ?? ''}`;
       if (seen.has(id)) return false; seen.add(id); return true;
     });
     byKey.set(it.key, winner);
@@ -316,7 +324,7 @@ export function fallbackSummary(items: BriefItem[]): string {
   const count = (src: BriefSource) => items.filter(i => i.source === src).length;
   const parts: string[] = [];
   if (urgent.length) parts.push(`${urgent.length} need${urgent.length === 1 ? 's' : ''} you today`);
-  const by: Array<[BriefSource, string]> = [['inbox', 'waiting for approval'], ['github', 'from GitHub'], ['advisory', 'new advisories'], ['longjob', 'long jobs'], ['work', 'background runs'], ['cron', 'schedules'], ['git', 'local git'], ['mcp', 'calendar/email']];
+  const by: Array<[BriefSource, string]> = [['inbox', 'waiting for approval'], ['github', 'from GitHub'], ['advisory', 'new advisories'], ['codegraph', 'code structure alerts'], ['longjob', 'long jobs'], ['work', 'background runs'], ['cron', 'schedules'], ['git', 'local git'], ['mcp', 'calendar/email']];
   const tally = by.map(([s, label]) => [count(s), label] as const).filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`);
   return `${parts.length ? `${parts[0]}. ` : ''}${tally.join(', ')}.`.replace(/^\. /, '');
 }
@@ -336,10 +344,14 @@ export interface MonitorSnapshot {
 export interface MonitorNotice {
   key: string;
   project: string;
-  kind: 'ci' | 'review' | 'advisory';
+  kind: 'ci' | 'review' | 'advisory' | 'codegraph';
   title: string;
   body: string;
   url?: string;
+  /** `codegraph`: what "Show in Code map" selects, and the prompt "Ask AICO to fix" prefills. */
+  file?: string;
+  mode?: string;
+  prompt?: string;
   at: number;
   /** Set when it may be shown — at once, or when quiet hours end. */
   releasedAt?: number;

@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { BookmarkBarMode, BookmarkInput, BookmarkNode, BookmarkTree, HistoryEntry, PermissionSetting } from '../shared/browser-types';
+import { normaliseCertExceptions, type PersistedCertException } from './browser-certs-core';
 import { BAR_ID, checkUrl, createBookmark, ensureFolderPath, findByUrl, getNode, updateNode } from '../shared/bookmark-tree';
 
 export const HISTORY_CAP = 5000;
@@ -132,6 +133,10 @@ export interface BrowserSettings {
   permissions: Record<string, Record<string, Exclude<PermissionSetting, 'ask'>>>;
   /** When the bookmarks bar shows (absent: always). */
   bookmarksBar?: BookmarkBarMode;
+  /** Certificates the person chose to "Always trust" for a host (browser-certs-core.ts). Session ones are never stored. */
+  certExceptions?: PersistedCertException[];
+  /** The person's "Allow self-signed certificates on localhost" (default off, like Chrome's allow-insecure-localhost). */
+  allowInsecureLocalhost?: boolean;
 }
 
 export const DEFAULT_SETTINGS: BrowserSettings = { blocking: { enabled: true, allowOrigins: [] }, zoom: {}, permissions: {} };
@@ -156,6 +161,8 @@ export function normaliseSettings(raw: unknown): BrowserSettings {
     zoom,
     permissions,
     ...(r.bookmarksBar === 'always' || r.bookmarksBar === 'newtab' || r.bookmarksBar === 'never' ? { bookmarksBar: r.bookmarksBar } : {}),
+    ...(normaliseCertExceptions(r.certExceptions).length ? { certExceptions: normaliseCertExceptions(r.certExceptions) } : {}),
+    ...(r.allowInsecureLocalhost === true ? { allowInsecureLocalhost: true } : {}),
   };
 }
 

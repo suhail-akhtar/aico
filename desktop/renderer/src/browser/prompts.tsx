@@ -223,7 +223,7 @@ function ConfirmDialog({ p }: { p: ConfirmPrompt }): React.ReactElement {
     <div className="bx-modal" role="alertdialog" aria-label={p.title} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); answer(false); } }}>
       <div className="flex items-start gap-3">
         <span className={cls('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', risky ? 'bg-aico-warning/15 text-aico-warning' : 'bg-aico-accent-soft text-aico-accent')}>
-          <Icon name={p.kind === 'commit' ? 'shield' : p.kind === 'upload' ? 'upload' : p.kind === 'tabs' ? 'layers' : risky ? 'alert' : 'download'} size={17} />
+          <Icon name={p.kind === 'commit' || p.kind === 'certificate' ? 'shield' : p.kind === 'upload' ? 'upload' : p.kind === 'tabs' ? 'layers' : risky ? 'alert' : 'download'} size={17} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-semibold">{p.title}</div>

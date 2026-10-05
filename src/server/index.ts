@@ -51,6 +51,8 @@ import { handleCanvasRoute } from './canvas-routes.js';
 import { handleArtifactRoute } from './artifact-routes.js';
 import { handleDeckVisualRoute } from './deck-visual-routes.js';
 import { handleCodeGraphRoute } from './codegraph-routes.js';
+import { handleEditorRoute } from './editor.js';
+import { readUserSettingsFile } from '../settings-project-policy.js';
 import { onCanvasActivity, onCanvasChange, onCanvasComments } from '../canvas/store.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
@@ -1363,6 +1365,17 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       uiKey: req.headers['x-aico-ui-key'],
       fetchSite: typeof req.headers['sec-fetch-site'] === 'string' ? req.headers['sec-fetch-site'] : undefined,
     });
+    // "Open in editor" (server/editor, ADR 0030): launching needs a person; the viewer, a registered project.
+    const editor = await handleEditorRoute(route, req.method ?? 'GET', systemBody as Record<string, unknown>, url.searchParams, {
+      human,
+      isKnownProject: dir => isKnownProject(cwd, dir),
+      projects: async () => (await listProjects(cwd)).filter(p => p.exists).map(p => p.path),
+      editorCommand: () => {
+        const e = readUserSettingsFile().editor as { command?: unknown } | undefined;
+        return typeof e?.command === 'string' ? e.command : undefined;
+      },
+    });
+    if (editor) { send(res, editor.status, editor.body); return; }
     const handled = await handleSystemRoute(route, req.method ?? 'GET', systemBody as Record<string, unknown>, url.searchParams, human);
     if (handled) {
       // A settings write can turn the Mini Apps host on, off, or move it. Doing

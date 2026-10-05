@@ -17,6 +17,8 @@ import {
 import { basename } from './grouping';
 import { AppsPane } from './components/AppsPane';
 import { WorkspacePage } from './components/WorkspacePage';
+import { FileViewerHost } from './components/FileViewer';
+import { registerFileOpener } from './file-open';
 import { GroupPage } from './components/GroupPage';
 import { AppWorkspace } from './components/apps/AppWorkspace';
 import { MiniAppScope } from './components/MiniAppScope';
@@ -65,15 +67,24 @@ export function App(): React.ReactElement {
       };
     } catch { return DEFAULT_ROUTE; }
   });
-  // A card deep in the page (the morning brief's "Review in inbox") asks for a destination by event.
+  // A card deep in the page (the morning brief's "Review in inbox", "Show in Code map") asks for a destination by event.
+  const [mapRequest, setMapRequest] = useState<{ file?: string; mode?: string; at: number } | null>(null);
   useEffect(() => {
     const go = (e: Event): void => {
       const dest = (e as CustomEvent<unknown>).detail;
       if (dest === 'inbox') setRoute(r => ({ ...r, destination: 'inbox' }));
+      else if (dest && typeof dest === 'object' && (dest as { destination?: unknown }).destination === 'project') {
+        const d = dest as { projectPath?: unknown; codemap?: { file?: unknown; mode?: unknown } };
+        if (typeof d.projectPath !== 'string' || !d.projectPath) return;
+        setRoute(r => ({ ...r, destination: 'project', projectPath: d.projectPath as string }));
+        if (d.codemap) setMapRequest({ ...(typeof d.codemap.file === 'string' ? { file: d.codemap.file } : {}), ...(typeof d.codemap.mode === 'string' ? { mode: d.codemap.mode } : {}), at: Date.now() });
+      }
     };
     window.addEventListener('aico:navigate', go);
     return () => window.removeEventListener('aico:navigate', go);
   }, []);
+  // "Open in editor" from shared widgets (file cards) reaches the engine through this (web/file-open).
+  useEffect(() => { registerFileOpener(); }, []);
   const onSessions = route.destination === 'sessions';
   const view = onSessions ? route.tab : route.destination;
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -314,6 +325,7 @@ export function App(): React.ReactElement {
           <WorkspacePage
             projectPath={route.projectPath}
             onOpenChat={() => setRoute(withTab(route, 'chat'))}
+            {...(mapRequest ? { openMap: mapRequest } : {})}
           />
         )}
       </main>
@@ -325,6 +337,7 @@ export function App(): React.ReactElement {
         />
       )}
       {pickerOpen && <ProjectPicker onClose={() => setPickerOpen(false)} />}
+      <FileViewerHost />
       <TasksDrawer
         open={tasksOpen}
         onClose={() => setTasksOpen(false)}

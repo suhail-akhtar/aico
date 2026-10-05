@@ -25,9 +25,13 @@
  *   - press a control that buys, pays, books, sends or deletes without the
  *     person allowing it in an AICO prompt (browser-commit-gate.ts);
  *   - upload a file, or download a program, without the user confirming;
- *   - answer an HTTP sign-in prompt, or accept a bad certificate — except a
- *     self-signed one on a private address whose exact origin a stored
- *     credential allows it for (`allowSelfSigned`), pinned on first sight.
+ *   - answer an HTTP sign-in prompt, or accept a bad certificate on its own.
+ *     A bad certificate passes only through the person's "Proceed" on the
+ *     warning (bound to that exact certificate, browser-certs-core.ts, ADR
+ *     0029), their "Allow self-signed certificates on localhost", or a stored
+ *     credential's `allowSelfSigned` for a private address, pinned on first
+ *     sight. Once the person allowed one, the agent may use that site too;
+ *     saved passwords stay out of it.
  * `handoff()` shows you what the agent needs and waits for you to press Done.
  * Stop / Take over (`browser:agentStop`) makes every agent tool refuse on that
  * tab until `browser:agentResume`; so does your own input on a tab an agent is
@@ -46,7 +50,7 @@
  * @module desktop/electron/browser
  */
 
-import { app, dialog, ipcMain, WebContentsView, session as electronSession, type BrowserWindow, type WebContents, type Session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, WebContentsView, session as electronSession, type WebContents, type Session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -54,7 +58,7 @@ import type { DesktopContext } from './context';
 import type {
   AgentEvent, BrowserState, ConfirmRequest, DialogRequest, DownloadItem, ExtractKind, FindRequest,
   FindResult, FormModel, HistoryEntry, HistoryListOptions, PageInsights, PageRead, PageStill, PermissionSetting, SecurityState, SiteInfo, TabState,
-  ConcealedReport, InjectionGuardInfo,
+  ConcealedReport, InjectionGuardInfo, CertWarning, CertExceptionsView,
 } from '../shared/browser-types';
 import { aicoPage } from './browser-page';
 import { guardPageText, withNotice } from '../../shared/injection-guard';
@@ -86,6 +90,10 @@ import { registerImport } from './browser-import';
 import { classifyCommit, commitQuestion, type CommitSignals, type CommitVerdict } from './browser-commit-gate';
 import { isRealPasswordField, isUsernameField, loginFormJs, passwordOf, type LoginFormReport } from './browser-login';
 import { isPrivateOrigin, loginOrigin } from './browser-vault-core';
+import {
+  CertExceptions, credentialGate, decideCertError, decideProceed, hostOfUrl, isLoopbackHost, normaliseHsts, noteHsts,
+  type HstsRecord,
+} from './browser-certs-core';
 import { PAGE_SIGNALS_JS, type PageSignals } from '../shared/page-signals';
 import { busyMessage, ownerHue, personTookOver, TabLeases, TabOwners, type Caller, type Intent, type World } from './browser-owners';
 import { registerTeach, teachPageJs } from './browser-teach';
@@ -124,7 +132,7 @@ interface Tab {
   agentUntil: number;
   humanCheck: boolean;
   error?: { code: number; description: string; url: string };
-  certError?: { url: string; error: string; issuer: string };
+  certError?: CertWarning;
   httpStatus?: number;
   lastGestureAt: number;
   /** When the agent last sent this tab trusted input (its own input events are not the person taking over). */
@@ -345,8 +353,61 @@ export function registerBrowser(ctx: DesktopContext): void {
     tabOf: (wcId) => byWc.get(wcId),
     front: () => { const t = activeId ? tabs.get(activeId) : undefined; return t && !t.view.webContents.isDestroyed() ? { id: t.id, wc: t.view.webContents } : null; },
     agentDriving: (wcId) => agentDriving(byWc.get(wcId)),
+    certCheck: (url) => certCredentialCheck(url, { wait: true }),
   });
-  const certs = new Map<string, { issuer: string; subject: string; validTo: number }>();
+  /** What the last verification of each host said (observed, never changed): details for site info, and whether it was valid. */
+  const certs = new Map<string, { issuer: string; subject: string; validTo: number; fingerprint: string; ok: boolean }>();
+  // ── Certificate exceptions (browser-certs-core.ts, ADR 0029): only the person proceeds; only this session partition ──
+  const certStore = new CertExceptions({
+    get: () => settings.get().certExceptions ?? [],
+    set: (list) => { const s = settings.get(); settings.set({ ...s, certExceptions: list }); },
+  });
+  const hsts = new JsonFile<HstsRecord>(path.join(dataDir, 'hsts.json'), {}, raw => normaliseHsts(raw));
+  /** Hosts whose certificate error was let through this run, and how (for the badge and the password rule). */
+  const certAccepted = new Map<string, { fingerprint: string; via: 'exception' | 'loopback' | 'credential' }>();
+  /** The person's last click or key on an AICO window (aico://app) — never a web page's. "Proceed" needs one. */
+  let lastAppInputAt = 0;
+  const watchAppInput = (w: BrowserWindow): void => {
+    w.webContents.on('input-event', (_e, input) => {
+      if (!['mouseDown', 'keyDown', 'rawKeyDown', 'touchStart', 'pointerDown'].includes(input.type)) return;
+      try { if (/^aico:\/\/app\//.test(w.webContents.getURL())) lastAppInputAt = Date.now(); } catch { /* window going away */ }
+    });
+  };
+  for (const w of BrowserWindow.getAllWindows()) watchAppInput(w);
+  app.on('browser-window-created', (_e, w) => watchAppInput(w));
+  let certSeq = 0;
+  /** A page's certificate standing: valid, or let through (and how) — `via` null when nothing let it through. */
+  const certStanding = (url: string): { host: string; ok: boolean; via: 'exception' | 'loopback' | 'credential' | null; fingerprint: string } => {
+    const host = hostOfUrl(url);
+    const c = /^https:/i.test(url) ? certs.get(host) : undefined;
+    if (!c || c.ok) return { host, ok: true, via: null, fingerprint: c?.fingerprint ?? '' };
+    const a = certAccepted.get(host);
+    return { host, ok: false, via: a && a.fingerprint === c.fingerprint ? a.via : null, fingerprint: c.fingerprint };
+  };
+  /**
+   * May a saved password go into this page? null = yes; otherwise why not.
+   * An "always" exception asks the person once for the host (AICO prompt);
+   * `wait: false` (the agent's call) asks and refuses for now if no answer comes in time.
+   */
+  const certCredentialCheck = async (url: string, opts: { wait: boolean }): Promise<string | null> => {
+    const st = certStanding(url);
+    if (st.ok) return null;
+    if (st.via === 'credential') return null; // a credential bound to this private origin asked for exactly this
+    const ex = certStore.match(st.host, st.fingerprint);
+    const g = credentialGate({ host: st.host, certOk: false, via: st.via === 'loopback' ? 'loopback' : st.via ? 'exception' : null, exception: ex });
+    if (g.ok === true) return null;
+    if (g.ok === false) return g.reason;
+    const c = confirm({
+      kind: 'certificate', origin: `https://${st.host}`, danger: true, okLabel: 'Use saved passwords here', cancelLabel: 'Don’t allow',
+      title: `Use saved passwords on ${st.host}?`,
+      detail: `You chose to always trust a certificate for ${st.host} that no recognised authority vouches for. Anyone who can intercept this connection could read a password typed here. Allow AICO to fill saved passwords (and the agent to sign in with browser_login) on this site? You are asked once for this site.`,
+    });
+    const answer = opts.wait ? await c.done : await Promise.race([c.done, sleep(20_000).then(() => null)]);
+    if (answer === null) return 'the user has not yet confirmed that saved passwords may be used on this site (its certificate is trusted only by an exception). AICO is asking them — tell them, then call browser_login again.';
+    if (!answer) return `the user did not allow saved passwords on ${st.host} (its certificate is trusted only by an exception).`;
+    certStore.confirmCredentials(st.host, st.fingerprint);
+    return null;
+  };
   /** Self-signed certificates accepted this run, by origin (trust on first use; a different one is refused). */
   const selfSignedPins = new Map<string, string>();
   const selfSignedAllowed = async (origin: string, fingerprint: string): Promise<boolean> => {
@@ -357,7 +418,7 @@ export function registerBrowser(ctx: DesktopContext): void {
     selfSignedPins.set(origin, fingerprint);
     return true;
   };
-  app.on('before-quit', () => { history.flush(); bookmarks.flush(); settings.flush(); downloads.flush(); });
+  app.on('before-quit', () => { history.flush(); bookmarks.flush(); settings.flush(); downloads.flush(); hsts.flush(); });
 
   // ── Questions for the user (permissions, JS dialogs, HTTP auth, confirmations) ──
   const pendingPerms = new Map<string, { cb: (ok: boolean) => void; origin: string; name: string; timer: NodeJS.Timeout }>();
@@ -658,7 +719,10 @@ export function registerBrowser(ctx: DesktopContext): void {
     // Observe (never change) certificate verification, for the site-info panel.
     ses.setCertificateVerifyProc((req, cb) => {
       try {
-        certs.set(req.hostname, { issuer: req.certificate.issuerName, subject: req.certificate.subjectName, validTo: req.certificate.validExpiry * 1000 });
+        certs.set(req.hostname.toLowerCase(), {
+          issuer: req.certificate.issuerName, subject: req.certificate.subjectName, validTo: req.certificate.validExpiry * 1000,
+          fingerprint: req.certificate.fingerprint, ok: req.errorCode === 0,
+        });
       } catch { /* observation only */ }
       cb(-3);
     });
@@ -698,6 +762,12 @@ export function registerBrowser(ctx: DesktopContext): void {
     ses.webRequest.onErrorOccurred(settled);
     ses.webRequest.onCompleted((d) => {
       settled(d);
+      // HSTS a site sends over a connection whose certificate was valid: it can never be clicked through later.
+      if (/^https:/i.test(d.url) && d.responseHeaders) {
+        const host = hostOfUrl(d.url);
+        const header = Object.entries(d.responseHeaders).find(([k]) => k.toLowerCase() === 'strict-transport-security')?.[1];
+        if (header && certs.get(host)?.ok) { const next = noteHsts(hsts.get(), host, header, Date.now()); if (next !== hsts.get()) hsts.set(next); }
+      }
       const tab = d.webContentsId !== undefined ? byWc.get(d.webContentsId) : undefined;
       if (!tab) return;
       tab.network.push({ method: d.method, url: d.url, status: d.statusCode, type: d.resourceType, at: Date.now() });
@@ -710,9 +780,18 @@ export function registerBrowser(ctx: DesktopContext): void {
   const securityOf = (t: Tab): SecurityState => {
     const u = t.view.webContents.getURL();
     if (t.certError || (t.error && t.error.code <= -200 && t.error.code > -300)) return 'error';
+    // Let through by an exception: still not secure, and the address bar says so for as long as the page is open.
+    if (/^https:/i.test(u) && !certStanding(u).ok) return 'error';
     if (/^https:/i.test(u)) return 'secure';
     if (/^http:/i.test(u)) return 'insecure';
     return 'internal';
+  };
+  const certExceptionOf = (url: string): { certException?: 'session' | 'always' | 'loopback' } => {
+    if (!/^https:/i.test(url)) return {};
+    const st = certStanding(url);
+    if (st.ok || !st.via || st.via === 'credential') return {};
+    if (st.via === 'loopback') return { certException: 'loopback' };
+    return { certException: certStore.match(st.host, st.fingerprint)?.scope === 'always' ? 'always' : 'session' };
   };
   const tabState = (t: Tab): TabState => {
     const wc = t.view.webContents;
@@ -724,6 +803,7 @@ export function registerBrowser(ctx: DesktopContext): void {
       audible: wc.isCurrentlyAudible(), muted: wc.isAudioMuted(), zoom: wc.getZoomFactor(), security: securityOf(t),
       trackersBlocked: t.trackersBlocked, agentActive: Date.now() < t.agentUntil, humanCheck: t.humanCheck,
       ...(t.error ? { error: t.error } : {}), ...(t.popupsBlocked ? { popupsBlocked: t.popupsBlocked } : {}),
+      ...(t.certError ? { cert: t.certError } : {}), ...certExceptionOf(wc.getURL()),
       ...privacy.tabExtras(t.id),
       ...(t.guard && t.guard.url === wc.getURL() ? { injectionGuard: t.guard } : {}),
       ...ownership(t),
@@ -949,16 +1029,37 @@ export function registerBrowser(ctx: DesktopContext): void {
       pushState();
     });
     wc.on('certificate-error', (e, url, error, certificate, cb, isMainFrame) => {
-      // Never accepted by a click-through or by the agent. The one exception is
-      // written down by a person or the agent's own CredentialGenerate: a
-      // credential bound to exactly this origin with `allowSelfSigned`, on a
-      // private-network address (a self-hosted server), and then only for the
-      // first certificate seen this run (a changed one is refused).
+      // Never accepted by the agent or by a page. Through: a certificate the
+      // person allowed on the warning (exact host + fingerprint), loopback
+      // under their localhost setting, or — as before — a credential bound to
+      // this private origin with `allowSelfSigned`, pinned on first sight.
+      // Revoked certificates and HSTS hosts are never bypassable.
       e.preventDefault();
-      const refuse = (): void => { cb(false); if (isMainFrame) { tab.certError = { url, error, issuer: certificate.issuerName }; pushState(); } };
+      const host = hostOfUrl(url);
+      const fingerprint = certificate.fingerprint;
+      const d = decideCertError({
+        host, fingerprint, error, exceptions: certStore, allowInsecureLocalhost: settings.get().allowInsecureLocalhost === true,
+        hsts: hsts.get(), now: Date.now(),
+      });
+      const accept = (via: 'exception' | 'loopback' | 'credential'): void => {
+        certAccepted.set(host, { fingerprint, via });
+        cb(true);
+        if (isMainFrame) pushState();
+      };
+      if (d.kind === 'accept') { accept(d.via); return; }
+      const refuse = (): void => {
+        cb(false);
+        if (!isMainFrame) return;
+        tab.certError = {
+          token: `k${Date.now().toString(36)}${++certSeq}`, url, host, error, issuer: certificate.issuerName, subject: certificate.subjectName,
+          fingerprint, validFrom: certificate.validStart * 1000, validTo: certificate.validExpiry * 1000, bypassable: d.bypassable,
+          ...(d.reason ? { reason: d.reason } : {}), ...(isLoopbackHost(host) ? { loopback: true } : {}),
+        };
+        pushState();
+      };
       const origin = loginOrigin(url);
-      if (!origin || !/^https:/i.test(origin) || !isPrivateOrigin(origin) || !/ERR_CERT_(AUTHORITY_INVALID|COMMON_NAME_INVALID)/.test(error)) { refuse(); return; }
-      void selfSignedAllowed(origin, certificate.fingerprint).then((ok) => { if (ok) cb(true); else refuse(); }).catch(refuse);
+      if (!d.bypassable || !origin || !/^https:/i.test(origin) || !isPrivateOrigin(origin) || !/ERR_CERT_(AUTHORITY_INVALID|COMMON_NAME_INVALID)/.test(error)) { refuse(); return; }
+      void selfSignedAllowed(origin, fingerprint).then((ok) => { if (ok) accept('credential'); else refuse(); }).catch(refuse);
     });
     wc.on('login', (e, _details, authInfo, cb) => {
       e.preventDefault();
@@ -1303,6 +1404,9 @@ export function registerBrowser(ctx: DesktopContext): void {
     if (!origin) return 'no matching login form: this page has no web address a credential can be bound to.';
     let form = await evaluate<LoginFormReport>(wc, loginFormJs(opts.form ?? 0), 5000).catch(() => null);
     if (!form || (!form.password && !form.identifierOnly)) return `no matching login form on ${wc.getURL()} (no visible username or password field in the page itself). Take a snapshot; if the sign-in is in a pop-up or another page, open that first.`;
+    // A page whose certificate is trusted only by an exception: a password typed here could be intercepted.
+    const certRefusal = await certCredentialCheck(wc.getURL(), { wait: false });
+    if (certRefusal) return `refused: ${certRefusal}`;
     const host = ctx.services.vaultHost;
     if (!host) return 'refused: the credential vault is not available in this window.';
     // The tool call must return within the MCP deadline; a person answering an
@@ -1391,7 +1495,11 @@ export function registerBrowser(ctx: DesktopContext): void {
     const t = tabs.get(r.id)!;
     agentEvent(t, 'open', 'done', r.url);
     const h = await humanCheck(t);
-    const err = t.certError ? `\nCertificate error (${t.certError.error}) — the page is blocked and will not be accepted. Tell the user.` : t.error ? `\nThe page failed to load: ${t.error.description} (${t.error.code}).` : '';
+    const err = t.certError
+      ? (t.certError.bypassable
+        ? `\nCertificate error (${t.certError.error}) on ${t.certError.host} — the page is blocked. You cannot continue past it: the person must allow this certificate (Advanced → Proceed on the warning in the AICO browser). Tell the user; once they have, open the page again.`
+        : `\nCertificate error (${t.certError.error}) on ${t.certError.host} — the page is blocked and nobody can bypass it: ${t.certError.reason ?? ''} Tell the user.`)
+      : t.error ? `\nThe page failed to load: ${t.error.description} (${t.error.code}).` : '';
     const login = h.detected || err ? undefined : await loginSuggestion(t).catch(() => undefined);
     const o = owners.ownerOf(t.id);
     return {
@@ -2349,8 +2457,49 @@ export function registerBrowser(ctx: DesktopContext): void {
     c.resolve(Boolean(allow));
     return true;
   });
+  // "Proceed to <host> (unsafe)": the person's, on the warning main is showing — checked here, never taken on the renderer's word.
+  ctx.handle('browser:certProceed', (req: { tabId?: unknown; token?: unknown; always?: unknown }) => {
+    const t = typeof req?.tabId === 'string' ? tabs.get(req.tabId) : undefined;
+    const w = t?.certError;
+    const verdict = decideProceed({ pending: w && t ? { ...w, tabId: t.id } : undefined, token: req?.token, now: Date.now(), lastPersonInputAt: lastAppInputAt });
+    if (!verdict.ok) throw new Error(verdict.reason);
+    const warn = w!;
+    certStore.add({ host: warn.host, fingerprint: warn.fingerprint, error: warn.error, issuer: warn.issuer, subject: warn.subject, validTo: warn.validTo, addedAt: Date.now() }, req.always === true ? 'always' : 'session');
+    t!.certError = undefined; t!.error = undefined;
+    void t!.view.webContents.loadURL(warn.url).catch(() => { /* the tab's state shows what happened */ });
+    pushState();
+    return true;
+  });
+  const certsView = (): CertExceptionsView => ({
+    exceptions: certStore.list().map(e => ({ host: e.host, fingerprint: e.fingerprint, issuer: e.issuer, subject: e.subject, validTo: e.validTo, addedAt: e.addedAt, error: e.error, scope: e.scope, ...(e.credentialsConfirmed ? { credentialsConfirmed: true } : {}) })),
+    allowInsecureLocalhost: settings.get().allowInsecureLocalhost === true,
+  });
+  ctx.handle('browser:certs:list', () => certsView());
+  ctx.handle('browser:certs:remove', (host: string, fingerprint?: string) => {
+    if (typeof host !== 'string') return certsView();
+    certStore.remove(host, typeof fingerprint === 'string' ? fingerprint : undefined);
+    certAccepted.delete(host.toLowerCase());
+    // Connections already open on the old exception close; the next load is judged again.
+    void ses?.closeAllConnections().catch(() => { /* best effort: new connections are judged again */ });
+    pushState();
+    return certsView();
+  });
+  ctx.handle('browser:certs:localhost', (on: unknown) => {
+    // Turning it on is the person's own act (a real click on the AICO window), like Proceed.
+    if (on === true && Date.now() - lastAppInputAt > 3000) throw new Error('Turning this on needs your own click.');
+    const s = settings.get();
+    const next = { ...s };
+    if (on === true) next.allowInsecureLocalhost = true; else delete next.allowInsecureLocalhost;
+    settings.set(next);
+    if (on !== true) {
+      for (const [h, a] of certAccepted) if (a.via === 'loopback') certAccepted.delete(h);
+      void ses?.closeAllConnections().catch(() => { /* best effort */ });
+    }
+    pushState();
+    return certsView();
+  });
   ctx.handle('browser:certAnswer', (tabId: string, proceed?: boolean) => {
-    if (proceed) throw new Error('A page with a certificate error cannot be opened here.');
+    if (proceed) throw new Error('Use Advanced → Proceed on the warning page.');
     const t = tabs.get(tabId) ?? active();
     const wc = t.view.webContents;
     t.certError = undefined; t.error = undefined;

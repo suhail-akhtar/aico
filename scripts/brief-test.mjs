@@ -305,6 +305,88 @@ await block('monitors through the service', async () => {
   assert(down.length === 0 && after.delayMs === 2 * B.MONITOR_BASE_MS && /not signed in/.test(after.error) && after.snapshot.ci.CI === '9001:failure', 'gh down: backs off, keeps the last snapshot, says why');
 });
 
+await block('code structure: snapshot diffs (pure)', async () => {
+  const snap = (over = {}) => ({ version: 'v', rules: '', at: 0, files: ['a.ts', 'b.ts', 'c.ts', 'hot.ts'], cycles: [], violations: [], hot: {}, orphans: [], ...over });
+  const prev = snap({ cycles: [{ key: 'a.ts\nb.ts', loop: ['a.ts', 'b.ts'] }], hot: { 'hot.ts': { raw: 10, fanIn: 3, loc: 200, churn: 4 } } });
+  const next = snap({
+    version: 'w',
+    files: ['a.ts', 'b.ts', 'c.ts', 'hot.ts', 'new.ts'],
+    cycles: [{ key: 'a.ts\nb.ts\nc.ts', loop: ['a.ts', 'b.ts', 'c.ts'] }],
+    violations: [{ key: 'src/ui/** ↛ src/db/**|a.ts|c.ts', from: 'a.ts', to: 'c.ts', rule: 'src/ui/** ↛ src/db/**', reason: 'UI goes through the API' }],
+    hot: { 'hot.ts': { raw: 30, fanIn: 9, loc: 260, churn: 7 }, 'new.ts': { raw: 50, fanIn: 1, loc: 10, churn: 9 } },
+    orphans: ['b.ts', 'new.ts'],
+  });
+  const alerts = T.cgDiffSnapshots(prev, next);
+  const kinds = alerts.map(a => a.kind);
+  assert(JSON.stringify(kinds) === JSON.stringify(['cycle', 'violation', 'hotspot', 'orphan']), `ranked: cycle, violation, hotspot, orphan (${kinds.join(', ')})`);
+  assert(/grew to 3 files/.test(alerts[0].title) && alerts[0].mode === 'cycles' && alerts[0].files[0] === 'a.ts' && /a\.ts → b\.ts → c\.ts → a\.ts/.test(alerts[0].prompt), 'a cycle that grew is said so, with its loop and a prompt to break it');
+  assert(alerts[1].detail.includes('UI goes through the API') && alerts[1].urgency === 'soon', 'a new violation carries its rule and reason');
+  assert(alerts[2].files[0] === 'hot.ts' && /imported by 3 → 9/.test(alerts[2].detail), 'a hotspot that grew ×3 is named with what grew (a brand-new file is not a "sudden" hotspot)');
+  assert(alerts[3].files.join() === 'b.ts' && alerts[3].urgency === 'fyi', 'a file that lost its last importer is an orphan; a new unimported file is not');
+  assert(T.cgDiffSnapshots(next, next).length === 0, 'nothing new: no alerts');
+});
+
+await block('code structure in the brief and the code-graph monitor', async () => {
+  const proj = path.join(tmp, 'shop');
+  const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(proj, rel)), { recursive: true }); fs.writeFileSync(path.join(proj, rel), text); };
+  put('src/a.ts', "import { b } from './b';\nimport { c } from './c';\nexport const a = b + c;\n");
+  put('src/b.ts', 'export const b = 1;\n');
+  put('src/c.ts', 'export const c = 2;\n');
+  put('src/main.ts', "import { a } from './a';\nconsole.log(a);\n");
+  put('package.json', JSON.stringify({ name: 'shop', main: 'src/main.ts' }));
+  put('.aico/codegraph.json', JSON.stringify({ rules: [{ from: 'src/ui/**', to: 'src/db/**', reason: 'UI goes through the API' }] }));
+  const quiet = { github: false, git: false, advisories: false, useModel: false };
+  writeSettings({ brief: quiet });
+  const fresh = async () => { await T.getCodeGraph(proj, { force: true }); };
+  const run = fakeRunner().run;
+
+  const none = await S.generateBrief('manual', { now: NOW + 10 * 86400e3, run, projects: [proj] });
+  assert(!none.items.some(i => i.source === 'codegraph'), 'a project never indexed is not indexed by the brief');
+
+  await fresh();
+  const base = await S.generateBrief('manual', { now: NOW + 11 * 86400e3, run, projects: [proj] });
+  assert(!base.items.some(i => i.source === 'codegraph') && T.cgLoadSnapshots(proj).brief, 'the first look at an indexed project is a baseline');
+
+  put('src/b.ts', "import { a } from './a';\nexport const b = 1;\nexport const twice = () => a;\n");
+  put('src/a.ts', "import { b } from './b';\nexport const a = b;\n");
+  put('src/ui/page.ts', "import { q } from '../db/query';\nexport const page = q;\n");
+  put('src/db/query.ts', 'export const q = 1;\n');
+  await fresh();
+  const b2 = await S.generateBrief('manual', { now: NOW + 12 * 86400e3, run, projects: [proj] });
+  const cg = b2.items.filter(i => i.source === 'codegraph');
+  const cycle = cg.find(i => /New import cycle/.test(i.title));
+  const viol = cg.find(i => /Layering rule broken/.test(i.title));
+  const orphan = cg.find(i => /no longer used/.test(i.title));
+  assert(cycle && cycle.urgency === 'soon' && /src\/a\.ts|src\/b\.ts/.test(cycle.detail), 'a new import cycle is in the brief', cycle);
+  assert(viol && viol.detail.includes('UI goes through the API'), 'a newly broken rule from the committed .aico/codegraph.json', viol);
+  assert(orphan && orphan.title.includes('c.ts'), 'a file that lost its last importer', orphan);
+  const show = cycle?.actions.find(a => a.kind === 'open-codemap');
+  const fix = cycle?.actions.find(a => a.kind === 'start-fix');
+  assert(show && show.cwd === proj && show.mode === 'cycles' && /^src\//.test(show.file ?? ''), '"Show in Code map" opens the cycles view on a file of the cycle');
+  assert(fix && fix.cwd === proj && /Find the import that closed it/.test(fix.prompt ?? ''), '"Ask AICO to fix" prefills a prompt (never sent by itself)');
+  assert(b2.summary.includes('code structure') && b2.rankedBy === 'rules', 'counted in the rule summary; no model call');
+
+  const b3 = await S.generateBrief('manual', { now: NOW + 13 * 86400e3, run, projects: [proj] });
+  assert(!b3.items.some(i => i.source === 'codegraph'), 'unchanged since the last brief: nothing repeated');
+
+  // The monitor: its own baseline, then a notice after a re-index.
+  writeSettings({ brief: { ...quiet, monitors: [{ path: proj, codeGraph: true }], quietHours: 'off' } });
+  const t0 = local(2026, 10, 20, 10, 0);
+  const first = await S.pollMonitors({ now: t0, run });
+  assert(first.length === 0 && T.cgLoadSnapshots(proj).monitor, 'the monitor\'s first poll is a baseline');
+  put('src/d.ts', "import { e } from './e';\nexport const d = e;\n");
+  put('src/e.ts', "import { d } from './d';\nexport const e = 1;\nexport const back = () => d;\n");
+  await fresh();
+  const notices = await S.checkGraphAfterIndex(proj, t0 + 5_000);
+  assert(notices.length === 1 && notices[0].kind === 'codegraph' && /New import cycle/.test(notices[0].title) && notices[0].mode === 'cycles' && notices[0].prompt, 'after a re-index: a notice for the new cycle', notices);
+  const latest = await S.handleBriefRoute('brief/latest', 'GET', {}, new URLSearchParams());
+  assert(latest.body.notices.some(n => n.kind === 'codegraph' && n.file), 'served to clients with its file and prompt');
+  assert((await S.checkGraphAfterIndex(proj, t0 + 6_000)).length === 0, 'a second re-index within the minute is checked later, not twice');
+  const poll = await S.pollMonitors({ now: t0 + 3_600_000, run });
+  assert(poll.length === 0, 'the next poll finds nothing new (same graph)');
+  assert(B.resolveBriefSettings({ codeGraph: false }).codeGraph === false && B.resolveBriefSettings({}).codeGraph === true, 'brief.codeGraph defaults on and can be switched off');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) { console.log(failures.map(f => `  ✗ ${f}`).join('\n')); process.exit(1); }
 process.exit(0);

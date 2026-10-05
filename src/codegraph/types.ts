@@ -71,8 +71,73 @@ export interface ParsedFile {
   entry?: string;
   /** Go: interface name → its method names (for implementation edges). */
   ifaces?: Record<string, string[]>;
+  /** Classes, interfaces, structs, traits declared here, with members (codegraph/parse/members). */
+  types?: TypeDecl[];
+  /** Methods declared outside their type's body: Go receivers, Rust `impl` blocks, Kotlin extensions. */
+  ext?: ExtMethod[];
+  /** `recv.method(…)` calls whose receiver type this file's own text determines. */
+  calls?: CallSite[];
+  /** Declared return types of top-level functions. */
+  returns?: Record<string, TypeRef>;
+  /** Types of module-level variables (`svc = BillingService()`, `export const svc = new Svc()`). */
+  globals?: Record<string, TypeRef>;
   loc: number;
 }
+
+/**
+ * A type as one file's text names it, resolved later against that file's
+ * imports and scope (codegraph/members):
+ *
+ * - `'T'`, `'pkg.T'` — a type name as written (qualified by an import);
+ * - `{ ret: 'f' }` — what calling `f` gives: an instance when `f` is a class,
+ *   the declared return type when it is a function;
+ * - `{ v: 'x' }` — the type of a module-level variable, possibly imported;
+ * - `{ of, m }` — the declared return type of method `m` on a receiver of type `of`;
+ * - `{ of, f }` — the declared type of field `f` on a receiver of type `of`.
+ *
+ * Nothing here is a guess: a parse that cannot name the type records nothing.
+ */
+export type TypeRef = string | { ret: string } | { v: string } | { of: TypeRef; m: string } | { of: TypeRef; f: string };
+
+/** A method (or interface/trait member) of a type. */
+export interface MemberDecl {
+  name: string;
+  line: number;
+  /** Header text, whitespace-normalised. */
+  sig: string;
+  /** Declared return type. `'Self'` means the receiver's own type. */
+  ret?: TypeRef;
+  /** Go: declared on the pointer receiver (`func (s *T)`), so only `*T` has it. */
+  ptr?: boolean;
+  /** Declared without a body to be overridden (`abstract`, `@abstractmethod`). */
+  abstract?: boolean;
+  internal?: boolean;
+}
+
+export interface TypeDecl {
+  name: string;
+  kind: 'class' | 'interface' | 'struct' | 'trait' | 'enum' | 'object' | 'type';
+  line: number;
+  /** Supertypes as written: `extends`, Python bases, Kotlin/C# `:` lists, Go embedded interfaces. */
+  bases?: string[];
+  /** `implements` lists (Java, TS, PHP). */
+  impls?: string[];
+  /** Go struct embedding (promoted methods). */
+  embeds?: Array<{ name: string; ptr: boolean }>;
+  methods: MemberDecl[];
+  /** Field name → declared or constructed type. */
+  fields?: Record<string, TypeRef>;
+  /** Interface, trait, protocol or ABC: calls through it may reach any implementation. */
+  iface?: boolean;
+  internal?: boolean;
+  /** `export default class` (TS/JS). */
+  def?: boolean;
+}
+
+/** A method declared outside its type's body. `trait`: Rust `impl Trait for Type`. */
+export interface ExtMethod { type: string; trait?: string; m: MemberDecl }
+
+export interface CallSite { recv: TypeRef; m: string; line: number }
 
 /** One file as stored: identity, freshness, and its parse. */
 export interface FileRecord {
@@ -83,7 +148,8 @@ export interface FileRecord {
   parsed?: ParsedFile;
 }
 
-export type EdgeKind = 'import' | 'reexport' | 'package' | 'inferred' | 'dynamic';
+/** `call`: a method call whose receiver's type is known (codegraph/members). */
+export type EdgeKind = 'import' | 'reexport' | 'package' | 'inferred' | 'dynamic' | 'call';
 
 export interface FileEdge {
   from: number;
@@ -98,8 +164,10 @@ export interface FileEdge {
    * depend on everything.
    */
   passThrough?: boolean;
-  /** `resolved`: an explicit import or a language rule; `inferred`: a unique name in scope. */
+  /** `resolved`: an explicit import or a language rule; `inferred`: a unique name in scope, or an interface. */
   confidence: 'resolved' | 'inferred';
+  /** Every reason for this edge is a call or an implementation through an interface: possible, not certain. */
+  viaInterface?: boolean;
 }
 
 /** One file that uses a declared symbol. */
@@ -108,7 +176,26 @@ export interface SymbolRef {
   /** The name it uses locally (an alias, `ns.member`, or the name itself). */
   local: string;
   lines: number[];
-  via: 'import' | 'namespace' | 'reexport' | 'package' | 'inferred';
+  /**
+   * `ondemand`: found by the TypeScript language service for this one symbol
+   * (codegraph/ts-ondemand) — "exact (on demand)".
+   * `call`: a method called on a receiver whose type is known; `interface`:
+   * a call through an interface (or abstract method) that this implementation
+   * may receive, or the interface's own link to a type that satisfies it.
+   */
+  via: 'import' | 'namespace' | 'reexport' | 'package' | 'inferred' | 'call' | 'interface' | 'ondemand';
+}
+
+/** A type that satisfies an interface (or trait, protocol, abstract base), and why. */
+export interface Implementation {
+  iface: { file: number; name: string };
+  impl: { file: number; name: string };
+  /** The interface's methods, each with where the implementation has it. */
+  methods: Array<{ name: string; file: number; line: number; ptr?: boolean }>;
+  /** `declared`: `implements`/`extends`/`impl Trait for`; `structural`: the method sets match (Go, TS). */
+  how: 'declared' | 'structural';
+  /** Go: only `*T` has every method (some have pointer receivers). */
+  pointer?: boolean;
 }
 
 export interface GraphFile {
@@ -161,6 +248,12 @@ export interface CodeGraph {
   unresolved: Array<{ file: number; spec: string }>;
   cochange: CoChange[];
   communities: Community[];
+  /** Interface → implementation pairs, with the methods that make them one. */
+  implementations: Implementation[];
   git: { available: boolean; head?: string; commits: number; skippedLarge: number };
-  stats: { indexed: number; parsed: number; skipped: number; truncated: boolean; buildMs: number; resolveMs: number };
+  stats: {
+    indexed: number; parsed: number; skipped: number; truncated: boolean; buildMs: number; resolveMs: number;
+    /** How TS/JS method calls were resolved: the TypeScript checker, or the lexical rules (and why). */
+    methods?: { ts: 'checker' | 'lexical' | 'pending'; note?: string; calls: number; overCap?: boolean };
+  };
 }

@@ -23,7 +23,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api';
 import {
-  askPrompt, basename, DEFAULT_FILTERS, GraphModel, MODES, toSvg,
+  askPrompt, basename, DEFAULT_FILTERS, exactPayload, GraphModel, MODES, toSvg,
   type CgFileDetail, type CgPayload, type CgSymbolDetail, type Filters, type Mode,
 } from './model';
 import { ForceLayout, initialPositions } from './layout';
@@ -33,8 +33,13 @@ import { CodeGraphPanel } from './CodeGraphPanel';
 import { CgIcon } from './icons';
 
 export interface CodeGraphHost {
-  /** Open a project-relative file (at a line) in the client's editor. */
-  openFile?: (relPath: string, line?: number) => void;
+  /**
+   * Open a project-relative file (at a line) in the client's editor. May
+   * resolve to a line to show ("Opened in VS Code at line 12").
+   */
+  openFile?: (relPath: string, line?: number) => void | Promise<string | void>;
+  /** The desktop: also offer the person's external editor (server/editor). */
+  openExternal?: (relPath: string, line?: number) => Promise<string | void>;
   /** Start a chat in this project with the prompt prepared. */
   ask?: (prompt: string) => void;
 }
@@ -128,7 +133,8 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
   const [layoutState, setLayoutState] = useState<'idle' | 'running' | 'done'>('idle');
   const [askBusy, setAskBusy] = useState(false);
 
-  const model = useMemo(() => (payload ? new GraphModel(payload) : null), [payload]);
+  // "Exact only" drops the links that rest on an interface or a unique name before anything is drawn.
+  const model = useMemo(() => (payload ? new GraphModel(filters.exactOnly ? exactPayload(payload) : payload) : null), [payload, filters.exactOnly]);
   const mask = useMemo(() => (model ? model.visible(filters) : new Uint8Array()), [model, filters]);
 
   // ── Loading and staying fresh ────────────────────────────────────────────
@@ -162,6 +168,13 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
   }, [projectPath, load]);
 
   const flash = useCallback((text: string) => { setNotice(text); setTimeout(() => setNotice(n => (n === text ? null : n)), 2_600); }, []);
+  const openFile = useCallback((rel: string, line?: number) => {
+    const r = host?.openFile?.(rel, line);
+    if (r && typeof (r as Promise<string | void>).then === 'function') void (r as Promise<string | void>).then(t => { if (t) flash(t); }).catch(() => undefined);
+  }, [host, flash]);
+  const openExternal = useCallback((rel: string, line?: number) => {
+    void host?.openExternal?.(rel, line).then(t => { if (t) flash(t); }).catch(err => flash(err instanceof Error ? err.message : String(err)));
+  }, [host, flash]);
 
   // ── Layout (worker) ──────────────────────────────────────────────────────
   const posRef = useRef<Float32Array>(new Float32Array());
@@ -235,11 +248,13 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
     if (mode === 'impact' && selected >= 0) return model.impact([selected], depth);
     if (mode === 'changes' && diff) return model.impact(diff.ids, depth);
     if (mode === 'symbol' && symbolDetail) {
-      const first = [...new Set(symbolDetail.users.map(u => u.id))];
+      // "Exact only": a caller reached only through an interface is not a user.
+      const users = filters.exactOnly ? symbolDetail.users.filter(u => u.via !== 'interface' && u.via !== 'inferred') : symbolDetail.users;
+      const first = [...new Set(users.map(u => u.id))];
       return model.impact([symbolDetail.file], Math.max(1, depth), first);
     }
     return undefined;
-  }, [model, mode, selected, depth, diff, symbolDetail]);
+  }, [model, mode, selected, depth, diff, symbolDetail, filters.exactOnly]);
 
   const pathIds = useMemo(() => {
     if (!model || mode !== 'path') return undefined;
@@ -438,7 +453,7 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
   };
   const onDoubleClick = (): void => {
     const node = sceneRef.current.nodes[hoverRef.current];
-    if (node?.kind === 'file' && model) host?.openFile?.(model.file(node.ref).path);
+    if (node?.kind === 'file' && model) openFile(model.file(node.ref).path);
   };
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -473,7 +488,9 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
   const fileHits = useMemo(() => (model && query.trim() ? model.search(query, 8) : []), [model, query]);
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2 || /[/\\.]/.test(q)) { setSymbolHits([]); return; }
+    // A path is a file search; `Class.method` is a symbol (methods are `Type.method` symbols).
+    const method = /^[A-Za-z_$][\w$]*\.[A-Za-z_$#][\w$]*$/.test(q);
+    if (q.length < 2 || (/[/\\.]/.test(q) && !method)) { setSymbolHits([]); return; }
     const t = setTimeout(() => { void api.codeGraphSymbols(projectPath, q).then(r => setSymbolHits(r.symbols.slice(0, 6))).catch(() => {}); }, 160);
     return () => clearTimeout(t);
   }, [projectPath, query]);
@@ -508,7 +525,7 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
     }
     if (e.key === '/') { e.preventDefault(); searchRef.current?.focus(); return; }
     if (e.key === 'Escape') { setSelected(-1); setMulti(new Set()); setSymbol(null); setGroup(null); return; }
-    if (e.key === 'Enter' && selected >= 0 && model) { host?.openFile?.(model.file(selected).path); return; }
+    if (e.key === 'Enter' && selected >= 0 && model) { openFile(model.file(selected).path); return; }
     if (e.key === '+' || e.key === '=') { zoomBy(1.25); return; }
     if (e.key === '-' || e.key === '_') { zoomBy(0.8); return; }
     if (e.key === '0') { fitView(); return; }
@@ -603,7 +620,7 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
           <div className="min-w-0">
             <div className="truncate text-[14px] font-semibold leading-tight">Code map{projectName ? <span className="font-normal text-aico-muted"> · {projectName}</span> : null}</div>
             <div className="truncate text-[11.5px] leading-tight text-aico-muted">
-              {payload ? <>{files.toLocaleString()} files · {deps.toLocaleString()} dependencies · {payload.communities.length} modules{payload.git.available ? ` · ${payload.git.commits} commit${payload.git.commits === 1 ? '' : 's'} of history` : ''}{payload.stats.truncated ? ' · truncated' : ''}{layoutState === 'running' ? ' · arranging…' : ''}</> : error ? 'Could not load' : 'Indexing the project…'}
+              {payload ? <>{files.toLocaleString()} files · {deps.toLocaleString()} dependencies · {payload.communities.length} modules{payload.git.available ? ` · ${payload.git.commits} commit${payload.git.commits === 1 ? '' : 's'} of history` : ''}{payload.stats.truncated ? ' · truncated' : ''}{payload.stats.methods?.ts === 'pending' ? ' · type-checking methods…' : ''}{layoutState === 'running' ? ' · arranging…' : ''}</> : error ? 'Could not load' : 'Indexing the project…'}
             </div>
           </div>
         </div>
@@ -704,6 +721,7 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
                 </div>
                 <label className="flex items-center gap-2 px-2 py-1 text-[12.5px]"><input type="checkbox" checked={filters.hideTests} onChange={e => setFilters(f => ({ ...f, hideTests: e.target.checked }))} />Hide tests</label>
                 <label className="flex items-center gap-2 px-2 py-1 text-[12.5px]"><input type="checkbox" checked={filters.hideVendor} onChange={e => setFilters(f => ({ ...f, hideVendor: e.target.checked }))} />Hide vendored, generated and templates</label>
+                <label className="flex items-center gap-2 px-2 py-1 text-[12.5px]" title="Hide links through interfaces (a call that may reach an implementation) and links by a unique name in scope"><input type="checkbox" checked={filters.exactOnly} onChange={e => setFilters(f => ({ ...f, exactOnly: e.target.checked }))} data-exact-only />Exact only (no links through interfaces)</label>
                 <div className="px-2 pb-2 pt-1">
                   <input className="h-7 w-full rounded-md border border-aico-border bg-aico-surface px-2 text-[12px] text-aico-primary outline-none focus:border-aico-accent" placeholder="Only under folder, e.g. src/api" value={filters.folder} onChange={e => setFilters(f => ({ ...f, folder: e.target.value }))} />
                 </div>
@@ -766,9 +784,10 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
           <CodeGraphPanel
             model={model} payload={payload} mode={mode} selected={selected} multi={multi} detail={detail} depths={depths} depth={depth}
             symbol={symbolDetail} pathIds={pathIds} pathEnds={pathEnds} cycleIdx={cycleIdx} diff={diff} group={group}
-            canAsk={Boolean(host?.ask)} canOpen={Boolean(host?.openFile)} askBusy={askBusy}
+            canAsk={Boolean(host?.ask)} canOpen={Boolean(host?.openFile)} askBusy={askBusy} exactOnly={filters.exactOnly}
             onSelect={(id) => select(id, { center: true })}
-            onOpen={(path, line) => host?.openFile?.(path, line)}
+            onOpen={(path, line) => openFile(path, line)}
+            {...(host?.openExternal ? { onOpenExternal: (path: string, line?: number) => openExternal(path, line) } : {})}
             onAsk={() => void askAbout()}
             onMode={setMode}
             onSymbol={(file, name) => { setSymbol({ file, name }); setModeState('symbol'); }}
@@ -783,7 +802,7 @@ export function CodeGraphView({ projectPath, projectName, host, initialFile, ini
 }
 
 function filtersActive(f: Filters): boolean {
-  return f.langs.length > 0 || f.hideTests || !f.hideVendor || Boolean(f.folder.trim());
+  return f.langs.length > 0 || f.hideTests || !f.hideVendor || Boolean(f.folder.trim()) || f.exactOnly;
 }
 
 function IconButton({ label, icon, onClick, active, spin }: { label: string; icon: Parameters<typeof CgIcon>[0]['name']; onClick: () => void; active?: boolean; spin?: boolean }): React.ReactElement {
@@ -840,7 +859,7 @@ function Legend({ mode, colorBy, model, theme }: { mode: Mode; colorBy: ColorBy;
   else if (mode === 'cycles') items.push([theme.danger, 'in an import cycle']);
   else if (mode === 'path') items.push([theme.accent, 'on the path']);
   else if (colorBy === 'language') for (const l of model.langs.slice(0, 8)) items.push([({ ts: '#3178c6', js: '#e8b400', py: '#3e7cb1', go: '#00a7d0', java: '#e76f00', kotlin: '#a97bff', cs: '#68217a', php: '#777bb4', rb: '#cc342d', rs: '#c46a2a' } as Record<string, string>)[l] ?? '#94a3b8', l]);
-  else items.push(['', 'colour = module · size = lines and importers · dashed = inferred']);
+  else items.push(['', 'colour = module · size = lines and importers · dashed = inferred or through an interface']);
   return (
     <div className="pointer-events-none absolute bottom-3 left-3 max-w-[60%] rounded-lg border border-aico-border bg-aico-elevated/95 px-2.5 py-1.5 text-[11.5px] text-aico-secondary shadow-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

@@ -573,12 +573,30 @@ export interface AicoSettings {
   /**
    * The code graph (ADR 0028). `rules` are layering rules: files matching
    * `from` must not depend on files matching `to` (globs over project-relative
-   * paths); violations show in `CodeGraph overview` and the Code map view.
-   * Usually set per project, in `.aico/settings.json`.
+   * paths); violations show in `CodeGraph overview`, the Code map view and
+   * the morning brief (new ones). Rules add up: these (every project),
+   * `projects["<absolute path>"].rules` (one project, set here), a project's
+   * `.aico/settings.json` and its committed `.aico/codegraph.json`
+   * (`{ "rules": [...] }`) — a project can add rules, never remove yours
+   * (codegraph/rules).
    *
    * Example: { "codeGraph": { "rules": [{ "from": "src/ui/**", "to": "src/db/**", "reason": "UI goes through the API" }] } }
    */
-  codeGraph?: { rules?: Array<{ from: string; to: string; reason?: string }> };
+  codeGraph?: {
+    rules?: Array<{ from: string; to: string; reason?: string }>;
+    projects?: Record<string, { rules?: Array<{ from: string; to: string; reason?: string }> }>;
+  };
+  /**
+   * "Open in editor" from the web client and the desktop's "Open in external
+   * editor" (ADR 0030). `command` is the program and its arguments, with
+   * `{file}`, `{line}`, `{col}` and `{root}` filled in — e.g.
+   * `code -g {file}:{line}`, `cursor -g {file}:{line}`,
+   * `idea --line {line} {file}`, `subl {file}:{line}`. Unset: VS Code (`code`)
+   * when it is on the PATH. Run without a shell (on Windows a `.cmd` launcher
+   * is run through cmd with every argument quoted), only on a person's click.
+   * Your own settings only: a project file cannot set it.
+   */
+  editor?: { command?: string };
   /**
    * Offer rarely used tool groups on demand (default true).
    *

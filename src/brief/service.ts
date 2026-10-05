@@ -24,6 +24,14 @@
  * NEVER ACTS. Nothing here writes to GitHub, a repository or a session. The
  * brief's actions are links a person clicks (brief/core `BriefAction`).
  *
+ * CODE STRUCTURE. For projects already indexed (someone opened the Code map
+ * or the agent used CodeGraph there — the brief never indexes a project on its
+ * own), the brief compares the code graph with the one it saw last time and
+ * lists new import cycles, newly broken layering rules, sudden hotspots and
+ * files that lost their last importer (codegraph/alerts), each with "Show in
+ * Code map" and "Ask AICO to fix". A project's `codeGraph` monitor does the
+ * same after every re-index and on its polls, as notices. No model either way.
+ *
  * STORAGE, under `aicoHome()/brief/`: `briefs.jsonl` (history, newest last,
  * trimmed to the last 60), `state.json` (armed/last-run, monitor snapshots,
  * backoff and notices), `advisories.json` (each project's last audit, at most
@@ -47,8 +55,8 @@ import {
   type Brief, type BriefItem, type BriefMonitorConfig, type MonitorNotice, type MonitorSnapshot, type ResolvedBriefSettings,
 } from './core.js';
 import {
-  advisoryItems, defaultRunner, ghState, githubForProject, gitHygiene, inboxItems, longJobItems, mcpItems, workItems,
-  latestRuns, type CachedAdvisory, type Runner,
+  advisoryItems, defaultRunner, ghState, githubForProject, gitHygiene, graphAlertItems, inboxItems, longJobItems, mcpItems, workItems,
+  latestRuns, type CachedAdvisory, type GraphAlertLike, type Runner,
 } from './collect.js';
 
 const HISTORY_KEEP = 60;
@@ -126,6 +134,28 @@ export interface BriefDeps {
   /** Replaces the advisory audit (tests): advisories for a folder, or undefined when none could be run. */
   audit?: (cwd: string) => Promise<CachedAdvisory[] | undefined>;
   now?: number;
+}
+
+/**
+ * New structural problems in a project since `slot` last looked (codegraph/alerts).
+ * Only for a project with a graph store unless `force` (a monitor the person switched on).
+ */
+async function graphAlertsFor(cwd: string, slot: 'brief' | 'monitor', now: number, force = false): Promise<GraphAlertLike[]> {
+  const { compareWithLast, hasGraphStore } = await import('../codegraph/alerts.js');
+  const { getCodeGraph, peekCodeGraph } = await import('../codegraph/index.js');
+  // Indexed = a stored graph, or one in memory (its store is written in the background).
+  if (!force && !hasGraphStore(cwd) && !peekCodeGraph(cwd)) return [];
+  const { codeGraphRules } = await import('../codegraph/rules.js');
+  const g = await getCodeGraph(cwd);
+  if (g.files.length === 0) return [];
+  return compareWithLast(cwd, slot, g, await codeGraphRules(cwd), now).alerts;
+}
+
+function graphNotices(cwd: string, alerts: GraphAlertLike[], now: number): MonitorNotice[] {
+  return alerts.map(a => ({
+    key: `codegraph|${cwd}|${a.key}`, project: cwd, kind: 'codegraph' as const, title: a.title, body: a.detail, at: now,
+    ...(a.files[0] ? { file: a.files[0] } : {}), mode: a.mode, prompt: a.prompt,
+  }));
 }
 
 let launchCwd = process.cwd();
@@ -239,6 +269,11 @@ async function buildBrief(trigger: Brief['trigger'], deps: BriefDeps): Promise<B
     }
     if (r.git) items.push(...await gitHygiene(run, cwd, now, defaultBranch).catch(() => []));
     if (r.advisories) items.push(...(await advisoriesFor(cwd, now, deps.audit ?? realAudit).catch(() => ({ items: [] }))).items);
+    if (r.codeGraph) {
+      const monitored = r.monitors.some(m => m.codeGraph && path.resolve(m.path) === path.resolve(cwd));
+      try { items.push(...graphAlertItems(cwd, await graphAlertsFor(cwd, 'brief', now, monitored), now)); }
+      catch (err) { notes.push(`Code structure of ${path.basename(cwd)} not checked: ${(err as Error).message.slice(0, 120)}`); }
+    }
   }
   if (r.mcp.length) {
     const { mcpRegistry } = await import('../mcp/registry.js');
@@ -295,7 +330,7 @@ export async function pollMonitors(deps: BriefDeps = {}): Promise<MonitorNotice[
   const settings = await loadSettings();
   const r = resolveBriefSettings(settings.brief);
   const state = loadBriefState();
-  const due = r.monitors.filter(m => (m.ci || m.reviews || m.advisories) && (state.monitors[m.path]?.nextAt ?? 0) <= now);
+  const due = r.monitors.filter(m => (m.ci || m.reviews || m.advisories || m.codeGraph) && (state.monitors[m.path]?.nextAt ?? 0) <= now);
   const fresh: MonitorNotice[] = [];
   if (due.length) {
     const run = deps.run ?? defaultRunner;
@@ -328,6 +363,8 @@ export async function pollMonitors(deps: BriefDeps = {}): Promise<MonitorNotice[
           snap.critical = adv.critical; urls.advisories = adv.titles;
         }
         const notices = diffMonitor(m.path, prev.snapshot, snap, now, urls);
+        // The code graph keeps its own snapshot (codegraph/alerts); the first poll is its baseline too.
+        if (m.codeGraph) notices.push(...graphNotices(m.path, await graphAlertsFor(m.path, 'monitor', now, true), now));
         fresh.push(...notices);
         const delayMs = nextDelay(prev.delayMs, notices.length ? 'changed' : 'same');
         state.monitors[m.path] = { snapshot: snap, delayMs, nextAt: now + delayMs };
@@ -337,20 +374,60 @@ export async function pollMonitors(deps: BriefDeps = {}): Promise<MonitorNotice[
       }
     }
   }
-  // Already-known notices are not repeated; held ones are released when quiet hours end.
+  publishNotices(state, fresh, now, r.quiet);
+  saveBriefState(state);
+  return fresh;
+}
+
+/** Already-known notices are not repeated; held ones are released when quiet hours end. */
+function publishNotices(state: BriefState, fresh: MonitorNotice[], now: number, quiet: ResolvedBriefSettings['quiet']): void {
   const known = new Set(state.notices.map(n => n.key));
   const before = new Set(state.notices.filter(n => n.releasedAt).map(n => n.key));
-  state.notices = releaseNotices([...state.notices, ...fresh.filter(n => !known.has(n.key))], now, r.quiet);
+  state.notices = releaseNotices([...state.notices, ...fresh.filter(n => !known.has(n.key))], now, quiet);
   for (const n of state.notices.filter(x => x.releasedAt && !before.has(x.key))) {
     pushNotification({ title: n.title, body: n.body, level: n.kind === 'review' ? 'info' : 'warning', sourceId: n.key });
   }
-  saveBriefState(state);
+}
+
+/** Per project: the last time a re-index was checked, so a burst of edits is checked once a minute at most. */
+const graphCheckedAt = new Map<string, number>();
+const GRAPH_MONITOR_GAP_MS = 60_000;
+const graphRecheck = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * After the code graph of a project with a `codeGraph` monitor is rebuilt:
+ * compare and notify. Cheap (no model, no re-index — the graph is the one just built).
+ */
+export async function checkGraphAfterIndex(root: string, now = Date.now()): Promise<MonitorNotice[]> {
+  const settings = await loadSettings();
+  const r = resolveBriefSettings(settings.brief);
+  const m = r.monitors.find(x => x.codeGraph && path.resolve(x.path) === path.resolve(root));
+  if (!m) return [];
+  const key = path.resolve(root);
+  const since = now - (graphCheckedAt.get(key) ?? 0);
+  if (since < GRAPH_MONITOR_GAP_MS) {
+    // Checked a moment ago: look again once the gap is over, so the last edit of a burst is not missed.
+    if (!graphRecheck.has(key)) {
+      const t = setTimeout(() => { graphRecheck.delete(key); void checkGraphAfterIndex(root).catch(() => { /* the next poll tries again */ }); }, GRAPH_MONITOR_GAP_MS - since + 50);
+      t.unref?.();
+      graphRecheck.set(key, t);
+    }
+    return [];
+  }
+  graphCheckedAt.set(key, now);
+  const fresh = graphNotices(m.path, await graphAlertsFor(m.path, 'monitor', now, true), now);
+  if (fresh.length) {
+    const state = loadBriefState();
+    publishNotices(state, fresh, now, r.quiet);
+    saveBriefState(state);
+  }
   return fresh;
 }
 
 // ── the timer ────────────────────────────────────────────────────────
 
 let timer: ReturnType<typeof setInterval> | undefined;
+let unhookGraph: (() => void) | undefined;
 
 /** One tick: arm on first sight, brief when due, poll monitors. Exported for the tests. */
 export async function briefTick(deps: BriefDeps = {}): Promise<{ briefed: boolean; notices: number }> {
@@ -374,11 +451,17 @@ export function startBriefService(opts: { launchCwd: string }): void {
   void briefTick().catch(() => { /* a failed tick is retried on the next one */ });
   timer = setInterval(() => { void briefTick().catch(() => { /* retried next tick */ }); }, TICK_MS);
   timer.unref?.();
+  // The code-graph monitor: a re-index is the moment a new cycle or violation appears.
+  void import('../codegraph/index.js').then(({ onGraphBuilt }) => {
+    unhookGraph = onGraphBuilt(root => { void checkGraphAfterIndex(root).catch(() => { /* the next poll tries again */ }); });
+  });
 }
 
 export function stopBriefService(): void {
   if (timer) clearInterval(timer);
   timer = undefined;
+  unhookGraph?.();
+  unhookGraph = undefined;
 }
 
 // ── routes (`/api/brief/*`) ──────────────────────────────────────────
@@ -434,8 +517,8 @@ export async function handleBriefRoute(route: string, method: string, body: Reco
       if (!await isKnownProject(launchCwd, p)) return { status: 403, body: { error: 'not a workspace' } };
       const settings = await loadSettings();
       const current = resolveBriefSettings(settings.brief).monitors.filter(m => path.resolve(m.path) !== p);
-      const next: BriefMonitorConfig = { path: p, ci: body.ci === true, reviews: body.reviews === true, advisories: body.advisories === true };
-      const list = next.ci || next.reviews || next.advisories ? [...current, next] : current;
+      const next: BriefMonitorConfig = { path: p, ci: body.ci === true, reviews: body.reviews === true, advisories: body.advisories === true, codeGraph: body.codeGraph === true };
+      const list = next.ci || next.reviews || next.advisories || next.codeGraph ? [...current, next] : current;
       await patchUserSettingPath('brief.monitors', list);
       return { status: 200, body: { ok: true, monitors: list } };
     }

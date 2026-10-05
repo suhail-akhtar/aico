@@ -127,13 +127,116 @@ user's repository; bounded, queried-never-injected answers (`codemap` header).
   contract is a cheap symbol list, this one's is resolution); index files in
   the store (a 5,000-file project is a few MB); a refresh stats every indexed
   file.
-- **Honest limits:** no type inference — `obj.method()` through an interface or
-  a receiver of unknown type is not linked (Go request paths through interfaces
-  break directed paths); dynamic imports with computed specifiers, reflection,
-  dependency injection by string, and generated code are invisible; Python
-  `import *` is followed only into the package's own modules; C#/Java edges for
-  same-namespace types are *inferred*, and labelled so.
+- **Honest limits:** *(revised by the addendum below — method calls on typed
+  receivers and interfaces are now linked)* a receiver whose type the code does
+  not state (an untyped parameter, a container element, a value assigned two
+  different types) stays unlinked by the lexical rules; dynamic imports with
+  computed specifiers, reflection, dependency injection by string, and
+  generated code are invisible; Python `import *` is followed only into the
+  package's own modules; C#/Java edges for same-namespace types are *inferred*,
+  and labelled so.
 - **Migration:** none — a new store directory, built on first use.
+
+## Addendum (2026-10-05): method calls by receiver type, exact interfaces, structural alerts
+
+The first version left `obj.method()` unlinked. This addendum closes that and
+the other limits the owner asked to be finished.
+
+**Receiver types, only where the code states them** (`src/codegraph/parse/members.ts`,
+`src/codegraph/members.ts`). Each file records its classes/interfaces/structs/
+traits with methods (exported as `Type.method`), fields and supertypes, the
+declared return types of its functions, the types of its module-level
+variables, and every `recv.method(…)` whose receiver type its own text
+states: a constructor (`new T()`, `T()`, `T{}`, `T::new()`, `T.new`), a typed
+parameter/local/field/property, a dataclass field, a Go receiver or struct
+field, `self.x = T()` in a method, a declared return type of the function or
+method called, chained. Shadowing is respected (loop variables, `catch`,
+comprehensions, lambda parameters), and a name assigned two different types —
+or once from an expression the rules do not read — is unknown. Resolution
+names the type through the same machinery as imports (aliases, barrels,
+packages, namespaces, PSR-4, `use`), walks base classes (and Go embedding, PHP
+trait `use`), and links the call to the declaration that runs (`via: 'call'`,
+edge kind `call`). An unresolvable receiver stays unlinked: a same-named
+method on an unrelated class never collects these calls (accuracy suite
+`scripts/codegraph-members-test.mjs`, decoys in every language).
+
+**TS/JS through the TypeScript checker** (`src/codegraph/ts-check.ts`). When
+`typescript` is loadable (the project's, then AICO's — ADR 0013) and the
+project is within 2,500 TS/JS files and 6 MB, a worker thread builds a program
+per nearest tsconfig (module resolution limited to the project's own files),
+resolves every call whose method name a project type declares, and finds
+implementations — declared and structural (`isTypeAssignableTo`). Its answers
+replace the lexical ones per file whose content is unchanged since it ran; the
+graph is built first without it and rebuilt (new version) when it finishes;
+`getCodeGraph({ exact })` waits for it (the agent's tool does, up to 20 s).
+This reverses, *for this job only*, the "TS compiler API not used for
+resolution" row below: measured cost (this repository: ~12 s program, ~15 s
+walk, ~1.7 GB; a 110-file app: 0.6 s, ~95 MB) is why it runs in a worker,
+debounced, size-capped, with a heap ceiling and a deadline; the graph's
+`stats.methods` says which rules produced the calls and why.
+
+**Projects over the full pass's limits: one symbol, exactly, on demand**
+(`src/codegraph/ts-ondemand.ts`). Above the caps the whole-project pass stays
+skipped, but a question about one TS/JS symbol — `CodeGraph impact`/`dependents`
+on `file#name`, the Code map's symbol view, the edit check after an exported
+signature change — is answered by a long-lived TypeScript LanguageService in a
+worker: candidates are the reverse import closure of the declaring file
+(complete for exports; for methods, plus a cached text scan for `.method`),
+the program is built lazily (`skipLibCheck`, project references honoured,
+module resolution kept to the project) and updated incrementally (script
+versions = modification times), `findReferences` (and
+`getImplementationAtPosition`) are classified per related symbol — this
+declaration and its aliases are users ("exact (on demand)"), the interface
+member it implements gives callers "via interface", sibling implementations are
+not users, a re-export is not a use. Results are cached by a hash of every
+TS/JS file's content hash; a query is time-boxed (8 s, then the lexical answer
+marked `partial` while the worker finishes and caches); the service is
+disposed above ~1 GB of heap and rebuilt on the next query (worker heap capped
+at 2 GB). Measured on this repository (`scripts/codegraph-ondemand-probe.mjs`):
+`aicoHome` — 56 caller files, equal to `findReferences` on the full program;
+4.0 s and a 368 MB worker heap (605 files in the program) against 14.5 s and
+1.6 GB for the full program; the second ask from the cache. A method
+(`DecisionGate.checkHuman`): equal, 6.2 s, 570 MB.
+
+**Interfaces.** Calls on an interface, trait, protocol/ABC or abstract method
+link to the declaration (`call`) and to each implementation's method
+(`via: 'interface'`, edges `inferred` + `viaInterface`), at most 12 per call.
+Implementations are nominal where the language declares them and, for Go,
+**exact method sets**: every interface method present with identical
+parameter and result types (compared by package, names ignored), on `T` or —
+when some have pointer receivers — only `*T` (recorded as `pointer`);
+embedded interfaces expanded, embedded structs promote their methods; an
+interface embedding one from outside the project is not checked. The old
+heuristic (method names + type keys, ≤ 6 types) is gone. The view, the file and
+symbol details and `CodeGraph implementations` show each implementation with
+*why* (the methods, where, pointer receivers); **Exact only** (view filter,
+`exact: true` on the tool) removes everything that rests on an interface or a
+unique name.
+
+**Edit check without a graph.** When no graph is ready within the 4 s budget,
+the check is queued, appended to the next tool result once the graph is ready,
+and — if the model stops first — given to it before the turn may end
+(`agent.ts`, `flushQueuedEditNotes`, once per turn). Method signature changes
+count (`Type.method` is an export).
+
+**Structural alerts** (`src/codegraph/alerts.ts`). The morning brief compares
+each *already indexed* project's graph with its last snapshot and lists new
+import cycles, newly broken layering rules, sudden hotspot growth and files
+that lost their last importer, ranked, each with "Show in Code map" and "Ask
+AICO to fix" (prefilled, never sent); a per-project `codeGraph` monitor does
+the same after every re-index (`onGraphBuilt`) and on its polls. No model.
+
+**Rules add up** (`src/codegraph/rules.ts`): user `codeGraph.rules`, user
+`codeGraph.projects[<path>].rules`, the project's `.aico/settings*.json`, and a
+committed, read-only `.aico/codegraph.json`; `codeGraph` is now `tighten`
+in `PROJECT_POLICY` — a project can add rules, never remove the person's.
+
+Still not linked, and why: receivers typed only by flow (`if (x instanceof T)`
+narrowing), container element types and generics' type arguments (lexical
+rules; the checker handles them for TS/JS), return types nobody declared
+outside TS/JS, Python structural Protocol conformance without a declared base.
+TypeScript projects above the checker's caps get the lexical rules for the
+*whole graph* (edges, the canvas) and exact answers for the symbol asked about.
 
 ## Threat model
 

@@ -19,7 +19,7 @@ import { proposePlan, proposePlanDefinition } from './plan.js';
 import { runChecks, runChecksDefinition } from './run-checks.js';
 import { codeMap, codeMapDefinition } from './codemap.js';
 import { codeGraphTool, codeGraphDefinition } from './codegraph.js';
-import { afterRead, afterWrite, beforeWrite } from '../codegraph/edit-note.js';
+import { afterRead, afterWrite, beforeWrite, takeQueuedEditNotes } from '../codegraph/edit-note.js';
 import { gitTool, gitDefinition } from './git.js';
 import { knowledgeTool, knowledgeDefinition } from './knowledge.js';
 import { recallTool, recallDefinition } from './recall.js';
@@ -936,6 +936,13 @@ export async function executeTool(
 
   // Cache read-only tool results
   setCachedResult(name, args, result);
+
+  // An edit check that waited for the code graph rides on the next result (codegraph/edit-note).
+  // After caching, so a cached read never carries an old note.
+  if (typeof result === 'string') {
+    const queued = await takeQueuedEditNotes();
+    if (queued) result += queued;
+  }
 
   return result;
 }

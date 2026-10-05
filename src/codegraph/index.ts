@@ -15,6 +15,15 @@
  *
  * Git history is re-read only when `HEAD` moves.
  *
+ * ## TS/JS method calls: lexical first, the checker after
+ *
+ * A graph is built at once with the lexical receiver rules for every
+ * language (parse/members). For TS/JS the TypeScript checker then runs in a
+ * worker (codegraph/ts-check), debounced after changes; when it finishes the
+ * graph is rebuilt from the same parses with its answers and the version
+ * moves. `getCodeGraph(root, { exact })` waits for it (bounded) — the agent's
+ * tool does; the Code map does not and reloads when the version changes.
+ *
  * ## Bounds
  *
  * {@link MAX_FILES} files (sorted by path, so the same ones every time, and
@@ -36,8 +45,10 @@ import { gitHead, readHistory, type GitHistory, emptyHistory } from './git.js';
 import { SOURCE_EXTENSIONS, entryFromPath, isTestPath, langOf, parseSource } from './parse/index.js';
 import { dirOf, joinRel, keyOf } from './paths.js';
 import { Resolver, resolveAll } from './resolve.js';
-import { loadStore, saveStore } from './store.js';
-import type { CodeGraph, CoChange, FileRecord, GraphFile, Lang } from './types.js';
+import { loadStore, saveStore, type StoredTsExact } from './store.js';
+import { runTsCheck, TS_CHECK_MAX_BYTES, TS_CHECK_MAX_FILES } from './ts-check.js';
+import type { ExactFile } from './members.js';
+import type { CodeGraph, CoChange, FileRecord, GraphFile, Implementation, Lang } from './types.js';
 
 export type { CodeGraph } from './types.js';
 
@@ -58,16 +69,41 @@ interface ProjectState {
   loaded: boolean;
   truncated: boolean;
   skipped: number;
+  /** The TypeScript checker's last answers (codegraph/ts-check). */
+  tsExact?: StoredTsExact;
+  /** A checker pass running now. */
+  tsRun?: Promise<void>;
+  tsTimer?: ReturnType<typeof setTimeout>;
+  /** Files changed while a pass ran: run again after it. */
+  tsDirty: boolean;
+  tsLastEnd: number;
+  /** Why the checker does not run here (too large, switched off, no typescript, failed). */
+  tsNote?: string;
 }
 
 const states = new Map<string, ProjectState>();
 const MAX_HELD = 4;
 
+/** Called after a build that produced a new graph (the code-graph monitor listens: brief/service). */
+type BuiltListener = (root: string, graph: CodeGraph) => void;
+const builtListeners = new Set<BuiltListener>();
+
+export function onGraphBuilt(listener: BuiltListener): () => void {
+  builtListeners.add(listener);
+  return () => { builtListeners.delete(listener); };
+}
+
+function announce(root: string, graph: CodeGraph): void {
+  if (!builtListeners.size) return;
+  // After the caller has its graph: a listener must never delay or fail a build.
+  setImmediate(() => { for (const l of builtListeners) { try { l(root, graph); } catch { /* a listener's problem, not the graph's */ } } });
+}
+
 function stateFor(root: string): ProjectState {
   const key = keyOf(path.resolve(root));
   let s = states.get(key);
   if (!s) {
-    s = { root: path.resolve(root), records: new Map(), configs: new Map(), git: emptyHistory(), lastRefresh: 0, loaded: false, truncated: false, skipped: 0 };
+    s = { root: path.resolve(root), records: new Map(), configs: new Map(), git: emptyHistory(), lastRefresh: 0, loaded: false, truncated: false, skipped: 0, tsDirty: false, tsLastEnd: 0 };
     states.set(key, s);
     // Least recently created out first: a desktop with a dozen projects open must not hold a dozen graphs.
     while (states.size > MAX_HELD) states.delete(states.keys().next().value!);
@@ -77,6 +113,7 @@ function stateFor(root: string): ProjectState {
 
 /** Forget in-memory graphs (tests; after a project is removed). */
 export function resetCodeGraphCache(): void {
+  for (const s of states.values()) if (s.tsTimer) clearTimeout(s.tsTimer);
   states.clear();
 }
 
@@ -85,15 +122,119 @@ export interface GraphOptions {
   force?: boolean;
   /** Use whatever is in memory without walking (the edit note's budget). */
   cachedOnly?: boolean;
+  /**
+   * Wait for the TypeScript checker's method calls: `true` up to its own
+   * deadline, a number for at most that many milliseconds. Without it a graph
+   * may carry the lexical TS/JS calls while the checker runs behind it.
+   */
+  exact?: boolean | number;
 }
 
 /** The project's graph, refreshed if it may be stale. */
 export async function getCodeGraph(root: string, opts: GraphOptions = {}): Promise<CodeGraph> {
   const s = stateFor(root);
-  if (s.inflight) return s.inflight;
-  if (s.graph && (opts.cachedOnly || (!opts.force && Date.now() - s.lastRefresh < REFRESH_THROTTLE_MS))) return s.graph;
-  s.inflight = refresh(s).finally(() => { s.inflight = undefined; });
-  return s.inflight;
+  let g: CodeGraph;
+  if (s.inflight) g = await s.inflight;
+  else if (s.graph && (opts.cachedOnly || (!opts.force && Date.now() - s.lastRefresh < REFRESH_THROTTLE_MS))) g = s.graph;
+  else {
+    s.inflight = refresh(s).finally(() => { s.inflight = undefined; });
+    g = await s.inflight;
+  }
+  if (opts.exact && !opts.cachedOnly) {
+    if (!s.tsRun && tsPlan(s).env !== undefined && s.tsExact?.env !== tsPlan(s).env) startTsCheck(s);
+    if (s.tsRun) {
+      const wait = typeof opts.exact === 'number' ? opts.exact : 150_000;
+      await Promise.race([s.tsRun, new Promise<void>(r => { const t = setTimeout(r, wait); t.unref?.(); })]);
+    }
+    g = s.graph ?? g;
+  }
+  return g;
+}
+
+/** Changes that should reach the checker are batched: one pass, a moment after the last. */
+const TS_DEBOUNCE_MS = 1_500;
+const TS_MIN_GAP_MS = 5_000;
+
+/** The TS/JS files the checker would see, and the fingerprint of their contents — or why it will not run. */
+function tsPlan(s: ProjectState): { env?: string; rels: string[]; hashes: Record<string, string>; skip?: string; overCap?: boolean } {
+  const recs = [...s.records.values()].filter(r => r.parsed && (r.parsed.lang === 'ts' || r.parsed.lang === 'js') && !/\.d\.[cm]?ts$/.test(r.path));
+  if (!recs.length) return { rels: [], hashes: {}, skip: 'no TS/JS files' };
+  if (process.env.AICO_CODEGRAPH_TYPECHECK === 'off') return { rels: [], hashes: {}, skip: 'the TypeScript checker is switched off (AICO_CODEGRAPH_TYPECHECK=off)' };
+  const bytes = recs.reduce((n, r) => n + r.size, 0);
+  // Tests lower the limits to reach the on-demand path on a small fixture.
+  const maxFiles = Number(process.env.AICO_CODEGRAPH_TS_MAX_FILES) || TS_CHECK_MAX_FILES;
+  const maxBytes = Number(process.env.AICO_CODEGRAPH_TS_MAX_BYTES) || TS_CHECK_MAX_BYTES;
+  if (recs.length > maxFiles || bytes > maxBytes) {
+    return { rels: [], hashes: {}, overCap: true, skip: `${recs.length} TS/JS files (${(bytes / 1e6).toFixed(1)} MB) is over the whole-project type checker's limit (${maxFiles} files, ${maxBytes / 1e6} MB): method calls use the lexical rules, and a symbol you ask about is resolved exactly on demand by the TypeScript language service` };
+  }
+  recs.sort((a, b) => a.path.localeCompare(b.path));
+  const hashes: Record<string, string> = {};
+  for (const r of recs) hashes[r.path] = r.hash;
+  const env = createHash('sha1').update(recs.map(r => `${r.path}:${r.hash}`).join('\n'))
+    .update([...s.configs.entries()].filter(([k]) => /(?:ts|js)config[^/]*\.json$/.test(k)).map(([k, v]) => `${k}\0${v}`).join('\0'))
+    .digest('hex').slice(0, 16);
+  return { env, rels: recs.map(r => r.path), hashes };
+}
+
+/** After a build: run the checker if what it would see changed (debounced; never twice at once). */
+function scheduleTsCheck(s: ProjectState): void {
+  const plan = tsPlan(s);
+  s.tsNote = plan.skip;
+  if (!plan.env || s.tsExact?.env === plan.env) return;
+  if (s.tsRun) { s.tsDirty = true; return; }
+  if (s.tsTimer) clearTimeout(s.tsTimer);
+  const delay = Math.max(TS_DEBOUNCE_MS, s.tsLastEnd + TS_MIN_GAP_MS - Date.now());
+  s.tsTimer = setTimeout(() => { s.tsTimer = undefined; if (!s.tsRun) startTsCheck(s); }, delay);
+  s.tsTimer.unref?.();
+}
+
+function startTsCheck(s: ProjectState): void {
+  if (s.tsTimer) { clearTimeout(s.tsTimer); s.tsTimer = undefined; }
+  const plan = tsPlan(s);
+  if (!plan.env) return;
+  const env = plan.env;
+  s.tsRun = runTsCheck(s.root, plan.rels).then(res => {
+    if (!res.ok) { s.tsNote = `the TypeScript checker did not run: ${res.reason}; method calls use the lexical rules`; return; }
+    s.tsNote = undefined;
+    s.tsExact = { env, hashes: plan.hashes, files: res.files, impls: res.impls, at: Date.now() };
+    // Same parses, new answers: rebuild and let clients see a new version.
+    if (states.get(keyOf(s.root)) === s) {
+      s.graph = buildGraph(s, { parsed: 0, scanMs: 0 });
+      void saveStore(s.root, [...s.records.values()], s.git, s.tsExact);
+      announce(s.root, s.graph);
+    }
+  }).catch(() => undefined).finally(() => {
+    s.tsRun = undefined;
+    s.tsLastEnd = Date.now();
+    if (s.tsDirty) { s.tsDirty = false; scheduleTsCheck(s); }
+    if (s.graph) s.graph = { ...s.graph, stats: { ...s.graph.stats, methods: methodStats(s, s.graph.stats.methods?.calls ?? 0) } };
+  });
+}
+
+function methodStats(s: ProjectState, calls: number): NonNullable<CodeGraph['stats']['methods']> {
+  const plan = tsPlan(s);
+  if (plan.skip) return { ts: 'lexical', note: plan.skip, calls, ...(plan.overCap ? { overCap: true } : {}) };
+  if (s.tsRun) return { ts: 'pending', note: 'the TypeScript checker is running; TS/JS method calls use the lexical rules until it finishes', calls };
+  if (s.tsExact && !s.tsNote) return { ts: 'checker', calls };
+  return { ts: 'lexical', ...(s.tsNote ? { note: s.tsNote } : {}), calls };
+}
+
+/**
+ * A hash of every TS/JS file's content hash: the on-demand language service's
+ * cache key (codegraph/ts-ondemand) — any edit to TS/JS invalidates, nothing else.
+ */
+export function tsContentKey(root: string): string {
+  const s = states.get(keyOf(path.resolve(root)));
+  if (!s) return String(Date.now());
+  const h = createHash('sha1');
+  for (const r of [...s.records.values()].filter(x => /\.[cm]?[jt]sx?$/.test(x.path)).sort((a, b) => a.path.localeCompare(b.path))) h.update(`${r.path}:${r.hash}\n`);
+  return h.digest('hex').slice(0, 16);
+}
+
+/** Exact users of one TS/JS symbol in a project too large for the whole-project pass (codegraph/ts-ondemand). */
+export async function exactUsersOnDemand(g: CodeGraph, file: number, name: string, opts: { budgetMs?: number } = {}): Promise<import('./ts-ondemand.js').OnDemandResult | undefined> {
+  const { onDemandUsers } = await import('./ts-ondemand.js');
+  return onDemandUsers(g, file, name, tsContentKey(g.root), opts);
 }
 
 /** The graph only if one is already in memory (never builds). */
@@ -131,6 +272,7 @@ async function refresh(s: ProjectState): Promise<CodeGraph> {
     if (stored) {
       for (const r of stored.records) s.records.set(r.path, r);
       s.git = stored.git;
+      if (stored.tsExact) s.tsExact = stored.tsExact;
     }
   }
   const { sources, configs, truncated } = await scan(s.root);
@@ -197,7 +339,9 @@ async function refresh(s: ProjectState): Promise<CodeGraph> {
 
   const graph = buildGraph(s, { parsed, scanMs: Date.now() - started });
   s.graph = graph;
-  void saveStore(s.root, [...s.records.values()], s.git);
+  void saveStore(s.root, [...s.records.values()], s.git, s.tsExact);
+  scheduleTsCheck(s);
+  announce(s.root, graph);
   return graph;
 }
 
@@ -244,7 +388,7 @@ function buildGraph(s: ProjectState, timing: { parsed: number; scanMs: number })
   const t0 = Date.now();
   const records = [...s.records.values()].sort((a, b) => a.path.localeCompare(b.path));
   const resolver = new Resolver(records.map(r => ({ path: r.path, ...(r.parsed ? { parsed: r.parsed } : {}) })), s.configs);
-  const res = resolveAll(resolver);
+  const res = resolveAll(resolver, exactInput(s, resolver));
   const fromManifest = manifestEntries(resolver, s.configs);
 
   const files: GraphFile[] = records.map((r, id) => {
@@ -283,6 +427,7 @@ function buildGraph(s: ProjectState, timing: { parsed: number; scanMs: number })
     .update(records.map(r => r.hash).join(','))
     .update(String(s.git.head ?? ''))
     .update([...s.configs.values()].join('\0'))
+    .update(s.tsExact?.env ?? '')
     .digest('hex').slice(0, 16);
   return {
     root: s.root,
@@ -296,12 +441,45 @@ function buildGraph(s: ProjectState, timing: { parsed: number; scanMs: number })
     unresolved: res.unresolved,
     cochange: cochange.slice(0, 5_000),
     communities: comms,
+    implementations: res.implementations,
     git: { available: s.git.available, ...(s.git.head ? { head: s.git.head } : {}), commits: s.git.commits, skippedLarge: s.git.skippedLarge },
     stats: {
       indexed: files.length, parsed: timing.parsed, skipped: s.skipped, truncated: s.truncated,
       buildMs: timing.scanMs, resolveMs: Date.now() - t0,
+      methods: methodStats(s, res.calls.exact + res.calls.viaInterface),
     },
   };
+}
+
+/**
+ * The checker's answers as resolution takes them: only for files whose content is
+ * still what the checker saw (an edited file falls back to the lexical rules until
+ * the next pass), paths mapped to this build's ids.
+ */
+function exactInput(s: ProjectState, r: Resolver): { files: Map<number, ExactFile>; implementations: Implementation[] } | undefined {
+  const x = s.tsExact;
+  if (!x) return undefined;
+  const files = new Map<number, ExactFile>();
+  for (const [rel, res] of Object.entries(x.files)) {
+    const rec = s.records.get(rel);
+    const id = r.lookup(rel);
+    if (!rec || id === undefined || rec.hash !== x.hashes[rel]) continue;
+    const calls: ExactFile['calls'] = [];
+    for (const [line, target, symbol, via] of res.calls) {
+      const t = r.lookup(target);
+      if (t !== undefined) calls.push({ line, file: t, symbol, via: via === 1 ? 'interface' : 'call' });
+    }
+    files.set(id, { calls, known: new Set(res.known) });
+  }
+  const implementations: Implementation[] = [];
+  for (const i of x.impls) {
+    const a = r.lookup(i.iface[0]);
+    const b = r.lookup(i.impl[0]);
+    if (a === undefined || b === undefined) continue;
+    const methods = i.methods.map(([name, rel, line]) => ({ name, file: r.lookup(rel) ?? b, line }));
+    implementations.push({ iface: { file: a, name: i.iface[1] }, impl: { file: b, name: i.impl[1] }, methods, how: i.how === 1 ? 'structural' : 'declared' });
+  }
+  return { files, implementations };
 }
 
 /** Recent commits for a file (from the stored history), newest first. */
