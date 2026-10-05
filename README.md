@@ -195,6 +195,10 @@ A real browser — tabs you drag, pin, mute and reopen, a bookmarks bar with fol
 history, downloads, reader mode, full view, full screen and **its own window when
 you want one** — built private-first, with **AICO riding along**. It remembers your
 sign-ins across updates and reinstalls, and brings your tabs back where you left them.
+Local dev servers and internal sites with a self-signed or private-CA certificate
+open like in Chrome — **Advanced → Proceed** (only your click counts, bound to that
+exact certificate, with an optional "always trust" you can manage), a red **Not secure**
+badge while you're there, and no saved passwords filled in unless you say so.
 
 <table>
 <tr>
@@ -284,6 +288,7 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 - **An accurate map of your project** (TypeScript/JavaScript with `@/` aliases and barrels, Python, Go, Java, C#, PHP, Rust and more): architecture, files, symbols, impact ("what breaks if I change this"), paths between files, cycles, hotspots, files that change together, and what your uncommitted changes affect. It runs locally, indexes 5,000 files in about a second, and updates as you edit.
 - **Ask AICO about any part of it** — the selected files and their neighbourhood go to the chat as precise context.
 - **The agent checks its own edits against it:** change an exported function and it is told which callers it has not updated yet.
+- **Big projects too:** past a few thousand files the symbol you ask about is still answered exactly by the TypeScript language service on demand (seconds, memory-capped), matching the compiler's own answer.
 - **Methods and interfaces, not just files:** calls are linked by the receiver's type (TypeScript through the TypeScript checker), so `BillingService.process` lists exactly its callers — never a same-named method elsewhere. Interfaces show which types implement them and why (Go by exact method sets); "Exact only" hides anything less than certain.
 - **In your morning brief:** new import cycles, broken layering rules, sudden hotspots and files nothing uses any more — with **Show in Code map** and **Ask AICO to fix**. In the web client files open in VS Code (or your editor) at the line, or in a built-in viewer.
 
@@ -291,6 +296,7 @@ sign-ins across updates and reinstalls, and brings your tabs back where you left
 
 - **Shift-left by default:** a security scan on every commit, CodeQL, dependency/lockfile/licence checks and an SBOM on every release, and a pen-test suite (1,100+ attacks on the real engine: auth, forged origins, DNS rebinding, path traversal, SSRF, secret leaks, fuzzing) in CI.
 - **Fail-safe:** every guard denies when something breaks; a cloned repo's settings can only tighten safety; turning on full autonomy or loosening safety needs a real person, never the API token alone.
+- **The agent's shell stays in its lane:** writing outside your project, downloading programs, installing software globally or running something just downloaded needs you — in every mode, full autonomy included.
 - **Code AICO writes gets the same checks:** secrets, risky patterns and vulnerable dependencies in its own changes block "done".
 
 ### 🔐 Credentials the agent uses but never sees

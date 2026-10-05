@@ -299,8 +299,8 @@ What rendered:
       </div>
       <div class="card">
         <span class="kicker">Tested</span>
-        <h3>3,095 offline assertions</h3>
-        <p>No API key needed to run them. Plus 269 web-client checks, 210 end-to-end checks against a real server, 38 Apps checks over real HTTP, and live suites that drive a real server, a real browser at five widths, a real VS Code, and real models.</p>
+        <h3>Thousands of offline checks, and a pen test</h3>
+        <p>No API key needed to run them: 3,500+ engine assertions, dozens of feature and security suites, web and desktop suites, and an 1,100-attack pen test against the real engine on every change. Plus live suites that drive a real server, a real browser, a real VS Code, real Word and PowerPoint, and real models.</p>
       </div>
       <div class="card">
         <span class="kicker">Learns from you</span>
@@ -311,6 +311,16 @@ What rendered:
         <span class="kicker"><a href="automation.html#skills">Measured skills</a></span>
         <h3>A prompt with a score</h3>
         <p><code>aico skill eval</code> grades a skill against planted tasks; <code>optimize</code> proposes bounded edits and keeps only what scores higher on tasks it never saw. Never a model judging a model.</p>
+      </div>
+      <div class="card">
+        <span class="kicker"><a href="desktop.html">Code map</a></span>
+        <h3>See how your project fits together</h3>
+        <p>An accurate local graph of files, modules and symbols in ten languages: impact of a change, paths, cycles, hotspots, files that change together. The agent is told which callers it has not updated yet.</p>
+      </div>
+      <div class="card">
+        <span class="kicker">Security</span>
+        <h3>Fails closed, asks a person</h3>
+        <p>Every guard denies when something breaks. A cloned repo can only tighten safety; full autonomy, writes outside your project and downloads of programs need you — never the API token alone.</p>
       </div>
     </div>
   </section>
@@ -548,11 +558,14 @@ What rendered:
       <h3>Is it safe to let it run shell commands?</h3>
       <div class="a">
         <p>
-          There are layers — per-tool permission prompts with diffs, a bash
-          classifier, plan mode that removes the write tools entirely, and spend
-          caps. The project states the limit plainly rather than claiming a
-          sandbox it does not have: the opt-in sandbox governs aico's own file
-          tools fully and spawned processes only partially.
+          There are layers — per-tool permission prompts with diffs, a shell
+          classifier, an independent safety reviewer, plan mode that removes the
+          write tools entirely, and spend caps. Shell commands that write outside
+          your project, download programs, install software globally or run
+          something just downloaded need a person in every mode, full autonomy
+          included. The limit stated plainly: the check reads the command text,
+          so a write made inside a program the command runs is governed by the
+          opt-in sandbox, not by that check.
         </p>
       </div>
     </div>
