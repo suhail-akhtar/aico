@@ -135,7 +135,7 @@ import { handleVaultRoute } from '../vault/http.js';
 import { quarantineIfEnabled } from '../vault/agent-hooks.js';
 import { sinkRedact, sinkRedactText } from '../vault/sink.js';
 import { decisionGate } from './decision-gate.js';
-import { DEFAULT_SUBMIT_RANK, decideSubmitMode, isAllowedHost, isAllowedOrigin, isInternalFault, publicErrorMessage, submitRank, type SubmitRank } from './http-guards.js';
+import { DEFAULT_SUBMIT_RANK, decideSubmitMode, hostAccess, isInternalFault, publicErrorMessage, submitRank, type SubmitRank } from './http-guards.js';
 
 export interface ServeOptions {
   port?: number;
@@ -526,19 +526,17 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
 
     // DNS rebinding: a page whose own name now resolves to 127.0.0.1 sends no
-    // foreign Origin, but its Host still names it. Only a loopback name on
-    // this port is served — static files included (server/http-guards).
-    if (!isAllowedHost(req.headers.host, port)) {
-      send(res, 403, { error: 'host not allowed' });
-      return;
-    }
-
-    // Reject cross-origin drivers outright. A same-origin page has no Origin
-    // header on same-origin requests, so presence of a foreign one is the signal.
-    // Parsed and compared whole: a prefix match let `…:7340.evil.example` in.
-    const origin = req.headers.origin;
-    if (origin !== undefined && !isAllowedOrigin(origin, port)) {
-      send(res, 403, { error: 'cross-origin request refused' });
+    // foreign Origin, but its Host still names it. Only a loopback name is
+    // served — static files included — on this port, or on another one when
+    // it is a port-forward (server/http-guards `hostAccess`).
+    //
+    // Cross-origin drivers are rejected outright. A same-origin page has no
+    // Origin header on same-origin requests, so presence of a foreign one is
+    // the signal. Parsed and compared whole: a prefix match let
+    // `…:7340.evil.example` in.
+    if (hostAccess(req.headers.host, req.headers.origin, port) === 'refused') {
+      const hostOk = hostAccess(req.headers.host, undefined, port) !== 'refused';
+      send(res, 403, { error: hostOk ? 'cross-origin request refused' : 'host not allowed' });
       return;
     }
 

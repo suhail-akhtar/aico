@@ -3,6 +3,32 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Security
+
+- **Attaching a file by path is confined like Read.** `@attach` in the
+  terminal and the desktop's attach dialog read any path they were given.
+  They now accept only files in the project, AICO's store or (desktop) a
+  folder or file the person opened or picked, by real path, so a link inside
+  the project that leads out counts as outside. Network (UNC) paths, Windows
+  device names (`CON`, `NUL`, `COM1`…, `\\.\…`) and `/dev`, `/proc`, `/sys`
+  are refused before anything is opened. Uploads by content are unchanged.
+- **Glob and Grep no longer reach through links.** A pattern naming a link's
+  path (`link/*`, `link/secret.txt`) made the OS follow a symlink or junction
+  out of the project; results whose real location is outside the readable
+  roots are now dropped, and Grep checks each file it reads.
+- **SSH port-forwards to `aico serve` work.** A loopback Host on a different
+  port (`ssh -L 9000:127.0.0.1:7340`) was refused as if it were DNS
+  rebinding. It is now served when the Origin is absent or names that same
+  host; the API still needs the token, and non-loopback Hosts are still
+  refused.
+- **Mini Apps answer bad bodies with 400/413.** A malformed or non-object JSON
+  body gets a fixed 400 message (the parser's text could quote the body), a
+  body over 1 MB a 413 (declared lengths before reading) instead of a reset
+  connection, and an unexpected failure a 500 without its message, path or
+  stack.
+
 ## 0.40.0 — 2026-10-04
 
 ### Fixed

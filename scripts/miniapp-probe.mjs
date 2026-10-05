@@ -16,6 +16,7 @@ import './lib/test-home.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+import http from 'node:http';
 
 const { startMiniAppServer } = await import('../dist-test/miniapps/server.js');
 
@@ -251,6 +252,47 @@ check('an unknown app is a 404', missing.status === 404);
 
 const index = await get('/');
 check('the index lists the app', index.text.includes('Invoices'));
+
+// ── bad and oversized bodies ────────────────────────────────────────
+// A malformed or huge body is the caller's mistake: 400 / 413 with a fixed
+// message, never a 500, a reset connection, a stack or a path on this machine.
+
+async function post(pathname, body, headers = {}) {
+  try {
+    const res = await fetch(base + pathname, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body });
+    return { status: res.status, text: await res.text() };
+  } catch (err) {
+    return { status: 0, text: String(err?.cause?.code ?? err?.message ?? err) };
+  }
+}
+const leaks = (text) => /\n\s+at\s|node:internal|[A-Za-z]:\\|\/(?:home|Users|tmp)\//.test(text) || text.includes(root);
+for (const [label, body, want] of [
+  ['malformed JSON', '{"customer": ', 400],
+  ['a JSON array', '[1,2]', 400],
+  ['a JSON string', '"x"', 400],
+  ['a body over 1 MB', JSON.stringify({ customer: 'x'.repeat(2_000_000) }), 413],
+]) {
+  const r = await post('/invoices/api/invoices', body);
+  check(`${label} → ${want}`, r.status === want, `got ${r.status} ${r.text.slice(0, 120)}`);
+  check(`${label}: the answer names no internals`, !leaks(r.text), r.text.slice(0, 200));
+}
+{
+  // Declares 50 MB and sends a few bytes: the answer must come from the header alone.
+  const u = new URL(base);
+  const status = await new Promise((resolve) => {
+    const req = http.request({ host: u.hostname, port: u.port, method: 'POST', path: '/invoices/api/invoices',
+      headers: { 'content-type': 'application/json', 'content-length': '50000000' }, timeout: 5000 }, (res) => { res.resume(); resolve(res.statusCode); req.destroy(); });
+    req.on('timeout', () => { req.destroy(); resolve(-1); });
+    req.on('error', () => resolve(0));
+    req.write('{"customer":');
+  });
+  check('a declared length over 1 MB → 413 before the body arrives', status === 413, `got ${status}`);
+}
+{
+  const bad = await fetch(`${base}/invoices/api/invoices/1`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{nope' });
+  check('a malformed PATCH body → 400', bad.status === 400, `got ${bad.status}`);
+}
+check('the server still answers after bad bodies', (await get('/invoices/api/tables')).status === 200);
 
 // ── the static kind ─────────────────────────────────────────────────
 

@@ -118,7 +118,16 @@ export async function startMiniAppServer(
 
   const server = http.createServer((req, res) => {
     void handle(req, res).catch((err) => {
-      send(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      // A bad body is the caller's mistake and says so; anything else is ours,
+      // and its text (a path, a stack) is for the log, not the page.
+      if (res.headersSent) { res.end(); return; }
+      if (err instanceof BodyError) {
+        if (err.status === 413) req.resume();
+        send(res, err.status, { error: err.message });
+        return;
+      }
+      console.error(`  [mini apps] ${req.method} ${(req.url ?? '').split('?')[0]}: ${err instanceof Error ? err.message : String(err)}`);
+      send(res, 500, { error: 'internal error' });
     });
   });
 
@@ -215,6 +224,10 @@ export async function startMiniAppServer(
 
       send(res, 405, { error: `${req.method} not allowed here` });
     } catch (err) {
+      // A body that is too big or not JSON gets its own status and a fixed
+      // message (the parser's can quote the body), and the rest of it is
+      // drained so the client reads the answer rather than a reset.
+      if (err instanceof BodyError) throw err;
       // A rejected column name, a failed constraint and a bad body are all the
       // caller's fault, and the message is the app author's best debugging
       // tool. 400 rather than 500 so a page can tell "you sent something wrong"
@@ -432,19 +445,47 @@ function escapeHtml(value: string): string {
   ));
 }
 
-/** Read a JSON body, capped so a malformed client cannot exhaust memory. */
+/** A request body the caller got wrong: too large (413) or not a JSON object (400). */
+class BodyError extends Error {
+  constructor(readonly status: 400 | 413, message: string) { super(message); }
+}
+
+const MAX_BODY = 1_000_000;
+
+/**
+ * Read a JSON body, capped so a malformed client cannot exhaust memory.
+ *
+ * Listeners rather than `for await`: leaving the iterator early destroyed the
+ * socket, so an oversized body got a reset (or a 500 from the top-level
+ * handler) instead of an answer. A declared length over the cap is refused
+ * before a byte is buffered; past the cap the rest is drained unbuffered.
+ * Same shape as the main server's reader (server/index.ts readJson).
+ */
 async function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > 1_000_000) throw new Error('request body too large');
-    chunks.push(chunk as Buffer);
-  }
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > MAX_BODY) throw new BodyError(413, 'request body too large');
+  const chunks = await new Promise<Buffer[]>((resolve, reject) => {
+    const got: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      if (size > MAX_BODY) return;
+      size += chunk.length;
+      if (size > MAX_BODY) { got.length = 0; reject(new BodyError(413, 'request body too large')); return; }
+      got.push(chunk);
+    });
+    req.on('end', () => resolve(got));
+    req.on('error', reject);
+  });
   if (chunks.length === 0) return {};
-  const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    // Fixed text, never the parser's message: that can quote the body.
+    throw new BodyError(400, 'invalid JSON body');
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('expected a JSON object');
+    throw new BodyError(400, 'expected a JSON object');
   }
   return parsed as Record<string, unknown>;
 }

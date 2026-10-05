@@ -2,7 +2,7 @@ import { readFile } from 'fs/promises';
 import { currentCwd } from '../run-context.js';
 import path from 'path';
 import fastGlob from 'fast-glob';
-import { resolveForReading } from './path.js';
+import { realReadableFilter, resolveForReading } from './path.js';
 import { globPatternProblem } from './glob.js';
 
 export interface GrepInput {
@@ -45,7 +45,11 @@ export async function grepFiles(input: GrepInput): Promise<string> {
   const results: string[] = [];
   const MAX_RESULTS = 200;
 
+  // Every file is read, so each one's own real location is checked as well as
+  // its folder's: a pattern naming a link's path reaches through it otherwise.
+  const keep = realReadableFilter(basePath);
   for (const file of files) {
+    if (!keep(file, true)) continue;
     let content: string;
     try {
       content = await readFile(path.join(basePath, file), 'utf8');

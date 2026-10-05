@@ -264,8 +264,26 @@ await block('3/5/7/8. the real server: submit modes, session ids, Host/Origin, e
     assert(r.status === 403, `static file with a rebinding Host → 403 (${r.status})`);
     r = await raw(port, 'GET', '/api/settings', { ...H, host: `evil.example:${port}` });
     assert(r.status === 403, `API with a rebinding Host → 403 (${r.status})`);
-    r = await raw(port, 'GET', '/api/settings', { ...H, host: `127.0.0.1:${port + 1}` });
-    assert(r.status === 403, `API with a loopback Host on another port → 403 (${r.status})`);
+    // An SSH port-forward (`ssh -L 9000:127.0.0.1:<port>`) arrives with a
+    // loopback Host on the forwarded port: served with the token, when the
+    // Origin is absent or that same host — never on the token-less API.
+    const fwd = `127.0.0.1:${port + 1}`;
+    r = await raw(port, 'GET', '/api/settings', { ...H, host: fwd });
+    assert(r.status === 200, `API with a loopback Host on another port and the token → 200 (${r.status})`);
+    r = await raw(port, 'GET', '/api/settings', { ...H, host: `localhost:${port + 7}`, origin: `http://localhost:${port + 7}` });
+    assert(r.status === 200, `…and with an Origin naming that same forwarded host → 200 (${r.status})`);
+    r = await raw(port, 'GET', '/api/settings', { host: fwd });
+    assert(r.status === 401, `a forwarded loopback Host without the token → 401 (${r.status})`);
+    for (const origin of [`http://127.0.0.1:${port}`, 'http://evil.example', `http://localhost:${port + 1}`, `http://${fwd}.evil.example`]) {
+      r = await raw(port, 'GET', '/api/settings', { ...H, host: fwd, origin });
+      assert(r.status === 403, `a forwarded Host with a different Origin (${origin}) → 403 (${r.status})`);
+    }
+    r = await raw(port, 'GET', '/', { host: fwd });
+    assert(r.status !== 403, `the static client loads through a forwarded loopback Host (${r.status})`);
+    r = await raw(port, 'GET', '/', { host: fwd, origin: 'http://evil.example' });
+    assert(r.status === 403, `…but not for a foreign Origin (${r.status})`);
+    r = await raw(port, 'GET', '/api/settings', { ...H, host: `evil.example:${port + 1}` });
+    assert(r.status === 403, `a non-loopback Host on another port → 403 (${r.status})`);
     for (const origin of [`http://127.0.0.1:${port}.evil.example`, `http://127.0.0.1:${port}0`, `http://localhost:${port}@evil.example`, 'null', `https://127.0.0.1:${port}`]) {
       r = await raw(port, 'GET', '/api/settings', { ...H, origin });
       assert(r.status === 403, `Origin ${origin} → 403 (${r.status})`);

@@ -212,6 +212,21 @@ for (const host of ['evil.example', `evil.example:${port}`, `127.0.0.1.nip.io:${
   const page = await request({ pathname: '/', headers: { host } });
   check(`host:${host} refused on the static client`, page.status === 403 || page.status === 421 || page.status === 400, `status ${page.status}`);
 }
+// An SSH port-forward: a loopback Host on another port. Served with the token
+// when the Origin is absent or names that same host; nothing else changes.
+{
+  const fwd = `localhost:${port + 11}`;
+  const ok = await request({ pathname: '/api/sessions', headers: H({ host: fwd }) });
+  check(`host:forwarded ${fwd} with the token accepted`, ok.status === 200, `status ${ok.status}`);
+  const same = await request({ pathname: '/api/sessions', headers: H({ host: fwd, origin: `http://${fwd}` }) });
+  check(`host:forwarded ${fwd} with its own Origin accepted`, same.status === 200, `status ${same.status}`);
+  const noToken = await request({ pathname: '/api/sessions', headers: { host: fwd } });
+  check(`host:forwarded ${fwd} without the token refused`, noToken.status === 401, `status ${noToken.status}`);
+  for (const origin of [`http://127.0.0.1:${port}`, 'http://evil.example', `http://${fwd}.evil.example`, `https://${fwd}`]) {
+    const r = await request({ pathname: '/api/sessions', headers: H({ host: fwd, origin }) });
+    check(`host:forwarded ${fwd} with Origin ${origin} refused`, r.status === 403, `status ${r.status}`);
+  }
+}
 
 // ── 3. CSRF-shaped requests ──────────────────────────────────────────────────
 

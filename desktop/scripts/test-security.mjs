@@ -252,6 +252,20 @@ console.log('\nimported markup');
   ok(/DOMParser/.test(bm), 'bookmark titles from HTML are read through an inert DOMParser document');
 }
 
+// ── 13. Attaching a file by path is confined (review 2026-10) ──
+console.log('\nattach by path');
+{
+  const pr = await load(path.join(desktop, '..', 'shared', 'path-refusal.ts'), 'path-refusal');
+  for (const bad of ['\\\\evil.example\\share\\a.pdf', '//evil.example/share/a.pdf', '\\\\.\\PhysicalDrive0', 'C:\\work\\NUL.txt', 'C:\\work\\com1']) {
+    ok(Boolean(pr.devicePathProblem(bad, 'win32')), `refused as a device or network path: ${bad}`);
+  }
+  ok(pr.devicePathProblem('C:\\work\\report.pdf', 'win32') === undefined && pr.devicePathProblem('/home/me/a.pdf', 'linux') === undefined, 'an ordinary file is not');
+  const ipc = src('electron/core-ipc.ts');
+  const handler = ipc.slice(ipc.indexOf("'dialog:readFileBase64'"), ipc.indexOf("'dialog:saveFile'"));
+  ok(/devicePathProblem\(/.test(handler) && /openedRoots\(ctx\)\.check\(/.test(handler), 'dialog:readFileBase64 refuses device paths and anything outside the opened folders and picked files');
+  ok(handler.indexOf('check(') < handler.indexOf('readFileSync'), 'and checks before it reads');
+}
+
 fs.rmSync(out, { recursive: true, force: true });
 console.log(`\n  DESKTOP SECURITY: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

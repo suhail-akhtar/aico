@@ -16,6 +16,7 @@ import type { DesktopContext } from './context';
 import { openedRoots } from './opened-roots';
 import { isExecutablePath } from './security-core';
 import { openExternalLink } from './external-link';
+import { devicePathProblem } from '../../shared/path-refusal';
 
 declare const __AICO_VERSION__: string;
 declare const __DESKTOP_VERSION__: string;
@@ -140,9 +141,18 @@ export function registerCoreIpc(ctx: DesktopContext): void {
       return { path: p, name: path.basename(p), size: st.size };
     });
   });
-  /** Read a picked file as base64 — for attachments, capped so a stray ISO cannot stall the UI. */
-  ctx.handle('dialog:readFileBase64', (p: string) => {
+  /**
+   * Read a picked file as base64 — for attachments, capped so a stray ISO cannot stall the UI.
+   * Only a file inside the folders open in AICO or one the person picked (opened-roots: real
+   * paths, so a link that leads out is outside), never a device or network path — the
+   * handler took any path, so a script in the renderer could read `~/.ssh` (review 2026-10).
+   */
+  ctx.handle('dialog:readFileBase64', async (p: string) => {
+    const device = typeof p === 'string' ? devicePathProblem(p) : undefined;
+    if (device) throw new Error(device);
+    await openedRoots(ctx).check(p, 'Cannot attach');
     const st = fs.statSync(p);
+    if (!st.isFile()) throw new Error('Only files can be attached.');
     if (st.size > 40 * 1024 * 1024) throw new Error('That file is larger than 40 MB.');
     return fs.readFileSync(p).toString('base64');
   });

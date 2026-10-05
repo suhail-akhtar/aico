@@ -218,7 +218,8 @@ export {
 } from './session/projections.js';
 // -- Transcript export + workspace write roots --
 export { toMarkdown, toPlainText, exportFilename } from './session/export.js';
-export { resolveInsideWorkspace, writableRoots, resolveForReading, readableRoots } from './tools/path.js';
+export { resolveInsideWorkspace, writableRoots, resolveForReading, readableRoots, resolveForAttaching } from './tools/path.js';
+export { devicePathProblem } from '../shared/path-refusal.js';
 export { resolveWorkspaceRoot, setWorkspaceRuntime, getWorkspaceInfo } from './workspace.js';
 // -- Streamed command output --
 export { bash, setBashProgressSink } from './tools/bash.js';
@@ -745,7 +746,7 @@ export { configWriteDenial, isAicoConfigFile } from './tools/config-write-guard.
 export { looksLikeSecretPath } from './tools/git.js';
 export { markTainted } from './run-context.js';
 // -- Security review 2026-10: server fixes (scripts/security-server-test.mjs) --
-export { isAllowedHost, isAllowedOrigin, publicErrorMessage, decideSubmitMode, submitRank } from './server/http-guards.js';
+export { isAllowedHost, isAllowedOrigin, hostAccess, publicErrorMessage, decideSubmitMode, submitRank } from './server/http-guards.js';
 export { isValidSessionId } from './session/persistence.js';
 // -- Shift-left security (ADR 0026): the agent's own security check (scripts/security-check-test.mjs) --
 export { securityCheck } from './security/project-scan.js';

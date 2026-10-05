@@ -15,6 +15,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { resolveForAttaching } from './tools/path.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -102,7 +103,10 @@ export async function resolveFileAttachment(
   filePath: string,
   cwd: string,
 ): Promise<ResolvedAttachment | null> {
-  const abs = path.isAbsolute(filePath) ? filePath : path.resolve(cwd, filePath);
+  // Confined like Read: the project, the AICO store, nothing through a link
+  // that leads out, no device or network path (tools/path resolveForAttaching).
+  // Checked before existsSync, which would already open a UNC share.
+  const abs = resolveForAttaching(filePath, cwd);
   if (!existsSync(abs)) return null;
 
   const info = await stat(abs);

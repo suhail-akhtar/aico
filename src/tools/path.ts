@@ -31,6 +31,7 @@ import { aicoHome } from '../home.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
 import { getBuiltinDir } from '../skills/loader.js';
 import { getWorkspaceRuntime } from '../workspace.js';
+import { devicePathProblem } from '../../shared/path-refusal.js';
 
 /** Whether `target` is `parent` or sits beneath it. */
 function isInside(parent: string, target: string): boolean {
@@ -195,4 +196,57 @@ export function resolveInsideWorkspace(inputPath: string, label = 'path'): strin
     `  given:     ${inputPath}\n` +
     roots.map(root => `  allowed:   ${root}`).join('\n'),
   );
+}
+
+/**
+ * Resolve a file a person attaches by path (`@attach` in the terminal).
+ *
+ * WHY: `@attach` read any path it was given — a file anywhere on disk, a link
+ * inside the project that leads out of it, a UNC share (which hands the
+ * person's NTLM hash to its host on open) or a device. Attaching is reading,
+ * so it gets the same realpath containment as Read (security review 2026-10):
+ * the readable roots plus AICO's own store. Device and network paths are
+ * refused from the text, before the filesystem is touched.
+ */
+export function resolveForAttaching(inputPath: string, cwd: string): string {
+  requireStringPath(inputPath, 'path');
+  const device = devicePathProblem(inputPath);
+  if (device) throw new Error(device);
+  const resolved = path.resolve(cwd, inputPath);
+  const deviceResolved = devicePathProblem(resolved);
+  if (deviceResolved) throw new Error(deviceResolved);
+  const roots = readableRoots(cwd);
+  const home = aicoHome();
+  if (!roots.some(root => isInside(root, home))) roots.push(home);
+  if (insideRoots(roots, resolved)) return resolved;
+  throw new Error(
+    `${inputPath} is outside the project and AICO's store, so it cannot be attached `
+    + '(a link inside the project that leads outside counts as outside). '
+    + 'Copy it into the project, or open its folder as the project.',
+  );
+}
+
+/**
+ * A filter for what a tree walk (Glob, Grep) found under `base`: keeps an
+ * entry only when the folder it sits in really is inside the readable roots
+ * — and, with `self`, the entry itself too.
+ *
+ * WHY: the walkers do not descend into links, but a pattern that names a
+ * link's path (`link/*`, `link/secret.txt`) makes fast-glob read that folder
+ * directly, and the operating system follows the link or junction on the way.
+ * Checking each result's real location is the only answer that holds however
+ * the walk got there (security review 2026-10). Folder answers are cached, so
+ * a large result list costs one realpath per folder, not per file.
+ */
+export function realReadableFilter(base: string, cwd = currentCwd()): (relative: string, self?: boolean) => boolean {
+  const roots = readableRoots(cwd).map(realLocation);
+  const inside = (p: string): boolean => roots.some(root => isInside(root, realLocation(p)));
+  const folders = new Map<string, boolean>();
+  return (relative, self = false) => {
+    const abs = path.resolve(base, relative);
+    const dir = path.dirname(abs);
+    let ok = folders.get(dir);
+    if (ok === undefined) { ok = inside(dir); folders.set(dir, ok); }
+    return ok && (!self || inside(abs));
+  };
 }

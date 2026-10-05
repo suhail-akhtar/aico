@@ -1,6 +1,6 @@
 import fastGlob from 'fast-glob';
 import { currentCwd } from '../run-context.js';
-import { resolveForReading } from './path.js';
+import { realReadableFilter, resolveForReading } from './path.js';
 
 export interface GlobInput {
   pattern: string;
@@ -34,12 +34,16 @@ export async function globFiles(input: GlobInput): Promise<string> {
   const problem = globPatternProblem(input.pattern);
   if (problem) throw new Error(problem);
   const cwd = input.cwd ? resolveForReading(input.cwd, 'cwd') : currentCwd();
-  const matches = await fastGlob(input.pattern, {
+  const found = await fastGlob(input.pattern, {
     cwd,
     dot: true,
     followSymbolicLinks: false,
     onlyFiles: false,
   });
+  // A pattern naming a link's path is read through the link by the OS; what
+  // really lives outside the roots is dropped (tools/path realReadableFilter).
+  const keep = realReadableFilter(cwd);
+  const matches = found.filter(match => keep(match));
   if (matches.length === 0) {
     return `No files matched pattern: ${input.pattern}`;
   }

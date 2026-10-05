@@ -1740,7 +1740,10 @@ export function AicoApp(props: InkAppProps) {
     // Resolve @attach paths to SDK attachments
     const fileAtts: ResolvedAttachment[] = [];
     for (const p of attachPaths) {
-      const att = await resolveFileAttachment(p, props.cwd);
+      // A refused path (outside the project, a device, too large) says why rather than ending the submit.
+      let att: ResolvedAttachment | null;
+      try { att = await resolveFileAttachment(p, props.cwd); }
+      catch (err) { pushStatic({ type: 'system', content: `  ✗ ${err instanceof Error ? err.message : String(err)}` }); continue; }
       if (att) fileAtts.push(att);
       else pushStatic({ type: 'system', content: `  ✗ File not found: ${p}` });
     }

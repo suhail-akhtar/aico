@@ -358,6 +358,90 @@ await block('D8. Glob/Grep cap brace expansion and refuse patterns that leave th
   assert(JSON.stringify(ok).includes('a.ts'), 'an ordinary brace pattern still works');
 });
 
+// ── G1. attachments by path are confined like the file tools ────────────
+await block('G1. @attach by path stays inside the project and the AICO store', async () => {
+  const project = fs.mkdtempSync(path.join(tmp, 'attachproj-'));
+  const outside = fs.mkdtempSync(path.join(tmp, 'attachout-'));
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'attach-outside-secret');
+  fs.writeFileSync(path.join(project, 'notes.md'), '# inside');
+  const attach = (p) => T.resolveFileAttachment(p, project).then(r => r, e => ({ error: String(e?.message ?? e) }));
+  const refused = (r) => Boolean(r && r.error) && !JSON.stringify(r).includes('attach-outside-secret');
+  let r = await attach(path.join(outside, 'secret.txt'));
+  assert(refused(r) && /outside|must stay/i.test(r.error), `a file outside the project is refused (${JSON.stringify(r).slice(0, 90)})`);
+  r = await attach(path.join('..', path.basename(outside), 'secret.txt'));
+  assert(refused(r), 'a relative path climbing out is refused');
+  let linked = true;
+  try { fs.symlinkSync(outside, path.join(project, 'link'), process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (e) { linked = false; assert(false, `could not create a link to test with: ${e?.message}`); }
+  if (linked) {
+    r = await attach(path.join('link', 'secret.txt'));
+    assert(refused(r), `a link inside the project pointing out is refused (${JSON.stringify(r).slice(0, 90)})`);
+    r = await attach('link');
+    assert(refused(r), 'the linked folder itself is refused as a directory attachment');
+  }
+  const devices = process.platform === 'win32'
+    ? ['\\\\evil.example\\share\\x.txt', '//evil.example/share/x.txt', '\\\\.\\PhysicalDrive0', '\\\\?\\C:\\x.txt', 'NUL', 'con.txt', 'sub/COM1.log', 'LPT1']
+    : ['\\\\evil.example\\share\\x.txt', '/dev/zero', '/proc/self/environ', '/sys/kernel'];
+  for (const bad of devices) {
+    r = await attach(bad);
+    assert(refused(r) && /device|network|UNC/i.test(r.error), `${JSON.stringify(bad)} is refused as a device or network path (${JSON.stringify(r).slice(0, 80)})`);
+  }
+  r = await attach('notes.md');
+  assert(r && r.sdkAttachment?.type === 'file', 'a file in the project still attaches');
+  const stored = path.join(testHome, 'attach-store-test.md');
+  fs.writeFileSync(stored, 'in the store');
+  r = await attach(stored);
+  assert(r && r.sdkAttachment?.type === 'file', `a file in AICO's own store attaches (${JSON.stringify(r).slice(0, 80)})`);
+  fs.rmSync(stored, { force: true });
+  assert(T.devicePathProblem('C:\\work\\report.pdf', 'win32') === undefined && T.devicePathProblem('/home/a/console.txt', 'linux') === undefined,
+    'ordinary paths are not device paths');
+  assert(T.devicePathProblem('/dev/sda', 'linux') && T.devicePathProblem('/proc/self/environ', 'linux'), '/dev and /proc are device paths on POSIX');
+  assert(['\\\\host\\share\\a', '//host/share/a', 'C:\\x\\NUL.txt', 'aux', 'x\\conout$', 'COM1 .log'].every(p => T.devicePathProblem(p, 'win32')),
+    'UNC paths and device names are device paths on Windows, whatever the extension');
+  assert(T.devicePathProblem('C:\\work\\console.log', 'win32') === undefined && T.devicePathProblem('C:\\work\\com10.txt', 'win32') === undefined,
+    'names that only start like a device are ordinary files');
+});
+
+// ── G2. Grep/Glob do not walk through links ─────────────────────────────
+await block('G2. Glob and Grep do not reach files through a link that leaves the project', async () => {
+  const project = fs.mkdtempSync(path.join(tmp, 'walkproj-'));
+  const outside = fs.mkdtempSync(path.join(tmp, 'walkout-'));
+  fs.writeFileSync(path.join(outside, 'leak.txt'), 'walk-needle-outside\n');
+  fs.mkdirSync(path.join(outside, 'deep'));
+  fs.writeFileSync(path.join(outside, 'deep', 'leak2.txt'), 'walk-needle-outside\n');
+  fs.writeFileSync(path.join(project, 'own.txt'), 'walk-needle-inside\n');
+  try { fs.symlinkSync(outside, path.join(project, 'link'), process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (e) { assert(false, `could not create a link to test with: ${e?.message}`); return; }
+  const inCtx = (fn) => T.runInContext({ cwd: project }, fn);
+  const call = (name, args) => inCtx(() => T.executeTool(name, args).then(x => JSON.stringify(x)).catch(e => `ERR ${e?.message}`));
+  for (const pattern of ['**/*', 'link/*', 'link/leak.txt', 'link/**/*.txt', 'link/deep/leak2.txt']) {
+    const out = await call('Glob', { pattern });
+    assert(/No files matched/.test(out) || !/leak2?\.txt/.test(out), `Glob ${pattern} lists nothing behind the link (${out.slice(0, 80)})`);
+  }
+  for (const glob of [undefined, 'link/*', 'link/leak.txt', 'link/**/*', 'link/deep/leak2.txt']) {
+    const out = await call('Grep', { pattern: 'walk-needle', ...(glob ? { glob } : {}) });
+    assert(!out.includes('walk-needle-outside'), `Grep ${glob ?? '(all)'} reads nothing behind the link (${out.slice(0, 80)})`);
+  }
+  const own = await call('Grep', { pattern: 'walk-needle' });
+  assert(own.includes('walk-needle-inside'), 'Grep still finds the project\'s own file');
+  const listed = await call('Glob', { pattern: '*.txt' });
+  assert(listed.includes('own.txt'), 'Glob still lists the project\'s own file');
+});
+
+// ── G3. a forwarded loopback port is not DNS rebinding ──────────────────
+await block('G3. Host check: loopback on another port only with the token and a same-host Origin', async () => {
+  const v = (host, origin) => T.hostAccess(host, origin, 7340);
+  assert(v('127.0.0.1:7340', undefined) === 'local' && v('localhost:7340', 'http://localhost:7340') === 'local', 'the server\'s own port is local');
+  assert(v('127.0.0.1:9000', undefined) === 'forwarded' && v('localhost:9000', 'http://localhost:9000') === 'forwarded' && v('[::1]:9000', undefined) === 'forwarded',
+    'a loopback name on another port with no or the same Origin is a forward');
+  assert(v('localhost', undefined) === 'forwarded', 'a loopback name with no port (port 80) is a forward');
+  for (const [host, origin] of [['evil.example:7340', undefined], ['evil.example:9000', undefined], ['127.0.0.1.nip.io:9000', undefined],
+    ['127.0.0.1:9000', 'http://127.0.0.1:7340'], ['127.0.0.1:9000', 'http://evil.example'], ['127.0.0.1:9000', 'http://127.0.0.1:9001'],
+    ['127.0.0.1:9000', 'https://127.0.0.1:9000'], ['127.0.0.1:9000', 'null'], ['127.0.0.1:7340', 'http://evil.example'], [undefined, undefined], ['user@127.0.0.1:9000', undefined]]) {
+    assert(v(host, origin) === 'refused', `Host ${host} / Origin ${origin} is refused`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
   console.log('Failures:\n' + failures.map(f => `  - ${f}`).join('\n'));

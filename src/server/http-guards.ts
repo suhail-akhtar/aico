@@ -10,6 +10,11 @@
  *    foreign Origin at all. What they cannot fake is the Host header the
  *    browser sends: it names the attacker's domain. So only a loopback name
  *    on this server's port is served.
+ *    A loopback name on *another* port is not rebinding — a rebinding page's
+ *    Host names its own domain — it is an SSH port-forward (`ssh -L
+ *    9000:127.0.0.1:7340`), which the check refused. That is served
+ *    (`hostAccess` → `forwarded`) when the Origin is absent or names that
+ *    same host; the API still needs the token, as everywhere.
  *  - **Origin.** The previous check was `origin.startsWith('http://127.0.0.1:7340')`,
  *    which `http://127.0.0.1:73400` and `http://127.0.0.1:7340.evil.example`
  *    both pass. An origin is parsed and compared whole.
@@ -40,14 +45,43 @@ const LOOPBACK_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
  * proxy, the VS Code tunnel) sends one.
  */
 export function isAllowedHost(host: string | undefined, port: number): boolean {
-  if (typeof host !== 'string' || !host) return false;
+  // Nothing but host[:port] — no credentials, path or query smuggled in (loopbackHost).
+  return loopbackHost(host)?.port === port;
+}
+
+/** The loopback name and port a Host header names, or undefined for anything else. */
+function loopbackHost(host: string | undefined): { hostname: string; port: number } | undefined {
+  if (typeof host !== 'string' || !host) return undefined;
   let parsed: URL;
-  try { parsed = new URL(`http://${host}`); } catch { return false; }
-  // Nothing but host[:port] — no credentials, path or query smuggled in.
-  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return false;
-  if (!LOOPBACK_NAMES.has(parsed.hostname.toLowerCase())) return false;
-  const p = parsed.port === '' ? 80 : Number(parsed.port);
-  return p === port;
+  try { parsed = new URL(`http://${host}`); } catch { return undefined; }
+  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return undefined;
+  const hostname = parsed.hostname.toLowerCase();
+  if (!LOOPBACK_NAMES.has(hostname)) return undefined;
+  return { hostname, port: parsed.port === '' ? 80 : Number(parsed.port) };
+}
+
+/**
+ * Who this request is, by its Host and Origin:
+ *
+ *  - `local` — a loopback name on our port, and no Origin or our own;
+ *  - `forwarded` — a loopback name on another port (an SSH or editor
+ *    port-forward), and no Origin or exactly `http://` + that same host. DNS
+ *    rebinding needs a non-loopback Host name, so this is not it; and an Origin
+ *    naming any other place is still a cross-origin driver;
+ *  - `refused` — everything else.
+ *
+ * Deny-only: neither answer grants anything — `/api/` still needs the token.
+ */
+export function hostAccess(host: string | undefined, origin: string | undefined, port: number): 'local' | 'forwarded' | 'refused' {
+  const named = loopbackHost(host);
+  if (!named) return 'refused';
+  if (named.port === port) return origin === undefined || isAllowedOrigin(origin, port) ? 'local' : 'refused';
+  if (origin === undefined) return 'forwarded';
+  let parsed: URL;
+  try { parsed = new URL(origin); } catch { return 'refused'; }
+  if (parsed.protocol !== 'http:' || parsed.origin !== origin) return 'refused';
+  const same = parsed.hostname.toLowerCase() === named.hostname && Number(parsed.port || '80') === named.port;
+  return same ? 'forwarded' : 'refused';
 }
 
 /** Is this Origin exactly http://<loopback>:<our port>? Parsed, never prefix-matched. */
