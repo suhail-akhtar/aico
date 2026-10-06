@@ -1,0 +1,9 @@
+# Replace @your-org/platform with your team. Everything that can change what runs in a cluster
+# or who may reach it needs a platform review.
+*                                  @your-org/platform
+/deploy/gitops/                    @your-org/platform
+/deploy/kustomize/base/            @your-org/platform
+/deploy/helm/system/templates/     @your-org/platform
+/infra/terraform/                  @your-org/platform
+/observability/                    @your-org/platform
+/.github/                          @your-org/platform

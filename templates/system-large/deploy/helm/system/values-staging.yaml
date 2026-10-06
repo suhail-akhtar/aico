@@ -1,0 +1,37 @@
+# Staging: production-shaped (two replicas, autoscaling, disruption budgets, network
+# policies, rate limit) at a smaller ceiling, with a real secret store and real TLS. Promotion
+# to staging is a reviewed PR that copies the digest from values-dev.yaml.
+global:
+  environment: staging
+  domain: staging.example.test
+  imagePullPolicy: IfNotPresent
+  requireImageDigest: true
+  topologySpread:
+    enabled: true
+  externalSecrets:
+    remoteKeyPrefix: system/staging
+  env:
+    OIDC_ISSUER_URI: https://idp.staging.example.test/realms/app
+
+ingress:
+  rateLimit:
+    average: 100
+    burst: 200
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true
+
+services:
+  web:
+    # 64-hex placeholders below are deliberately fake (all zeros). The promotion PR replaces
+    # them with the digest that passed dev; an image pull of the placeholder fails loudly.
+    image: {digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+    autoscaling: {maxReplicas: 4}
+  api:
+    image: {digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+    autoscaling: {maxReplicas: 6}
+  worker:
+    image: {digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}

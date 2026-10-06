@@ -1,0 +1,38 @@
+# Everything switched on: digests, ServiceMonitor, PrometheusRule, extra volumes, node
+# placement, pull secrets, zone-strict spreading. Rendered by validate-cluster and ct.
+global:
+  environment: staging
+  requireImageDigest: true
+  imagePullSecrets:
+    - name: ghcr-pull
+  commonLabels:
+    team: platform
+  commonAnnotations:
+    example.test/owner: platform-team
+  topologySpread:
+    enabled: true
+    zone: DoNotSchedule
+    node: DoNotSchedule
+monitoring:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+  prometheusRule:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+services:
+  web:
+    image: {digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+    extraVolumes:
+      - {name: nginx-cache, mountPath: /var/cache/nginx, sizeLimit: 128Mi}
+    nodeSelector: {kubernetes.io/os: linux}
+    tolerations:
+      - {key: workload, operator: Equal, value: apps, effect: NoSchedule}
+  api:
+    image: {digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+    serviceAccountAnnotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/example-api
+  worker:
+    image: {digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"}

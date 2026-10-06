@@ -1,0 +1,19 @@
+# Defaults for the pods that arrive without resources (operators' helper pods, Jobs), and a
+# ceiling per container so one mistake cannot request a whole node. The chart's own
+# containers always set explicit requests and limits.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: system
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        cpu: 500m
+        memory: 256Mi
+      max:
+        cpu: "4"
+        memory: 8Gi

@@ -1,0 +1,92 @@
+# Flux Kustomizations for the dev cluster (bootstrap this cluster with
+# flux bootstrap ... --path=deploy/gitops/flux/clusters/dev). dependsOn is the ordering:
+# sources, then the operators and their CRDs, then the secret store, then the environment's
+# platform resources (namespace, policies, database), then the application releases.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: sources
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./deploy/gitops/flux/sources
+  prune: true
+  sourceRef: {kind: GitRepository, name: system}
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: observability-config
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./observability/otel-collector/k8s
+  prune: true
+  dependsOn:
+    - name: sources
+  sourceRef: {kind: GitRepository, name: system}
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: operators
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./deploy/gitops/flux/operators
+  prune: true
+  wait: true
+  timeout: 15m
+  dependsOn:
+    - name: sources
+    - name: observability-config
+  sourceRef: {kind: GitRepository, name: system}
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: secret-store
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./deploy/kustomize/examples/aws
+  prune: true
+  wait: true
+  dependsOn:
+    - name: operators
+  sourceRef: {kind: GitRepository, name: system}
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: system-platform
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./deploy/kustomize/overlays/dev
+  prune: true
+  timeout: 15m
+  dependsOn:
+    - name: operators
+    - name: secret-store
+  sourceRef: {kind: GitRepository, name: system}
+  healthChecks:
+    - apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      name: system-db
+      namespace: system-dev
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: system-apps
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./deploy/gitops/flux/apps/dev
+  prune: true
+  timeout: 15m
+  dependsOn:
+    - name: system-platform
+  sourceRef: {kind: GitRepository, name: system}

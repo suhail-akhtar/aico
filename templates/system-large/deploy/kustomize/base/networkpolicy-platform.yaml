@@ -1,0 +1,177 @@
+# Allow rules for the platform workloads that live next to the services. Under default-deny
+# the database and the pooler would otherwise be unreachable (and unable to replicate).
+# Application pods are recognised by app.kubernetes.io/part-of=system, a label only the chart
+# sets; platform pods deliberately do not carry it.
+#
+# Keycloak, Valkey and flagd are deployed by their own charts: only their INGRESS is allowed
+# here. Their egress (Keycloak to its database, for example) belongs with that deployment.
+---
+# PostgreSQL instances (CloudNativePG)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: system-db
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # SQL from the services and from PgBouncer.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: system
+        - podSelector:
+            matchLabels:
+              cnpg.io/poolerName: system-db-pooler-rw
+      ports:
+        - {protocol: TCP, port: 5432}
+    # Replication and status between the instances themselves.
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: system-db
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+    # The operator reconciles through the instance manager's status endpoint.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - {protocol: TCP, port: 8000}
+        - {protocol: TCP, port: 5432}
+    # Metrics.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - {protocol: TCP, port: 9187}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: system-db
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+    # The instance manager talks to the Kubernetes API. The API server address differs per
+    # cluster, so this is deliberately wide on the two usual ports: narrow it to your control
+    # plane CIDR in an overlay.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 6443}
+---
+# PgBouncer pooler pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-pooler
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/poolerName: system-db-pooler-rw
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: system
+      ports:
+        - {protocol: TCP, port: 5432}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - {protocol: TCP, port: 9127}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: system-db
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+# Valkey: sessions and rate limits, used by the API and the worker
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-valkey
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: system
+      ports:
+        - {protocol: TCP, port: 6379}
+---
+# flagd: feature flags, read by the API and the worker
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-flagd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: flagd
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: system
+      ports:
+        - {protocol: TCP, port: 8013}
+---
+# Keycloak: the browser reaches it through the ingress controller, the services fetch JWKS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: system
+      ports:
+        - {protocol: TCP, port: 8080}

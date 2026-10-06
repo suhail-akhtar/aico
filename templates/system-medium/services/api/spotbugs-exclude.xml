@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Reviewed false positives only. Put the reason in a comment above every Match.
+-->
+<FindBugsFilter>
+  <!--
+    Spring beans and records hold injected collaborators by design (shared singletons, never
+    mutated through the reference), so exposing them is not a defect.
+  -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+  </Match>
+
+  <!--
+    RequestIdFilter echoes X-Request-Id only after it matches [A-Za-z0-9._-]{1,64} (no CR, LF or
+    other header-splitting characters); anything else is replaced by a generated UUID. This is
+    covered by FiltersTest.requestIdReplacesAHostileSuppliedId.
+  -->
+  <Match>
+    <Class name="com.example.system.shared.web.RequestIdFilter"/>
+    <Bug pattern="HRS_REQUEST_PARAMETER_TO_HTTP_HEADER"/>
+  </Match>
+
+  <!--
+    JsonOidcLogoutSuccessHandler writes a body built by Jackson (a JSON object, content type
+    application/json), never HTML, so there is no markup context for a script to run in. The only
+    variable part is the identity provider's end-session URL.
+  -->
+  <Match>
+    <Class name="com.example.system.identity.security.JsonOidcLogoutSuccessHandler"/>
+    <Bug pattern="XSS_SERVLET"/>
+  </Match>
+
+  <!--
+    ConfigurationCheck maps property names to the environment variable an operator sets
+    ("spring.datasource.password" to "DATABASE_PASSWORD"); there is no password in it. A test
+    (ConfigurationCheckTest) pins that it reports names, never values.
+  -->
+  <Match>
+    <Class name="com.example.system.shared.config.ConfigurationCheck"/>
+    <Bug pattern="HARD_CODE_PASSWORD"/>
+  </Match>
+</FindBugsFilter>

@@ -1,0 +1,40 @@
+# Stack-level CI. Each service keeps its own full workflow (lint, types, tests with coverage gates, audit,
+# SBOM) under services/*/.github when you split it out; this one proves the system works together.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Create .env with random secrets
+        run: make setup
+      - name: Compose config is valid
+        run: docker compose --profile e2e config --quiet
+      - name: Build and start the stack
+        run: docker compose up --build --wait
+      - name: Browser suite through the gateway
+        run: docker compose --profile e2e run --rm e2e
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+      - name: Stop
+        if: always()
+        run: docker compose --profile e2e down -v
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high

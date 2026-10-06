@@ -1,0 +1,98 @@
+suite: network policy matrix
+templates:
+  - templates/networkpolicy.yaml
+tests:
+  - it: has a namespace-wide default deny
+    documentSelector:
+      path: metadata.name
+      value: default-deny-all
+    asserts:
+      - equal:
+          path: spec.podSelector
+          value: {}
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress, Egress]
+      - notExists:
+          path: spec.ingress
+      - notExists:
+          path: spec.egress
+  - it: web accepts only the ingress controller and has no egress at all
+    documentSelector:
+      path: metadata.name
+      value: web
+    asserts:
+      - equal:
+          path: spec.egress
+          value: []
+      - lengthEqual:
+          path: spec.ingress
+          count: 1
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: traefik
+  - it: worker accepts no HTTP caller
+    documentSelector:
+      path: metadata.name
+      value: worker
+    asserts:
+      - equal:
+          path: spec.ingress
+          value: []
+  - it: api accepts only the ingress controller
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 1
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: traefik
+  - it: the Prometheus scrape rule appears only for a service with metrics on
+    set:
+      monitoring.serviceMonitor.enabled: true
+      services.api.metrics.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+      - equal:
+          path: spec.ingress[1].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: monitoring
+  - it: api egress is exactly DNS, postgres, valkey, keycloak, s3, smtp, otel, flagd
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - lengthEqual:
+          path: spec.egress
+          count: 8
+      - equal:
+          path: spec.egress[7].ports[0].port
+          value: 8013
+  - it: worker egress is the same set as the api
+    documentSelector:
+      path: metadata.name
+      value: worker
+    asserts:
+      - lengthEqual:
+          path: spec.egress
+          count: 8
+  - it: fails on a peer name that does not exist
+    set:
+      services.api.networkPolicy.egress:
+        - {to: nowhere, ports: [1]}
+    asserts:
+      - failedTemplate:
+          errorPattern: "unknown peer"
+  - it: renders no policy at all when disabled
+    set:
+      networkPolicy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

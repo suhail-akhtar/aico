@@ -65,7 +65,7 @@
     "test:diagrams": "npx tsup src/test-exports.ts --format esm --outDir dist-test --target node18 && npx esbuild shared/widgets/diagram-types.ts --bundle --format=esm --outfile=dist-test/diagram-types.mjs --log-level=error && node scripts/diagram-matrix.mjs",
     "test:miniapps": "npx tsup src/miniapps/server.ts --format esm --outDir dist-test/miniapps --target node22 --silent && node scripts/miniapp-probe.mjs",
     "test:apps": "npm run build && node scripts/apps-live.mjs",
-    "test:starters": "node scripts/templates-verify-dotnet.mjs && node scripts/templates-verify-fastapi.mjs && node scripts/templates-verify-go.mjs && node scripts/templates-verify-laravel.mjs && node scripts/templates-verify-react.mjs && node scripts/templates-verify-spring.mjs",
+    "test:starters": "node scripts/templates-verify-dotnet.mjs && node scripts/templates-verify-fastapi.mjs && node scripts/templates-verify-go.mjs && node scripts/templates-verify-laravel.mjs && node scripts/templates-verify-react.mjs && node scripts/templates-verify-spring.mjs && node scripts/templates-verify-system-large.mjs && node scripts/templates-verify-system-small.mjs && node scripts/templates-verify-system-medium.mjs",
     "test:templates": "node scripts/templates-live.mjs",
     "test:apps:build": "npm run build && node scripts/apps-build-live.mjs",
     "test:roles:live": "npx tsup src/test-exports.ts --format esm --outDir dist-test --clean --target node18 && node scripts/roles-memory-live.mjs",

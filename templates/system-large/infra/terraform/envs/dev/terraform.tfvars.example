@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (git-ignored). Nothing here is secret; it is per-person detail.
+region = "eu-west-1"
+owner  = "platform-team"
+
+# Your SSO administrator role gets cluster-admin through an EKS access entry.
+# admin_principal_arns = ["arn:aws:iam::123456789012:role/AWSReservedSSO_Administrator_abcdef"]
+
+# Leave empty to keep the Kubernetes API private (reach it through a VPN or bastion).
+# public_access_cidrs = ["203.0.113.0/24"]

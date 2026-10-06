@@ -1,0 +1,39 @@
+# The application chart for staging: chart and values come from this repository, so a
+# merged pull request that edits deploy/helm/system/values-staging.yaml (an image digest bump)
+# IS the deployment. The same values.yaml + values-staging.yaml pair Argo CD uses.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: system
+  namespace: flux-system
+spec:
+  interval: 10m
+  releaseName: system
+  targetNamespace: system-staging
+  storageNamespace: system-staging
+  install:
+    remediation: {retries: 3}
+  upgrade:
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    cleanupOnFail: true
+  rollback:
+    timeout: 10m
+  test:
+    enable: false
+  chart:
+    spec:
+      chart: ./deploy/helm/system
+      reconcileStrategy: Revision
+      sourceRef: {kind: GitRepository, name: system}
+      valuesFiles:
+        - ./deploy/helm/system/values.yaml
+        - ./deploy/helm/system/values-staging.yaml
+  # The HPA owns the replica count: do not revert its scale-ups on the next reconcile.
+  driftDetection:
+    mode: enabled
+    ignore:
+      - paths: ["/spec/replicas"]
+        target:
+          kind: Deployment

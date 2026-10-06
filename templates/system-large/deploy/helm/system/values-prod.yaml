@@ -1,0 +1,41 @@
+# Production. Three replicas minimum for the services on the request path, zone spread that
+# refuses to co-locate (DoNotSchedule), digest-only images, alert rules on. Change here only
+# through a reviewed PR; the promotion workflow bumps the digests, a human approves.
+global:
+  environment: prod
+  domain: example.test
+  imagePullPolicy: IfNotPresent
+  requireImageDigest: true
+  topologySpread:
+    enabled: true
+    zone: DoNotSchedule
+    node: ScheduleAnyway
+  externalSecrets:
+    remoteKeyPrefix: system/prod
+
+ingress:
+  rateLimit:
+    average: 50
+    burst: 100
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true
+
+services:
+  # Placeholder digests are all zeros on purpose: the promotion PR replaces them.
+  web:
+    image: {digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+    replicas: 3
+    autoscaling: {minReplicas: 3, maxReplicas: 10}
+  api:
+    image: {digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+    replicas: 3
+    resources:
+      requests: {cpu: 500m, memory: 768Mi}
+      limits: {cpu: "2", memory: 1Gi}
+    autoscaling: {minReplicas: 3, maxReplicas: 12}
+  worker:
+    image: {digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}

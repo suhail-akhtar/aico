@@ -1,0 +1,135 @@
+{
+  "id": "system-small",
+  "version": "1.0.0",
+  "name": "System, small (React + FastAPI + PostgreSQL)",
+  "category": "fullstack",
+  "kind": "bundle",
+  "summary": "A complete full-stack system on one origin: the React 19 web-app starter and the FastAPI starter behind a Traefik gateway, PostgreSQL 18 for data, and a backend-for-frontend sign-in (oauth2-proxy with sessions in Valkey, Keycloak as the identity provider) so the browser never holds a token. One compose project (docker compose up --wait), one worked feature (items), a Playwright suite that signs in through the real identity provider and drives the real API and database. Sized for one team and one database; docs/ARCHITECTURE.md says what to add to grow it.",
+  "features": [
+    "Single origin through Traefik (file config, no Docker socket): /api to FastAPI, everything else to the SPA, /idp to Keycloak",
+    "BFF sign-in: HttpOnly session cookie, tokens stay server-side, CSRF header enforced at the gateway",
+    "Hardened containers: non-root, read-only filesystems, no capabilities, digest-pinned images, secrets only from a gitignored .env"
+  ],
+  "tags": [
+    "fullstack",
+    "bundle",
+    "react",
+    "fastapi",
+    "postgres",
+    "traefik",
+    "oidc",
+    "keycloak",
+    "bff",
+    "compose",
+    "docker"
+  ],
+  "match": [
+    "fullstack",
+    "full-stack",
+    "bundle",
+    "system",
+    "react",
+    "fastapi",
+    "postgres",
+    "traefik",
+    "frontend",
+    "backend",
+    "oidc",
+    "compose",
+    "app",
+    "saas",
+    "crud"
+  ],
+  "toolchain": {
+    "id": "node",
+    "version": ">=24",
+    "tools": [
+      {
+        "id": "docker"
+      }
+    ],
+    "installHint": "Install Docker (Desktop or Engine with the compose plugin): https://docs.docker.com/get-docker/. Node 24 is needed only to run the scripts and the web checks outside containers."
+  },
+  "manifestFile": "compose.yaml",
+  "envFile": {
+    "file": ".env",
+    "example": ".env.example",
+    "generate": {
+      "DB_PASSWORD": "hex:16",
+      "KEYCLOAK_DB_PASSWORD": "hex:16",
+      "KEYCLOAK_ADMIN_PASSWORD": "hex:16",
+      "OIDC_CLIENT_SECRET": "hex:24",
+      "COOKIE_SECRET": "hex:16",
+      "DEV_USER_PASSWORD": "hex:12"
+    }
+  },
+  "services": [
+    {
+      "id": "web",
+      "role": "frontend",
+      "template": "web-app-react",
+      "port": 8080,
+      "healthPath": "/healthz",
+      "dependsOn": [
+        "api"
+      ]
+    },
+    {
+      "id": "api",
+      "role": "api",
+      "template": "api-service-fastapi",
+      "port": 8000,
+      "healthPath": "/readyz",
+      "dependsOn": [
+        "db"
+      ]
+    },
+    {
+      "id": "db",
+      "role": "db",
+      "image": "postgres:18-alpine",
+      "port": 5432,
+      "compose": {
+        "volumes": [
+          "db:/var/lib/postgresql"
+        ]
+      }
+    },
+    {
+      "id": "cache",
+      "role": "cache",
+      "image": "valkey/valkey:9.0.6-alpine",
+      "port": 6379
+    },
+    {
+      "id": "auth",
+      "role": "auth",
+      "image": "quay.io/keycloak/keycloak:26.8.0",
+      "port": 8080,
+      "dependsOn": [
+        "db"
+      ]
+    }
+  ],
+  "preview": "web",
+  "compose": {
+    "file": "compose.yaml"
+  },
+  "run": {
+    "test": "docker compose --profile e2e run --rm e2e"
+  },
+  "verify": {
+    "skip": [
+      "audit"
+    ]
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    ".aico/decisions.md",
+    "compose.yaml",
+    "docs/*.md"
+  ],
+  "brief": "docs/EXTENDING.md"
+}

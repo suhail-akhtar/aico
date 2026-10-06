@@ -1,0 +1,119 @@
+# One set of Applications per environment, generated from a list. Adding an environment is
+# adding one list element (and a values-<env>.yaml plus a kustomize overlay).
+#
+#   system-<env>           the Helm chart (deploy/helm/system) with values.yaml + values-<env>.yaml
+#   system-<env>-platform  the kustomize overlay: namespace + policy + quota + the database
+#
+# Automated sync (prune + self-heal) is ON for dev only. Staging and production sync when a
+# human presses the button after the promotion PR merged; an Application whose sync is not
+# automated still shows drift, it just does not act on it.
+#
+# Ordering: sync waves order Applications only inside the App-of-Apps (the operators). These
+# three converge on their own: every sync retries with backoff, so ExternalSecrets and the
+# database wait for their operators' CRDs and the services wait for the database. Operators
+# first, then environments: apply platform/app-of-apps.yaml, then this file.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: system-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - {env: dev, namespace: system-dev, autoSync: "true"}
+          - {env: staging, namespace: system-staging, autoSync: "false"}
+          - {env: prod, namespace: system-prod, autoSync: "false"}
+  template:
+    metadata:
+      name: "system-{{ .env }}"
+      labels:
+        system.example.test/env: "{{ .env }}"
+        system.example.test/layer: apps
+    spec:
+      project: system
+      source:
+        repoURL: https://github.com/example-org/system.git
+        targetRevision: main
+        path: deploy/helm/system
+        helm:
+          releaseName: system
+          valueFiles:
+            - values.yaml
+            - "values-{{ .env }}.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .namespace }}"
+      syncPolicy:
+        syncOptions:
+          - ServerSideApply=true
+          - RespectIgnoreDifferences=true
+          - PruneLast=true
+          # ExternalSecret and ServiceMonitor kinds may not exist the first time around.
+          - SkipDryRunOnMissingResource=true
+        retry:
+          limit: 10
+          backoff: {duration: 20s, factor: 2, maxDuration: 5m}
+      # The HPA owns the replica count; without this Argo CD reverts every scale-up and the
+      # application flaps between OutOfSync and Synced.
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - .spec.replicas
+  templatePatch: |
+    {{- if eq .autoSync "true" }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: system-platform-env
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - {env: dev, namespace: system-dev, autoSync: "true"}
+          - {env: staging, namespace: system-staging, autoSync: "false"}
+          - {env: prod, namespace: system-prod, autoSync: "false"}
+  template:
+    metadata:
+      name: "system-{{ .env }}-platform"
+      labels:
+        system.example.test/env: "{{ .env }}"
+        system.example.test/layer: platform
+    spec:
+      project: system
+      source:
+        repoURL: https://github.com/example-org/system.git
+        targetRevision: main
+        path: "deploy/kustomize/overlays/{{ .env }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .namespace }}"
+      syncPolicy:
+        syncOptions:
+          - ServerSideApply=true
+          - SkipDryRunOnMissingResource=true
+        retry:
+          limit: 10
+          backoff: {duration: 20s, factor: 2, maxDuration: 5m}
+  templatePatch: |
+    {{- if eq .autoSync "true" }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: true
+    {{- end }}

@@ -1,0 +1,41 @@
+# Composition example for teams that deploy with Kustomize but want ONE definition of the
+# services: the Helm chart renders the Deployments, Services, HPAs and Ingress into
+# chart-rendered.yaml (render.sh; git-ignored, never committed), and this overlay layers
+# environment-specific post-render patches on top. The Deployments are not copied into
+# Kustomize: change a service in deploy/helm/system and re-render.
+#
+#   sh render.sh staging && kustomize build .      # or: kubectl apply -k .
+#
+# Prefer chart values for anything the chart models (replicas, resources, hosts); use these
+# patches for what a platform team imposes on every workload after the fact.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: system-staging
+resources:
+  - ../staging
+  - chart-rendered.yaml
+# Image pinning after render: the images transformer rewrites tag/digest by image name.
+# (The digests below are placeholders; a promotion PR or CI writes the real ones.)
+images:
+  - name: ghcr.io/example-org/system-api
+    newTag: 0.1.0
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+labels:
+  - pairs:
+      example.test/composed-by: kustomize
+    includeSelectors: false
+patches:
+  # HPA bounds for this environment.
+  - target: {kind: HorizontalPodAutoscaler, name: api}
+    patch: |-
+      - {op: replace, path: /spec/minReplicas, value: 2}
+      - {op: replace, path: /spec/maxReplicas, value: 4}
+  # Ingress host for a preview environment.
+  - target: {kind: Ingress, name: system}
+    patch: |-
+      - {op: replace, path: /spec/rules/0/host, value: app.preview.example.test}
+  # PodDisruptionBudget: keep at least one api pod during voluntary disruptions.
+  - target: {kind: PodDisruptionBudget, name: api}
+    patch: |-
+      - {op: remove, path: /spec/maxUnavailable}
+      - {op: add, path: /spec/minAvailable, value: 1}

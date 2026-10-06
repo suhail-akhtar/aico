@@ -1,0 +1,28 @@
+# Root of the platform layer: one Application that owns every Application in ./apps. Apply
+# this once per cluster (kubectl apply -n argocd -f app-of-apps.yaml); afterwards adding an
+# operator is adding a file to ./apps. Sync waves on the child Applications order the
+# bootstrap (CRDs, then operators, then add-ons that need those CRDs).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/example-org/system.git
+    targetRevision: main
+    path: deploy/gitops/argocd/platform/apps
+    directory:
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

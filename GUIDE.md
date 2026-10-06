@@ -570,7 +570,7 @@ and deploys. Turn the host on once under Settings → Apps.
 **Create app** asks one question first — what do you want to build? Write it
 the way you would brief a colleague: who uses it, what they do most often, what
 must be true when it is done. As you type, the templates are ranked against your
-words and the best match is named with the words that matched. Fifteen templates
+words and the best match is named with the words that matched. Eighteen templates
 ship (nine for Node, listed here, plus the starters below): a records page over SQLite that needs no install, a static landing page, a
 JSON API, a full web application with accounts, a metrics dashboard, a
 documentation site, a command-line tool, an LLM agent service, and an Expo
@@ -580,7 +580,7 @@ tokens. Take the best match, browse *See all templates*, or *Let the agent
 choose and start*. Your brief becomes the first message of the conversation.
 
 Beyond those nine, the catalogue has starters for Python, Java, .NET, Go and PHP
-and a React frontend. A template can also be a bundle (a frontend, an API and a database that start together); the engine runs them, but no ready-made bundle ships yet.
+and a React frontend. Three ready-made system bundles (frontend, API, database, sign-in and a gateway that start together) go from small to large: system-small, system-medium and system-large (the last is deployment code for the medium app, validated statically, not applied to a cluster).
 A card says what it needs installed, checked on your machine for real (`go
 version`, `java -version`), and when the toolchain is missing but Docker is
 running it says so and can run the app in a container instead — only when you

@@ -1,0 +1,35 @@
+suite: values schema
+templates:
+  - templates/service.yaml
+tests:
+  - it: rejects an unknown top-level key
+    set:
+      surprise: true
+    asserts:
+      - failedTemplate: {}
+  - it: rejects a service without resources
+    set:
+      services.api.resources: null
+    asserts:
+      - failedTemplate: {}
+  - it: rejects the latest tag
+    set:
+      services.api.image.tag: latest
+    asserts:
+      - failedTemplate: {}
+  - it: rejects a malformed digest
+    set:
+      services.api.image.digest: "sha256:123"
+    asserts:
+      - failedTemplate: {}
+  - it: rejects an unknown environment
+    set:
+      global.environment: qa
+    asserts:
+      - failedTemplate: {}
+  - it: rejects a misspelt service key
+    set:
+      services.api.autoscalling:
+        enabled: true
+    asserts:
+      - failedTemplate: {}

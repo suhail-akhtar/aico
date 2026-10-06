@@ -1,0 +1,87 @@
+# PostgreSQL 18 on CloudNativePG: one primary, streaming replicas, automated failover.
+# One cluster, one database ("app", owner role "app") shared by the API and the worker, the same
+# layout as the medium tier's compose. A second module that outgrows it can get its own Database
+# and role (spec.managed.roles + a Database object) without touching the others.
+#
+# base = one instance (dev). Overlays set instances to 2 (staging) and 3 (prod) and size the
+# resources and storage.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: system-db
+spec:
+  description: system platform database
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie
+  instances: 1
+  primaryUpdateStrategy: unsupervised
+  primaryUpdateMethod: switchover
+  # No superuser secret is created; operators use `kubectl cnpg psql` through the operator.
+  enableSuperuserAccess: false
+  startDelay: 300
+  stopDelay: 120
+  smartShutdownTimeout: 30
+  switchoverDelay: 60
+  minSyncReplicas: 0
+  maxSyncReplicas: 0
+  postgresql:
+    parameters:
+      max_connections: "200"       # PgBouncer fronts the services; this is the server-side ceiling
+      shared_buffers: 256MB
+      log_checkpoints: "on"
+      log_lock_waits: "on"
+      log_min_duration_statement: "500"
+      password_encryption: scram-sha-256
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+      encoding: UTF8
+      secret:
+        name: system-db-app
+  storage:
+    size: 20Gi
+  walStorage:
+    size: 5Gi
+  resources:
+    # requests == limits: Guaranteed QoS, the last pod the kubelet would evict.
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: preferred
+    topologyKey: kubernetes.io/hostname
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: system-db
+  monitoring:
+    enablePodMonitor: true      # needs the prometheus-operator CRDs (platform layer)
+  # Continuous WAL archiving and base backups to object storage. The in-tree
+  # barmanObjectStore is deprecated since CloudNativePG 1.26 in favour of the Barman Cloud
+  # plugin but is supported in 1.30; the README documents the migration. Credentials come
+  # from the ExternalSecret in db-externalsecrets.yaml. On EKS prefer IRSA: drop s3Credentials
+  # and set inheritFromIAMRole: true.
+  backup:
+    retentionPolicy: 30d
+    barmanObjectStore:
+      destinationPath: s3://system-db-backups-change-me/
+      s3Credentials:
+        accessKeyId:
+          name: system-db-backup-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: system-db-backup-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: gzip
+        maxParallel: 2
+      data:
+        compression: gzip
+        jobs: 2

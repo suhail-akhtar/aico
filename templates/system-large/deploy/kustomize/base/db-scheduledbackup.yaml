@@ -1,0 +1,12 @@
+# Daily base backup at 02:15 (the cron has six fields: seconds first). WAL archiving is
+# continuous, so the recovery point objective is seconds, not a day.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: system-db-daily
+spec:
+  schedule: "0 15 2 * * *"
+  backupOwnerReference: self
+  immediate: true
+  cluster:
+    name: system-db

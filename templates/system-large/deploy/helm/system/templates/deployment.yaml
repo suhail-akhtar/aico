@@ -1,0 +1,157 @@
+{{- range $name, $raw := .Values.services }}
+{{- $svc := mergeOverwrite (deepCopy $.Values.serviceDefaults) (deepCopy $raw) }}
+{{- if $svc.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "system.labels" $ctx | nindent 4 }}
+  {{- with $.Values.global.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if not $svc.autoscaling.enabled }}
+  replicas: {{ $svc.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "system.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "system.labels" $ctx | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "system.env" $ctx | sha256sum }}
+        {{- with $.Values.global.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ $svc.terminationGracePeriodSeconds }}
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ $name }}
+          image: {{ include "system.image" $ctx | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: {{ $svc.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ $name }}-config
+            {{- if and $svc.secrets.enabled $.Values.global.externalSecrets.enabled }}
+            - secretRef:
+                name: {{ $name }}-secrets
+            {{- end }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: {{ $svc.probes.startup.path }}
+              port: http
+            periodSeconds: {{ $svc.probes.startup.periodSeconds }}
+            failureThreshold: {{ $svc.probes.startup.failureThreshold }}
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: {{ $svc.probes.readiness.path }}
+              port: http
+            periodSeconds: {{ $svc.probes.readiness.periodSeconds }}
+            failureThreshold: {{ $svc.probes.readiness.failureThreshold }}
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: {{ $svc.probes.liveness.path }}
+              port: http
+            periodSeconds: {{ $svc.probes.liveness.periodSeconds }}
+            failureThreshold: {{ $svc.probes.liveness.failureThreshold }}
+            timeoutSeconds: 3
+          lifecycle:
+            preStop:
+              # Keeps the pod serving while endpoints and the ingress controller drop it; the
+              # sleep action needs no binary in the (read-only, minimal) image.
+              sleep:
+                seconds: {{ $svc.preStopSleepSeconds }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- range $svc.extraVolumes }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- range $svc.extraVolumes }}
+        - name: {{ .name }}
+          emptyDir:
+            sizeLimit: {{ default "64Mi" .sizeLimit }}
+        {{- end }}
+      {{- if $.Values.global.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: {{ $.Values.global.topologySpread.zone }}
+          labelSelector:
+            matchLabels:
+              {{- include "system.selectorLabels" $ctx | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: {{ $.Values.global.topologySpread.node }}
+          labelSelector:
+            matchLabels:
+              {{- include "system.selectorLabels" $ctx | nindent 14 }}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "system.selectorLabels" $ctx | nindent 20 }}
+      {{- with $svc.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $svc.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}

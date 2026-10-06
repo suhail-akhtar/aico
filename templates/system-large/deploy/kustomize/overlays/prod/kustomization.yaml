@@ -1,0 +1,84 @@
+# Production: three PostgreSQL instances across zones with one synchronous replica (a
+# committed transaction survives the loss of the primary), PgBouncer x3, daily backups with
+# continuous WAL archiving, quota sized for the HPA maxima in values-prod.yaml.
+# Secrets come from system/prod/api.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: system-prod
+resources:
+  - ../../base
+labels:
+  - pairs:
+      app.kubernetes.io/instance: prod
+    includeSelectors: false
+patches:
+  - target: {group: postgresql.cnpg.io, version: v1, kind: Cluster, name: system-db}
+    patch: |-
+      - op: replace
+        path: /spec/instances
+        value: 3
+      - op: replace
+        path: /spec/minSyncReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxSyncReplicas
+        value: 1
+      - op: replace
+        path: /spec/resources
+        value:
+          requests: {cpu: "2", memory: 4Gi}
+          limits: {cpu: "2", memory: 4Gi}
+      - op: replace
+        path: /spec/storage/size
+        value: 200Gi
+      - op: replace
+        path: /spec/walStorage/size
+        value: 20Gi
+      - op: replace
+        path: /spec/postgresql/parameters/shared_buffers
+        value: 1GB
+      - op: replace
+        path: /spec/postgresql/parameters/max_connections
+        value: "300"
+      - op: replace
+        path: /spec/affinity/podAntiAffinityType
+        value: required
+      - op: replace
+        path: /spec/topologySpreadConstraints/0/whenUnsatisfiable
+        value: DoNotSchedule
+      - op: replace
+        path: /spec/backup/barmanObjectStore/destinationPath
+        value: s3://system-db-backups-prod/
+  - target: {group: postgresql.cnpg.io, version: v1, kind: Pooler, name: system-db-pooler-rw}
+    patch: |-
+      - op: replace
+        path: /spec/instances
+        value: 3
+  - target: {kind: ResourceQuota, name: system}
+    patch: |-
+      - op: replace
+        path: /spec/hard/requests.cpu
+        value: "40"
+      - op: replace
+        path: /spec/hard/requests.memory
+        value: 80Gi
+      - op: replace
+        path: /spec/hard/limits.cpu
+        value: "100"
+      - op: replace
+        path: /spec/hard/limits.memory
+        value: 120Gi
+      - op: replace
+        path: /spec/hard/pods
+        value: "200"
+      - op: replace
+        path: /spec/hard/requests.storage
+        value: 1Ti
+  # One remote secret per environment: system/prod/api (the worker reuses it).
+  - target: {group: external-secrets.io, version: v1, kind: ExternalSecret, name: system-db-app}
+    patch: |-
+      - {op: replace, path: /spec/data/0/remoteRef/key, value: system/prod/api}
+  - target: {group: external-secrets.io, version: v1, kind: ExternalSecret, name: system-db-backup-s3}
+    patch: |-
+      - {op: replace, path: /spec/data/0/remoteRef/key, value: system/prod/db-backup}
+      - {op: replace, path: /spec/data/1/remoteRef/key, value: system/prod/db-backup}

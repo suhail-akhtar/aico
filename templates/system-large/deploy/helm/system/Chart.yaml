@@ -1,0 +1,10 @@
+apiVersion: v2
+name: system
+description: One chart for every application service of the system-large bundle (web, api, worker). The services map in values.yaml is the single source of truth for Deployments, Services, probes, autoscaling, NetworkPolicies, ingress and external secrets.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+keywords: [system, spring-boot, modulith]
+maintainers:
+  - name: platform-team

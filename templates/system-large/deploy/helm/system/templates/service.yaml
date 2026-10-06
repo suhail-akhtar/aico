@@ -1,0 +1,23 @@
+{{- range $name, $raw := .Values.services }}
+{{- $svc := mergeOverwrite (deepCopy $.Values.serviceDefaults) (deepCopy $raw) }}
+{{- if $svc.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "system.labels" $ctx | nindent 4 }}
+spec:
+  type: {{ $svc.service.type }}
+  selector:
+    {{- include "system.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $svc.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}
+{{- end }}

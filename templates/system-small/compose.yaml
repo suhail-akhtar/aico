@@ -1,0 +1,212 @@
+# Full stack on one origin: Traefik (gateway) -> web (static SPA) | bff (oauth2-proxy, sessions in Valkey)
+# -> api (FastAPI, OIDC resource server) -> PostgreSQL; Keycloak is the identity provider.
+#   docker compose up --build --wait      then open http://localhost:${AICO_PREVIEW_PORT:-8080}
+#   docker compose --profile e2e run --rm e2e      the browser suite through the gateway, signing in at Keycloak
+# Secrets come from .env (generated at create; see .env.example). Nothing secret lives in this file.
+# Traefik listens on the same port number inside as outside, so the browser, oauth2-proxy and the API
+# all see one public origin and the e2e container can share Traefik's network namespace.
+
+x-hardened: &hardened
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+services:
+  proxy:
+    <<: *hardened
+    image: traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
+    user: "65532:65532"
+    command:
+      - --entrypoints.web.address=:${AICO_PREVIEW_PORT:-8080}
+      - --entrypoints.traefik.address=:8082
+      - --ping=true
+      - --ping.entrypoint=traefik
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --log.level=INFO
+    ports:
+      - "127.0.0.1:${AICO_PREVIEW_PORT:-8080}:${AICO_PREVIEW_PORT:-8080}"
+    volumes:
+      - ./deploy/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+    read_only: true
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping", "--ping.entrypoint=traefik", "--entrypoints.traefik.address=:8082"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      web: { condition: service_healthy }
+      api: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      bff: { condition: service_started }
+
+  web:
+    <<: *hardened
+    build: ./services/web
+    image: __APP_SLUG__-web
+    environment:
+      API_BASE_URL: /api
+      LOGIN_URL: /api/auth/start
+      LOGOUT_URL: /api/auth/sign_out?rd=/
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-local}
+    read_only: true
+    tmpfs: [/tmp]
+
+  bff:
+    <<: *hardened
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+    environment:
+      OAUTH2_PROXY_PROVIDER: keycloak-oidc
+      OAUTH2_PROXY_CLIENT_ID: web
+      OAUTH2_PROXY_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
+      OAUTH2_PROXY_COOKIE_SECRET: ${COOKIE_SECRET:?set COOKIE_SECRET in .env (32 characters)}
+      OAUTH2_PROXY_OIDC_ISSUER_URL: http://localhost:${AICO_PREVIEW_PORT:-8080}/idp/realms/app
+      OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+      OAUTH2_PROXY_LOGIN_URL: http://localhost:${AICO_PREVIEW_PORT:-8080}/idp/realms/app/protocol/openid-connect/auth
+      OAUTH2_PROXY_REDEEM_URL: http://keycloak:8080/idp/realms/app/protocol/openid-connect/token
+      OAUTH2_PROXY_OIDC_JWKS_URL: http://keycloak:8080/idp/realms/app/protocol/openid-connect/certs
+      OAUTH2_PROXY_SKIP_CLAIMS_FROM_PROFILE_URL: "true"
+      OAUTH2_PROXY_REDIRECT_URL: http://localhost:${AICO_PREVIEW_PORT:-8080}/api/auth/callback
+      OAUTH2_PROXY_PROXY_PREFIX: /api/auth
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_UPSTREAMS: static://202
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "true"
+      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
+      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+      OAUTH2_PROXY_SCOPE: openid email profile
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      OAUTH2_PROXY_COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      OAUTH2_PROXY_COOKIE_SAMESITE: lax
+      OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
+      OAUTH2_PROXY_COOKIE_REFRESH: 2m
+      OAUTH2_PROXY_SESSION_STORE_TYPE: redis
+      OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://cache:6379
+      OAUTH2_PROXY_BACKEND_LOGOUT_URL: http://keycloak:8080/idp/realms/app/protocol/openid-connect/logout?id_token_hint={id_token}
+      OAUTH2_PROXY_WHITELIST_DOMAINS: localhost:${AICO_PREVIEW_PORT:-8080}
+    read_only: true
+    depends_on:
+      cache: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  api:
+    <<: *hardened
+    build: ./services/api
+    image: __APP_SLUG__-api
+    environment: &api-env
+      APP_ENV: production
+      AUTH_MODE: oidc
+      OIDC_ISSUER: http://localhost:${AICO_PREVIEW_PORT:-8080}/idp/realms/app
+      OIDC_JWKS_URI: http://keycloak:8080/idp/realms/app/protocol/openid-connect/certs
+      OIDC_AUDIENCE: app-api
+      DATABASE_URL: postgresql+psycopg://app:${DB_PASSWORD:?set DB_PASSWORD in .env}@db:5432/app
+      FORWARDED_ALLOW_IPS: "*"
+      # Per-process limits behind a gateway see one address (the proxy). Generous here; put the real
+      # per-client limits at the gateway (docs/OPERATIONS.md).
+      RATE_LIMIT_DEFAULT: 6000/minute
+      RATE_LIMIT_AUTH: 3000/minute
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  migrate:
+    image: __APP_SLUG__-api
+    build: ./services/api
+    command: ["python", "-m", "app.cli", "migrate"]
+    environment: *api-env
+    depends_on:
+      db: { condition: service_healthy }
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  db:
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      POSTGRES_DB: app
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD in .env}
+    volumes:
+      - db:/var/lib/postgresql
+      - ./deploy/postgres/10-keycloak.sh:/docker-entrypoint-initdb.d/10-keycloak.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  cache:
+    <<: *hardened
+    image: valkey/valkey:9.0.6-alpine@sha256:187679e3bd4036959631e3f03983ab2ba503ab21e6fd0454d508e909db2ee989
+    user: "999:999"
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    read_only: true
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    <<: *hardened
+    image: quay.io/keycloak/keycloak:26.8.0@sha256:b0f60d489d51c5d113390bdf5461d4c06e6051be026c05549f2e1e10ec352bcc
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HTTP_RELATIVE_PATH: /idp
+      KC_HOSTNAME: http://localhost:${AICO_PREVIEW_PORT:-8080}/idp
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      DEV_USER_PASSWORD: ${DEV_USER_PASSWORD:?set DEV_USER_PASSWORD in .env}
+      PUBLIC_URL: http://localhost:${AICO_PREVIEW_PORT:-8080}
+    volumes:
+      - ./deploy/keycloak/realm.json:/opt/keycloak/data/import/realm.json:ro
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /idp/health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  e2e:
+    profiles: [e2e]
+    image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+    network_mode: "service:proxy"
+    working_dir: /app
+    ipc: host
+    volumes:
+      - ./services/web:/app
+      - e2e_node_modules:/app/node_modules
+    environment:
+      CI: "1"
+      E2E_BASE_URL: http://localhost:${AICO_PREVIEW_PORT:-8080}
+      E2E_USER: dev@example.com
+      E2E_PASSWORD: ${DEV_USER_PASSWORD}
+    command: sh -c "npm ci --no-audit --no-fund && npx playwright test --project=desktop"
+    depends_on:
+      proxy: { condition: service_healthy }
+
+volumes:
+  db:
+  e2e_node_modules:

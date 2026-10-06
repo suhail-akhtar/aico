@@ -1,0 +1,67 @@
+{
+  "id": "system-medium",
+  "version": "1.0.0",
+  "name": "System (medium): modular monolith with identity, outbox and worker",
+  "category": "system",
+  "kind": "bundle",
+  "summary": "A whole small-company system that runs with one command: a React single-page app and a Spring Boot 4 / Spring Modulith modular monolith behind a Traefik gateway, signing people in through Keycloak (OIDC authorization code, backend-for-frontend cookie session), with PostgreSQL 18, Valkey sessions and rate limits, SeaweedFS S3 attachments, flagd feature flags, a transactional outbox with a separate worker, an audit trail and Mailpit for mail. Tasks with assignment emails are the worked feature. Tests: 104 unit and architecture tests plus integration tests on real PostgreSQL and Valkey, 31 web tests, and a compose smoke that signs in and follows a task through the outbox and the audit log. The middle stage of a small -> medium -> large growth path.",
+  "features": [
+    "Keycloak sign-in through the API (BFF cookie session, CSRF, roles from the realm), machine client for automation",
+    "Transactional outbox with a worker, idempotent consumers, audit trail, S3 attachments, feature flags",
+    "Hardened compose (no capabilities, read-only filesystems, digest-pinned images), CI with SHA-pinned actions"
+  ],
+  "tags": ["system", "fullstack", "bundle", "react", "spring", "spring-boot", "modulith", "keycloak", "oidc", "postgresql", "valkey", "traefik", "outbox", "audit", "docker-compose", "enterprise"],
+  "match": ["system", "platform", "fullstack", "full-stack", "bundle", "compose", "keycloak", "oidc", "sso", "modulith", "outbox", "audit", "enterprise", "workflow", "tasks", "react", "spring", "springboot", "java", "company"],
+  "toolchain": {
+    "id": "java",
+    "version": ">=25",
+    "tools": [{ "id": "node", "version": ">=24" }, { "id": "docker", "optional": false }],
+    "installHint": "Install a JDK 25 (Temurin: https://adoptium.net/temurin/releases/?version=25) and Node 24+. Docker is required: the system is a set of containers (Keycloak, PostgreSQL, Valkey, SeaweedFS, Traefik)."
+  },
+  "manifestFile": "compose.yaml",
+  "envFile": {
+    "file": ".env",
+    "example": ".env.example",
+    "generate": {
+      "POSTGRES_PASSWORD": "password:32",
+      "APP_DB_PASSWORD": "password:32",
+      "KEYCLOAK_DB_PASSWORD": "password:32",
+      "VALKEY_PASSWORD": "password:32",
+      "S3_ACCESS_KEY": "password:20",
+      "S3_SECRET_KEY": "password:40",
+      "KEYCLOAK_ADMIN_PASSWORD": "password:32",
+      "OIDC_CLIENT_SECRET": "hex:32",
+      "AUTOMATION_CLIENT_SECRET": "hex:32",
+      "DEV_USER_PASSWORD": "password:24"
+    }
+  },
+  "artifactDirs": ["target"],
+  "docker": {
+    "image": "maven:3.9-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976",
+    "containerPort": 8080,
+    "composeFile": "compose.yaml"
+  },
+  "verify": { "skip": ["audit"] },
+  "services": [
+    { "id": "web", "role": "frontend", "path": "services/web", "port": 8080, "healthPath": "/healthz", "dependsOn": ["api"] },
+    { "id": "api", "role": "api", "path": "services/api", "port": 8080, "healthPath": "/healthz", "dependsOn": ["db", "cache", "auth"] },
+    { "id": "db", "role": "db" },
+    { "id": "cache", "role": "cache" },
+    { "id": "auth", "role": "auth" },
+    { "id": "mail", "role": "mail" }
+  ],
+  "preview": "web",
+  "compose": { "file": "compose.yaml", "generate": false },
+  "run": {
+    "typecheck": "npm --prefix services/web run typecheck",
+    "test": "npm --prefix services/web test",
+    "format": "npm --prefix services/web run fmt:check",
+    "lint": "npm --prefix services/web run lint",
+    "build": "docker compose build"
+  },
+  "substitute": ["README.md", "AICO.md", "docs/EXTENDING.md", ".aico/backlog.md", ".aico/decisions.md"],
+  "deploy": [
+    { "id": "compose", "label": "Docker Compose (this host)", "script": "docker compose up --build --wait -d", "requires": ["docker"] }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

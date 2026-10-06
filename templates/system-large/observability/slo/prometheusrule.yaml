@@ -1,0 +1,222 @@
+# GENERATED from slo/slo-recording.rules.yaml + slo/slo-alerts.rules.yaml (the Prometheus rule files are the source of truth;
+# validate-cluster fails when this file drifts from them). Recording rules and burn-rate alerts for the API (system-api).
+# Selected by the Prometheus Operator through the "release" label below: set it to match your
+# Prometheus resource's ruleSelector.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: system-slo
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: system-observability
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: slo.availability.error_ratio
+      interval: 30s
+      rules:
+        - record: slo:availability_error_ratio:rate5m
+          expr: |
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[5m]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[5m]))
+        - record: slo:availability_error_ratio:rate30m
+          expr: |
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[30m]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[30m]))
+        - record: slo:availability_error_ratio:rate1h
+          expr: |
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[1h]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[1h]))
+        - record: slo:availability_error_ratio:rate2h
+          expr: |
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[2h]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[2h]))
+        - record: slo:availability_error_ratio:rate6h
+          expr: |
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[6h]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[6h]))
+        - record: slo:availability_error_ratio:rate1d
+          expr: |
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[1d]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[1d]))
+        - record: slo:availability_error_ratio:rate3d
+          expr: |
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[3d]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[3d]))
+
+    # Objectives as data, so the alert expressions are written once for every service.
+    - name: slo.objectives
+      interval: 1m
+      rules:
+        - record: slo:availability_objective
+          expr: vector(0.999)
+          labels: {job: system-api}
+        - record: slo:latency_objective
+          expr: vector(0.99)
+          labels: {job: system-api}
+
+    # Latency error ratio = share of requests slower than the threshold:
+    # API 500 ms (le="0.5").
+    - name: slo.latency.api.error_ratio
+      interval: 30s
+      rules:
+        - record: slo:latency_error_ratio:rate5m
+          expr: |
+            1 - (
+              sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[5m]))
+              /
+              sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[5m]))
+            )
+          labels:
+            latency_threshold: "0.5"
+        - record: slo:latency_error_ratio:rate30m
+          expr: |
+            1 - (
+              sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[30m]))
+              /
+              sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[30m]))
+            )
+          labels:
+            latency_threshold: "0.5"
+        - record: slo:latency_error_ratio:rate1h
+          expr: |
+            1 - (
+              sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[1h]))
+              /
+              sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[1h]))
+            )
+          labels:
+            latency_threshold: "0.5"
+        - record: slo:latency_error_ratio:rate2h
+          expr: |
+            1 - (
+              sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[2h]))
+              /
+              sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[2h]))
+            )
+          labels:
+            latency_threshold: "0.5"
+        - record: slo:latency_error_ratio:rate6h
+          expr: |
+            1 - (
+              sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[6h]))
+              /
+              sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[6h]))
+            )
+          labels:
+            latency_threshold: "0.5"
+        - record: slo:latency_error_ratio:rate1d
+          expr: |
+            1 - (
+              sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[1d]))
+              /
+              sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[1d]))
+            )
+          labels:
+            latency_threshold: "0.5"
+        - record: slo:latency_error_ratio:rate3d
+          expr: |
+            1 - (
+              sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[3d]))
+              /
+              sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[3d]))
+            )
+          labels:
+            latency_threshold: "0.5"
+
+    - name: slo.availability.alerts
+      rules:
+        - alert: SloAvailabilityFastBurn
+          expr: |
+            (
+              slo:availability_error_ratio:rate1h > on(job) (14.4 * (1 - slo:availability_objective))
+              and
+              slo:availability_error_ratio:rate5m > on(job) (14.4 * (1 - slo:availability_objective))
+            )
+            or
+            (
+              slo:availability_error_ratio:rate6h > on(job) (6 * (1 - slo:availability_objective))
+              and
+              slo:availability_error_ratio:rate30m > on(job) (6 * (1 - slo:availability_objective))
+            )
+          for: 2m
+          labels:
+            severity: page
+            slo: availability
+          annotations:
+            summary: "{{ $labels.job }} is burning its availability error budget fast"
+            description: "5xx ratio is {{ $value | humanizePercentage }} on {{ $labels.job }}, far above what its availability objective allows."
+            runbook_url: https://example.test/runbooks/SloAvailabilityFastBurn.md
+        - alert: SloAvailabilitySlowBurn
+          expr: |
+            (
+              slo:availability_error_ratio:rate1d > on(job) (3 * (1 - slo:availability_objective))
+              and
+              slo:availability_error_ratio:rate2h > on(job) (3 * (1 - slo:availability_objective))
+            )
+            or
+            (
+              slo:availability_error_ratio:rate3d > on(job) (1 * (1 - slo:availability_objective))
+              and
+              slo:availability_error_ratio:rate6h > on(job) (1 * (1 - slo:availability_objective))
+            )
+          for: 15m
+          labels:
+            severity: ticket
+            slo: availability
+          annotations:
+            summary: "{{ $labels.job }} is slowly spending its availability error budget"
+            description: "5xx ratio is {{ $value | humanizePercentage }} on {{ $labels.job }}; at this rate the 30-day budget runs out early."
+            runbook_url: https://example.test/runbooks/SloAvailabilitySlowBurn.md
+
+    - name: slo.latency.alerts
+      rules:
+        - alert: SloLatencyFastBurn
+          expr: |
+            (
+              slo:latency_error_ratio:rate1h > on(job) (14.4 * (1 - slo:latency_objective))
+              and
+              slo:latency_error_ratio:rate5m > on(job) (14.4 * (1 - slo:latency_objective))
+            )
+            or
+            (
+              slo:latency_error_ratio:rate6h > on(job) (6 * (1 - slo:latency_objective))
+              and
+              slo:latency_error_ratio:rate30m > on(job) (6 * (1 - slo:latency_objective))
+            )
+          for: 2m
+          labels:
+            severity: page
+            slo: latency
+          annotations:
+            summary: "{{ $labels.job }} is burning its latency error budget fast"
+            description: "{{ $value | humanizePercentage }} of {{ $labels.job }} requests are slower than the latency threshold (the API threshold is 500 ms)."
+            runbook_url: https://example.test/runbooks/SloLatencyFastBurn.md
+        - alert: SloLatencySlowBurn
+          expr: |
+            (
+              slo:latency_error_ratio:rate1d > on(job) (3 * (1 - slo:latency_objective))
+              and
+              slo:latency_error_ratio:rate2h > on(job) (3 * (1 - slo:latency_objective))
+            )
+            or
+            (
+              slo:latency_error_ratio:rate3d > on(job) (1 * (1 - slo:latency_objective))
+              and
+              slo:latency_error_ratio:rate6h > on(job) (1 * (1 - slo:latency_objective))
+            )
+          for: 15m
+          labels:
+            severity: ticket
+            slo: latency
+          annotations:
+            summary: "{{ $labels.job }} is slowly spending its latency error budget"
+            description: "{{ $value | humanizePercentage }} of {{ $labels.job }} requests are slower than the latency threshold."
+            runbook_url: https://example.test/runbooks/SloLatencySlowBurn.md

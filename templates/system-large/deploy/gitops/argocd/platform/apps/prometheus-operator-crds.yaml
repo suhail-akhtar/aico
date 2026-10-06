@@ -1,0 +1,28 @@
+# Wave 0. Only the CRDs (ServiceMonitor, PodMonitor, PrometheusRule): the application chart,
+# CloudNativePG emits those objects. Running Prometheus itself is a separate choice
+# (kube-prometheus-stack, a managed service, the Grafana stack): they all read these CRDs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-operator-crds
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-operator-crds
+    targetRevision: 32.0.1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

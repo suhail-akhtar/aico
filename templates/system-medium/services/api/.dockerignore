@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+.mvn/wrapper/maven-wrapper.jar
+target
+.env
+.env.*
+!.env.example
+*.log
+docs
+.aico
+README.md
+CHANGELOG.md
+compose.yaml
+Makefile

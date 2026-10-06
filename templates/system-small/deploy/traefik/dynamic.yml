@@ -1,0 +1,59 @@
+# One origin. Static, file-based config: the Docker socket is never mounted into the proxy.
+http:
+  routers:
+    idp:
+      rule: PathPrefix(`/idp`)
+      priority: 40
+      entryPoints: [web]
+      service: keycloak
+    auth:
+      rule: PathPrefix(`/api/auth`)
+      priority: 30
+      entryPoints: [web]
+      service: bff
+    # An unsafe request without the custom header never reaches the API: forward-auth to the web
+    # container's /__csrf_rejected answers 403 problem+json.
+    csrf:
+      rule: PathPrefix(`/api/`) && !Method(`GET`) && !Method(`HEAD`) && !Method(`OPTIONS`) && !Header(`X-Requested-With`, `fetch`)
+      priority: 25
+      entryPoints: [web]
+      middlewares: [csrf-reject]
+      service: web
+    api:
+      rule: PathPrefix(`/api/`)
+      priority: 20
+      entryPoints: [web]
+      middlewares: [session, strip-api]
+      service: api
+    web:
+      rule: PathPrefix(`/`)
+      priority: 1
+      entryPoints: [web]
+      service: web
+  middlewares:
+    csrf-reject:
+      forwardAuth:
+        address: http://web:8080/__csrf_rejected
+    # The session check: oauth2-proxy answers 202 (and the access token) or 401. Traefik copies
+    # the Authorization header onto the request it forwards to the API.
+    session:
+      forwardAuth:
+        address: http://bff:4180/api/auth/auth
+        trustForwardHeader: true
+        authResponseHeaders: [Authorization]
+    strip-api:
+      stripPrefix:
+        prefixes: [/api]
+  services:
+    web:
+      loadBalancer:
+        servers: [{ url: "http://web:8080" }]
+    api:
+      loadBalancer:
+        servers: [{ url: "http://api:8000" }]
+    bff:
+      loadBalancer:
+        servers: [{ url: "http://bff:4180" }]
+    keycloak:
+      loadBalancer:
+        servers: [{ url: "http://keycloak:8080" }]

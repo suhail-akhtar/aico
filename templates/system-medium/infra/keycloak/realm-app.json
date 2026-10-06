@@ -1,0 +1,141 @@
+{
+  "realm": "app",
+  "displayName": "System (medium)",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "maxFailureWaitSeconds": 300,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "defaultSignatureAlgorithm": "RS256",
+  "roles": {
+    "realm": [
+      { "name": "member", "description": "An ordinary user: manages their own tasks." },
+      { "name": "admin", "description": "Can read every task and the audit trail." }
+    ]
+  },
+  "defaultRole": { "name": "default-roles-app", "composite": true, "clientRole": false },
+  "clients": [
+    {
+      "clientId": "system-web",
+      "name": "System web (browser login, backend-for-frontend)",
+      "description": "Confidential client used by the API to sign browsers in. Tokens never reach the browser.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:${APP_PORT}/login/oauth2/code/keycloak"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:${APP_PORT}/",
+        "access.token.lifespan": "300"
+      },
+      "defaultClientScopes": ["web-origins", "profile", "roles", "email"],
+      "protocolMappers": [
+        {
+          "name": "audience-system-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "system-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles-flat",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "automation",
+      "name": "Automation (machine client)",
+      "description": "Client-credentials client for scripts and other services; calls the API with a bearer token.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${AUTOMATION_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": ["profile", "roles", "email"],
+      "protocolMappers": [
+        {
+          "name": "audience-system-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "system-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles-flat",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-automation",
+      "enabled": true,
+      "serviceAccountClientId": "automation",
+      "realmRoles": ["member"]
+    },
+    {
+      "username": "alice",
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "${DEV_USER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["member", "admin"]
+    },
+    {
+      "username": "bob",
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Member",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "${DEV_USER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["member"]
+    }
+  ]
+}

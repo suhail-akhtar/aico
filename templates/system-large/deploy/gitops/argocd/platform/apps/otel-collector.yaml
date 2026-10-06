@@ -1,0 +1,37 @@
+# Wave 2. OpenTelemetry Collector (contrib 0.162.0, chart 0.175.1). The pipeline is the
+# ConfigMap in observability/otel-collector/k8s (third source); the chart only runs it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  sources:
+    - repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+      chart: opentelemetry-collector
+      targetRevision: 0.175.1
+      helm:
+        releaseName: otel-collector
+        valueFiles:
+          - $values/deploy/gitops/argocd/platform/values/otel-collector.yaml
+    - repoURL: https://github.com/example-org/system.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/example-org/system.git
+      targetRevision: main
+      path: observability/otel-collector/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

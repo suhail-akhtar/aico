@@ -1,0 +1,43 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+---
+# Workload-level alerts that need only kube-state-metrics. The SLO burn-rate rules for
+# api and worker live in observability/slo (they need the Micrometer HTTP metrics).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: system-workloads
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/part-of: system
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: system.workloads
+      rules:
+        - alert: SystemDeploymentUnavailable
+          expr: kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ "{{ $labels.deployment }}" }} has no available replicas"
+            runbook_url: {{ .Values.monitoring.prometheusRule.runbookBaseUrl }}/SystemDeploymentUnavailable.md
+        - alert: SystemPodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ "{{ $labels.pod }}" }} restarted more than 3 times in 15 minutes"
+            runbook_url: {{ .Values.monitoring.prometheusRule.runbookBaseUrl }}/SystemPodCrashLooping.md
+        - alert: SystemHpaAtMax
+          expr: kube_horizontalpodautoscaler_status_current_replicas{namespace="{{ .Release.Namespace }}"} == kube_horizontalpodautoscaler_spec_max_replicas{namespace="{{ .Release.Namespace }}"}
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ "{{ $labels.horizontalpodautoscaler }}" }} has been at maxReplicas for 30 minutes"
+            runbook_url: {{ .Values.monitoring.prometheusRule.runbookBaseUrl }}/SystemHpaAtMax.md
+{{- end }}

@@ -1,0 +1,21 @@
+# local configuration and secrets: only the example is committed
+.env
+.env.*
+!.env.example
+
+# the services are separate projects with their own ignores; these are the usual artefacts
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.venv/
+__pycache__/
+*.tsbuildinfo
+sbom*.json
+
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db

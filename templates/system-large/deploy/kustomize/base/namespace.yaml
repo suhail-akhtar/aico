@@ -1,0 +1,14 @@
+# The Pod Security Admission labels are the cluster-level backstop for the chart's
+# securityContext: a Deployment that drifts from the restricted profile is rejected at
+# admission, not discovered in an audit. "latest" tracks the cluster's own version.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: system
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

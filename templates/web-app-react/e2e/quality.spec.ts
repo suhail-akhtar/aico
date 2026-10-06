@@ -157,7 +157,10 @@ test.describe('security posture in a real browser', () => {
     expect(exposed.values.join(' ')).not.toMatch(/eyJ[A-Za-z0-9_-]{10,}/);
     expect(exposed.cookie).not.toMatch(/session|oauth2|token|jwt/i);
     const cookies = await page.context().cookies();
-    for (const cookie of cookies.filter((c) => /session|oauth2/i.test(c.name))) {
+    // The app's own session cookie lives at path /. An identity provider on the same origin (the
+    // full-stack bundles' Keycloak under /idp) keeps its own cookies at its own path: not ours to judge.
+    const appCookies = cookies.filter((c) => c.path === '/' && /session|oauth2/i.test(c.name));
+    for (const cookie of appCookies) {
       expect(cookie.httpOnly, `${cookie.name} must be HttpOnly`).toBe(true);
       expect(['Lax', 'Strict']).toContain(cookie.sameSite);
     }

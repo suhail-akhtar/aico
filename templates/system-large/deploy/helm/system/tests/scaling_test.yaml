@@ -1,0 +1,44 @@
+suite: autoscaling and disruption budgets
+templates:
+  - templates/hpa.yaml
+  - templates/pdb.yaml
+tests:
+  - it: renders an HPA for every service by default
+    template: templates/hpa.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: HPA targets the Deployment and scales on CPU and memory
+    template: templates/hpa.yaml
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - equal:
+          path: spec.scaleTargetRef.name
+          value: api
+      - lengthEqual:
+          path: spec.metrics
+          count: 2
+      - equal:
+          path: spec.minReplicas
+          value: 2
+  - it: PDB never blocks a drain of an unhealthy pod
+    template: templates/pdb.yaml
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - equal:
+          path: spec.unhealthyPodEvictionPolicy
+          value: AlwaysAllow
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+  - it: autoscaling off removes the HPA
+    template: templates/hpa.yaml
+    set:
+      services.api.autoscaling.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1

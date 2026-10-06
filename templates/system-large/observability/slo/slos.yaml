@@ -1,0 +1,36 @@
+# The service level objectives, in one readable place. The numbers here are the contract with
+# the business; slo-recording.rules.yaml and slo-alerts.rules.yaml implement them (the
+# objective values are repeated there as slo:*_objective, keep them in step).
+#
+# Scope: the API on the user's request path. The worker does background work: its health is
+# judged by the outbox backlog and job alerts (alerts/platform.rules.yaml), not by latency.
+version: 1
+window: 30d
+slos:
+  - name: api-availability
+    service: system-api
+    objective: 99.9
+    description: Requests to the API (REST, OIDC login) that do not fail with a 5xx.
+    sli:
+      good: http_server_requests_seconds_count{job="system-api", status!~"5.."}
+      total: http_server_requests_seconds_count{job="system-api"}
+      excluded_uris: ["/actuator.*", "/healthz", "/readyz"]
+    error_budget: 43m of full outage per 30 days
+    alerts: [SloAvailabilityFastBurn, SloAvailabilitySlowBurn]
+  - name: api-latency
+    service: system-api
+    objective: 99.0
+    description: API requests that complete within 500 ms.
+    sli:
+      good: http_server_requests_seconds_bucket{job="system-api", le="0.5"}
+      total: http_server_requests_seconds_count{job="system-api"}
+      excluded_uris: ["/actuator.*", "/healthz", "/readyz"]
+    threshold: 500ms
+    alerts: [SloLatencyFastBurn, SloLatencySlowBurn]
+burn_rate_policy:
+  page:
+    - {burn_rate: 14.4, long_window: 1h, short_window: 5m}
+    - {burn_rate: 6, long_window: 6h, short_window: 30m}
+  ticket:
+    - {burn_rate: 3, long_window: 1d, short_window: 2h}
+    - {burn_rate: 1, long_window: 3d, short_window: 6h}

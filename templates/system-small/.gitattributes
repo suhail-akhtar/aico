@@ -1,0 +1,4 @@
+# One line ending everywhere: LF (a CRLF checkout breaks shell scripts inside containers).
+* text=auto eol=lf
+*.sh text eol=lf
+Makefile text eol=lf

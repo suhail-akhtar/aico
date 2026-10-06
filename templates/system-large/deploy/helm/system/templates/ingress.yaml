@@ -1,0 +1,82 @@
+{{- if .Values.ingress.enabled }}
+{{- $appHost := default (printf "app.%s" .Values.global.domain) .Values.ingress.hosts.app }}
+{{- $idpHost := default (printf "idp.%s" .Values.global.domain) .Values.ingress.hosts.idp }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: system
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/part-of: system
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    {{- if and .Values.ingress.rateLimit.enabled (eq .Values.ingress.controller "traefik") }}
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-ratelimit@kubernetescrd" .Release.Namespace }}
+    {{- end }}
+    {{- /* Not on Traefik? Put the equivalent of ingress.rateLimit into ingress.annotations
+         (for ingress-nginx: nginx.ingress.kubernetes.io/limit-rps and limit-burst-multiplier). */}}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts:
+        - {{ $appHost }}
+        {{- if .Values.ingress.idp.enabled }}
+        - {{ $idpHost }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  rules:
+    - host: {{ $appHost }}
+      http:
+        paths:
+          {{- range $name, $raw := .Values.services }}
+{{- $svc := mergeOverwrite (deepCopy $.Values.serviceDefaults) (deepCopy $raw) }}
+          {{- if and $svc.enabled $svc.ingress.enabled }}
+          {{- range $svc.ingress.paths }}
+          - path: {{ .path }}
+            pathType: {{ default "Prefix" .pathType }}
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: {{ $svc.service.port }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+    {{- if .Values.ingress.idp.enabled }}
+    - host: {{ $idpHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.ingress.idp.service }}
+                port:
+                  number: {{ .Values.ingress.idp.port }}
+    {{- end }}
+{{- if and .Values.ingress.rateLimit.enabled (eq .Values.ingress.controller "traefik") }}
+---
+# Traefik rate limit per client IP. Needs the Traefik CRDs (installed by the traefik chart).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ratelimit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/part-of: system
+spec:
+  rateLimit:
+    average: {{ .Values.ingress.rateLimit.average }}
+    period: 1s
+    burst: {{ .Values.ingress.rateLimit.burst }}
+    sourceCriterion:
+      ipStrategy:
+        depth: {{ .Values.ingress.rateLimit.proxyDepth }}
+{{- end }}
+{{- end }}

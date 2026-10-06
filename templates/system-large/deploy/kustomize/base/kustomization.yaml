@@ -1,0 +1,22 @@
+# Platform baseline for one environment namespace: everything the application chart
+# assumes exists but must not own (namespace + policy, quota, the database, its pooler and
+# its credentials). The Deployments, Services, HPAs and Ingress are NOT here: they come from
+# deploy/helm/system, the single source of truth for service definitions. Kustomize composes
+# with the chart only through overlays/rendered-chart-example.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: system
+resources:
+  - namespace.yaml
+  - resourcequota.yaml
+  - limitrange.yaml
+  - networkpolicy-default-deny.yaml
+  - networkpolicy-platform.yaml
+  - db-cluster.yaml
+  - db-pooler.yaml
+  - db-scheduledbackup.yaml
+  - db-externalsecrets.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: system-platform
+    includeSelectors: false

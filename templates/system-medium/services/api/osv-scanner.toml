@@ -1,0 +1,10 @@
+# Reviewed exceptions for the dependency audit (make audit). The audit fails on any finding, so an
+# advisory that cannot be fixed yet must be listed here with a reason and an expiry, and a person
+# must have reviewed it. Prefer upgrading (see the version overrides in pom.xml) over ignoring.
+#
+# Example (delete the leading # to use):
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# ignoreUntil = 2026-12-31
+# reason = "Only reachable through the DIGEST authenticator, which this service does not use."

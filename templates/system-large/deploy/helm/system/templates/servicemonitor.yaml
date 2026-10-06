@@ -1,0 +1,30 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+{{- range $name, $raw := .Values.services }}
+{{- $svc := mergeOverwrite (deepCopy $.Values.serviceDefaults) (deepCopy $raw) }}
+{{- if and $svc.enabled $svc.metrics.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "system.labels" $ctx | nindent 4 }}
+    {{- with $.Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "system.selectorLabels" $ctx | nindent 6 }}
+  endpoints:
+    - port: http
+      path: {{ $svc.metrics.path }}
+      interval: {{ $.Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ $.Values.monitoring.serviceMonitor.scrapeTimeout }}
+  targetLabels:
+    - app.kubernetes.io/part-of
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,110 @@
+# OpenTelemetry Collector (contrib) for docker compose. The services export OTLP to this
+# collector (OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317); the collector is the
+# only component that knows the backends, so changing Tempo for another trace store is one
+# exporter line here and no service redeploy.
+#
+# Backends are read from the environment with defaults that match the compose stack:
+#   TEMPO_ENDPOINT       OTLP gRPC of Tempo        (default tempo:4317)
+#   PROMETHEUS_RW_URL    remote-write receiver     (default http://prometheus:9090/api/v1/write)
+#   LOKI_OTLP_URL        Loki native OTLP ingest   (default http://loki:3100/otlp)
+#   DEPLOYMENT_ENV       resource attribute        (default local)
+# Prometheus must run with --web.enable-remote-write-receiver; Loki 3.x accepts OTLP at /otlp.
+#
+# Validate: otelcol-contrib validate --config=config.yaml
+# Keep the shared pipeline in step with ../k8s/configmap.yaml (which adds k8sattributes).
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # First in every pipeline: refuse data before the collector runs out of memory, so an
+  # overloaded backend produces back-pressure and dropped telemetry, not an OOM kill.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  resource:
+    attributes:
+      - key: deployment.environment.name
+        value: ${env:DEPLOYMENT_ENV:-local}
+        action: upsert
+  # Keep every error and every slow trace, and a tenth of the healthy fast ones. The decision
+  # waits for the whole trace (decision_wait), so it needs all spans of a trace to reach the
+  # SAME collector: with more than one replica put a load-balancing exporter tier (trace-id
+  # routing) in front, or run a single collector for tracing.
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 200
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 1000
+      - name: healthy-sample
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+  batch:
+    send_batch_size: 8192
+    send_batch_max_size: 10000
+    timeout: 5s
+
+exporters:
+  otlp/tempo:
+    endpoint: ${env:TEMPO_ENDPOINT:-tempo:4317}
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 120s
+  prometheusremotewrite:
+    endpoint: ${env:PROMETHEUS_RW_URL:-http://prometheus:9090/api/v1/write}
+    resource_to_telemetry_conversion:
+      enabled: true
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 120s
+  otlphttp/loki:
+    endpoint: ${env:LOKI_OTLP_URL:-http://loki:3100/otlp}
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 120s
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+    metrics:
+      level: normal
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, tail_sampling, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/loki]

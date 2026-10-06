@@ -1,0 +1,82 @@
+# Development cluster (kind, k3d, a shared dev namespace). Cheap and small: one replica,
+# no autoscaling, no disruption budgets, object storage and SMTP are in-cluster stand-ins.
+# Argo CD / Flux sync this file automatically; the images workflow opens a PR that writes the
+# freshly built digest into services.<name>.image.digest.
+global:
+  environment: dev
+  domain: dev.example.test
+  imagePullPolicy: IfNotPresent
+  requireImageDigest: false
+  topologySpread:
+    enabled: false
+  externalSecrets:
+    remoteKeyPrefix: system/dev
+  env:
+    OIDC_ISSUER_URI: https://idp.dev.example.test/realms/app
+
+ingress:
+  rateLimit:
+    average: 200
+    burst: 400
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: false
+
+networkPolicy:
+  peers:
+    # Dev runs SeaweedFS (S3) and Mailpit (SMTP) inside the cluster, so the allow is a pod
+    # selector instead of "any public address".
+    s3:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: seaweedfs
+    smtp:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: mailpit
+
+services:
+  web:
+    replicas: 1
+    autoscaling: {enabled: false}
+    pdb: {enabled: false}
+    resources:
+      requests: {cpu: 25m, memory: 32Mi}
+      limits: {cpu: 250m, memory: 96Mi}
+  api:
+    replicas: 1
+    autoscaling: {enabled: false}
+    pdb: {enabled: false}
+    resources:
+      requests: {cpu: 100m, memory: 384Mi}
+      limits: {cpu: "1", memory: 640Mi}
+    env:
+      S3_ENDPOINT: http://seaweedfs-s3:8333
+      S3_PATH_STYLE: "true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_AUTH: "false"
+      SMTP_STARTTLS: "false"
+    networkPolicy:
+      extraEgress:
+        - {to: s3, ports: [8333]}
+        - {to: smtp, ports: [1025]}
+  worker:
+    replicas: 1
+    resources:
+      requests: {cpu: 100m, memory: 320Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+    env:
+      S3_ENDPOINT: http://seaweedfs-s3:8333
+      S3_PATH_STYLE: "true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_AUTH: "false"
+      SMTP_STARTTLS: "false"
+    networkPolicy:
+      extraEgress:
+        - {to: s3, ports: [8333]}
+        - {to: smtp, ports: [1025]}

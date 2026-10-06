@@ -1,0 +1,36 @@
+# PgBouncer in front of the read-write service. The services connect to
+# system-db-pooler-rw:5432 (DATABASE_URL in the chart), never to system-db-rw directly.
+#
+# poolMode is "session" on purpose: Flyway takes a session-level advisory lock for the
+# duration of a migration and Hibernate uses server-side prepared statements; both break
+# under transaction pooling. Switching to "transaction" means prepareThreshold=0 on the
+# JDBC URL and migrations through system-db-rw. Do that deliberately, not by accident.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: system-db-pooler-rw
+spec:
+  cluster:
+    name: system-db
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: session
+    parameters:
+      max_client_conn: "1000"
+      default_pool_size: "20"
+      server_idle_timeout: "300"
+  monitoring:
+    enablePodMonitor: true
+  template:
+    spec:
+      containers: []
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    cnpg.io/poolerName: system-db-pooler-rw

@@ -1,0 +1,28 @@
+# Accepted checkov findings, each with the reason. Everything else must pass.
+framework:
+  - terraform
+skip-check:
+  # Secrets Manager: the values are written and rotated out of band by the owner (a rotation
+  # Lambda is account-specific); Terraform deliberately never holds a secret value.
+  - CKV2_AWS_57
+  # Backup bucket: access logging, cross-region replication and event notifications need a
+  # log bucket / second region / consumer that the owner chooses. Versioning, KMS, TLS-only
+  # policy, public-access block and lifecycle are in place.
+  - CKV_AWS_18
+  - CKV_AWS_144
+  - CKV2_AWS_62
+  # Dev keeps 30 days of VPC flow logs to save cost; prod sets 365 and passes.
+  - CKV_AWS_338
+  # Checkov's supported-version list lags the EKS release train (1.36 is current standard
+  # support); the version is a variable validated by regex.
+  - CKV_AWS_339
+  # Dev can opt in to a public API endpoint, restricted by a mandatory allow-list (precondition);
+  # prod is hard-wired private.
+  - CKV_AWS_39
+  # The RDS security group is created together with the (optional) instance; the finding is
+  # an artefact of the conditional count.
+  - CKV2_AWS_5
+  # RDS query logging: log_statement and log_min_duration_statement ARE set in the parameter group
+  # (modules/db/main.tf), but checkov cannot follow the reference through the count index
+  # (aws_db_parameter_group.this[0]) and reports a false positive.
+  - CKV2_AWS_30

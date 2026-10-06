@@ -1,0 +1,61 @@
+# Staging: production-shaped database (primary + one replica, daily backups) at roughly a
+# quarter of production's size. Secrets come from system/staging/<service>.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: system-staging
+resources:
+  - ../../base
+labels:
+  - pairs:
+      app.kubernetes.io/instance: staging
+    includeSelectors: false
+patches:
+  - target: {group: postgresql.cnpg.io, version: v1, kind: Cluster, name: system-db}
+    patch: |-
+      - op: replace
+        path: /spec/instances
+        value: 2
+      - op: replace
+        path: /spec/resources
+        value:
+          requests: {cpu: "1", memory: 2Gi}
+          limits: {cpu: "1", memory: 2Gi}
+      - op: replace
+        path: /spec/storage/size
+        value: 50Gi
+      - op: replace
+        path: /spec/postgresql/parameters/shared_buffers
+        value: 512MB
+      - op: replace
+        path: /spec/backup/barmanObjectStore/destinationPath
+        value: s3://system-db-backups-staging/
+  - target: {group: postgresql.cnpg.io, version: v1, kind: Pooler, name: system-db-pooler-rw}
+    patch: |-
+      - op: replace
+        path: /spec/instances
+        value: 2
+  - target: {kind: ResourceQuota, name: system}
+    patch: |-
+      - op: replace
+        path: /spec/hard/requests.cpu
+        value: "16"
+      - op: replace
+        path: /spec/hard/requests.memory
+        value: 32Gi
+      - op: replace
+        path: /spec/hard/limits.cpu
+        value: "32"
+      - op: replace
+        path: /spec/hard/limits.memory
+        value: 48Gi
+      - op: replace
+        path: /spec/hard/pods
+        value: "100"
+  # One remote secret per service, per environment: system/staging/<service>.
+  - target: {group: external-secrets.io, version: v1, kind: ExternalSecret, name: system-db-app}
+    patch: |-
+      - {op: replace, path: /spec/data/0/remoteRef/key, value: system/staging/api}
+  - target: {group: external-secrets.io, version: v1, kind: ExternalSecret, name: system-db-backup-s3}
+    patch: |-
+      - {op: replace, path: /spec/data/0/remoteRef/key, value: system/staging/db-backup}
+      - {op: replace, path: /spec/data/1/remoteRef/key, value: system/staging/db-backup}

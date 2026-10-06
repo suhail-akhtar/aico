@@ -1,0 +1,93 @@
+# Two projects, two trust levels.
+#
+# "system"   : what the application teams own. Namespaced kinds only (an explicit whitelist),
+#              the three environment namespaces only, this repository only. No RBAC objects and no Secret objects can be created from git
+#              (secrets arrive through ExternalSecret), so a compromised PR cannot mint
+#              permissions or smuggle a credential in.
+# "platform" : operators and cluster-scoped add-ons. Administrator-level by nature (CRDs,
+#              ClusterRoles); protect deploy/gitops/argocd/platform with CODEOWNERS and
+#              branch protection, and keep the list of source repositories short.
+#
+# Replace https://github.com/example-org/system.git with your repository.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: system
+  namespace: argocd
+spec:
+  description: system application services and their per-environment platform resources
+  sourceRepos:
+    - https://github.com/example-org/system.git
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: system-dev}
+    - {server: https://kubernetes.default.svc, namespace: system-staging}
+    - {server: https://kubernetes.default.svc, namespace: system-prod}
+  # Namespace objects only: the kustomize base creates the environment namespace with its
+  # Pod Security labels.
+  clusterResourceWhitelist:
+    - {group: "", kind: Namespace}
+  namespaceResourceWhitelist:
+    - {group: "", kind: ConfigMap}
+    - {group: "", kind: Service}
+    - {group: "", kind: ServiceAccount}
+    - {group: "", kind: LimitRange}
+    - {group: "", kind: ResourceQuota}
+    - {group: apps, kind: Deployment}
+    - {group: apps, kind: StatefulSet}
+    - {group: autoscaling, kind: HorizontalPodAutoscaler}
+    - {group: policy, kind: PodDisruptionBudget}
+    - {group: networking.k8s.io, kind: Ingress}
+    - {group: networking.k8s.io, kind: NetworkPolicy}
+    - {group: external-secrets.io, kind: ExternalSecret}
+    - {group: postgresql.cnpg.io, kind: Cluster}
+    - {group: postgresql.cnpg.io, kind: Pooler}
+    - {group: postgresql.cnpg.io, kind: Database}
+    - {group: postgresql.cnpg.io, kind: ScheduledBackup}
+    - {group: traefik.io, kind: Middleware}
+    - {group: monitoring.coreos.com, kind: ServiceMonitor}
+    - {group: monitoring.coreos.com, kind: PodMonitor}
+    - {group: monitoring.coreos.com, kind: PrometheusRule}
+  orphanedResources:
+    warn: true
+  roles:
+    - name: viewer
+      description: read-only access to the system applications
+      policies:
+        - p, proj:system:viewer, applications, get, system/*, allow
+      groups:
+        - example-org:developers
+    - name: deployer
+      description: may sync dev and staging; production syncs go through the pull request
+      policies:
+        - p, proj:system:deployer, applications, get, system/*, allow
+        - p, proj:system:deployer, applications, sync, system/system-dev*, allow
+        - p, proj:system:deployer, applications, sync, system/system-staging*, allow
+      groups:
+        - example-org:platform
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: cluster operators and add-ons (CloudNativePG, External Secrets, Traefik, OpenTelemetry)
+  sourceRepos:
+    - https://github.com/example-org/system.git
+    - https://cloudnative-pg.github.io/charts
+    - https://charts.external-secrets.io
+    - https://traefik.github.io/charts
+    - https://prometheus-community.github.io/helm-charts
+    - https://open-telemetry.github.io/opentelemetry-helm-charts
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: argocd}
+    - {server: https://kubernetes.default.svc, namespace: cnpg-system}
+    - {server: https://kubernetes.default.svc, namespace: external-secrets}
+    - {server: https://kubernetes.default.svc, namespace: traefik}
+    - {server: https://kubernetes.default.svc, namespace: observability}
+    - {server: https://kubernetes.default.svc, namespace: monitoring}
+  clusterResourceWhitelist:
+    - {group: "*", kind: "*"}
+  namespaceResourceWhitelist:
+    - {group: "*", kind: "*"}

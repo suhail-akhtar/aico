@@ -1,0 +1,40 @@
+suite: monitoring toggles
+templates:
+  - templates/servicemonitor.yaml
+  - templates/prometheusrule.yaml
+tests:
+  - it: ServiceMonitor renders nothing when off
+    template: templates/servicemonitor.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: no ServiceMonitor while no service exposes a Prometheus endpoint (the API pushes OTLP)
+    template: templates/servicemonitor.yaml
+    set:
+      monitoring.serviceMonitor.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: a ServiceMonitor appears for a service that turns its metrics endpoint on
+    template: templates/servicemonitor.yaml
+    set:
+      monitoring.serviceMonitor.enabled: true
+      services.api.metrics.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: PrometheusRule renders nothing when off
+    template: templates/prometheusrule.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: PrometheusRule carries the runbook link
+    template: templates/prometheusrule.yaml
+    set:
+      monitoring.prometheusRule.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - matchRegex:
+          path: spec.groups[0].rules[0].annotations.runbook_url
+          pattern: SystemDeploymentUnavailable.md$

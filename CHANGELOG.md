@@ -7,6 +7,7 @@ and each `release/vX.Y` branch is cut from it at the version it names.
 
 ### Added
 
+- **Three system bundles.** `system-small` (React + FastAPI + Postgres + Valkey behind Traefik, Keycloak sign-in through oauth2-proxy; 55 checks, 26/26 browser tests), `system-medium` (Spring Boot 4.1 Modulith API and worker with outbox and audit, React, flagd, SeaweedFS, Mailpit; 166 backend tests at 90% coverage, 31 frontend tests, a 15-step end-to-end smoke) and `system-large` (Helm chart with 49 unit tests, kustomize overlays, Terraform, Argo CD or Flux, OpenTelemetry; 72 checks, validated statically — not applied to a real cluster). Verified by `npm run test:starters`.
 - **Six new starters.** `api-service-fastapi` (Python 3.14, FastAPI), `api-service-spring` (Java 25, Spring Boot 4 + Modulith), `api-service-dotnet` (.NET 10), `api-service-go` (Go 1.27), `web-app-laravel` (PHP 8.5, Laravel 13, Livewire 4) and `web-app-react` (Vite, React 19, typed client). Each ships a worked items feature, Argon2id passwords, RFC 9457 errors, OpenAPI, 85%+ coverage gates, dependency audit, SBOM, hardened non-root image, CI and its own git workflow; the four API starters also support OIDC. Each is verified end to end by `npm run test:starters` (Docker, not part of `npm test`).
 
 - **Multi-stack apps and bundles (ADR 0031).** Apps are no longer Node-only.

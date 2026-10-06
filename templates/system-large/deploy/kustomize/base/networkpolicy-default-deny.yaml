@@ -1,0 +1,11 @@
+# Deny all ingress and egress for every pod in the namespace. The chart (per service) and
+# networkpolicy-platform.yaml (per platform workload) then allow exactly what is needed.
+# The chart can render the same baseline (networkPolicy.defaultDeny); the two objects have
+# different names and identical effect, so applying both is harmless.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: baseline-default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

@@ -1,0 +1,209 @@
+# The platform operators, the Flux counterpart of deploy/gitops/argocd/platform. Same chart
+# versions and the same values as argocd/platform/values/*.yaml (keep the two in step if you
+# run both, or delete the tool you do not use). Ordering is dependsOn: the CRD-bearing
+# releases first, then what emits their kinds.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus-operator-crds
+  namespace: flux-system
+spec:
+  interval: 1h
+  releaseName: prometheus-operator-crds
+  targetNamespace: monitoring
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation: {retries: 3}
+  upgrade:
+    crds: CreateReplace
+    remediation: {retries: 3}
+  chart:
+    spec:
+      chart: prometheus-operator-crds
+      version: 32.0.1
+      sourceRef: {kind: HelmRepository, name: prometheus-community}
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-secrets
+  namespace: flux-system
+spec:
+  interval: 1h
+  releaseName: external-secrets
+  targetNamespace: external-secrets
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation: {retries: 3}
+  upgrade:
+    crds: CreateReplace
+    remediation: {retries: 3}
+  chart:
+    spec:
+      chart: external-secrets
+      version: 2.11.0
+      sourceRef: {kind: HelmRepository, name: external-secrets}
+  values:
+    installCRDs: true
+    replicaCount: 2
+    serviceAccount:
+      create: true
+      name: external-secrets
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudnative-pg
+  namespace: flux-system
+spec:
+  interval: 1h
+  releaseName: cnpg
+  targetNamespace: cnpg-system
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation: {retries: 3}
+  upgrade:
+    crds: CreateReplace
+    remediation: {retries: 3}
+  chart:
+    spec:
+      chart: cloudnative-pg
+      version: 0.29.1
+      sourceRef: {kind: HelmRepository, name: cloudnative-pg}
+  values:
+    replicaCount: 2
+    monitoring:
+      podMonitorEnabled: false
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traefik
+  namespace: flux-system
+spec:
+  interval: 1h
+  releaseName: traefik
+  targetNamespace: traefik
+  dependsOn:
+    - name: prometheus-operator-crds
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation: {retries: 3}
+  upgrade:
+    crds: CreateReplace
+    remediation: {retries: 3}
+  chart:
+    spec:
+      chart: traefik
+      version: 41.6.1
+      sourceRef: {kind: HelmRepository, name: traefik}
+  values:
+    deployment:
+      replicas: 2
+    ingressClass:
+      enabled: true
+      isDefaultClass: false
+      name: traefik
+    providers:
+      kubernetesCRD:
+        enabled: true
+      kubernetesIngress:
+        enabled: true
+        publishedService:
+          enabled: true
+    ports:
+      web:
+        http:
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+              permanent: true
+      websecure:
+        http:
+          tls:
+            enabled: true
+    log:
+      format: json
+      level: INFO
+    accessLog:
+      enabled: true
+      format: json
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+---
+# The collector runs the pipeline in observability/otel-collector/k8s/configmap.yaml
+# (applied by the "observability" Flux Kustomization before this release).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: otel-collector
+  namespace: flux-system
+spec:
+  interval: 1h
+  releaseName: otel-collector
+  targetNamespace: observability
+  dependsOn:
+    - name: prometheus-operator-crds
+  install:
+    createNamespace: true
+    remediation: {retries: 3}
+  upgrade:
+    remediation: {retries: 3}
+  chart:
+    spec:
+      chart: opentelemetry-collector
+      version: 0.175.1
+      sourceRef: {kind: HelmRepository, name: open-telemetry}
+  values:
+    mode: deployment
+    fullnameOverride: otel-collector
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: 0.162.0
+    command:
+      name: otelcol-contrib
+    configMap:
+      create: false
+      existingName: otel-collector-config
+    replicaCount: 2
+    presets:
+      kubernetesAttributes:
+        enabled: true
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 10001
+      runAsGroup: 10001
+      fsGroup: 10001
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: [ALL]
+    ports:
+      otlp:
+        enabled: true
+      otlp-http:
+        enabled: true
+      jaeger-compact:
+        enabled: false
+      jaeger-thrift:
+        enabled: false
+      jaeger-grpc:
+        enabled: false
+      zipkin:
+        enabled: false
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1

@@ -1,0 +1,21 @@
+# Lint the plain YAML. Helm templates contain Go templating and are validated by helm lint instead.
+extends: default
+ignore: |
+  deploy/helm/system/templates/
+  deploy/helm/system/tests/__snapshot__/
+  deploy/kustomize/overlays/rendered-chart-example/chart-rendered.yaml
+  .terraform/
+rules:
+  line-length: disable
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  braces:
+    max-spaces-inside: 1
+  indentation:
+    spaces: 2
+    indent-sequences: consistent

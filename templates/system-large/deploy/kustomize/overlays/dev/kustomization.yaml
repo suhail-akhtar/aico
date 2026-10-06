@@ -1,0 +1,36 @@
+# Development: one database instance, no object-store backups (nothing worth restoring),
+# small quota. Remote secret keys stay at the base defaults (system/dev/...).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: system-dev
+resources:
+  - ../../base
+labels:
+  - pairs:
+      app.kubernetes.io/instance: dev
+    includeSelectors: false
+patches:
+  # No backups in dev: drop the backup section, the schedule and the credentials.
+  - target: {group: postgresql.cnpg.io, version: v1, kind: Cluster, name: system-db}
+    patch: |-
+      - op: remove
+        path: /spec/backup
+  - target: {group: postgresql.cnpg.io, version: v1, kind: ScheduledBackup, name: system-db-daily}
+    patch: |-
+      $patch: delete
+      apiVersion: postgresql.cnpg.io/v1
+      kind: ScheduledBackup
+      metadata:
+        name: system-db-daily
+  - target: {group: external-secrets.io, version: v1, kind: ExternalSecret, name: system-db-backup-s3}
+    patch: |-
+      $patch: delete
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: system-db-backup-s3
+  - target: {group: postgresql.cnpg.io, version: v1, kind: Pooler, name: system-db-pooler-rw}
+    patch: |-
+      - op: replace
+        path: /spec/instances
+        value: 1

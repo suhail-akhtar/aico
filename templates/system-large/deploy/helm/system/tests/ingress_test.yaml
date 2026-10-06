@@ -1,0 +1,61 @@
+suite: ingress
+templates:
+  - templates/ingress.yaml
+tests:
+  - it: routes / to web and /api /oauth2 /login to api on app.domain, idp to Keycloak
+    documentSelector:
+      path: kind
+      value: Ingress
+    asserts:
+      - equal:
+          path: spec.ingressClassName
+          value: traefik
+      - equal:
+          path: spec.rules[0].host
+          value: app.example.test
+      - equal:
+          path: spec.rules[1].host
+          value: idp.example.test
+      - contains:
+          path: spec.rules[0].http.paths
+          content:
+            path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+      - contains:
+          path: spec.rules[0].http.paths
+          content:
+            path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 8080
+      - equal:
+          path: spec.tls[0].secretName
+          value: system-tls
+  - it: carries the Traefik rate limit middleware
+    documentSelector:
+      path: kind
+      value: Middleware
+    asserts:
+      - equal:
+          path: spec.rateLimit.average
+          value: 50
+  - it: generic controller renders no Traefik middleware
+    set:
+      ingress.controller: generic
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: ingress can be switched off
+    set:
+      ingress.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

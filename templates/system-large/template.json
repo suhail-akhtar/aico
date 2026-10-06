@@ -1,0 +1,35 @@
+{
+  "id": "system-large",
+  "version": "1.0.0",
+  "name": "System, large (Kubernetes, GitOps, Terraform)",
+  "category": "system",
+  "kind": "bundle",
+  "summary": "The large tier of the system bundles: the same Spring Modulith API and React web app as the medium tier, deployed to Kubernetes. One Helm chart (web, api, worker; restricted pod security, NetworkPolicy matrix, HPA, PDB, ExternalSecrets, Traefik ingress, values schema, 49 helm-unittest tests), kustomize platform overlays for dev/staging/prod (CloudNativePG with PgBouncer and backups, quota, default-deny), Argo CD and Flux definitions, Terraform modules for network, cluster, database and secrets, and OpenTelemetry, Prometheus SLO burn-rate rules and Grafana dashboards. Every manifest is linted, schema-checked and policy-scanned in pinned containers; nothing here has been applied to a real cluster.",
+  "features": [
+    "One chart, three workloads: web, api, worker (the API image with the jobs on); digest-only images in production",
+    "GitOps for Argo CD and Flux; kustomize overlays for the platform layer; Terraform modules with locked providers",
+    "SLO burn-rate alerts with promtool tests, OTLP collector, Grafana dashboards"
+  ],
+  "tags": ["kubernetes", "helm", "kustomize", "argocd", "flux", "terraform", "gitops", "observability", "opentelemetry", "slo", "cloudnativepg", "enterprise"],
+  "match": ["kubernetes", "k8s", "helm", "kustomize", "gitops", "argocd", "flux", "terraform", "enterprise", "production", "deploy", "observability", "slo", "system"],
+  "toolchain": {
+    "id": "node",
+    "version": ">=22",
+    "tools": [{ "id": "docker" }],
+    "installHint": "The checks run in pinned containers: install Docker (https://docs.docker.com/get-docker/). Node is only needed by AICO itself."
+  },
+  "manifestFile": "Makefile",
+  "artifactDirs": [".terraform", "charts"],
+  "services": [
+    { "id": "db", "role": "db", "port": 5432 },
+    { "id": "api", "role": "api", "image": "system-api:latest", "port": 8080, "healthPath": "/readyz", "dependsOn": ["db"] },
+    { "id": "web", "role": "frontend", "image": "system-web:latest", "port": 8080, "healthPath": "/healthz", "dependsOn": ["api"] }
+  ],
+  "preview": "web",
+  "compose": { "file": "compose.yaml", "generate": true },
+  "run": {
+    "test": "sh scripts/check.sh",
+    "lint": "sh scripts/check.sh yaml helm",
+    "build": "sh scripts/check.sh helm kustomize"
+  }
+}

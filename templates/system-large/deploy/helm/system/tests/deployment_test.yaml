@@ -1,0 +1,203 @@
+suite: deployment hardening
+templates:
+  - templates/deployment.yaml
+  - templates/configmap.yaml
+tests:
+  - it: renders one Deployment per enabled service
+    template: templates/deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 3
+  - it: pod and container satisfy the restricted Pod Security profile
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
+          path: spec.template.spec.enableServiceLinks
+          value: false
+  - it: gives the container resources and a writable /tmp emptyDir
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: web
+    asserts:
+      - exists:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+      - exists:
+          path: spec.template.spec.containers[0].resources.limits.memory
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
+          value: /tmp
+      - exists:
+          path: spec.template.spec.volumes[0].emptyDir
+  - it: probes use /healthz for liveness and startup and /readyz for readiness
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: worker
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /readyz
+  - it: drains gracefully
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 45
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds
+          value: 10
+  - it: leaves replicas to the HPA when autoscaling is on
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - notExists:
+          path: spec.replicas
+  - it: sets replicas when autoscaling is off
+    template: templates/deployment.yaml
+    set:
+      services.api.autoscaling.enabled: false
+      services.api.replicas: 4
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 4
+  - it: renders an image by tag
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/example-org/system-api:0.1.0
+  - it: renders an image by tag and digest
+    template: templates/deployment.yaml
+    set:
+      services.api.image.digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/example-org/system-api:0.1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - it: refuses a tag-only image when digests are required
+    template: templates/deployment.yaml
+    set:
+      global.requireImageDigest: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "image.digest is required"
+  - it: spreads pods over zones and nodes
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.topologySpreadConstraints
+          count: 2
+  - it: injects secrets only by reference
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: api
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: api-secrets
+  - it: web has no secret reference
+    template: templates/deployment.yaml
+    documentSelector:
+      path: metadata.name
+      value: web
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].envFrom
+          count: 1
+  - it: web gets no Spring environment
+    template: templates/configmap.yaml
+    documentSelector:
+      path: metadata.name
+      value: web-config
+    asserts:
+      - notExists:
+          path: data.DATABASE_URL
+  - it: api gets the Spring environment and the shared database
+    template: templates/configmap.yaml
+    documentSelector:
+      path: metadata.name
+      value: api-config
+    asserts:
+      - equal:
+          path: data.DATABASE_URL
+          value: jdbc:postgresql://system-db-pooler-rw:5432/app
+      - equal:
+          path: data.OTEL_SERVICE_NAME
+          value: system-api
+      - equal:
+          path: data.PORT
+          value: "8080"
+  - it: the worker is the same image with the background jobs on and reads the API's remote secret
+    template: templates/configmap.yaml
+    documentSelector:
+      path: metadata.name
+      value: worker-config
+    asserts:
+      - equal:
+          path: data.APP_JOBS_ENABLED
+          value: "true"
+      - equal:
+          path: data.OTEL_SERVICE_NAME
+          value: system-worker
+  - it: the api keeps the background jobs off
+    template: templates/configmap.yaml
+    documentSelector:
+      path: metadata.name
+      value: api-config
+    asserts:
+      - equal:
+          path: data.APP_JOBS_ENABLED
+          value: "false"

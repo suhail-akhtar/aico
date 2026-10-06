@@ -1,0 +1,23 @@
+{
+  "$schema": "https://flagd.dev/schema/v0/flags.json",
+  "flags": {
+    "attachments-enabled": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "on"
+    },
+    "email-notifications-enabled": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "on"
+    },
+    "max-open-tasks-per-user": {
+      "state": "ENABLED",
+      "variants": { "members": 25, "admins": 100 },
+      "defaultVariant": "members",
+      "targeting": {
+        "if": [{ "in": ["ADMIN", { "var": "roles" }] }, "admins", "members"]
+      }
+    }
+  }
+}

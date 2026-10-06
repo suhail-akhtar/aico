@@ -1,0 +1,11 @@
+# The collector's namespace, created before the ConfigMap and the chart that mount it.
+# The collector itself receives telemetry, so it stays out of the application namespaces
+# (and out of their Pod Security enforcement); the application chart's NetworkPolicy peer
+# "otel" selects exactly this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

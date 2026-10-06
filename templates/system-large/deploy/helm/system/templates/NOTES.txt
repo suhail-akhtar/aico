@@ -1,0 +1,29 @@
+system {{ .Chart.AppVersion }} ({{ .Values.global.environment }}) installed in namespace {{ .Release.Namespace }} as release {{ .Release.Name }}.
+
+Services:
+{{- range $name, $raw := .Values.services }}
+{{- $svc := mergeOverwrite (deepCopy $.Values.serviceDefaults) (deepCopy $raw) }}
+{{- if $svc.enabled }}
+  - {{ $name }}: {{ include "system.image" (dict "root" $ "name" $name "svc" $svc) }}
+{{- end }}
+{{- end }}
+
+Check the rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/api
+  kubectl -n {{ .Release.Namespace }} get pods,hpa,pdb,networkpolicy,externalsecret
+{{- if .Values.ingress.enabled }}
+
+Application:  https://{{ default (printf "app.%s" .Values.global.domain) .Values.ingress.hosts.app }}
+{{- if .Values.ingress.idp.enabled }}
+Identity:     https://{{ default (printf "idp.%s" .Values.global.domain) .Values.ingress.hosts.idp }}
+{{- end }}
+{{- end }}
+{{- if .Values.global.externalSecrets.enabled }}
+
+Secrets come from the ClusterSecretStore "{{ .Values.global.externalSecrets.secretStoreRef.name }}" under {{ .Values.global.externalSecrets.remoteKeyPrefix }}/<service>.
+A pod stays Pending/CreateContainerConfigError until the ExternalSecret reports SecretSynced:
+  kubectl -n {{ .Release.Namespace }} get externalsecret
+{{- end }}
+
+Every namespace policy is default-deny; a connection that times out is a missing
+networkPolicy rule in values.yaml, not a bug in the service.

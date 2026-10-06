@@ -1,0 +1,130 @@
+# Recording rules for the SLOs in slos.yaml. Hand-written on purpose: every expression is
+# visible and reviewable, there is no generator to trust or upgrade.
+#
+# Inputs are Spring Boot Micrometer metrics scraped from the API (system-api):
+#   http_server_requests_seconds_count / _bucket   (labels job, status, uri, le)
+# Latency needs the histogram buckets: set, per service,
+#   management.metrics.distribution.slo.http.server.requests=300ms,500ms,1s
+# so the le="0.3" and le="0.5" buckets below exist (the le label is the bucket bound in seconds).
+# Actuator and probe traffic is excluded: it is not user experience.
+#
+# Naming follows the Prometheus convention level:metric:operations.
+groups:
+  - name: slo.availability.error_ratio
+    interval: 30s
+    rules:
+      - record: slo:availability_error_ratio:rate5m
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[5m]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[5m]))
+      - record: slo:availability_error_ratio:rate30m
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[30m]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[30m]))
+      - record: slo:availability_error_ratio:rate1h
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[1h]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[1h]))
+      - record: slo:availability_error_ratio:rate2h
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[2h]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[2h]))
+      - record: slo:availability_error_ratio:rate6h
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[6h]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[6h]))
+      - record: slo:availability_error_ratio:rate1d
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[1d]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[1d]))
+      - record: slo:availability_error_ratio:rate3d
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",status=~"5..",uri!~"/actuator.*|/healthz|/readyz"}[3d]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[3d]))
+
+  # Objectives as data, so the alert expressions are written once for every service.
+  - name: slo.objectives
+    interval: 1m
+    rules:
+      - record: slo:availability_objective
+        expr: vector(0.999)
+        labels: {job: system-api}
+      - record: slo:latency_objective
+        expr: vector(0.99)
+        labels: {job: system-api}
+
+  # Latency error ratio = share of requests slower than the threshold:
+  # API 500 ms (le="0.5").
+  - name: slo.latency.api.error_ratio
+    interval: 30s
+    rules:
+      - record: slo:latency_error_ratio:rate5m
+        expr: |
+          1 - (
+            sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[5m]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[5m]))
+          )
+        labels:
+          latency_threshold: "0.5"
+      - record: slo:latency_error_ratio:rate30m
+        expr: |
+          1 - (
+            sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[30m]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[30m]))
+          )
+        labels:
+          latency_threshold: "0.5"
+      - record: slo:latency_error_ratio:rate1h
+        expr: |
+          1 - (
+            sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[1h]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[1h]))
+          )
+        labels:
+          latency_threshold: "0.5"
+      - record: slo:latency_error_ratio:rate2h
+        expr: |
+          1 - (
+            sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[2h]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[2h]))
+          )
+        labels:
+          latency_threshold: "0.5"
+      - record: slo:latency_error_ratio:rate6h
+        expr: |
+          1 - (
+            sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[6h]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[6h]))
+          )
+        labels:
+          latency_threshold: "0.5"
+      - record: slo:latency_error_ratio:rate1d
+        expr: |
+          1 - (
+            sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[1d]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[1d]))
+          )
+        labels:
+          latency_threshold: "0.5"
+      - record: slo:latency_error_ratio:rate3d
+        expr: |
+          1 - (
+            sum by (job) (rate(http_server_requests_seconds_bucket{job="system-api",le="0.5",uri!~"/actuator.*|/healthz|/readyz"}[3d]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{job="system-api",uri!~"/actuator.*|/healthz|/readyz"}[3d]))
+          )
+        labels:
+          latency_threshold: "0.5"

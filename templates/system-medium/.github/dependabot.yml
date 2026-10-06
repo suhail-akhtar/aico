@@ -1,0 +1,47 @@
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /services/api
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      spring:
+        patterns: ["org.springframework*", "org.springdoc*"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: npm
+    directory: /services/web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Base images pinned by digest in the Dockerfiles and compose.yaml.
+  - package-ecosystem: docker
+    directory: /services/api
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(docker)"
+  - package-ecosystem: docker
+    directory: /services/web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(docker)"
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(docker)"
+
+  # Actions are pinned by commit SHA; Dependabot rewrites both the SHA and the version comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(ci)"

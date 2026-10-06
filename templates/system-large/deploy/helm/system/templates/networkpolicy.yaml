@@ -1,0 +1,88 @@
+{{- /*
+Zero trust between pods: one default-deny for the namespace, then an explicit allow per
+service built from services.<name>.networkPolicy. The matrix lives in values.yaml, next to
+the services, so a reviewer sees "the API may reach Valkey" in the same diff as the code that
+does it. Policies only ever allow: the default-deny below is what makes them mean anything.
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- if .Values.networkPolicy.defaultDeny }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/part-of: system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+{{- end }}
+{{- range $name, $raw := .Values.services }}
+{{- $svc := mergeOverwrite (deepCopy $.Values.serviceDefaults) (deepCopy $raw) }}
+{{- if $svc.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+{{- $np := $svc.networkPolicy }}
+{{- $egressRules := concat (default (list) $np.egress) (default (list) $np.extraEgress) }}
+{{- $scrape := and $.Values.monitoring.serviceMonitor.enabled $svc.metrics.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "system.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "system.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  {{- if or $np.ingressFrom $scrape }}
+  ingress:
+    {{- range $np.ingressFrom }}
+    - from:
+        {{- include "system.peer" (dict "root" $ "peer" .) | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $svc.service.port }}
+    {{- end }}
+    {{- if $scrape }}
+    # Prometheus scrape: the only rule beyond the documented matrix, and only when the
+    # ServiceMonitor is enabled.
+    - from:
+        {{- include "system.peer" (dict "root" $ "peer" "prometheus") | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $svc.service.port }}
+    {{- end }}
+  {{- else }}
+  ingress: []
+  {{- end }}
+  {{- if or $np.dns $egressRules }}
+  egress:
+    {{- if $np.dns }}
+    - to:
+        {{- include "system.peer" (dict "root" $ "peer" "kube-dns") | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    {{- range $egressRules }}
+    - to:
+        {{- include "system.peer" (dict "root" $ "peer" .to) | nindent 8 }}
+      ports:
+        {{- $proto := default "TCP" .protocol }}
+        {{- range .ports }}
+        - protocol: {{ $proto }}
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+  {{- else }}
+  egress: []
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

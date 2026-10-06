@@ -1,0 +1,16 @@
+# Remote state. Copy to backend.tf, fill in the bucket, and run `terraform init`.
+#
+# Create the state bucket once, outside this configuration (versioned, encrypted, private,
+# and not managed by the state it holds). Locking uses the S3 lock file (Terraform 1.10+):
+# no DynamoDB table is needed. Use one key per environment so a dev apply can never touch
+# prod state, and give the CI role of each environment access to its own key only.
+#
+# terraform {
+#   backend "s3" {
+#     bucket       = "example-org-terraform-state"
+#     key          = "system/dev/terraform.tfstate"
+#     region       = "eu-west-1"
+#     encrypt      = true
+#     use_lockfile = true
+#   }
+# }

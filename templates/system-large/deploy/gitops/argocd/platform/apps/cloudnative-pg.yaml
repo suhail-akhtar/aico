@@ -1,0 +1,35 @@
+# Wave 0. CloudNativePG operator 1.30.1 (chart 0.29.1). The Cluster, Pooler and Database
+# objects come from deploy/kustomize (the system-<env>-platform Applications).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudnative-pg
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: cloudnative-pg
+      targetRevision: 0.29.1
+      helm:
+        releaseName: cnpg
+        valueFiles:
+          - $values/deploy/gitops/argocd/platform/values/cloudnative-pg.yaml
+    - repoURL: https://github.com/example-org/system.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The CRDs exceed the client-side apply annotation size limit.
+      - ServerSideApply=true

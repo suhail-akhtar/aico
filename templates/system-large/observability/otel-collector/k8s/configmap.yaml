@@ -1,0 +1,121 @@
+# The collector pipeline for Kubernetes, mounted by the opentelemetry-collector chart through
+# configMap.existingName (the chart requires the key to be named "relay"). Same pipeline as
+# ../docker/config.yaml plus the k8sattributes processor, which tags telemetry with the pod,
+# namespace and Deployment it came from (the chart's kubernetesAttributes preset, enabled in
+# the chart values, grants the RBAC for that lookup).
+#
+# Backends default to in-cluster service names in the observability namespace; override them
+# with env on the Deployment (chart values `extraEnvs`) when yours live elsewhere.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/part-of: system-observability
+data:
+  relay: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      k8sattributes:
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.deployment.name
+            - k8s.node.name
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.ip
+          - sources:
+              - from: connection
+      resource:
+        attributes:
+          - key: deployment.environment.name
+            value: ${env:DEPLOYMENT_ENV:-cluster}
+            action: upsert
+      tail_sampling:
+        decision_wait: 10s
+        num_traces: 50000
+        expected_new_traces_per_sec: 200
+        policies:
+          - name: errors
+            type: status_code
+            status_code:
+              status_codes: [ERROR]
+          - name: slow
+            type: latency
+            latency:
+              threshold_ms: 1000
+          - name: healthy-sample
+            type: probabilistic
+            probabilistic:
+              sampling_percentage: 10
+      batch:
+        send_batch_size: 8192
+        send_batch_max_size: 10000
+        timeout: 5s
+
+    exporters:
+      otlp/tempo:
+        endpoint: ${env:TEMPO_ENDPOINT:-tempo.observability.svc.cluster.local:4317}
+        tls:
+          insecure: true
+        sending_queue:
+          enabled: true
+          queue_size: 5000
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 120s
+      prometheusremotewrite:
+        endpoint: ${env:PROMETHEUS_RW_URL:-http://prometheus.monitoring.svc.cluster.local:9090/api/v1/write}
+        resource_to_telemetry_conversion:
+          enabled: true
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 120s
+      otlphttp/loki:
+        endpoint: ${env:LOKI_OTLP_URL:-http://loki.observability.svc.cluster.local:3100/otlp}
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 120s
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      extensions: [health_check]
+      telemetry:
+        logs:
+          level: info
+          encoding: json
+        metrics:
+          level: normal
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource, tail_sampling, batch]
+          exporters: [otlp/tempo]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource, batch]
+          exporters: [prometheusremotewrite]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource, batch]
+          exporters: [otlphttp/loki]

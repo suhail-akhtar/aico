@@ -1,0 +1,49 @@
+# OpenTelemetry Collector (chart 0.175.1) running the contrib distribution 0.162.0, so the
+# tail_sampling and k8sattributes components are available. The pipeline configuration is not
+# duplicated here: it lives in observability/otel-collector/k8s/configmap.yaml (a ConfigMap
+# with the key "relay") and the chart mounts it by name.
+mode: deployment
+fullnameOverride: otel-collector
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: 0.162.0
+command:
+  name: otelcol-contrib
+configMap:
+  create: false
+  existingName: otel-collector-config
+replicaCount: 2
+# RBAC for the k8sattributes processor in the ConfigMap pipeline (the preset also adds a
+# processor to the chart-generated config, which is unused because configMap.create is false).
+presets:
+  kubernetesAttributes:
+    enabled: true
+# The namespace enforces Pod Security "restricted".
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+ports:
+  otlp:
+    enabled: true
+  otlp-http:
+    enabled: true
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

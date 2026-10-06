@@ -1,0 +1,116 @@
+# Cause-oriented alerts for the platform: a target that vanished, a JVM about to fall over,
+# a database that cannot replicate or archive. They complement the
+# symptom-oriented SLO burn alerts (../slo): the SLO alert says users are hurting, these say
+# what to look at. Each alert's runbook_url is a
+# placeholder under example.test: point it at your own runbooks (none ship with this bundle).
+#
+# Metric sources: Spring Boot Micrometer pushed over OTLP through the collector (jvm_*, hikaricp_*,
+# http_server_*; the medium API does not expose /actuator/prometheus), CloudNativePG (cnpg_*),
+# kube-state-metrics (kube_deployment_*). Metric names depend on exporter versions: verify them
+# against your own Prometheus before relying on an alert (nothing here was run against a cluster).
+groups:
+  - name: system.services
+    rules:
+      - alert: ServiceTargetDown
+        expr: kube_deployment_status_replicas_available{deployment=~"web|api|worker"} == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Deployment {{ $labels.deployment }} has no available replica"
+          description: "kube-state-metrics reports zero available replicas of {{ $labels.deployment }} for 5 minutes: pods are crashing, failing readiness (database, Valkey) or blocked by a NetworkPolicy."
+          runbook_url: https://example.test/runbooks/ServiceTargetDown.md
+      - alert: HighHttp5xxRate
+        expr: |
+          sum by (job) (rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[5m])) > 1
+          and
+          sum by (job) (rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[5m]))
+            / sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "{{ $labels.job }} returns more than 5% 5xx"
+          description: "{{ $labels.job }} has been serving 5xx at over 1 req/s and over 5% of its traffic for 10 minutes."
+          runbook_url: https://example.test/runbooks/HighHttp5xxRate.md
+      - alert: JvmHeapNearLimit
+        expr: |
+          sum by (job, instance) (jvm_memory_used_bytes{area="heap"})
+            / sum by (job, instance) (jvm_memory_max_bytes{area="heap"}) > 0.9
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} heap is above 90%"
+          description: "Heap has stayed above 90% of its maximum for 15 minutes: a leak, an undersized limit, or a load spike that will end in an OOM kill."
+          runbook_url: https://example.test/runbooks/JvmHeapNearLimit.md
+      - alert: JvmGcPressure
+        expr: sum by (job, instance) (rate(jvm_gc_pause_seconds_sum[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} spends over 10% of its time in GC pauses"
+          description: "GC pauses take {{ $value | humanizePercentage }} of wall-clock time."
+          runbook_url: https://example.test/runbooks/JvmGcPressure.md
+      - alert: HikariPoolSaturated
+        expr: |
+          sum by (job, instance) (hikaricp_connections_active) / sum by (job, instance) (hikaricp_connections_max) > 0.9
+          or
+          sum by (job, instance) (hikaricp_connections_pending) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} database connection pool is saturated"
+          description: "The JDBC pool is over 90% busy or threads are waiting for a connection."
+          runbook_url: https://example.test/runbooks/HikariPoolSaturated.md
+
+  - name: system.postgres
+    rules:
+      - alert: PostgresInstanceDown
+        expr: cnpg_collector_up == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "PostgreSQL instance {{ $labels.pod }} is down"
+          description: "The CloudNativePG exporter reports the instance is not accepting connections."
+          runbook_url: https://example.test/runbooks/PostgresInstanceDown.md
+      - alert: PostgresReplicationLag
+        expr: max by (pod) (cnpg_pg_replication_lag) > 30
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "PostgreSQL replica {{ $labels.pod }} is {{ $value }}s behind"
+          description: "A replica lags the primary by more than 30 seconds: a failover now would lose that window (async replication) or block (sync)."
+          runbook_url: https://example.test/runbooks/PostgresReplicationLag.md
+      - alert: PostgresConnectionsNearLimit
+        expr: |
+          sum by (pod) (cnpg_backends_total) / max by (pod) (cnpg_pg_settings_setting{name="max_connections"}) > 0.8
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "PostgreSQL {{ $labels.pod }} is using over 80% of max_connections"
+          description: "Backends are close to max_connections. PgBouncer should be absorbing client connections: look for a service bypassing it or a leak."
+          runbook_url: https://example.test/runbooks/PostgresConnectionsNearLimit.md
+      - alert: PostgresBackupFailing
+        expr: increase(cnpg_pg_stat_archiver_failed_count[1h]) > 0
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "PostgreSQL {{ $labels.pod }} is failing to archive WAL"
+          description: "WAL archiving to object storage has failed for 15 minutes. Point-in-time recovery has a gap and the WAL volume will fill."
+          runbook_url: https://example.test/runbooks/PostgresBackupFailing.md
+      - alert: PgbouncerClientsWaiting
+        expr: sum by (pod) (cnpg_pgbouncer_pools_cl_waiting) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "PgBouncer {{ $labels.pod }} has clients waiting for a server connection"
+          description: "Clients queue at the pooler: default_pool_size is too small for the load, or queries hold connections too long."
+          runbook_url: https://example.test/runbooks/PgbouncerClientsWaiting.md

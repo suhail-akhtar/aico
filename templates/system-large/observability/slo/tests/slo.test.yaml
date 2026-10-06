@@ -1,0 +1,77 @@
+# Unit tests for the burn-rate rules: promtool test rules slo/tests/slo.test.yaml (run from
+# observability/, so the rule_files paths below resolve). A rule nobody has seen fire is a
+# rule nobody can trust.
+rule_files:
+  - ../slo-recording.rules.yaml
+  - ../slo-alerts.rules.yaml
+
+evaluation_interval: 30s
+
+tests:
+  # 5% of API requests fail for two hours: far above 14.4 x the 0.1% budget on both the
+  # 1h and 5m windows, so the fast-burn page fires.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="system-api",status="200",uri="/api/tasks"}'
+        values: "0+950x180"
+      - series: 'http_server_requests_seconds_count{job="system-api",status="500",uri="/api/tasks"}'
+        values: "0+50x180"
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: SloAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels:
+              job: system-api
+              severity: page
+              slo: availability
+            exp_annotations:
+              summary: "system-api is burning its availability error budget fast"
+              description: "5xx ratio is 5% on system-api, far above what its availability objective allows."
+              runbook_url: https://example.test/runbooks/SloAvailabilityFastBurn.md
+
+  # Healthy traffic (0.05% errors, inside the 0.1% budget): nothing fires.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="system-api",status="200",uri="/api/tasks"}'
+        values: "0+999x180"
+      - series: 'http_server_requests_seconds_count{job="system-api",status="500",uri="/api/tasks"}'
+        values: "0+0.5x180"
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: SloAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: SloAvailabilitySlowBurn
+        exp_alerts: []
+
+  # Probe traffic is excluded: 100% failing /readyz must not burn the user-facing budget.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="system-api",status="200",uri="/api/tasks"}'
+        values: "0+500x180"
+      - series: 'http_server_requests_seconds_count{job="system-api",status="503",uri="/readyz"}'
+        values: "0+500x180"
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: SloAvailabilityFastBurn
+        exp_alerts: []
+
+  # 10% of requests slower than 500 ms against a 1% latency budget fires the latency page.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_bucket{job="system-api",le="0.5",uri="/api/tasks"}'
+        values: "0+900x180"
+      - series: 'http_server_requests_seconds_count{job="system-api",uri="/api/tasks"}'
+        values: "0+1000x180"
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: SloLatencyFastBurn
+        exp_alerts:
+          - exp_labels:
+              job: system-api
+              severity: page
+              slo: latency
+            exp_annotations:
+              summary: "system-api is burning its latency error budget fast"
+              description: "10% of system-api requests are slower than the latency threshold (the API threshold is 500 ms)."
+              runbook_url: https://example.test/runbooks/SloLatencyFastBurn.md

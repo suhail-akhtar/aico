@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars (git-ignored). Nothing here is secret; it is per-person detail.
+region = "eu-west-1"
+owner  = "platform-team"
+
+# The CI role that applies this configuration and your SSO administrator role get
+# cluster-admin through EKS access entries. The production API stays private.
+# admin_principal_arns = ["arn:aws:iam::123456789012:role/AWSReservedSSO_Administrator_abcdef"]
+
+# false = run PostgreSQL in the cluster with CloudNativePG instead of RDS.
+# create_rds = true

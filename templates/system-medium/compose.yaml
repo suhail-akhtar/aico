@@ -1,0 +1,274 @@
+# The whole system on one machine: `make up` (or `docker compose up --build --wait`).
+#
+#   http://localhost:8080   the app (Traefik: "/" is the web app, "/api" "/oauth2" "/login" the API)
+#   http://localhost:8180   the identity provider (Keycloak, through Traefik); its public URL is the
+#                           OIDC issuer, so browsers and the API see the same address
+#   http://localhost:8025   Mailpit (every email the system sends lands here)
+#
+# Everything is published on 127.0.0.1 only. Secrets are never written here: each ${VAR:?} comes
+# from the git-ignored .env (created by `make setup`, or by AICO from .env.example with random
+# values). Hardening applied to every container: no capabilities, no privilege escalation, read-only
+# root filesystem where the image allows it, named volumes only, no Docker socket anywhere.
+name: system-medium
+
+x-hardened: &hardened
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+x-app-env: &app-env
+  SPRING_PROFILES_ACTIVE: prod
+  DATABASE_URL: jdbc:postgresql://postgres:5432/app
+  DATABASE_USER: app
+  DATABASE_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required, run make setup}
+  VALKEY_HOST: valkey
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD is required, run make setup}
+  # The issuer is the PUBLIC address of Keycloak; the "idp.localhost" alias on the Traefik service
+  # makes it reachable from this container too, so the discovery document and every token agree.
+  OIDC_ISSUER_URI: http://idp.localhost:${IDP_PORT:-8180}/realms/app
+  OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET is required, run make setup}
+  APP_PUBLIC_URL: http://localhost:${APP_PORT:-8080}
+  S3_ENDPOINT: http://seaweedfs:8333
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required, run make setup}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required, run make setup}
+  S3_CREATE_BUCKET: "true"
+  FLAGD_HOST: flagd
+  SMTP_HOST: mailpit
+  # Telemetry export is off here (APP_OTEL_ENABLED=false by default). Point
+  # OTEL_EXPORTER_OTLP_ENDPOINT at a collector and set APP_OTEL_ENABLED=true to turn it on;
+  # the "large" stage of docs/ARCHITECTURE.md adds the collector and dashboards.
+  # A local stack keeps the API explorer on; the prod profile turns it off unless asked.
+  APP_DOCS_ENABLED: "true"
+  JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp"
+
+x-app-depends: &app-depends
+  postgres: { condition: service_healthy }
+  valkey: { condition: service_healthy }
+  keycloak: { condition: service_healthy }
+  traefik: { condition: service_healthy }
+  seaweedfs: { condition: service_healthy }
+  mailpit: { condition: service_healthy }
+  flagd: { condition: service_started }
+
+services:
+  # ---- front door ------------------------------------------------------------------------------
+  traefik:
+    image: traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
+    <<: *hardened
+    # Static configuration as flags (a flag set and a file cannot be mixed). The identity provider's
+    # entry point listens on the port it is published on, because that port is part of the OIDC
+    # issuer URL the API calls from inside this network (idp.localhost:<IDP_PORT>).
+    command:
+      - --global.checkNewVersion=false
+      - --global.sendAnonymousUsage=false
+      - --entryPoints.web.address=:8080
+      - --entryPoints.web.transport.respondingTimeouts.readTimeout=30s
+      - --entryPoints.web.transport.respondingTimeouts.writeTimeout=60s
+      - --entryPoints.web.transport.respondingTimeouts.idleTimeout=60s
+      - --entryPoints.web.forwardedHeaders.insecure=false
+      - --entryPoints.idp.address=:${IDP_PORT:-8180}
+      - --entryPoints.idp.forwardedHeaders.insecure=false
+      - --entryPoints.ping.address=:8082
+      - --ping.entryPoint=ping
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=false
+      - --api.dashboard=false
+      - --log.level=INFO
+      - --log.format=json
+      - --accessLog.format=json
+      - --accessLog.fields.defaultMode=keep
+      - --accessLog.fields.headers.defaultMode=drop
+      - --accessLog.fields.headers.names.User-Agent=keep
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+      - "127.0.0.1:${IDP_PORT:-8180}:${IDP_PORT:-8180}"
+    volumes:
+      - ./infra/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+    networks:
+      default:
+        # The public hostname of the identity provider, resolvable inside the network.
+        aliases: [idp.localhost]
+    read_only: true
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping", "--ping.entryPoint=ping", "--entryPoints.ping.address=:8082"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---- the application -------------------------------------------------------------------------
+  web:
+    build: ./services/web
+    image: system-web:local
+    <<: *hardened
+    read_only: true
+    tmpfs: [/tmp]
+
+  api:
+    build: ./services/api
+    image: system-api:local
+    <<: *hardened
+    depends_on: *app-depends
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: system-api
+      # Web replicas never run the background jobs; the worker does.
+      APP_JOBS_ENABLED: "false"
+    read_only: true
+    tmpfs: [/tmp]
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 60s
+      retries: 6
+
+  # The same image as the API, with the jobs switched on: retries outbox deliveries that failed and
+  # purges what is old. Scale the API and the worker independently.
+  worker:
+    image: system-api:local
+    <<: *hardened
+    depends_on:
+      <<: *app-depends
+      api: { condition: service_healthy }
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: system-worker
+      APP_JOBS_ENABLED: "true"
+    read_only: true
+    tmpfs: [/tmp]
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 60s
+      retries: 6
+
+  # ---- data ------------------------------------------------------------------------------------
+  postgres:
+    image: postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    <<: *hardened
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, FOWNER, DAC_OVERRIDE]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required, run make setup}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required, run make setup}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required, run make setup}
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11
+    <<: *hardened
+    command: ["sh", "-c", 'exec valkey-server --requirepass "$$VALKEY_PASSWORD" --save 60 1 --appendonly no']
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD is required, run make setup}
+      REDISCLI_AUTH: ${VALKEY_PASSWORD}
+    volumes:
+      - valkey-data:/data
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
+    <<: *hardened
+    entrypoint: ["sh", "/entrypoint.sh"]
+    # The image's data directory belongs to its "seaweed" user (1000); with every capability dropped,
+    # root could not write there, so run as that user.
+    user: "1000:1000"
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required, run make setup}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required, run make setup}
+    volumes:
+      - seaweed-data:/data
+      - ./infra/seaweedfs/entrypoint.sh:/entrypoint.sh:ro
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status && wget -q -O /dev/null http://127.0.0.1:8333/status || exit 1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 15s
+      retries: 20
+
+  # ---- identity --------------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0@sha256:b0f60d489d51c5d113390bdf5461d4c06e6051be026c05549f2e1e10ec352bcc
+    <<: *hardened
+    # start-dev is Keycloak's development mode (plain HTTP). For production use `start` behind TLS
+    # with an explicit hostname: see docs/OPERATIONS.md.
+    command: ["start-dev", "--import-realm"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required, run make setup}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required, run make setup}
+      KC_HTTP_PORT: "8180"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: http://idp.localhost:${IDP_PORT:-8180}
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      # Substituted into the realm import (infra/keycloak/realm-app.json): nothing secret is in git.
+      APP_PORT: ${APP_PORT:-8080}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET is required, run make setup}
+      AUTOMATION_CLIENT_SECRET: ${AUTOMATION_CLIENT_SECRET:?AUTOMATION_CLIENT_SECRET is required, run make setup}
+      DEV_USER_PASSWORD: ${DEV_USER_PASSWORD:?DEV_USER_PASSWORD is required, run make setup}
+    volumes:
+      - ./infra/keycloak/realm-app.json:/opt/keycloak/data/import/realm-app.json:ro
+    healthcheck:
+      # The image has no curl: speak HTTP to the management port with bash.
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 5s
+      timeout: 5s
+      start_period: 40s
+      retries: 30
+
+  # ---- flags and mail ----------------------------------------------------------------------------
+  flagd:
+    image: ghcr.io/open-feature/flagd:v0.17.0@sha256:c9f21380dfe51d3ad662a116bc350c7692dead7a8d1e640aa0f6b40cd3d966df
+    <<: *hardened
+    command: ["start", "--uri", "file:/etc/flagd/flags.json"]
+    volumes:
+      - ./infra/flagd/flags.json:/etc/flagd/flags.json:ro
+    read_only: true
+
+  mailpit:
+    image: axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+    <<: *hardened
+    environment:
+      MP_MAX_MESSAGES: "500"
+    ports:
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  valkey-data:
+  seaweed-data:

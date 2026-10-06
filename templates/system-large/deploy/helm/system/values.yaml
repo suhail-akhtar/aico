@@ -1,0 +1,270 @@
+# Defaults for the system chart. Every environment overlays this file with values-<env>.yaml
+# (dev | staging | prod); values.schema.json rejects unknown keys and wrong types, so a
+# typo fails `helm lint` / `helm template` instead of silently doing nothing.
+#
+# One release per namespace: resources are named by service key (web, api, worker) so the
+# services reach each other as http://api:8080, exactly as in docker compose.
+#
+# NO SECRET VALUES BELONG HERE. Secrets are ExternalSecret references (global.externalSecrets);
+# the values live in the secret manager behind the ClusterSecretStore "platform".
+
+global:
+  environment: dev            # dev | staging | prod; labels telemetry and picks defaults
+  domain: example.test        # public hosts are app.<domain> and idp.<domain>
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []        # [{name: ghcr-pull}] when the registry is private
+  # Production sets this true: a tag is mutable, a digest is not. The promotion PR writes
+  # services.<name>.image.digest (see deploy/gitops/README.md).
+  requireImageDigest: false
+  commonLabels: {}
+  commonAnnotations: {}
+  topologySpread:
+    enabled: true
+    zone: ScheduleAnyway      # prod uses DoNotSchedule when there are always >= 3 zones
+    node: ScheduleAnyway
+  externalSecrets:
+    enabled: true
+    refreshInterval: 1h
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: platform
+    # Remote key = <prefix>/<service>, a JSON secret whose properties are the env var names.
+    remoteKeyPrefix: system/dev
+  # Non-secret environment shared by every Spring service (services with springEnv: true).
+  env:
+    PORT: "8080"
+    SPRING_PROFILES_ACTIVE: prod
+    OIDC_ISSUER_URI: https://idp.example.test/realms/app
+    APP_OTEL_ENABLED: "true"
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
+
+ingress:
+  enabled: true
+  controller: traefik         # traefik | generic ("generic": set annotations yourself)
+  className: traefik
+  hosts:
+    app: ""                   # default app.<global.domain>
+    idp: ""                   # default idp.<global.domain>
+  tls:
+    secretName: system-tls    # issued by cert-manager or synced by an ExternalSecret; never in git
+  annotations: {}
+  rateLimit:
+    enabled: true             # Traefik Middleware "ratelimit"; per client IP
+    average: 50               # requests per second
+    burst: 100
+    proxyDepth: 1             # how many trusted proxies sit in front (X-Forwarded-For depth)
+  idp:
+    enabled: true             # idp.<domain> -> Keycloak Service in this namespace
+    service: keycloak
+    port: 8080
+
+monitoring:
+  serviceMonitor:
+    enabled: false            # needs the prometheus-operator CRDs (deploy/gitops/argocd/platform)
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}                # e.g. {release: kube-prometheus-stack} if your Prometheus selects by label
+  prometheusRule:
+    enabled: false
+    labels: {}
+    runbookBaseUrl: https://example.test/runbooks
+
+networkPolicy:
+  enabled: true
+  defaultDeny: true           # kustomize/base renders the same baseline; two identical policies are harmless
+  # Named peers for services.<name>.networkPolicy. A service key is also a valid peer name
+  # (it selects that service's pods). Each value is a list of NetworkPolicyPeer objects.
+  peers:
+    kube-dns:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+    ingress-controller:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: traefik
+    prometheus:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: monitoring
+    # CloudNativePG: PgBouncer pooler pods and the instances behind system-db-rw.
+    postgres:
+      - podSelector:
+          matchLabels:
+            cnpg.io/poolerName: system-db-pooler-rw
+      - podSelector:
+          matchLabels:
+            cnpg.io/cluster: system-db
+    valkey:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: valkey
+    flagd:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: flagd
+    keycloak:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: keycloak
+    otel:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: observability
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: opentelemetry-collector
+    # Object storage and SMTP are outside the cluster in production: NetworkPolicy cannot
+    # match a DNS name, so the allow is "any public address, this port, no RFC1918".
+    # Narrow the CIDR to your provider's ranges if you can; dev swaps both for in-cluster pods.
+    s3:
+      - ipBlock:
+          cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+    smtp:
+      - ipBlock:
+          cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+
+# Defaults merged under every entry of services (Helm cannot default inside a map of maps).
+# Only non-empty, non-zero defaults belong here: the merge keeps the default when an overlay
+# sets false/0/empty, so an overlay cannot "turn a default off" through this block.
+serviceDefaults:
+  terminationGracePeriodSeconds: 45
+  preStopSleepSeconds: 10     # keep below terminationGracePeriodSeconds
+  probes:
+    startup: {path: /healthz, periodSeconds: 5, failureThreshold: 36}   # up to 3 minutes for a cold JVM
+    readiness: {path: /readyz, periodSeconds: 10, failureThreshold: 3}
+    liveness: {path: /healthz, periodSeconds: 10, failureThreshold: 3}
+
+# The service map. Adding a service is adding an entry; nothing else in the chart changes.
+services:
+  web:
+    enabled: true
+    image: {repository: ghcr.io/example-org/system-web, tag: 0.1.0, digest: ""}
+    springEnv: false          # static SPA: none of the Spring environment
+    env: {}
+    replicas: 2
+    resources:
+      requests: {cpu: 50m, memory: 32Mi}
+      limits: {cpu: 250m, memory: 128Mi}
+    autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 75}
+    pdb: {enabled: true, maxUnavailable: 1}
+    service: {type: ClusterIP, port: 8080}
+    ingress:
+      enabled: true
+      paths:
+        - {path: /, pathType: Prefix}
+    secrets: {enabled: false, keys: []}
+    metrics: {enabled: false, path: /actuator/prometheus}
+    extraVolumes: []
+    networkPolicy:
+      dns: false              # matrix: web has no egress at all
+      ingressFrom: [ingress-controller]
+      egress: []
+
+  # The Spring Modulith API of the medium tier (image system-api, port 8080, /healthz /readyz).
+  # Serves HTTP; the background jobs are off here (APP_JOBS_ENABLED=false) exactly as in compose.
+  api:
+    enabled: true
+    image: {repository: ghcr.io/example-org/system-api, tag: 0.1.0, digest: ""}
+    springEnv: true
+    env:
+      DATABASE_URL: jdbc:postgresql://system-db-pooler-rw:5432/app
+      DATABASE_USER: app
+      OIDC_CLIENT_ID: system-web
+      OIDC_AUDIENCE: system-api
+      VALKEY_HOST: valkey
+      S3_ENDPOINT: https://s3.example.test
+      S3_BUCKET: attachments
+      S3_PATH_STYLE: "false"
+      FLAGD_HOST: flagd
+      SMTP_HOST: smtp.example.test
+      SMTP_PORT: "587"
+      SMTP_USER: system
+      SMTP_AUTH: "true"
+      SMTP_STARTTLS: "true"
+      APP_JOBS_ENABLED: "false"
+    replicas: 2
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 768Mi}
+    autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 8, targetCPUUtilizationPercentage: 70, targetMemoryUtilizationPercentage: 80}
+    pdb: {enabled: true, maxUnavailable: 1}
+    service: {type: ClusterIP, port: 8080}
+    ingress:
+      enabled: true
+      paths:
+        - {path: /api, pathType: Prefix}
+        - {path: /oauth2, pathType: Prefix}
+        - {path: /login, pathType: Prefix}
+    secrets:
+      enabled: true
+      keys: [DATABASE_PASSWORD, VALKEY_PASSWORD, OIDC_CLIENT_SECRET, S3_ACCESS_KEY, S3_SECRET_KEY, SMTP_PASSWORD]
+    # The API exports metrics over OTLP (the collector), it does not expose /actuator/prometheus.
+    metrics: {enabled: false, path: /actuator/prometheus}
+    extraVolumes: []
+    networkPolicy:
+      dns: true
+      ingressFrom: [ingress-controller]
+      egress:
+        - {to: postgres, ports: [5432]}
+        - {to: valkey, ports: [6379]}
+        - {to: keycloak, ports: [8080, 443]}
+        - {to: s3, ports: [443]}
+        - {to: smtp, ports: [587, 465]}
+        - {to: otel, ports: [4317, 4318]}
+        - {to: flagd, ports: [8013]}
+
+  # The same image as the API with the background jobs on (outbox retries, purges). Nothing
+  # calls it over HTTP; scale it independently of the API. It reads the API's remote secret.
+  worker:
+    enabled: true
+    image: {repository: ghcr.io/example-org/system-api, tag: 0.1.0, digest: ""}
+    springEnv: true
+    env:
+      DATABASE_URL: jdbc:postgresql://system-db-pooler-rw:5432/app
+      DATABASE_USER: app
+      OIDC_CLIENT_ID: system-web
+      OIDC_AUDIENCE: system-api
+      VALKEY_HOST: valkey
+      S3_ENDPOINT: https://s3.example.test
+      S3_BUCKET: attachments
+      S3_PATH_STYLE: "false"
+      FLAGD_HOST: flagd
+      SMTP_HOST: smtp.example.test
+      SMTP_PORT: "587"
+      SMTP_USER: system
+      SMTP_AUTH: "true"
+      SMTP_STARTTLS: "true"
+      APP_JOBS_ENABLED: "true"
+    replicas: 1
+    resources:
+      requests: {cpu: 100m, memory: 384Mi}
+      limits: {cpu: 500m, memory: 640Mi}
+    autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 1, targetCPUUtilizationPercentage: 75}
+    pdb: {enabled: false, maxUnavailable: 1}
+    service: {type: ClusterIP, port: 8080}
+    ingress: {enabled: false, paths: []}
+    secrets:
+      enabled: true
+      remoteName: api
+      keys: [DATABASE_PASSWORD, VALKEY_PASSWORD, OIDC_CLIENT_SECRET, S3_ACCESS_KEY, S3_SECRET_KEY, SMTP_PASSWORD]
+    metrics: {enabled: false, path: /actuator/prometheus}
+    extraVolumes: []
+    networkPolicy:
+      dns: true
+      ingressFrom: []         # matrix: nothing calls the worker over HTTP; it works from the database
+      egress:
+        - {to: postgres, ports: [5432]}
+        - {to: valkey, ports: [6379]}
+        - {to: keycloak, ports: [8080, 443]}
+        - {to: s3, ports: [443]}
+        - {to: smtp, ports: [587, 465]}
+        - {to: otel, ports: [4317, 4318]}
+        - {to: flagd, ports: [8013]}

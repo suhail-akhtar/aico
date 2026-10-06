@@ -1,0 +1,52 @@
+# Routing table. Hostnames are compose service names on the private network; the API, the web
+# server and Keycloak publish no ports of their own.
+http:
+  routers:
+    # The API, and the OIDC endpoints it serves for the browser login (BFF).
+    api:
+      rule: >-
+        PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/login`) ||
+        PathPrefix(`/v3/api-docs`) || PathPrefix(`/swagger-ui`)
+      entryPoints: [web]
+      service: api
+      middlewares: [gateway-limit]
+      priority: 100
+    # Everything else is the single-page app.
+    web:
+      rule: PathPrefix(`/`)
+      entryPoints: [web]
+      service: web
+      priority: 1
+    # The identity provider, on its own entry point.
+    idp:
+      rule: PathPrefix(`/`)
+      entryPoints: [idp]
+      service: idp
+      middlewares: [gateway-limit]
+
+  middlewares:
+    # A coarse per-address ceiling at the edge, before a request costs the API anything. The API
+    # keeps its own, finer budgets (see docs/OPERATIONS.md); this one only stops floods.
+    gateway-limit:
+      rateLimit:
+        average: 100
+        period: 1s
+        burst: 200
+
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: http://api:8080
+        healthCheck:
+          path: /healthz
+          interval: 10s
+          timeout: 3s
+    web:
+      loadBalancer:
+        servers:
+          - url: http://web:8080
+    idp:
+      loadBalancer:
+        servers:
+          - url: http://keycloak:8180

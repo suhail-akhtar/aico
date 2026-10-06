@@ -1,0 +1,5 @@
+# Replace @your-org/maintainers with your team or user.
+*                       @your-org/maintainers
+/compose.yaml           @your-org/maintainers
+/deploy/                @your-org/maintainers
+/.github/               @your-org/maintainers

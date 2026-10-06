@@ -1,0 +1,17 @@
+# A ceiling for the whole namespace: a runaway HPA or a bad rollout exhausts this quota,
+# not the cluster. Sized for the dev profile; overlays raise it with the HPA maxima.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: system
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 24Gi
+    pods: "60"
+    persistentvolumeclaims: "12"
+    requests.storage: 200Gi
+    services.loadbalancers: "0"
+    services.nodeports: "0"

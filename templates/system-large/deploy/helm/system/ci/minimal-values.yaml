@@ -1,0 +1,27 @@
+# ct (chart-testing) / validate-cluster fixture: only the edge services (web and api), no autoscaling,
+# no external secrets, generic ingress. Proves the chart renders with the features off.
+global:
+  environment: dev
+  externalSecrets:
+    enabled: false
+ingress:
+  controller: generic
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+  idp:
+    enabled: false
+networkPolicy:
+  defaultDeny: false
+services:
+  web:
+    replicas: 1
+    autoscaling: {enabled: false}
+    pdb: {enabled: false}
+  api:
+    replicas: 1
+    autoscaling: {enabled: false}
+    pdb: {enabled: false}
+    secrets: {enabled: false, keys: []}
+  worker:
+    enabled: false

@@ -1,0 +1,5 @@
+# Accepted trivy findings, each with the reason.
+# S3 access logging on the database backup bucket: needs a dedicated log bucket that the
+# account owner chooses (and that must not log into itself). Everything else in the bucket
+# (KMS, versioning, TLS-only, public access block) is enforced.
+AWS-0089

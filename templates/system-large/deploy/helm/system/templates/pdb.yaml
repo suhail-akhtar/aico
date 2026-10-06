@@ -1,0 +1,25 @@
+{{- range $name, $raw := .Values.services }}
+{{- $svc := mergeOverwrite (deepCopy $.Values.serviceDefaults) (deepCopy $raw) }}
+{{- if and $svc.enabled $svc.pdb.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "system.labels" $ctx | nindent 4 }}
+spec:
+  {{- if $svc.pdb.minAvailable }}
+  minAvailable: {{ $svc.pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ default 1 $svc.pdb.maxUnavailable }}
+  {{- end }}
+  # A pod that never became ready must not block a node drain.
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      {{- include "system.selectorLabels" $ctx | nindent 6 }}
+{{- end }}
+{{- end }}

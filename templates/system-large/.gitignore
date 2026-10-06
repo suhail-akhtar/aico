@@ -1,0 +1,10 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+deploy/kustomize/overlays/rendered-chart-example/chart-rendered.yaml
+deploy/helm/system/charts/
+deploy/helm/system/tests/__snapshot__/
+.env

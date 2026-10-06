@@ -507,9 +507,9 @@ models that read images.
 <details>
 <summary><b>Apps — build real applications, not snippets</b></summary>
 
-Fifteen templates. Nine for Node — a records page over SQLite, a landing page, a Hono JSON API, a
+Eighteen templates. Nine for Node — a records page over SQLite, a landing page, a Hono JSON API, a
 Next.js app with accounts, a metrics dashboard, a docs site, a CLI, an LLM agent
-service and an Expo mobile app — plus starters for Python (FastAPI), Java (Spring Boot), C# (ASP.NET Core), Go and PHP (Laravel) and a React frontend, copy in as files (zero model tokens) with a worked
+service and an Expo mobile app — plus starters for Python (FastAPI), Java (Spring Boot), C# (ASP.NET Core), Go and PHP (Laravel) and a React frontend, plus three full-system bundles (small: React + FastAPI + Postgres behind Traefik and Keycloak; medium: Spring Modulith API, worker, outbox, audit, React, flagd, object storage; large: Helm, kustomize, Terraform, Argo CD or Flux and OpenTelemetry for the medium app), copy in as files (zero model tokens) with a worked
 feature, tests, notes for the agent, a backlog and a deploy script. Or a custom
 stack from a description. The turn cannot end until the app was opened in a real
 browser and its own checks are green; **Deploy** runs the script it ships with. A

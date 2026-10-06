@@ -1,0 +1,101 @@
+# Multi-window, multi-burn-rate alerts (Google SRE Workbook, "Alerting on SLOs"), written by
+# hand. An alert needs a long window to prove the burn is real and a short window to prove it
+# is still happening, so it resolves quickly once fixed:
+#
+#   FastBurn (page)   14.4x budget over 1h  AND 5m   (2% of a 30-day budget gone in an hour)
+#                     6x   over 6h AND 30m           (5% in six hours)
+#   SlowBurn (ticket) 3x   over 1d AND 2h            (10% in a day)
+#                     1x   over 3d AND 6h            (the whole budget would be gone in 30 days)
+#
+# Threshold = burn rate x (1 - objective); the objective comes from slo:*_objective so one
+# expression serves every service. Error ratios: slo-recording.rules.yaml.
+groups:
+  - name: slo.availability.alerts
+    rules:
+      - alert: SloAvailabilityFastBurn
+        expr: |
+          (
+            slo:availability_error_ratio:rate1h > on(job) (14.4 * (1 - slo:availability_objective))
+            and
+            slo:availability_error_ratio:rate5m > on(job) (14.4 * (1 - slo:availability_objective))
+          )
+          or
+          (
+            slo:availability_error_ratio:rate6h > on(job) (6 * (1 - slo:availability_objective))
+            and
+            slo:availability_error_ratio:rate30m > on(job) (6 * (1 - slo:availability_objective))
+          )
+        for: 2m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: "{{ $labels.job }} is burning its availability error budget fast"
+          description: "5xx ratio is {{ $value | humanizePercentage }} on {{ $labels.job }}, far above what its availability objective allows."
+          runbook_url: https://example.test/runbooks/SloAvailabilityFastBurn.md
+      - alert: SloAvailabilitySlowBurn
+        expr: |
+          (
+            slo:availability_error_ratio:rate1d > on(job) (3 * (1 - slo:availability_objective))
+            and
+            slo:availability_error_ratio:rate2h > on(job) (3 * (1 - slo:availability_objective))
+          )
+          or
+          (
+            slo:availability_error_ratio:rate3d > on(job) (1 * (1 - slo:availability_objective))
+            and
+            slo:availability_error_ratio:rate6h > on(job) (1 * (1 - slo:availability_objective))
+          )
+        for: 15m
+        labels:
+          severity: ticket
+          slo: availability
+        annotations:
+          summary: "{{ $labels.job }} is slowly spending its availability error budget"
+          description: "5xx ratio is {{ $value | humanizePercentage }} on {{ $labels.job }}; at this rate the 30-day budget runs out early."
+          runbook_url: https://example.test/runbooks/SloAvailabilitySlowBurn.md
+
+  - name: slo.latency.alerts
+    rules:
+      - alert: SloLatencyFastBurn
+        expr: |
+          (
+            slo:latency_error_ratio:rate1h > on(job) (14.4 * (1 - slo:latency_objective))
+            and
+            slo:latency_error_ratio:rate5m > on(job) (14.4 * (1 - slo:latency_objective))
+          )
+          or
+          (
+            slo:latency_error_ratio:rate6h > on(job) (6 * (1 - slo:latency_objective))
+            and
+            slo:latency_error_ratio:rate30m > on(job) (6 * (1 - slo:latency_objective))
+          )
+        for: 2m
+        labels:
+          severity: page
+          slo: latency
+        annotations:
+          summary: "{{ $labels.job }} is burning its latency error budget fast"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.job }} requests are slower than the latency threshold (the API threshold is 500 ms)."
+          runbook_url: https://example.test/runbooks/SloLatencyFastBurn.md
+      - alert: SloLatencySlowBurn
+        expr: |
+          (
+            slo:latency_error_ratio:rate1d > on(job) (3 * (1 - slo:latency_objective))
+            and
+            slo:latency_error_ratio:rate2h > on(job) (3 * (1 - slo:latency_objective))
+          )
+          or
+          (
+            slo:latency_error_ratio:rate3d > on(job) (1 * (1 - slo:latency_objective))
+            and
+            slo:latency_error_ratio:rate6h > on(job) (1 * (1 - slo:latency_objective))
+          )
+        for: 15m
+        labels:
+          severity: ticket
+          slo: latency
+        annotations:
+          summary: "{{ $labels.job }} is slowly spending its latency error budget"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.job }} requests are slower than the latency threshold."
+          runbook_url: https://example.test/runbooks/SloLatencySlowBurn.md

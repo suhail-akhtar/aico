@@ -1,0 +1,53 @@
+# Grafana datasources, provisioned from files so a rebuilt Grafana is identical to the old one
+# and nobody has to click a connection together. Mount this directory at
+# /etc/grafana/provisioning/datasources. UIDs are fixed because dashboards and the
+# trace-to-logs links refer to them. Hostnames match the in-cluster services; override per
+# environment with a copy of this file.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus.monitoring.svc.cluster.local:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 30s
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo.observability.svc.cluster.local:3200
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        filterByTraceID: true
+      tracesToMetrics:
+        datasourceUid: prometheus
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki.observability.svc.cluster.local:3100
+    editable: false
+    jsonData:
+      derivedFields:
+        - name: trace_id
+          matcherRegex: '"trace_id":"(\w+)"'
+          url: '$${__value.raw}'
+          datasourceUid: tempo
