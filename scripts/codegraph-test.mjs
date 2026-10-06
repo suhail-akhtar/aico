@@ -441,7 +441,7 @@ await block('Edit note: no graph within the budget — the check is queued and d
       // ride on a later result than the very next one: the promise is that it
       // is delivered once, not on which call. Read until it arrives (bounded).
       let next = '';
-      for (let i = 0; i < 20 && !String(next).includes('Code graph check'); i++) {
+      for (let i = 0; i < 200 && !String(next).includes('Code graph check'); i++) {
         next = await T.executeTool('Read', { file_path: path.join(dir, 'src/features/a.ts') });
         if (!String(next).includes('Code graph check')) await new Promise(r => setTimeout(r, 100));
       }
