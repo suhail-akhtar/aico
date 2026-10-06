@@ -108,7 +108,8 @@ import { getAgentRegistry } from './tools/task.js';
 import { investigate, investigateDefinition, type InvestigateInput } from './tools/investigate.js';
 import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
-import { checkProjectGate, resetChecks } from './checks.js';
+import { checkProjectGate, resetChecks, touchedFiles } from './checks.js';
+import { appCommitGate } from './apps/app-git.js';
 import { gateChecks } from './tools/run-checks.js';
 import { loadProfile, renderProfile } from './project/profile.js';
 import { installProfileObserver } from './project/observe.js';
@@ -3092,6 +3093,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   let verificationNudges = 0;
   /** Times this turn has been sent back over failing or stale project checks. */
   let checksNudges = 0;
+  /** Times this turn has been sent back to commit a finished story in an app (apps/app-git.ts). */
+  let commitNudges = 0;
 
   async function runLoop(): Promise<void> {
     throwIfLoopAborted();
@@ -3114,6 +3117,9 @@ const MAX_TRUNCATION_RETRIES = 2;
  * the ones after it are real fix-and-recheck cycles rather than reminders.
  */
 const MAX_VERIFICATION_NUDGES = 3;
+
+/** How many times a turn may be sent back to commit its work in an app: the message names the exact call, so two is plenty. */
+const MAX_COMMIT_NUDGES = 2;
 
 /**
  * How many times a turn may be sent back over its own project checks.
@@ -3423,6 +3429,23 @@ const GOAL_REMINDER_EVERY = 6;
               if (!silent) {
                 showError(`Verification gate: the artifact is not confirmed working `
                   + `(nudge ${verificationNudges}/${MAX_VERIFICATION_NUDGES}).`);
+                startSpinner('Thinking…');
+              }
+              continue;
+            }
+          }
+
+          // A story is not done until it is committed: in an app's own git repo, a turn that changed
+          // source may not end with the tree dirty (ADR 0031). After the browser gate, so the commit
+          // describes verified work. Silent outside an app, without git, or when no source changed.
+          if (completionGateEnabled && commitNudges < MAX_COMMIT_NUDGES) {
+            const gate = appCommitGate(projectRoot(), touchedFiles().length);
+            if (!gate.ok && gate.message) {
+              commitNudges++;
+              transcript.recordAssistant(text, [], stepUsage, stepReasoning);
+              transcript.recordUserMessage(gate.message, { kind: 'plugin', plugin: 'commit-gate' });
+              if (!silent) {
+                showError(`Commit gate: the app has uncommitted changes (nudge ${commitNudges}/${MAX_COMMIT_NUDGES}).`);
                 startSpinner('Thinking…');
               }
               continue;

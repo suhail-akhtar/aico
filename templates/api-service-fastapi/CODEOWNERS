@@ -1,0 +1,8 @@
+# Replace @your-org/maintainers with your team or user. Every change needs review
+# from an owner; security-sensitive paths are listed so they are never missed.
+*                                  @your-org/maintainers
+/src/app/core/security.py          @your-org/maintainers
+/src/app/features/auth/            @your-org/maintainers
+/src/app/db/migrations/            @your-org/maintainers
+/Dockerfile                        @your-org/maintainers
+/.github/                          @your-org/maintainers

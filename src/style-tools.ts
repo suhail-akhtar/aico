@@ -32,6 +32,7 @@
 import fs from 'fs';
 import path from 'path';
 import { scriptRunner, type Check } from './checks.js';
+import { wrapper } from './checks-stacks.js';
 
 export type StyleKind = 'format' | 'lint';
 
@@ -149,6 +150,24 @@ export function detectStyleTools(root: string): StyleTool[] {
   const dotnetProject = safeList(root).find(f => /\.(sln|slnx|csproj|fsproj|vbproj)$/i.test(f));
   if (dotnetProject && fs.existsSync(path.join(root, '.editorconfig'))) {
     tools.push({ kind: 'format', tool: 'dotnet format', check: 'dotnet format --verify-no-changes', fix: 'dotnet format', evidence: `${dotnetProject} + .editorconfig` });
+  }
+
+  // ── Java: Spotless, the one formatter both Maven and Gradle projects wire in ──
+  if (fs.existsSync(path.join(root, 'pom.xml')) && /spotless-maven-plugin/.test(readText(path.join(root, 'pom.xml')))) {
+    const mvn = wrapper(root, 'mvn', process.platform);
+    tools.push({ kind: 'format', tool: 'spotless', check: `${mvn} -B -ntp spotless:check`, fix: `${mvn} -B -ntp spotless:apply`, evidence: 'pom.xml spotless-maven-plugin' });
+  } else if (/com\.diffplug\.spotless/.test(readText(path.join(root, 'build.gradle')) + readText(path.join(root, 'build.gradle.kts')))) {
+    const g = wrapper(root, 'gradle', process.platform);
+    tools.push({ kind: 'format', tool: 'spotless', check: `${g} --console=plain spotlessCheck`, fix: `${g} --console=plain spotlessApply`, evidence: 'build.gradle spotless plugin' });
+  }
+
+  // ── PHP: Pint (Laravel's formatter) or PHP-CS-Fixer, only where the project configured one ──
+  if (fs.existsSync(path.join(root, 'composer.json'))) {
+    const composer = readText(path.join(root, 'composer.json'));
+    const pint = exists(root, 'pint.json') ?? (/laravel\/pint/.test(composer) ? 'composer.json laravel/pint' : undefined);
+    const csFixer = exists(root, '.php-cs-fixer.php', '.php-cs-fixer.dist.php');
+    if (pint) tools.push({ kind: 'format', tool: 'pint', check: 'php vendor/bin/pint --test', fix: 'php vendor/bin/pint', evidence: pint });
+    else if (csFixer) tools.push({ kind: 'format', tool: 'php-cs-fixer', check: 'php vendor/bin/php-cs-fixer fix --dry-run --diff', fix: 'php vendor/bin/php-cs-fixer fix', evidence: csFixer });
   }
 
   return tools;

@@ -1,0 +1,8 @@
+# Replace @your-org/maintainers with the people or team who review changes.
+# Security contact (see SECURITY.md): replace with a monitored address.
+*                       @your-org/maintainers
+/app/Features/Accounts/ @your-org/maintainers
+/app/Support/           @your-org/maintainers
+/docker/                @your-org/maintainers
+/Dockerfile             @your-org/maintainers
+/.github/               @your-org/maintainers

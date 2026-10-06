@@ -1,0 +1,10 @@
+# Replace @your-org/maintainers with your team or user. Every change needs review
+# from an owner; security-sensitive paths are listed so they are never missed.
+*                            @your-org/maintainers
+/nginx/                      @your-org/maintainers
+/Dockerfile                  @your-org/maintainers
+/src/api/client.ts           @your-org/maintainers
+/src/auth/                   @your-org/maintainers
+/src/config/                 @your-org/maintainers
+/openapi/                    @your-org/maintainers
+/.github/                    @your-org/maintainers

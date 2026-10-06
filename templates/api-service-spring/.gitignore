@@ -1,0 +1,24 @@
+# Build output
+target/
+*.class
+*.jar
+*.log
+dependency-reduced-pom.xml
+
+# Local secrets and configuration
+.env
+.env.local
+.env.*.local
+
+# Editors and OS
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+.DS_Store
+Thumbs.db
+
+# Tool caches
+.spotless-index

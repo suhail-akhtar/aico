@@ -1,0 +1,151 @@
+# CI for the service. Every third-party action is pinned to a full commit SHA with
+# its tag in a comment (a tag can be moved; a SHA cannot), and Dependabot keeps the
+# pins fresh. Tools that publish container images (gitleaks, osv-scanner, trivy) run
+# from images pinned by digest instead of through a marketplace action.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_VERSION: "0.12.23"
+
+jobs:
+  quality:
+    name: format, lint, types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked
+      - run: make fmt-check lint typecheck
+      - name: OpenAPI document is current
+        run: uv run python -m app.cli openapi --check
+
+  test:
+    name: tests (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: ci-only-password # standards-allow: secret
+          POSTGRES_DB: app
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U app -d app" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://app:ci-only-password@localhost:5432/app' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Tests with the coverage gate (85%)
+        run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.database == 'sqlite'
+        with:
+          name: coverage
+          path: coverage.xml
+
+  security:
+    name: dependencies and secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked
+      - name: pip-audit over the lockfile
+        run: make audit
+      - name: osv-scanner over the lockfile
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src
+          ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
+          scan source --lockfile=uv.lock
+      - name: gitleaks over the history
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git --no-banner --redact .
+      - name: SBOM (CycloneDX) of the locked runtime dependencies
+        run: make sbom
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: sbom.cdx.json
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        if: github.event_name == 'pull_request'
+
+  codeql:
+    name: codeql
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: python
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+
+  image:
+    name: container image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [quality, test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: api-service:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test the stack (PostgreSQL, migration, API)
+        env:
+          API_PORT: "8000"
+        run: |
+          export POSTGRES_PASSWORD="$(openssl rand -hex 16)" JWT_SECRET="$(openssl rand -hex 32)"
+          docker compose up -d --build --wait --wait-timeout 180
+          curl --fail --silent http://127.0.0.1:8000/healthz
+          curl --fail --silent http://127.0.0.1:8000/readyz
+          docker compose down -v
+      - name: Trivy image scan (fails on fixable HIGH or CRITICAL)
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          ghcr.io/aquasecurity/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+          image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed api-service:ci

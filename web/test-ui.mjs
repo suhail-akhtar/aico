@@ -20,6 +20,7 @@ import { flattenRows, rowKey } from './dist-test/sidebar-rows.mjs';
 import { moveFocus } from './dist-test/sidebar-keys.mjs';
 import { dropAction } from './dist-test/sidebar-drop.mjs';
 import { parseBacklog, nextStory } from './dist-test/backlog.mjs';
+import * as stacks from './dist-test/stacks.mjs';
 import { setPathRoots, shortenPath } from './dist-test/paths.mjs';
 import { protectCurrency } from './dist-test/currency.mjs';
 import * as rich from './dist-test/rich-specs.mjs';
@@ -2526,6 +2527,37 @@ section('Agent certification: badges and the certify reply');
     assert.equal(plan.estimateUsd, 0.123);
     assert.equal(plan.capUsd, 2);
     assert.equal(plan.passed, null);
+  });
+}
+
+
+{
+  const t = (over) => ({ id: 'x', version: '1.0.0', name: 'X', category: 'api', summary: 's', source: 'bundled', ...over });
+  test('a template names its stack and what it needs installed', () => {
+    assert.equal(stacks.stackKey(t({ kind: 'process', toolchain: { id: 'python', version: '>=3.12' } })), 'python');
+    assert.equal(stacks.stackKey(t({ kind: 'process', requires: { node: '>=22.5.0' } })), 'node');
+    assert.equal(stacks.stackKey(t({ kind: 'bundle' })), 'bundle');
+    assert.equal(stacks.stackKey(t({ kind: 'page' })), undefined, 'a page needs no stack');
+    assert.equal(stacks.stackNeeds(t({ kind: 'process', toolchain: { id: 'python', version: '>=3.12' } })), 'Python 3.12+');
+    assert.equal(stacks.stackNeeds(t({ kind: 'process', toolchain: { id: 'dotnet', version: '>=10.0' } })), '.NET 10.0+');
+    assert.equal(stacks.stackNeeds(t({ kind: 'process', requires: { node: '>=22.5.0' } })), 'Node 22.5.0+');
+    assert.equal(stacks.stackNeeds(t({ kind: 'bundle' })), undefined);
+  });
+  test('availability is worded from the engine probe, never guessed', () => {
+    assert.equal(stacks.availabilityNote(t({ kind: 'process' })), undefined, 'no probe, nothing to say');
+    assert.equal(stacks.availabilityNote(t({ kind: 'process', availability: { ok: true, message: '', docker: false } })), undefined);
+    const docker = stacks.availabilityNote(t({ kind: 'process', availability: { ok: true, message: 'Note: python 3.12+ was not found on this machine. Install it. Docker is available.', docker: true } }));
+    assert.equal(docker.tone, 'docker');
+    assert.ok(docker.text.startsWith('python 3.12+ was not found on this machine.') && docker.text.endsWith('Runs in Docker instead.'), docker.text);
+    const missing = stacks.availabilityNote(t({ kind: 'process', availability: { ok: false, message: 'go 1.27+ was not found. Install Go.', docker: false } }));
+    assert.equal(missing.tone, 'missing');
+  });
+  test('counts and service lists come from what the server sent', () => {
+    assert.equal(stacks.templateCount(1), '1 template');
+    assert.equal(stacks.templateCount(14), '14 templates');
+    assert.equal(stacks.servicesLine(t({ kind: 'bundle', services: [{ id: 'api', role: 'api' }, { id: 'web', role: 'frontend' }, { id: 'db', role: 'db' }] })), 'api · web · db');
+    assert.equal(stacks.servicesLine(t({ kind: 'process' })), undefined);
+    assert.deepEqual(stacks.STACK_ORDER.slice(0, 2), ['node', 'python']);
   });
 }
 

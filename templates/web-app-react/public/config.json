@@ -1,0 +1,6 @@
+{
+  "apiBaseUrl": "/api",
+  "loginUrl": "/api/auth/start",
+  "logoutUrl": "/api/auth/sign_out?rd=/",
+  "environment": "development"
+}

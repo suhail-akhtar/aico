@@ -21,6 +21,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { templatePackageFilter } from '../../shared/apps/artifact-dirs.mjs';
+import { templatePackageFilter } from '../../shared/apps/artifact-dirs.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const desktop = path.resolve(here, '..');
@@ -89,7 +91,7 @@ await build({
 fs.cpSync(path.join(repo, 'src/skills/builtin'), path.join(engineDir, 'builtin'), { recursive: true });
 fs.cpSync(path.join(repo, 'templates'), path.join(engineDir, 'templates'), {
   recursive: true,
-  filter: (src) => !/[\\/](node_modules|\.next|\.astro|\.expo|dist|coverage|data)([\\/]|$)/.test(src),
+  filter: templatePackageFilter(path.join(repo, 'templates')),
 });
 // Canvas export draws Mermaid and maths in a headless browser from the web
 // build's `export-render.html` (src/canvas/visuals.ts looks for `web-dist`

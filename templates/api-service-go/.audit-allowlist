@@ -1,0 +1,6 @@
+# Reviewed vulnerability exceptions for `make audit` (scripts/audit.sh).
+#
+# One per line:  <GO-ID>  <why it is acceptable here>  review-by YYYY-MM-DD
+# An entry past its review date fails the audit. Prefer upgrading the dependency;
+# use this only for a finding that cannot be fixed yet and is not exploitable in
+# this service, and say why. Empty on purpose.

@@ -44,7 +44,7 @@ export function MiniAppScope(): React.ReactElement | null {
   if (!slug) return null;
 
   const kind = app?.kind ?? 'page';
-  const ownProcess = kind === 'process' || kind === 'nextjs' || kind === 'mobile';
+  const ownProcess = kind === 'process' || kind === 'nextjs' || kind === 'mobile' || kind === 'bundle';
   // A page or static app lives at a fixed address on the shared host; a
   // process app has an address only while it is running.
   const url = ownProcess

@@ -12,7 +12,7 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useStore } from '@web/store';
-import { useDesk } from '@/state/desk';
+import { useDesk, toast } from '@/state/desk';
 import { usePrompts } from '@/plugins/registry';
 import { Icon } from '@/lib/icons';
 import { markSeen } from '@/lib/local';
@@ -34,6 +34,7 @@ const BRIEF_HOST: BriefHost = {
   openUrl: (url) => { void desktop.shell.openExternal(url); },
   openInbox: () => useDesk.getState().navigate({ view: 'inbox' }),
   openChat: (id) => { void openChat(id); },
+  notify: (kind, title, detail) => { if (kind === 'error') toast.error(title, detail); else toast.success(title, detail); },
   startFix: (cwd, prompt) => newChat({ ...(cwd ? { project: cwd } : {}), prompt }),
   openCodeMap: (cwd, file, mode) => useDesk.getState().navigate({ view: 'codemap', params: { path: cwd, ...(file ? { file } : {}), ...(mode ? { mode } : {}) } }),
 };

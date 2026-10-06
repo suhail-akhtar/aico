@@ -1,0 +1,13 @@
+<Project>
+  <!-- Reviewed vulnerability exceptions. Empty on purpose.
+
+       To accept an advisory you must have read it and decided it cannot be reached in this
+       service. Add an ItemGroup like the one below, with a comment saying who reviewed it, why it
+       is not exploitable here, and a review-by date. Add the same advisory URL to
+       scripts/audit-allowlist.txt, which is what the `make audit` gate reads.
+
+         <ItemGroup>
+           <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-xxxx-xxxx-xxxx" />
+         </ItemGroup>
+  -->
+</Project>

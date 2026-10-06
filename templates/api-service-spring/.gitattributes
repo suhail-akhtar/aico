@@ -1,0 +1,9 @@
+# LF everywhere: a CRLF checkout breaks shell scripts and the Maven wrapper ("sh\r: not found").
+* text=auto eol=lf
+*.sh text eol=lf
+mvnw text eol=lf
+# Windows batch files must keep CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.jar binary

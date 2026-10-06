@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      aspnetcore-and-efcore:
+        patterns: ["Microsoft.AspNetCore.*", "Microsoft.EntityFrameworkCore*", "Microsoft.Extensions.*", "dotnet-ef"]
+      opentelemetry:
+        patterns: ["OpenTelemetry*"]
+      testing:
+        patterns: ["xunit*", "coverlet*", "Testcontainers*", "NetArchTest*"]
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(docker)"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(ci)"

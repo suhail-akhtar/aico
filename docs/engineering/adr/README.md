@@ -55,6 +55,8 @@ in the module header of the code they govern.
 | [0028](0028-code-graph.md) | A native, accurate code graph (resolved imports, symbol references through re-exports, git co-change) for the agent's deferred `CodeGraph` tool, an in-loop edit check and the Code map view; no parser dependency | Accepted |
 | [0029](0029-browser-certificate-exceptions.md) | Browser certificate exceptions: only the person proceeds past a certificate warning, bound to the exact certificate (session or always); localhost opt-in; revoked/HSTS never; no saved passwords on excepted sites | Accepted |
 | [0030](0030-open-in-editor.md) | Open a project file in the person's editor from the web client (and "Open in external editor" in the desktop): a person's click only, the program from user settings or VS Code on the PATH, no shell, registered-project files by real path; the client's own viewer otherwise | Accepted |
+| [0031](0031-multi-stack-apps.md) | Multi-stack apps: manifest-driven run/probe/env for Python, Java, .NET, Go and PHP, one artifact-directory list, bundles of services (compose or native), Docker fallback, a per-app git release workflow with a human gate on tags | Accepted |
+| [0032](0032-brief-fix-all.md) | Fix all in the morning brief: one confirmed background fix per project on its own branch, started only by a person, auto-approve and unattended with the inbox (L4, never full autonomy or `permissions: 'full'`), anything the Sentinel or shell confinement stops waits for the person | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

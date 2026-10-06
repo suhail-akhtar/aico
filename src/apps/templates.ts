@@ -26,7 +26,6 @@
  * @module apps/templates
  */
 
-import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { cp, mkdir, readFile, writeFile } from 'fs/promises';
@@ -37,10 +36,19 @@ import { aicoHome } from '../home.js';
 import { meaningfulWords } from '../knowledge/match.js';
 import type { AicoSettings } from '../settings.js';
 import {
-  createMiniApp, miniAppDir, type DeployTarget, type MiniApp, type MiniAppKind, type RunProfile,
+  createMiniApp, getMiniApp, miniAppDir, type DeployTarget, type MiniApp, type MiniAppKind, type RunProfile,
 } from '../miniapps/store.js';
+import { applyPlatform } from '../miniapps/store.js';
 import { profileFromTemplate } from '../project/profile.js';
 import { seedDecisions } from '../project/decisions.js';
+import { hasArtifactSegment, isArtifactName } from '../../shared/apps/artifact-dirs.mjs';
+import { writeAppEnv } from './env-file.js';
+import { checkRequirements, type RequirementReport } from './toolchain.js';
+import {
+  validateBundle, validateRunExtensions, validateStack,
+  type AppCompose, type AppService, type AppStack, type DockerSpec, type EnvFileSpec,
+} from './stack.js';
+import type { ToolchainSpec } from './toolchain.js';
 
 export interface TemplateManifest {
   id: string;
@@ -57,6 +65,22 @@ export interface TemplateManifest {
   /** Words in a brief that suggest this template. */
   match?: string[];
   requires?: { node?: string };
+  /** The toolchain a non-Node (or any) stack needs, probed for real. ADR 0031. */
+  toolchain?: ToolchainSpec;
+  /** The file whose presence means "scaffolded"; default `package.json`. */
+  manifestFile?: string | string[];
+  envFile?: EnvFileSpec;
+  /** Extra artefact directory names (never copied, listed or packaged). */
+  artifactDirs?: string[];
+  /** Names from the shared artefact list this template keeps (`bin/` as source). */
+  keepDirs?: string[];
+  docker?: DockerSpec;
+  /** Read by the rot check (`scripts/templates-live.mjs`). */
+  verify?: { env?: Record<string, string>; skip?: string[] };
+  /** A bundle's services, the one the preview shows, and its compose file. */
+  services?: AppService[];
+  preview?: string;
+  compose?: AppCompose;
   run?: RunProfile;
   deploy?: DeployTarget[];
   /** Files (relative paths) in which `__APP_TITLE__` and friends are substituted. */
@@ -82,7 +106,7 @@ export const REQUIRED_TEMPLATE_FILES = [
   'docs/EXTENDING.md',    // how to add a page, a route, a table, a test
 ] as const;
 
-const KINDS = new Set(['page', 'static', 'process', 'cli', 'mobile']);
+const KINDS = new Set(['page', 'static', 'process', 'cli', 'mobile', 'bundle']);
 
 /**
  * Where the shipped templates are.
@@ -151,6 +175,16 @@ export function validateManifest(value: unknown): string[] {
   if ((m.kind === 'process' || m.kind === 'mobile') && !(m.run && typeof (m.run as RunProfile).dev === 'string')) {
     problems.push('a process template must declare run.dev');
   }
+  // Multi-stack additions (ADR 0031). Absent on the nine Node templates, which stay valid unchanged.
+  problems.push(...validateStack(m));
+  problems.push(...validateRunExtensions(m.run));
+  const toolchain = (m.toolchain as { id?: string } | undefined)?.id;
+  if (toolchain && toolchain !== 'node' && m.kind !== 'bundle') {
+    if (m.manifestFile === undefined) problems.push(`a ${toolchain} template must declare manifestFile (the file that means "scaffolded")`);
+    if (m.kind === 'process' && !(m.run && typeof (m.run as RunProfile).test === 'string')) problems.push('a process template must declare run.test so the checks gate can run');
+  }
+  if (m.kind === 'bundle') problems.push(...validateBundle(m));
+  else if (m.services !== undefined) problems.push('services belong to kind "bundle"');
   return problems;
 }
 
@@ -196,8 +230,40 @@ export function getTemplate(id: string, cwd = process.cwd()): Template | undefin
 export function suggestTemplates(brief: string, templates = listTemplates()): Template[] {
   const words = new Set([...meaningfulWords(brief)].map(stem));
   if (words.size === 0) return [];
-  const scored = templates.map(t => ({ t, score: matchScore(t, words).score }));
+  const scored = templates.map(t => ({ t, score: suggestionScore(t, words) }));
   return scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score).map(s => s.t);
+}
+
+/**
+ * Words that name a stack. A brief that says "a Python API" or "Laravel" picks
+ * that stack's starter; a brief that says nothing about a stack must not be
+ * handed whichever stack happens to share the most generic words ("api",
+ * "rest", "service"). Node's starters are the long-standing default (each one
+ * built end to end by a real model), so a starter on another toolchain, and a
+ * bundle, count half unless the brief names its stack or asks for a bundle.
+ */
+const STACK_WORDS: Record<string, string[]> = {
+  python: ['python', 'fastapi', 'django', 'flask', 'pydantic', 'uvicorn', 'pytest'],
+  java: ['java', 'spring', 'springboot', 'maven', 'gradle', 'jvm', 'kotlin', 'jakarta'],
+  dotnet: ['dotnet', 'csharp', 'aspnet', 'blazor', 'efcore', 'nuget'],
+  // Two-letter words never reach the matcher (meaningfulWords drops them), so "go" cannot be listed.
+  go: ['golang', 'gin', 'goroutine'],
+  php: ['php', 'laravel', 'symfony', 'composer', 'livewire', 'blade', 'eloquent'],
+};
+// Not "service"/"services": nearly every API brief says it, and it must not read as a request for a bundle.
+const BUNDLE_WORDS = ['bundle', 'microservices', 'multi-service', 'multiservice', 'compose', 'full-stack', 'fullstack', 'monorepo'];
+
+/** Whether the brief's words name this template's stack (or ask for a bundle). */
+function namesItsStack(t: TemplateManifest, words: Set<string>): boolean {
+  if (t.kind === 'bundle') return BUNDLE_WORDS.some(w => words.has(stem(w)));
+  return (STACK_WORDS[t.toolchain?.id ?? ''] ?? []).some(w => words.has(stem(w)));
+}
+
+/** The ranking score: the word overlap, halved for a stack the brief did not ask for. */
+function suggestionScore(t: TemplateManifest, words: Set<string>): number {
+  const { score } = matchScore(t, words);
+  const other = t.kind === 'bundle' || (t.toolchain && t.toolchain.id !== 'node');
+  return other && !namesItsStack(t, words) ? Math.floor(score / 2) : score;
 }
 
 /** A crude singular: "invoices" and "invoice" are one word to the ranking. */
@@ -291,7 +357,7 @@ function globToRegExp(glob: string): string {
 function walk(dir: string, rel = ''): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(path.join(dir, rel), { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === '.next' || entry.name === '.next-dev' || entry.name === 'dist' || entry.name === 'data.sqlite') continue;
+    if (isArtifactName(entry.name)) continue;
     const next = rel ? `${rel}/${entry.name}` : entry.name;
     if (entry.isDirectory()) out.push(...walk(dir, next));
     else out.push(next);
@@ -306,6 +372,81 @@ export interface InstantiateInput {
   sessionId?: string;
 }
 
+/** The stack facts of a template as an app carries them (empty for the Node templates, so their `app.json` is unchanged). */
+export function stackOf(t: Pick<TemplateManifest, 'toolchain' | 'manifestFile' | 'envFile' | 'docker' | 'artifactDirs' | 'keepDirs'>): AppStack | undefined {
+  const stack: AppStack = {
+    ...(t.toolchain ? { toolchain: t.toolchain } : {}),
+    ...(t.manifestFile ? { manifestFile: t.manifestFile } : {}),
+    ...(t.envFile ? { envFile: t.envFile } : {}),
+    ...(t.docker ? { docker: t.docker } : {}),
+    ...(t.artifactDirs?.length ? { artifactDirs: t.artifactDirs } : {}),
+    ...(t.keepDirs?.length ? { keepDirs: t.keepDirs } : {}),
+  };
+  return Object.keys(stack).length ? stack : undefined;
+}
+
+/**
+ * Whether this machine can run a template, and what to say when it cannot.
+ *
+ * A Node-only template keeps its historical check (the engine's own Node
+ * version). A template with a `toolchain` is probed for real; when the native
+ * toolchain is missing but Docker answers, the template is still usable (it
+ * runs in a container, ADR 0031 section 4) and the message says how. A bundle
+ * never blocks creation: compose needs only Docker, and native start
+ * re-checks each service.
+ */
+export function checkTemplateRequirements(t: TemplateManifest): { ok: boolean; message: string; report?: RequirementReport } {
+  if (t.kind === 'bundle') return { ok: true, message: '' };
+  if (!t.toolchain) {
+    return nodeSatisfies(t.requires?.node)
+      ? { ok: true, message: '' }
+      : { ok: false, message: `Template "${t.id}" needs Node ${t.requires?.node}; this machine runs ${process.versions.node}. Pick another template or upgrade Node.` };
+  }
+  const report = checkRequirements({ toolchain: t.toolchain });
+  if (report.ok) return { ok: true, message: '', report };
+  if (report.dockerAvailable) {
+    return { ok: true, message: `Note: ${report.message}`, report };
+  }
+  return { ok: false, message: `Template "${t.id}" cannot run on this machine. ${report.message} Docker is not available either, so there is no fallback.`, report };
+}
+
+/** Copy a template's files into `dir`, minus what a template must never carry. */
+async function copyTemplateFiles(template: Template, dir: string): Promise<void> {
+  const opts = { keep: template.keepDirs ?? [], extra: template.artifactDirs ?? [] };
+  // The nine Node templates have always dropped a scratch `data/`; a stack with a toolchain keeps it.
+  const legacyData = !template.toolchain;
+  await cp(template.dir, dir, {
+    recursive: true,
+    force: false,
+    errorOnExist: false,
+    filter: (src) => {
+      if (path.resolve(src) === path.resolve(template.dir)) return true;
+      const base = path.basename(src);
+      // Local conveniences of a template's own development never travel: an
+      // install, build output, a scratch database, a committed secret.
+      if (base === 'template.json' || base === '.env' || base === '.env.local' || base === 'package-lock.json.bak') return false;
+      if (legacyData && base === 'data') return false;
+      return !hasArtifactSegment(path.relative(template.dir, src), opts);
+    },
+  });
+}
+
+/** Substitute the title tokens in the files the manifest names. */
+async function substituteIn(template: Template, dir: string, values: { title: string; slug: string; description: string }): Promise<void> {
+  for (const rel of walk(dir)) {
+    if (!matchesSubstitute(rel, template.substitute)) continue;
+    const file = path.join(dir, rel);
+    const text = await readFile(file, 'utf8');
+    const next = substituteTokens(text, values);
+    if (next !== text) await writeFile(file, next, 'utf8');
+  }
+}
+
+/** The first commit's subject: what this app was made from, so history says where it started. */
+export function scaffoldMessage(t: Pick<Template, 'name' | 'id' | 'version'>): string {
+  return `chore: scaffold ${t.name} (aico template ${t.id}@${t.version})`;
+}
+
 /**
  * Make an app from a template.
  *
@@ -314,6 +455,10 @@ export interface InstantiateInput {
  * but `template.json`, `node_modules` and build output, then substitutes the
  * title tokens in the files the manifest names. Returns the app as the store
  * now describes it.
+ *
+ * A bundle (`kind: "bundle"`) is the same, plus each service made from a
+ * template is copied into its own directory with its own env file, and the
+ * service's run profile and stack are snapshotted into `app.json.services`.
  */
 export async function instantiateTemplate(
   input: InstantiateInput,
@@ -321,6 +466,30 @@ export async function instantiateTemplate(
   cwd = process.cwd(),
 ): Promise<MiniApp> {
   const { template } = input;
+
+  // Resolve a bundle's service templates before claiming a directory: a missing
+  // one must refuse cleanly, not leave a half-made app behind.
+  const services: AppService[] = [];
+  const serviceTemplates = new Map<string, Template>();
+  for (const svc of template.services ?? []) {
+    const entry: AppService = { ...svc };
+    const templateId = typeof (svc as { template?: unknown }).template === 'string' ? (svc as unknown as { template: string }).template : undefined;
+    if (templateId) {
+      const st = getTemplate(templateId, cwd);
+      if (!st) throw new Error(`bundle "${template.id}" needs template "${templateId}" for service "${svc.id}", which is not installed`);
+      if (st.kind === 'bundle') throw new Error(`service "${svc.id}" cannot itself be a bundle`);
+      serviceTemplates.set(svc.id, st);
+      entry.template = { id: st.id, version: st.version };
+      if (st.run) entry.run = st.run;
+      const stack = stackOf(st);
+      if (stack) entry.stack = stack;
+    }
+    // Only a service made from a template gets a default directory; a bare db/cache has no code to put anywhere.
+    if (templateId && !svc.path) entry.path = path.posix.join('services', svc.id);
+    services.push(entry);
+  }
+
+  const stack = stackOf(template);
   const app = await createMiniApp({
     title: input.title,
     ...(input.description ? { description: input.description } : {}),
@@ -330,45 +499,43 @@ export async function instantiateTemplate(
     template: { id: template.id, version: template.version },
     ...(template.run ? { run: template.run } : {}),
     ...(template.deploy ? { deploy: template.deploy } : {}),
+    ...(stack ? { stack } : {}),
+    ...(services.length ? { services } : {}),
+    ...(template.compose ? { compose: template.compose } : {}),
+    ...(template.preview ? { preview: template.preview } : {}),
   }, settings, cwd);
   const dir = miniAppDir(app.slug, settings, cwd);
 
-  await cp(template.dir, dir, {
-    recursive: true,
-    force: false,
-    errorOnExist: false,
-    filter: (src) => {
-      const base = path.basename(src);
-      // Local conveniences of a template's own development never travel: an
-      // install, build output, a scratch database, a committed secret.
-      return base !== 'template.json' && base !== 'node_modules' && base !== '.next' && base !== '.next-dev' && base !== 'data.sqlite'
-        && base !== 'coverage' && base !== 'data' && base !== '.env' && base !== '.env.local'
-        && base !== '.astro' && base !== '.expo' && base !== 'dist' && base !== 'web-build'
-        && !base.endsWith('.tsbuildinfo') && base !== 'package-lock.json.bak';
-    },
-  });
-
+  await copyTemplateFiles(template, dir);
   const values = { title: app.title, slug: app.slug, description: input.description ?? '' };
-  for (const rel of walk(dir)) {
-    if (!matchesSubstitute(rel, template.substitute)) continue;
-    const file = path.join(dir, rel);
-    const text = await readFile(file, 'utf8');
-    const next = substituteTokens(text, values);
-    if (next !== text) await writeFile(file, next, 'utf8');
+  await substituteIn(template, dir, values);
+  await writeLocalEnv(dir, template.envFile);
+
+  for (const svc of services) {
+    const st = serviceTemplates.get(svc.id);
+    if (!st || !svc.path) continue;
+    const svcDir = path.join(dir, svc.path);
+    await mkdir(svcDir, { recursive: true });
+    await copyTemplateFiles(st, svcDir);
+    await substituteIn(st, svcDir, values);
+    await writeLocalEnv(svcDir, st.envFile);
   }
-  await writeLocalEnv(dir);
+  if (template.kind === 'bundle' && template.compose?.generate) {
+    const { writeGeneratedCompose } = await import('./bundle.js');
+    await writeGeneratedCompose({ ...app, services }, dir);
+  }
   // The manifest the store wrote is authoritative; the copy must not have
   // overwritten it (the template has no app.json, but a user's might).
   await mkdir(dir, { recursive: true });
 
   // Born knowing its commands, at template rank: above anything the manifest
   // would be guessed to say, below anything the person later decides.
-  await profileFromTemplate(dir, template.run, `${template.name} (${template.id})`).catch(() => undefined);
+  await profileFromTemplate(dir, template.run ? applyPlatform(template.run) : template.run, `${template.name} (${template.id})`).catch(() => undefined);
   // Last, so the first commit is the template exactly as it landed —
-  // substituted, with a generated .env.local already gitignored by every
-  // process template that ships one.
-  await initAppGit(dir, `Start from ${template.name} ${template.version}`);
-  return { ...app, built: true };
+  // substituted, with a generated env file already gitignored.
+  await initAppGit(dir, scaffoldMessage(template));
+  const built = await getMiniApp(app.slug, settings, cwd);
+  return { ...app, ...(services.length ? { services } : {}), built: built?.built ?? true };
 }
 
 export interface CustomAppInput {
@@ -404,7 +571,9 @@ export async function createCustomApp(
   const dir = miniAppDir(app.slug, settings, cwd);
   seedDecisions(dir, app.title);
   await writeFile(path.join(dir, '.gitignore'),
-    'node_modules/\n.venv/\n__pycache__/\ndist/\nbuild/\n.env\n.env.local\n*.log\n', 'utf8');
+    // A net until the real, stack-fitted one replaces it: every ecosystem's installs, caches and build output
+    // (not `bin/` or `vendor/`, which are source in some stacks) and every env file but the example.
+    'node_modules/\n.venv/\nvenv/\n__pycache__/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\ntarget/\nobj/\n.gradle/\ndist/\nbuild/\ncoverage/\n.env\n.env.*\n!.env.example\n*.log\n', 'utf8');
   await initAppGit(dir, 'Custom app scaffold — stack not yet chosen');
   return app;
 }
@@ -419,18 +588,9 @@ export async function createCustomApp(
  * and an agent spent twenty steps on a form that was fine. The app should be
  * runnable the moment it is created; the example stays as the documentation.
  */
-export async function writeLocalEnv(dir: string): Promise<string | undefined> {
-  const example = path.join(dir, '.env.example');
-  const local = path.join(dir, '.env.local');
-  if (!existsSync(example) || existsSync(local)) return undefined;
-  const text = await readFile(example, 'utf8');
-  const out = text.split(/\r?\n/).map(line => {
-    const m = /^([A-Z0-9_]+)=(.*)$/.exec(line);
-    if (!m || !/^change-me/i.test(m[2] ?? '')) return line;
-    return `${m[1]}=${crypto.randomBytes(24).toString('hex')}`;
-  }).join('\n');
-  await writeFile(local, out, 'utf8');
-  return local;
+export async function writeLocalEnv(dir: string, spec?: EnvFileSpec): Promise<string | undefined> {
+  // The generation itself (formats, gitignore safety, key names only) lives in env-file.ts.
+  return (await writeAppEnv(dir, spec))?.file;
 }
 
 const execFileAsync = promisify(execFile);

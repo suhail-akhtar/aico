@@ -32,6 +32,8 @@
 import fs from 'fs';
 import path from 'path';
 import { detectChecks, type Check } from '../checks.js';
+import { containerizeChecks } from '../apps/check-container.js';
+import { detectStackLabel, refineLabel } from '../checks-stacks.js';
 import type { RunProfile } from '../miniapps/store.js';
 
 export type ProfileSource = 'user' | 'template' | 'observed' | 'detected';
@@ -214,6 +216,11 @@ export function updateProfile(root: string, patch: ProfilePatch): Promise<Projec
  * being held to and correct it.
  */
 export function checksFor(root: string): Check[] {
+  // An app whose toolchain is missing here but whose Docker answers is checked in a container (ADR 0031).
+  return containerizeChecks(root, nativeChecksFor(root));
+}
+
+function nativeChecksFor(root: string): Check[] {
   const profile = loadProfile(root);
   const fromProfile = CHECK_COMMANDS
     .filter(name => profile.commands[name])
@@ -271,11 +278,18 @@ export function detectStack(root: string): Pick<ProfilePatch, 'stack' | 'package
     out.stack = { value: 'Rust (cargo)', source: 'detected' };
     out.packageManager = { value: 'cargo', source: 'detected' };
   } else if (fs.existsSync(path.join(root, 'pyproject.toml')) || fs.existsSync(path.join(root, 'setup.py'))) {
-    out.stack = { value: 'Python', source: 'detected' };
+    out.stack = { value: refineLabel(root, 'Python'), source: 'detected' };
     out.packageManager = { value: fs.existsSync(path.join(root, 'poetry.lock')) ? 'poetry' : fs.existsSync(path.join(root, 'uv.lock')) ? 'uv' : 'pip', source: 'detected' };
   } else if (fs.existsSync(path.join(root, 'go.mod'))) {
-    out.stack = { value: 'Go', source: 'detected' };
+    out.stack = { value: refineLabel(root, 'Go'), source: 'detected' };
     out.packageManager = { value: 'go', source: 'detected' };
+  } else {
+    // Java (Maven/Gradle), .NET and PHP (Composer): no template says, so the manifest does.
+    const label = detectStackLabel(root);
+    if (label) {
+      out.stack = { value: label.stack, source: 'detected' };
+      out.packageManager = { value: label.packageManager, source: 'detected' };
+    }
   }
   return out;
 }

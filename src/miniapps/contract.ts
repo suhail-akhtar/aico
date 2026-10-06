@@ -258,7 +258,11 @@ There is no fixed stack here. Before writing any code:
      becomes the first section of docs/PRD.md, before Purpose.
   2. Set this app's run commands to match what you chose: edit app.json's
      "run" object (install, dev with {port}, ready, build, test, typecheck,
-     lint, start) the way a template's would have shipped it.
+     lint, start; also format, audit, health, installedMarker) the way a
+     template's would have shipped it, and its "stack" ({"toolchain":
+     {"id":"python|java|dotnet|go|php|node","version":">=3.12"},
+     "manifestFile":"pyproject.toml"}) so AppManage start can probe the
+     toolchain and tell "built" from "not yet scaffolded".
   3. Write AICO.md yourself, the way a template's documents its own layout —
      what the app is, where things live, what to copy for the next feature.
      Nobody else will write it for a stack nobody chose in advance.

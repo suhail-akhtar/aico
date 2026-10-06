@@ -48,8 +48,10 @@ export interface SecurityCheckResult {
   counts: { secrets: number; high: number; medium: number; advisories: number };
 }
 
-const MANIFEST = /(?:^|[\\/])(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^\\/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(?:\.lock)?|Cargo\.(?:toml|lock)|go\.(?:mod|sum)|[^\\/]+\.csproj|packages\.lock\.json)$/i;
-const SKIP = /[\\/](?:node_modules|\.git|dist|build|\.next|coverage|vendor|\.venv|venv|__pycache__)[\\/]/;
+const MANIFEST = /(?:^|[\\/])(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^\\/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(?:\.lock)?|Cargo\.(?:toml|lock)|go\.(?:mod|sum)|[^\\/]+\.(?:csproj|fsproj|vbproj)|packages\.lock\.json|pom\.xml|build\.gradle(?:\.kts)?|gradle\.lockfile|composer\.(?:json|lock))$/i;
+/** Source in languages the code rules do not cover (Java, Kotlin, C#, PHP): said aloud, never silently passed. */
+const UNCOVERED = /\.(?:java|kt|cs|php)$/i;
+const SKIP = /[\\/](?:node_modules|\.git|dist|build|\.next|coverage|vendor|\.venv|venv|__pycache__|target|obj|\.gradle)[\\/]/;
 const MAX_FILE = 2 * 1024 * 1024;
 
 function run(cmd: string, args: string[], cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -186,6 +188,14 @@ export async function securityCheck(root: string, written: readonly string[], op
     }
   }
 
+  // Honest coverage: the rules are language-scoped. Java, Kotlin, C# and PHP files get the secret scan and the
+  // dependency audit, but no code rules, and a clean pass must not read as "reviewed".
+  const uncovered = files.filter(f => UNCOVERED.test(f));
+  const notes: string[] = [];
+  if (uncovered.length) {
+    notes.push(`  note  ${uncovered.length} Java/Kotlin/C#/PHP file(s) written: secrets and dependencies were checked, but there are no code rules for those languages here. Rely on the project's own analysis (SpotBugs/Error Prone, Roslyn analyzers, PHPStan/Larastan) and CodeQL.`);
+  }
+
   if (opts.external !== false && files.length) {
     const ext = await externalScanners(root, files, opts.signal);
     counts.high += ext.high;
@@ -199,5 +209,5 @@ export async function securityCheck(root: string, written: readonly string[], op
   const tail = report.length
     ? '\nIf a finding is deliberate and safe, say why on that line: `security-allow: <rule> — reason`.'
     : '';
-  return { passed, output: [head, ...report.slice(0, 40)].join('\n') + tail, counts };
+  return { passed, output: [head, ...report.slice(0, 40), ...notes].join('\n') + tail, counts };
 }

@@ -12662,13 +12662,35 @@ console.log('  -- Every shipped template is complete and describes itself correc
     assert(aicoMd.length <= 2_000, `${t.id}: AICO.md fits the inlined cap (${aicoMd.length} chars)`);
     assert(/- \[x\]/.test(fs.readFileSync(path.join(t.dir, '.aico', 'backlog.md'), 'utf8')),
       `${t.id}: the backlog records the worked feature as done`);
-    if (t.kind === 'process') {
+    if (t.kind === 'process' && (!t.toolchain || t.toolchain.id === 'node')) {
       const pkg = JSON.parse(fs.readFileSync(path.join(t.dir, 'package.json'), 'utf8'));
       for (const s of ['typecheck', 'build', 'test']) assert(pkg.scripts?.[s], `${t.id}: npm script "${s}" exists so detectChecks finds it`);
       assert(fs.existsSync(path.join(t.dir, 'package-lock.json')), `${t.id}: ships a lockfile`);
       assert(fs.existsSync(path.join(t.dir, 'Dockerfile')) && fs.existsSync(path.join(t.dir, 'compose.yaml')) && fs.existsSync(path.join(t.dir, '.env.example')),
         `${t.id}: ships Dockerfile, compose.yaml and .env.example`);
       assert(t.run?.dev && t.run?.ready && t.run?.install, `${t.id}: declares install, dev and ready`);
+    } else if (t.kind === 'process') {
+      // A Python, Java, .NET, Go or PHP starter (ADR 0031): the same completeness bar, stack-aware.
+      const present = (f) => fs.existsSync(path.join(t.dir, f));
+      const manifests = [t.manifestFile].flat().filter(Boolean);
+      assert(manifests.length > 0 && manifests.some(m => m.includes('*')
+        ? fs.readdirSync(t.dir).some(n => n.startsWith(m.split('*')[0]) && n.endsWith(m.split('*').pop()))
+        : present(m)), `${t.id}: ships its manifest file (${manifests.join(', ')})`);
+      const lockNames = { python: ['uv.lock', 'poetry.lock', 'requirements.txt', 'pylock.toml'], go: ['go.sum'], php: ['composer.lock'], dotnet: ['packages.lock.json'], java: ['gradle.lockfile', 'pom.xml'] }[t.toolchain.id] ?? [];
+      const walkAll = (dir, depth = 0) => depth > 4 ? [] : fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+        e.isDirectory() ? (['.git', 'node_modules', '.venv', 'target', 'obj', 'bin', 'vendor'].includes(e.name) ? [] : walkAll(path.join(dir, e.name), depth + 1)) : [e.name]);
+      assert(walkAll(t.dir).some(n => lockNames.includes(n)), `${t.id}: ships a lock or pinned dependency file (${lockNames.join(' | ')})`);
+      assert(present('Dockerfile') && present('compose.yaml') && present('.env.example'), `${t.id}: ships Dockerfile, compose.yaml and .env.example`);
+      assert(t.run?.dev && t.run?.test && !!(t.run.ready || t.run.health), `${t.id}: declares dev, test and a readiness signal (ready or health)`);
+      const gi = fs.readFileSync(path.join(t.dir, '.gitignore'), 'utf8');
+      assert(!t.envFile || gi.split(/\r?\n/).some(l => l.trim() === t.envFile.file || l.trim() === `/${t.envFile.file}`), `${t.id}: its generated env file (${t.envFile?.file}) is gitignored`);
+    } else if (t.kind === 'bundle') {
+      const shippedIds = new Set(shipped.map(x => x.id));
+      for (const svc of t.services) {
+        if (svc.template) assert(shippedIds.has(svc.template), `${t.id}: service "${svc.id}" uses an installed template (${svc.template})`);
+        else if (svc.path) assert(fs.existsSync(path.join(t.dir, svc.path)), `${t.id}: service "${svc.id}" ships ${svc.path}`);
+      }
+      assert(fs.existsSync(path.join(t.dir, t.compose?.file ?? 'compose.yaml')) || t.compose?.generate, `${t.id}: ships a compose file or generates one`);
     }
   }
   // Manifest validation says what is wrong, not just "invalid".
@@ -12838,7 +12860,7 @@ console.log('  -- Every created app gets its own git history --');
   const templatedDir = miniAppDir(templated.slug, settings, ws);
   assert(fs.existsSync(path.join(templatedDir, '.git')), 'a templated app has its own git repo');
   const templatedLog = execFileSync('git', ['log', '--format=%s'], { cwd: templatedDir, encoding: 'utf8' }).trim();
-  assert(/^Start from Landing page/.test(templatedLog), `the first commit names the template (${templatedLog})`);
+  assert(/^chore: scaffold Landing page \(aico template landing-static@\d+\.\d+\.\d+\)/.test(templatedLog), `the first commit names the template (${templatedLog})`);
 
   // initAppGit is idempotent: a repo that already exists is left alone.
   const again = await initAppGit(templatedDir, 'should not run');

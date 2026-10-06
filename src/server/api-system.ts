@@ -193,7 +193,7 @@ export async function handleSystemRoute(
   // The morning brief and monitors (brief/service): reads, a manual run, monitor switches.
   if (route.startsWith('brief/')) {
     const { handleBriefRoute } = await import('../brief/service.js');
-    return handleBriefRoute(route, method, body, query);
+    return handleBriefRoute(route, method, body, query, human);
   }
   // About you (profile/service, ADR 0018): facts, their controls, a run, export, wipe.
   if (route === 'profile' || route.startsWith('profile/')) {

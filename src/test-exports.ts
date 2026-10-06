@@ -265,7 +265,7 @@ export { detectStyleTools, styleChecks } from './style-tools.js';
 export {
   dependencyAudit, parseNpmAudit, parsePipAudit, parseCargoAudit, parseDotnetVulnerable, parseGovulncheck,
   classifyLicense, scanNodeLicenses, scanPythonLicenses, findSitePackages, detectEcosystems, formatAudit,
-  DEFAULT_ALLOWED_LICENSES,
+  DEFAULT_ALLOWED_LICENSES, parseComposerAudit, parseOsvScanner, auditOne,
 } from './tools/dependency-audit.js';
 export { listChanges, diffOf, revertFile, isGitRepo, gitLog } from './server/changes.js';
 export { projectStats } from './project/stats.js';
@@ -385,14 +385,35 @@ export { REPORT_CONTRACT } from './agents/prompts-registry.js';
 export { executeSupervise, superviseToolDefinition } from './tools/supervise.js';
 export { loadSettings } from './settings.js';
 export {
-  createMiniApp, miniAppDir, getMiniApp, listMiniApps, effectiveKind, hasProcess, runProfileFor, backlogProgress,
+  createMiniApp, miniAppDir, getMiniApp, listMiniApps, effectiveKind, hasProcess, runProfileFor, backlogProgress, applyPlatform,
 } from './miniapps/store.js';
 export { miniAppContext, fileList, appStateLine } from './miniapps/context.js';
 export {
   listTemplates, getTemplate, validateManifest, suggestTemplates, matchScore, stem, renderCatalogue, substituteTokens,
   matchesSubstitute, instantiateTemplate, nodeSatisfies, bundledTemplatesDir, REQUIRED_TEMPLATE_FILES,
-  initAppGit, createCustomApp,
+  initAppGit, createCustomApp, checkTemplateRequirements, scaffoldMessage, stackOf, writeLocalEnv,
 } from './apps/templates.js';
+export {
+  probeTool, checkRequirements, versionSatisfies, parseVersion, validateProbe, aliasCommand, clearToolchainCache,
+  DEFAULT_PROBES, DEFAULT_DOCKER_IMAGES, dockerImageFor, probeArgsFor,
+} from './apps/toolchain.js';
+export { generateSecret, writeAppEnv, ensureGitignored } from './apps/env-file.js';
+export {
+  validateStack, validateBundle, validateRunExtensions, dependencyOrder, manifestPresent, KNOWN_MANIFEST_FILES,
+} from './apps/stack.js';
+export {
+  planNative, renderCompose, writeGeneratedCompose, wire, toYaml, nativeBlockers, previewService, hasCode,
+} from './apps/bundle.js';
+export {
+  dockerRunPlan, setDockerCommandForTests, dockerReady, clearDockerReadyCache, isValidImage, dockerBase,
+} from './apps/docker-run.js';
+export { containerizeChecks } from './apps/check-container.js';
+export {
+  commitAll, validateCommit, formatCommit, bumpVersion, findVersion, writeVersion, releaseChangelog, planRelease,
+  performRelease, tagBaseline, appCommitGate, changelogFromCommits, inferBump, latestTag, dirtyFiles, COMMIT_TYPES,
+} from './apps/app-git.js';
+export { detectStackChecks, detectStackLabel } from './checks-stacks.js';
+export { isArtifactName, hasArtifactSegment, templatePackageFilter, ARTIFACT_DIRS } from '../shared/apps/artifact-dirs.mjs';
 export { executeAppManage, appManageToolDefinition } from './tools/manage-miniapps.js';
 export { runAgent } from './agent.js';
 export {
@@ -649,6 +670,7 @@ export {
 export * as brief from './brief/core.js';
 export * as briefCollect from './brief/collect.js';
 export * as briefService from './brief/service.js';
+export * as briefFix from './brief/fix.js';
 
 // Preference learning (learning/signals, preferences, distill; ADR 0016): scripts/preferences-test.mjs.
 export {

@@ -1,0 +1,24 @@
+# build output
+bin/
+obj/
+artifacts/
+TestResults/
+*.received.*
+# local state and secrets (config is environment-only; never commit these)
+.env
+.env.local
+.env.*
+!.env.example
+data/
+*.db
+*.db-shm
+*.db-wal
+*.pfx
+*.pem
+*.key
+# tooling
+.vs/
+.idea/
+*.user
+*.swp
+.DS_Store

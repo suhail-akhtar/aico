@@ -16,7 +16,7 @@
  * @module apps/deploy
  */
 
-import { spawnSync } from 'child_process';
+import { probeTool } from './toolchain.js';
 import { appState, runAppCommand, type RunningApp } from '../miniapps/process.js';
 import type { DeployTarget, MiniApp } from '../miniapps/store.js';
 
@@ -25,15 +25,15 @@ export function deployKey(slug: string): string {
   return `${slug}#deploy`;
 }
 
-/** Whether a command-line tool answers on this machine. */
+/**
+ * Whether a command-line tool answers on this machine.
+ *
+ * Uses each tool's real probe (`go version`, `java -version`, `composer
+ * --version`): `go --version` is not Go syntax, so the old `--version` for
+ * everything reported Go as missing on machines that had it.
+ */
 export function toolAvailable(name: string): boolean {
-  const probe = spawnSync(name, ['--version'], {
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
-    timeout: 15_000,
-    windowsHide: true,
-  });
-  return probe.status === 0;
+  return probeTool({ id: name }).found;
 }
 
 /** Which of a target's requirements are missing here. */

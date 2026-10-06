@@ -378,7 +378,8 @@ Plus: **steer a run mid-flight** (delivered at the next step boundary, nothing l
 | [**SWE-bench Lite**](benchmarks/swebench-lite/README.md) — real GitHub issues from 12 open-source repos, graded by each project's own tests | **73 / 80 resolved (91.25%)** — two disjoint random draws, 35/40 then 38/40 | Fixing real bugs in large, unfamiliar codebases from the issue text alone — django 29/31, sympy 17/19, scikit-learn 6/6, matplotlib 5/5, pytest 4/4, sphinx 3/3 … |
 | [**Custom-stack architecture**](benchmarks/custom-app-architecture/README.md) — ambiguous greenfield briefs, no template | **4 / 5 built clean (17/17 checks each)**; the fifth hit a real iteration cap at 60% | Deciding the data model, stack and boundaries — not just filling in a template |
 | **Hidden-test implementation** — a spec, 7 visible tests, graded by 23 it never saw | **23 / 23** on both gpt-5.6-luna and gpt-5.6-terra | Implementing to a spec, not to the visible tests |
-| **Nine app templates** — each built end to end by a real model | **9 / 9 proven live**, opened in a browser at two widths | The app platform works as a whole |
+| **Nine Node app templates** — each built end to end by a real model | **9 / 9 proven live**, opened in a browser at two widths | The app platform works as a whole |
+| **Five more starters** — FastAPI, Spring Boot, ASP.NET Core, Go, Laravel — each built, tested, audited and run as a container | **61–74 checks each**, 95–98% test coverage, dependency audit clean, container smoke test green | The starters hold up in their own ecosystems (these were verified by running them, not by a model build) |
 | [**Engineering benchmark**](scripts/eng-bench.mjs) (`npm run bench:eng`) — multi-tenant API with JWT/RBAC, a bug in an unfamiliar codebase, a pattern refactor, an architecture doc, a full-stack feature, delegated security fixes; independent graders and black-box checks | **≈99 / 100 checks** on `deepseek-flash` for **≈$0.35 a full run**; delegation 12/12 | The everyday enterprise work, measured on every prompt or tool change — a skill that bloated output was caught and removed before release |
 
 Every one is reproducible from scripts in this repository, with per-instance
@@ -506,9 +507,9 @@ models that read images.
 <details>
 <summary><b>Apps — build real applications, not snippets</b></summary>
 
-Nine templates — a records page over SQLite, a landing page, a Hono JSON API, a
+Fifteen templates. Nine for Node — a records page over SQLite, a landing page, a Hono JSON API, a
 Next.js app with accounts, a metrics dashboard, a docs site, a CLI, an LLM agent
-service and an Expo mobile app — copy in as files (zero model tokens) with a worked
+service and an Expo mobile app — plus starters for Python (FastAPI), Java (Spring Boot), C# (ASP.NET Core), Go and PHP (Laravel) and a React frontend, copy in as files (zero model tokens) with a worked
 feature, tests, notes for the agent, a backlog and a deploy script. Or a custom
 stack from a description. The turn cannot end until the app was opened in a real
 browser and its own checks are green; **Deploy** runs the script it ships with. A

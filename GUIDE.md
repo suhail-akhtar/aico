@@ -277,8 +277,13 @@ in `brief.mcp` (for example `[{ "server": "calendar", "tool": "list_events" }]`)
 
 Each item has one-click actions — open the PR or run, open the chat, review in
 the inbox, or **Start a fix**, which opens a new chat in that project with the
-prompt filled in and *not sent*. The brief only reads; nothing acts until you
-click. Earlier briefs are under **History**.
+prompt filled in and *not sent* (the composer is scrolled into view and the card says so). The
+same advisory in several projects is one row with the projects as chips; **Fix all**
+(per advisory, per project, or the whole section) shows a plan first and, once you
+confirm, starts one background task per project on its own `fix/advisory-…` branch —
+never the default branch, nothing pushed — skipping any project with uncommitted
+changes. Uncommitted changes and stale branches offer **Review**. Otherwise the brief
+only reads; nothing acts until you click. Earlier briefs are under **History**.
 
 **Monitors** are opt-in per project (the card's **Monitors** table): CI on the
 default branch, new review requests, new critical advisories. They poll
@@ -565,14 +570,25 @@ and deploys. Turn the host on once under Settings → Apps.
 **Create app** asks one question first — what do you want to build? Write it
 the way you would brief a colleague: who uses it, what they do most often, what
 must be true when it is done. As you type, the templates are ranked against your
-words and the best match is named with the words that matched. Nine templates
-ship: a records page over SQLite that needs no install, a static landing page, a
+words and the best match is named with the words that matched. Fifteen templates
+ship (nine for Node, listed here, plus the starters below): a records page over SQLite that needs no install, a static landing page, a
 JSON API, a full web application with accounts, a metrics dashboard, a
 documentation site, a command-line tool, an LLM agent service, and an Expo
 mobile app. Each copies in as files with a worked feature, tests, notes for the
 agent and a deploy script; nothing is generated, so the skeleton costs no
 tokens. Take the best match, browse *See all templates*, or *Let the agent
 choose and start*. Your brief becomes the first message of the conversation.
+
+Beyond those nine, the catalogue has starters for Python, Java, .NET, Go and PHP
+and a React frontend. A template can also be a bundle (a frontend, an API and a database that start together); the engine runs them, but no ready-made bundle ships yet.
+A card says what it needs installed, checked on your machine for real (`go
+version`, `java -version`), and when the toolchain is missing but Docker is
+running it says so and can run the app in a container instead — only when you
+choose that (*Start in Docker*). Every app has its own git history: a scaffold
+commit naming the template, one Conventional Commit per finished story (a turn
+that changed source cannot end with the app uncommitted), a `v0.1.0` baseline
+tag when the first iteration passes its checks, and releases that bump the
+version and CHANGELOG. Tagging asks for your approval and nothing is ever pushed.
 
 That conversation is bound to the app, and the app sits beside it. **Preview**
 is the app itself, at desktop, tablet or phone width, reloaded when a turn ends.

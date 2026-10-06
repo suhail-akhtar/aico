@@ -46,6 +46,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import type { AicoSettings } from '../settings.js';
 import { resolveWorkspaceRoot } from '../workspace.js';
+import { KNOWN_MANIFEST_FILES, manifestPresent, type AppCompose, type AppService, type AppStack } from '../apps/stack.js';
 
 /**
  * What the host does with an app.
@@ -56,8 +57,10 @@ import { resolveWorkspaceRoot } from '../workspace.js';
  *   cli      no server; checks and a `run.start` that prints
  *   mobile   an Expo project; `process` semantics with a web preview
  *   nextjs   legacy spelling of `process` with the Next.js run profile
+ *   bundle   several services run together (frontend + API + database…); each
+ *            has its own run profile in `services`, see ADR 0031
  */
-export type MiniAppKind = 'page' | 'static' | 'process' | 'cli' | 'mobile' | 'nextjs';
+export type MiniAppKind = 'page' | 'static' | 'process' | 'cli' | 'mobile' | 'nextjs' | 'bundle';
 
 /** How to install, run, build and check an app. Copied from its template at create. */
 export interface RunProfile {
@@ -73,6 +76,20 @@ export interface RunProfile {
   lint?: string;
   /** For `cli` apps: the command "Run" executes. */
   start?: string;
+  /** Check mode: must fail on unformatted code, not rewrite it. */
+  format?: string;
+  /** Dependency audit; fails on high/critical. */
+  audit?: string;
+  /** A path (relative to the app) whose existence means `install` already ran. Default for Node: `node_modules`. */
+  installedMarker?: string;
+  /** The environment variable that carries the port. Default `PORT`; `""` when the command only takes `{port}`. */
+  portEnv?: string;
+  /** An HTTP path polled on the app's port; a 2xx/3xx answer means ready, in addition to `ready`. */
+  health?: string;
+  /** Non-secret environment for dev/start/checks. `{port}` is substituted. */
+  env?: Record<string, string>;
+  /** Per-field overrides on Windows (`mvnw` rather than `./mvnw`). */
+  win32?: Partial<Record<'install' | 'dev' | 'build' | 'test' | 'typecheck' | 'lint' | 'format' | 'audit' | 'start', string>>;
 }
 
 export interface DeployTarget {
@@ -102,6 +119,14 @@ export interface MiniApp {
   template?: { id: string; version: string };
   run?: RunProfile;
   deploy?: DeployTarget[];
+  /** Toolchain, manifest file, env file and container hints for a non-Node (or any templated) stack. Absent on apps made before ADR 0031. */
+  stack?: AppStack;
+  /** A bundle's services, in declaration order. */
+  services?: AppService[];
+  /** A bundle's compose file. */
+  compose?: AppCompose;
+  /** For a bundle: the service the Apps preview shows. Default: the first frontend. */
+  preview?: string;
   createdAt: number;
   updatedAt: number;
   /** The session that is building it, so the two can find each other. */
@@ -159,7 +184,7 @@ export function effectiveKind(app: Pick<MiniApp, 'kind'>): Exclude<MiniAppKind, 
 /** Whether the app is a child process with a port of its own. */
 export function hasProcess(app: Pick<MiniApp, 'kind'>): boolean {
   const kind = effectiveKind(app);
-  return kind === 'process' || kind === 'mobile';
+  return kind === 'process' || kind === 'mobile' || kind === 'bundle';
 }
 
 /** Whether the shared host serves this app's `public/`. */
@@ -176,7 +201,11 @@ export function servedByHost(app: Pick<MiniApp, 'kind'>): boolean {
  * a `process` app with a missing field are the npm conventions, because that is
  * what every template here uses and what a hand-made project most likely has.
  */
-export function runProfileFor(app: Pick<MiniApp, 'kind' | 'run'>): RunProfile {
+export function runProfileFor(app: Pick<MiniApp, 'kind' | 'run'> & { stack?: AppStack }): RunProfile {
+  return applyPlatform(baseRunProfile(app));
+}
+
+function baseRunProfile(app: Pick<MiniApp, 'kind' | 'run'> & { stack?: AppStack }): RunProfile {
   const declared = app.run ?? {};
   if (app.kind === 'nextjs') {
     return {
@@ -188,6 +217,11 @@ export function runProfileFor(app: Pick<MiniApp, 'kind' | 'run'>): RunProfile {
     };
   }
   if (!hasProcess(app) && effectiveKind(app) !== 'cli') return declared;
+  // A declared stack other than Node must not inherit `npm install`: an app that omitted `install` (a Go
+  // module has none) would otherwise run npm in a directory with no package.json.
+  if (app.stack?.toolchain && app.stack.toolchain.id !== 'node') {
+    return { ready: 'listening on|Listening on|running on|Now listening|Started |started server|http://', ...declared };
+  }
   return {
     install: 'npm install --no-audit --no-fund',
     ready: 'ready in|started server|Local:\\s+http|listening on|http://',
@@ -195,14 +229,41 @@ export function runProfileFor(app: Pick<MiniApp, 'kind' | 'run'>): RunProfile {
   };
 }
 
-/** What has to exist for an app of this kind to count as built. */
-function builtMarker(app: Pick<MiniApp, 'kind'>): string {
+/**
+ * A run profile with this platform's overrides applied.
+ *
+ * `run.win32` exists because `./mvnw` is a POSIX path and Windows wants
+ * `mvnw` (cmd resolves `mvnw.cmd` from the current directory). Only declared
+ * fields are overridden; everything else is untouched.
+ */
+export function applyPlatform(run: RunProfile, platform: string = process.platform): RunProfile {
+  const { win32, ...rest } = run;
+  return platform === 'win32' && win32 ? { ...rest, ...win32 } : rest;
+}
+
+/**
+ * Whether the files that make an app runnable exist.
+ *
+ * A page or static app needs `public/index.html`. A templated app says which
+ * file means "scaffolded" (`stack.manifestFile`: `pyproject.toml`,
+ * `*.csproj`, `go.mod`…). A bundle is built when every service that has code
+ * has its directory. Anything else (an old Node app, or a custom app whose
+ * stack the agent chose) counts when any known project manifest exists —
+ * which is what lets a custom Python or Go app read as built, where it used to
+ * be "not built yet" forever because only `package.json` counted.
+ */
+function isBuilt(app: Pick<MiniApp, 'kind' | 'stack' | 'services'>, dir: string): boolean {
   switch (effectiveKind(app)) {
     case 'page':
     case 'static':
-      return path.join('public', 'index.html');
+      return existsSync(path.join(dir, 'public', 'index.html'));
+    case 'bundle': {
+      const withCode = (app.services ?? []).filter(s => !s.image && (s.path || s.template));
+      return withCode.length > 0 && withCode.every(s => existsSync(path.join(dir, s.path ?? path.join('services', s.id))));
+    }
     default:
-      return 'package.json';
+      if (app.stack?.manifestFile) return manifestPresent(dir, app.stack.manifestFile);
+      return manifestPresent(dir, KNOWN_MANIFEST_FILES.slice());
   }
 }
 
@@ -216,7 +277,7 @@ async function readApp(dir: string): Promise<MiniApp | null> {
       Reading the stored flag instead would let a half-written app claim to be
       finished for as long as nobody corrected the file.
     */
-    const built = existsSync(path.join(dir, builtMarker(app)));
+    const built = isBuilt(app, dir);
     return { ...app, built };
   } catch {
     return null;
@@ -258,6 +319,10 @@ export interface CreateMiniAppInput {
   template?: { id: string; version: string };
   run?: RunProfile;
   deploy?: DeployTarget[];
+  stack?: AppStack;
+  services?: AppService[];
+  compose?: AppCompose;
+  preview?: string;
 }
 
 /**
@@ -289,6 +354,10 @@ export async function createMiniApp(
     ...(input.template ? { template: input.template } : {}),
     ...(input.run && Object.keys(input.run).length ? { run: input.run } : {}),
     ...(input.deploy?.length ? { deploy: input.deploy } : {}),
+    ...(input.stack && Object.keys(input.stack).length ? { stack: input.stack } : {}),
+    ...(input.services?.length ? { services: input.services } : {}),
+    ...(input.compose ? { compose: input.compose } : {}),
+    ...(input.preview ? { preview: input.preview } : {}),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     createdAt: now,
     updatedAt: now,
@@ -321,7 +390,7 @@ export async function deleteMiniApp(
 /** Record that something changed, so the list orders by what was touched last. */
 export async function touchMiniApp(
   slug: string,
-  patch: Partial<Pick<MiniApp, 'title' | 'description' | 'sessionId' | 'run' | 'deploy' | 'category'>> = {},
+  patch: Partial<Pick<MiniApp, 'title' | 'description' | 'sessionId' | 'run' | 'deploy' | 'category' | 'stack' | 'services'>> = {},
   settings?: AicoSettings, cwd = process.cwd(),
 ): Promise<MiniApp | null> {
   const dir = miniAppDir(slug, settings, cwd);

@@ -254,14 +254,14 @@ export async function gitHygiene(run: Runner, cwd: string, now: number, defaultB
   const status = await run('git', ['status', '--porcelain=v1'], cwd);
   const changed = status.code === 0 ? status.stdout.split('\n').filter(l => l.trim()).length : 0;
   if (changed > 0) {
-    items.push({ key: `git|${cwd}|dirty|${changed}`, source: 'git', urgency: 'fyi', title: `${changed} uncommitted change${changed === 1 ? '' : 's'} in ${name}`, project: cwd, actions: [] });
+    items.push({ key: `git|${cwd}|dirty|${changed}`, source: 'git', urgency: 'fyi', title: `${changed} uncommitted change${changed === 1 ? '' : 's'} in ${name}`, project: cwd, actions: [{ kind: 'start-fix', label: 'Review', cwd, prompt: 'Show me what is uncommitted in this project (git status and a summary of the diff) and suggest how to split it into commits. Do not change anything.' }] });
   }
   const current = (await run('git', ['branch', '--show-current'], cwd)).stdout.trim();
   const refs = await run('git', ['for-each-ref', '--format=%(refname:short)%09%(committerdate:unix)', 'refs/heads'], cwd);
   const keep = new Set([current, defaultBranch ?? '', 'main', 'master', 'develop'].filter(Boolean));
   const stale = refs.stdout.split('\n').map(l => l.split('\t')).filter(([b, t]) => b && t && !keep.has(b) && now - Number(t) * 1000 > STALE_BRANCH_DAYS * 86_400_000).map(([b]) => b!);
   if (stale.length) {
-    items.push({ key: `git|${cwd}|stale|${stale.sort().join(',')}`, source: 'git', urgency: 'fyi', title: `${stale.length} stale branch${stale.length === 1 ? '' : 'es'} in ${name} (no commits for ${STALE_BRANCH_DAYS}+ days)`, detail: stale.slice(0, 5).join(', '), project: cwd, actions: [] });
+    items.push({ key: `git|${cwd}|stale|${stale.sort().join(',')}`, source: 'git', urgency: 'fyi', title: `${stale.length} stale branch${stale.length === 1 ? '' : 'es'} in ${name} (no commits for ${STALE_BRANCH_DAYS}+ days)`, detail: stale.slice(0, 5).join(', '), project: cwd, actions: [{ kind: 'start-fix', label: 'Review', cwd, prompt: `These local branches have had no commits for ${STALE_BRANCH_DAYS}+ days: ${stale.slice(0, 20).join(', ')}. For each, say whether it is merged or holds unique work, and list what is safe to delete. Do not delete anything.` }] });
   }
   return items;
 }
@@ -274,10 +274,21 @@ export interface CachedAdvisory { id: string; pkg: string; severity: string; tit
 export function advisoryItems(cwd: string, current: CachedAdvisory[], previousIds: string[] | undefined): BriefItem[] {
   if (!previousIds) return []; // the first audit of a project is a baseline, not news
   const had = new Set(previousIds);
-  return current.filter(a => !had.has(a.id) && (a.severity === 'critical' || a.severity === 'high')).slice(0, 8).map(a => ({
-    key: `adv|${cwd}|${a.id}`, source: 'advisory' as const, urgency: a.severity === 'critical' ? 'urgent' as const : 'soon' as const,
+  // One row per (advisory id, package) in a project: the same advisory reported
+  // by several lockfiles (or ecosystems) of one project is one problem; the
+  // most severe report wins and a known fix version is kept.
+  const byKey = new Map<string, CachedAdvisory>();
+  for (const a of current) {
+    if (had.has(a.id) || (a.severity !== 'critical' && a.severity !== 'high')) continue;
+    const k = `${a.id}|${a.pkg}`;
+    const seen = byKey.get(k);
+    byKey.set(k, seen ? { ...a, severity: seen.severity === 'critical' || a.severity === 'critical' ? 'critical' : 'high', ...(a.fix ?? seen.fix ? { fix: (a.fix ?? seen.fix)! } : {}) } : a);
+  }
+  return [...byKey.values()].slice(0, 8).map(a => ({
+    key: `adv|${cwd}|${a.id}|${a.pkg}`, source: 'advisory' as const, urgency: a.severity === 'critical' ? 'urgent' as const : 'soon' as const,
     title: `New ${a.severity} advisory in ${baseName(cwd)}: ${a.pkg} — ${a.title}`.slice(0, 200),
     detail: `${a.id}${a.fix ? `; fix: ${a.fix}` : ''}`, project: cwd,
+    advisory: { id: a.id, pkg: a.pkg, severity: a.severity, title: a.title, ...(a.fix ? { fix: a.fix } : {}) },
     actions: [{ kind: 'start-fix', label: 'Start a fix', cwd, prompt: `A new ${a.severity} advisory ${a.id} affects ${a.pkg} in this project (${a.title}). Run DependencyAudit, explain the exposure and propose the smallest upgrade that fixes it. Do not change anything until I agree.` }],
   }));
 }

@@ -1,0 +1,338 @@
+openapi: 3.0.3
+info:
+  title: __APP_TITLE__ API
+  version: 0.1.0
+  description: |
+    Spec-first: this file is the contract. `make gen` turns it into the typed
+    server interface in `internal/api/api.gen.go`; the build fails until every
+    operation is implemented. Errors are RFC 9457 problem details
+    (`application/problem+json`). Authentication is a bearer token: an opaque one from
+    `POST /v1/auth/login` (the default, `AUTH_MODE=local`), or an access token from an external
+    OpenID Connect provider when the service runs with `AUTH_MODE=oidc`, in which case the
+    register, login and logout operations answer 404.
+servers:
+  - url: /
+tags:
+  - name: ops
+  - name: auth
+  - name: items
+paths:
+  /healthz:
+    get:
+      operationId: Healthz
+      tags: [ops]
+      summary: Liveness. The process is up; no dependency is checked.
+      security: []
+      responses:
+        "200":
+          description: Alive.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+  /readyz:
+    get:
+      operationId: Readyz
+      tags: [ops]
+      summary: Readiness. The database answers and the server is not draining.
+      security: []
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /openapi.yaml:
+    get:
+      operationId: GetOpenAPI
+      tags: [ops]
+      summary: This document.
+      security: []
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/yaml:
+              schema: { type: string, format: binary }
+  /v1/auth/register:
+    post:
+      operationId: Register
+      tags: [auth]
+      summary: Create an account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Credentials" }
+      responses:
+        "201":
+          description: Account created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/login:
+    post:
+      operationId: Login
+      tags: [auth]
+      summary: Exchange credentials for a bearer token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Credentials" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Token" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/logout:
+    post:
+      operationId: Logout
+      tags: [auth]
+      summary: Revoke the presented token.
+      responses:
+        "204": { description: Signed out. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/me:
+    get:
+      operationId: GetMe
+      tags: [auth]
+      summary: The signed-in user.
+      responses:
+        "200":
+          description: The user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/items:
+    get:
+      operationId: ListItems
+      tags: [items]
+      summary: The caller's items, newest first (keyset pagination).
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          description: Opaque; pass the `next_cursor` of the previous page.
+          schema: { type: string, maxLength: 200 }
+      responses:
+        "200":
+          description: A page of items.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    post:
+      operationId: CreateItem
+      tags: [items]
+      summary: Create an item owned by the caller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateItem" }
+      responses:
+        "201":
+          description: Created.
+          headers:
+            Location:
+              description: Path of the new item.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/items/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid, x-go-type: string }
+    get:
+      operationId: GetItem
+      tags: [items]
+      summary: One of the caller's items. Another user's item is a 404.
+      responses:
+        "200":
+          description: The item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: UpdateItem
+      tags: [items]
+      summary: Replace an item's fields.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateItem" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    delete:
+      operationId: DeleteItem
+      tags: [items]
+      summary: Delete an item.
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Opaque token from `POST /v1/auth/login`.
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok] }
+    Credentials:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, maxLength: 254, example: ada@example.com }
+        password: { type: string, minLength: 12, maxLength: 128, writeOnly: true }
+    User:
+      type: object
+      required: [id, email, created_at]
+      properties:
+        id: { type: string, format: uuid, x-go-type: string }
+        email: { type: string }
+        created_at: { type: string, format: date-time }
+    Me:
+      type: object
+      required: [id, email]
+      properties:
+        id: { type: string, format: uuid, x-go-type: string }
+        email: { type: string }
+    Token:
+      type: object
+      required: [access_token, token_type, expires_at]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+        expires_at: { type: string, format: date-time }
+    CreateItem:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 1000, nullable: true }
+        quantity: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
+    Item:
+      type: object
+      required: [id, name, description, quantity, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid, x-go-type: string }
+        name: { type: string }
+        description: { type: string }
+        quantity: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ItemPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Item" }
+        next_cursor:
+          type: string
+          description: Absent on the last page.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type: { type: string, example: "urn:problem:not-found" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        request_id: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+  responses:
+    BadRequest:
+      description: Malformed request (unparseable JSON or parameter).
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    Unauthorized:
+      description: Missing, malformed, expired or revoked credentials.
+      headers:
+        WWW-Authenticate: { schema: { type: string } }
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    NotFound:
+      description: No such resource (or it belongs to someone else).
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    Conflict:
+      description: The resource already exists.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    PayloadTooLarge:
+      description: Body over the configured limit.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    UnsupportedMediaType:
+      description: The body must be application/json.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    Unprocessable:
+      description: Well-formed but invalid; `errors` names each field.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    ServiceUnavailable:
+      description: A dependency is down or the server is shutting down.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }

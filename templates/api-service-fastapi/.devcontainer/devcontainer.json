@@ -1,0 +1,18 @@
+{
+  "name": "api-service-fastapi",
+  "image": "mcr.microsoft.com/devcontainers/python:3.14-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "postCreateCommand": "pip install --no-cache-dir uv==0.12.23 && uv sync --locked",
+  "forwardPorts": [8000],
+  "customizations": {
+    "vscode": {
+      "extensions": ["charliermarsh.ruff", "ms-python.python", "ms-python.mypy-type-checker"],
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "[python]": { "editor.defaultFormatter": "charliermarsh.ruff", "editor.formatOnSave": true }
+      }
+    }
+  }
+}

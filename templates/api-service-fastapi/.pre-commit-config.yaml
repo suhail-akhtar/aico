@@ -1,0 +1,36 @@
+# Hooks run on `git commit` (`make setup` installs them). CI re-runs everything:
+# hooks are a convenience, not the gate.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: ruff
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy --strict
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false

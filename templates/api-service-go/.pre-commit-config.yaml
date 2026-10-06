@@ -1,0 +1,31 @@
+# Hooks run on `git commit` (install them once with `pre-commit install`).
+# CI re-runs everything: hooks are a convenience, not the gate.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: gofumpt
+        name: gofumpt + goimports
+        entry: make fmt
+        language: system
+        types: [go]
+        pass_filenames: false
+      - id: golangci-lint
+        name: golangci-lint
+        entry: make lint
+        language: system
+        types: [go]
+        pass_filenames: false

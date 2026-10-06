@@ -1,0 +1,60 @@
+# Local stack: the app (built from the Dockerfile) and its PostgreSQL. Start it with `make run`
+# (which creates .env.local with generated secrets first) or
+# `docker compose --env-file .env.local up --build`.
+#
+# For development with fast reloads, run only the database here (`make db`) and the app from your
+# IDE or `make dev`; the database port is published on localhost only.
+name: api-service
+
+services:
+  db:
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: ${DATABASE_USER:-app}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required, run make setup}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build: .
+    image: api-service:local
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: jdbc:postgresql://db:5432/app
+      DATABASE_USER: ${DATABASE_USER:-app}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required, run make setup}
+      # Required in local mode (the app refuses to start without it and says so); unused in oidc mode.
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-}
+      APP_AUTH_MODE: ${APP_AUTH_MODE:-local}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-}
+      # The API explorer is off in the prod profile; a local stack turns it on.
+      APP_DOCS_ENABLED: ${APP_DOCS_ENABLED:-true}
+    ports:
+      - "${PORT:-8080}:8080"
+    # Hardening: nothing writable but /tmp, no capabilities, no privilege escalation.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  db-data:

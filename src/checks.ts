@@ -32,6 +32,7 @@ import fs from 'fs';
 import path from 'path';
 import { runScoped } from './run-scoped.js';
 import { formatTestSummary, type TestSummary } from './test-results.js';
+import { detectStackChecks, hasStackManifest } from './checks-stacks.js';
 
 /** One thing that must pass. */
 export interface Check {
@@ -84,7 +85,7 @@ export function detectChecksFor(touched: readonly string[], cwd: string): Array<
     let dir = path.dirname(path.resolve(file));
     let found = root;
     while (dir.startsWith(root)) {
-      if (MANIFESTS.some(m => fs.existsSync(path.join(dir, m)))) { found = dir; break; }
+      if (MANIFESTS.some(m => fs.existsSync(path.join(dir, m))) || hasStackManifest(dir)) { found = dir; break; }
       if (dir === root) break;
       const parent = path.dirname(dir);
       if (parent === dir) break;
@@ -151,7 +152,9 @@ export function scriptRunner(root: string): string {
  * answer — a folder of notes has no build.
  */
 export function detectChecks(root: string): Check[] {
-  const found: Check[] = [];
+  // Python, Java, .NET, PHP and Go first: where both name a check (a `uv run pytest` and a bare
+  // `pytest`), the project's own runner wins, and the dedupe below keeps the first.
+  const found: Check[] = [...detectStackChecks(root)];
 
   const pkg = readJson(path.join(root, 'package.json'));
   if (pkg) {

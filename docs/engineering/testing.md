@@ -43,7 +43,9 @@ all of them. Run all three before saying "tests pass".
 | `npm run test:mcp` | `aico mcp-serve` and the MCP client against real stdio servers |
 | `npm run test:serve` | cron and boot reconciliation under a real `aico serve` |
 | `npm run test:apps`, `test:deploy` | Apps routes and deploy against a real server |
-| `npm run test:templates` | every process template installs, typechecks, tests and builds from clean (network; slow — run before a release that touches templates) |
+| `npm run test:templates` | every process template (Node, Python, Java, .NET, Go, PHP) installs, formats, lints, typechecks, tests and builds from clean, through its manifest's declared checks, natively or in its pinned container image; a starter nothing could check (no toolchain, no Docker) fails as NOT VERIFIED (network; slow — run before a release that touches templates; `--docker` / `--native` force a mode) |
+| `node scripts/validate-template.mjs [templates/<id>]` | the loader's manifest validator plus the completeness bar, with every message printed (a bad manifest is otherwise dropped silently); free |
+| `node scripts/multistack-test.mjs` | multi-stack apps (ADR 0031) offline: toolchain probes, env secret formats, manifest and bundle validation, manifest-driven start, Docker fallback and compose against a fake `docker` (`scripts/fixtures/fake-docker.mjs`), native bundle start of two real processes, per-stack checks, audit parsers, the per-app git workflow and the release human gate; part of `npm test` |
 | `npm run test:nextapp`, `test:miniapps` | Next.js / Mini App host install, serve, persist, refuse |
 | `npm run test:panel` | the VS Code panel's transport against a real server (no model) |
 | `npm run test:bench:graders` | the eng-bench graders fail each untouched fixture and plausible-but-wrong mutant, and score each reference solution 100% (needs Chrome; ~40 s) |

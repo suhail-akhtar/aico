@@ -1,0 +1,19 @@
+{
+  "name": "api-service-go",
+  "image": "mcr.microsoft.com/devcontainers/go:2-1.27-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "postCreateCommand": "make setup && docker compose up -d --wait db",
+  "forwardPorts": [8080, 5432],
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"],
+      "settings": {
+        "go.lintTool": "golangci-lint",
+        "go.formatTool": "gofumpt",
+        "[go]": { "editor.formatOnSave": true }
+      }
+    }
+  }
+}

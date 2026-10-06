@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "dotnet-ef": {
+      "version": "10.0.12",
+      "commands": ["dotnet-ef"],
+      "rollForward": false
+    },
+    "dotnet-reportgenerator-globaltool": {
+      "version": "5.5.11",
+      "commands": ["reportgenerator"],
+      "rollForward": false
+    },
+    "cyclonedx": {
+      "version": "6.2.0",
+      "commands": ["dotnet-cyclonedx"],
+      "rollForward": false
+    }
+  }
+}

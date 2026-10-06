@@ -1,0 +1,229 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Web app API contract",
+    "version": "1.0.0",
+    "description": "The slice of the backend API this single-page app depends on. It is the contract between the SPA and whichever API sits behind the gateway: the typed client in src/api/generated is generated from this file, and every backend the app is shipped with must satisfy it (extra fields and extra operations are fine). Authentication is a cookie session held by the gateway (the BFF); the browser never sees a token. Unsafe methods must carry `X-Requested-With: fetch` or the gateway rejects them (CSRF); the client adds it to every request."
+  },
+  "servers": [{ "url": "/api", "description": "Same origin, through the gateway." }],
+  "tags": [{ "name": "auth" }, { "name": "items" }],
+  "paths": {
+    "/v1/auth/me": {
+      "get": {
+        "operationId": "getMe",
+        "tags": ["auth"],
+        "summary": "The signed-in user. 401 when there is no valid session.",
+        "responses": {
+          "200": {
+            "description": "The user.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Me" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/items": {
+      "get": {
+        "operationId": "listItems",
+        "tags": ["items"],
+        "summary": "The caller's items, newest first, one page at a time (keyset pagination).",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque. Pass the `next_cursor` of the previous page.",
+            "schema": { "type": "string", "maxLength": 200 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of items.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ItemPage" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Invalid" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "operationId": "createItem",
+        "tags": ["items"],
+        "summary": "Create an item owned by the caller.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ItemInput" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+          },
+          "400": { "$ref": "#/components/responses/Invalid" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      }
+    },
+    "/v1/items/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "operationId": "getItem",
+        "tags": ["items"],
+        "summary": "One of the caller's items. Another user's item is a 404.",
+        "responses": {
+          "200": {
+            "description": "The item.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "operationId": "replaceItem",
+        "tags": ["items"],
+        "summary": "Replace an item's fields (every field is sent, every time).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ItemInput" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+          },
+          "400": { "$ref": "#/components/responses/Invalid" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteItem",
+        "tags": ["items"],
+        "summary": "Delete an item.",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Me": {
+        "type": "object",
+        "required": ["id", "email"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string" }
+        }
+      },
+      "Item": {
+        "type": "object",
+        "required": ["id", "name", "description", "quantity", "created_at", "updated_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "quantity": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ItemInput": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "description": { "type": ["string", "null"], "maxLength": 1000 },
+          "quantity": { "type": "integer", "minimum": 0, "maximum": 1000000, "default": 0 }
+        }
+      },
+      "ItemPage": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } },
+          "next_cursor": {
+            "type": ["string", "null"],
+            "description": "Null or absent on the last page."
+          }
+        }
+      },
+      "FieldError": {
+        "type": "object",
+        "required": ["message"],
+        "description": "One validation failure. The field is `field` (a dotted path) or `loc` (a path array), depending on the backend.",
+        "properties": {
+          "field": { "type": "string" },
+          "loc": { "type": "array", "items": { "type": ["string", "integer"] } },
+          "message": { "type": "string" },
+          "type": { "type": "string" }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "description": "RFC 9457 problem details (application/problem+json).",
+        "required": ["title", "status"],
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "integer" },
+          "detail": { "type": ["string", "null"] },
+          "instance": { "type": ["string", "null"] },
+          "request_id": { "type": ["string", "null"] },
+          "errors": {
+            "description": "Validation failures. An array of FieldError, or (ASP.NET) an object mapping a field to its messages. The client normalises both.",
+            "oneOf": [
+              { "type": "array", "items": { "$ref": "#/components/schemas/FieldError" } },
+              {
+                "type": "object",
+                "additionalProperties": { "type": "array", "items": { "type": "string" } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "No valid session (or the session expired).",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      },
+      "NotFound": {
+        "description": "No such item (or it belongs to someone else).",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      },
+      "Invalid": {
+        "description": "The request is malformed or fails validation; `errors` names each field.",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,152 @@
+{
+  "id": "web-app-laravel",
+  "version": "1.0.0",
+  "name": "Web app (Laravel)",
+  "category": "saas",
+  "kind": "process",
+  "summary": "A full-stack PHP web application: Laravel 13 on PHP 8.5, Blade + Livewire 4, Tailwind, sign-up and sign-in (Fortify, Argon2id), a Sanctum-protected JSON API with OpenAPI, PostgreSQL, one worked feature (items) with ownership policies, 100+ tests at 96% coverage, and a hardened FrankenPHP image.",
+  "features": [
+    "Sign-up, sign-in and password reset (Fortify, Argon2id, throttled) plus bearer-token API auth (Sanctum)",
+    "An items feature end to end: Livewire page, JSON API, policies, form requests, actions, tests",
+    "Security by default: CSP with nonces, RFC 9457 errors, CORS allow-list, rate limits, fail-fast config",
+    "Docker only: Pint, PHPStan level 10, Pest with a coverage gate, composer audit, SBOM, read-only image"
+  ],
+  "tags": [
+    "php",
+    "laravel",
+    "livewire",
+    "blade",
+    "tailwind",
+    "postgres",
+    "sanctum",
+    "auth",
+    "saas",
+    "fullstack",
+    "web app",
+    "openapi"
+  ],
+  "match": [
+    "php",
+    "laravel",
+    "livewire",
+    "blade",
+    "saas",
+    "web app",
+    "webapp",
+    "portal",
+    "platform",
+    "full stack",
+    "fullstack",
+    "users",
+    "login",
+    "signup",
+    "accounts",
+    "crm",
+    "admin",
+    "booking",
+    "marketplace",
+    "sign in",
+    "sign up",
+    "customers",
+    "invoices",
+    "orders",
+    "team",
+    "multi-user",
+    "workspace",
+    "tenant",
+    "auth",
+    "members",
+    "projects",
+    "tasks",
+    "tickets",
+    "inventory",
+    "clients",
+    "eloquent"
+  ],
+  "toolchain": {
+    "id": "php",
+    "version": ">=8.5 <8.6",
+    "tools": [
+      {
+        "id": "composer",
+        "version": ">=2.8"
+      },
+      {
+        "id": "docker",
+        "optional": true
+      }
+    ],
+    "installHint": "No PHP needed: with Docker running, AICO runs everything in a pinned PHP 8.5 + Composer container (docker: true). To run natively install PHP 8.5 (https://www.php.net/downloads) and Composer (https://getcomposer.org/download/)."
+  },
+  "manifestFile": "composer.json",
+  "envFile": {
+    "file": ".env",
+    "example": ".env.example",
+    "generate": {
+      "APP_KEY": "laravel-app-key"
+    }
+  },
+  "artifactDirs": [
+    ".phpunit.cache",
+    ".phpstan.cache"
+  ],
+  "docker": {
+    "image": "composer:2.10.3@sha256:af98f42dfff7c68ba8d53c2164fd9fde1087b7d449514baa38c418b1f6bc4bac",
+    "containerPort": 8000,
+    "setup": "composer install --no-interaction --prefer-dist --no-progress",
+    "dev": "php artisan app:dev --host=0.0.0.0 --port=8000",
+    "cache": [
+      "/work/vendor",
+      "/tmp/cache"
+    ],
+    "context": ".",
+    "dockerfile": "Dockerfile",
+    "composeFile": "compose.yaml"
+  },
+  "run": {
+    "install": "composer install --no-interaction --prefer-dist --no-progress",
+    "dev": "php artisan app:dev --port={port}",
+    "ready": "Server running on",
+    "health": "/healthz",
+    "env": {
+      "APP_ENV": "local",
+      "APP_DEBUG": "true",
+      "APP_URL": "http://127.0.0.1:{port}",
+      "DB_CONNECTION": "sqlite",
+      "DB_DATABASE": "database/database.sqlite",
+      "SESSION_DRIVER": "database",
+      "CACHE_STORE": "database",
+      "QUEUE_CONNECTION": "sync",
+      "MAIL_MAILER": "log",
+      "SESSION_SECURE_COOKIE": "false"
+    },
+    "lint": "composer lint",
+    "typecheck": "composer analyse",
+    "test": "composer test",
+    "audit": "composer audit --locked --no-interaction",
+    "build": "docker build -t laravel-app ."
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    ".aico/decisions.md",
+    "CHANGELOG.md",
+    "docs/*.md",
+    "compose.yaml",
+    "compose.dev.yaml",
+    "Makefile",
+    ".env.example"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "docker build -t laravel-app .",
+      "requires": [
+        "docker"
+      ]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

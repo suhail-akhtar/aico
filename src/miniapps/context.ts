@@ -38,12 +38,13 @@
 
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
+import { isArtifactName } from '../../shared/apps/artifact-dirs.mjs';
 import { authoringContract } from './contract.js';
 import { describe } from './data.js';
 import { effectiveKind, hasProcess, type MiniApp } from './store.js';
 
 /** Directories whose contents say nothing an author needs and cost a great deal. */
-const SKIP = new Set(['node_modules', '.next', '.next-dev', 'dist', 'build', 'coverage', '.git', '.turbo', 'out']);
+const skipEntry = (name: string): boolean => name === '.git' || isArtifactName(name);
 const MAX_ENTRIES = 40;
 /** The most of the app's own AICO.md that is inlined. */
 const MAX_AICO_MD = 2_000;
@@ -89,7 +90,7 @@ export async function fileList(dir: string): Promise<string> {
       return;
     }
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (entry.name === 'data.sqlite' || SKIP.has(entry.name)) continue;
+      if (skipEntry(entry.name)) continue;
       // The app's own `.aico/` is listed by name so the agent knows the backlog
       // and decisions files exist; other dot-directories are tooling.
       if (entry.name.startsWith('.') && entry.name !== '.aico' && entry.name !== '.env.example') continue;
@@ -152,6 +153,11 @@ export async function miniAppContext(
     `  Slug       ${app.slug}`,
     `  Kind       ${kind}${app.template ? ` · from template ${app.template.id}@${app.template.version}` : ''}`,
     `  Directory  ${dir}`,
+    // A non-Node stack names its toolchain and manifest so the agent does not assume npm (ADR 0031).
+    ...(app.stack?.toolchain ? [`  Stack      ${app.stack.toolchain.id}${app.stack.toolchain.version ? ` ${app.stack.toolchain.version}` : ''}${app.stack.manifestFile ? ` · manifest ${[app.stack.manifestFile].flat().join(' or ')}` : ''}`] : []),
+    ...(kind === 'bundle' && app.services?.length
+      ? [`  Services   ${app.services.map(s => `${s.id} (${s.role}${s.path ? `, services/${s.id}` : s.image ? `, ${s.image}` : ''}${s.id === app.preview ? ', preview' : ''})`).join(' · ')}`]
+      : []),
     ...(hasProcess(app) ? [] : [`  URL        ${url}`]),
   ].join('\n');
 

@@ -1,0 +1,108 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  # CI=true switches NuGet to locked mode (Directory.Build.props): a lockfile that is out of date fails the build.
+  CI: "true"
+
+# Actions are pinned by commit SHA (the tag is in the comment); Dependabot proposes the bumps.
+jobs:
+  check:
+    name: format, analyzers, tests on PostgreSQL + coverage gate, audit, SBOM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Restore (locked) and tools
+        run: |
+          dotnet tool restore
+          dotnet restore ApiService.slnx
+      - name: Format, style and analyzer findings
+        run: make fmt-check lint typecheck
+      - name: Tests on a real PostgreSQL with the 85 % coverage gate
+        env:
+          TEST_POSTGRES: "1"
+        run: make cov
+      - name: Vulnerability audit (fails on high or critical, direct or transitive)
+        run: make audit
+      - name: SBOM
+        run: make sbom
+      - name: Coverage summary
+        if: always()
+        run: cat artifacts/coverage/report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: reports
+          path: |
+            artifacts/coverage/report
+            artifacts/sbom/bom.json
+          if-no-files-found: ignore
+
+  container:
+    name: image builds, migrates PostgreSQL and answers /healthz
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Throwaway secrets for the smoke run
+        run: |
+          {
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "Jwt__SigningKey=$(openssl rand -base64 48 | tr -d '\n')"
+          } > .env
+      - name: Start the stack
+        run: docker compose up --build -d
+      - name: Smoke test
+        run: sh scripts/smoke.sh http://127.0.0.1:8080
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop
+        if: always()
+        run: docker compose down -v
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 detect --source /repo --redact --no-banner
+
+  dependency-review:
+    name: dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high

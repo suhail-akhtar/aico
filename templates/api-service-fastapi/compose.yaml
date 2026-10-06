@@ -1,0 +1,81 @@
+# Local stack: PostgreSQL, a one-shot migration, and the API. `docker compose up --build`.
+# Secrets come from `.env` (copy .env.example); nothing secret lives in this file.
+#
+# The API runs as the production image does: APP_ENV=production, read-only root
+# filesystem, no capabilities, no new privileges. If it starts here it will start
+# on a cluster.
+
+services:
+  db:
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: app
+    volumes:
+      - db:/var/lib/postgresql
+    # Not published to the host (a local PostgreSQL often owns 5432). To reach it from
+    # a client, add `ports: ["127.0.0.1:5433:5432"]` in a compose.override.yaml.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Runs once to completion before the API starts. Migrations never run from every
+  # replica at boot: concurrent migrators race.
+  migrate:
+    build: .
+    image: __APP_SLUG__
+    command: ["python", "-m", "app.cli", "migrate"]
+    environment: &app-env
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://app:${POSTGRES_PASSWORD}@db:5432/app
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  api:
+    build: .
+    image: __APP_SLUG__
+    environment: *app-env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2).status == 200 else 1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # The whole check suite against this PostgreSQL:
+  #   docker compose --profile tools run --rm tools
+  tools:
+    profiles: [tools]
+    build:
+      context: .
+      target: tools
+    environment:
+      TEST_DATABASE_URL: postgresql+psycopg://app:${POSTGRES_PASSWORD}@db:5432/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db:

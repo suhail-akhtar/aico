@@ -1,0 +1,10 @@
+# Spec-first generation settings (make gen). Models plus the std-http strict
+# server only: no embedded spec (it would pull kin-openapi into the binary).
+package: api
+output: internal/api/api.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+output-options:
+  skip-prune: true

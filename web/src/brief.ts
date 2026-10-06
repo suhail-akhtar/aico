@@ -7,6 +7,11 @@
  * Actions are performed by the client, on a click, through routes that
  * already guard them — the engine never executes one (brief/core).
  *
+ * Also here: the grouping the card shows — one row per advisory across projects
+ * (`groupAdvisories`), the same data by project (`advisoryByProject`), chip labels
+ * that tell two folders with one name apart (`projectLabels`) — and the shapes of
+ * Fix all's plan and result (engine: brief/fix).
+ *
  * @module web/brief
  */
 
@@ -33,7 +38,11 @@ export interface BriefItem {
   project?: string;
   at?: number;
   actions: BriefAction[];
+  /** `advisory` items: the structured facts (older stored briefs lack it; see {@link advisoryOf}). */
+  advisory?: BriefAdvisory;
 }
+
+export interface BriefAdvisory { id: string; pkg: string; severity: string; title: string; fix?: string }
 
 export interface Brief {
   id: string;
@@ -116,4 +125,112 @@ export function whenLabel(at: number, now = Date.now()): string {
 /** Notices newer than the last one this client showed. */
 export function freshNotices(notices: BriefNotice[], lastSeen: number): BriefNotice[] {
   return notices.filter(n => (n.releasedAt ?? 0) > lastSeen);
+}
+
+// ── grouping (the card) ──────────────────────────────────────────────
+
+const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, moderate: 2, medium: 2, low: 3 };
+export const severityRank = (s: string): number => SEVERITY_RANK[s] ?? 9;
+export const baseName = (p: string): string => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+
+/** The advisory an item carries; older stored briefs only have it in their title and detail. */
+export function advisoryOf(it: BriefItem): BriefAdvisory | undefined {
+  if (it.source !== 'advisory') return undefined;
+  if (it.advisory) return it.advisory;
+  const m = /^New (\w+) advisory in .+?: (.+?) — (.*)$/.exec(it.title);
+  const id = /^([^;\s]+)/.exec(it.detail ?? '')?.[1];
+  if (!m || !id) return undefined;
+  const fix = /fix: ([^;\s]+)/.exec(it.detail ?? '')?.[1];
+  return { id, pkg: m[2]!, severity: m[1]!, title: m[3]!, ...(fix ? { fix } : {}) };
+}
+
+export interface AdvisoryGroup {
+  /** `id|pkg` */
+  key: string;
+  id: string;
+  pkg: string;
+  severity: string;
+  title: string;
+  fix?: string;
+  /** One entry per affected project (the same project twice counts once). */
+  projects: Array<{ path: string; itemKey: string }>;
+}
+
+/**
+ * One group per (advisory id, package) across projects, most severe first,
+ * then the most projects, then the package name. Items that are not advisories
+ * come back in `rest`, in their order.
+ */
+export function groupAdvisories(items: BriefItem[]): { groups: AdvisoryGroup[]; rest: BriefItem[] } {
+  const map = new Map<string, AdvisoryGroup>();
+  const rest: BriefItem[] = [];
+  for (const it of items) {
+    const a = advisoryOf(it);
+    if (!a || !it.project) { rest.push(it); continue; }
+    const key = `${a.id}|${a.pkg}`;
+    const g = map.get(key) ?? { key, id: a.id, pkg: a.pkg, severity: a.severity, title: a.title, projects: [] };
+    if (severityRank(a.severity) < severityRank(g.severity)) g.severity = a.severity;
+    if (a.fix && !g.fix) g.fix = a.fix;
+    if (!g.projects.some(p => p.path === it.project)) g.projects.push({ path: it.project, itemKey: it.key });
+    map.set(key, g);
+  }
+  const groups = [...map.values()].sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || b.projects.length - a.projects.length || a.pkg.localeCompare(b.pkg) || a.id.localeCompare(b.id));
+  return { groups, rest };
+}
+
+export interface ProjectAdvisories { path: string; advisories: Array<{ id: string; pkg: string; severity: string; fix?: string; itemKey: string }> }
+
+/** The same advisories by project: the most severe first, then the most advisories. */
+export function advisoryByProject(groups: AdvisoryGroup[]): ProjectAdvisories[] {
+  const map = new Map<string, ProjectAdvisories>();
+  for (const g of groups) for (const p of g.projects) {
+    const e = map.get(p.path) ?? { path: p.path, advisories: [] };
+    e.advisories.push({ id: g.id, pkg: g.pkg, severity: g.severity, ...(g.fix ? { fix: g.fix } : {}), itemKey: p.itemKey });
+    map.set(p.path, e);
+  }
+  const worst = (e: ProjectAdvisories): number => Math.min(...e.advisories.map(a => severityRank(a.severity)));
+  return [...map.values()].sort((a, b) => worst(a) - worst(b) || b.advisories.length - a.advisories.length || baseName(a.path).localeCompare(baseName(b.path)));
+}
+
+/** Chip text per path: the folder name, with its parent when two paths share a name. */
+export function projectLabels(paths: string[]): Map<string, string> {
+  const uniq = [...new Set(paths)];
+  const count = new Map<string, number>();
+  for (const p of uniq) count.set(baseName(p), (count.get(baseName(p)) ?? 0) + 1);
+  const out = new Map<string, string>();
+  for (const p of uniq) {
+    const name = baseName(p);
+    if ((count.get(name) ?? 0) < 2) { out.set(p, name); continue; }
+    const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/);
+    out.set(p, parts.length > 1 ? `${parts[parts.length - 2]}/${name}` : name);
+  }
+  return out;
+}
+
+/** "3 projects", "1 project". */
+export const countLabel = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
+/** How many rows a collapsed list shows before "Show N more". */
+export const COLLAPSED_ROWS = 4;
+
+/** What a list shows: all of it, or the first `limit`, and how many are hidden. */
+export function visibleRows<T>(rows: T[], expanded: boolean, limit = COLLAPSED_ROWS): { rows: T[]; hidden: number } {
+  if (expanded || rows.length <= limit + 1) return { rows, hidden: 0 }; // never hide a single row behind "Show 1 more"
+  return { rows: rows.slice(0, limit), hidden: rows.length - limit };
+}
+
+// ── Fix all (engine: brief/fix) ──────────────────────────────────────
+
+export interface FixTargetRow { id: string; pkg: string; severity: string; title: string; fix?: string; itemKey: string }
+export interface FixPlanProject { project: string; name: string; branch: string; targets: FixTargetRow[]; blocked?: string }
+export interface FixPlanResponse { ok: boolean; plan: { projects: FixPlanProject[]; skipped: string[] }; budgetUsd: number }
+export interface FixResultRow { project: string; name: string; branch: string; status: 'started' | 'skipped'; agentId?: string; reason?: string }
+export interface FixAllResponse { ok: boolean; results: FixResultRow[]; skipped: string[] }
+
+/** One sentence for what Fix all did, for the card's status line. */
+export function fixSummary(results: FixResultRow[]): string {
+  const started = results.filter(r => r.status === 'started').length;
+  const skipped = results.length - started;
+  if (!started) return `Nothing was started: ${results.map(r => `${r.name} (${r.reason ?? 'skipped'})`).join('; ') || 'no project could be fixed'}.`;
+  return `Started ${countLabel(started, 'fix', 'fixes')} on their own branches — follow them in Tasks.${skipped ? ` ${skipped} skipped: ${results.filter(r => r.status === 'skipped').map(r => `${r.name} (${r.reason ?? 'skipped'})`).join('; ')}.` : ''}`;
 }

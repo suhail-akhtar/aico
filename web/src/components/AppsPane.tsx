@@ -34,7 +34,7 @@ interface Props {
 
 /** Whether an app runs as its own process (and so has a start/stop and a moving address). */
 export function ownsProcess(kind: MiniAppSummary['kind']): boolean {
-  return kind === 'process' || kind === 'nextjs' || kind === 'mobile';
+  return kind === 'process' || kind === 'nextjs' || kind === 'mobile' || kind === 'bundle';
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -47,6 +47,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   docs: 'Documentation',
   agent: 'Agents',
   mobile: 'Mobile',
+  bundle: 'Full-stack bundles',
 };
 
 export function categoryLabel(category: string | undefined): string {
@@ -217,8 +218,9 @@ export function AppsPane({ onOpenChat }: Props): React.ReactElement {
         <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
           <p className="text-[14px] text-aico-primary">No apps yet</p>
           <p className="max-w-sm text-[12px] text-aico-muted">
-            Start from a template below — a records tool, a landing page, a JSON API, a web app
-            with accounts — or describe what you need and let the agent choose.
+            Start from a template below — a records tool, a landing page, a JSON API in Node, Python,
+            Java, .NET, Go or PHP, a web app with accounts, a full-stack bundle — or describe what you
+            need and let the agent choose.
           </p>
         </div>
       ) : (
@@ -326,6 +328,7 @@ const KIND_LABEL: Record<NonNullable<MiniAppSummary['kind']>, string> = {
   nextjs: 'process',
   cli: 'cli',
   mobile: 'mobile',
+  bundle: 'bundle',
 };
 
 export function KindBadge({ kind }: { kind: MiniAppSummary['kind'] }): React.ReactElement {
@@ -334,7 +337,8 @@ export function KindBadge({ kind }: { kind: MiniAppSummary['kind'] }): React.Rea
     <span
       title={label === 'process'
         ? 'Runs as its own process with your permissions'
-        : label === 'page' ? 'One page over the shared SQLite host' : label}
+        : label === 'page' ? 'One page over the shared SQLite host'
+        : label === 'bundle' ? 'Several services that run together' : label}
       className="shrink-0 rounded bg-aico-hover px-1.5 py-0.5 font-mono text-[10px] text-aico-muted"
     >
       {label}

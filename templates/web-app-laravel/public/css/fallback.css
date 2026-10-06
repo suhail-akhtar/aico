@@ -1,0 +1,44 @@
+/*
+ * A hand-written stylesheet used ONLY when there is no Vite build (no
+ * public/build/manifest.json and no dev server): a machine with PHP and no Node,
+ * or the AICO dev runner. It styles the same class names as resources/css/app.css
+ * and the Tailwind utilities the views use, so the app is fully usable and looks
+ * the same in spirit. Build the real thing with `npm run build` (the Docker image
+ * does it) and Tailwind takes over; this file is then not requested.
+ * If you add a utility class to a view, add it here too (or just run Vite).
+ */
+:root { --bg:#f8f9fb; --surface:#fff; --text:#1d2130; --muted:#6a7080; --line:#e1e4ea; --danger:#c0392b; --brand:#4a3fd6; --brand-dark:#3b31b3; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --bg:#14161f; --surface:#1c1f2b; --text:#eef0f6; --muted:#a3a9ba; --line:#2d3142; --danger:#ff7b6b; --brand:#7b73f0; --brand-dark:#6a62e0; } }
+*, ::before, ::after { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+a { color: inherit; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: .75rem; padding: 1.5rem; box-shadow: 0 1px 2px rgb(0 0 0 / .05); }
+.card.p-4 { padding: 1rem; }
+.app-header { background: var(--surface); border-bottom: 1px solid var(--line); }
+.label { display: block; margin-bottom: .25rem; font-size: .875rem; font-weight: 500; }
+.input { display: block; width: 100%; background: var(--surface); color: inherit; border: 1px solid var(--line); border-radius: .5rem; padding: .5rem .75rem; font: inherit; font-size: .875rem; }
+.input:focus { outline: 2px solid var(--brand); }
+.btn { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: .5rem; padding: .5rem 1rem; font: inherit; font-size: .875rem; font-weight: 500; color: #fff; background: var(--brand); cursor: pointer; }
+.btn:hover { background: var(--brand-dark); }
+.btn-quiet { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: .5rem; padding: .375rem .75rem; font: inherit; font-size: .875rem; color: inherit; background: transparent; cursor: pointer; text-decoration: none; }
+.btn-quiet:hover { background: var(--bg); }
+.btn-quiet:disabled { opacity: .5; cursor: default; }
+.field-error { margin: .25rem 0 0; font-size: .875rem; color: var(--danger); }
+.muted { color: var(--muted); }
+.pill { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 9999px; padding: .125rem .5rem; font-size: .75rem; font-weight: 500; background: var(--bg); }
+.antialiased { -webkit-font-smoothing: antialiased; }
+.min-h-screen { min-height: 100vh; } .min-w-0 { min-width: 0; } .w-full { width: 100%; } .mx-auto { margin-inline: auto; }
+.max-w-3xl { max-width: 48rem; } .max-w-md { max-width: 28rem; }
+.flex { display: flex; } .flex-col { flex-direction: column; } .flex-wrap { flex-wrap: wrap; } .grow { flex-grow: 1; } .shrink-0 { flex-shrink: 0; }
+.items-center { align-items: center; } .items-end { align-items: flex-end; } .items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; } .justify-center { justify-content: center; }
+.gap-2 { gap: .5rem; } .gap-3 { gap: .75rem; } .gap-4 { gap: 1rem; } .gap-6 { gap: 1.5rem; }
+.space-y-2 > * + * { margin-top: .5rem; }
+.p-4 { padding: 1rem; } .px-4 { padding-inline: 1rem; } .py-3 { padding-block: .75rem; } .py-8 { padding-block: 2rem; } .py-12 { padding-block: 3rem; }
+.mt-1 { margin-top: .25rem; } .mt-2 { margin-top: .5rem; } .mt-4 { margin-top: 1rem; } .mt-6 { margin-top: 1.5rem; } .mt-8 { margin-top: 2rem; }
+.mb-3 { margin-bottom: .75rem; } .mb-4 { margin-bottom: 1rem; } .mb-8 { margin-bottom: 2rem; }
+.border-b { border-bottom: 1px solid var(--line); }
+.text-sm { font-size: .875rem; } .text-xl { font-size: 1.25rem; } .text-2xl { font-size: 1.5rem; } .text-center { text-align: center; }
+.font-medium { font-weight: 500; } .font-semibold { font-weight: 600; } .underline { text-decoration: underline; } .line-through { text-decoration: line-through; }
+.whitespace-pre-line { white-space: pre-line; }
+.break-words { overflow-wrap: anywhere; }

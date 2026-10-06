@@ -1,0 +1,84 @@
+# golangci-lint v2. `make lint` runs the linters, `make fmt-check` the formatters.
+# Why this set: the standard linters (govet, errcheck, staticcheck, ineffassign,
+# unused) plus the ones that catch real service bugs: gosec (security), revive
+# (API and naming), bodyclose/noctx (leaked connections and missing contexts),
+# errorlint (broken errors.Is/As), sloglint (consistent structured logs).
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - nolintlint
+    - revive
+    - sloglint
+    - unconvert
+    - usestdlibvars
+  settings:
+    errcheck:
+      check-type-assertions: true
+    gosec:
+      excludes:
+        - G104 # unhandled errors are errcheck's job, with its own exclusions
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+        - name: error-return
+        - name: error-naming
+        - name: error-strings
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+    sloglint:
+      attr-only: true
+      context: scope
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - noctx # httptest.NewRequest is the idiom; the context adds nothing to an in-memory call
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra:
+        group-params: true
+    goimports:
+      local-prefixes:
+        - example.com/api-service
+  exclusions:
+    generated: lax

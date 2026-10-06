@@ -1,0 +1,58 @@
+# The production image on its own, plus two throwaway tool containers.
+#   docker compose up --build            the static server on http://localhost:8080
+#   docker compose --profile tools run --rm tools     lint, types, tests, audit, build (Node 24)
+#   docker compose --profile e2e run --rm e2e         the browser suite (Playwright, mock gateway)
+#
+# Alone, the image has no API behind it (/api answers 404 JSON): it is the static half of a
+# deployment. The full-stack bundles put a gateway, an API and an identity provider around it.
+services:
+  web:
+    build: .
+    image: __APP_SLUG__-web
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-/api}
+      LOGIN_URL: ${LOGIN_URL:-/api/auth/start}
+      LOGOUT_URL: ${LOGOUT_URL:-/api/auth/sign_out?rd=/}
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-production}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  tools:
+    profiles: [tools]
+    image: node:24.21.0-trixie-slim@sha256:e72c2aebe8d0bbc8a2d8b6879337dba735570d222e1c165ec553ae4add136c9d
+    working_dir: /app
+    # Dependencies live in a named volume: a bind-mounted node_modules is very slow on Windows and macOS.
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - npm-cache:/root/.npm
+    environment:
+      CI: "1"
+    command: sh -c "npm ci --no-audit --no-fund && npm run check"
+
+  e2e:
+    profiles: [e2e]
+    image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+    working_dir: /app
+    ipc: host
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - npm-cache:/root/.npm
+    environment:
+      CI: "1"
+      E2E_BASE_URL: ${E2E_BASE_URL:-}
+      E2E_USER: ${E2E_USER:-}
+      E2E_PASSWORD: ${E2E_PASSWORD:-}
+    command: sh -c "npm ci --no-audit --no-fund && npx playwright test"
+
+volumes:
+  node_modules:
+  npm-cache:

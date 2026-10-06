@@ -1,0 +1,103 @@
+{
+  "id": "api-service-dotnet",
+  "version": "1.1.0",
+  "name": "API service (ASP.NET Core)",
+  "category": "api",
+  "kind": "process",
+  "summary": "A JSON API on .NET 10 and ASP.NET Core minimal APIs: JWT login with refresh rotation (or, with AUTH_MODE=oidc, a resource server for an external OIDC provider), snake_case JSON, a worked owner-scoped resource (items), EF Core migrations for PostgreSQL (SQLite in development), RFC 9457 errors, a tested OpenAPI 3.1 contract, rate limiting, security headers, health probes, and a distroless non-root container. Warnings are errors; 85% coverage gate.",
+  "features": [
+    "JWT auth with Argon2id hashes and refresh-token rotation, or an OIDC resource server; owner-scoped items",
+    "EF Core migrations, problem+json errors, OpenAPI contract tested as a snapshot",
+    "Analyzers as errors, coverage gate, NuGet audit, SBOM; chiseled non-root image"
+  ],
+  "tags": [
+    "api",
+    "dotnet",
+    "csharp",
+    "aspnet",
+    "aspnetcore",
+    "efcore",
+    "postgres",
+    "jwt",
+    "oidc",
+    "openapi",
+    "rest",
+    "backend",
+    "service"
+  ],
+  "match": [
+    "api",
+    "rest",
+    "service",
+    "backend",
+    "endpoint",
+    "endpoints",
+    "microservice",
+    "json",
+    "server",
+    "integration",
+    "openapi",
+    "dotnet",
+    "csharp",
+    "aspnet",
+    "enterprise"
+  ],
+  "toolchain": {
+    "id": "dotnet",
+    "version": ">=10.0",
+    "tools": [
+      { "id": "docker", "optional": true }
+    ],
+    "installHint": "Install the .NET 10 SDK: https://dotnet.microsoft.com/download/dotnet/10.0"
+  },
+  "manifestFile": "ApiService.slnx",
+  "envFile": {
+    "file": ".env.local",
+    "example": ".env.example"
+  },
+  "artifactDirs": ["artifacts", "TestResults", "data"],
+  "docker": {
+    "image": "mcr.microsoft.com/dotnet/sdk:10.0.401-noble",
+    "containerPort": 8080,
+    "dev": "dotnet run --project src/ApiService --launch-profile Development -- --urls http://0.0.0.0:8080",
+    "setup": "dotnet restore ApiService.slnx",
+    "cache": ["/root/.nuget/packages"]
+  },
+  "verify": {
+    "env": { "DOTNET_NOLOGO": "1", "DOTNET_CLI_TELEMETRY_OPTOUT": "1" }
+  },
+  "run": {
+    "install": "dotnet restore ApiService.slnx",
+    "installedMarker": "artifacts/obj",
+    "dev": "dotnet run --project src/ApiService --launch-profile Development -- --urls http://127.0.0.1:{port}",
+    "ready": "Now listening on",
+    "health": "/healthz",
+    "env": { "ASPNETCORE_ENVIRONMENT": "Development" },
+    "format": "dotnet format ApiService.slnx --verify-no-changes",
+    "lint": "dotnet format style ApiService.slnx --verify-no-changes --severity warn",
+    "typecheck": "dotnet build ApiService.slnx -warnaserror --nologo",
+    "test": "dotnet test --solution ApiService.slnx",
+    "audit": "dotnet restore ApiService.slnx --force --verbosity quiet",
+    "build": "dotnet publish src/ApiService/ApiService.csproj -c Release -o artifacts/publish --nologo",
+    "start": "dotnet run --project src/ApiService -c Release --launch-profile Development -- --urls http://127.0.0.1:{port}"
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    "LICENSE",
+    ".aico/backlog.md",
+    ".aico/decisions.md",
+    "deploy/README.md",
+    "deploy/docker.mjs",
+    "compose.yaml"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "node deploy/docker.mjs",
+      "requires": ["docker"]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

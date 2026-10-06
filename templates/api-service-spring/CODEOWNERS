@@ -1,0 +1,7 @@
+# Replace @your-org/maintainers with your team or user. GitHub reads this file from the repository
+# root, .github/ or docs/; the last matching pattern wins.
+*                       @your-org/maintainers
+/src/main/java/**/shared/security/   @your-org/security
+/pom.xml                @your-org/maintainers
+/Dockerfile             @your-org/maintainers
+/.github/               @your-org/maintainers

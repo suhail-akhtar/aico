@@ -1,0 +1,10 @@
+/bin/
+coverage.out
+coverage.raw
+sbom.cdx.json
+.env
+.env.local
+*.test
+*.out
+.idea/
+.vscode/

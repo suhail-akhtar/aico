@@ -1,0 +1,16 @@
+.git
+.github
+.aico
+.devcontainer
+.env
+.env.*
+!.env.example
+bin
+coverage.*
+sbom.cdx.json
+docs
+deploy
+**/*_test.go
+*.md
+compose.yaml
+Makefile

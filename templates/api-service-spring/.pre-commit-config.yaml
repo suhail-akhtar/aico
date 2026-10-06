@@ -1,0 +1,34 @@
+# Install once: pip install pre-commit && pre-commit install --install-hooks
+# (add `-t commit-msg` to enforce Conventional Commits). CI re-runs everything; hooks only save a
+# round trip.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: local
+    hooks:
+      - id: spotless
+        name: google-java-format (spotless:check)
+        entry: ./mvnw -q spotless:check
+        language: system
+        types: [java]
+        pass_filenames: false

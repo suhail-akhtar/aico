@@ -1,0 +1,103 @@
+{
+  "id": "api-service-go",
+  "version": "1.1.0",
+  "name": "API service (Go)",
+  "category": "api",
+  "kind": "process",
+  "summary": "A production-shaped JSON API on Go 1.27 and the standard library: spec-first OpenAPI (oapi-codegen), PostgreSQL through pgx and sqlc with goose migrations, Argon2id accounts with opaque bearer sessions (or, with AUTH_MODE=oidc, an OIDC resource server verifying RS256 access tokens from a JWKS with just-in-time provisioning), RFC 9457 errors, structured logs, rate limits, graceful shutdown, a distroless non-root image, and tests from unit to security to OpenAPI contract with the race detector. One worked resource (items) to copy.",
+  "tags": [
+    "api",
+    "go",
+    "golang",
+    "postgres",
+    "openapi",
+    "rest",
+    "sqlc",
+    "pgx",
+    "backend",
+    "service"
+  ],
+  "match": [
+    "api",
+    "rest",
+    "service",
+    "backend",
+    "endpoint",
+    "endpoints",
+    "go",
+    "golang",
+    "microservice",
+    "json",
+    "server",
+    "openapi",
+    "postgres",
+    "auth",
+    "authentication"
+  ],
+  "requires": {},
+  "toolchain": {
+    "id": "go",
+    "version": ">=1.27",
+    "tools": [
+      { "id": "docker", "optional": true }
+    ],
+    "installHint": "Install Go 1.27 or newer from https://go.dev/dl/. Docker is optional for the checks (they run in the pinned golang image when Go is missing) but needed for the dev loop: the service needs PostgreSQL, which compose provides."
+  },
+  "manifestFile": "go.mod",
+  "envFile": {
+    "file": ".env",
+    "example": ".env.example",
+    "generate": {
+      "POSTGRES_PASSWORD": "hex:24",
+      "SEED_PASSWORD": "password:24"
+    }
+  },
+  "run": {
+    "dev": "docker compose up --build",
+    "portEnv": "PORT",
+    "ready": "server listening",
+    "health": "/healthz",
+    "format": "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 fmt --diff",
+    "lint": "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run --max-same-issues=0 ./...",
+    "typecheck": "go vet ./...",
+    "test": "go test -count=1 ./...",
+    "audit": "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...",
+    "build": "go build ./...",
+    "start": "docker compose up --build"
+  },
+  "docker": {
+    "image": "golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195",
+    "containerPort": 8080,
+    "dev": "go run ./cmd/server",
+    "cache": ["/go/pkg/mod", "/root/.cache/go-build"],
+    "context": ".",
+    "dockerfile": "Dockerfile",
+    "composeFile": "compose.yaml"
+  },
+  "verify": {
+    "skip": []
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    ".aico/decisions.md",
+    "api/openapi.yaml",
+    "deploy/README.md",
+    "deploy/*.mjs"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "node deploy/docker.mjs",
+      "requires": ["docker"]
+    }
+  ],
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "Spec-first OpenAPI: oapi-codegen strict server, sqlc queries, goose migrations",
+    "Argon2id accounts with opaque sessions or OIDC resource-server mode (JWKS, JIT provisioning), owner-scoped CRUD, RFC 9457 errors",
+    "Race-detector tests against PostgreSQL, OpenAPI contract tests, distroless non-root image"
+  ]
+}

@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.example</groupId>
+  <artifactId>api-service</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <name>api-service</name>
+  <description>Spring Boot API service starter: items resource, JWT auth, PostgreSQL, Flyway.</description>
+
+  <properties>
+    <java.version>25</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- A fixed timestamp makes the jar reproducible; release tooling bumps it. -->
+    <project.build.outputTimestamp>2026-10-06T00:00:00Z</project.build.outputTimestamp>
+
+    <!--
+      Security patch overrides of versions the Spring Boot 4.1.1 BOM manages. Each is a patch bump
+      inside the same minor line, made because the dependency audit (make audit) reported advisories
+      against the BOM default. Delete an override once Spring Boot's own BOM catches up.
+        tomcat 11.0.24 -> 11.0.26   GHSA-9xv2-5v5q-p794, GHSA-gcx9-497g-6cp6, GHSA-h3x4-894j-xpx5
+        jackson 3.1.5  -> 3.1.7     GHSA-7hhh-6rmp-j9qf, GHSA-p6pp-m3f8-5c89, GHSA-cxp5-3px4-pw24 and more
+        jackson 2.21.5 -> 2.21.7    same advisories, Jackson 2 annotations/core still on the classpath
+    -->
+    <tomcat.version>11.0.26</tomcat.version>
+    <!-- Flyway: the BOM manages 12.4.0; 13.9.0 is the current GA and passes the whole suite on PG 18. -->
+    <flyway.version>13.9.0</flyway.version>
+    <jackson-bom.version>3.1.7</jackson-bom.version>
+    <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+
+    <!-- Everything outside the Spring Boot BOM is pinned here, one line each. -->
+    <spring-modulith.version>2.1.1</spring-modulith.version>
+    <springdoc.version>3.1.1</springdoc.version>
+    <archunit.version>1.5.1</archunit.version>
+    <errorprone.version>2.50.0</errorprone.version>
+    <nullaway.version>0.14.2</nullaway.version>
+    <jspecify.version>1.0.1</jspecify.version>
+
+    <spotless.version>3.10.3</spotless.version>
+    <google-java-format.version>1.36.0</google-java-format.version>
+    <spotbugs-plugin.version>4.10.4.1</spotbugs-plugin.version>
+    <spotbugs.version>4.10.4</spotbugs.version>
+    <findsecbugs.version>1.14.0</findsecbugs.version>
+    <enforcer.version>3.6.3</enforcer.version>
+    <jacoco.version>0.8.15</jacoco.version>
+    <jacoco.minimum.line>0.85</jacoco.minimum.line>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.modulith</groupId>
+        <artifactId>spring-modulith-bom</artifactId>
+        <version>${spring-modulith.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- Web: Spring MVC on virtual threads (spring.threads.virtual.enabled). -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webmvc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <!-- Persistence: JPA + Flyway + PostgreSQL. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <!-- Security: OAuth2 resource server (JWT); the local issuer signs with the same key. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+    </dependency>
+    <!-- Operations: health probes, Micrometer, OpenTelemetry (nothing exported unless configured). -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-opentelemetry</artifactId>
+    </dependency>
+    <!-- API contract. -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>${springdoc.version}</version>
+    </dependency>
+    <!-- Module annotations (@ApplicationModule); verification runs in the tests. -->
+    <dependency>
+      <groupId>org.springframework.modulith</groupId>
+      <artifactId>spring-modulith-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jspecify</groupId>
+      <artifactId>jspecify</artifactId>
+      <version>${jspecify.version}</version>
+    </dependency>
+
+    <!-- Tests -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webmvc-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.modulith</groupId>
+      <artifactId>spring-modulith-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <version>${archunit.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>app</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>${enforcer.version}</version>
+        <executions>
+          <execution>
+            <id>enforce</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[${java.version},)</version>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[3.9.0,)</version>
+                </requireMavenVersion>
+                <banDuplicatePomDependencyVersions/>
+                <dependencyConvergence/>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>log4j:log4j</exclude>
+                    <exclude>org.projectlombok:lombok</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <release>${java.version}</release>
+          <parameters>true</parameters>
+        </configuration>
+        <executions>
+          <!-- Error Prone + NullAway on production code only; tests compile with plain javac. -->
+          <execution>
+            <id>default-compile</id>
+            <configuration>
+              <compilerArgs>
+                <arg>-XDcompilePolicy=simple</arg>
+                <arg>-XDaddTypeAnnotationsToSymbol=true</arg>
+                <arg>--should-stop=ifError=FLOW</arg>
+                <arg>-Xplugin:ErrorProne -XepDisableWarningsInGeneratedCode -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=com.example.app</arg>
+              </compilerArgs>
+              <annotationProcessorPaths>
+                <path>
+                  <groupId>com.google.errorprone</groupId>
+                  <artifactId>error_prone_core</artifactId>
+                  <version>${errorprone.version}</version>
+                </path>
+                <path>
+                  <groupId>com.uber.nullaway</groupId>
+                  <artifactId>nullaway</artifactId>
+                  <version>${nullaway.version}</version>
+                </path>
+              </annotationProcessorPaths>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.version}</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <excludes>
+                <exclude>com/example/app/Application.class</exclude>
+              </excludes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${jacoco.minimum.line}</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <argLine>@{argLine} -XX:+EnableDynamicAgentLoading -Xshare:off</argLine>
+          <includes>
+            <include>**/*Test.java</include>
+          </includes>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <argLine>@{argLine} -XX:+EnableDynamicAgentLoading -Xshare:off</argLine>
+          <includes>
+            <include>**/*IT.java</include>
+          </includes>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <version>${spotless.version}</version>
+        <configuration>
+          <java>
+            <googleJavaFormat>
+              <version>${google-java-format.version}</version>
+              <style>GOOGLE</style>
+            </googleJavaFormat>
+            <removeUnusedImports/>
+            <trimTrailingWhitespace/>
+            <endWithNewline/>
+          </java>
+        </configuration>
+        <executions>
+          <execution>
+            <id>spotless-check</id>
+            <phase>validate</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
+        <version>${spotbugs-plugin.version}</version>
+        <dependencies>
+          <dependency>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs</artifactId>
+            <version>${spotbugs.version}</version>
+          </dependency>
+        </dependencies>
+        <configuration>
+          <effort>Max</effort>
+          <threshold>Medium</threshold>
+          <failOnError>true</failOnError>
+          <excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
+          <plugins>
+            <plugin>
+              <groupId>com.h3xstream.findsecbugs</groupId>
+              <artifactId>findsecbugs-plugin</artifactId>
+              <version>${findsecbugs.version}</version>
+            </plugin>
+          </plugins>
+        </configuration>
+        <executions>
+          <execution>
+            <id>spotbugs-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+
+      <plugin>
+        <!-- SBOM: the Spring Boot parent supplies version, execution and output (META-INF/sbom). -->
+        <groupId>org.cyclonedx</groupId>
+        <artifactId>cyclonedx-maven-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>build-info</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

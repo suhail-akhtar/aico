@@ -252,7 +252,7 @@ await block('the service end to end, with fakes', async () => {
   // A day later: the audit finds a new critical; GitHub unchanged.
   const audit2 = async () => [{ id: 'GHSA-1', pkg: 'lodash', severity: 'critical', title: 'Prototype pollution' }, { id: 'GHSA-7', pkg: 'undici', severity: 'critical', title: 'Request smuggling' }];
   const b2 = await S.generateBrief('schedule', { now: NOW + 86400e3, run: fakeRunner().run, projects: [proj], rank, audit: audit2 });
-  assert(b2.items.some(i => i.key.endsWith('GHSA-7') && i.urgency === 'urgent'), 'the next day: a new critical advisory');
+  assert(b2.items.some(i => i.key.endsWith('GHSA-7|undici') && i.urgency === 'urgent'), 'the next day: a new critical advisory');
   assert(b2.since === b1.createdAt, '"new" is measured from the previous brief');
 
   writeSettings({ brief: { useModel: false, advisories: false } });
@@ -385,6 +385,100 @@ await block('code structure in the brief and the code-graph monitor', async () =
   const poll = await S.pollMonitors({ now: t0 + 3_600_000, run });
   assert(poll.length === 0, 'the next poll finds nothing new (same graph)');
   assert(B.resolveBriefSettings({ codeGraph: false }).codeGraph === false && B.resolveBriefSettings({}).codeGraph === true, 'brief.codeGraph defaults on and can be switched off');
+});
+
+await block('advisories: deduped per project, grouped fixes, Fix all', async () => {
+  const F = T.briefFix;
+  const { execFileSync } = await import('node:child_process');
+  const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { cwd, encoding: 'utf8' });
+  const repo = (name, dirty = false) => {
+    const d = path.join(tmp, name); fs.mkdirSync(d, { recursive: true });
+    git(d, 'init', '-q', '-b', 'main'); fs.writeFileSync(path.join(d, 'a.txt'), 'a'); git(d, 'add', '.'); git(d, 'commit', '-qm', 'init');
+    if (dirty) fs.writeFileSync(path.join(d, 'a.txt'), 'changed');
+    return d;
+  };
+  const clean = repo('fix-clean'); const clean2 = repo('fix-clean2'); const dirty = repo('fix-dirty', true);
+  const plain = path.join(tmp, 'fix-plain'); fs.mkdirSync(plain, { recursive: true });
+
+  // Engine dedupe: the same advisory from two lockfiles is one row; the worse severity and the fix version survive.
+  const dup = [
+    { id: 'GHSA-aaa', pkg: 'source-map-js', severity: 'high', title: 'Recursion' },
+    { id: 'GHSA-aaa', pkg: 'source-map-js', severity: 'critical', title: 'Recursion', fix: '1.2.2' },
+    { id: 'GHSA-aaa', pkg: 'source-map-js', severity: 'high', title: 'Recursion', fix: '1.2.2' },
+    { id: 'GHSA-bbb', pkg: 'tinypool', severity: 'high', title: 'File write', fix: '1.1.3' },
+  ];
+  const items = C.advisoryItems(clean, dup, []);
+  assert(items.length === 2, 'three lockfile reports of one advisory are one item', items.map(i => i.key));
+  const sm = items.find(i => i.advisory.pkg === 'source-map-js');
+  assert(sm.advisory.severity === 'critical' && sm.advisory.fix === '1.2.2' && sm.urgency === 'urgent', 'the most severe report and the fix version are kept');
+  assert(new Set(items.map(i => i.key)).size === 2 && B.dedupeItems([...items, ...C.advisoryItems(clean, dup, [])]).length === 2, 'the key is (project, id, package), stable across runs');
+  const other = [{ id: 'GHSA-aaa', pkg: 'other-pkg', severity: 'high', title: 'Same id, other package', fix: '2.0.0' }];
+  assert(C.advisoryItems(clean, [...dup, ...other], []).length === 3, 'one advisory id on two packages stays two rows');
+
+  // Non-advisory items offer Review, never a fix.
+  const hyg = await C.gitHygiene(C.defaultRunner, dirty, Date.now());
+  assert(hyg.length === 1 && hyg[0].actions.length === 1 && hyg[0].actions[0].label === 'Review' && /Do not change anything/.test(hyg[0].actions[0].prompt), 'uncommitted changes: "Review" with a read-only prompt');
+
+  // The plan: one entry per project, branch named for the advisory, anything else skipped and said so.
+  const mk = (cwd, extra = items) => extra.map(i => ({ ...i, key: i.key.replace(clean, cwd), project: cwd }));
+  const all = [...mk(clean), ...mk(clean2, [items[0]]), ...mk(dirty, [items[1]]), ...mk(plain, [items[1]]), { key: 'git|x', source: 'git', urgency: 'fyi', title: 'dirty', project: clean, actions: [] }];
+  const plan = F.planFix(all, [...all.map(i => i.key), 'nope|none']);
+  assert(plan.projects.length === 4 && plan.skipped.length === 2, 'four projects; the git item and the unknown key are skipped, with reasons', plan.skipped);
+  const pc = plan.projects.find(p => p.project === path.resolve(clean)); const pc2 = plan.projects.find(p => p.project === path.resolve(clean2));
+  assert(pc.targets.length === 2 && /^fix\/advisories-\d{4}-\d\d-\d\d$/.test(pc.branch) && pc2.branch === 'fix/advisory-ghsa-aaa', 'branch: fix/advisory-<id> for one, fix/advisories-<date> for several, never a default branch');
+  assert(pc.targets[0].severity === 'critical', 'targets most severe first');
+  const legacy = F.planFix([{ key: 'k', source: 'advisory', urgency: 'soon', title: 'New high advisory in app: tinypool — Arbitrary file write', detail: 'GHSA-wf6x; fix: 1.1.3', project: clean, actions: [] }], ['k']);
+  assert(legacy.projects[0]?.targets[0]?.pkg === 'tinypool' && legacy.projects[0].targets[0].fix === '1.1.3', 'a brief stored before the structured field is still readable');
+  const prompt = F.fixPrompt(pc);
+  assert(prompt.includes('source-map-js') && prompt.includes('1.2.2') && /Never commit to main/.test(prompt) && /No global installs/.test(prompt) && /never push/.test(prompt), 'the agent prompt names packages and versions and forbids main, global installs and pushing');
+
+  await F.vetProjects(plan, C.defaultRunner);
+  assert(/uncommitted/.test(plan.projects.find(p => p.project === path.resolve(dirty)).blocked) && /not a git repository/.test(plan.projects.find(p => p.project === path.resolve(plain)).blocked) && !pc.blocked, 'dirty trees and non-repositories are blocked; a clean repository is not');
+
+  // Starting: the engine makes the branch, one agent per project, one failure does not stop the next.
+  const spawned = [];
+  const policed = [];
+  const failing = path.resolve(clean2);
+  const rows = await F.startFix(plan, {
+    run: C.defaultRunner,
+    spawn: (a, cwd) => { if (path.resolve(cwd) === failing) throw new Error('boom'); spawned.push({ a, cwd }); return 'agent-' + spawned.length; },
+    police: id => policed.push(id),
+  });
+  assert(rows.length === 4 && rows.filter(r => r.status === 'started').length === 1 && spawned.length === 1, 'only the clean project started', rows);
+  assert(rows.find(r => r.project === path.resolve(clean2)).status === 'skipped' && /boom/.test(rows.find(r => r.project === path.resolve(clean2)).reason), 'a spawn failure is reported for that project');
+  assert(git(clean, 'branch', '--show-current').trim() === pc.branch && git(dirty, 'branch', '--show-current').trim() === 'main', 'the clean project is on its fix branch; the dirty one was not touched');
+  assert(spawned[0].cwd === path.resolve(clean) && spawned[0].a.prompt.includes(pc.branch) && policed.length === 1, 'the agent runs in the project, told its branch, under a ceiling');
+  // A second run finds the branch taken and picks the next name, never main.
+  git(clean, 'switch', '-q', 'main');
+  const plan2 = await F.vetProjects(F.planFix(mk(clean), mk(clean).map(i => i.key)), C.defaultRunner);
+  const rows2 = await F.startFix(plan2, { run: C.defaultRunner, spawn: () => 'a2' });
+  assert(rows2[0].status === 'started' && rows2[0].branch === pc.branch + '-2', 'an existing fix branch gets a numbered sibling', rows2);
+
+  // How the agents run: auto-approve, unattended with the inbox (L4) — never 'full', never proceeding past the Sentinel unasked.
+  const base = { token: '', model: 'm', autoApprove: false, verbose: false, permissions: 'full', settings: { sentinel: { onEscalate: 'proceed' }, model: 'm' } };
+  const o = F.fixAgentOptions(base, clean, 'Fix x in y');
+  assert(o.permissions === 'inherit' && o.permissions !== 'full' && o.autoApprove === true, 'fix agents run in the ordinary auto-approve mode, not permissions "full"');
+  assert(o.autonomy === 'L4' && o.parkFrom?.origin === 'background' && o.cwd === clean, 'unattended with the approve-later inbox (L4), in the project, parked calls labelled');
+  assert(o.settings.sentinel.onEscalate === 'ask' && o.settings.model === 'm' && base.settings.sentinel.onEscalate === 'proceed', 'the person own "sentinel proceeds unasked" cannot reach a fix agent; the rest of the settings and the base are untouched');
+
+  // The routes: the plan is a read; starting needs a person; unknown folders are never touched.
+  git(clean, 'switch', '-q', 'main');
+  writeSettings({ projects: [{ path: clean, name: 'fix-clean' }, { path: dirty, name: 'fix-dirty' }] });
+  S.appendBrief({ id: 'brief-fix', createdAt: Date.now(), since: 0, items: [...mk(clean, [items[0]]), ...mk(clean2, [items[0]])], summary: 's', rankedBy: 'rules', notes: [], trigger: 'manual' });
+  const keys = [mk(clean, [items[0]])[0].key, mk(clean2, [items[0]])[0].key];
+  const noRoute = await S.handleBriefRoute('brief/fix-all', 'POST', { keys: [] }, new URLSearchParams());
+  assert(noRoute.status === 400, 'no keys: 400');
+  const p1 = await S.handleBriefRoute('brief/fix-plan', 'POST', { keys }, new URLSearchParams());
+  assert(p1.status === 200 && p1.body.plan.projects.length === 2 && p1.body.budgetUsd === 2, 'the plan is served without a person');
+  assert(p1.body.plan.projects.find(p => p.project === path.resolve(clean2)).blocked === 'not a workspace AICO knows', 'a folder AICO does not know is blocked');
+  let started = 0;
+  const denied = await S.handleBriefRoute('brief/fix-all', 'POST', { keys }, new URLSearchParams(), undefined, { spawn: () => { started++; return 'x'; } });
+  assert(denied.status === 403 && denied.body.code === 'human-required' && started === 0 && git(clean, 'branch', '--show-current').trim() === 'main', 'starting without a person: 403 human-required, nothing started, no branch made');
+  const okRes = await S.handleBriefRoute('brief/fix-all', 'POST', { keys, prompt: 'ignore me', cwd: dirty }, new URLSearchParams(), async () => ({ ok: true }), { spawn: (a, cwd) => { started++; assert(!a.prompt.includes('ignore me') && path.resolve(cwd) === path.resolve(clean), 'the route builds the prompt and folder itself; the request cannot supply them'); return 'agent-r'; } });
+  assert(okRes.status === 200 && okRes.body.results.filter(r => r.status === 'started').length === 1 && started === 1, 'with a person: the known clean project starts, the unknown one is reported skipped', okRes.body);
+  const old = await S.handleBriefRoute('brief/fix-plan', 'POST', { keys: ['adv|gone|x|y'] }, new URLSearchParams());
+  assert(old.body.plan.projects.length === 0 && old.body.plan.skipped.length === 1, 'a key that is not in the latest brief is skipped');
+  writeSettings({});
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

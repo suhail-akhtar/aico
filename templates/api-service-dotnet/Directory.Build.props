@@ -1,0 +1,34 @@
+<Project>
+  <!-- Shared build policy. Warnings are errors everywhere, locally and in CI, so
+       "it builds" and "it is clean" are the same statement. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+  <!-- Supply chain: every restore is pinned by packages.lock.json (CI restores in
+       locked mode), and NuGet Audit fails the restore on a high or critical
+       advisory, direct or transitive. Reviewed exceptions live in
+       audit-allowlist.props, never inline. -->
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>high</NuGetAuditLevel>
+  </PropertyGroup>
+  <Import Project="audit-allowlist.props" />
+
+  <ItemGroup>
+    <PackageReference Include="Meziantou.Analyzer" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,27 @@
+# Keep the build context to what the image needs. Secrets and caches never enter a layer.
+.git
+.github
+.env
+.env.*
+!.env.example
+vendor
+node_modules
+public/build
+public/hot
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+*.sqlite
+.phpunit.cache
+.phpstan.cache
+coverage
+tests
+docs
+*.md
+.aico
+.devcontainer
+compose*.yaml
+Makefile
+bootstrap/cache/*
+!bootstrap/cache/.gitignore

@@ -58,6 +58,7 @@ import { resolveWorkspaceRoot } from '../workspace.js';
 import { getContextWindow } from '../context-window.js';
 import { isEffortChoice } from '../../shared/reasoning.js';
 import { hostToolsFrom } from '../../shared/host-tools.js';
+import { isArtifactName, DEPENDENCY_DIRS } from '../../shared/apps/artifact-dirs.mjs';
 import { handOffToChat, mintSessionId, type HandOffDeps, type HandOffInput } from './chat-handoff.js';
 import type { ChatRow } from '../../shared/chat-handoff.js';
 import { saveKnowledge } from '../knowledge/store.js';
@@ -70,7 +71,8 @@ import {
   backlogProgress, deleteMiniApp, effectiveKind, getMiniApp, hasProcess, listMiniApps, miniAppDir, runProfileFor,
 } from '../miniapps/store.js';
 import { installApp, runningApps, startApp, stopAllApps, stopApp, subscribeToApps } from '../miniapps/process.js';
-import { createCustomApp, getTemplate, instantiateTemplate, listTemplates, matchScore, nodeSatisfies, stem, suggestTemplates } from '../apps/templates.js';
+import { checkTemplateRequirements, createCustomApp, getTemplate, instantiateTemplate, listTemplates, matchScore, stem, suggestTemplates } from '../apps/templates.js';
+import { checkRequirements } from '../apps/toolchain.js';
 import { meaningfulWords } from '../knowledge/match.js';
 import { promises as fsp } from 'fs';
 
@@ -94,7 +96,12 @@ function suggestName(brief: string): string {
   return picked.join(' ');
 }
 
-const APP_TREE_SKIP = new Set(['node_modules', '.next', '.next-dev', '.astro', '.expo', 'dist', 'build', 'coverage', '.git', '.turbo', 'out', 'data.sqlite', 'data.sqlite-wal', 'data.sqlite-shm']);
+/** Whether a relative path is inside installed dependencies or is the scratch database (never served to a reader). */
+const isDependencyOrDataPath = (rel: string): boolean =>
+  rel.split(/[\\/]/).some(seg => DEPENDENCY_DIRS.includes(seg) || seg.startsWith('data.sqlite'));
+
+/** What the Apps file tree hides: the shared artefact list (ADR 0031) plus the repository itself. */
+const appTreeSkips = (name: string): boolean => name === '.git' || isArtifactName(name);
 
 /** Two levels of an app's files for the workspace panel; directories deeper than that are named, not walked. */
 async function listAppFiles(dir: string): Promise<Array<{ path: string; dir: boolean; size?: number }>> {
@@ -103,7 +110,7 @@ async function listAppFiles(dir: string): Promise<Array<{ path: string; dir: boo
     let entries;
     try { entries = await fsp.readdir(path.join(dir, rel), { withFileTypes: true }); } catch { return; }
     for (const e of entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))) {
-      if (APP_TREE_SKIP.has(e.name)) continue;
+      if (appTreeSkips(e.name)) continue;
       if (e.name.startsWith('.') && e.name !== '.aico' && e.name !== '.env.example') continue;
       const next = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
@@ -713,7 +720,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       // automatic: these install dependencies and hold a port, and starting
       // every app a workspace has ever contained because the portal opened
       // would be a surprising amount of machinery for a list nobody clicked.
-      const body = await readJson(req) as { slug?: string; action?: string };
+      const body = await readJson(req) as { slug?: string; action?: string; docker?: boolean; mode?: string };
       const live = await loadSettings();
       if (!body.slug) { send(res, 400, { error: 'slug required' }); return; }
       if (body.action === 'stop') {
@@ -731,7 +738,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         });
         return;
       }
-      send(res, 200, await startApp(body.slug, miniAppDir(body.slug, live, cwd), app));
+      send(res, 200, await startApp(body.slug, miniAppDir(body.slug, live, cwd), app, {
+        ...(body.docker === true ? { docker: true } : {}),
+        ...(body.mode === 'compose' || body.mode === 'native' ? { mode: body.mode } : {}),
+      }));
       return;
     }
 
@@ -819,6 +829,10 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         ...(source.template ? { template: source.template } : {}),
         ...(source.run ? { run: source.run } : {}),
         ...(source.deploy ? { deploy: source.deploy } : {}),
+        ...(source.stack ? { stack: source.stack } : {}),
+        ...(source.services ? { services: source.services } : {}),
+        ...(source.compose ? { compose: source.compose } : {}),
+        ...(source.preview ? { preview: source.preview } : {}),
       }, live, cwd);
       const from = miniAppDir(source.slug, live, cwd);
       const to = miniAppDir(made.slug, live, cwd);
@@ -828,7 +842,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         errorOnExist: false,
         filter: (src) => {
           const base = path.basename(src);
-          return !['app.json', 'node_modules', '.next', '.astro', '.expo', 'dist', 'coverage', 'data', 'data.sqlite', 'data.sqlite-wal', 'data.sqlite-shm', '.env', '.env.local'].includes(base);
+          // A copy carries the source, not what an install or a run made: the shared artefact list, plus
+          // the person's data and secrets, which a duplicate must never inherit.
+          return !['app.json', 'data', '.env', '.env.local', '.env.production'].includes(base) && !isArtifactName(base);
         },
       });
       const app = await getMiniApp(made.slug, live, cwd);
@@ -882,7 +898,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       const dir = miniAppDir(slug, live, cwd);
       const abs = path.resolve(dir, rel);
       const inside = path.relative(dir, abs);
-      if (!inside || inside.startsWith('..') || path.isAbsolute(inside) || /(^|[\\/])(node_modules|data\.sqlite)/.test(inside)) {
+      if (!inside || inside.startsWith('..') || path.isAbsolute(inside) || isDependencyOrDataPath(inside)) {
         send(res, 400, { error: 'path must be inside the app' }); return;
       }
       try {
@@ -900,7 +916,17 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       // The catalogue the Apps screen builds its "Start from a template" cards
       // from. Read from disk each time: a template dropped into
       // ~/.aico/templates appears without a restart.
-      send(res, 200, { templates: listTemplates(cwd).map(t => ({ ...t, dir: undefined })) });
+      // `availability` says whether this machine can run each one (a real toolchain probe, cached
+      // briefly) and whether Docker could stand in, so the picker can say "install Python 3.12+" up front.
+      send(res, 200, {
+        templates: listTemplates(cwd).map(t => {
+          const need = checkTemplateRequirements(t);
+          return {
+            ...t, dir: undefined,
+            availability: { ok: need.ok && !need.message, message: need.message, docker: need.ok && !!need.message },
+          };
+        }),
+      });
       return;
     }
 
@@ -919,6 +945,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       if (!body.title?.trim()) { send(res, 400, { error: 'title required' }); return; }
       const live = await loadSettings();
       let app: Awaited<ReturnType<typeof instantiateTemplate>>;
+      let notice: string | undefined;
       if (body.custom) {
         app = await createCustomApp({
           title: body.title.trim(),
@@ -927,20 +954,28 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       } else {
         const template = getTemplate(body.template!, cwd);
         if (!template) { send(res, 404, { error: `no template "${body.template}"` }); return; }
-        if (!nodeSatisfies(template.requires?.node)) {
-          send(res, 400, { error: `template "${template.id}" needs Node ${template.requires?.node}; this machine runs ${process.versions.node}` });
+        // Node: the engine's own version. Other stacks: a real toolchain probe, with Docker as the fallback (ADR 0031).
+        const need = checkTemplateRequirements(template);
+        if (!need.ok) { send(res, 400, { error: need.message }); return; }
+        notice = need.message || undefined;
+        try {
+          app = await instantiateTemplate({
+            template,
+            title: body.title.trim(),
+            ...(body.description?.trim() ? { description: body.description.trim() } : {}),
+          }, live, cwd);
+        } catch (err) {
+          send(res, 400, { error: err instanceof Error ? err.message : String(err) });
           return;
         }
-        app = await instantiateTemplate({
-          template,
-          title: body.title.trim(),
-          ...(body.description?.trim() ? { description: body.description.trim() } : {}),
-        }, live, cwd);
       }
       const dir = miniAppDir(app.slug, live, cwd);
       const profile = runProfileFor(app);
-      if (body.install !== false && profile?.install && hasProcess(app)) {
-        void installApp(app.slug, dir, profile);
+      // Install in the background while the person types a brief, but only where it can work: a stack
+      // whose toolchain is missing here would just fail, and a bundle installs per service when started.
+      const nativeOk = !app.stack?.toolchain || checkRequirements({ toolchain: app.stack.toolchain }).ok;
+      if (body.install !== false && profile?.install && hasProcess(app) && effectiveKind(app) !== 'bundle' && nativeOk) {
+        void installApp(app.slug, dir, profile, app);
       }
       const sessionId = `miniapp-${app.slug}`;
       const root = resolveWorkspaceRoot(live, cwd);
@@ -949,7 +984,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       sessionCwd.set(sessionId, root);
       // The same shape the listing gives: an absent kind means page on disk,
       // but a client should not have to know that.
-      send(res, 200, { slug: app.slug, sessionId, app: { ...app, kind: effectiveKind(app), backlog: await backlogProgress(dir) } });
+      send(res, 200, { slug: app.slug, sessionId, ...(notice ? { notice } : {}), app: { ...app, kind: effectiveKind(app), backlog: await backlogProgress(dir) } });
       announceApps();
       return;
     }

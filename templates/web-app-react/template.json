@@ -1,0 +1,96 @@
+{
+  "id": "web-app-react",
+  "version": "1.0.0",
+  "name": "Web app (React)",
+  "category": "frontend",
+  "kind": "process",
+  "summary": "A standalone React 19 single-page app with Vite 8 and TypeScript 6: TanStack Router and Query, Tailwind 4, a typed API client generated from an OpenAPI contract, cookie-session sign-in through a gateway (the browser never holds a token, CSRF-protected), and a worked items feature with optimistic updates, accessible dialogs, dark mode and a strict CSP. Its dev server includes a mock gateway, so it runs with no backend. Vitest with axe, Playwright at 1280 and 390, a hardened non-root nginx image.",
+  "features": [
+    "BFF sign-in (no tokens in the browser), CSRF header, strict CSP, runtime /config.json",
+    "Typed client, query options and zod schemas generated from openapi.json, checked in CI",
+    "Items CRUD: optimistic updates, keyboard and screen-reader friendly, 85% coverage, axe, Playwright"
+  ],
+  "tags": [
+    "react",
+    "frontend",
+    "spa",
+    "vite",
+    "typescript",
+    "tailwind",
+    "tanstack",
+    "openapi",
+    "oidc",
+    "bff",
+    "accessibility",
+    "nginx"
+  ],
+  "match": [
+    "react",
+    "frontend",
+    "spa",
+    "single-page",
+    "vite",
+    "typescript",
+    "tailwind",
+    "dashboard",
+    "client",
+    "web",
+    "ui",
+    "tanstack"
+  ],
+  "toolchain": {
+    "id": "node",
+    "version": ">=24",
+    "tools": [{ "id": "npm" }, { "id": "docker", "optional": true }],
+    "installHint": "Install Node.js 24 LTS from https://nodejs.org/. Docker is optional: it runs the checks and the browser suite in pinned images, and builds the production image."
+  },
+  "manifestFile": "package.json",
+  "artifactDirs": ["playwright-report", "test-results", "blob-report"],
+  "run": {
+    "install": "npm ci --no-audit --no-fund",
+    "installedMarker": "node_modules",
+    "dev": "npm run dev -- --port {port} --strictPort",
+    "portEnv": "",
+    "ready": "Local:\\s+http|ready in",
+    "health": "/config.json",
+    "format": "npm run fmt:check",
+    "lint": "npm run lint",
+    "typecheck": "npm run typecheck",
+    "test": "npm test",
+    "audit": "npm run audit",
+    "build": "npm run build",
+    "start": "npm run preview -- --port {port} --strictPort"
+  },
+  "docker": {
+    "image": "node:24.21.0-trixie-slim@sha256:e72c2aebe8d0bbc8a2d8b6879337dba735570d222e1c165ec553ae4add136c9d",
+    "containerPort": 5173,
+    "dev": "npm run dev -- --host 0.0.0.0 --port 5173 --strictPort",
+    "setup": "npm ci --no-audit --no-fund",
+    "cache": ["/root/.npm"],
+    "context": ".",
+    "dockerfile": "Dockerfile",
+    "composeFile": "compose.yaml"
+  },
+  "verify": {
+    "skip": []
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    "index.html",
+    ".aico/backlog.md",
+    ".aico/decisions.md",
+    "compose.yaml",
+    "deploy/README.md",
+    "deploy/*.mjs"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "node deploy/docker.mjs",
+      "requires": ["docker"]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

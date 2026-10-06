@@ -43,12 +43,15 @@ import {
 } from '../miniapps/store.js';
 import { closeDatabase, describe as describeTables } from '../miniapps/data.js';
 import { appState, startApp, stopApp, type RunningApp } from '../miniapps/process.js';
-import { createCustomApp, getTemplate, instantiateTemplate, nodeSatisfies, renderCatalogue } from '../apps/templates.js';
+import { checkTemplateRequirements, createCustomApp, getTemplate, instantiateTemplate, renderCatalogue } from '../apps/templates.js';
+import { COMMIT_TYPES, commitAll, performRelease, planRelease, tagBaseline } from '../apps/app-git.js';
+import { checksFor } from '../project/profile.js';
+import { spawn } from 'child_process';
 import { deployApp, deployState } from '../apps/deploy.js';
 import { seedDecisions } from '../project/decisions.js';
 
 export interface AppManageInput {
-  action: 'list' | 'create' | 'describe' | 'tables' | 'delete' | 'templates' | 'start' | 'stop' | 'status' | 'deploy';
+  action: 'list' | 'create' | 'describe' | 'tables' | 'delete' | 'templates' | 'start' | 'stop' | 'status' | 'deploy' | 'commit' | 'release';
   /** For deploy: which target from app.json (defaults to the first). */
   target?: string;
   /** For create: what to call it. For everything else: which one. */
@@ -66,6 +69,26 @@ export interface AppManageInput {
    * — this only says the person explicitly wants that path.
    */
   custom?: boolean;
+  /** For start: run the app in a container instead of on this machine's toolchain (offered when the toolchain is missing and Docker is present). */
+  docker?: boolean;
+  /** For start of a bundle: `compose` (docker compose) or `native` (each service as a process). Default: compose when Docker is ready. */
+  mode?: 'compose' | 'native';
+  /** For commit: the Conventional Commit type (feat, fix, refactor, test, docs, chore…). */
+  type?: string;
+  /** For commit: the story title (the subject), imperative, no trailing period. */
+  message?: string;
+  /** For commit: what shows it is done (the "Done when" evidence). */
+  body?: string;
+  /** For commit: an optional scope, e.g. "items". */
+  scope?: string;
+  /** For release: force the bump; the default is inferred from the commits since the last tag. */
+  bump?: 'major' | 'minor' | 'patch';
+  /** For release: an exact MAJOR.MINOR.PATCH instead of a bump. */
+  version?: string;
+  /** For release: `true` after reading the plan. A person is then asked to approve; the tag is created locally and never pushed. */
+  confirm?: boolean;
+  /** For release: tag the `v0.1.0` baseline once Iteration 0 passes its checks. */
+  baseline?: boolean;
 }
 
 /** The old name, kept one release so a transcript that says it still works. */
@@ -116,6 +139,7 @@ function pointer(app: MiniApp, dir: string, created: boolean): string {
         + `and AppManage start (name "${app.slug}") to run it — the first start installs dependencies, `
         + 'which takes a while. VerifyApp the URL it reports.'
       : `Then: build by copying the worked pattern and VerifyApp ${kind === 'cli' ? 'is not needed — a passing RunChecks is the check' : 'the served URL after every change'}.`,
+    'Commit each finished story: AppManage commit (type, message = the story title, body = what shows it is done). A turn that changed source cannot end with the app uncommitted.',
     'Do not create another app in this conversation.',
   ].join('\n');
 }
@@ -123,8 +147,11 @@ function pointer(app: MiniApp, dir: string, created: boolean): string {
 function describeProcess(rec: RunningApp | undefined, slug: string): string {
   if (!rec) return `"${slug}" is not running. AppManage start to run it.`;
   const tail = rec.output.slice(-20);
-  const head = `"${slug}": ${rec.state}${rec.url ? ` at ${rec.url}` : ''}${rec.error ? ` — ${rec.error}` : ''}`;
-  return tail.length ? `${head}\n\nLast output:\n${tail.join('\n')}` : head;
+  const head = `"${slug}": ${rec.state}${rec.mode && rec.mode !== 'native' ? ` (${rec.mode})` : ''}${rec.url ? ` at ${rec.url}` : ''}${rec.error ? ` — ${rec.error}` : ''}`;
+  const services = rec.services?.length
+    ? `\nServices:\n${rec.services.map(s => `  ${s.id} (${s.role}): ${s.state}${s.url ? ` at ${s.url}` : ''}${s.error ? ` — ${s.error}` : ''}`).join('\n')}`
+    : '';
+  return tail.length ? `${head}${services}\n\nLast output:\n${tail.join('\n')}` : `${head}${services}`;
 }
 
 /** Wait for a started process to settle: running, failed, or the timeout. */
@@ -136,6 +163,33 @@ async function awaitReady(slug: string): Promise<RunningApp | undefined> {
     await new Promise(r => setTimeout(r, 500));
   }
   return appState(slug);
+}
+
+/** One check command, run to completion in the app directory; the tail of its output when it fails. */
+function runCheckCommand(command: string, cwd: string): Promise<{ code: number; tail: string }> {
+  return new Promise(resolve => {
+    let out = '';
+    const child = spawn(command, { cwd, shell: true, windowsHide: true }); // security-allow: shell-true — the app's own declared check command, the same trust RunChecks gives it (a shell, in the app directory); never text from this call's arguments
+    const timer = setTimeout(() => { try { child.kill(); } catch { /* gone */ } }, 15 * 60_000);
+    const keep = (b: Buffer) => { out = (out + b.toString()).slice(-4000); };
+    child.stdout?.on('data', keep);
+    child.stderr?.on('data', keep);
+    child.on('error', e => { clearTimeout(timer); resolve({ code: -1, tail: e.message }); });
+    child.on('close', code => { clearTimeout(timer); resolve({ code: code ?? -1, tail: out }); });
+  });
+}
+
+/** Run the app's own checks now (profile first, manifest second), stopping at the first failure. */
+async function appChecksPass(dir: string): Promise<{ ok: true; ran: string[] } | { ok: false; message: string }> {
+  const checks = checksFor(dir).filter(c => !c.builtin);
+  if (checks.length === 0) return { ok: true, ran: [] };
+  const ran: string[] = [];
+  for (const check of checks) {
+    const r = await runCheckCommand(check.command, check.cwd ?? dir);
+    ran.push(check.name);
+    if (r.code !== 0) return { ok: false, message: `${check.name} failed (${check.command}):\n${r.tail.split('\n').slice(-12).join('\n')}` };
+  }
+  return { ok: true, ran };
 }
 
 export async function executeAppManage(input: AppManageInput): Promise<string> {
@@ -224,17 +278,22 @@ export async function executeAppManage(input: AppManageInput): Promise<string> {
         if (!template) {
           return `No template called "${input.template}".\n\n${renderCatalogue(input.brief ?? input.description ?? '', cwd)}`;
         }
-        if (!nodeSatisfies(template.requires?.node)) {
-          return `Template "${template.id}" needs Node ${template.requires?.node}; this machine runs ${process.versions.node}. `
-            + 'Pick another template or upgrade Node.';
+        // Node: the engine's own version. Other stacks: a real probe of the toolchain, and the Docker option (ADR 0031).
+        const requirement = checkTemplateRequirements(template);
+        if (!requirement.ok) return requirement.message;
+        let app: MiniApp;
+        try {
+          app = await instantiateTemplate({
+            template,
+            title: input.name,
+            ...(input.description ? { description: input.description } : {}),
+            ...(sessionId ? { sessionId } : {}),
+          }, settings, cwd);
+        } catch (err) {
+          return `Could not create from "${template.id}": ${err instanceof Error ? err.message : String(err)}`;
         }
-        const app = await instantiateTemplate({
-          template,
-          title: input.name,
-          ...(input.description ? { description: input.description } : {}),
-          ...(sessionId ? { sessionId } : {}),
-        }, settings, cwd);
-        return withNotice(pointer(app, miniAppDir(app.slug, settings, cwd), true));
+        const made = pointer(app, miniAppDir(app.slug, settings, cwd), true);
+        return withNotice(requirement.message ? `${made}\n\n${requirement.message}` : made);
       }
 
       // The page kind by explicit request keeps its authoring contract: for a
@@ -337,12 +396,12 @@ export async function executeAppManage(input: AppManageInput): Promise<string> {
       }
       const dir = miniAppDir(slug, settings, cwd);
       const profile = runProfileFor(app);
-      if (!profile?.dev) return `"${slug}" declares no dev command in app.json; add run.dev and try again.`;
+      if (effectiveKind(app) !== 'bundle' && !profile?.dev) return `"${slug}" declares no dev command in app.json; add run.dev and try again.`;
       const current = appState(slug);
       if (current?.state === 'running') return describeProcess(current, slug);
-      await startApp(slug, dir, app);
+      await startApp(slug, dir, app, { ...(input.docker ? { docker: true } : {}), ...(input.mode ? { mode: input.mode } : {}) });
       const rec = await awaitReady(slug);
-      if (rec?.state === 'running') return `"${slug}" is running at ${rec.url}. VerifyApp it.`;
+      if (rec?.state === 'running') return `"${slug}" is running at ${rec.url}${rec.mode === 'docker' ? ' (in a container)' : rec.mode === 'compose' ? ' (docker compose)' : ''}. VerifyApp it.${rec.services?.length ? `\n${describeProcess(rec, slug).split('\n').filter(l => /^  \S+ \(|^Services:/.test(l)).join('\n')}` : ''}`;
       if (rec && rec.state !== 'failed' && rec.state !== 'stopped') {
         return `"${slug}" is still ${rec.state} after ${START_TIMEOUT_MS / 1000}s (a first install can take longer). `
           + `Check again with AppManage status.\n\n${describeProcess(rec, slug)}`;
@@ -429,6 +488,70 @@ export async function executeAppManage(input: AppManageInput): Promise<string> {
         : `Could not delete "${slug}".`;
     }
 
+    case 'commit': {
+      const found = await find(input.name);
+      if (typeof found === 'string') return found;
+      const dir = miniAppDir(found.slug, settings, cwd);
+      const result = await commitAll(dir, {
+        type: input.type ?? 'feat',
+        ...(input.scope ? { scope: input.scope } : {}),
+        subject: input.message ?? '',
+        ...(input.body ? { body: input.body } : {}),
+      });
+      return result.ok
+        ? `Committed ${result.sha} in "${found.slug}": ${result.subject} (${result.files} file${result.files === 1 ? '' : 's'}).`
+        : result.message;
+    }
+
+    case 'release': {
+      const found = await find(input.name);
+      if (typeof found === 'string') return found;
+      const { slug, app } = found;
+      const dir = miniAppDir(slug, settings, cwd);
+      const ask = currentRunContext()?.approve;
+
+      if (input.baseline) {
+        if (!input.confirm) {
+          return `Baseline for "${slug}": runs the app's checks, then creates the annotated tag v0.1.0 on the current commit (never pushed). `
+            + 'Call again with baseline: true and confirm: true; a person is asked to approve the tag.';
+        }
+        if (!ask) return 'Not tagged: a tag needs a person\'s approval and nobody can be asked in this run. Ask the person to approve it from a chat, or tag it themselves.';
+        const checked = await appChecksPass(dir);
+        if (!checked.ok) return `Not tagged: Iteration 0 must pass the app's checks first.\n${checked.message}`;
+        const yes = await ask('AppManage release', `Tag the baseline v0.1.0 of "${app.title}" (checks passed: ${checked.ran.join(', ') || 'none defined'}); local tag only, nothing is pushed`);
+        if (!yes) return 'Not tagged: the person declined.';
+        const tagged = await tagBaseline(dir);
+        return tagged.ok ? `Tagged ${tagged.tag} (annotated, local). Push it yourself when you want it shared.` : tagged.message;
+      }
+
+      const plan = await planRelease(dir, {
+        ...(input.bump ? { bump: input.bump } : {}),
+        ...(input.version ? { version: input.version } : {}),
+      });
+      if ('error' in plan) return plan.error;
+      const summary = [
+        `Release plan for "${slug}": ${plan.current} → ${plan.next} (${plan.bump}), tag ${plan.tag}.`,
+        plan.versionFile ? `Version is written to ${plan.versionFile}.` : 'This stack keeps no version in a manifest; the tag is the version.',
+        `${plan.commits.length} commit(s) since the last release. CHANGELOG [Unreleased] becomes [${plan.next}]:`,
+        plan.entries || '(nothing)',
+      ];
+      if (plan.dirty.length) summary.push(`Blocked: ${plan.dirty.length} uncommitted file(s) (${plan.dirty.slice(0, 3).join(', ')}). Commit them with AppManage commit first.`);
+      if (plan.tagTaken) summary.push(`Blocked: ${plan.tag} already exists. Tags are never moved; pick another version.`);
+      if (!input.confirm) {
+        return `${summary.join('\n')}\n\nTo release: call again with confirm: true. The checks run first, a person is asked to approve, then the manifest, CHANGELOG and docs/releases/${plan.next}.md are committed and ${plan.tag} is tagged (annotated, local; nothing is pushed).`;
+      }
+      if (plan.dirty.length || plan.tagTaken) return summary.join('\n');
+      if (!ask) return 'Not released: tagging needs a person\'s approval and nobody can be asked in this run. Ask the person to approve it from a chat.';
+      const checked = await appChecksPass(dir);
+      if (!checked.ok) return `Not released: the app's checks fail.\n${checked.message}`;
+      const yes = await ask('AppManage release', `Release "${app.title}" ${plan.tag}: bump ${plan.current} → ${plan.next}, update CHANGELOG, create an annotated tag (local only, nothing is pushed). Checks passed: ${checked.ran.join(', ') || 'none defined'}`);
+      if (!yes) return 'Not released: the person declined.';
+      const done = await performRelease(dir, plan);
+      return done.ok
+        ? `Released ${done.tag} (commit ${done.commit}); notes in ${done.notes}. Nothing was pushed: \`git push origin main ${done.tag}\` is yours to run.`
+        : done.message;
+    }
+
     default:
       return `Unknown action "${String(input.action)}".`;
   }
@@ -446,27 +569,32 @@ export const appManageToolDefinition = {
     'a name and no template) to see the catalogue: each template copies in without generating a line,',
     'and arrives with a worked feature, tests, a Dockerfile, and notes to you in AICO.md.',
     'Then "create" with the template id. Kinds: page (one HTML file over the shared SQLite host, no',
-    'install), static (files), process (its own server — Next.js, Hono — installed and started by',
-    '"start"), cli. After creating, read the app\'s AICO.md and docs/EXTENDING.md before writing',
+    'install), static (files), process (its own server — Next.js, Hono, FastAPI, Spring Boot, ASP.NET',
+    'Core, Go, Laravel — installed and started by "start"), bundle (several services run together),',
+    'cli. After creating, read the app\'s AICO.md and docs/EXTENDING.md before writing',
     'anything; build by copying the worked feature; RunChecks; then "start" and VerifyApp.',
     'No template fits, or the person wants the stack chosen from the brief instead of picked from a',
     'list? "create" with `custom: true` and no template — Skill app-plan then decides the stack as',
-    'part of the PRD instead of assuming one. Every created app starts under its own git history.',
+    'part of the PRD instead of assuming one. Every created app starts under its own git history:',
+    '"commit" records each finished story as a Conventional Commit (a turn that changed source cannot end',
+    'uncommitted); "release" bumps SemVer, moves the CHANGELOG and tags, with a person\'s approval.',
   ].join(' '),
   inputSchema: {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string',
-        enum: ['templates', 'list', 'create', 'describe', 'tables', 'start', 'stop', 'status', 'deploy', 'delete'],
+        enum: ['templates', 'list', 'create', 'describe', 'tables', 'start', 'stop', 'status', 'deploy', 'commit', 'release', 'delete'],
         description:
           'templates: the catalogue, best matches for `brief` first. create: make an app from `template` '
           + '(without one, returns the catalogue and makes nothing). list: every app, its kind and state. '
           + 'describe: the pointer or authoring guide for an existing app. tables: a page app\'s schema as it '
           + 'applied. start/stop/status: the process of a process app (start installs on first run and waits '
           + 'for the URL). deploy: run the app\'s own deploy script (`target` from app.json; docker by default) '
-          + 'and report the outcome — refuses plainly when a required tool is missing. delete: remove an app '
-          + 'and its data for good.',
+          + 'and report the outcome — refuses plainly when a required tool is missing. commit: one Conventional '
+          + 'Commit of everything changed (type, message, body). release: plan a SemVer release (no confirm), or '
+          + 'perform it (confirm: true; checks run, a person approves, annotated local tag, never pushed); '
+          + 'baseline: true tags v0.1.0 once Iteration 0 passes. delete: remove an app and its data for good.',
       },
       target: {
         type: 'string',
@@ -497,6 +625,16 @@ export const appManageToolDefinition = {
         type: 'string',
         description: 'One line saying what the app is for. Shown on its card and substituted into the template.',
       },
+      docker: { type: 'boolean', description: 'For start: run the app in a container (the toolchain is missing here and Docker is available). Offered in the refusal; never chosen silently.' },
+      mode: { type: 'string', enum: ['compose', 'native'], description: 'For start of a bundle: docker compose, or each service as a native process. Default: compose when Docker is ready.' },
+      type: { type: 'string', enum: [...COMMIT_TYPES], description: 'For commit: the Conventional Commit type.' },
+      message: { type: 'string', description: 'For commit: the story title, imperative, at most 72 characters.' },
+      body: { type: 'string', description: 'For commit: what shows the story is done (its "Done when" evidence).' },
+      scope: { type: 'string', description: 'For commit: optional scope, e.g. "items".' },
+      bump: { type: 'string', enum: ['major', 'minor', 'patch'], description: 'For release: force the bump (default inferred from commits).' },
+      version: { type: 'string', description: 'For release: an exact MAJOR.MINOR.PATCH.' },
+      confirm: { type: 'boolean', description: 'For release: true to perform it after reading the plan. A person is asked to approve.' },
+      baseline: { type: 'boolean', description: 'For release: tag the v0.1.0 baseline (with confirm: true).' },
     },
     required: ['action'],
   },

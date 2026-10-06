@@ -155,7 +155,7 @@ export function AppWorkspace(): React.ReactElement | null {
       </nav>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {tab === 'preview' && <PreviewTab app={app} url={url} process={process} hostUp={Boolean(host)} slug={slug} onStart={async () => { await api.runMiniApp(slug, 'start').catch(() => undefined); void refreshApps(); }} />}
+        {tab === 'preview' && <PreviewTab app={app} url={url} process={process} hostUp={Boolean(host)} slug={slug} onStart={async () => { await api.runMiniApp(slug, 'start').catch(() => undefined); void refreshApps(); }} onStartDocker={async () => { await api.runMiniApp(slug, 'start', { docker: true }).catch(() => undefined); void refreshApps(); }} />}
         {tab === 'backlog' && <BacklogTab slug={slug} busy={busy} onAsk={text => void submit(text)} />}
         {tab === 'decisions' && <TextFileTab slug={slug} path=".aico/decisions.md" busy={busy} empty="No decisions recorded yet. The agent appends one line per settled design choice." />}
         {tab === 'files' && <FilesTab slug={slug} busy={busy} />}
@@ -203,8 +203,8 @@ function Resizer({ onResize, width }: { onResize: (w: number) => void; width: nu
 
 // ── Preview ─────────────────────────────────────────────────────────────────
 
-function PreviewTab({ app, url, process, hostUp, slug, onStart }: {
-  app: MiniAppSummary; url: string | null; process?: MiniAppProcess; hostUp: boolean; slug: string; onStart: () => void;
+function PreviewTab({ app, url, process, hostUp, slug, onStart, onStartDocker }: {
+  app: MiniAppSummary; url: string | null; process?: MiniAppProcess; hostUp: boolean; slug: string; onStart: () => void; onStartDocker?: () => void;
 }): React.ReactElement {
   const [device, setDevice] = useState<Device>('desktop');
   const [nonce, setNonce] = useState(0);
@@ -220,7 +220,15 @@ function PreviewTab({ app, url, process, hostUp, slug, onStart }: {
       return (
         <Empty>
           {process?.state === 'failed'
-            ? <>The app failed to start{process.error ? `: ${process.error}` : ''}. See Logs.</>
+            ? (
+              <div className="space-y-2">
+                <p>The app failed to start{process.error ? `: ${process.error}` : ''}. See Logs.</p>
+                {/* The engine's refusal says when a container could stand in; the person decides, never the engine. */}
+                {onStartDocker && /docker: true|Docker is available/i.test(process.error ?? '') && (
+                  <button onClick={onStartDocker} className="rounded-lg bg-aico-accent px-2.5 py-1 text-[12px] font-medium text-white" data-preview-start-docker>Start in Docker</button>
+                )}
+              </div>
+            )
             : process?.state === 'installing' ? 'Installing dependencies — a first install takes a few minutes.'
             : process?.state === 'starting' ? 'Starting…'
             : <>Not running. <button onClick={onStart} className="rounded-lg bg-aico-accent px-2.5 py-1 text-[12px] font-medium text-white" data-preview-start>Start the app</button></>}
@@ -398,6 +406,12 @@ function LogsTab({ process, deploy, isProcess }: { process?: MiniAppProcess; dep
           <pre className="whitespace-pre-wrap rounded bg-aico-bg p-2 font-mono leading-relaxed text-aico-secondary">{process.output.slice(-200).join('\n') || 'no output yet'}</pre>
         </section>
       )}
+      {process?.services?.map(svc => (
+        <section key={svc.id} className="mb-3" data-service-log={svc.id}>
+          <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-aico-muted">{svc.id} · {svc.role} · {svc.state}{svc.url ? ` · ${svc.url}` : ''}{svc.error ? ` · ${svc.error}` : ''}</h4>
+          <pre className="whitespace-pre-wrap rounded bg-aico-bg p-2 font-mono leading-relaxed text-aico-secondary">{svc.output.slice(-120).join('\n') || 'no output yet'}</pre>
+        </section>
+      ))}
       {deploy && (
         <section>
           <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-aico-muted">Deploy · {deploy.state}{deploy.error ? ` · ${deploy.error}` : ''}</h4>

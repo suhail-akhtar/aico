@@ -1,0 +1,120 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.{cs,csx}]
+indent_size = 4
+
+[*.{csproj,props,targets,slnx,json,yml,yaml,md,xml}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+[*.md]
+trim_trailing_whitespace = false
+
+# ---------------------------------------------------------------------------------------------
+# C# style (enforced in the build: EnforceCodeStyleInBuild + TreatWarningsAsErrors, and `make fmt-check`)
+# ---------------------------------------------------------------------------------------------
+[*.cs]
+file_scoped_namespace = true:warning
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_using_directive_placement = outside_namespace:warning
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_prefer_braces = true:warning
+csharp_new_line_before_open_brace = all
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+dotnet_style_qualification_for_method = false:warning
+dotnet_style_qualification_for_event = false:warning
+
+# Naming: instance fields camelCase (no underscore); constants and static fields PascalCase. First match wins.
+dotnet_naming_rule.constants_and_statics_pascal.severity = warning
+dotnet_naming_rule.constants_and_statics_pascal.symbols = constants_and_statics
+dotnet_naming_rule.constants_and_statics_pascal.style = pascal
+dotnet_naming_symbols.constants_and_statics.applicable_kinds = field
+dotnet_naming_symbols.constants_and_statics.required_modifiers = static
+dotnet_naming_style.pascal.capitalization = pascal_case
+dotnet_naming_rule.private_fields_camel.severity = warning
+dotnet_naming_rule.private_fields_camel.symbols = private_fields
+dotnet_naming_rule.private_fields_camel.style = camel
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_fields.required_modifiers =
+dotnet_naming_style.camel.capitalization = camel_case
+
+# ---------------------------------------------------------------------------------------------
+# Analyzer tuning. AnalysisLevel=latest-all turns every .NET analyzer on and Meziantou.Analyzer adds
+# more; these are the rules switched off, each for a reason. Anything not listed is an error.
+# ---------------------------------------------------------------------------------------------
+
+# ASP.NET Core has no SynchronizationContext, so ConfigureAwait(false) is noise on every await.
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.MA0004.severity = none
+# Several small related types per file (a feature's DTOs, an options class and its validator) read better together.
+dotnet_diagnostic.MA0048.severity = none
+# Culture-sensitive APIs: the app runs with InvariantGlobalization, so these cannot differ by machine.
+dotnet_diagnostic.CA1305.severity = none
+# Localised resource strings: this service answers in one language.
+dotnet_diagnostic.CA1303.severity = none
+# Public-surface rules for libraries; this is an application and almost everything is internal.
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1812.severity = none
+dotnet_diagnostic.CA1032.severity = none
+# Flags ArgumentOutOfRangeException.ThrowIfGreaterThan(expression, limit), which names the argument expression on purpose.
+dotnet_diagnostic.MA0015.severity = none
+dotnet_diagnostic.CA1861.severity = none
+# Rules that fight idiomatic ASP.NET Core and EF Core code.
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA1716.severity = none
+dotnet_diagnostic.CA1054.severity = none
+dotnet_diagnostic.CA1056.severity = none
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA1819.severity = none
+# Comparisons the compiler already does ordinally for these string operations.
+dotnet_diagnostic.MA0006.severity = none
+dotnet_diagnostic.MA0016.severity = none
+dotnet_diagnostic.MA0051.severity = none
+dotnet_diagnostic.MA0026.severity = none
+dotnet_diagnostic.MA0053.severity = none
+
+# Request DTOs are public on purpose: the framework's validation source generator (AddValidation) only
+# discovers public types, and an internal DTO silently skips validation. Every other type is internal.
+[**/*Dtos.cs]
+dotnet_diagnostic.CA1515.severity = none
+
+# EF Core migrations are generated code.
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
+
+# Tests: xunit's conventions (underscores, public types, static helpers) are fine.
+[tests/**.cs]
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1822.severity = none
+dotnet_diagnostic.CA2234.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.MA0004.severity = none
+dotnet_diagnostic.MA0042.severity = none
+dotnet_diagnostic.MA0045.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA5394.severity = none
+# xunit Assert.Equal on strings is already ordinal; the test helper builds its own DDL with generated names.
+dotnet_diagnostic.MA0002.severity = none
+dotnet_diagnostic.CA2100.severity = none

@@ -1,0 +1,113 @@
+{
+  "id": "api-service-fastapi",
+  "version": "1.1.0",
+  "name": "API service (FastAPI)",
+  "category": "api",
+  "kind": "process",
+  "summary": "A production-shaped JSON API on FastAPI and Python 3.14: Pydantic v2, async SQLAlchemy and Alembic (SQLite to start, PostgreSQL in compose), Argon2id accounts with short JWTs and rotating refresh tokens (or, with AUTH_MODE=oidc, an OIDC resource server: RS256 verification, a cached JWKS, just-in-time users), RFC 9457 errors, structured logs, rate limits, a hardened container, and tests from unit to security to Schemathesis contract. One worked resource (items) to copy.",
+  "tags": [
+    "api",
+    "fastapi",
+    "python",
+    "pydantic",
+    "sqlalchemy",
+    "postgres",
+    "sqlite",
+    "openapi",
+    "rest",
+    "jwt",
+    "oidc",
+    "backend",
+    "service"
+  ],
+  "match": [
+    "api",
+    "rest",
+    "service",
+    "backend",
+    "endpoint",
+    "endpoints",
+    "python",
+    "fastapi",
+    "microservice",
+    "json",
+    "server",
+    "openapi",
+    "postgres",
+    "auth",
+    "authentication",
+    "jwt",
+    "oidc"
+  ],
+  "toolchain": {
+    "id": "python",
+    "version": ">=3.14",
+    "tools": [
+      { "id": "uv", "version": ">=0.9" },
+      { "id": "docker", "optional": true }
+    ],
+    "installHint": "Install uv (https://docs.astral.sh/uv/getting-started/installation/); it downloads Python 3.14 itself. Docker is optional: it is needed for the container, the compose stack and the PostgreSQL test run."
+  },
+  "manifestFile": "pyproject.toml",
+  "envFile": {
+    "file": ".env",
+    "example": ".env.example",
+    "generate": {
+      "JWT_SECRET": "hex:32",
+      "SEED_PASSWORD": "password:24",
+      "POSTGRES_PASSWORD": "hex:16"
+    }
+  },
+  "artifactDirs": [".hypothesis", "htmlcov", "data"],
+  "run": {
+    "install": "uv sync --locked",
+    "installedMarker": ".venv",
+    "dev": "uv run uvicorn app.main:create_app --factory --reload --port {port} --no-server-header",
+    "portEnv": "",
+    "ready": "Uvicorn running on|Application startup complete",
+    "health": "/healthz",
+    "format": "uv run ruff format --check .",
+    "lint": "uv run ruff check .",
+    "typecheck": "uv run mypy",
+    "test": "uv run pytest -q",
+    "audit": "uv run python scripts/audit.py",
+    "build": "docker build -t api-service .",
+    "start": "uv run uvicorn app.main:create_app --factory --host 0.0.0.0 --port {port} --proxy-headers --no-access-log --no-server-header"
+  },
+  "docker": {
+    "image": "python:3.14-slim",
+    "containerPort": 8000,
+    "dev": "uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000",
+    "setup": "pip install uv==0.12.23 && uv sync --locked",
+    "cache": ["/root/.cache/uv"],
+    "context": ".",
+    "dockerfile": "Dockerfile",
+    "composeFile": "compose.yaml"
+  },
+  "verify": {
+    "skip": ["audit"]
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    ".aico/backlog.md",
+    ".aico/decisions.md",
+    "compose.yaml",
+    "deploy/README.md",
+    "deploy/*.mjs"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "node deploy/docker.mjs",
+      "requires": ["docker"]
+    }
+  ],
+  "brief": "docs/EXTENDING.md",
+  "features": [
+    "Accounts with Argon2id, short JWTs and rotating refresh tokens, or OIDC resource-server mode behind an identity provider",
+    "Typed, owner-scoped CRUD with cursor pagination, RFC 9457 errors and OpenAPI",
+    "Unit, security, property and Schemathesis tests; hardened non-root image"
+  ]
+}

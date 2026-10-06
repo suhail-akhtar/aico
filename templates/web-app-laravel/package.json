@@ -1,0 +1,19 @@
+{
+  "$schema": "https://www.schemastore.org/package.json",
+  "name": "web-app-laravel-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "laravel-vite-plugin": "3.2.0",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.2"
+  }
+}

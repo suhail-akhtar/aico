@@ -3,6 +3,71 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **Six new starters.** `api-service-fastapi` (Python 3.14, FastAPI), `api-service-spring` (Java 25, Spring Boot 4 + Modulith), `api-service-dotnet` (.NET 10), `api-service-go` (Go 1.27), `web-app-laravel` (PHP 8.5, Laravel 13, Livewire 4) and `web-app-react` (Vite, React 19, typed client). Each ships a worked items feature, Argon2id passwords, RFC 9457 errors, OpenAPI, 85%+ coverage gates, dependency audit, SBOM, hardened non-root image, CI and its own git workflow; the four API starters also support OIDC. Each is verified end to end by `npm run test:starters` (Docker, not part of `npm test`).
+
+- **Multi-stack apps and bundles (ADR 0031).** Apps are no longer Node-only.
+  A template declares its `toolchain` (Python, Java, .NET, Go, PHP or Node, with
+  a real version probe: `go version`, `java -version`), its `manifestFile`, its
+  `envFile` with per-secret formats (hex, base64, Laravel `APP_KEY`, JWT secret,
+  ASP.NET key directory), `run.installedMarker`/`health`/`env`/`format`/`audit`,
+  per-platform overrides (`run.win32`) and a pinned `docker` image. The runner
+  starts any of them from the manifest (no `package.json` needed), marks an app
+  ready from its output *or* an HTTP health poll, and a missing or too-old
+  toolchain is a plain "install X" that also offers Docker: `AppManage start`
+  with `docker: true` (or the Apps screen's "Start in Docker") runs the same
+  command in a constrained container (app directory mount only, loopback port,
+  no manifest-supplied flags); checks for such an app are wrapped the same way
+  when the toolchain is missing and Docker answers. One shared artefact-directory
+  list (`.venv`, `target`, `bin`, `obj`, `vendor`, `__pycache__`, …) now serves the
+  template copy, duplicate, file tree, file route, session listing and both
+  package filters. **Bundles** (`kind: "bundle"`) run frontend + API + database
+  together, as a compose project (generated from the services when absent:
+  pinned Postgres 18, Valkey 9, Keycloak, Mailpit, Traefik single origin from
+  files, no Docker socket, secrets only in a gitignored `.env`) or as native
+  processes in dependency order with `{service.<id>.url}` wiring, per-service
+  state, port, health and logs; the preview is the frontend. Custom apps and
+  opened repositories in Maven, Gradle, .NET, Composer, Go and Python get correct
+  checks and stack labels; `DependencyAudit` learns Composer and (through
+  osv-scanner, when installed, else an honest "NOT audited") Maven and Gradle;
+  the security check says aloud that it has no code rules for Java, Kotlin, C#
+  and PHP. **Per-app git workflow:** the scaffold commit is `chore: scaffold
+  <name> (aico template <id>@<version>)`; `AppManage commit` records a story as a
+  Conventional Commit and the completion gate refuses to end a turn that changed
+  source in an app and left it uncommitted; `AppManage release` bumps SemVer in
+  the stack's manifest, moves CHANGELOG `[Unreleased]`, writes release notes and
+  creates an annotated tag (`baseline: true` for `v0.1.0`) only after the checks
+  pass and a person approves; nothing is ever pushed. `scripts/validate-template.mjs`
+  prints why a template would be dropped; `npm run test:templates` now verifies
+  every starter through its declared checks, natively or in its container.
+
+- **Morning brief: advisories grouped, and Fix all (ADR 0032).** One row per
+  advisory (package, severity, id, fixed-in version) with the affected projects
+  as chips, sorted by severity then by how many projects it touches — or the
+  same data **By project**. Long lists collapse behind a count, sections fold,
+  the header stays put, and the same advisory reported by several lockfiles of
+  one project is one item (key: project, advisory id, package). **Fix all**
+  (per advisory, per project, or the whole section) first shows a plan —
+  projects, packages, target versions, the `fix/advisory-<id>` branch — and
+  starts nothing until you confirm; it needs a person (desktop: the window's
+  grant; web: the UI key). Then one background task per project, on its own
+  branch (never the default branch, nothing pushed; auto-approve and unattended with the Waiting-for-you inbox, never full autonomy), capped at `brief.fixBudgetUsd`
+  (default $2) each, visible in Tasks. A project with uncommitted changes or no
+  git repository is skipped and said so; one failing does not stop the others.
+  Uncommitted changes and stale branches now offer **Review**, not a fix.
+
+### Fixed
+
+- **"Start a fix" looked dead on the desktop Home.** It filled the composer —
+  which sits above the brief and was scrolled out of sight — and said nothing.
+  It now scrolls the composer into view, focuses it and says "Prompt ready in
+  the composer for <project>"; any failing action shows its reason (and a
+  desktop toast) and a working button shows it is working. Two folders with the
+  same name get their parent in the chip.
+
 ## 0.42.0 — 2026-10-05
 
 ### Added

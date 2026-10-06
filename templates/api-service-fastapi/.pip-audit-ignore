@@ -1,0 +1,3 @@
+# Reviewed exceptions for scripts/audit.py. One per line:
+#   <advisory id>  <expiry YYYY-MM-DD>  <why it does not apply> (reviewed by <name>)
+# An expired entry fails the audit. Empty means: no known vulnerability is accepted.

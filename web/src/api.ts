@@ -168,7 +168,7 @@ function safeParse(text: string): unknown {
 
 import type { ParkedAction } from './inbox';
 import type { CgFileDetail, CgPayload, CgSymbolDetail } from './components/codegraph/model';
-import type { BriefLatest, Brief, BriefSummaryRow } from './brief';
+import type { BriefLatest, Brief, BriefSummaryRow, FixPlanResponse, FixAllResponse } from './brief';
 export type { ParkedAction } from './inbox';
 
 /** One Sentinel review as the audit file records it (engine: sentinel/ `SentinelRecord`). */
@@ -599,8 +599,8 @@ export const api = {
     get<{ memories: MemorySummary[] }>(`memory${scope && scope !== 'all' ? `?scope=${encodeURIComponent(scope)}` : ''}`),
 
   /** Start or stop a process app's own process. */
-  runMiniApp: (slug: string, action: 'start' | 'stop') =>
-    post<MiniAppProcess | { stopped: boolean }>('apps/run', { slug, action }),
+  runMiniApp: (slug: string, action: 'start' | 'stop', opts?: { docker?: boolean; mode?: 'compose' | 'native' }) =>
+    post<MiniAppProcess | { stopped: boolean }>('apps/run', { slug, action, ...(opts ?? {}) }),
 
   /** What an app can start from: the shipped templates plus the user's and the project's. */
   templates: () => get<{ templates: AppTemplate[] }>('apps/templates'),
@@ -659,6 +659,9 @@ export const api = {
   briefHistory: (limit = 14) => get<{ briefs: BriefSummaryRow[] }>(`brief/history?limit=${limit}`),
   briefById: (id: string) => get<{ brief: Brief }>(`brief/history?id=${encodeURIComponent(id)}`),
   runBrief: () => post<{ ok: boolean; started?: boolean; error?: string }>('brief/run', {}),
+  /** Fix all: the plan (a read), then the start (needs a person; the keys are item keys of the latest brief). */
+  briefFixPlan: (keys: string[]) => post<FixPlanResponse>('brief/fix-plan', { keys }),
+  briefFixAll: (keys: string[]) => postAsPerson<FixAllResponse>('brief/fix-all', { keys }),
   setBriefMonitor: (path: string, flags: { ci?: boolean; reviews?: boolean; advisories?: boolean; codeGraph?: boolean }) =>
     post<{ ok: boolean }>('brief/monitors', { path, ...flags }),
 
@@ -772,7 +775,7 @@ export const api = {
    */
   createApp: (input: { template: string; title: string; description?: string; install?: boolean }
     | { custom: true; title: string; description?: string }) =>
-    post<{ slug: string; sessionId: string; app: MiniAppSummary }>('apps/create', input),
+    post<{ slug: string; sessionId: string; app: MiniAppSummary; notice?: string }>('apps/create', input),
 
   /** Stop one sub-agent without cancelling the turn its siblings are in. */
   stopSubAgent: (agentId: string, reason: string) =>
@@ -1323,9 +1326,15 @@ export interface AppTemplate {
   tags?: string[];
   match?: string[];
   requires?: { node?: string };
+  /** The toolchain a non-Node (or any) stack needs. */
+  toolchain?: { id: 'node' | 'python' | 'java' | 'dotnet' | 'go' | 'php'; version?: string };
+  /** A bundle's parts. */
+  services?: Array<{ id: string; role: string; template?: string; path?: string; image?: string }>;
   run?: { install?: string; dev?: string };
   deploy?: Array<{ id: string; label: string; requires?: string[] }>;
   source: 'bundled' | 'user' | 'project';
+  /** Whether this machine can run it, from a real toolchain probe: `docker` means a container would stand in. */
+  availability?: { ok: boolean; message: string; docker: boolean };
 }
 
 /** A lesson the log proposed, waiting for a person. Mirrors `learning/extract` on the server. */
@@ -1476,7 +1485,7 @@ export interface ProjectStats {
 }
 
 /** What runs an app: the shared host (page, static), its own process, or nothing served (cli). */
-export type AppKind = 'page' | 'static' | 'process' | 'cli' | 'mobile' | 'nextjs';
+export type AppKind = 'page' | 'static' | 'process' | 'cli' | 'mobile' | 'nextjs' | 'bundle';
 
 /** How a process app's process is doing. Page and static apps have none. */
 export interface MiniAppProcess {
@@ -1488,6 +1497,10 @@ export interface MiniAppProcess {
   /** The tail of what the process printed — the whole content of "it broke". */
   output: string[];
   startedAt: number;
+  /** On the machine's toolchain, in a container, or as a compose project. */
+  mode?: 'native' | 'docker' | 'compose';
+  /** A bundle's services, each with its own state and log tail. */
+  services?: Array<{ id: string; role: string; state: 'pending' | 'installing' | 'starting' | 'running' | 'failed' | 'stopped'; port?: number; url?: string; error?: string; output: string[] }>;
 }
 
 export interface MiniAppSummary {
@@ -1509,6 +1522,10 @@ export interface MiniAppSummary {
   backlog?: { done: number; total: number };
   /** Deploy targets the app ships with, from app.json. */
   deploy?: Array<{ id: string; label: string; script?: string; requires?: string[] }>;
+  /** The stack facts a templated app carries (toolchain, manifest file, container image). */
+  stack?: { toolchain?: { id: string; version?: string }; manifestFile?: string | string[] };
+  /** A bundle's services. */
+  services?: Array<{ id: string; role: string }>;
 }
 
 export interface MiniAppsView {

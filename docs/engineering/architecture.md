@@ -63,7 +63,7 @@ agents changing the code. Paths were verified against the tree on 2026-09-30.
 | `knowledge/`, `learning/` | knowledge entries (triggered, in the volatile tail); proposals from ratings/corrections |
 | `checkpoint/` | undo for the agent's file changes |
 | `codemap/` | codebase index (queried, never injected) |
-| `apps/`, `miniapps/`, `project/` | app templates + deploy; Mini App host; `.aico/profile.json`, checks, decisions |
+| `apps/`, `miniapps/`, `project/` | app templates + deploy; Mini App host; `.aico/profile.json`, checks, decisions. `apps/` also holds the multi-stack layer ([ADR 0031](adr/0031-multi-stack-apps.md)): `toolchain` probes, `stack` types and validation, `env-file`, `docker-run` (the one place a manifest reaches `docker run`), `bundle` (services, compose), `app-git` (commits, releases); the artefact-directory list is `shared/apps/artifact-dirs.mjs` |
 | `canvas/` | canvas documents edited by user and agent |
 | `worktree/` | git worktree manager + tools |
 | `verification.ts`, `checks.ts`, `requirements.ts` | completion gates: a turn that produced a web artifact cannot complete without a fresh passing verdict |

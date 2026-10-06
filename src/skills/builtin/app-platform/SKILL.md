@@ -14,14 +14,15 @@ Apps are real applications kept in the workspace under `<workspace>/miniapps/<sl
 - **process** — its own server (Next.js, Hono, Astro…): `AppManage start` installs on first run, starts `run.dev` on a free port, waits for `run.ready`, and reports the URL.
 - **cli** — nothing served; a passing `RunChecks` is the check.
 - **mobile** — Expo; the web preview is what runs here.
+- **bundle** — several services run together (frontend + API + database…), as a compose project or as native processes; the preview is the frontend. Node, Python, Java, .NET, Go and PHP apps all use the process kind: `app.json` `stack` names the toolchain and manifest file, and a missing toolchain is refused with what to install (or `docker: true` to run it in a container).
 
 ## Templates (`AppManage templates`)
 
-page-records · landing-static · api-service-hono · web-saas-next · dashboard-next · cli-node · docs-astro · agent-service-node · mobile-expo. Each copies in as files in zero model tokens with a worked feature, tests, `AICO.md` (notes for you, inlined into your prompt), `docs/EXTENDING.md` (the pattern to copy), `.aico/backlog.md`, `.aico/decisions.md`, `.aico/profile.json` (its commands, template rank), and for process/static kinds a Dockerfile, `compose.yaml`, `.env.example` and `deploy/`. User templates live in `~/.aico/templates/<id>/` and `<project>/.aico/templates/<id>/`.
+The catalogue is whatever `AppManage templates` lists (Node, Python, Java, .NET, Go and PHP starters, full-stack bundles) — take ids from it, not from memory. Each copies in as files in zero model tokens with a worked feature, tests, `AICO.md` (notes for you, inlined into your prompt), `docs/EXTENDING.md` (the pattern to copy), `.aico/backlog.md`, `.aico/decisions.md`, `.aico/profile.json` (its commands, template rank), and for process/static kinds a Dockerfile, `compose.yaml`, `.env.example` and `deploy/`. User templates live in `~/.aico/templates/<id>/` and `<project>/.aico/templates/<id>/`.
 
 ## The tool: AppManage
 
-`templates [brief]` ranks by the brief · `create name template [description]` copies and returns a ~150-token pointer (no template → the catalogue, nothing made; `kind: page` → the page authoring contract) · `describe` · `list` · `tables` (page apps) · `start` / `stop` / `status` · `deploy [target]` (runs the app's own script; refuses plainly when a tool is missing) · `delete` (refused for the app this conversation is about). In a conversation bound to an app, never `create` another.
+`templates [brief]` ranks by the brief · `create name template [description]` copies and returns a ~150-token pointer (no template → the catalogue, nothing made; `kind: page` → the page authoring contract) · `describe` · `list` · `tables` (page apps) · `start` / `stop` / `status` · `deploy [target]` (runs the app's own script; refuses plainly when a tool is missing) · `commit type message body` (one Conventional Commit per finished story) · `release` (SemVer bump, CHANGELOG, annotated tag; a person approves, never pushed) · `delete` (refused for the app this conversation is about). In a conversation bound to an app, never `create` another.
 
 ## What a bound conversation gives you
 

@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+
+@source '../views/**/*.blade.php';
+
+/* Design tokens. Change the product's look here, not in the views. */
+@theme {
+    --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --color-brand-50: oklch(0.97 0.02 265);
+    --color-brand-500: oklch(0.55 0.2 265);
+    --color-brand-600: oklch(0.49 0.2 265);
+    --color-brand-700: oklch(0.43 0.19 265);
+}
+
+:root {
+    --bg: oklch(0.98 0.003 265);
+    --surface: oklch(1 0 0);
+    --text: oklch(0.22 0.02 265);
+    --muted: oklch(0.5 0.02 265);
+    --line: oklch(0.9 0.01 265);
+    --danger: oklch(0.55 0.2 27);
+    color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: oklch(0.17 0.015 265);
+        --surface: oklch(0.22 0.02 265);
+        --text: oklch(0.95 0.01 265);
+        --muted: oklch(0.72 0.02 265);
+        --line: oklch(0.32 0.02 265);
+        --danger: oklch(0.72 0.17 27);
+    }
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+}
+
+@layer components {
+    .card {
+        @apply rounded-xl border p-6 shadow-sm;
+        background: var(--surface);
+        border-color: var(--line);
+    }
+
+    /* No inline style="" attributes anywhere: the CSP forbids them. */
+    .app-header {
+        @apply border-b;
+        background: var(--surface);
+        border-color: var(--line);
+    }
+
+    .label {
+        @apply mb-1 block text-sm font-medium;
+    }
+
+    .input {
+        @apply block w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2;
+        background: var(--surface);
+        border-color: var(--line);
+        --tw-ring-color: var(--color-brand-500);
+    }
+
+    .btn {
+        @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2;
+        background: var(--color-brand-600);
+        --tw-ring-color: var(--color-brand-500);
+    }
+
+    .btn:hover {
+        background: var(--color-brand-700);
+    }
+
+    .btn-quiet {
+        @apply inline-flex items-center rounded-lg border px-3 py-1.5 text-sm transition-colors;
+        border-color: var(--line);
+        color: var(--text);
+        background: transparent;
+    }
+
+    .btn-quiet:hover {
+        background: var(--bg);
+    }
+
+    .field-error {
+        @apply mt-1 text-sm;
+        color: var(--danger);
+    }
+
+    .muted {
+        color: var(--muted);
+    }
+
+    .pill {
+        @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+        background: var(--bg);
+        border: 1px solid var(--line);
+    }
+}

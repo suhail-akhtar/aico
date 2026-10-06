@@ -56,7 +56,12 @@ export interface BriefItem {
   project?: string;
   at?: number;
   actions: BriefAction[];
+  /** `advisory` items: the structured facts, so a client can group one advisory across projects (brief/fix). */
+  advisory?: BriefAdvisory;
 }
+
+/** One dependency advisory as the brief keeps it. */
+export interface BriefAdvisory { id: string; pkg: string; severity: string; title: string; fix?: string }
 
 export interface Brief {
   id: string;
@@ -104,6 +109,8 @@ export interface BriefSettings {
   codeGraph?: boolean;
   /** Per-project monitors; nothing is polled for a project not listed here. */
   monitors?: BriefMonitorConfig[];
+  /** "Fix all": the spend ceiling of each project's agent, in USD (default 2; the supervisor stops it past this). */
+  fixBudgetUsd?: number;
 }
 
 export interface ResolvedBriefSettings {

@@ -87,7 +87,7 @@
       of instructions. A template copies in as files — nothing is generated — and every
       one carries a worked feature end to end, tests, a Dockerfile, and a short
       <code>AICO.md</code> written for the agent: what the app is, how it is laid out,
-      and what to copy for the next feature. Nine ship today:
+      and what to copy for the next feature. Fifteen ship today — nine for Node, then five more stacks and a React frontend:
     </p>
     <ul>
       <li><strong>page-records</strong> — a one-screen tool over the shared SQLite host: summary strip, table, form, two-step delete. Nothing to install; serving the moment it is saved.</li>
@@ -95,6 +95,7 @@
       <li><strong>api-service-hono</strong> — a JSON API on Hono and Node's built-in SQLite: typed routes with field-level errors, an OpenAPI document, health and readiness, tests that run the app in memory, a multi-stage image.</li>
       <li><strong>web-saas-next</strong> — Next.js App Router, Tailwind, node:sqlite, sign-up and sign-in with a signed cookie, an items feature from page to database to test, a standalone image.</li>
       <li><strong>dashboard-next</strong>, <strong>docs-astro</strong>, <strong>cli-node</strong>, <strong>agent-service-node</strong>, <strong>mobile-expo</strong> — a metrics dashboard, a documentation site, a command-line tool, an LLM agent service, and an Expo app with a web preview.</li>
+      <li><strong>api-service-fastapi</strong> (Python 3.14, FastAPI, SQLAlchemy, Alembic, uv), <strong>api-service-spring</strong> (Java 25, Spring Boot 4, Modulith, Flyway), <strong>api-service-dotnet</strong> (.NET 10, minimal APIs, EF Core), <strong>api-service-go</strong> (Go 1.27, standard library, pgx, sqlc), <strong>web-app-laravel</strong> (PHP 8.5, Laravel 13, Livewire) — each with a worked items feature, Argon2id passwords with pinned parameters, problem-details errors, an OpenAPI document, 95%+ test coverage, a clean dependency audit, an SBOM, a hardened non-root image and CI. <strong>web-app-react</strong> is a typed-client frontend (Vite, React 19, TanStack, Tailwind) that talks to any of them through a same-origin session cookie.</li>
     </ul>
     <p>
       Your own templates go in <code>~/.aico/templates/&lt;id&gt;/</code> or a project's

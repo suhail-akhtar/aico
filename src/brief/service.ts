@@ -21,8 +21,10 @@
  * person named in `brief.mcp`. Quiet hours (`brief.quietHours`, 22:00–07:00 by
  * default) hold monitor notices until they end.
  *
- * NEVER ACTS. Nothing here writes to GitHub, a repository or a session. The
- * brief's actions are links a person clicks (brief/core `BriefAction`).
+ * NEVER ACTS ON ITS OWN. Nothing here writes to GitHub, a repository or a session
+ * unprompted. The brief's actions are links a person clicks (brief/core
+ * `BriefAction`); the one exception is "Fix all" (brief/fix), which a person
+ * confirms from a shown plan and which the route refuses without one.
  *
  * CODE STRUCTURE. For projects already indexed (someone opened the Code map
  * or the agent used CodeGraph there — the brief never indexes a project on its
@@ -58,6 +60,7 @@ import {
   advisoryItems, defaultRunner, ghState, githubForProject, gitHygiene, graphAlertItems, inboxItems, longJobItems, mcpItems, workItems,
   latestRuns, type CachedAdvisory, type GraphAlertLike, type Runner,
 } from './collect.js';
+import { DEFAULT_FIX_BUDGET_USD, FIX_DEADLINE_MS, fixAgentOptions, planFix, startFix, vetProjects, type FixDeps } from './fix.js';
 
 const HISTORY_KEEP = 60;
 const NOTICES_KEEP = 50;
@@ -472,7 +475,11 @@ export function stopBriefService(): void {
  * one-click actions are performed by the client, through the routes that
  * already guard them (the inbox's approve needs a person).
  */
-export async function handleBriefRoute(route: string, method: string, body: Record<string, unknown>, query: URLSearchParams): Promise<{ status: number; body: unknown } | undefined> {
+export async function handleBriefRoute(
+  route: string, method: string, body: Record<string, unknown>, query: URLSearchParams,
+  human: () => Promise<{ ok: boolean; reason?: string }> = async () => ({ ok: false, reason: 'no person attached to this request' }),
+  fixDeps: Partial<FixDeps> = {},
+): Promise<{ status: number; body: unknown } | undefined> {
   switch (route) {
     case 'brief/latest': {
       if (method !== 'GET') return { status: 405, body: { error: 'GET only' } };
@@ -522,7 +529,43 @@ export async function handleBriefRoute(route: string, method: string, body: Reco
       await patchUserSettingPath('brief.monitors', list);
       return { status: 200, body: { ok: true, monitors: list } };
     }
+    // Fix all (brief/fix): the plan is a read; starting it spends money and edits
+    // files, so it needs a person — never the API token alone.
+    case 'brief/fix-plan':
+    case 'brief/fix-all': {
+      if (method !== 'POST') return { status: 405, body: { error: 'POST only' } };
+      const keys = Array.isArray(body.keys) ? body.keys.filter((k): k is string => typeof k === 'string').slice(0, 200) : [];
+      if (!keys.length) return { status: 400, body: { ok: false, error: 'keys required: the item keys of the advisories to fix' } };
+      const start = route === 'brief/fix-all';
+      if (start) {
+        const person = await human();
+        if (!person.ok) return { status: 403, body: { ok: false, code: 'human-required', error: person.reason ?? 'Fix all needs a person in the AICO window; the API token alone cannot start it.' } };
+      }
+      const run = fixDeps.run ?? defaultRunner;
+      const plan = planFix(listBriefs(1)[0]?.items ?? [], keys);
+      const { isKnownProject } = await import('../server/projects.js');
+      for (const p of plan.projects) if (!await isKnownProject(launchCwd, p.project)) p.blocked = 'not a workspace AICO knows';
+      await vetProjects(plan, run);
+      if (!start) return { status: 200, body: { ok: true, plan, budgetUsd: fixBudget(await loadSettings()) } };
+      const settings = await loadSettings();
+      const deps: FixDeps = { run, spawn: fixDeps.spawn ?? (() => { throw new Error('no agent runner'); }), ...(fixDeps.police ? { police: fixDeps.police } : {}) };
+      if (!fixDeps.spawn) {
+        const { spawnBackgroundAgent, getBackgroundAgentOpts } = await import('../background/index.js');
+        const { ledger } = await import('../work/ledger.js');
+        const opts = getBackgroundAgentOpts();
+        if (!opts) return { status: 503, body: { ok: false, error: 'AICO is not configured to run agents (no provider or model set up).' } };
+        deps.spawn = (args, cwd) => spawnBackgroundAgent(args, fixAgentOptions(opts, cwd, args.description));
+        deps.police = (agentId) => ledger.setPolicy(`bg:${agentId}`, { maxCostUsd: fixBudget(settings), deadlineMs: FIX_DEADLINE_MS, onBreach: 'stop', notify: 'on-breach' });
+      }
+      const results = await startFix(plan, deps);
+      return { status: 200, body: { ok: results.some(r => r.status === 'started'), results, skipped: plan.skipped } };
+    }
     default:
       return undefined;
   }
+}
+
+function fixBudget(settings: AicoSettings): number {
+  const v = settings.brief?.fixBudgetUsd;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(v, 50) : DEFAULT_FIX_BUDGET_USD;
 }

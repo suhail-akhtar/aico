@@ -1,0 +1,9 @@
+# Replace @your-org/maintainers with your team or user. Every change needs review
+# from an owner; security-sensitive paths are listed so they are never missed.
+*                                       @your-org/maintainers
+/internal/features/auth/                @your-org/maintainers
+/internal/platform/httpx/               @your-org/maintainers
+/db/migrations/                         @your-org/maintainers
+/api/openapi.yaml                       @your-org/maintainers
+/Dockerfile                             @your-org/maintainers
+/.github/                               @your-org/maintainers

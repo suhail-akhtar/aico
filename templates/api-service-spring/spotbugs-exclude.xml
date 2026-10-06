@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Reviewed false positives only. Put the reason in a comment above every Match.
+-->
+<FindBugsFilter>
+  <!--
+    Spring beans and records hold injected collaborators by design (shared singletons, never
+    mutated through the reference), so exposing them is not a defect.
+  -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+  </Match>
+
+  <!--
+    RequestIdFilter echoes X-Request-Id only after it matches [A-Za-z0-9._-]{1,64} (no CR, LF or
+    other header-splitting characters); anything else is replaced by a generated UUID. This is
+    covered by FiltersTest.requestIdReplacesAHostileSuppliedId.
+  -->
+  <Match>
+    <Class name="com.example.app.shared.web.RequestIdFilter"/>
+    <Bug pattern="HRS_REQUEST_PARAMETER_TO_HTTP_HEADER"/>
+  </Match>
+</FindBugsFilter>

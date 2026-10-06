@@ -1,5 +1,6 @@
 import { defineConfig } from 'tsup';
 import fs from 'fs';
+import { templatePackageFilter } from './shared/apps/artifact-dirs.mjs';
 
 export default defineConfig({
   entry: ['src/index.ts'],
@@ -25,7 +26,7 @@ export default defineConfig({
     if (fs.existsSync('templates')) {
       fs.cpSync('templates', 'dist/templates', {
         recursive: true,
-        filter: (src) => !/[\\/](node_modules|\.next|\.astro|\.expo|dist|coverage|data)([\\/]|$)/.test(src),
+        filter: templatePackageFilter('templates'),
       });
     }
   },

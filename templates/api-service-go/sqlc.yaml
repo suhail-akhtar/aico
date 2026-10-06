@@ -1,0 +1,20 @@
+version: "2"
+sql:
+  - engine: postgresql
+    # sqlc reads the goose migrations as the schema (it stops at "-- +goose Down").
+    schema: db/migrations
+    queries: db/queries
+    gen:
+      go:
+        package: dbgen
+        out: internal/platform/database/dbgen
+        sql_package: pgx/v5
+        emit_interface: false
+        emit_json_tags: false
+        overrides:
+          - db_type: uuid
+            go_type: string
+          - db_type: timestamptz
+            go_type:
+              import: time
+              type: Time

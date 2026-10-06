@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Components use the semantic names (bg, surface, text, ...) and
+ * never a raw colour, so dark mode and a rebrand are changes to this block only.
+ * Light is the default; `prefers-color-scheme: dark` flips it unless the user
+ * chose light explicitly; `data-theme` (set by theme-init.js and the toggle)
+ * wins over the system setting. Contrast: text on bg and primary-fg on primary
+ * meet WCAG AA (4.5:1) in both schemes; the e2e suite runs axe on both.
+ */
+:root {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #cbd5e1;
+  --primary: #1d4ed8;
+  --primary-hover: #1e40af;
+  --primary-fg: #ffffff;
+  --danger: #b91c1c;
+  --danger-hover: #991b1b;
+  --danger-fg: #ffffff;
+  --ring: #2563eb;
+  --success: #166534;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1120;
+  --surface: #111a2e;
+  --surface-2: #17233b;
+  --text: #e2e8f0;
+  --muted: #a3b1c6;
+  --border: #334155;
+  --primary: #60a5fa;
+  --primary-hover: #93c5fd;
+  --primary-fg: #0b1120;
+  --danger: #f87171;
+  --danger-hover: #fca5a5;
+  --danger-fg: #0b1120;
+  --ring: #93c5fd;
+  --success: #86efac;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b1120;
+    --surface: #111a2e;
+    --surface-2: #17233b;
+    --text: #e2e8f0;
+    --muted: #a3b1c6;
+    --border: #334155;
+    --primary: #60a5fa;
+    --primary-hover: #93c5fd;
+    --primary-fg: #0b1120;
+    --danger: #f87171;
+    --danger-hover: #fca5a5;
+    --danger-fg: #0b1120;
+    --ring: #93c5fd;
+    --success: #86efac;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-fg: var(--text);
+  --color-muted: var(--muted);
+  --color-line: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-fg: var(--danger-fg);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+  dialog {
+    color: inherit;
+  }
+  dialog::backdrop {
+    background: rgb(2 6 23 / 0.6);
+  }
+}

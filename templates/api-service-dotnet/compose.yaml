@@ -1,0 +1,72 @@
+# Local stack: PostgreSQL, a one-shot migration job, and the API. `make up` (or docker compose up --build).
+# "GSS Encryption Mode=Disable": Npgsql would otherwise probe for Kerberos libraries the distroless image does not have.
+# Reads .env for POSTGRES_PASSWORD and Jwt__SigningKey (or AUTH_MODE=oidc and the OIDC_* values instead; an empty
+# Jwt__SigningKey in local mode is refused by the app at startup, naming the variable); see .env.example. Not a production manifest:
+# it shows the shape (migrate first, then serve; read-only filesystem; no capabilities).
+name: __APP_SLUG__
+
+services:
+  db:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example)}
+    volumes:
+      - db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    image: __APP_SLUG__
+    command: ["--migrate"]
+    environment:
+      ConnectionStrings__Default: Host=db;Database=app;Username=app;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable
+      Jwt__SigningKey: ${Jwt__SigningKey:-}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      # On an empty database EF first probes for its history table and logs that harmless miss as an error.
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: None
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  api:
+    build: .
+    image: __APP_SLUG__
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      ConnectionStrings__Default: Host=db;Database=app;Username=app;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable
+      Jwt__SigningKey: ${Jwt__SigningKey:-}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      Cors__AllowedOrigins: ${Cors__AllowedOrigins:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+volumes:
+  db:

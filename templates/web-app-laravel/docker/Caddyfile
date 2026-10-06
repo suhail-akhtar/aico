@@ -1,0 +1,41 @@
+{
+	# TLS is terminated in front of the container (a proxy or the platform).
+	auto_https off
+	admin off
+	frankenphp
+	order php_server before file_server
+	servers {
+		# Honour X-Forwarded-* only from private ranges (the proxy), never the internet.
+		trusted_proxies static private_ranges
+	}
+	log {
+		output stderr
+		format json
+	}
+}
+
+{$SERVER_NAME::8080} {
+	root * /app/public
+	encode zstd gzip
+
+	request_body {
+		max_size 2MB
+	}
+
+	header {
+		-Server
+		-X-Powered-By
+	}
+
+	# Dotfiles are never served (except ACME-style /.well-known).
+	@dotfiles {
+		path_regexp dot ^/\.
+		not path /.well-known/*
+	}
+	respond @dotfiles 404
+
+	php_server {
+		# Only public/index.php executes. Anything else ending in .php is a 404.
+		try_files {path} index.php
+	}
+}

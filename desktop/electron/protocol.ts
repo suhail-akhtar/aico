@@ -120,7 +120,7 @@ export interface ProtocolOptions {
  * and confirming, editing or adding an About-you fact, running the learner
  * or widening what it reads (profile/service.ts), and adding an MCP server,
  * writing a skill, adopting a learned rule, and a submit that widens a chat's
- * approval mode (full autonomy, L4) — security review 2026-10, api-system.ts.
+ * approval mode (full autonomy, L4) — security review 2026-10, api-system.ts, and the morning brief's Fix all (brief/fix).
  * A submit's grant is spent only when the engine asks for it (a mode above the
  * chat's last), and unspent grants expire after two minutes.
  * The renderer is the AICO window —
@@ -129,7 +129,7 @@ export interface ProtocolOptions {
  * and a grant needs the app transport's JSON + `x-aico-intent` request
  * (protocol-policy.ts humanIntent), which a form or a frame cannot make.
  */
-const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit', '/api/editor/open']);
+const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit', '/api/editor/open', '/api/brief/fix-all']);
 
 /**
  * Vault routes the interface may never call: they return a value, or mint

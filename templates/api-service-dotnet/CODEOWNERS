@@ -1,0 +1,6 @@
+# Who must review changes. GitHub reads this file from the repository root, .github/ or docs/.
+# Replace the example with your GitHub user or team, then delete these comment lines.
+#
+# *                      @your-org/your-team
+# /src/ApiService/Features/Auth/   @your-org/security
+# /.github/              @your-org/platform

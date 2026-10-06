@@ -1,0 +1,16 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    # Level 10 is PHPStan's maximum (it treats every `mixed` as an error). Do not lower
+    # it to get green: fix the type, or narrow it at the boundary like the code in app/.
+    level: 10
+    paths:
+        - app
+        - bootstrap
+        - database
+        - routes
+    # tests/ is not analysed: inside a Pest closure `$this` is bound at run time, which
+    # static analysis cannot see, so level 10 reports noise rather than defects. The
+    # architecture tests (tests/Feature/ArchitectureTest.php) guard the structure instead.
+    tmpDir: .phpstan.cache

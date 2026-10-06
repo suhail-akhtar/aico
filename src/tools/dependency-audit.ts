@@ -10,7 +10,8 @@
  *
  * **The ecosystem's own tool, or nothing.** `npm audit` / `pnpm audit`,
  * `pip-audit`, `cargo audit`, `dotnet list package --vulnerable`,
- * `govulncheck`. Nothing is installed: a missing auditor is reported with the
+ * `govulncheck`, `composer audit`, and, for Maven and Gradle (which ship no
+ * auditor of their own), `osv-scanner` when it is installed. Nothing is installed: a missing auditor is reported with the
  * command that installs it, and the rest of the report still runs. There is no
  * vulnerability database of our own to go stale.
  *
@@ -257,6 +258,66 @@ export function parseDotnetVulnerable(json: unknown): Pick<EcosystemAudit, 'advi
   return { advisories: unique, counts };
 }
 
+/** `composer audit --format=json`: advisories keyed by package. Exit code 1 means "found some", not "failed". */
+export function parseComposerAudit(json: unknown): Pick<EcosystemAudit, 'advisories' | 'counts'> {
+  const advisories: Advisory[] = [];
+  const byPackage = ((json ?? {}) as any).advisories ?? {};
+  for (const list of Object.values(byPackage) as any[]) {
+    for (const a of Array.isArray(list) ? list : Object.values(list ?? {}) as any[]) {
+      advisories.push({
+        pkg: String(a.packageName ?? '?'), version: String(a.affectedVersions ?? ''),
+        severity: sev(a.severity), id: advisoryId(a.link, a.cve ?? a.advisoryId),
+        title: String(a.title ?? ''), fix: patchedFrom(a.affectedVersions) ?? 'see advisory',
+      });
+    }
+  }
+  const unique = dedupe(advisories);
+  const counts: Partial<Record<Severity, number>> = {};
+  for (const a of unique) counts[a.severity] = (counts[a.severity] ?? 0) + 1;
+  return { advisories: unique, counts };
+}
+
+/** A CVSS base score as the severity band the other auditors use. */
+function cvssBand(score: number): Severity {
+  return score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'moderate' : score > 0 ? 'low' : 'unknown';
+}
+
+/** The first version an OSV `affected` entry says fixes the vulnerability. */
+function osvFix(vuln: any): string | undefined {
+  for (const aff of vuln?.affected ?? []) {
+    for (const range of aff.ranges ?? []) {
+      const fixed = (range.events ?? []).find((e: any) => e.fixed);
+      if (fixed) return `>=${fixed.fixed}`;
+    }
+  }
+  return undefined;
+}
+
+/** `osv-scanner scan source --format json`: results[].packages[].vulnerabilities[], severity from the group's max CVSS. */
+export function parseOsvScanner(json: unknown): Pick<EcosystemAudit, 'advisories' | 'counts'> {
+  const advisories: Advisory[] = [];
+  for (const result of ((json ?? {}) as any).results ?? []) {
+    for (const p of result.packages ?? []) {
+      const scoreOf = (id: string): number => {
+        const g = (p.groups ?? []).find((x: any) => (x.ids ?? []).includes(id));
+        return Number(g?.max_severity ?? 0);
+      };
+      for (const v of p.vulnerabilities ?? []) {
+        const text = String(v.database_specific?.severity ?? '');
+        const severity = scoreOf(String(v.id)) > 0 ? cvssBand(scoreOf(String(v.id))) : sev(text);
+        advisories.push({
+          pkg: String(p.package?.name ?? '?'), version: String(p.package?.version ?? ''), severity,
+          id: advisoryId(v.id, v.id), title: String(v.summary ?? ''), fix: osvFix(v) ?? 'none known',
+        });
+      }
+    }
+  }
+  const unique = dedupe(advisories);
+  const counts: Partial<Record<Severity, number>> = {};
+  for (const a of unique) counts[a.severity] = (counts[a.severity] ?? 0) + 1;
+  return { advisories: unique, counts };
+}
+
 /** govulncheck's `-json` output is a stream of pretty-printed objects, one after another. */
 export function splitJsonStream(text: string): unknown[] {
   const out: unknown[] = [];
@@ -482,6 +543,9 @@ export function detectEcosystems(root: string): string[] {
   if (has('Cargo.toml')) list.push('cargo');
   if (safeList(root).some(f => /\.(sln|slnx|csproj|fsproj|vbproj)$/i.test(f))) list.push('dotnet');
   if (has('go.mod')) list.push('go');
+  if (has('pom.xml')) list.push('maven');
+  if (has('build.gradle', 'build.gradle.kts')) list.push('gradle');
+  if (has('composer.json')) list.push('composer');
   return list;
 }
 
@@ -545,7 +609,36 @@ export async function auditOne(eco: string, root: string, signal?: AbortSignal):
     return { ...base('govulncheck'), ...parseGovulncheck(r.stdout) };
   }
 
-  return { ...base(eco), status: 'skipped', message: `unknown ecosystem "${eco}"; known: npm, python, cargo, dotnet, go.` };
+  if (eco === 'composer') {
+    if (!fs.existsSync(path.join(root, 'composer.lock'))) {
+      return { ...base('composer audit'), status: 'skipped', message: 'no composer.lock; run `composer install` (or `composer update --lock`) first, composer audit reads the lock file.' };
+    }
+    const r = await run('composer', ['audit', '--format=json', '--no-interaction'], root, AUDIT_TIMEOUT_MS, signal);
+    if (r.missing) return missing('composer audit', 'install Composer (https://getcomposer.org/download/)');
+    const json = firstJson(r.stdout);
+    // Exit 1 with JSON is "vulnerabilities found", which is an answer; no JSON is a failure.
+    return json ? { ...base('composer audit'), ...parseComposerAudit(json) } : failed('composer audit', r);
+  }
+
+  if (eco === 'maven' || eco === 'gradle') {
+    // Neither build tool audits; the independent scanner reads the dependency files. If it is not installed
+    // this says so rather than reporting a clean bill of health nobody checked.
+    const tool = 'osv-scanner';
+    const r = await run('osv-scanner', ['scan', 'source', '--format', 'json', '-r', '.'], root, AUDIT_TIMEOUT_MS, signal);
+    if (r.missing) {
+      return {
+        ...base(tool), status: 'missing',
+        message: `${eco === 'maven' ? 'Maven' : 'Gradle'} has no built-in dependency audit and osv-scanner is not installed, so these dependencies were NOT audited. Install osv-scanner (https://google.github.io/osv-scanner/installation/) or run OWASP dependency-check yourself`
+          + `${eco === 'gradle' ? '; Gradle also needs dependency locking (gradle.lockfile) for osv-scanner to see resolved versions' : ''}.`,
+      };
+    }
+    const json = firstJson(r.stdout);
+    // osv-scanner exits 1 when it found vulnerabilities and 128 when it found no packages.
+    if (!json) return r.code === 128 ? { ...base(tool), status: 'skipped', message: `osv-scanner found no ${eco} packages to audit${eco === 'gradle' ? ' (enable dependency locking: gradle.lockfile)' : ''}.` } : failed(tool, r);
+    return { ...base(tool), ...parseOsvScanner(json) };
+  }
+
+  return { ...base(eco), status: 'skipped', message: `unknown ecosystem "${eco}"; known: npm, python, cargo, dotnet, go, maven, gradle, composer.` };
 }
 
 const MAX_ADVISORIES = 10;
@@ -629,7 +722,7 @@ export const dependencyAuditDefinition = {
   inputSchema: {
     type: 'object' as const,
     properties: {
-      ecosystems: { type: 'array', items: { type: 'string', enum: ['npm', 'python', 'cargo', 'dotnet', 'go'] }, description: 'Default: all the project uses.' },
+      ecosystems: { type: 'array', items: { type: 'string', enum: ['npm', 'python', 'cargo', 'dotnet', 'go', 'maven', 'gradle', 'composer'] }, description: 'Default: all the project uses.' },
       allow: { type: 'array', items: { type: 'string' }, description: 'SPDX licences acceptable for this run (replaces the configured allowlist).' },
       licenses: { type: 'boolean', description: 'false skips the licence scan.' },
     },

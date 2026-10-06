@@ -21,6 +21,7 @@ import { api, type AppTemplate } from '../api';
 import { useStore } from '../store';
 import { categoryLabel, KindBadge } from './AppsPane';
 import { KIND_WORDS, TemplateGallery } from './apps/TemplateGallery';
+import { availabilityNote, servicesLine, stackNeeds } from './apps/stacks';
 
 interface Props {
   templates: AppTemplate[];
@@ -66,6 +67,7 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
   }, [brief]);
 
   const best = useMemo(() => (suggested[0] && suggested[0].matched.length > 0 ? templates.find(t => t.id === suggested[0]!.id) : undefined), [suggested, templates]);
+  // A bundle installs per service when it starts, so only a single process app offers the background install.
   const isProcess = template?.kind === 'process' || template?.kind === 'mobile';
   const canCreate = Boolean(template || custom) && title.trim().length > 0 && !creating;
 
@@ -215,7 +217,11 @@ export function AppCreateWizard({ templates, initial, onClose, onCreated }: Prop
                     {(template.features?.length ?? 0) > 0 && (
                       <ul className="mt-1.5 space-y-0.5 text-[11px] text-aico-muted">{template.features!.map(f => <li key={f}>• {f}</li>)}</ul>
                     )}
-                    {template.requires?.node && <p className="mt-1 text-[11px] text-aico-muted">Needs Node {template.requires.node}.</p>}
+                    {stackNeeds(template) && <p className="mt-1 text-[11px] text-aico-muted">Needs {stackNeeds(template)}.</p>}
+                    {servicesLine(template) && <p className="mt-1 text-[11px] text-aico-muted">Services: {servicesLine(template)}.</p>}
+                    {availabilityNote(template) && (
+                      <p className={`mt-1 text-[11px] ${availabilityNote(template)!.tone === 'missing' ? 'text-aico-danger' : 'text-amber-600 dark:text-amber-300'}`} data-wizard-availability>{availabilityNote(template)!.text}</p>
+                    )}
                   </div>
                   <button onClick={() => setStep('choose')} className="shrink-0 text-[12px] text-aico-accent hover:underline">Change</button>
                 </div>

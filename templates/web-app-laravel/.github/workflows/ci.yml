@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: jobs that need more ask for it themselves.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Format, static analysis, tests, coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # Actions are pinned by full commit SHA (the tag is in the comment); Dependabot bumps both.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          extensions: pdo_pgsql, intl, bcmath, pcntl, zip, sodium
+          coverage: pcov
+          tools: composer:2
+        env:
+          fail-fast: true
+      - name: Install dependencies from composer.lock
+        run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Pint (format check)
+        run: composer lint
+      - name: PHPStan / Larastan (level 10)
+        run: composer analyse
+      - name: Tests with coverage (gate 85%)
+        run: composer cov
+      - name: The committed OpenAPI document is current
+        run: |
+          composer openapi
+          git diff --exit-code docs/openapi.json
+
+  postgres:
+    name: Tests on PostgreSQL 18
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      db:
+        image: postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: app
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U app -d app" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_DATABASE: app
+      DB_USERNAME: app
+      DB_PASSWORD: ci-only-password
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          extensions: pdo_pgsql, intl, bcmath, pcntl, zip, sodium
+          tools: composer:2
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: vendor/bin/pest --no-coverage
+
+  supply-chain:
+    name: Dependency audit, SBOM, secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          tools: composer:2
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      # Fails on any known advisory for a locked package. To accept one deliberately, add it to
+      # config.audit.ignore in composer.json with a comment saying why and when to revisit.
+      - name: composer audit
+        run: composer audit --locked --no-interaction
+      - name: CycloneDX SBOM (production dependencies)
+        run: composer sbom
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: sbom.cdx.json
+      - name: Secret scan (gitleaks, history included)
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 detect --source /repo --redact --no-banner
+      - name: npm audit (build-time dependencies)
+        run: npm audit --package-lock-only --audit-level=high
+
+  image:
+    name: Build the image, smoke test it, scan it
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: docker build -t app:ci .
+      - name: Smoke test (read-only, non-root, /healthz, sign-up, items API)
+        run: sh scripts/smoke.sh app:ci
+      - name: Scan the image for known vulnerabilities (HIGH and CRITICAL with a fix available)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 \
+            image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress app:ci
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high

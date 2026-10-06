@@ -1,0 +1,102 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "aico/web-app-laravel",
+    "type": "project",
+    "description": "A full-stack Laravel web application: Blade + Livewire, Fortify authentication, a Sanctum-protected JSON API, PostgreSQL.",
+    "keywords": ["laravel", "livewire", "starter"],
+    "license": "MIT",
+    "require": {
+        "php": "^8.5",
+        "dedoc/scramble": "^0.13.47",
+        "laravel/fortify": "^1.40",
+        "laravel/framework": "^13.17",
+        "laravel/sanctum": "^4.3",
+        "livewire/livewire": "^4.4"
+    },
+    "require-dev": {
+        "cyclonedx/cyclonedx-php-composer": "^6.2",
+        "fakerphp/faker": "^1.23",
+        "larastan/larastan": "^3.12",
+        "laravel/pint": "^1.27",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.6",
+        "pestphp/pest": "^4.7",
+        "pestphp/pest-plugin-laravel": "^4.1",
+        "phpunit/phpunit": "^12.5.12",
+        "roave/security-advisories": "dev-latest"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "setup": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
+            "@php artisan key:generate --ansi",
+            "@php artisan migrate --force --seed"
+        ],
+        "fmt": "pint",
+        "lint": "pint --test",
+        "analyse": "phpstan analyse --memory-limit=1G --no-progress",
+        "test": [
+            "@php artisan config:clear --ansi",
+            "pest"
+        ],
+        "cov": [
+            "@php artisan config:clear --ansi",
+            "@putenv XDEBUG_MODE=off",
+            "@php -d pcov.enabled=1 vendor/bin/pest --coverage --min=85"
+        ],
+        "sbom": "@composer CycloneDX:make-sbom --omit=dev --output-format=JSON --spec-version=1.6 --output-file=sbom.cdx.json --no-interaction",
+        "openapi": [
+            "@putenv DB_CONNECTION=sqlite",
+            "@putenv DB_DATABASE=storage/framework/openapi.sqlite",
+            "@php -r \"file_put_contents('storage/framework/openapi.sqlite', '');\"",
+            "@php artisan migrate --force --no-interaction",
+            "@php artisan scramble:export",
+            "@php -r \"unlink('storage/framework/openapi.sqlite');\""
+        ],
+        "check": [
+            "@lint",
+            "@analyse",
+            "@cov",
+            "@composer audit --locked --no-interaction"
+        ],
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ],
+        "pre-package-uninstall": [
+            "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "process-timeout": 0,
+        "audit": {
+            "abandoned": "report",
+            "block-insecure": true
+        },
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "cyclonedx/cyclonedx-php-composer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

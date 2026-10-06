@@ -179,7 +179,7 @@ try {
     const log = await api(`project/git-log?path=${encodeURIComponent(dir)}&limit=5`);
     check(log.status === 200 && log.json?.isRepo === true, 'GET project/git-log recognises the app’s own git history');
     check(Array.isArray(log.json?.commits) && log.json.commits.length >= 1, `and lists at least the initial commit (${log.json?.commits?.length})`);
-    check(/^Start from/.test(log.json?.commits?.[0]?.subject ?? ''), `the first commit is the template scaffold (${log.json?.commits?.[0]?.subject})`);
+    check(/^chore: scaffold .+ \(aico template [a-z0-9-]+@\d+\.\d+\.\d+\)/.test(log.json?.commits?.[0]?.subject ?? ''), `the first commit is the template scaffold (${log.json?.commits?.[0]?.subject})`);
     const noRepo = await api(`project/git-log?path=${encodeURIComponent(workspace)}`);
     check(noRepo.status === 200 && noRepo.json?.isRepo === false, 'a directory with no git history says so, not an error');
 

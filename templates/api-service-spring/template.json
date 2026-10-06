@@ -1,0 +1,128 @@
+{
+  "id": "api-service-spring",
+  "version": "1.1.0",
+  "name": "API service (Spring Boot)",
+  "category": "api",
+  "kind": "process",
+  "summary": "A production-shaped JSON API on Spring Boot 4 and Java 25: Web MVC on virtual threads, JPA with Flyway and PostgreSQL, a JWT resource server with registration and login (or an external OIDC provider such as Keycloak, with one setting), cursor-paged snake_case JSON, RFC 9457 errors, an OpenAPI 3.1 document, health probes, JSON logs and OpenTelemetry hooks. Package-by-feature with ports and adapters, enforced by ArchUnit and Spring Modulith; tests on real PostgreSQL, 85% coverage gate, SpotBugs, Error Prone, dependency audit, SBOM, non-root container. One worked resource (items) to copy.",
+  "features": [
+    "JWT auth (local or OIDC resource server), ownership checks, RFC 9457 errors, OpenAPI 3.1 with a contract test",
+    "Tests on real PostgreSQL, 85% coverage gate, architecture rules, security tests",
+    "Non-root layered container, SBOM and dependency audit, CI workflow"
+  ],
+  "tags": [
+    "api",
+    "java",
+    "spring",
+    "spring-boot",
+    "postgresql",
+    "jpa",
+    "flyway",
+    "openapi",
+    "rest",
+    "jwt",
+    "backend",
+    "service",
+    "enterprise"
+  ],
+  "match": [
+    "api",
+    "rest",
+    "service",
+    "backend",
+    "endpoint",
+    "endpoints",
+    "microservice",
+    "java",
+    "spring",
+    "springboot",
+    "enterprise",
+    "jwt",
+    "postgres",
+    "postgresql",
+    "openapi",
+    "crud"
+  ],
+  "toolchain": {
+    "id": "java",
+    "version": ">=25",
+    "tools": [
+      { "id": "docker", "optional": true }
+    ],
+    "installHint": "Install a JDK 25 (Temurin: https://adoptium.net/temurin/releases/?version=25). Docker is optional: it gives the dev server and the tests a real PostgreSQL, and builds the container."
+  },
+  "manifestFile": "pom.xml",
+  "envFile": {
+    "file": ".env.local",
+    "example": ".env.example",
+    "generate": {
+      "APP_JWT_SECRET": "jwt-secret",
+      "DATABASE_PASSWORD": "password:32"
+    }
+  },
+  "artifactDirs": [
+    "target"
+  ],
+  "docker": {
+    "image": "maven:3.9-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976",
+    "containerPort": 8080,
+    "dev": "sh ./mvnw spring-boot:test-run -Dspring-boot.run.main-class=com.example.app.DevApplication",
+    "setup": "sh ./mvnw -B -ntp -DskipTests -Dspotless.check.skip=true test-compile",
+    "cache": [
+      "/root/.m2"
+    ],
+    "context": ".",
+    "dockerfile": "Dockerfile",
+    "composeFile": "compose.yaml"
+  },
+  "verify": {
+    "env": {
+      "AICO_TEST_DB": "auto"
+    },
+    "skip": [
+      "audit"
+    ]
+  },
+  "run": {
+    "install": "./mvnw -B -ntp -DskipTests -Dspotless.check.skip=true test-compile",
+    "installedMarker": "target",
+    "dev": "./mvnw -B -ntp spring-boot:test-run -Dspring-boot.run.main-class=com.example.app.DevApplication",
+    "portEnv": "PORT",
+    "ready": "Dev seed ready",
+    "health": "/readyz",
+    "format": "./mvnw -B -ntp spotless:check",
+    "lint": "./mvnw -B -ntp -DskipTests -Djacoco.skip=true verify",
+    "typecheck": "./mvnw -B -ntp -DskipTests -Dspotless.check.skip=true compile",
+    "test": "./mvnw -B -ntp test",
+    "audit": "node scripts/audit.mjs",
+    "build": "./mvnw -B -ntp verify",
+    "win32": {
+      "install": "mvnw -B -ntp -DskipTests -Dspotless.check.skip=true test-compile",
+      "dev": "mvnw -B -ntp spring-boot:test-run -Dspring-boot.run.main-class=com.example.app.DevApplication",
+      "format": "mvnw -B -ntp spotless:check",
+      "lint": "mvnw -B -ntp -DskipTests -Djacoco.skip=true verify",
+      "typecheck": "mvnw -B -ntp -DskipTests -Dspotless.check.skip=true compile",
+      "test": "mvnw -B -ntp test",
+      "build": "mvnw -B -ntp verify"
+    }
+  },
+  "substitute": [
+    "README.md",
+    "AICO.md",
+    "docs/EXTENDING.md",
+    ".aico/backlog.md",
+    ".aico/decisions.md",
+    "deploy/README.md"
+  ],
+  "deploy": [
+    {
+      "id": "docker",
+      "label": "Docker image",
+      "script": "docker build -t api-service:latest .",
+      "requires": [
+        "docker"
+      ]
+    }
+  ],
+  "brief": "docs/EXTENDING.md"
+}

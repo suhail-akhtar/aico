@@ -1,0 +1,30 @@
+# Dependencies and build output (rebuilt from composer.lock / package-lock.json)
+/vendor
+/node_modules
+/public/build
+/public/hot
+/public/storage
+
+# Secrets and local state
+.env
+.env.*
+!.env.example
+/storage/*.key
+/auth.json
+*.sqlite
+*.sqlite-journal
+
+# Tool caches and reports
+.phpunit.cache
+.phpunit.result.cache
+.phpstan.cache
+/coverage
+/sbom.cdx.json
+/storage/logs/*
+!/storage/logs/.gitignore
+
+# Editors and OS
+.idea
+.vscode
+.DS_Store
+Thumbs.db

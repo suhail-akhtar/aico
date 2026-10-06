@@ -1,0 +1,19 @@
+{
+  "name": "web-app",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
+  "forwardPorts": [5173, 4173],
+  "portsAttributes": {
+    "5173": { "label": "dev server (mock gateway)" },
+    "4173": { "label": "production preview" }
+  },
+  "postCreateCommand": "npm ci --no-audit --no-fund",
+  "customizations": {
+    "vscode": {
+      "extensions": ["biomejs.biome", "bradlc.vscode-tailwindcss", "ms-playwright.playwright"],
+      "settings": {
+        "editor.defaultFormatter": "biomejs.biome",
+        "editor.formatOnSave": true
+      }
+    }
+  }
+}

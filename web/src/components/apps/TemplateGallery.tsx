@@ -4,7 +4,7 @@
  * A template card says three things at a glance: what kind of thing it is (a
  * glyph and a category), what you get (three lines from the manifest), and
  * how it runs (in words, not a token: "served instantly", "its own server").
- * Search and category chips narrow nine cards to the one that fits; a brief,
+ * Search, stack and category chips narrow the cards to the one that fits; a brief,
  * when the caller has one, ranks them and marks the best matches.
  *
  * @module components/apps/TemplateGallery
@@ -13,6 +13,7 @@
 import React, { useMemo, useState } from 'react';
 import type { AppTemplate } from '../../api';
 import { categoryLabel } from '../AppsPane';
+import { STACK_LABEL, STACK_ORDER, availabilityNote, servicesLine, stackKey, stackNeeds, templateCount } from './stacks';
 
 /** How a kind runs, in the words a person needs before choosing. */
 export const KIND_WORDS: Record<string, string> = {
@@ -22,9 +23,10 @@ export const KIND_WORDS: Record<string, string> = {
   nextjs: 'its own server · installs first',
   cli: 'command line · no server',
   mobile: 'mobile · web preview here',
+  bundle: 'several services · run together',
 };
 
-/** A coloured tile per category, so nine cards are told apart before they are read. */
+/** A coloured tile per category, so the cards are told apart before they are read. */
 const GLYPH: Record<string, { text: string; tone: string }> = {
   'internal-tool': { text: 'Rt', tone: 'bg-sky-500/15 text-sky-600 dark:text-sky-300' },
   landing: { text: 'Ld', tone: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' },
@@ -35,6 +37,7 @@ const GLYPH: Record<string, { text: string; tone: string }> = {
   docs: { text: 'Dx', tone: 'bg-teal-500/15 text-teal-600 dark:text-teal-300' },
   agent: { text: 'Ag', tone: 'bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-300' },
   mobile: { text: 'Mb', tone: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300' },
+  bundle: { text: 'Bn', tone: 'bg-orange-500/15 text-orange-700 dark:text-orange-300' },
 };
 
 export function CategoryGlyph({ category, size = 36 }: { category?: string; size?: number }): React.ReactElement {
@@ -64,21 +67,25 @@ export interface GalleryProps {
 export function TemplateGallery({ templates, suggested, onPick, compact = false, filters = true }: GalleryProps): React.ReactElement {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
+  const [stack, setStack] = useState<string | null>(null);
 
   const categories = useMemo(() => [...new Set(templates.map(t => t.category))].sort((a, b) => categoryLabel(a).localeCompare(categoryLabel(b))), [templates]);
+  // Only the stacks the catalogue actually has: a machine with the nine Node templates shows no stack chips.
+  const stacks = useMemo(() => STACK_ORDER.filter(k => templates.some(t => stackKey(t) === k)), [templates]);
   const rank = new Map((suggested ?? []).map((s, i) => [s.id, { i, matched: s.matched }]));
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return templates
       .filter(t => !category || t.category === category)
+      .filter(t => !stack || stackKey(t) === stack)
       .filter(t => !q || [t.name, t.summary, t.category, ...(t.tags ?? []), ...(t.features ?? [])].join(' ').toLowerCase().includes(q))
       .sort((a, b) => {
         const ra = rank.get(a.id)?.i ?? 999;
         const rb = rank.get(b.id)?.i ?? 999;
         return ra - rb || categoryLabel(a.category).localeCompare(categoryLabel(b.category)) || a.name.localeCompare(b.name);
       });
-  }, [templates, query, category, rank]);
+  }, [templates, query, category, stack, rank]);
 
   return (
     <div data-template-gallery>
@@ -92,6 +99,13 @@ export function TemplateGallery({ templates, suggested, onPick, compact = false,
             className="w-48 rounded-lg border border-aico-border bg-aico-bg px-2.5 py-1.5 text-[12px] text-aico-primary outline-none focus:ring-2 focus:ring-aico-accent/40"
             data-template-search
           />
+          {stacks.length > 1 && (
+            <div className="flex flex-wrap gap-1" data-template-stacks>
+              <Chip active={stack === null} onClick={() => setStack(null)}>Any stack</Chip>
+              {stacks.map(k => <Chip key={k} active={stack === k} onClick={() => setStack(stack === k ? null : k)}>{STACK_LABEL[k]}</Chip>)}
+            </div>
+          )}
+          <span className="text-[11px] text-aico-muted" data-template-count>{templateCount(shown.length)}</span>
           <div className="flex flex-wrap gap-1">
             <Chip active={category === null} onClick={() => setCategory(null)}>All</Chip>
             {categories.map(c => <Chip key={c} active={category === c} onClick={() => setCategory(category === c ? null : c)}>{categoryLabel(c)}</Chip>)}
@@ -131,7 +145,15 @@ export function TemplateGallery({ templates, suggested, onPick, compact = false,
               {r && r.matched.length > 0 && (
                 <p className="mt-2 text-[10px] text-aico-muted">matches: {[...new Set(r.matched)].slice(0, 5).join(', ')}</p>
               )}
-              {t.requires?.node && <p className="mt-2 text-[10px] text-aico-muted">Node {t.requires.node}{t.source !== 'bundled' ? ` · ${t.source} template` : ''}</p>}
+              {servicesLine(t) && <p className="mt-2 text-[10px] text-aico-muted" data-template-services>{servicesLine(t)}</p>}
+              {(stackNeeds(t) || t.source !== 'bundled') && (
+                <p className="mt-2 text-[10px] text-aico-muted">{stackNeeds(t)}{t.source !== 'bundled' ? `${stackNeeds(t) ? ' · ' : ''}${t.source} template` : ''}</p>
+              )}
+              {availabilityNote(t) && (
+                <p className={`mt-1 text-[10px] ${availabilityNote(t)!.tone === 'missing' ? 'text-aico-danger' : 'text-amber-600 dark:text-amber-300'}`} data-template-availability={availabilityNote(t)!.tone}>
+                  {availabilityNote(t)!.text}
+                </p>
+              )}
             </button>
           );
         })}

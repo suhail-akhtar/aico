@@ -1,0 +1,141 @@
+# The whole stack as it runs in production, locally: `docker compose up --build`.
+# For live-reload development use `make dev` (adds compose.dev.yaml: your files are
+# mounted into the containers and Vite serves assets with hot reload).
+#
+# The image is read-only, runs as a non-root user with every Linux capability
+# dropped; only /tmp (tmpfs) and the storage volume are writable.
+
+x-app: &app
+  build:
+    context: .
+    target: runtime
+  image: __APP_SLUG__:local
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  environment: &app-env
+    APP_NAME: "${APP_NAME:-App}"
+    APP_ENV: production
+    APP_DEBUG: "false"
+    APP_KEY: ${APP_KEY:?run `make setup` to create .env with an APP_KEY}
+    APP_URL: ${APP_URL:-http://localhost:8080}
+    LOG_CHANNEL: stderr
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    DB_CONNECTION: pgsql
+    DB_HOST: db
+    DB_PORT: "5432"
+    DB_DATABASE: ${DB_DATABASE:-app}
+    DB_USERNAME: ${DB_USERNAME:-app}
+    DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    SESSION_DRIVER: database
+    # Plain http on localhost: Secure cookies would never come back. Behind TLS, remove this line.
+    SESSION_SECURE_COOKIE: "false"
+    CACHE_STORE: database
+    QUEUE_CONNECTION: database
+    MAIL_MAILER: smtp
+    MAIL_HOST: mailpit
+    MAIL_PORT: "1025"
+    HASH_DRIVER: ${HASH_DRIVER:-argon2id}
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+    TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+    API_DOCS_ENABLED: ${API_DOCS_ENABLED:-true}
+  volumes:
+    - storage:/app/storage/app
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-app}
+      POSTGRES_USER: ${DB_USERNAME:-app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: apply migrations, then exit. The app waits for it to succeed.
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["php", "artisan", "migrate", "--force"]
+
+  app:
+    <<: *app
+    ports:
+      # Loopback only. Put a TLS-terminating proxy in front to expose it.
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Database-backed queue worker (jobs, queued mail). Same image, different command.
+  # SIGTERM lets the current job finish before the worker exits.
+  queue:
+    <<: *app
+    command: ["php", "artisan", "queue:work", "--tries=3", "--max-time=3600", "--sleep=3"]
+    stop_grace_period: 60s
+    # No web server here, so the image's HTTP healthcheck would always fail: check the process instead.
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep -q '[q]ueue:work'"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Runs the schedule in routes/console.php every minute (the container form of the cron entry).
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work"]
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep -q '[s]chedule:work'"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Catches all outgoing mail. UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
+
+  # Every check, in a container (no PHP on the host): `docker compose run --rm tools composer check`.
+  tools:
+    profiles: [tools]
+    build:
+      context: .
+      target: tools
+    image: __APP_SLUG__-tools:local
+    working_dir: /app
+    volumes:
+      - .:/app
+      # vendor/ lives in a named volume: thousands of small files are slow over a bind mount on Windows/macOS.
+      - vendor:/app/vendor
+      - composer-cache:/home/dev/.cache/composer
+    environment:
+      COMPOSER_ALLOW_SUPERUSER: "0"
+
+volumes:
+  db:
+  storage:
+  vendor:
+  composer-cache:
