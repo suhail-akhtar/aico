@@ -377,6 +377,7 @@ await block('Edit note: a changed exported signature names the untouched users, 
   await T.getCodeGraph(dir, { force: true });
   const ctx = { cwd: dir, sessionId: 'cg-edit' };
   const result = await T.runInContext(ctx, async () => {
+    await new Promise(r => setTimeout(r, 60)); // fixture mtimes must precede the turn start on coarse-clock runners
     T.cgResetEditNotes();
     // Touch one caller first, through the normal path: it must not be listed.
     await T.executeTool('Read', { file_path: path.join(dir, 'src/features/a.ts') });
@@ -414,6 +415,7 @@ await block('Edit note: a co-change partner with no import is named once', async
   T.resetCodeGraphCache();
   await T.getCodeGraph(dir, { force: true });
   const out = await T.runInContext({ cwd: dir, sessionId: 'cg-editco' }, async () => {
+    await new Promise(r => setTimeout(r, 60)); // fixture mtimes must precede the turn start on coarse-clock runners
     T.cgResetEditNotes();
     await T.executeTool('Read', { file_path: path.join(dir, 'src/rates.js') });
     const first = await T.executeTool('Edit', { file_path: path.join(dir, 'src/rates.js'), old_str: 'ON: 1', new_str: 'ON: 1, NU: 0.05' });
@@ -433,6 +435,7 @@ await block('Edit note: no graph within the budget — the check is queued and d
     T.resetCodeGraphCache();
     const ctx = { cwd: dir, sessionId: 'cg-editq' };
     const out = await T.runInContext(ctx, async () => {
+      await new Promise(r => setTimeout(r, 60)); // fixture mtimes must precede the turn start on coarse-clock runners
       T.cgResetEditNotes();
       await T.executeTool('Read', { file_path: path.join(dir, 'src/lib/format/currency.ts') });
       const edit = await T.executeTool('Edit', { file_path: path.join(dir, 'src/lib/format/currency.ts'), old_str: 'export function formatAmount(cents: number): string {', new_str: 'export function formatAmount(cents: number, currency: string): string {' });
@@ -456,6 +459,7 @@ await block('Edit note: no graph within the budget — the check is queued and d
     const dir2 = writeTree(tmp('editq2'), TS_FIXTURE);
     T.resetCodeGraphCache();
     const flushed = await T.runInContext({ cwd: dir2, sessionId: 'cg-editq2' }, async () => {
+      await new Promise(r => setTimeout(r, 60)); // fixture mtimes must precede the turn start on coarse-clock runners
       T.cgResetEditNotes();
       await T.executeTool('Read', { file_path: path.join(dir2, 'src/lib/format/currency.ts') });
       await T.executeTool('Edit', { file_path: path.join(dir2, 'src/lib/format/currency.ts'), old_str: 'export function plainAmount(', new_str: 'export function rawAmount(' });
