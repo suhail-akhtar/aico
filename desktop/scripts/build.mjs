@@ -22,7 +22,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { templatePackageFilter } from '../../shared/apps/artifact-dirs.mjs';
-import { templatePackageFilter } from '../../shared/apps/artifact-dirs.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const desktop = path.resolve(here, '..');
