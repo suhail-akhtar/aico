@@ -581,6 +581,11 @@ await block('Git workflow: story commits, the commit gate, baseline and release 
   assert(/Nothing to commit/.test(commitTool), 'AppManage commit on a clean tree says so');
 });
 
+await block('Packaged app: template copy avoids fs.cp (it cannot read an asar archive)', async () => {
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'apps', 'templates.ts'), 'utf8');
+  assert(!src.includes('await cp(') && !src.includes('cpSync('), 'copyTemplateFiles uses readdir + copyFile, which go through the asar layer');
+});
+
 // ──────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) { console.log(failures.map(f => `  - ${f}`).join('\n')); process.exit(1); }

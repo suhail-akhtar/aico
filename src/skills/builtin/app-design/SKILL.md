@@ -6,7 +6,7 @@ version: 1.0.0
 trigger: \b(design|ui|ux|look and feel|looks? (good|bad|professional|ugly)|polish|professional|beautiful|good.looking|layout|styling|theme|responsive|dashboard)\b
 antiTrigger: \b(bugs?|root cause|regression|stack ?trace|traceback|crash(es|ed|ing)?|data loss|csv|pagination|cursor|sql|cli|no ui)\b
 ---
-Design is decided before the first component and checked in a screenshot after the last. A screen is done when a stranger can tell what it is for, what to do first, and what just happened. Sketches: `references/patterns.md`. {args}
+Decided before the first component, checked in a screenshot after the last. A screen is done when a stranger can tell what it is for, what to do first, and what just happened. Sketches: `references/patterns.md`. The look: skill ui-craft. {args}
 
 ## 1. One shell, chosen once
 
@@ -47,4 +47,4 @@ At 390px the navigation collapses, tables scroll in their own box or become card
 - Ship placeholder copy (lorem, "Item 1") or emoji as icons.
 - Shadow every card, gradient every heading, vary the radius.
 - The admin-panel look: dense grey tables, no hierarchy, no empty states.
-- A modal where a page will do; tokens restyled per feature.
+- A modal where a page will do.

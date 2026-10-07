@@ -802,3 +802,4 @@ export { codeGraphRules as cgRules } from './codegraph/rules.js';
 export * as editorServer from './server/editor.js';
 export { exactUsersOnDemand as cgExactUsersOnDemand, tsContentKey as cgTsContentKey } from './codegraph/index.js';
 export { disposeOnDemand as cgDisposeOnDemand } from './codegraph/ts-ondemand.js';
+export { asksPermissionToContinue, wantsCheckIns, CONTINUE_NUDGE } from './continue-gate.js';

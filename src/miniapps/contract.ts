@@ -268,7 +268,7 @@ There is no fixed stack here. Before writing any code:
      Nobody else will write it for a stack nobody chose in advance.
 
 From there the ordinary loop applies: RunChecks, AppManage start, VerifyApp,
-one backlog story at a time. Skill app-design before the first screen,
+one backlog story at a time. Skills ui-craft (the look) and app-design (the structure) before the first screen,
 app-ship to make it deployable, app-quality before calling anything done.
 
 This already has its own git history (git log to see it) and a .gitignore

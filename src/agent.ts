@@ -21,6 +21,7 @@ import { checkPermission } from './permissions.js';
 import { classifyBashCommand, isBashReadOnly, shellCommandOf } from './safety.js';
 import { createShellConfinement, SHELL_CONFINEMENT_SHOWN, type ShellConfinement } from './tools/shell-confinement-guard.js';
 import { canAskUser, setAskUserCallback } from './tools/askuser.js';
+import { asksPermissionToContinue, CONTINUE_NUDGE, wantsCheckIns } from './continue-gate.js';
 import { getOpenTodoCount, pendingTodoLines, readTodos, todoChecklist } from './tools/todo.js';
 import {
   showToolCall,
@@ -3087,6 +3088,7 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // Track how many times the completion gate has nudged the model to keep
   // working despite open todos. Capped so a stuck agent isn't trapped forever.
   let completionNudges = 0;
+  let continueNudges = 0;
   /** Recovery attempts after a step was cut off at the output ceiling. */
   let truncationRetries = 0;
   /** Times this turn has been sent back for an unverified or failing artifact. */
@@ -3131,6 +3133,8 @@ const MAX_COMMIT_NUDGES = 2;
 const MAX_CHECKS_NUDGES = 3;
 
 const MAX_COMPLETION_NUDGES = 2;
+/** Answers to "shall I continue?" in one turn (continue-gate); beyond this the question reaches the person. */
+const MAX_CONTINUE_NUDGES = 3;
 
 /** At the end of a turn, how long a queued edit check may wait for the code graph (codegraph/edit-note). */
 const EDIT_NOTE_FLUSH_MS = 30_000;
@@ -3468,6 +3472,22 @@ const GOAL_REMINDER_EVERY = 6;
                 showError(`Completion gate: ${openCount} open todo(s) — continuing (nudge ${completionNudges}/${MAX_COMPLETION_NUDGES}).`);
               }
               if (!silent) startSpinner('Thinking…');
+              continue;
+            }
+          }
+
+          // A turn that ends by asking leave to carry on with agreed work: answer it in the loop
+          // (continue-gate). Silent when the person asked for check-ins.
+          if (completionGateEnabled && continueNudges < MAX_CONTINUE_NUDGES && asksPermissionToContinue(text)) {
+            const said = transcript.messages().filter(m => m.role === 'user').map(m => typeof m.content === 'string' ? m.content : '');
+            if (!wantsCheckIns(said)) {
+              continueNudges++;
+              transcript.recordAssistant(text, [], stepUsage, stepReasoning);
+              transcript.recordUserMessage(CONTINUE_NUDGE, { kind: 'plugin', plugin: 'continue-gate' });
+              if (!silent) {
+                showError(`Continue gate: the turn asked leave to carry on — continuing (nudge ${continueNudges}/${MAX_CONTINUE_NUDGES}).`);
+                startSpinner('Thinking…');
+              }
               continue;
             }
           }

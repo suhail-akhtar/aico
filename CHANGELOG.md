@@ -3,6 +3,17 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Fixed
+
+- **Creating an app from a template failed in the installed desktop app** with `ENOENT … not found in app.asar`, for every template. Node's `fs.cp` cannot read Electron's asar archive; the copy now walks the template and copies file by file through the archive layer (file modes kept, existing files not overwritten), and a test fails if `fs.cp` comes back.
+- **Long builds stopped after each phase to ask "shall I proceed?".** The loop now recognises a closing request for leave to carry on and answers it with "continue with the next phase" (up to three times a turn). A real question, a credential request, or a person who asked for check-ins still ends the turn (`src/continue-gate.ts`).
+
+### Added
+
+- **Skill `ui-craft`: design direction and craft.** Before building any UI the agent commits to a purpose, a tone and one memorable thing, then works through type pairing, colour tokens, composition, motion and the chrome of browsers and desktop tools, and critiques a real screenshot at 1280px and 390px before calling the screen done. `app-design` (structure) points to it, and the app contract names both before the first screen.
+
 ## 0.44.0 — 2026-10-06
 
 ### Added

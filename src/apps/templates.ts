@@ -27,8 +27,8 @@
  */
 
 import { execFile } from 'child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
-import { cp, mkdir, readFile, writeFile } from 'fs/promises';
+import { constants as fsConstants, existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { copyFile, mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
@@ -415,20 +415,31 @@ async function copyTemplateFiles(template: Template, dir: string): Promise<void>
   const opts = { keep: template.keepDirs ?? [], extra: template.artifactDirs ?? [] };
   // The nine Node templates have always dropped a scratch `data/`; a stack with a toolchain keeps it.
   const legacyData = !template.toolchain;
-  await cp(template.dir, dir, {
-    recursive: true,
-    force: false,
-    errorOnExist: false,
-    filter: (src) => {
-      if (path.resolve(src) === path.resolve(template.dir)) return true;
-      const base = path.basename(src);
-      // Local conveniences of a template's own development never travel: an
-      // install, build output, a scratch database, a committed secret.
-      if (base === 'template.json' || base === '.env' || base === '.env.local' || base === 'package-lock.json.bak') return false;
-      if (legacyData && base === 'data') return false;
-      return !hasArtifactSegment(path.relative(template.dir, src), opts);
-    },
-  });
+  // Not fs.cp: in the packaged desktop app the templates sit in an asar archive
+  // (unpacked on disk), and fs.cp bypasses Electron's asar layer and answers
+  // ENOENT for every template. readdir + copyFile go through it and keep file modes.
+  const keepEntry = (src: string): boolean => {
+    const base = path.basename(src);
+    // Local conveniences of a template's own development never travel: an
+    // install, build output, a scratch database, a committed secret.
+    if (base === 'template.json' || base === '.env' || base === '.env.local' || base === 'package-lock.json.bak') return false;
+    if (legacyData && base === 'data') return false;
+    return !hasArtifactSegment(path.relative(template.dir, src), opts);
+  };
+  const copyDir = async (from: string, to: string): Promise<void> => {
+    await mkdir(to, { recursive: true });
+    for (const entry of await readdir(from, { withFileTypes: true })) {
+      const src = path.join(from, entry.name);
+      if (!keepEntry(src)) continue;
+      const dest = path.join(to, entry.name);
+      if (entry.isDirectory()) await copyDir(src, dest);
+      else if (entry.isFile()) {
+        // force: false — a file already there (a custom brief's README) is kept.
+        await copyFile(src, dest, fsConstants.COPYFILE_EXCL).catch(e => { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; });
+      }
+    }
+  };
+  await copyDir(template.dir, dir);
 }
 
 /** Substitute the title tokens in the files the manifest names. */
