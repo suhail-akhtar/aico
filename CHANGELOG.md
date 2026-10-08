@@ -3,6 +3,12 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **The Code map is readable: a layered Architecture and a Focus view.** The default view is no longer a force-directed hairball. **Architecture** draws folders as labelled boxes with their file counts, laid out top to bottom — what depends on something sits above it — with the number of imports on each link and cycles in red; click a folder to open it into its sub-folders and files (others stay as boxes), **Esc** or the breadcrumb to go back. Links a longer chain already implies are left out by default (**Links: All** brings them back). **Focus** puts one file in the middle, the files that use it on its left, the files it uses on its right, two hops out; click any box to refocus, with back/forward and a trail. Search (`/`) lands in Focus. Pan by dragging, zoom with the wheel or a pinch toward the cursor, a minimap, **0** fits, arrows pan, **F** focuses the selected file; labels stay inside their boxes and are never drawn smaller than 9.5 px. Open in editor, Ask AICO and the details panel work from both views (a folder can be asked about too). The old map is kept as **Overview**. The layout (`layered.ts`) is written in-house, deterministic and unit-tested (edges point down, cycles broken, 5,000 nodes / 15,000 edges in under a second).
+
 ## 0.45.0 — 2026-10-07
 
 ### Fixed

@@ -1,7 +1,8 @@
 /**
  * The Code map's view model: the engine's graph payload (src/codegraph/view)
  * turned into what a picture needs — adjacency, filters, impact layers, paths,
- * search, the architecture (modules collapsed), colours, and SVG export.
+ * search, the overview (communities collapsed), colours, and SVG export. The
+ * layered Architecture and Focus views are built in modules.ts / flow.ts.
  *
  * Pure: no DOM, no React, no fetch, so the web unit suite runs it as is and
  * the desktop page, the web workspace page and any later client share one
@@ -98,10 +99,12 @@ export interface CgSymbolDetail {
 
 export const EDGE_KINDS = ['import', 'reexport', 'package', 'inferred', 'dynamic', 'call'] as const;
 
-export type Mode = 'architecture' | 'files' | 'impact' | 'path' | 'cycles' | 'hotspots' | 'cochange' | 'changes' | 'symbol';
+export type Mode = 'architecture' | 'focus' | 'overview' | 'files' | 'impact' | 'path' | 'cycles' | 'hotspots' | 'cochange' | 'changes' | 'symbol';
 
 export const MODES: Array<{ id: Mode; label: string; hint: string }> = [
-  { id: 'architecture', label: 'Architecture', hint: 'Modules of files that depend on each other; click one to open it' },
+  { id: 'architecture', label: 'Architecture', hint: 'Folders as boxes, dependents above what they depend on; click one to open it' },
+  { id: 'focus', label: 'Focus', hint: 'One file in the middle: who uses it on the left, what it uses on the right' },
+  { id: 'overview', label: 'Overview', hint: 'Every module as a bubble on a force-directed map' },
   { id: 'files', label: 'Files', hint: 'Every file and its imports' },
   { id: 'impact', label: 'Impact', hint: 'What depends on the selection, by distance' },
   { id: 'path', label: 'Path', hint: 'How one file reaches another' },

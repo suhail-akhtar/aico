@@ -10,6 +10,10 @@
  * that answers a question dims everything that is not the answer instead of
  * hiding it, so the person keeps their bearings.
  *
+ * The layered Architecture and Focus views are not scenes of this kind (their
+ * boxes and routed edges are flow.ts); this file draws the force-map modes,
+ * including the Overview (the old Architecture bubbles).
+ *
  * @module web/components/codegraph/scene
  */
 
@@ -58,7 +62,7 @@ export interface SceneInput {
   mode: Mode;
   colorBy: ColorBy;
   selected: number;
-  /** Communities opened in the architecture view. */
+  /** Communities opened in the overview. */
   expanded: Set<number>;
   /** Impact/changes/symbol: file → depth (0 = the subject). */
   depths?: Map<number, number>;
@@ -84,7 +88,7 @@ function fileColor(inp: SceneInput, id: number): string {
 }
 
 export function buildScene(inp: SceneInput): Scene {
-  if (inp.mode === 'architecture') return architectureScene(inp);
+  if (inp.mode === 'overview') return architectureScene(inp);
   const { model, pos, mask } = inp;
   const nodes: SceneNode[] = [];
   const fileIndex = new Map<number, number>();

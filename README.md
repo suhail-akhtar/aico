@@ -285,7 +285,7 @@ badge while you're there, and no saved passwords filled in unless you say so.
 
 ### 🗺 Code map — see how your project fits together
 
-- **An accurate map of your project** (TypeScript/JavaScript with `@/` aliases and barrels, Python, Go, Java, C#, PHP, Rust and more): architecture, files, symbols, impact ("what breaks if I change this"), paths between files, cycles, hotspots, files that change together, and what your uncommitted changes affect. It runs locally, indexes 5,000 files in about a second, and updates as you edit.
+- **An accurate map of your project** (TypeScript/JavaScript with `@/` aliases and barrels, Python, Go, Java, C#, PHP, Rust and more): a layered architecture (folders, dependents above what they depend on), a focus view of any one file, files, symbols, impact ("what breaks if I change this"), paths between files, cycles, hotspots, files that change together, and what your uncommitted changes affect. It runs locally, indexes 5,000 files in about a second, and updates as you edit.
 - **Ask AICO about any part of it** — the selected files and their neighbourhood go to the chat as precise context.
 - **The agent checks its own edits against it:** change an exported function and it is told which callers it has not updated yet.
 - **Big projects too:** past a few thousand files the symbol you ask about is still answered exactly by the TypeScript language service on demand (seconds, memory-capped), matching the compiler's own answer.

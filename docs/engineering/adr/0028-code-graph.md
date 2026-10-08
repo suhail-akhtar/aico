@@ -238,6 +238,29 @@ outside TS/JS, Python structural Protocol conformance without a declared base.
 TypeScript projects above the checker's caps get the lexical rules for the
 *whole graph* (edges, the canvas) and exact answers for the symbol asked about.
 
+## Addendum (2026-10-08): a layered Architecture and a Focus view
+
+The force map (Barnes-Hut in a worker) answers "what clusters with what" but
+was hard to read and impossible to navigate: no direction, no order, every file
+a dot. The default view is now two **layered** drawings, written in-house like
+the force layout (no new dependency): `web/src/components/codegraph/layered.ts`
+(Sugiyama: cycle breaking by weight then DFS feedback edges, longest-path
+layers, dummy nodes, barycentre sweeps with a Fenwick-counted crossing check,
+least-squares coordinate packing; deterministic; 5,000 nodes / 15,000 edges in
+well under a second in the unit test, dummies dropped past 60,000), `modules.ts`
+(folders as boxes, about half a √files of them, opened one at a time) and
+`flow.ts` (the two scenes). **Architecture** boxes are *folders*, not the
+engine's communities: label-propagation clusters were named after their biggest
+folder ("src" with a third of the files) and told a person nothing about where
+to look. Dependencies already implied by a longer chain are left out by default
+(a "Key links" switch brings them back) because on a folder graph they were
+most of the ink. **Focus** puts a file in the middle with its users on the left
+and its dependencies on the right, two hops out; the column *is* the hop count,
+which a layered layout of the neighbourhood could not promise. The force map
+stays as **Overview**; the file-level modes are unchanged. The layered layout
+runs on the main thread (it measures in milliseconds at the sizes a screen can
+show); only the force layout needs the worker.
+
 ## Threat model
 
 Reads project files and runs `git log` / `git diff --name-only` with argument

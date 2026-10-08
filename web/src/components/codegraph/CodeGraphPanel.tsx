@@ -7,6 +7,10 @@
  * Every list item selects its file on the map (and every file can be opened
  * in the editor), so the panel and the canvas are two views of one thing.
  *
+ * In the Architecture view the panel also describes the folder the person last
+ * opened (what it uses, what uses it, its core files); in Focus, the file in the
+ * middle is the selection and every list item refocuses on the file it names.
+ *
  * Interfaces are explained, not just drawn: which types implement one,
  * whether declared or by matching method sets (Go, TypeScript), and each
  * method with where the implementation has it — a pointer receiver marked,
@@ -19,6 +23,17 @@
 import React from 'react';
 import { basename, dirname, splitUsers, type CgFileDetail, type CgImpl, type CgPayload, type CgSymbolDetail, type GraphModel, type Mode } from './model';
 import { CgIcon } from './icons';
+
+/** The folder the person last opened in the Architecture view, and its links to the boxes now on screen. */
+export interface ModuleInfo {
+  key: string;
+  title: string;
+  path: string;
+  files: number[];
+  uses: Array<{ key: string; title: string; count: number }>;
+  usedBy: Array<{ key: string; title: string; count: number }>;
+  cycleFiles: number;
+}
 
 interface Props {
   model: GraphModel;
@@ -40,6 +55,14 @@ interface Props {
   askBusy: boolean;
   /** "Exact only": leave out what rests on an interface or a unique name. */
   exactOnly?: boolean;
+  /** The folder the panel describes (Architecture). */
+  moduleInfo?: ModuleInfo | null;
+  /** The boxes of the Architecture view, biggest first (the summary lists them). */
+  archModules?: Array<{ key: string; title: string; sub: string; count: number; tint: string }>;
+  /** The file in the middle of the Focus view, or −1. */
+  focusId?: number;
+  onFocus?: (id: number) => void;
+  onModule?: (key: string) => void;
   onSelect: (id: number) => void;
   onOpen: (path: string, line?: number) => void;
   /** The desktop's "Open in external editor". */
@@ -58,8 +81,10 @@ export function CodeGraphPanel(p: Props): React.ReactElement {
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[12.5px]">
         <ModeSection {...p} />
         {p.selected >= 0 && p.mode !== 'symbol' && <FileSection {...p} />}
+        {p.selected < 0 && p.mode === 'architecture' && p.moduleInfo && <ModuleSection {...p} info={p.moduleInfo} />}
         {p.selected < 0 && p.mode !== 'symbol' && p.group !== null && <GroupSection {...p} />}
-        {p.selected < 0 && p.group === null && ['architecture', 'files'].includes(p.mode) && <Summary {...p} />}
+        {p.selected < 0 && p.group === null && !(p.mode === 'architecture' && p.moduleInfo) && ['architecture', 'overview', 'files'].includes(p.mode) && <Summary {...p} />}
+        {p.selected < 0 && p.mode === 'focus' && <Hint>Pick a file with the search box (/), or open a folder in the Architecture and click a file there. It goes in the middle; the files that use it are on its left, the files it uses on its right.</Hint>}
       </div>
       {p.canAsk && (
         <div className="border-t border-aico-border p-3">
@@ -80,6 +105,7 @@ function askLabel(p: Props): string {
   if (p.mode === 'impact' && p.selected >= 0) return 'Ask AICO about this impact';
   if (p.multi.size > 0) return `Ask AICO about ${p.multi.size + (p.selected >= 0 ? 1 : 0)} files`;
   if (p.selected >= 0) return 'Ask AICO about this file';
+  if (p.moduleInfo) return 'Ask AICO about this folder';
   if (p.group !== null) return 'Ask AICO about this module';
   return 'Ask AICO about this';
 }
@@ -338,6 +364,7 @@ function FileSection(p: Props): React.ReactElement {
         <Chip onClick={() => p.onMode('impact')}><CgIcon name="target" size={12} />Impact</Chip>
         <Chip onClick={() => p.onPathEnd('from', p.selected)}><CgIcon name="route" size={12} />Path from here</Chip>
         <Chip onClick={() => p.onPathEnd('to', p.selected)}>Path to here</Chip>
+        {p.mode !== 'focus' && p.onFocus ? <Chip onClick={() => p.onFocus!(p.selected)}><CgIcon name="target" size={12} />Focus (F)</Chip> : null}
         {p.payload.git.available ? <Chip onClick={() => p.onMode('cochange')}><CgIcon name="git" size={12} />Changes with</Chip> : null}
       </div>
       {!d && <div className="mt-3 h-24 animate-pulse rounded-lg bg-aico-surface" />}
@@ -393,6 +420,31 @@ function FileSection(p: Props): React.ReactElement {
   );
 }
 
+function ModuleSection(p: Props & { info: ModuleInfo }): React.ReactElement {
+  const { info } = p;
+  const core = [...info.files].sort((a, b) => p.model.file(b).fanIn - p.model.file(a).fanIn);
+  const langs = new Map<string, number>();
+  for (const f of info.files) { const l = p.model.file(f).lang; langs.set(l, (langs.get(l) ?? 0) + 1); }
+  const links = (title: string, list: ModuleInfo['uses']): React.ReactNode => list.length === 0 ? null : (
+    <>
+      <H>{title}</H>
+      {list.map(x => <button key={x.key} className="flex w-full justify-between gap-2 rounded-md px-1.5 py-1 text-left hover:bg-aico-hover" onClick={() => p.onModule?.(x.key)}><span className="min-w-0 truncate">{x.title}</span><span className="shrink-0 text-aico-muted tabular-nums">{x.count}</span></button>)}
+    </>
+  );
+  return (
+    <>
+      <H>Folder</H>
+      <div className="break-all text-[13px] font-semibold">{info.path || 'project root'}</div>
+      <div className="text-aico-muted">{info.files.length} files · {[...langs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l, n]) => `${l} ${n}`).join(', ')}</div>
+      {info.cycleFiles > 0 && <div className="mt-1.5"><Badge tone="danger">{info.cycleFiles} file(s) in an import cycle</Badge></div>}
+      {links('Depends on', info.uses)}
+      {links('Used by', info.usedBy)}
+      <H>Core files</H>
+      <List p={p} ids={core} limit={25} note={id => `${p.model.file(id).fanIn} importers`} />
+    </>
+  );
+}
+
 function GroupSection(p: Props): React.ReactElement | null {
   const c = p.payload.communities.find(x => x.id === p.group);
   if (!c) return null;
@@ -430,12 +482,22 @@ function Summary(p: Props): React.ReactElement {
       <H>Project</H>
       <div className="grid grid-cols-3 gap-1.5">
         <Stat label="Files" value={payload.files.length.toLocaleString()} />
-        <Stat label="Modules" value={payload.communities.length} />
+        <Stat label={p.archModules ? 'Folders' : 'Modules'} value={p.archModules ? p.archModules.length : payload.communities.length} />
         <Stat label="Cycles" value={payload.cycles.length} />
       </div>
       <div className="mt-2 flex flex-wrap gap-1">{[...langs.entries()].sort((a, b) => b[1] - a[1]).map(([l, n]) => <Badge key={l}>{l} {n}</Badge>)}</div>
-      <H>Modules</H>
-      {payload.communities.slice(0, 12).map(c => (
+      {p.archModules ? (
+        <>
+          <H>Folders · {p.archModules.length}</H>
+          {p.archModules.slice(0, 14).map(m => (
+            <button key={m.key} className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-aico-hover" onClick={() => p.onModule?.(m.key)} title={m.sub}>
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: m.tint }} />
+              <span className="min-w-0 flex-1 truncate">{m.title}</span><span className="text-aico-muted tabular-nums">{m.count}</span>
+            </button>
+          ))}
+        </>
+      ) : <H>Modules</H>}
+      {!p.archModules && payload.communities.slice(0, 12).map(c => (
         <button key={c.id} className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-aico-hover" onClick={() => p.onGroup(c.id)}>
           <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: ['#4e79a7', '#f28e2b', '#59a14f', '#e15759', '#76b7b2', '#b07aa1', '#edc948', '#9c755f', '#ff9da7', '#5fa2ce', '#8cd17d', '#d37295', '#a0cbe8', '#c49c94', '#86bcb6', '#d4a6c8'][c.id % 16] }} />
           <span className="min-w-0 flex-1 truncate">{c.label}</span><span className="text-aico-muted">{c.files.length}</span>
@@ -454,7 +516,7 @@ function Summary(p: Props): React.ReactElement {
       {payload.external.length > 0 && <><H>Packages</H><div className="flex flex-wrap gap-1">{payload.external.slice(0, 24).map(([name, n]) => <Badge key={name}>{name} {n}</Badge>)}</div></>}
       <H>Keys</H>
       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-aico-muted">
-        <span>/ search</span><span>arrows walk edges</span><span>1–9 views</span><span>Enter open</span><span>0 fit · F focus</span><span>A ask AICO</span><span>Shift-click add</span><span>Esc clear</span>
+        <span>/ search</span><span>{p.mode === 'architecture' || p.mode === 'focus' ? 'arrows pan' : 'arrows walk edges'}</span><span>1–9 views</span><span>Enter open</span><span>0 fit · + − zoom</span><span>F focus on a file</span><span>A ask AICO</span><span>Shift-click add</span><span>Esc back</span><span>Alt+← → history</span>
       </div>
     </>
   );

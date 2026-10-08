@@ -468,10 +468,17 @@ lives in the AICO home rather than your repository, and refreshes itself.
 
 - **See it:** desktop — a project's **Code map** tab, "Show in code map" on a
   file, or `Ctrl+Shift+M`; web — **Code map** on a workspace page. Views:
-  architecture (modules; click one to open it), files, impact of a file or
+  **Architecture** (the first view: folders as boxes, what depends on
+  something above it, with the number of imports on each link and cycles in
+  red; click a folder to open it, **Esc** or the breadcrumb to go back),
+  **Focus** (one file in the middle, the files that use it on the left, the
+  files it uses on the right, two hops out; click any box to refocus, Esc or
+  Alt+← to go back), the old force **Overview**, files, impact of a file or
   symbol by depth, the path from one file to another, import cycles,
-  hotspots, co-change, and what your uncommitted change affects. `/` searches
-  files and symbols; arrows walk the edges; Enter opens the file.
+  hotspots, co-change, and what your uncommitted change affects. Drag to pan,
+  scroll or pinch to zoom, **0** fits, **F** focuses the selected file, `/`
+  searches files and symbols, Enter opens the file (arrows pan in
+  Architecture and Focus, and walk the edges in the others).
 - **Ask about it:** select files, a symbol, a path or an impact and press
   **Ask AICO about this** — a chat starts with exactly that context.
 - **Methods too:** calls are linked by the receiver's type wherever the code
