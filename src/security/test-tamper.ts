@@ -241,6 +241,9 @@ export function deletedTestPaths(command: string, cwd: string): string[] {
       let target = a;
       if (/^-(?:path|literalpath)$/i.test(a)) { if (args[i + 1] === undefined) continue; target = args[++i]!; }
       else if (a.startsWith('-') || (head !== 'rm' && head !== 'git' && /^\/[a-z]$/i.test(a))) continue;
+      // `del tests\a.test.js` names the same file on every OS, but on POSIX a
+      // backslash is part of the file name, so the stat missed it there.
+      target = target.replace(/\\/g, '/');
       const abs = path.resolve(cwd, target);
       let stat: fs.Stats | undefined;
       try { stat = fs.statSync(abs); } catch { stat = undefined; }
