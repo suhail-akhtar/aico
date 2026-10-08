@@ -1,0 +1,35 @@
+{
+  "$schema": "https://github.com/suhail-akhtar/aico/blob/main/docs/engineering/adr/0035-managed-policy-and-audit-export.md",
+  "_comment": "An example AICO managed policy (ADR 0035). Copy it, delete what you do not need, and check it with: aico policy check policy.json. Every key can only RESTRICT; none can grant. Place it at %ProgramData%\\AICO\\policy.json (Windows), /Library/Application Support/AICO/policy.json (macOS) or /etc/aico/policy.json (Linux), writable only by administrators.",
+
+  "version": 1,
+  "message": "AICO is managed by Example Corp. Only the approved providers and models are available.",
+  "contact": "ai-help@example.com",
+  "minAicoVersion": "0.47.0",
+
+  "allowedProviders": ["anthropic", "ollama"],
+  "deniedProviders": [],
+  "allowedModels": ["claude-*", "ollama/*", "llama*", "qwen*"],
+  "deniedModels": ["*-preview", "*-experimental"],
+  "localOnly": false,
+
+  "deniedTools": ["WebSearch", "mcp__*__delete*"],
+  "maxAutonomyLevel": "L3",
+  "requiredGates": ["checks", "security", "verification", "commit", "supply-chain", "change-scan"],
+
+  "mcp": { "mode": "allow-list", "allow": ["github", "corp-*"] },
+  "plugins": { "mode": "forbid" },
+  "customTools": { "mode": "forbid" },
+
+  "network": {
+    "mode": "allow-list",
+    "domains": ["github.com", "*.githubusercontent.com", "docs.example.com", "registry.npmjs.org", "pypi.org"],
+    "allowLoopback": true
+  },
+
+  "budget": { "perSessionUsd": 10, "perDayUsd": 50 },
+  "sentinelRequired": true,
+  "telemetry": "off",
+
+  "audit": { "user": "username", "host": "hash", "tenant": "example-corp" }
+}

@@ -23,6 +23,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, type ModelRoleRow, type ModelRolesView } from '../../api';
 import { useStore } from '../../store';
+import { lockFor } from '../../settings-schema';
 
 const PRESETS: Array<{ value: ModelRolesView['preset']; label: string; hint: string }> = [
   { value: 'balanced', label: 'Balanced (recommended)', hint: 'Today\'s behaviour: helpers on your model, background jobs on the cheap one.' },
@@ -45,6 +46,7 @@ export function formatRolePrice(price: ModelRoleRow['price']): string {
 export function RolesPane(): React.ReactElement {
   const model = useStore(s => s.model ?? s.defaultModel);
   const refreshSettings = useStore(s => s.refreshSettings);
+  const policy = useStore(s => s.policy);
   const [view, setView] = useState<ModelRolesView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,6 +67,9 @@ export function RolesPane(): React.ReactElement {
     return <div className="text-[12px] text-aico-muted">{error ? `Could not load model roles: ${error}` : 'Loading model roles…'}</div>;
   }
   const localForced = view.preset === 'private';
+  // The organisation's managed policy can hold this on (ADR 0035).
+  const managedLock = lockFor('models.localOnlyPersonal', policy?.locked);
+  const managedLocal = managedLock?.kind === 'fixed';
 
   return (
     <section className="mt-8" data-model-roles>
@@ -96,8 +101,8 @@ export function RolesPane(): React.ReactElement {
         <input
           type="checkbox"
           className="mt-0.5"
-          checked={localForced || view.localOnlyPersonal}
-          disabled={localForced}
+          checked={localForced || managedLocal || view.localOnlyPersonal}
+          disabled={localForced || managedLocal}
           onChange={e => void save('models.localOnlyPersonal', e.target.checked ? true : null)}
           data-local-only
         />
@@ -107,6 +112,7 @@ export function RolesPane(): React.ReactElement {
             Background jobs and embeddings read your own sessions and memories. With this on they use only a local
             model (Ollama or a loopback endpoint); with none set they run without a model rather than go to the cloud.
             {localForced ? ' The Private preset turns this on.' : ''}
+            {managedLocal ? ` ${managedLock?.reason ?? 'Managed by your organisation.'}` : ''}
           </span>
         </span>
       </label>

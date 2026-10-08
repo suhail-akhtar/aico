@@ -51,6 +51,7 @@ import { handleCanvasRoute } from './canvas-routes.js';
 import { handleArtifactRoute } from './artifact-routes.js';
 import { handleDeckVisualRoute } from './deck-visual-routes.js';
 import { handleCodeGraphRoute } from './codegraph-routes.js';
+import { handleEvidenceRoute } from './evidence-routes.js';
 import { handleEditorRoute } from './editor.js';
 import { readUserSettingsFile } from '../settings-project-policy.js';
 import { onCanvasActivity, onCanvasChange, onCanvasComments } from '../canvas/store.js';
@@ -1376,6 +1377,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     // The Code map view (server/codegraph-routes, ADR 0028): registered projects only.
     if (await handleCodeGraphRoute(route, req, res, url, { send, isKnownProject: dir => isKnownProject(cwd, dir) })) return;
+
+    // The change packet (server/evidence-routes, ADR 0034): registered projects only, read-only.
+    if (await handleEvidenceRoute(route, req, res, url, { send, isKnownProject: dir => isKnownProject(cwd, dir) })) return;
 
     // The Artifacts panel: everything this chat made or opened (server/artifact-routes).
     if (await handleArtifactRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;

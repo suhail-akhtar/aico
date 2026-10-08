@@ -98,6 +98,8 @@ export interface PipelineResult {
   denied: boolean;
   /** Set when the call was denied, for diagnostics. */
   denialReason?: string;
+  /** The stage that denied it (a guard's registered name), for the audit trail (ADR 0035). */
+  deniedBy?: string;
 }
 
 // ── Stage signatures ─────────────────────────────────────────────────
@@ -192,6 +194,7 @@ export class ToolPipeline {
   async execute(ctx: ToolCallContext, dispatch: Dispatch): Promise<PipelineResult> {
     let denied = false;
     let denialReason: string | undefined;
+    let deniedBy: string | undefined;
     let outcome: ToolOutcome;
 
     // ── pre-execute ──────────────────────────────────────────────────
@@ -207,6 +210,7 @@ export class ToolPipeline {
     if (!decision || (decision.kind !== 'allow' && decision.kind !== 'deny')) {
       decision = { kind: 'deny', reason: `Refused: a pre-execute stage returned an unrecognised decision for ${ctx.name}, so the call was not run.` };
     }
+    if (decision.kind === 'deny') deniedBy = 'pre-execute';
 
     // ── guards (monotonic: they may deny, never grant) ────────────────
     if (decision.kind === 'allow') {
@@ -217,6 +221,7 @@ export class ToolPipeline {
           // verdict denies rather than passes.
           if (!verdict || verdict.kind !== 'abstain') {
             decision = { kind: 'deny', reason: verdict?.kind === 'deny' ? verdict.reason : `Refused: guard "${guard.name}" returned an unrecognised verdict.` };
+            deniedBy = guard.name;
             break;
           }
         }
@@ -265,6 +270,7 @@ export class ToolPipeline {
       additionalContexts: sinkRedact(post.additionalContexts),
       denied,
       ...(denialReason === undefined ? {} : { denialReason: sinkRedactText(denialReason) }),
+      ...(denied && deniedBy ? { deniedBy } : {}),
     };
   }
 
@@ -275,6 +281,7 @@ export class ToolPipeline {
       additionalContexts: [],
       denied: true,
       denialReason: reason,
+      deniedBy: stage,
     };
   }
 

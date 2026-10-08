@@ -76,6 +76,10 @@
     "attachments/upload": {
       "gate": "token"
     },
+    "audit/*": {
+      "gate": "token+human",
+      "note": "audit/export and audit/usage: the redacted audit stream and cost summary; the model can hold the token, so a person must be behind the request (policy/routes, ADR 0035)"
+    },
     "background/cancel": {
       "gate": "token"
     },
@@ -296,6 +300,10 @@
     "permission": {
       "gate": "token+human",
       "note": "allow:true needs the UI key / connected client nonce (decision-gate.ts); a no needs only the token"
+    },
+    "policy": {
+      "gate": "token",
+      "note": "read-only: which settings the managed policy locks, the rules in force, the file's problems; no secrets (the policy has no field for one) (policy/routes, ADR 0035)"
     },
     "profile": {
       "gate": "token"

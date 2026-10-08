@@ -96,6 +96,9 @@ export function languageOf(file) {
   if (/\.(?:[cm]?[jt]sx?)$/i.test(file)) return 'js';
   if (/\.pyw?$/i.test(file)) return 'py';
   if (/\.go$/i.test(file)) return 'go';
+  if (/\.java$/i.test(file)) return 'java';
+  if (/\.php\d?$/i.test(file)) return 'php';
+  if (/\.cs$/i.test(file)) return 'cs';
   return null;
 }
 
@@ -243,7 +246,186 @@ export const GENERIC_RULES = [
     message: 'command run through a shell',
     fix: 'exec.Command(program, args...) without a shell',
   },
+
+  // ── Java, PHP and C# (ADR 0033), and rules that apply across languages ──
+  // Line-level and tuned for precision, like the rules above; every one is waivable
+  // on its line with `security-allow: <id> — reason`.
+  {
+    id: 'cmd-injection', severity: 'high', langs: ['java'],
+    test: (l) => /\bRuntime\.getRuntime\(\)\.exec\s*\(\s*(?:"[^"]*"\s*\+|[A-Za-z_]\w*\s*[,)])/.test(l)
+      || /\bnew\s+ProcessBuilder\s*\(.*"(?:sh|bash|cmd|cmd\.exe|powershell)"\s*,\s*"(?:-c|\/c|-Command)"/.test(l),
+    message: 'shell command built from a variable (command injection)',
+    fix: 'ProcessBuilder with an argument list and no shell; never put untrusted text in a command string',
+  },
+  {
+    id: 'cmd-injection', severity: 'high', langs: ['php'],
+    test: (l) => (/\b(?:shell_exec|exec|system|passthru|popen|proc_open|pcntl_exec)\s*\([^;]*\$/.test(l) || /`[^`]*\$\w+[^`]*`/.test(l))
+      && !/escapeshell(?:arg|cmd)\s*\(/.test(l),
+    message: 'shell command built from a variable (command injection)',
+    fix: 'escapeshellarg() on every argument, or proc_open with an argument array; better, use a PHP library instead of a shell',
+  },
+  {
+    id: 'cmd-injection', severity: 'high', langs: ['cs'],
+    test: (l, c) => /\bProcess\.Start\s*\(\s*(?:\$@?"|@?"[^"]*"\s*\+)/.test(l)
+      || (/\bArguments\s*=\s*(?:\$@?"[^"]*\{|@?"[^"]*"\s*\+\s*[A-Za-z_])/.test(l) && /\b(?:cmd(?:\.exe)?|\/bin\/(?:ba)?sh|powershell|pwsh)\b/i.test(c.text)),
+    message: 'process or shell command built from a variable (command injection)',
+    fix: 'ProcessStartInfo with ArgumentList (no shell, no string building); never put untrusted text in a command line',
+  },
+  {
+    id: 'eval', severity: 'high', langs: ['php'],
+    test: (l, c) => /(?<![\w>$:])eval\s*\(/.test(c.code),
+    message: 'eval runs a string as code',
+    fix: 'parse the data (json_decode) or dispatch on a fixed table instead of evaluating text',
+  },
+  {
+    id: 'eval', severity: 'high', langs: ['java'],
+    test: (l, c) => /\.eval\s*\(/.test(c.code) && /\b(?:ScriptEngine|ScriptEngineManager|GroovyShell|Nashorn)\b/.test(c.text),
+    message: 'a script engine evaluates a string as code',
+    fix: 'do not evaluate text; parse the data or dispatch on a fixed table',
+  },
+  {
+    id: 'eval', severity: 'high', langs: ['cs'],
+    test: (l) => /\bCSharpScript\.(?:EvaluateAsync|RunAsync)\s*\(/.test(l),
+    message: 'Roslyn scripting evaluates a string as code',
+    fix: 'do not evaluate text; parse the data or dispatch on a fixed table',
+  },
+  {
+    id: 'sql-interpolated', severity: 'high', langs: ['java'],
+    test: (l) => /\.(?:executeQuery|executeUpdate|execute|prepareStatement|prepareCall|createQuery|createNativeQuery|queryForObject|queryForList|query|update)\s*\(\s*(?:"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^"]*"\s*\+\s*[A-Za-z_(]|String\.format\s*\(\s*"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b)/i.test(l)
+      || /\bString\s+\w*(?:sql|query)\w*\s*=\s*"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^"]*"\s*\+\s*[A-Za-z_(]/i.test(l),
+    message: 'SQL built by string concatenation (SQL injection)',
+    fix: 'PreparedStatement with ? placeholders (or named parameters) and set the values separately',
+  },
+  {
+    id: 'sql-interpolated', severity: 'high', langs: ['php'],
+    test: (l) => /(?:\b(?:mysqli_query|mysql_query|pg_query)|->(?:query|exec|prepare))\s*\(\s*(?:\$\w+\s*,\s*)?(?:"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^"]*\$\w|'[^']*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^']*'\s*\.\s*\$)/i.test(l)
+      || /\$\w*(?:sql|query)\w*\s*=\s*(?:"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^"]*\$\w|'[^']*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^']*'\s*\.\s*\$)/i.test(l),
+    message: 'SQL built by string interpolation (SQL injection)',
+    fix: 'PDO prepared statements: prepare("... WHERE id = ?") then execute([$id])',
+  },
+  {
+    id: 'sql-interpolated', severity: 'high', langs: ['cs'],
+    test: (l) => /\b(?:new\s+(?:Sql|Npgsql|MySql|Oracle|SQLite)Command|FromSqlRaw|ExecuteSqlRaw|ExecuteSqlCommand|Query|QueryAsync|Execute|ExecuteAsync)\s*(?:<[^>]*>)?\s*\(\s*(?:\$@?"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^"]*\{|@?"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^"]*"\s*\+\s*[A-Za-z_])/i.test(l)
+      || /\b\w*(?:sql|query)\w*\s*=\s*(?:\$@?"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^"]*\{|@?"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b[^"]*"\s*\+\s*[A-Za-z_])/i.test(l),
+    message: 'SQL built by string interpolation (SQL injection)',
+    fix: 'parameters (SqlParameter / Dapper anonymous object / FromSqlInterpolated); never splice values into the text',
+  },
+  {
+    id: 'tls-verify-off', severity: 'high', langs: ['java'],
+    test: (l) => /\bALLOW_ALL_HOSTNAME_VERIFIER\b|\bNoopHostnameVerifier\b|\bTrustAllStrategy\b|\bTrustSelfSignedStrategy\b|\bInsecureTrustManagerFactory\b|\bsetHostnameVerifier\s*\(\s*\(?[\w, ]*\)?\s*->\s*true\b/.test(l),
+    message: 'TLS certificate or host-name verification turned off',
+    fix: 'keep verification on; trust a specific CA or pinned certificate instead of switching the check off',
+  },
+  {
+    id: 'tls-verify-off', severity: 'high', langs: ['php'],
+    test: (l) => /\bCURLOPT_SSL_VERIFY(?:PEER|HOST)\s*,\s*(?:false|0)\b|['"]verify['"]\s*=>\s*false\b|['"]verify_peer(?:_name)?['"]\s*=>\s*false\b/i.test(l),
+    message: 'TLS certificate verification turned off',
+    fix: 'keep verification on; point CURLOPT_CAINFO / the client\'s verify option at a CA bundle instead',
+  },
+  {
+    id: 'tls-verify-off', severity: 'high', langs: ['cs'],
+    test: (l) => /\bDangerousAcceptAnyServerCertificateValidator\b|\bServerCertificate(?:Custom)?ValidationCallback\s*\+?=\s*[^;]*(?:=>\s*true\b|delegate\s*\{\s*return\s+true)/.test(l),
+    message: 'TLS certificate validation turned off',
+    fix: 'keep validation on; trust a specific certificate (pinning) instead of accepting any',
+  },
+  {
+    id: 'hardcoded-credential', severity: 'high', langs: ['js', 'py', 'go', 'java', 'php', 'cs'],
+    test: (l, c) => {
+      // A test file's credentials are fixtures (secret SHAPES are still found by findSecrets everywhere).
+      if (/(?:^|[\\/])(?:__tests__|tests?|spec|e2e|fixtures?|testdata)[\\/]|[._-](?:test|spec)\.[a-z]+$|_test\.(?:go|py)$|(?:Tests?|IT)\.(?:java|cs|php)$/i.test(c.file)) return false;
+      // The conventional "this one is deliberate" markers of other scanners are honoured too.
+      if (/\b(?:nosec|nolint|noqa|NOSONAR)\b|pragma:\s*allowlist\s*secret|gitleaks:allow|standards-allow:\s*secret/i.test(l)) return false;
+      const m = /(['"]?)([\w$.-]*(?:password|passwd|pwd|secret|api_?key|apikey|access_?key|auth_?token|access_?token|private_?key|client_?secret)[\w$.-]*)\1\s*(?:=>|:=|=|:)\s*@?(['"])([^'"\\\r\n]{8,200})\3/i.exec(l);
+      return !!m && plausibleSecret(m[2], m[4]);
+    },
+    message: 'a credential-named value is set to a literal',
+    fix: 'read it from an environment variable or the credential vault; never put the value in source',
+  },
+  {
+    id: 'unsafe-deserialise', severity: 'high', langs: ['js'],
+    test: (l, c) => /\.unserialize\s*\(/.test(l) && /node-serialize/.test(c.text),
+    message: 'node-serialize unserialize runs code embedded in the data',
+    fix: 'JSON.parse; never unserialize data from outside the process',
+  },
+  {
+    id: 'unsafe-deserialise', severity: 'high', langs: ['java'],
+    test: (l) => /\bnew\s+ObjectInputStream\s*\(|\bnew\s+XMLDecoder\s*\(|\.enableDefaultTyping\s*\(|\bnew\s+Yaml\s*\(\s*\)\s*\.load\s*\(/.test(l),
+    message: 'deserialising data that can run code',
+    fix: 'JSON with a fixed schema; for Java serialisation set an ObjectInputFilter allow-list; SnakeYAML with SafeConstructor',
+  },
+  {
+    id: 'unsafe-deserialise', severity: 'high', langs: ['php'],
+    test: (l, c) => /(?<![\w>:$])unserialize\s*\(/.test(c.code) && !/allowed_classes/.test(l),
+    message: 'unserialize() on data can instantiate arbitrary classes',
+    fix: 'json_decode; or unserialize($data, [\'allowed_classes\' => false])',
+  },
+  {
+    id: 'unsafe-deserialise', severity: 'high', langs: ['cs'],
+    test: (l) => /\bnew\s+(?:BinaryFormatter|NetDataContractSerializer|SoapFormatter|LosFormatter)\b|\bTypeNameHandling\s*=\s*TypeNameHandling\.(?:All|Auto|Objects|Arrays)\b/.test(l),
+    message: 'deserialising data that can run code',
+    fix: 'System.Text.Json or a fixed-type serializer; never BinaryFormatter, and never TypeNameHandling on untrusted input',
+  },
+  {
+    id: 'unescaped-output', severity: 'medium', langs: ['php'],
+    test: (l, c) => /\b(?:echo|print)\b[^;]*\$_(?:GET|POST|REQUEST|COOKIE)\b/.test(c.code) && !/htmlspecialchars|htmlentities|esc_html|esc_attr|intval|\(int\)|absint/.test(l),
+    message: 'request data echoed into the page without escaping (XSS)',
+    fix: 'htmlspecialchars($value, ENT_QUOTES, \'UTF-8\') on output, or a template engine that escapes',
+  },
+  {
+    id: 'unescaped-output', severity: 'medium', langs: ['cs'],
+    test: (l) => /\bHtml\.Raw\s*\(\s*[A-Za-z_@]/.test(l),
+    message: 'Html.Raw on a variable outputs it without encoding (XSS)',
+    fix: 'let Razor encode it (@value), or encode explicitly before Html.Raw',
+  },
+  {
+    id: 'unescaped-output', severity: 'medium', langs: ['java'],
+    test: (l) => /getWriter\(\)\s*\.\s*(?:print|println|write)\s*\([^;]*request\.getParameter\s*\(/.test(l),
+    message: 'request data written into the response without encoding (XSS)',
+    fix: 'encode on output (OWASP Java Encoder, JSTL c:out) or use a template engine that escapes',
+  },
+  {
+    id: 'php-include-request', severity: 'high', langs: ['php'],
+    test: (l, c) => /\b(?:include|require)(?:_once)?\b[^;]*\$_(?:GET|POST|REQUEST|COOKIE)\b/.test(c.code),
+    message: 'a file path taken from the request is included (local/remote file inclusion)',
+    fix: 'map a fixed set of keys to known files; never include a path built from request data',
+  },
+  {
+    id: 'weak-password-hash', severity: 'high', langs: ['js', 'py', 'go', 'java', 'php', 'cs'],
+    test: (l, c) => {
+      const re = WEAK_HASH[c.lang];
+      if (!re || !re.test(l)) return false;
+      const near = c.lines.slice(Math.max(0, c.index - 2), c.index + 3).join('\n');
+      return /\b(?:password|passwd|passphrase|pwd)\w*/i.test(near);
+    },
+    message: 'MD5 or SHA-1 used where a password is hashed',
+    fix: 'a password hash built for it: bcrypt, scrypt, argon2 (password_hash in PHP, PasswordHasher in .NET)',
+  },
 ];
+
+/** Hash calls that are fine for checksums and wrong for passwords, per language. */
+const WEAK_HASH = {
+  js: /\bcreateHash\s*\(\s*['"](?:md5|sha-?1)['"]\s*\)|\bCryptoJS\.(?:MD5|SHA1)\s*\(/i,
+  py: /\bhashlib\.(?:md5|sha1)\s*\(|\bhashlib\.new\s*\(\s*['"](?:md5|sha-?1)['"]/i,
+  go: /\b(?:md5|sha1)\.(?:New|Sum)\s*\(/,
+  java: /\bMessageDigest\.getInstance\s*\(\s*"(?:MD5|SHA-?1)"\s*\)|\bDigestUtils\.(?:md5|sha1)(?:Hex)?\s*\(/i,
+  php: /(?<![\w>:$])(?:md5|sha1)\s*\(|\bhash\s*\(\s*['"](?:md5|sha-?1)['"]/i,
+  cs: /\b(?:MD5|SHA1)(?:CryptoServiceProvider|Managed|Cng)?\.Create\s*\(\s*\)|\bnew\s+(?:MD5|SHA1)(?:CryptoServiceProvider|Managed|Cng)\s*\(/,
+};
+
+/**
+ * Is `value`, assigned to a credential-named `name`, plausibly a real secret?
+ * Precision over recall: prose, identifiers, placeholders, paths and
+ * environment-variable names are not.
+ */
+function plausibleSecret(name, value) {
+  if (/\s/.test(value) || PLACEHOLDER.test(value)) return false;
+  if (/(?:env|var|name|label|field|header|path|file|url|uri|hint|prompt|placeholder|text|message|msg|regex|pattern|length|policy|type|id|ref|param|input|selector|title|error|class|hash|sentinel)$/i.test(name.replace(/[^A-Za-z]+$/, ''))) return false;
+  if (/\$\{|\{[^}]*\}|<[^>]+>|%[sd]|process\.env|\benv\(|^\.{0,2}[\\/~]|^[A-Za-z]:[\\/]|^https?:/i.test(value)) return false;
+  if (/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$/.test(value) && !/\d{3}/.test(value)) return false; // dotted.i18n.key or kebab-case-id
+  const hasDigit = /\d/.test(value); const hasAlpha = /[A-Za-z]/.test(value); const hasSymbol = /[^A-Za-z0-9_.-]/.test(value);
+  if (!((hasDigit && hasAlpha) || hasSymbol)) return false;
+  return shannon(value) >= 2.5;
+}
 
 /** `security-allow: <id>` on the line, or on a comment line directly above it. */
 export function isWaived(lines, index, id) {
@@ -288,6 +470,7 @@ export function scanCode(file, text, rules = GENERIC_RULES) {
       if (trimmed.startsWith('/*')) { if (!trimmed.includes('*/')) inBlock = true; continue; }
       if (trimmed.startsWith('*') || trimmed.startsWith('//')) continue;
     } else if (trimmed.startsWith('#')) continue;
+    if (lang === 'php' && trimmed.startsWith('#') && !trimmed.startsWith('#[')) continue;
     const state = lang === 'py' ? { code: raw.replace(/#.*$/, ''), open: false } : codeState(raw);
     if (state.open) inTemplate = true;
     const ctx = { file, text, lines, index: i, lang, code: state.code };

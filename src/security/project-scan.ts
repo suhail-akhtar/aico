@@ -13,9 +13,10 @@
  *   - **secrets** in the added lines (or the whole file when there is no git
  *     history to diff against): the same high-confidence shapes the
  *     repository's own pre-push hook refuses (shared/security/rules.mjs).
- *   - **code rules** for JS/TS, Python and Go — command and SQL injection,
- *     eval, TLS off, unsanitised HTML, weak randomness for secrets, secrets in
- *     logs. Only findings on lines this turn added count, so a model is never
+ *   - **code rules** for JS/TS, Python, Go, Java, PHP and C# — command and SQL
+ *     injection, eval, TLS off, unsanitised HTML, hard-coded credentials, unsafe
+ *     deserialisation, weak password hashes, weak randomness for secrets, secrets
+ *     in logs. Only findings on lines this turn added count, so a model is never
  *     blocked by code it did not write.
  *   - **dependency audit** when a manifest or lockfile changed, through the
  *     ecosystem's own auditor (tools/dependency-audit.ts). New high/critical
@@ -31,6 +32,10 @@
  *
  * Deliberately not here: a taint engine or anything that downloads. Those are
  * CodeQL's and the user's CI's job; this is the cheap net that runs every turn.
+ *
+ * {@link scanWrittenFiles} is the structured half (secrets + code rules on added
+ * lines), shared with the turn-end change-safety gate (`change-safety.ts`,
+ * ADR 0033), which runs it even in a project that defines no other checks.
  *
  * @module security/project-scan
  */
@@ -49,8 +54,8 @@ export interface SecurityCheckResult {
 }
 
 const MANIFEST = /(?:^|[\\/])(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^\\/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(?:\.lock)?|Cargo\.(?:toml|lock)|go\.(?:mod|sum)|[^\\/]+\.(?:csproj|fsproj|vbproj)|packages\.lock\.json|pom\.xml|build\.gradle(?:\.kts)?|gradle\.lockfile|composer\.(?:json|lock))$/i;
-/** Source in languages the code rules do not cover (Java, Kotlin, C#, PHP): said aloud, never silently passed. */
-const UNCOVERED = /\.(?:java|kt|cs|php)$/i;
+/** Source in languages the code rules do not cover (Kotlin, Ruby): said aloud, never silently passed. */
+const UNCOVERED = /\.(?:kt|kts|rb)$/i;
 const SKIP = /[\\/](?:node_modules|\.git|dist|build|\.next|coverage|vendor|\.venv|venv|__pycache__|target|obj|\.gradle)[\\/]/;
 const MAX_FILE = 2 * 1024 * 1024;
 
@@ -137,20 +142,36 @@ async function externalScanners(root: string, files: string[], signal?: AbortSig
   return { lines, high };
 }
 
+/** One thing the scan found on a line this turn added. */
+export interface ScanFinding {
+  kind: 'secret' | 'code';
+  /** `secret` for a secret, else the code rule's id. */
+  rule: string;
+  severity: 'high' | 'medium';
+  /** Project-relative, forward slashes. */
+  file: string;
+  line: number;
+  /** For a secret: what it looks like (the pattern name and length — never the value). */
+  message: string;
+  fix: string;
+  /** A secret's pattern name, for the evidence record. */
+  pattern?: string;
+  length?: number;
+}
+
 /**
- * Run the security check over the files a turn wrote.
+ * Secrets and code-rule findings on the lines this turn added, per file written.
  *
- * @param root  the project root (where manifests and git live)
- * @param written  files this turn wrote, absolute or relative to root
+ * Structured on purpose: `securityCheck` formats it as a report, the turn-end
+ * change-safety gate nudges from it and records it. `files` are the absolute
+ * paths actually scanned (inside the project, not vendored, readable, text).
  */
-export async function securityCheck(root: string, written: readonly string[], opts: { signal?: AbortSignal; external?: boolean } = {}): Promise<SecurityCheckResult> {
+export async function scanWrittenFiles(root: string, written: readonly string[], signal?: AbortSignal): Promise<{ files: string[]; findings: ScanFinding[] }> {
   const files = [...new Set(written.map(f => path.resolve(root, f)))]
     .filter(f => !SKIP.test(f) && path.relative(root, f) && !path.relative(root, f).startsWith('..'))
     .filter(f => { try { const s = fs.statSync(f); return s.isFile() && s.size <= MAX_FILE; } catch { return false; } });
-  const added = await addedLines(root, files, opts.signal);
-  const report: string[] = [];
-  const counts = { secrets: 0, high: 0, medium: 0, advisories: 0 };
-
+  const added = await addedLines(root, files, signal);
+  const findings: ScanFinding[] = [];
   for (const file of files) {
     let text: string;
     try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
@@ -160,14 +181,39 @@ export async function securityCheck(root: string, written: readonly string[], op
     const counts_ = (line: number): boolean => lines == null || lines.has(line);
     for (const s of findSecrets(text)) {
       if (!counts_(s.line)) continue;
-      counts.secrets++;
-      report.push(`  HIGH  secret ${rel}:${s.line} — looks like a ${s.name} (${s.preview}, ${s.length} chars). Move it to an environment variable or the credential vault; never commit it.`);
+      findings.push({
+        kind: 'secret', rule: 'secret', severity: 'high', file: rel, line: s.line,
+        message: `looks like a ${s.name} (${s.preview}, ${s.length} chars)`,
+        fix: 'Move it to an environment variable or the credential vault; never commit it.',
+        pattern: s.name, length: s.length,
+      });
     }
     if (!languageOf(file)) continue;
-    const found: CodeFinding[] = scanCode(rel, text).filter(f => counts_(f.line));
-    for (const f of found) {
+    for (const f of scanCode(rel, text).filter(x => counts_(x.line))) {
+      findings.push({ kind: 'code', rule: f.rule, severity: f.severity === 'high' ? 'high' : 'medium', file: rel, line: f.line, message: f.message, fix: f.fix });
+    }
+  }
+  return { files, findings };
+}
+
+/**
+ * Run the security check over the files a turn wrote.
+ *
+ * @param root  the project root (where manifests and git live)
+ * @param written  files this turn wrote, absolute or relative to root
+ */
+export async function securityCheck(root: string, written: readonly string[], opts: { signal?: AbortSignal; external?: boolean } = {}): Promise<SecurityCheckResult> {
+  const { files, findings } = await scanWrittenFiles(root, written, opts.signal);
+  const report: string[] = [];
+  const counts = { secrets: 0, high: 0, medium: 0, advisories: 0 };
+
+  for (const f of findings) {
+    if (f.kind === 'secret') {
+      counts.secrets++;
+      report.push(`  HIGH  secret ${f.file}:${f.line} — ${f.message}. ${f.fix}`);
+    } else {
       if (f.severity === 'high') counts.high++; else counts.medium++;
-      report.push(`  ${f.severity === 'high' ? 'HIGH ' : 'warn '} ${f.rule} ${rel}:${f.line} — ${f.message}. Fix: ${f.fix}`);
+      report.push(`  ${f.severity === 'high' ? 'HIGH ' : 'warn '} ${f.rule} ${f.file}:${f.line} — ${f.message}. Fix: ${f.fix}`);
     }
   }
 
@@ -188,12 +234,12 @@ export async function securityCheck(root: string, written: readonly string[], op
     }
   }
 
-  // Honest coverage: the rules are language-scoped. Java, Kotlin, C# and PHP files get the secret scan and the
+  // Honest coverage: the rules are language-scoped. Kotlin and Ruby files get the secret scan and the
   // dependency audit, but no code rules, and a clean pass must not read as "reviewed".
   const uncovered = files.filter(f => UNCOVERED.test(f));
   const notes: string[] = [];
   if (uncovered.length) {
-    notes.push(`  note  ${uncovered.length} Java/Kotlin/C#/PHP file(s) written: secrets and dependencies were checked, but there are no code rules for those languages here. Rely on the project's own analysis (SpotBugs/Error Prone, Roslyn analyzers, PHPStan/Larastan) and CodeQL.`);
+    notes.push(`  note  ${uncovered.length} Kotlin/Ruby file(s) written: secrets and dependencies were checked, but there are no code rules for those languages here. Rely on the project's own analysis (detekt, RuboCop/Brakeman) and CodeQL.`);
   }
 
   if (opts.external !== false && files.length) {

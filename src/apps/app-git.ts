@@ -38,6 +38,8 @@ import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 import { looksLikeSecretPath } from '../tools/git.js';
+import { changeSafetyEnabled, describeDiffSecrets, recordRefusedCommit, secretsInDiff } from '../security/change-safety.js';
+import { runFindingSink } from '../security/finding.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -116,6 +118,15 @@ export async function commitAll(dir: string, input: CommitInput): Promise<Commit
   }
   await ensureIdentity(dir);
   await git(dir, 'add', '-A');
+  // The same refusal the Git tool makes (ADR 0033): a secret in the change is never committed.
+  if (changeSafetyEnabled()) {
+    const added = await secretsInDiff(dir, 'staged');
+    if (added.length > 0) {
+      await git(dir, 'reset', '-q', '--', ...new Set(added.map(a => a.file)));
+      recordRefusedCommit(added, runFindingSink());
+      return { ok: false, message: `Not committed: ${describeDiffSecrets(added)}` };
+    }
+  }
   // `git add -A` also stages the engine's profile file when it is not ignored; that is harmless and accurate.
   const { subject, body } = formatCommit(input);
   try {

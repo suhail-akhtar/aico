@@ -803,3 +803,46 @@ export * as editorServer from './server/editor.js';
 export { exactUsersOnDemand as cgExactUsersOnDemand, tsContentKey as cgTsContentKey } from './codegraph/index.js';
 export { disposeOnDemand as cgDisposeOnDemand } from './codegraph/ts-ondemand.js';
 export { asksPermissionToContinue, wantsCheckIns, CONTINUE_NUDGE } from './continue-gate.js';
+// Change evidence, the CI agent and flaky-test detection (ADR 0034).
+export { buildEvidence, gatherGit, packetFromEvents, packetFromDisk, render as renderEvidence, renderMarkdown as renderEvidenceMarkdown, renderShort as renderEvidenceShort } from './evidence/index.js';
+export { evidenceTool, evidenceDefinition } from './tools/evidence.js';
+export { evidenceAnswer } from './server/evidence-routes.js';
+export { planRerun, classifyRerun, recordFlaky, knownFlaky, flakyFile, shellArg, flakyReport } from './flaky.js';
+export { runReview, reviewPrompt, boundedDiff, REVIEW_MARKER, SAFE_REF } from './ci/review.js';
+export { runFixCi, fixCiPrompt, logTail, FIX_BRANCH_PREFIX } from './ci/fix-ci.js';
+export { runHeadless, READ_ONLY_TOOLS } from './ci/headless.js';
+export { sessionLogHandle } from './session/log-handle.js';
+
+// -- Managed policy and audit export (ADR 0035): scripts/managed-policy-test.mjs, scripts/audit-export-test.mjs --
+export {
+  readManagedPolicy, readManagedPolicyFrom, managedPolicy, resetManagedPolicyCache, validatePolicy, systemPolicyPath, globMatch, GATE_IDS,
+} from './policy/managed.js';
+export {
+  PolicyError, applyManagedPolicy, modelDecision, assertModelAllowed, providerDecision, toolDecision, urlDecision, hostMatches as policyHostMatches,
+  extensionDecision, assertExtensionAllowed, isGateRequired, policyCeiling, withPolicyCeiling, runRefusal, dayBudgetCap,
+  dayBudgetRefusal, telemetryOff, forbidsFullAutonomy, createPolicyGuard, lockedSettings, lockFor, publicPolicy, describeRules, policyAllowsTool, urlsIn,
+} from './policy/enforce.js';
+export { lockedWriteRefusal, handlePolicyRoute } from './policy/routes.js';
+export { collectAudit, parseWhen, AUDIT_SCHEMA, AUDIT_COLUMNS } from './audit/export.js';
+export { toJsonl, toCsv, toCef, toCefLine, csvCell, cefHeader, cefValue, formatAudit as formatAuditRecords } from './audit/format.js';
+export { auditText, callTarget } from './audit/redact.js';
+export { resolveIdentity } from './audit/identity.js';
+export { summarizeUsage, usageToCsv, usageToJson, todaySpend, resetTodaySpendCache } from './audit/usage.js';
+export { recordSettingsChange, recordPolicyLoad, readOwnAuditEvents, auditEventsFile, resetAuditLogMemory } from './audit/log.js';
+export { addMcpServer } from './mcp/manage.js';
+export { saveUserSetting } from './settings.js';
+
+// Supply chain and change safety (ADR 0033).
+export { parseInstalls, splitCommands, tokenize } from './tools/package-parse.js';
+export {
+  judgePackage, lookupPackage, lookalikeOf, editDistance, privateRegistry, isPrivateUrl, isLocalPackage, PackageCache, resetPackageCache, TOP_PACKAGES,
+} from './tools/package-registry.js';
+export { createSupplyChain } from './tools/supply-chain-guard.js';
+export { installChangeSafetyGuards, commitScope } from './tools/change-safety-guard.js';
+export {
+  changeSafetyGate, resetChangeSafety, noteTamperObserved, secretsInDiff, secretsInUnifiedDiff, describeDiffSecrets, changeSafetyEnabled,
+} from './security/change-safety.js';
+export { compareTest, isTestFile, assertionCount, skipMarkers, deletedTestPaths } from './security/test-tamper.js';
+export { scanWrittenFiles } from './security/project-scan.js';
+export { runFindingSink } from './security/finding.js';
+export { testCheckFailedThisTurn } from './checks.js';

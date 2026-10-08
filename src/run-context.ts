@@ -176,6 +176,23 @@ export interface RunContext {
    * skipped every taint-gated check (security review 2026-10).
    */
   taint?: TaintCell;
+  /**
+   * This run's own session log, as far as a tool may touch it (ADR 0034):
+   * read what has been recorded, and append the two record events that exist
+   * so a reviewer's report can be built from facts (`check/run`,
+   * `tool/decision`). Narrow on purpose — a tool that could append any event
+   * could forge surface events. Absent for a run with no session log; a
+   * delegated run has its own, never its parent's.
+   */
+  sessionLog?: SessionLogHandle;
+}
+
+/** See {@link RunContext.sessionLog}. */
+export interface SessionLogHandle {
+  /** Everything recorded so far, oldest first. */
+  events(): readonly import('./session/events.js').SessionEvent[];
+  /** Append a `check/run`, `tool/decision` or `safety/finding` record. Never throws. */
+  record<T extends 'check/run' | 'tool/decision' | 'safety/finding'>(type: T, data: import('./session/events.js').SessionEventMap[T]): void;
 }
 
 /** See {@link RunContext.taint}. */

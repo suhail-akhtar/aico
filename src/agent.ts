@@ -20,6 +20,10 @@ import { mcpRegistry } from './mcp.js';
 import { checkPermission } from './permissions.js';
 import { classifyBashCommand, isBashReadOnly, shellCommandOf } from './safety.js';
 import { createShellConfinement, SHELL_CONFINEMENT_SHOWN, type ShellConfinement } from './tools/shell-confinement-guard.js';
+import { createSupplyChain } from './tools/supply-chain-guard.js';
+import { installChangeSafetyGuards } from './tools/change-safety-guard.js';
+import { changeSafetyGate, resetChangeSafety } from './security/change-safety.js';
+import { runFindingSink } from './security/finding.js';
 import { canAskUser, setAskUserCallback } from './tools/askuser.js';
 import { asksPermissionToContinue, CONTINUE_NUDGE, wantsCheckIns } from './continue-gate.js';
 import { getOpenTodoCount, pendingTodoLines, readTodos, todoChecklist } from './tools/todo.js';
@@ -48,6 +52,7 @@ import { resolveInstance } from './providers/instances.js';
 import type { ToolDef, ToolCall, FinishReason, ReasoningTrace } from './providers/types.js';
 import type { Inbox, Session, TurnEndReason, Usage } from './session/index.js';
 import { canonicalHeader } from './session/index.js';
+import { sessionLogHandle } from './session/log-handle.js';
 import { sectionHashes } from './prompt/render.js';
 import { projectRoot } from './run-context.js';
 import type { PromptSection } from './prompt/types.js';
@@ -109,14 +114,14 @@ import { getAgentRegistry } from './tools/task.js';
 import { investigate, investigateDefinition, type InvestigateInput } from './tools/investigate.js';
 import { checkVerificationGate, resetVerification } from './verification.js';
 import { setBrief } from './requirements.js';
-import { checkProjectGate, resetChecks, touchedFiles } from './checks.js';
+import { checkProjectGate, resetChecks, testCheckFailedThisTurn, touchedFiles, writtenFiles } from './checks.js';
 import { appCommitGate } from './apps/app-git.js';
 import { gateChecks } from './tools/run-checks.js';
 import { loadProfile, renderProfile } from './project/profile.js';
 import { installProfileObserver } from './project/observe.js';
 import { skillCatalogue, skillsToSuggest } from './tools/skill.js';
 import { loadKnowledge } from './knowledge/store.js';
-import { beginCheckpoint, commitCheckpoint } from './checkpoint/index.js';
+import { beginCheckpoint, commitCheckpoint, recordedBefore } from './checkpoint/index.js';
 import { checkpointDir } from './tools/checkpoint.js';
 import { matchKnowledge, renderKnowledge } from './knowledge/match.js';
 import { preferencesForTask } from './learning/preferences.js';
@@ -137,6 +142,8 @@ import {
 import { applyAutonomyCeiling, ceilingLevel, requestedLevel } from './agents/ceiling.js';
 import { installWritePathsGuard } from './agents/paths-guard.js';
 import { parseLevel } from './autonomy/levels.js';
+import { PolicyError, createPolicyGuard, dayBudgetCap, dayBudgetRefusal, policyAllowsTool, runRefusal, withPolicyCeiling } from './policy/enforce.js';
+import { engineVersion } from './policy/managed.js';
 import { toolRequiresPermission } from './permissions.js';
 import { isMcpToolName, isReadOnlyMcpTool, parseMcpToolName } from './mcp/policy.js';
 import { activeJob, isLongEstimate, pendingJob, propose, proposalResult, subAgentMaxMs } from './longjob/index.js';
@@ -951,6 +958,9 @@ export function resolveToolSet(opts: {
     const off = new Set(disabled);
     defs = defs.filter(d => !off.has(d.name));
   }
+  // The organisation's deniedTools (ADR 0035), patterns included: a tool it has
+  // forbidden is not offered at all. The `managed-policy` guard is the second line.
+  defs = defs.filter(d => policyAllowsTool(d.name));
 
   /*
     The agent's effective set: its own list intersected with every delegator's.
@@ -982,6 +992,7 @@ export function mcpToolAllowed(name: string, opts: {
 }): boolean {
   if (opts.planMode && !isReadOnlyMcpTool(name)) return false;
   if (opts.settings?.disabledTools?.some(entry => entryMatches(entry, name))) return false;
+  if (!policyAllowsTool(name)) return false;
   return scopeAllows(opts.scope, name);
 }
 
@@ -1145,6 +1156,10 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
     return next();
   });
 
+  // The organisation's managed policy (ADR 0035): first, so a person is never
+  // asked to approve a call their organisation has forbidden. Deny-only.
+  pipeline.onGuard('managed-policy', createPolicyGuard());
+
   /*
     The effective set, at dispatch. The schemas offered are filtered by the
     same scope, so this is the second line: it is what makes "not allowed"
@@ -1253,6 +1268,9 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
         } catch { /* diff is best-effort */ }
       }
       allowed = await opts.onPermissionRequest(ctx.name, detail.slice(0, mcp || outside ? 300 : 100), fileDiff);
+      // A person answered: the one approval fact the change packet can state (ADR 0034).
+      currentRunContext()?.sessionLog?.record('tool/decision', { callId: ctx.callId, name: ctx.name, decision: allowed ? 'approved' : 'denied', by: 'person' });
+      ctx.state.set('decision-recorded', true);
       if (allowed && outside) ctx.state.set(SHELL_CONFINEMENT_SHOWN, true);
     } else if (mcp && isReadOnlyMcpTool(ctx.name)) {
       // The terminal asks only before tools that change things, and the person
@@ -1313,6 +1331,10 @@ function buildToolHandlers(opts: ToolHandlerOpts & { toolProfile?: AgentToolProf
         : body);
       const result = outcome.outcome.result;
       harness?.observe({ name, args, denied: outcome.denied || Boolean(mocked?.denied), mocked: Boolean(mocked) });
+      // A guard refused the call (a person's refusal was recorded where they gave it).
+      if (outcome.denied && !ctx.state.get('decision-recorded')) {
+        currentRunContext()?.sessionLog?.record('tool/decision', { callId, name, decision: 'denied', by: 'policy', ...(outcome.deniedBy ? { stage: outcome.deniedBy } : {}), ...(outcome.denialReason ? { reason: outcome.denialReason.slice(0, 300) } : {}) });
+      }
 
       if (!opts.silent) showToolResult(name, result, opts.verbose);
       opts.onToolDone?.(name, result, callId);
@@ -1592,6 +1614,11 @@ export function budgetImages(
  * `process.cwd()`, which is what the CLI has always meant by "here".
  */
 export async function runAgent(rawOpts: AgentOptions): Promise<string> {
+  // The organisation's run gate (ADR 0035): an unreadable policy file, or an
+  // engine older than the policy requires, means no run at all — said in the
+  // policy's own words rather than as a mystery failure further in.
+  const policyRefusal = runRefusal(engineVersion());
+  if (policyRefusal) throw new PolicyError(policyRefusal, 'run-gate');
   // The user's message is scanned for secrets, and every callback that leaves
   // this run is wrapped by the vault redactor. See vault/agent-hooks.
   const guarded = await guardAgentRun(rawOpts);
@@ -1599,7 +1626,7 @@ export async function runAgent(rawOpts: AgentOptions): Promise<string> {
   // the engine's switches (plan mode, autoApprove, the asker) before anything
   // runs — agents/ceiling. Unbounded runs come back unchanged.
   const parentRun = currentRunContext();
-  const ceiling = guarded.agentBounds?.autonomy;
+  const ceiling = withPolicyCeiling(guarded.agentBounds?.autonomy);
   const opts = applyAutonomyCeiling(guarded, {
     ceiling,
     ...(parentRun?.autonomy ? { parent: parentRun.autonomy } : {}),
@@ -1671,6 +1698,8 @@ export async function runAgent(rawOpts: AgentOptions): Promise<string> {
       ...(harness ? { evalHarness: harness } : {}),
       // Starts tainted when the delegating run already is; see RunContext.taint.
       taint: { tainted: Boolean(parentRun?.taint?.tainted), ...(parentRun?.taint ? { parent: parentRun.taint } : {}) },
+      // This run's own log, for the two record events the change packet reads (ADR 0034).
+      ...(opts.session ? { sessionLog: sessionLogHandle(opts.session) } : {}),
       // What the person asked for — the Sentinel's only authority. A delegated
       // run inherits its root's rather than trusting the brief it was given.
       userRequests: parentRun?.userRequests ?? userRequestsOf(opts.session?.events, opts.conversationHistory, opts.task),
@@ -2265,6 +2294,16 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // Deterministic, so before the reviewer: a call it refuses costs no review,
   // and a person's yes here (HUMAN_APPROVED) is not asked again there.
   shellConfinement.install(pipeline);
+  // Supply chain and change safety (ADR 0033): deterministic like the line above, so before the reviewer.
+  // A package the registry has never heard of, a secret about to be committed, a test deleted unattended.
+  createSupplyChain({
+    agentId, cwd: () => runCwd, settings, ask: askPerson, unattended: runLevel === 'L4' || Boolean(opts.headless),
+    approvedKey: HUMAN_APPROVED, sessionId: opts.sessionId, record: runFindingSink(),
+  }).install(pipeline);
+  installChangeSafetyGuards(pipeline, {
+    agentId, cwd: () => runCwd, enabled: () => settings?.completionGate?.changeSafety !== false,
+    unattended: runLevel === 'L4' || Boolean(opts.headless), record: runFindingSink(), sessionId: opts.sessionId,
+  });
   installSentinel(pipeline, {
     agentId,
     active: () => sentinelPossible && sentinelActive({
@@ -2939,10 +2978,20 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   resetEditNotes();
   let editNoteFlushed = false;
   resetChecks();
+  resetChangeSafety();
   // The user's own words are the standard the work is held to. Taken from the
   // task rather than from anything the model writes: a model that authors its
   // own acceptance criteria authors ones it has met.
   setBrief(opts.task ?? '');
+
+  const managedDayCap = dayBudgetCap();
+  let daySpend = 0;
+  const refreshDaySpend = (): void => {
+    void import('./audit/usage.js').then(u => u.todaySpend(settings)).then(v => { daySpend = v; }, () => { /* keep the last figure */ });
+  };
+  if (managedDayCap !== undefined) {
+    try { daySpend = await (await import('./audit/usage.js')).todaySpend(settings); } catch { /* the session cap still applies */ }
+  }
 
   /**
    * Whether cumulative spend has passed a configured ceiling.
@@ -2953,6 +3002,13 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
    * tracker, which now includes the in-flight turn.
    */
   const checkSafetyLimits = (): string | undefined => {
+    // The organisation's daily cap (ADR 0035): today's estimated spend across
+    // every session, refreshed in the background at most every 20 s.
+    if (managedDayCap !== undefined) {
+      refreshDaySpend();
+      const dayRefusal = dayBudgetRefusal(daySpend);
+      if (dayRefusal) return dayRefusal;
+    }
     // The agent's own budget first: it is the tighter, per-run bound.
     if (budget?.maxUsd && budget.maxUsd > 0 && tokenTracker) {
       const spent = tokenTracker.estimateCost(model, settings) - budgetCostAtStart;
@@ -3097,6 +3153,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   let checksNudges = 0;
   /** Times this turn has been sent back to commit a finished story in an app (apps/app-git.ts). */
   let commitNudges = 0;
+  /** Times this turn has been sent back over secrets, unsafe code or weakened tests in its own changes (security/change-safety.ts). */
+  let safetyNudges = 0;
 
   async function runLoop(): Promise<void> {
     throwIfLoopAborted();
@@ -3122,6 +3180,9 @@ const MAX_VERIFICATION_NUDGES = 3;
 
 /** How many times a turn may be sent back to commit its work in an app: the message names the exact call, so two is plenty. */
 const MAX_COMMIT_NUDGES = 2;
+
+/** How many times a turn may be sent back over its own diff: each nudge names file:line and the fix, and a finding is reported once. */
+const MAX_SAFETY_NUDGES = 2;
 
 /**
  * How many times a turn may be sent back over its own project checks.
@@ -3433,6 +3494,26 @@ const GOAL_REMINDER_EVERY = 6;
               if (!silent) {
                 showError(`Verification gate: the artifact is not confirmed working `
                   + `(nudge ${verificationNudges}/${MAX_VERIFICATION_NUDGES}).`);
+                startSpinner('Thinking…');
+              }
+              continue;
+            }
+          }
+
+          // What the turn changed is itself checked (ADR 0033): secrets, high-severity code-rule
+          // findings and weakened tests, even where the project defines no checks. Findings past the
+          // nudge budget are still recorded (`safety/finding`) for the change-evidence report.
+          if (completionGateEnabled && settings?.completionGate?.changeSafety !== false) {
+            const safety = await changeSafetyGate({
+              root: projectRoot(), written: writtenFiles(), testFailedEarlier: testCheckFailedThisTurn(),
+              before: recordedBefore, nudge: safetyNudges < MAX_SAFETY_NUDGES, record: runFindingSink(),
+            });
+            if (!safety.ok && safety.message) {
+              safetyNudges++;
+              transcript.recordAssistant(text, [], stepUsage, stepReasoning);
+              transcript.recordUserMessage(safety.message, { kind: 'plugin', plugin: 'change-safety' });
+              if (!silent) {
+                showError(`Change-safety gate: secrets, unsafe code or weakened tests in this turn's changes (nudge ${safetyNudges}/${MAX_SAFETY_NUDGES}).`);
                 startSpinner('Thinking…');
               }
               continue;

@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { currentCwd } from '../run-context.js';
+import { extensionDecision } from '../policy/enforce.js';
 import { sinkRedact } from '../vault/sink.js';
 import { NAME_RE, PACK_RE, describeCall, validateArgs, validateDefinition, type CustomToolDef } from './format.js';
 import { runCustomTool, runProbe } from './runner.js';
@@ -112,6 +113,9 @@ export async function executeToolManage(input: ToolManageInput, ctx: ToolManageC
       if (!def || typeof def !== 'object') return 'A definition is required: {name, description, input_schema, run|http, effect, …}.';
       const name = String(def.name ?? '');
       if (!NAME_RE.test(name)) return 'Not written: name must be lower-case letters, digits and _ (starting with a letter).';
+      // The organisation's policy (ADR 0035): creating or changing a tool is refused where it forbids them.
+      const allowed = extensionDecision('customTools', name);
+      if (!allowed.ok) return `Not written: ${allowed.message}`;
       const existing = find(all, name);
       if (action === 'create' && existing) return `Not written: "${name}" already exists (${existing.file}). Use action "update" to change it.`;
       if (action === 'update' && (!existing || existing.scope !== 'user')) {

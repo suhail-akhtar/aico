@@ -27,6 +27,8 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { currentCwd } from '../run-context.js';
+import { changeSafetyEnabled, describeDiffSecrets, recordRefusedCommit, secretsInDiff } from '../security/change-safety.js';
+import { runFindingSink } from '../security/finding.js';
 
 const run = promisify(execFile);
 
@@ -233,6 +235,16 @@ async function commit(input: GitInput): Promise<string> {
     await git(['reset', '-q', '--', ...stagedSecrets]);
     return `Refusing to commit what looks like credentials: ${stagedSecrets.join(', ')} (staged by the paths you gave; `
       + 'they have been unstaged again). Add them to .gitignore, or commit them yourself if they are genuinely safe.';
+  }
+
+  // And on what the commit would add (ADR 0033): a secret in history stays there.
+  if (changeSafetyEnabled()) {
+    const added = await secretsInDiff(currentCwd(), 'staged');
+    if (added.length > 0) {
+      await git(['reset', '-q', '--', ...new Set(added.map(a => a.file))]);
+      recordRefusedCommit(added, runFindingSink());
+      return `Refusing to commit: ${describeDiffSecrets(added)} The files with a secret have been unstaged again.`;
+    }
   }
 
   const result = await git(['commit', '-m', message]);

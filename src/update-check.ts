@@ -29,6 +29,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { aicoHome } from './home.js';
+import { telemetryOff } from './policy/enforce.js';
 
 /** How long a cached answer is trusted before another check is worth making. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -133,6 +134,9 @@ export async function pendingUpdate(current: string): Promise<string | undefined
  * so an offline machine tries once a day rather than on every single command.
  */
 export async function refreshUpdateCache(repository: unknown): Promise<void> {
+  // The one outbound call AICO makes that is not the person's task. An
+  // organisation that has said "telemetry off" (ADR 0035) gets no call at all.
+  if (telemetryOff()) return;
   const cached = await readCache();
   if (cached && Date.now() - cached.checkedAt < CACHE_TTL_MS) return;
 

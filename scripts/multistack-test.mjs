@@ -333,11 +333,14 @@ await block('Audit: Composer, OSV for Maven/Gradle, and honesty when the scanner
   const c2 = await T.auditOne('composer', dir);
   process.env.PATH = savedPath;
   assert(c2.status === 'missing' && /Composer/.test(c2.message), 'Composer missing is a note with the install link, not a pass');
-  // The security check says so aloud about languages it has no rules for.
+  // The security check says so aloud about languages it has no rules for (Kotlin and Ruby; Java, PHP and C# got rules in ADR 0033).
   const proj = tmp('sec');
-  write(proj, 'src/App.java', 'public class App { }');
-  const sec = await T.securityCheck(proj, ['src/App.java'], { external: false });
-  assert(sec.passed && /no code rules for those languages/.test(sec.output), 'a clean Java pass is labelled as having no code rules');
+  write(proj, 'src/App.kt', 'class App');
+  const sec = await T.securityCheck(proj, ['src/App.kt'], { external: false });
+  assert(sec.passed && /no code rules for those languages/.test(sec.output), 'a clean Kotlin pass is labelled as having no code rules');
+  write(proj, 'src/App.java', 'class App { void f(java.sql.Statement st, String id) throws Exception { st.executeQuery("SELECT * FROM t WHERE id=" + id); } }');
+  const secJava = await T.securityCheck(proj, ['src/App.java'], { external: false });
+  assert(!secJava.passed && /sql-interpolated/.test(secJava.output) && !/no code rules for those languages/.test(secJava.output), 'Java has code rules now: string-built SQL fails the security check, and no "no code rules" label');
 });
 
 // ──────────────────────────────────────────────────────────────

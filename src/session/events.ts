@@ -447,6 +447,79 @@ export interface SessionEventMap {
     tokensBefore: number;
     tokensAfter: number;
   };
+
+  /**
+   * RECORD. One project check ran (ADR 0034).
+   *
+   * The tool result a model reads is prose; a reviewer's report needs the exit
+   * code and the counts as data. Appended by `RunChecks` for every check it
+   * actually ran (a check it skipped after a failure has no event, which is
+   * what lets the change packet say "not run" and mean it). `outcome: 'flaky'`
+   * means the check failed, its failing tests were re-run once and passed:
+   * the check is *not* green and the event names the tests.
+   */
+  'check/run': {
+    name: string;
+    command: string;
+    /** Sub-project directory, relative to the run's root, when not the root. */
+    cwd?: string;
+    outcome: 'passed' | 'failed' | 'flaky';
+    /** The process exit code; null for the in-process security check. */
+    exitCode: number | null;
+    ms: number;
+    builtin?: 'security';
+    /** What the runner reported, when its output could be read (`test-results.ts`). */
+    tests?: { runner: string; passed: number; failed: number; skipped: number; unit?: 'tests' | 'packages'; failures: string[] };
+    /** The one re-run of the failing tests: what was re-run and what happened. */
+    retry?: { basis: 'tests' | 'whole-check'; tests: string[]; passed: boolean; flaky?: string[] };
+    /** For `security`: the built-in scan's counts. */
+    findings?: { secrets: number; high: number; medium: number; advisories: number };
+  };
+
+  /**
+   * RECORD. A tool call was allowed or refused, and by whom (ADR 0034).
+   *
+   * `by: 'person'` is an answer to a permission dialog; `by: 'policy'` is a
+   * guard denying (hook, plan mode, bash safety, scope, sandbox, shell
+   * confinement…) with the stage's own reason. Records the decision only — the
+   * call's result is still the `tool/result`. Calls auto-approved by a
+   * setting have no event: nobody decided.
+   */
+  'tool/decision': {
+    callId: string;
+    name: string;
+    decision: 'approved' | 'denied';
+    by: 'person' | 'policy';
+    reason?: string;
+    /** The guard that refused (`managed-policy`, `permission`, `sentinel`, …); read by the audit export (ADR 0035). */
+    stage?: string;
+  };
+
+  /**
+   * RECORD. A supply-chain, secret, SAST or test-tamper control found something (ADR 0033).
+   *
+   * The nudge or refusal a model reads is prose; the change-evidence report
+   * (ADR 0034) needs what was checked and what was found as data. One event per
+   * finding, appended by the guards and gates in `security/change-safety.ts`
+   * and `tools/supply-chain-guard.ts`. Old logs have none and render "no
+   * record". `detail` never holds a secret value — a pattern name and a length
+   * at most.
+   */
+  'safety/finding': {
+    turn: number;
+    control: 'supply-chain' | 'secret' | 'sast' | 'test-tamper';
+    /** `package-missing`, `package-new`, `secret`, a SAST rule id, `test-file-deleted`, `skip-marker-added`… */
+    rule: string;
+    severity: 'high' | 'medium' | 'info';
+    outcome: 'denied' | 'approved-by-person' | 'refused-commit' | 'nudged' | 'reported' | 'advisory';
+    /** Project-relative, forward slashes. */
+    file?: string;
+    line?: number;
+    /** `npm:left-padz`, `tests/a.test.ts`. */
+    subject?: string;
+    /** At most 300 characters. */
+    detail: string;
+  };
 }
 
 /** Every event type name. */

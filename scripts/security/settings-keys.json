@@ -12,7 +12,8 @@
     "miniApps": "can bind the Mini Apps host to 0.0.0.0",
     "vault": "can stop pasted secrets being vaulted",
     "sentinel": "the independent reviewer of high-risk calls",
-    "completionGate": "enabled:false switches off the checks gate, including the security check",
+    "completionGate": "enabled:false switches off the checks gate, including the security check; changeSafety:false the diff review",
+    "supplyChain": "packageCheck:false switches off the check that installed packages exist and are not brand-new or lookalikes",
     "hooks": "runs commands",
     "env": "sets the process environment",
     "mcpServers": "spawns processes / connects out"

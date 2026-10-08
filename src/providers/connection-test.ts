@@ -18,6 +18,7 @@
  */
 
 import { MODALITIES, type Modality } from '../model-capabilities.js';
+import { providerDecision } from '../policy/enforce.js';
 
 export interface ProviderTestResult {
   ok: boolean;
@@ -127,6 +128,9 @@ export async function testProvider(
   apiKey: string,
   baseUrl?: string,
 ): Promise<ProviderTestResult> {
+  // The organisation's policy (ADR 0035): do not send a key to a provider it blocks.
+  const allowed = providerDecision(providerId);
+  if (!allowed.ok) return { ok: false, error: allowed.message };
   const probe = PROBES[providerId];
   if (!probe && !baseUrl) {
     return { ok: false, error: `Unknown provider "${providerId}" and no base URL given` };

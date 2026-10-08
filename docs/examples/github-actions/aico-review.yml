@@ -1,0 +1,51 @@
+# Example: a read-only AICO review on every pull request (ADR 0034, GUIDE.md "AICO in CI").
+#
+# Copy to .github/workflows/aico-review.yml in YOUR repository. It is not active
+# in the AICO repository itself.
+#
+# - Trigger is pull_request, not pull_request_target: pull requests from forks
+#   get no secrets, so the action skips them with a notice instead of handing a
+#   fork's code a model key.
+# - The model sees the diff and can read files; it cannot run commands, write,
+#   or reach the network, and the process it runs in has no GitHub token.
+# - One comment per pull request, updated in place on later pushes.
+# - Replace vX.Y.Z with a release tag that contains this action. AICO is
+#   installed at that same tag (or set `version:` to pin it separately).
+
+name: AICO review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: aico-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0              # the review compares against the base branch
+          persist-credentials: false  # the action refuses a checkout that leaves a token in .git/config
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: suhail-akhtar/aico/.github/actions/aico@vX.Y.Z
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # or OPENAI_API_KEY, DEEPSEEK_API_KEY, ...
+        with:
+          mode: review
+          github-token: ${{ secrets.GITHUB_TOKEN }}   # used only by the step that posts the comment
+          budget-usd: '2'
+          timeout-minutes: '15'

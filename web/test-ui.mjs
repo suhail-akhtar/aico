@@ -26,7 +26,7 @@ import { protectCurrency } from './dist-test/currency.mjs';
 import * as rich from './dist-test/rich-specs.mjs';
 import {
   PANES, SECRET_ROOTS, allFields, assertNoSecrets, changedPaths,
-  patchFor, readPath, searchFields,
+  lockFor, patchFor, readPath, searchFields,
 } from './dist-test/settings-schema.mjs';
 import {
   initialSessionId, rememberSession, forgetSession, isValidSessionId, freshSessionId,
@@ -667,6 +667,28 @@ test('reading a path that does not exist is undefined, not a crash', () => {
   assert.equal(readPath({}, 'a.b.c'), undefined);
   assert.equal(readPath({ a: 1 }, 'a.b'), undefined);
   assert.equal(readPath({ a: { b: 2 } }, 'a.b'), 2);
+});
+
+test('a managed lock applies to a field by its path or an ancestor, and to nothing else', () => {
+  // ADR 0035: the screen disables what the engine's policy fixes. Pure, so the screen and this agree.
+  const locked = [
+    { path: 'autoApprove', kind: 'fixed', value: false, reason: 'r1' },
+    { path: 'sentinel', kind: 'restricted', reason: 'r2' },
+    { path: 'completionGate.enabled', kind: 'fixed', value: true, reason: 'r3' },
+  ];
+  assert.equal(lockFor('autoApprove', locked).reason, 'r1');
+  assert.equal(lockFor('sentinel.mode', locked).reason, 'r2', 'a lock on a group covers its fields');
+  assert.equal(lockFor('completionGate.security', locked), undefined, 'a sibling of a locked field is not locked');
+  assert.equal(lockFor('autoApproveX', locked), undefined, 'a longer name is not a descendant');
+  assert.equal(lockFor('theme', undefined), undefined, 'no policy, no lock');
+});
+
+test('every setting the engine can lock is one the screen shows (or a custom pane handles)', () => {
+  // The paths policy/enforce.ts lockedSettings() can return. A lock on a path no control is bound to would be silent.
+  const shown = new Set(allFields().map(f => f.path));
+  for (const path of ['autoApprove', 'completionGate.enabled', 'sentinel.mode', 'sentinel.onEscalate', 'safetyLimits.maxCostPerSession', 'disabledTools']) {
+    assert.ok(shown.has(path), `${path} has a control`);
+  }
 });
 
 test('search matches the label, the explanation and the key itself', () => {

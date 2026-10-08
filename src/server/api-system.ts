@@ -200,6 +200,12 @@ export async function handleSystemRoute(
     const { handleProfileRoute } = await import('../profile/service.js');
     return handleProfileRoute(route, method, body, human);
   }
+  // The managed policy and the audit export (policy/routes, ADR 0035): the policy is a read;
+  // the audit trail needs a person.
+  if (route === 'policy' || route.startsWith('audit/')) {
+    const { handlePolicyRoute } = await import('../policy/routes.js');
+    return handlePolicyRoute(route, method, body, human);
+  }
   // Recall (ADR 0018): search past sessions, memories, knowledge, About you; rebuild the index.
   if (route.startsWith('recall/')) {
     const { handleRecallRoute } = await import('../recall/index.js');
@@ -1425,6 +1431,9 @@ ${content || 'Describe the procedure here.'}
       // never written over the real one (and so is not a change at all).
       const patch = restoreRedacted(sent, await readUserSettingsFile()) as Record<string, unknown>;
       {
+        // A value the organisation's managed policy fixes is refused by name (ADR 0035).
+        const locked = (await import('../policy/routes.js')).lockedWriteRefusal(patch);
+        if (locked) return { status: 403, body: { ok: false, code: 'policy-locked', error: locked } };
         const weakens = safetyWeakening(settings, patch);
         if (weakens) { const h = await human(); if (!h.ok) return needsHuman(`${weakens} needs a person in the AICO window; the API token alone cannot do it.`); }
       }
@@ -1448,6 +1457,8 @@ ${content || 'Describe the procedure here.'}
         const root = keys[0]!;
         const next = withLeaf((current as Record<string, unknown>)[root], keys.slice(1), value ?? null);
         const patch = { [root]: next } as Record<string, unknown>;
+        const locked = (await import('../policy/routes.js')).lockedWriteRefusal(patch);
+        if (locked) return { status: 403, body: { ok: false, code: 'policy-locked', error: locked } };
         const weakens = safetyWeakening(current, patch);
         if (weakens) { const h = await human(); if (!h.ok) return needsHuman(`${weakens} needs a person in the AICO window; the API token alone cannot do it.`); }
       }
@@ -1941,6 +1952,17 @@ function widening(cur: Record<string, unknown>, patch: Record<string, unknown>):
 
   if (has('vault') && obj(cur.vault).scanUserMessages !== false && obj(patch.vault).scanUserMessages === false) {
     return 'Turning off secret scanning of your messages';
+  }
+
+  // Supply-chain and change-safety checks (ADR 0033): off, or looser, needs a person.
+  if (has('supplyChain')) {
+    const was = obj(cur.supplyChain);
+    const next = obj(patch.supplyChain);
+    if (next.packageCheck === false && was.packageCheck !== false) return 'Turning off the check on packages the agent installs';
+    if (typeof next.minAgeDays === 'number' && next.minAgeDays < (typeof was.minAgeDays === 'number' ? was.minAgeDays : 30)) return 'Lowering how old a package must be to install without asking';
+  }
+  if (has('completionGate') && obj(cur.completionGate).changeSafety !== false && obj(patch.completionGate).changeSafety === false) {
+    return 'Turning off the review of changes the agent makes for secrets and weakened tests';
   }
   return undefined;
 }

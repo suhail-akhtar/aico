@@ -25,6 +25,8 @@ import { registerSkillCommands } from './skills/eval/cli.js';
 import { registerVaultCommands } from './vault/cli.js';
 import { registerToolCommands } from './custom-tools/cli.js';
 import { registerAgentCommands } from './evals/cli.js';
+import { registerPolicyCommands } from './policy/cli.js';
+import { registerCiCommands } from './ci/cli.js';
 import { initializeFeatures, shutdownFeatures } from './bootstrap.js';
 import { mcpRegistry } from './mcp/index.js';
 import { cronScheduler } from './cron/scheduler.js';
@@ -388,6 +390,10 @@ registerSkillCommands(program, { pickModel: (m, settings) => resolveModel(m || s
 registerVaultCommands(program);
 registerToolCommands(program);
 registerAgentCommands(program, { pickModel: (m, settings) => resolveModel(m || settings?.model || defaultModel(), settings) });
+// audit export, usage, policy show|check: governance for an organisation (ADR 0035).
+registerPolicyCommands(program);
+// evidence / review / fix-ci: the commands a pipeline calls (ADR 0034).
+registerCiCommands(program, { pickModel: (m, settings) => resolveModel(m || settings?.model || defaultModel(), settings) });
 
 // ── provider subcommand ───────────────────────────────────────────────
 const providerCmd = program
@@ -455,6 +461,9 @@ async function runSingleTask(
       settings,
       effort: opts.effort,
       silent: !opts.verbose,
+      // Without a tracker the session cost ceiling (safetyLimits) has nothing to
+      // measure and never trips — the headless path ran with no spend limit.
+      tokenTracker: createTokenTracker(),
       ...(opened ? { session: opened.session } : {}),
     });
     if (result) process.stdout.write(result + '\n');

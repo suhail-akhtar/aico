@@ -52,6 +52,7 @@ import {
   streamApps,
   type MiniAppsView,
   type MiniAppProcess,
+  type ManagedPolicyView,
 } from './api';
 
 /** The one Apps stream, shared by every pane that asks for it. */
@@ -227,6 +228,8 @@ interface AppState {
   providerTypes: ProviderTypeInfo[];
   activeProvider: string | null;
   settings: Record<string, unknown>;
+  /** The organisation's managed policy, when there is one (ADR 0035). Null until read, and on an engine that predates it. */
+  policy: ManagedPolicyView | null;
   system: SystemSnapshot | null;
   /**
    * The Apps screen's state, kept live by a topic stream rather than a poll:
@@ -530,6 +533,7 @@ export const useStore = create<AppState>((set, get) => ({
   providerTypes: [],
   activeProvider: null,
   settings: {},
+  policy: null,
   system: null,
   apps: null,
   appsLive: 'off',
@@ -1269,6 +1273,8 @@ export const useStore = create<AppState>((set, get) => ({
   refreshSettings: async () => {
     try { set({ settings: await api.settings() }); }
     catch (err) { set({ error: (err as Error).message }); }
+    // Read beside the settings it constrains. A failure means "not managed" (an older engine), not an error to show.
+    try { set({ policy: await api.policy() }); } catch { /* no policy route: not managed */ }
   },
 
   setGoal: async (text, status) => {

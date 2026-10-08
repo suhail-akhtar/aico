@@ -12,6 +12,9 @@ import { tightenOnlySentinel, type SentinelSettings } from './sentinel/policy.js
 import type { BriefSettings } from './brief/core.js';
 import { dropProjectModelChoices, type ModelsSettings } from './models/roles.js';
 import { filterProjectLayer } from './settings-project-policy.js';
+import { managedPolicy } from './policy/managed.js';
+import { applyManagedPolicy } from './policy/enforce.js';
+import { recordPolicyLoad, recordSettingsChange } from './audit/log.js';
 
 export interface AicoSettings {
   model?: string;
@@ -494,6 +497,14 @@ export interface AicoSettings {
      * checks. Default: true.
      */
     security?: boolean;
+    /**
+     * The turn-end change-safety review (security/change-safety.ts, ADR 0033):
+     * secrets, high-severity code-rule findings and weakened tests in what a
+     * turn changed nudge the model before it may finish, and a commit that
+     * adds a secret is refused. Runs in projects with no checks too.
+     * Default: true. A project file can only turn it on.
+     */
+    changeSafety?: boolean;
   };
   /**
    * Cost circuit breaker. Evaluated at the top of every step, so a breach stops
@@ -570,6 +581,20 @@ export interface AicoSettings {
    * Example: { "dependencyAudit": { "allowLicenses": ["MIT", "Apache-2.0", "LGPL-3.0-only"] } }
    */
   dependencyAudit?: { allowLicenses?: string[] };
+  /**
+   * Supply-chain check on install commands (ADR 0033): a package a shell
+   * command asks npm/pip/cargo/go/dotnet/composer/gem to install must exist on
+   * the public registry (a name that does not is refused); a brand-new,
+   * almost-unused or lookalike one, or a git/URL source, needs a person.
+   * `packageCheck` defaults to true; `minAgeDays` (default 30) is how old a
+   * package must be before it is installed without asking. A private registry
+   * configured for the package (.npmrc, PIP_INDEX_URL, GOPROXY…) steps the
+   * check aside. Your own settings only can loosen it: a project file may
+   * set `packageCheck: true` and nothing else.
+   *
+   * Example: { "supplyChain": { "packageCheck": true, "minAgeDays": 14 } }
+   */
+  supplyChain?: { packageCheck?: boolean; minAgeDays?: number };
   /**
    * The code graph (ADR 0028). `rules` are layering rules: files matching
    * `from` must not depend on files matching `to` (globs over project-relative
@@ -756,7 +781,7 @@ const MERGED_SECTIONS = [
   'modelPricing',
   'agentModels',
   'completionGate', 'safetyLimits', 'repeatGuard', 'sandbox', 'sessionTitles', 'imageGeneration',
-  'longJobs', 'sentinel', 'learning',
+  'longJobs', 'sentinel', 'learning', 'supplyChain',
 ] as const satisfies ReadonlyArray<keyof AicoSettings>;
 
 /**
@@ -945,6 +970,16 @@ export async function loadSettings(): Promise<AicoSettings> {
   merged = deepMerge(merged, project);
   merged = deepMerge(merged, local);
 
+  // The organisation's managed policy (ADR 0035) sits above user and project
+  // settings. It runs here, once, at the one place layers are merged, so no
+  // reader downstream can see an unclamped value by forgetting to ask. It only
+  // tightens; a problem in the policy file is said out loud, never skipped.
+  const managed = managedPolicy();
+  recordPolicyLoad(managed);
+  for (const problem of managed.problems) warnOnce(`managed:${managed.hash}:${problem.message}`, `  ⚠ Managed policy: ${problem.message}`);
+  const clamped = applyManagedPolicy(merged, managed);
+  if (clamped.length) warnOnce(`managed-clamp:${managed.hash}:${clamped.join('|')}`, `  ⚠ Your organisation's AICO policy applies: ${clamped.join('; ')}.`);
+
   // Validate and warn about bad settings, then coerce unfixable numeric values
   // to safe defaults so they can't silently disable timeouts downstream.
   const warnings = validateSettings(merged);
@@ -989,6 +1024,7 @@ export async function saveUserSetting(key: string, value: unknown): Promise<void
   }
   existing[key] = value;
   await writeFile(filePath, JSON.stringify(existing, null, 2));
+  recordSettingsChange(key, value);
 }
 
 /** Settings roots that hold credentials; never written by path. */
@@ -1040,6 +1076,7 @@ export async function patchUserSettingPath(dotted: string, value: unknown): Prom
     cursor[leaf] = value;
   }
   await writeFile(filePath, JSON.stringify(root, null, 2));
+  recordSettingsChange(dotted, value);
 }
 
 /**
@@ -1075,6 +1112,7 @@ export async function patchUserProviderTuning(
   else providers[type] = family;
   existing.providers = providers;
   await writeFile(filePath, JSON.stringify(existing, null, 2));
+  recordSettingsChange(`providers.${type}`, patch);
   return family;
 }
 

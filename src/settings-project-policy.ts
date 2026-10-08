@@ -85,6 +85,8 @@ export const PROJECT_POLICY = {
   agentModels: 'allow',
   disabledTools: 'allow',
   dependencyAudit: 'allow',
+  // Whether install commands are checked against the public registry (ADR 0033): a project may only switch it on.
+  supplyChain: 'tighten',
   // Layering rules for the code graph are checks: a project may add rules, never remove the person's.
   codeGraph: 'tighten',
   // Which program "Open in editor" launches: a command line, so the person's alone.
@@ -189,18 +191,34 @@ export function tightenProjectLayer(layer: Layer, user: Layer, root: string): st
     if (Object.keys(kept).length) layer.workspace = kept; else delete layer.workspace;
   }
 
-  // completionGate: a project may switch the gate or its security check on,
-  // never off. Both default to on, so `true` is the only value that tightens;
+  // completionGate: a project may switch the gate, its security check or the
+  // change-safety review on, never off. All default to on, so `true` is the only value that tightens;
   // any other value or field is dropped rather than merged over the person's.
   if ('completionGate' in layer) {
     const p = isObj(layer.completionGate) ? layer.completionGate : {};
     const kept: Layer = {};
     for (const [k, v] of Object.entries(p)) {
-      if ((k === 'enabled' || k === 'security') && v === true) kept[k] = v;
+      if ((k === 'enabled' || k === 'security' || k === 'changeSafety') && v === true) kept[k] = v;
       else dropped.push(`completionGate.${k}`);
     }
     if (!isObj(layer.completionGate)) dropped.push('completionGate');
     if (Object.keys(kept).length) layer.completionGate = kept; else delete layer.completionGate;
+  }
+
+  // supplyChain: a project may switch the package check on and ask for an older minimum
+  // age than the person's (default 30 days); never off, never younger (ADR 0033).
+  if ('supplyChain' in layer) {
+    const p = isObj(layer.supplyChain) ? layer.supplyChain : {};
+    const u = isObj(user.supplyChain) ? user.supplyChain : {};
+    const floor = typeof u.minAgeDays === 'number' ? u.minAgeDays : 30;
+    const kept: Layer = {};
+    for (const [k, v] of Object.entries(p)) {
+      if (k === 'packageCheck' && v === true) kept[k] = v;
+      else if (k === 'minAgeDays' && typeof v === 'number' && Number.isFinite(v) && v > floor) kept[k] = v;
+      else dropped.push(`supplyChain.${k}`);
+    }
+    if (!isObj(layer.supplyChain)) dropped.push('supplyChain');
+    if (Object.keys(kept).length) layer.supplyChain = kept; else delete layer.supplyChain;
   }
 
   // codeGraph: a project's layering rules are added to the person's, never in place of

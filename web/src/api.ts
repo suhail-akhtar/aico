@@ -943,6 +943,8 @@ export const api = {
     post<ProviderTestResult>('providers/test', draft),
 
   settings: () => request<Record<string, unknown>>('settings'),
+  /** Which settings the organisation's managed policy locks (ADR 0035). An older engine has no such route. */
+  policy: () => request<ManagedPolicyView>('policy'),
   // As the person: a write that widens what the agent may do needs proof of one (engine: api-system safetyWeakening).
   saveSettings: (patch: Record<string, unknown>) => postAsPerson<Record<string, unknown>>('settings', patch),
   /** One value by dotted path, in the user's own file only; `undefined` removes it. */
@@ -1059,6 +1061,19 @@ async function canvasWrite(path: string, body: unknown): Promise<CanvasWriteResu
     if (err instanceof ApiError && err.status === 409 && canvas?.canvas) return { ok: false, conflict: true, canvas: canvas.canvas };
     throw err;
   }
+}
+
+/** What `GET /api/policy` returns: the organisation's managed policy, never a secret (ADR 0035). */
+export interface ManagedPolicyView {
+  managed: boolean;
+  lockdown: boolean;
+  hash: string;
+  message?: string;
+  contact?: string;
+  sources: Array<{ origin: string; path: string; exists: boolean; weakness?: string; error?: string }>;
+  problems: Array<{ level: string; key?: string; message: string }>;
+  locked: Array<{ path: string; kind: 'fixed' | 'bounded' | 'restricted'; reason: string; value?: unknown }>;
+  rules: string[];
 }
 
 export interface ProviderTestResult {

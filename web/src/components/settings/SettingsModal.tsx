@@ -31,8 +31,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api';
 import { useStore } from '../../store';
 import {
-  PANES, changedPaths, patchFor, readPath, searchFields,
-  type Pane,
+  PANES, changedPaths, lockFor, patchFor, readPath, searchFields,
+  type LockedSetting, type Pane,
 } from '../../settings-schema';
 import { Icon } from '../Icon';
 import { Field } from './Field';
@@ -56,6 +56,7 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
 export function SettingsModal({ onClose, initialPane }: SettingsModalProps): React.ReactElement {
   const settings = useStore(s => s.settings);
   const refreshSettings = useStore(s => s.refreshSettings);
+  const policy = useStore(s => s.policy);
   const refreshProviders = useStore(s => s.refreshProviders);
 
   const [paneId, setPaneId] = useState(
@@ -225,6 +226,33 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
           </div>
         )}
 
+        {policy?.managed && (
+          <div
+            data-testid="managed-banner"
+            className={`shrink-0 border-b px-5 py-2 text-[12px] leading-relaxed ${policy.lockdown
+              ? 'border-aico-danger/30 bg-aico-danger/10 text-aico-danger'
+              : 'border-aico-border-subtle bg-aico-hover text-aico-secondary'}`}
+          >
+            <span className="inline-flex items-center gap-1 font-medium text-aico-primary">
+              <Icon name="lock" size={13} /> Managed by your organisation.
+            </span>{' '}
+            {policy.lockdown
+              ? 'The policy file could not be read, so AICO is locked down until IT fixes it. '
+              : 'Some settings are fixed or limited and cannot be changed here. '}
+            {policy.message}{' '}
+            {policy.contact && <>Contact: {policy.contact}.</>}
+            {(policy.rules.length > 0 || policy.problems.length > 0) && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-aico-muted">What is managed</summary>
+                <ul className="mt-1 list-disc pl-5">
+                  {policy.rules.map(rule => <li key={rule}>{rule}</li>)}
+                  {policy.problems.map(p => <li key={p.message} className={p.level === 'error' ? 'text-aico-danger' : ''}>{p.message}</li>)}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+
         <div className="flex min-h-0 flex-1">
           {!query && (
             <nav className="hidden w-48 shrink-0 overflow-y-auto border-r border-aico-border-subtle p-2 sm:block">
@@ -247,6 +275,7 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
                 query={query}
                 settings={settings}
                 changed={changed}
+                locked={policy?.locked}
                 onChange={write}
               />
             ) : (
@@ -310,6 +339,7 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
                               spec={field}
                               value={readPath(settings, field.path)}
                               changed={changed.has(field.path)}
+                              lock={lockFor(field.path, policy?.locked)}
                               onChange={value => void write(field.path, value)}
                             />
                           ))}
@@ -338,11 +368,12 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
 }
 
 function SearchResults(
-  { hits, query, settings, changed, onChange }: {
+  { hits, query, settings, changed, locked, onChange }: {
     hits: ReturnType<typeof searchFields>;
     query: string;
     settings: Record<string, unknown>;
     changed: Set<string>;
+    locked: ReadonlyArray<LockedSetting> | undefined;
     onChange: (path: string, value: unknown) => void;
   },
 ): React.ReactElement {
@@ -371,6 +402,7 @@ function SearchResults(
           value={readPath(settings, hit.field.path)}
           changed={changed.has(hit.field.path)}
           breadcrumb={`${hit.pane.label} · ${hit.group.title}`}
+          lock={lockFor(hit.field.path, locked)}
           onChange={value => onChange(hit.field.path, value)}
         />
       ))}

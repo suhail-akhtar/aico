@@ -264,6 +264,12 @@ export async function probeModelImageInput(opts: {
         ?? listInstances(opts.settings).find(i => i.type === opts.provider)
       : resolveInstance(opts.settings, { model: opts.model });
     if (!instance) throw new Error(opts.provider ? `No provider "${opts.provider}"` : 'No usable provider is configured');
+    // The organisation's policy (ADR 0035): a probe sends a request like any other.
+    const { assertModelAllowed } = await import('../policy/enforce.js');
+    assertModelAllowed({
+      model: opts.model, providerType: instance.type, instanceId: instance.id,
+      local: instance.type === 'ollama' ? !instance.baseUrl || /^https?:\/\/(?:localhost|127\.\d+\.\d+\.\d+|\[::1\])/i.test(instance.baseUrl) : false,
+    });
     api = providerFromInstance(instance, opts.model, opts.settings);
     providerId = instance.id;
   }

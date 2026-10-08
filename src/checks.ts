@@ -31,6 +31,7 @@
 import fs from 'fs';
 import path from 'path';
 import { runScoped } from './run-scoped.js';
+import { currentCwd } from './run-context.js';
 import { formatTestSummary, type TestSummary } from './test-results.js';
 import { detectStackChecks, hasStackManifest } from './checks-stacks.js';
 
@@ -114,6 +115,12 @@ export interface CheckResult {
   sourceMtimeMs: number;
   /** What the test runner reported, when its output could be read (see `test-results.ts`). */
   tests?: TestSummary;
+  /**
+   * Tests that failed and then passed on one re-run (ADR 0034). The check is
+   * recorded as not passed — a non-deterministic failure is not a green — and
+   * the gate says so rather than asking the model to "fix" a failure that is gone.
+   */
+  flaky?: string[];
 }
 
 /** Ordering weights. Lower runs first. */
@@ -224,9 +231,11 @@ interface ChecksState {
    * child wrote matters to the parent's browser gate though no check covers it.
    */
   written: Set<string>;
+  /** A `test` check failed at some point this turn, even if a later run passed (test-tamper, ADR 0033). */
+  testFailed: boolean;
 }
 
-const state = runScoped<ChecksState>(() => ({ touched: new Map(), results: new Map(), commands: 0, written: new Set() }));
+const state = runScoped<ChecksState>(() => ({ touched: new Map(), results: new Map(), commands: 0, written: new Set(), testFailed: false }));
 
 /** Note that a shell command ran. Called from the Bash and Terminal paths. */
 export function noteCommandRun(): void {
@@ -245,7 +254,9 @@ export function resetChecks(): void {
 
 /** Note that a source file changed. Called from the write path. */
 export function noteSourceChanged(file: string): void {
-  const abs = path.resolve(file);
+  // Against the run's directory, not the process's: a server's cwd is not the project, and a relative
+  // path the model gave was resolved by the write tool against the project (ADR 0033: the review reads these).
+  const abs = path.resolve(currentCwd(), file);
   state.get().written.add(abs);
   if (!isSourceFile(file)) return;
   try { state.get().touched.set(abs, fs.statSync(abs).mtimeMs); }
@@ -297,6 +308,12 @@ export function newestSourceChange(): number {
 /** Record what a check did. */
 export function recordCheck(result: CheckResult): void {
   state.get().results.set(result.name, result);
+  if (!result.passed && /test/i.test(`${result.name} ${result.command}`)) state.get().testFailed = true;
+}
+
+/** Whether a test check failed at any point this turn. A test edited after one did is judged harder (ADR 0033). */
+export function testCheckFailedThisTurn(): boolean {
+  return state.get().testFailed;
 }
 
 /** Everything recorded this turn. */
@@ -335,6 +352,11 @@ const ESCAPE = 'If the person running this has deliberately asked for something 
  * line that names an error is a failure's own (the learning extractor keys on it).
  */
 function failureDetail(r: CheckResult): string {
+  if (r.flaky) {
+    const names = r.flaky.length > 0 ? r.flaky.join(', ') : 'the check';
+    return `FLAKY: ${names} failed, then passed on a re-run. It is not a pass and re-running will not make it one: `
+      + 'fix the race if it is in code you changed, otherwise tell the person which test is flaky and suggest they quarantine it.';
+  }
   if (r.tests && r.tests.failures.length > 0) {
     const [counts, ...failures] = formatTestSummary(r.tests, { max: 3 }).split('\n');
     return [...failures, `(${counts})`].join('\n');

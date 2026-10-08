@@ -111,6 +111,15 @@ export async function recordBeforeWrite(file: string): Promise<void> {
 }
 
 /**
+ * What a file held before this turn first touched it: its text, `null` when the
+ * turn created it, or `undefined` when it was not touched (or nothing is
+ * recording). The test-tamper check compares against this (ADR 0033).
+ */
+export function recordedBefore(file: string): string | null | undefined {
+  return active?.files.find(entry => entry.file === file)?.before;
+}
+
+/**
  * Note what the agent left behind, so later outside edits are detectable.
  *
  * Called after a write succeeds. Without it, restore could not tell an

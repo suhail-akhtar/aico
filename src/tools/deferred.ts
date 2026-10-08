@@ -138,6 +138,12 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ['CodeGraph'],
   },
   {
+    // ADR 0034. Loaded outright by a request about a PR description or commit message (REQUEST_LOADS).
+    id: 'evidence',
+    summary: 'the change evidence report: checks run, files changed, approvals, cost, gaps — for a PR description or commit body',
+    tools: ['Evidence'],
+  },
+  {
     id: 'audit',
     summary: 'dependency vulnerabilities and licences',
     tools: ['DependencyAudit'],
@@ -201,6 +207,11 @@ const REQUEST_LOADS: Array<{ re: RegExp; groups: readonly string[] }> = [
     // rename/signature change: that is when a missed caller costs most.
     re: /\b(?:impact|blast radius|what (?:uses|calls|imports|depends on|breaks)|who (?:uses|calls|imports)|where (?:is|are) [\w.$#/-]+ (?:used|called|imported)|(?:every|all|each) (?:the )?(?:callers?|call[- ]?sites?|usages?|uses|importers?|dependents?)\b|callers? of|usages? of|depend(?:s|encies|ents)? (?:on|of)|dependency (?:graph|tree|map)|call (?:graph|path|chain)|code ?(?:graph|map)|how does [\w ./-]{1,60} (?:reach|get to|call)|requests? (?:path|flow)|reach(?:es|ing)? (?:the )?(?:database|db|data ?store|storage|repository)|architecture|module (?:structure|boundaries)|circular (?:imports?|dependenc)|import cycles?|dead (?:code|files?)|(?:change|changing) (?:the )?signature|add(?:ing)? (?:a )?(?:required )?(?:parameter|argument)|renam(?:e|ing))\b/i,
     groups: ['graph'],
+  },
+  {
+    // A PR description, a commit message or "what did you verify": the record beats the model's recollection (ADR 0034).
+    re: /\b(?:pull request|PR (?:description|body|summary)|pr (?:description|body)|commit (?:message|body)|change (?:packet|evidence|report)|evidence (?:report|packet)|what (?:did|have) you (?:verify|verified|check|run|test)|prove it works)\b/i,
+    groups: ['evidence'],
   },
   {
     // A question about earlier work: the same "cannot ask for what it cannot see" reason.

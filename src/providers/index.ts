@@ -32,6 +32,8 @@ import {
   PROVIDER_TYPES, resolveApiKey, resolveBaseUrl, resolveInstance,
 } from './instances.js';
 import type { ProviderInstance } from './instances.js';
+import { managedPolicy } from '../policy/managed.js';
+import { assertModelAllowed } from '../policy/enforce.js';
 import { isDirectVendor, isDeepSeekPlatformModel, isKimiModel, isOpenAIModel, isZAIModel, vendorForModel } from './model-vendor.js';
 export { isDeepSeekPlatformModel, isDirectVendor, vendorForModel } from './model-vendor.js';
 
@@ -150,11 +152,32 @@ export function detectProviderType(model: string, settings?: AicoSettings): stri
   return 'ollama';
 }
 
+const LOOPBACK_URL = /^https?:\/\/(?:localhost|127\.\d+\.\d+\.\d+|\[::1\])(?::\d+)?(?:\/|$)/i;
+
+/** Which provider family and endpoint this model resolves to, and whether that endpoint is this machine. */
+function policyRoute(model: string, settings?: AicoSettings): { model: string; providerType: string; instanceId?: string; local: boolean } {
+  if (settings?.providerInstances?.length) {
+    const instance = resolveInstance(settings, { model });
+    if (instance) {
+      const local = instance.type === 'ollama' ? !instance.baseUrl || LOOPBACK_URL.test(instance.baseUrl) : Boolean(instance.baseUrl && LOOPBACK_URL.test(instance.baseUrl));
+      return { model, providerType: instance.type, instanceId: instance.id, local };
+    }
+  }
+  const type = detectProviderType(model, settings) ?? '';
+  const base = (settings?.providers as Record<string, { baseUrl?: string } | undefined> | undefined)?.[type]?.baseUrl;
+  const local = type === 'ollama' ? !base || LOOPBACK_URL.test(base) : Boolean(base && LOOPBACK_URL.test(base));
+  return { model, providerType: type, local };
+}
+
 /**
  * Select and instantiate the appropriate provider for the given model.
  * Throws a descriptive error if no provider can be found.
  */
 export function selectProvider(model: string, settings?: AicoSettings): ProviderAPI {
+  // The organisation's policy (ADR 0035) is asked before any adapter is built,
+  // so a disallowed provider fails with the policy's own words and nothing is
+  // sent anywhere. Every model call in the engine comes through here.
+  if (managedPolicy().active) assertModelAllowed(policyRoute(model, settings));
   // Explicitly configured instances take precedence over model-name sniffing.
   // Only when someone has actually configured one, though: an installation
   // driven entirely by environment variables must keep behaving exactly as it

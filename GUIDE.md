@@ -7,10 +7,12 @@ The README says what this is. This says how to work with it.
 - [Planning something first](#planning-something-first)
 - [When it pushes back](#when-it-pushes-back)
 - [Running servers and long commands](#running-servers-and-long-commands)
+- [AICO in CI](#aico-in-ci)
 - [Keeping a shell](#keeping-a-shell)
 - [Steering a run without stopping it](#steering-a-run-without-stopping-it)
 - [Projects, sessions and groups](#projects-sessions-and-groups)
 - [Choosing a model](#choosing-a-model)
+- [For organisations: a managed policy and an audit trail](#for-organisations-a-managed-policy-and-an-audit-trail)
 - [When something goes wrong](#when-something-goes-wrong)
 
 ---
@@ -314,6 +316,39 @@ lists them, like everything else running. Details:
 
 ---
 
+## Packages, secrets and tests: what aico checks in its own changes
+
+Three things a coding agent gets wrong under pressure are checked in code, not
+asked for in the prompt (ADR 0033):
+
+- **Packages.** Before an install command runs, aico asks the public registry
+  (npm, PyPI, crates.io, the Go proxy, NuGet, Packagist, RubyGems) whether each
+  package it names exists. A name that does not is refused — models invent
+  plausible names, and an attacker can register one. A package published in the
+  last 30 days, with almost no downloads, one letter from a popular name, or
+  installed from a git repository or URL needs your approval (and is refused
+  when nobody is watching). With no network, or a private registry set in
+  `.npmrc`, `PIP_INDEX_URL`, `GOPROXY` and the like, the check steps aside with a
+  note. Switch it off or change the age in your own settings only:
+  `{ "supplyChain": { "packageCheck": true, "minAgeDays": 30 } }`. Maven and
+  Gradle edits, and lockfile installs, are not covered.
+- **Secrets and unsafe code.** Before a turn may finish, what it wrote is
+  scanned for secrets and high-severity mistakes (JS/TS, Python, Go, Java, PHP,
+  C#), even in a project with no checks; the model is sent back with file:line
+  and the fix. A commit that adds a secret is refused — through the `Git` tool,
+  app commits, or `git commit` in a shell. Waive a deliberate line with
+  `security-allow: <rule> — reason`. `completionGate.changeSafety: false` (your
+  own settings) turns the review off.
+- **Tests.** A test that got weaker this turn — deleted, fewer assertions, a new
+  `.skip`, a weaker check, a changed expected value after a failing run — is
+  named, and the model must restore it or tell you why. Unattended runs
+  (background agents, scheduled work) cannot delete or skip a test without you.
+
+These are heuristics, not proofs: a package that exists and is old is not
+thereby safe, and the code rules are patterns, not analysis.
+
+---
+
 ## MCP servers, and trusting a project
 
 Every MCP tool call goes through the same checks as aico's own tools: hooks,
@@ -369,6 +404,109 @@ about it, collect the result, stop it. It deliberately does not expose `Read`,
 tools, and would move every safety rule aico has to the wrong side of the
 boundary. Every submitted job carries a spend ceiling and a deadline and is
 stopped automatically if it passes either.
+
+---
+
+## AICO in CI
+
+Two jobs for a pipeline, and a record of what a change was checked against.
+Design and limits: [ADR 0034](docs/engineering/adr/0034-evidence-ci-agent-flaky-tests.md).
+
+### Review a pull request
+
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0, persist-credentials: false }
+- uses: actions/setup-node@v4
+  with: { node-version: 22 }
+- uses: suhail-akhtar/aico/.github/actions/aico@vX.Y.Z   # a release tag that contains the action
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # or OPENAI_API_KEY, DEEPSEEK_API_KEY, …
+  with:
+    mode: review
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    budget-usd: '2'
+```
+
+The full workflow is [`docs/examples/github-actions/aico-review.yml`](docs/examples/github-actions/aico-review.yml)
+(permissions: `contents: read`, `pull-requests: write`). Copy it into your own
+repository; AICO's own repository does not run it.
+
+What it does: the model is given the diff, a list of who depends on each
+changed file (computed from the project's import graph, not left for the model
+to ask), and read-only file tools. It cannot run a command, write a file or
+reach the network, and the process it runs in holds the model key and **no
+GitHub token** — a separate step posts the result as **one comment**, updated in
+place on later pushes. It ranks findings by severity, says what it could not
+check, and ends with a record of what the review did. It is a comment, never an
+approval, and it does not replace your required checks.
+
+Things worth knowing:
+
+- Use `pull_request`, not `pull_request_target`. Pull requests from forks get
+  no secrets from GitHub, so the action notices there is no key and skips with a
+  notice instead of failing the PR.
+- `fetch-depth: 0` (it compares against the base branch) and
+  `persist-credentials: false` are required. The action refuses a checkout that
+  left a token in `.git/config`, because the review's file tools could read it.
+- `version:` pins the AICO release; by default it is the tag you referenced the
+  action at. There is no "latest".
+- `budget-usd` and `timeout-minutes` are hard ceilings for the AICO step. A
+  review stopped by either says so.
+- Linux runners; Node 22.5 or newer.
+
+### Fix a failing CI run (opt-in)
+
+[`docs/examples/github-actions/aico-fix-ci.yml`](docs/examples/github-actions/aico-fix-ci.yml)
+runs when a workflow named in it fails on a branch you list, and does nothing
+unless `allow-fix-ci: 'true'` is set. It reproduces the failure on a clean
+checkout, fixes it on a **new** branch (`aico/fix-ci-<run id>`, created by the
+engine before the agent starts), and commits only if the session log shows the
+failure reproduced and every project check passing afterwards. Then a separate
+step pushes that branch and opens a pull request against the branch that failed,
+with the change evidence as its body. It never pushes to the branch it is
+fixing, never edits `.github/`, never fixes its own fix branches, and refuses
+an agent that committed by itself. A failure that does not reproduce is
+reported, not "fixed".
+
+This job runs your failing commit's code with a write token, so keep it to
+branches only trusted people can push to and to commits from your own repository
+(the example does both). Pull requests opened with `GITHUB_TOKEN` do not start
+your CI; review them like any other.
+
+From a terminal, the same engine commands are `aico review --base origin/main`
+and `aico fix-ci --log failed.log`; both print Markdown, neither pushes or posts.
+Exit code 2 means "nothing to publish", not an error.
+
+### The change evidence report
+
+`aico evidence` prints what the session log proves about a piece of work: files
+changed (+/-), every check run with its command, exit code and counts,
+VerifyApp results, scans and findings, approvals a person gave and calls that
+were refused, models and estimated cost, and the open items. Anything with no
+record is shown as **not run** or **no record** — never inferred.
+
+```
+aico evidence                       # the project's latest session, as Markdown
+aico evidence --format short        # "Verified: typecheck, test (412 passed) · not run: lint"
+aico evidence --session 3fa9c1 --format json
+```
+
+In a chat, ask for a PR description or a commit message and the agent loads the
+`Evidence` tool and pastes the record instead of its recollection. The `short`
+form is meant for a commit body; none of the forms carries authorship or credit
+lines. Limits: checks run by a sub-agent are in that agent's own log, a terminal
+permission prompt (the CLI REPL) leaves no record, calls auto-approved by a
+setting leave none, and the cost is an estimate.
+
+### Flaky tests
+
+When a test check fails and the runner said which tests, `RunChecks` re-runs
+just those once. Failed then passed is reported **FLAKY**, by name — not as a
+pass, and not retried until it is. Failed twice is a real failure. A test seen
+flaky before is marked "known flaky" (a per-project list under the AICO home).
+AICO does not skip, quarantine or edit a flaky test; the report suggests
+quarantining it and leaves that to you.
 
 ---
 
@@ -706,6 +844,89 @@ moves research and review helpers to the cheap model; *Private* keeps the jobs
 that read your own data on a local model. Set a vision model there and a
 text-only chat model is told what your screenshots show. `/doctor` lists any
 job whose choice could not be used.
+
+---
+
+## For organisations: a managed policy and an audit trail
+
+AICO is one person's tool on one person's machine, and says so: there is no
+SSO, SCIM, role system, admin console or central server. What it has is the
+two things an IT team can run with the tools it already owns — a **policy file**
+that locks things for everyone on a machine, and an **audit export** a log
+shipper can collect. See [ADR 0035](docs/engineering/adr/0035-managed-policy-and-audit-export.md)
+for the decisions and the limits.
+
+**The policy.** Put a JSON file where only administrators can write it and push
+it with MDM, Group Policy, Intune, Jamf or your configuration management:
+
+| OS | Path |
+|---|---|
+| Windows | `%ProgramData%\AICO\policy.json` |
+| macOS | `/Library/Application Support/AICO/policy.json` |
+| Linux | `/etc/aico/policy.json` |
+
+It sits above the person's own settings and a project's: it can only
+**restrict**, never grant. A full example with every key is in
+[`docs/examples/aico-policy.example.json`](docs/examples/aico-policy.example.json);
+check yours before you deploy it with `aico policy check policy.json`. What it
+can say:
+
+- **Providers and models** — allow-lists and deny-lists with `*` patterns
+  (`claude-*`); `localOnly` to allow only models that run on the machine.
+- **Tools** — `deniedTools` (names and patterns, MCP tools included). A forbidden
+  tool is not offered to the model at all, and a call to it is refused before
+  anyone is asked.
+- **Autonomy** — `maxAutonomyLevel` (L0 plan … L4 unattended) for every run:
+  chat, terminal, cron, background agents.
+- **Gates** — `requiredGates` (`checks`, `security`, `verification`, `commit`,
+  `supply-chain`, `change-scan`) cannot be switched off by anyone.
+- **Extension points** — `mcp`, `plugins`, `customTools`: `forbid`, or an
+  `allow-list` of names. Servers already configured that are not on the list
+  stop being loaded.
+- **Network** — `network` allow-list or deny-list of domains for the tools that
+  carry a URL (WebFetch, the browser tools, MCP tools that take a URL).
+- **Spend** — `budget.perSessionUsd` and `budget.perDayUsd`.
+- **The rest** — `sentinelRequired`, `telemetry: "off"` (no update check),
+  `minAicoVersion`, and a `message` and `contact` shown with every block.
+
+People see it: Settings shows "Managed by your organisation", fixed settings
+are greyed out with the reason, and a blocked model or tool says which rule
+blocked it and whom to ask. `aico policy show` prints the same.
+
+**A mistake in the file is loud, not silent.** A value that is invalid takes
+its most restrictive form and the problem is shown; a key this version does not
+know is reported and ignored (use `minAicoVersion` to require a newer AICO); a
+file that cannot be read at all **locks AICO down** — no model or tool call —
+until it is fixed. `AICO_POLICY_FILE` names one more policy file for testing; it
+is applied *in addition to* the system file and can only add restrictions.
+
+**What the policy cannot do.** It is only as strong as the operating system's
+protection of the file: an administrator can edit it, and anyone can run another
+tool. AICO checks and reports when the current user could edit the file ("not a
+lock"). It does not parse shell commands, so `Bash` can still reach any host
+unless you also deny it or filter egress. Desktop plugins can still be added
+from the app's own plugin screen.
+
+**The audit export.**
+
+    aico audit export --since 2026-10-01 --until 2026-10-08 --format cef --out audit.cef
+    aico audit export --since 2026-10-01 --project /work/api --format jsonl
+    aico usage --since 2026-10-01 --by model --format csv
+
+Formats are `jsonl` (every field), `cef` (what ArcSight, Sentinel, QRadar and
+Splunk's CEF add-on read natively) and `csv`. Each record has a schema version
+(`aico.audit/1`), an ISO time, the OS user and a hash of the host (the policy's
+`audit` section changes both), and a stable `id`, so exporting the same period
+twice de-duplicates. It covers every tool call (what it acted on, whether it was
+allowed, whether a person or the auto-approve switch decided, which guard
+refused it), turns with tokens and estimated cost, approvals in the
+approve-later inbox, credential **use** by reference name, settings and policy
+changes (key names, never values), background agents, cron firings and long
+jobs. It never contains file contents, prompts, assistant text or tool
+results; every string is redacted again on the way out. The HTTP route
+(`POST /api/audit/export`) needs a person in the AICO window. The records are
+read from files on the machine, so they are not tamper-evident — ship the export
+somewhere append-only on a schedule.
 
 ---
 

@@ -20,7 +20,7 @@
  */
 
 import React from 'react';
-import type { Field as FieldSpec } from '../../settings-schema';
+import type { Field as FieldSpec, LockedSetting } from '../../settings-schema';
 import { Icon } from '../Icon';
 
 export interface FieldProps {
@@ -31,9 +31,17 @@ export interface FieldProps {
   changed: boolean;
   /** Shown above the label when the row is a search hit from another pane. */
   breadcrumb?: string;
+  /**
+   * Set when the organisation's managed policy governs this setting (ADR 0035).
+   * A `fixed` lock disables the control; the others stay editable inside the
+   * policy's bounds, and the row says why it is managed. The engine enforces
+   * either way — this is the screen telling the truth, not the lock.
+   */
+  lock?: LockedSetting | undefined;
 }
 
-export function Field({ spec, value, onChange, changed, breadcrumb }: FieldProps): React.ReactElement {
+export function Field({ spec, value, onChange, changed, breadcrumb, lock }: FieldProps): React.ReactElement {
+  const fixed = lock?.kind === 'fixed';
   const stacked = spec.kind === 'segmented';
   /*
     Only the wide controls drop below their label.
@@ -68,7 +76,16 @@ export function Field({ spec, value, onChange, changed, breadcrumb }: FieldProps
           )}
           <div className="flex items-center gap-2">
             <span className="text-[14px] font-medium text-aico-primary">{spec.label}</span>
-            {changed && (
+            {lock && (
+              <span
+                title={lock.reason}
+                className="flex items-center gap-1 rounded-full border border-aico-border-subtle px-1.5 py-0.5 text-[11px] text-aico-muted"
+                data-testid="managed-lock"
+              >
+                <Icon name="lock" size={12} /> Managed
+              </span>
+            )}
+            {changed && !fixed && (
               <>
                 <span
                   className="h-1.5 w-1.5 shrink-0 rounded-full bg-aico-accent"
@@ -89,16 +106,23 @@ export function Field({ spec, value, onChange, changed, breadcrumb }: FieldProps
           {spec.hint && (
             <p className="mt-0.5 max-w-lg text-[13px] leading-relaxed text-aico-secondary">{spec.hint}</p>
           )}
+          {lock && <p className="mt-0.5 max-w-lg text-[12px] leading-relaxed text-aico-muted">{lock.reason}</p>}
         </div>
 
         {!stacked && (
           <div className={`shrink-0 pt-0.5 ${wide ? 'max-md:w-full max-md:pt-0' : ''}`}>
-            <Control spec={spec} value={value} onChange={onChange} />
+            <fieldset disabled={fixed} className="m-0 min-w-0 border-0 p-0 disabled:opacity-60">
+              <Control spec={spec} value={value} onChange={onChange} />
+            </fieldset>
           </div>
         )}
       </div>
 
-      {stacked && <div className="mt-3"><Control spec={spec} value={value} onChange={onChange} /></div>}
+      {stacked && (
+        <fieldset disabled={fixed} className="m-0 mt-3 min-w-0 border-0 p-0 disabled:opacity-60">
+          <Control spec={spec} value={value} onChange={onChange} />
+        </fieldset>
+      )}
     </div>
   );
 }

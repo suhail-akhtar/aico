@@ -72,7 +72,7 @@ await block('Every top-level setting has a project policy; new keys default to u
     autoCompact: 'allow', contextManagement: 'allow', mcpSecurity: 'allow', agents: 'allow', skills: 'tighten', memory: 'allow',
     miniApps: 'user-only', cron: 'allow', promptCaching: 'allow', theme: 'allow', contextWindows: 'allow', modelPricing: 'user-only',
     modelCapabilities: 'allow', maxIterations: 'allow', maxParallelToolCalls: 'allow', completionGate: 'tighten', safetyLimits: 'tighten',
-    agentModels: 'allow', disabledTools: 'allow', dependencyAudit: 'allow', codeGraph: 'tighten', editor: 'user-only', deferTools: 'allow', imageGeneration: 'allow',
+    agentModels: 'allow', disabledTools: 'allow', dependencyAudit: 'allow', supplyChain: 'tighten', codeGraph: 'tighten', editor: 'user-only', deferTools: 'allow', imageGeneration: 'allow',
     sandbox: 'tighten', shell: 'user-only', vault: 'user-only', repeatGuard: 'allow', longJobs: 'allow', sentinel: 'tighten', brief: 'allow',
     profile: 'user-only', models: 'user-only',
   };

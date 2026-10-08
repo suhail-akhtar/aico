@@ -1,0 +1,271 @@
+# AICO in a pipeline (ADR 0034, docs/engineering/adr/0034-evidence-ci-agent-flaky-tests.md).
+#
+#   mode: review   a read-only review of a pull request, posted as ONE comment
+#   mode: fix-ci   (opt-in) reproduce a failing workflow run on a NEW branch and
+#                  open a pull request; never pushes to the branch it fixes
+#
+# Why it is shaped like this:
+#   - The model runs in a step that has the model key and NO repository token.
+#     Posting and pushing are separate steps that hold the token and never run
+#     the model. Text in a diff or a CI log cannot make the model post, push or
+#     call the API, because nothing in its process can.
+#   - A review gets a read-only tool set (no shell, no writes, no web).
+#   - fix-ci is off unless allow-fix-ci is "true"; the branch is created by the
+#     engine, the push is refused for the base branch and for a branch that is
+#     not an AICO fix branch, and workflow files are never changed.
+#   - AICO is installed from a pinned release tag, never "latest". No other
+#     action is used inside this one.
+#
+# The calling workflow must: check out with fetch-depth: 0 and
+# persist-credentials: false (this action refuses a checkout that left a token
+# in .git/config where the agent could read it), set Node 22.5+, and pass the
+# model key as an environment variable of the step that uses this action.
+# Linux runners only (it uses `timeout`).
+
+name: AICO
+description: Run AICO headless in CI - a read-only pull request review, or an opt-in fix for a failing workflow run on a new branch.
+author: suhail-akhtar
+branding:
+  icon: search
+  color: blue
+
+inputs:
+  mode:
+    description: "review (comment on a pull request) or fix-ci (open a fix PR for a failed workflow run)."
+    required: true
+  version:
+    description: "AICO release tag to install, for example v0.47.0. Defaults to the tag this action was referenced at; if neither is a vX.Y.Z tag the action fails rather than float."
+    required: false
+    default: ""
+  model:
+    description: "Model name. Empty uses AICO's default for the provider key found."
+    required: false
+    default: ""
+  budget-usd:
+    description: "Stop once the estimated cost of the run passes this many USD (AICO safetyLimits.maxCostPerSession)."
+    required: false
+    default: "2"
+  timeout-minutes:
+    description: "Wall-clock limit for the AICO step, in minutes."
+    required: false
+    default: "15"
+  github-token:
+    description: "Used only by the posting and pushing steps. Never given to the model's process."
+    required: false
+    default: ""
+  post:
+    description: "review: post the comment (true) or only write it to the job summary and the review-file output (false)."
+    required: false
+    default: "true"
+  fail-on-error:
+    description: "Fail the job when AICO itself errors (true), or only warn (false)."
+    required: false
+    default: "false"
+  pr-number:
+    description: "review: the pull request number. Defaults to the pull_request event's."
+    required: false
+    default: ""
+  base-ref:
+    description: "review: the branch the PR merges into. Defaults to the pull_request event's base."
+    required: false
+    default: ""
+  allow-fix-ci:
+    description: "fix-ci only runs when this is exactly true. Default false."
+    required: false
+    default: "false"
+  run-id:
+    description: "fix-ci: the failed workflow run's id (github.event.workflow_run.id)."
+    required: false
+    default: ""
+  base-branch:
+    description: "fix-ci: the branch the failed run was on; the fix pull request is opened against it (github.event.workflow_run.head_branch)."
+    required: false
+    default: ""
+
+outputs:
+  result:
+    description: "review: reviewed | skipped. fix-ci: fixed | no-change | not-reproduced | unverified | refused | skipped."
+    value: ${{ steps.run.outputs.result }}
+  review-file:
+    description: "review: path of the Markdown review."
+    value: ${{ steps.run.outputs.review_file }}
+  pr-url:
+    description: "fix-ci: URL of the pull request that was opened."
+    value: ${{ steps.publish.outputs.pr_url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the AICO version and check the environment
+      id: setup
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_MODE" in review|fix-ci) ;; *) echo "::error::mode must be review or fix-ci"; exit 1 ;; esac
+        version="${INPUT_VERSION:-}"
+        if [ -z "$version" ] && [[ "$ACTION_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then version="$ACTION_REF"; fi
+        if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Pin AICO: set the version input to a release tag such as v0.47.0 (this action was not referenced by a tag, and it will not install an unpinned version)."
+          exit 1
+        fi
+        if ! node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=5)?0:1)'; then
+          echo "::error::AICO needs Node 22.5 or newer. Add actions/setup-node with node-version 22 before this step."
+          exit 1
+        fi
+        home="$RUNNER_TEMP/aico-home"
+        mkdir -p "$home"
+        { echo "version=$version"; echo "home=$home"; } >> "$GITHUB_OUTPUT"
+
+    - name: Refuse a checkout that left credentials where the agent can read them
+      shell: bash
+      run: |
+        set -euo pipefail
+        if git config --local --get-regexp '^(http\..*\.extraheader|includeif\..*\.path|credential\..*)$' >/dev/null 2>&1; then
+          echo "::error::The checkout persisted git credentials in .git/config. Use actions/checkout with persist-credentials: false so the agent cannot read a token."
+          exit 1
+        fi
+
+    - name: Is there a model key, and is this mode enabled?
+      id: gate
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        ALLOW_FIX_CI: ${{ inputs.allow-fix-ci }}
+      run: |
+        set -euo pipefail
+        have=false
+        for v in ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY GOOGLE_API_KEY MOONSHOT_API_KEY ZAI_API_KEY; do
+          if [ -n "${!v:-}" ]; then have=true; fi
+        done
+        run=true
+        if [ "$have" != true ]; then
+          echo "::notice::No model API key in the environment (pull requests from forks do not receive secrets), so AICO was skipped."
+          run=false
+        fi
+        if [ "$INPUT_MODE" = fix-ci ] && [ "$ALLOW_FIX_CI" != true ]; then
+          echo "::notice::fix-ci is off (allow-fix-ci is not true), so nothing was attempted."
+          run=false
+        fi
+        echo "run=$run" >> "$GITHUB_OUTPUT"
+
+    - name: Fetch the failed run's log
+      if: steps.gate.outputs.run == 'true' && inputs.mode == 'fix-ci'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        RUN_ID: ${{ inputs.run-id }}
+      run: |
+        set -euo pipefail
+        [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::run-id must be the failed run's numeric id."; exit 1; }
+        [ -n "${GH_TOKEN:-}" ] || { echo "::error::fix-ci needs github-token to read the failed run's log."; exit 1; }
+        gh run view "$RUN_ID" --log-failed > "$RUNNER_TEMP/aico-failed.log" 2>/dev/null || true
+        [ -s "$RUNNER_TEMP/aico-failed.log" ] || { echo "::warning::No failed-step log was available for run $RUN_ID."; : > "$RUNNER_TEMP/aico-failed.log"; }
+
+    - name: Run AICO (the model's process has no repository token)
+      id: run
+      if: steps.gate.outputs.run == 'true'
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        VERSION: ${{ steps.setup.outputs.version }}
+        AICO_HOME: ${{ steps.setup.outputs.home }}
+        MODEL: ${{ inputs.model }}
+        BUDGET: ${{ inputs.budget-usd }}
+        TIMEOUT_MIN: ${{ inputs.timeout-minutes }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        PR_NUMBER: ${{ inputs.pr-number != '' && inputs.pr-number || github.event.pull_request.number }}
+        BASE_REF: ${{ inputs.base-ref != '' && inputs.base-ref || github.base_ref }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+        RUN_ID: ${{ inputs.run-id }}
+      run: |
+        set -uo pipefail
+        [[ "$BUDGET" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::budget-usd must be a number."; exit 1; }
+        [[ "$TIMEOUT_MIN" =~ ^[0-9]+$ ]] || { echo "::error::timeout-minutes must be a whole number."; exit 1; }
+        model_args=(); [ -n "$MODEL" ] && model_args=(-m "$MODEL")
+        # Everything below runs with the repository tokens removed from the environment.
+        aico() { timeout "${TIMEOUT_MIN}m" env -u GH_TOKEN -u GITHUB_TOKEN -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+          npx -y "github:suhail-akhtar/aico#${VERSION}" "$@"; }
+        if [ "$INPUT_MODE" = review ]; then
+          [[ "$BASE_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::No usable base branch (is this a pull_request event?)."; exit 1; }
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/aico-pr-body.md"
+          out="$RUNNER_TEMP/aico-review.md"
+          aico review --base "origin/${BASE_REF}" ${PR_NUMBER:+--pr "$PR_NUMBER"} --pr-title="$PR_TITLE" --pr-body-file "$RUNNER_TEMP/aico-pr-body.md" \
+            --budget "$BUDGET" --max-minutes "$TIMEOUT_MIN" "${model_args[@]}" -C "$GITHUB_WORKSPACE" -o "$out"
+          code=$?
+        else
+          out="$RUNNER_TEMP/aico-fix-body.md"
+          aico fix-ci --log "$RUNNER_TEMP/aico-failed.log" --run-id "$RUN_ID" --branch-prefix aico/fix-ci \
+            --budget "$BUDGET" --max-minutes "$TIMEOUT_MIN" "${model_args[@]}" -C "$GITHUB_WORKSPACE" \
+            -o "$out" --result "$RUNNER_TEMP/aico-fix-result.json"
+          code=$?
+        fi
+        # 0 = produced something to publish; 2 = nothing to publish (not an error); anything else is AICO failing.
+        if [ "$code" -eq 0 ]; then result=$([ "$INPUT_MODE" = review ] && echo reviewed || echo fixed)
+        elif [ "$code" -eq 2 ]; then
+          result=skipped
+          if [ "$INPUT_MODE" = fix-ci ] && [ -s "$RUNNER_TEMP/aico-fix-result.json" ]; then
+            result=$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).status||"skipped"))' "$RUNNER_TEMP/aico-fix-result.json" 2>/dev/null || echo skipped)
+          fi
+          echo "::notice::AICO had nothing to publish ($result)."
+        else
+          result=error
+          if [ "$FAIL_ON_ERROR" = true ]; then echo "::error::AICO exited with code $code."; echo "result=$result" >> "$GITHUB_OUTPUT"; exit "$code"; fi
+          echo "::warning::AICO exited with code $code; no output was produced."
+        fi
+        { echo "result=$result"; echo "review_file=$out"; } >> "$GITHUB_OUTPUT"
+
+    - name: Post the review as one comment
+      if: steps.gate.outputs.run == 'true' && inputs.mode == 'review' && steps.run.outputs.result == 'reviewed'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        POST: ${{ inputs.post }}
+        PR_NUMBER: ${{ inputs.pr-number != '' && inputs.pr-number || github.event.pull_request.number }}
+        REVIEW_FILE: ${{ steps.run.outputs.review_file }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        cat "$REVIEW_FILE" >> "$GITHUB_STEP_SUMMARY"
+        if [ "$POST" != true ]; then echo "::notice::post is false: the review is in the job summary only."; exit 0; fi
+        [ -n "${GH_TOKEN:-}" ] || { echo "::warning::No github-token, so the review was not posted (it is in the job summary)."; exit 0; }
+        [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::warning::No pull request number; not posting."; exit 0; }
+        # One comment per PR: update the one carrying the marker, else create it.
+        id=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '.[] | select(.user.type == "Bot" and (.body | contains("<!-- aico-review -->"))) | .id' | head -n1 || true)
+        if [ -n "$id" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$REVIEW_FILE" >/dev/null
+        else
+          gh pr comment "$PR_NUMBER" --body-file "$REVIEW_FILE" >/dev/null
+        fi
+
+    - name: Push the fix branch and open a pull request
+      id: publish
+      if: steps.gate.outputs.run == 'true' && inputs.mode == 'fix-ci' && steps.run.outputs.result == 'fixed'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+        RUN_ID: ${{ inputs.run-id }}
+        BODY_FILE: ${{ steps.run.outputs.review_file }}
+      run: |
+        set -euo pipefail
+        [ -n "${GH_TOKEN:-}" ] || { echo "::error::Pushing the fix branch needs github-token."; exit 1; }
+        branch=$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).branch||""))' "$RUNNER_TEMP/aico-fix-result.json")
+        # The branch is the engine's: it must carry the fix prefix and must not be the branch being fixed.
+        [[ "$branch" =~ ^aico/fix-ci-[A-Za-z0-9._-]+$ ]] || { echo "::error::Refusing to push '$branch': not an AICO fix branch."; exit 1; }
+        [[ "$BASE_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::base-branch is required for fix-ci."; exit 1; }
+        [[ "$BASE_BRANCH" != aico/fix-ci* ]] || { echo "::error::Not fixing a fix branch."; exit 1; }
+        [ "$branch" != "$BASE_BRANCH" ] || { echo "::error::Refusing to push to the branch being fixed."; exit 1; }
+        gh auth setup-git
+        git push origin "refs/heads/$branch:refs/heads/$branch"
+        title=$(git log -1 --format=%s "$branch")
+        url=$(gh pr create --base "$BASE_BRANCH" --head "$branch" --title "$title" --body-file "$BODY_FILE")
+        echo "pr_url=$url" >> "$GITHUB_OUTPUT"
+        echo "Opened $url"

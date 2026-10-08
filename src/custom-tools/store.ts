@@ -28,6 +28,7 @@
  * @module custom-tools/store
  */
 
+import { extensionDecision } from '../policy/enforce.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { aicoHome } from '../home.js';
@@ -210,7 +211,8 @@ export async function loadCustomTools(cwd: string = process.cwd()): Promise<Load
 /** The ones a run may call, by name. */
 export function usableTools(all: readonly LoadedTool[]): Map<string, LoadedTool & { def: CustomToolDef }> {
   const map = new Map<string, LoadedTool & { def: CustomToolDef }>();
-  for (const t of all) if (t.status === 'enabled' && t.def) map.set(t.name, t as LoadedTool & { def: CustomToolDef });
+  // A tool the organisation's policy does not admit (ADR 0035) is not callable, enabled or not.
+  for (const t of all) if (t.status === 'enabled' && t.def && extensionDecision('customTools', t.name).ok) map.set(t.name, t as LoadedTool & { def: CustomToolDef });
   return map;
 }
 

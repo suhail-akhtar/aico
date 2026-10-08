@@ -531,6 +531,22 @@ export const PANES: Pane[] = [
             keywords: 'todo done finish gate',
           },
           {
+            path: 'completionGate.changeSafety',
+            label: 'Review the changes it made for secrets, unsafe code and weakened tests',
+            hint: 'Before a turn may finish, and before a commit: a secret, a high-severity code finding or a deleted/skipped test sends the model back. A commit that adds a secret is refused.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'secrets sast security tests skip tamper commit review',
+          },
+          {
+            path: 'supplyChain.packageCheck',
+            label: 'Check packages exist before installing them',
+            hint: 'Install commands are checked against the public registry: a name that does not exist is refused; a brand-new, barely used or lookalike package, or a git/URL source, asks you.',
+            kind: 'toggle',
+            fallback: true,
+            keywords: 'npm pip cargo go package install supply chain slopsquatting typosquat',
+          },
+          {
             path: 'repeatGuard.enabled',
             label: 'Warn on repeated tool calls',
             hint: 'Injects an escalating reminder when the same call is made verbatim. Never blocks.',
@@ -1009,6 +1025,26 @@ function assertWritable(root: string): void {
   if ((SECRET_ROOTS as readonly string[]).includes(root)) {
     throw new Error(`refusing to write "${root}" from the settings screen: it holds credentials`);
   }
+}
+
+/* ── Managed policy (ADR 0035) ─────────────────────────────────────── */
+
+/** A setting the organisation's managed policy fixes, bounds or restricts. Mirrors `GET /api/policy` → `locked`. */
+export interface LockedSetting {
+  path: string;
+  /** `fixed`: the policy decides the value (control disabled). `bounded`/`restricted`: editable inside the policy. */
+  kind: 'fixed' | 'bounded' | 'restricted';
+  reason: string;
+  value?: unknown;
+}
+
+/**
+ * The lock that applies to a field, if any: the policy names its path or an
+ * ancestor of it (`sentinel` covers `sentinel.mode`). Pure, so the screen and
+ * its test agree.
+ */
+export function lockFor(path: string, locked: readonly LockedSetting[] | undefined): LockedSetting | undefined {
+  return locked?.find(l => path === l.path || path.startsWith(`${l.path}.`));
 }
 
 /* ── Search ───────────────────────────────────────────────────────── */

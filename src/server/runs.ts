@@ -32,6 +32,7 @@ import {
 } from '../session/projections.js';
 import { personaFor, resolveAgent } from '../agents/resolve.js';
 import { effectiveLevel, levelLabel, modeFromLevel, type AutonomyLevel } from '../autonomy/levels.js';
+import { forbidsFullAutonomy } from '../policy/enforce.js';
 import { activeProviderType } from '../providers/instances.js';
 import type { ImageRef } from '../providers/types.js';
 import type { UserAttachment } from '../session/events.js';
@@ -507,6 +508,9 @@ export class RunManager {
     }
     run.approval = opts.approval === 'full' ? 'auto' : (opts.approval ?? 'auto');
     let fullAutonomy = opts.approval === 'full';
+    // The organisation's policy (ADR 0035) can rule full autonomy out: the safety reviewer's doubts then ask a person.
+    const fullAutonomyBlocked = fullAutonomy && forbidsFullAutonomy();
+    if (fullAutonomyBlocked) fullAutonomy = false;
 
     let settings = await this.currentSettings();
     const goal = currentGoal(run.session);
@@ -566,6 +570,7 @@ export class RunManager {
     // screen to explain why the replies had changed character.
     if (agent.notice) emit('notice', { text: agent.notice });
     if (leveled?.cappedBy) emit('notice', { text: `This turn runs at ${levelLabel(leveled.level)}, not ${leveled.requested}: ${leveled.reason}.` });
+    if (fullAutonomyBlocked) emit('notice', { text: "Full autonomy is not available here: your organisation's AICO policy requires the safety reviewer to ask a person when it is unsure." });
 
     emit('turn-start', { task, model, ...(opts.source ? { source: opts.source } : {}) });
 

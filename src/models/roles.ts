@@ -39,6 +39,7 @@ import type { AicoSettings } from '../settings.js';
 import { getModelCapabilities, modelAccepts, modelProduces } from '../model-capabilities.js';
 import { listInstances, isUsable, resolveInstance, type ProviderInstance } from '../providers/instances.js';
 import { costFor, createTokenTracker } from '../tokens.js';
+import { modelDecision } from '../policy/enforce.js';
 
 export type ModelRole =
   | 'main' | 'coding' | 'explore' | 'review' | 'background'
@@ -301,6 +302,11 @@ export function resolveRole(role: ModelRole, o: ResolveOptions): RoleResolution 
     const inst = strayLocal ? undefined : found;
     if (s && !found) { reasons.push(`${c.source} choice skipped: no configured provider can serve ${c.model}`); continue; }
     const local = isLocalInstance(inst) && !isCloudModelTag(c.model);
+    // The organisation's managed policy (ADR 0035): a model it does not allow is
+    // never chosen for a role, and the reason names the rule — shown beside the
+    // role in Settings and `/doctor` instead of a call that fails later.
+    const allowed = modelDecision({ model: c.model, ...(inst ? { providerType: inst.type, instanceId: inst.id } : {}), local });
+    if (!allowed.ok) { reasons.push(`${c.source} choice skipped: ${allowed.message}`); continue; }
     if (keepLocal && !local) {
       reasons.push(`${c.source} choice skipped: ${c.model} is not served on this machine (your data is set to stay on it)`);
       continue;

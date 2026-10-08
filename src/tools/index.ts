@@ -19,6 +19,7 @@ import { proposePlan, proposePlanDefinition } from './plan.js';
 import { runChecks, runChecksDefinition } from './run-checks.js';
 import { codeMap, codeMapDefinition } from './codemap.js';
 import { codeGraphTool, codeGraphDefinition } from './codegraph.js';
+import { evidenceTool, evidenceDefinition } from './evidence.js';
 import { afterRead, afterWrite, beforeWrite, takeQueuedEditNotes } from '../codegraph/edit-note.js';
 import { gitTool, gitDefinition } from './git.js';
 import { knowledgeTool, knowledgeDefinition } from './knowledge.js';
@@ -309,6 +310,8 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...refactorDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   // The deferred `graph` group (tools/codegraph, ADR 0028): reads a cached index, so it may overlap.
   { ...codeGraphDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
+  // The deferred `evidence` group (ADR 0034): reads the run's own log and runs read-only git.
+  { ...evidenceDefinition, isConcurrencySafe: true, maxResultSizeChars: 40_000 },
   { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...contextWindowToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 5_000 },
   { ...agentCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
@@ -700,6 +703,9 @@ export async function executeTool(
       break;
     case 'CodeGraph':
       result = await codeGraphTool(args as unknown as Parameters<typeof codeGraphTool>[0]);
+      break;
+    case 'Evidence':
+      result = await evidenceTool(args as unknown as Parameters<typeof evidenceTool>[0]);
       break;
     case 'CodebaseMap':
       result = await codeMap(args as unknown as Parameters<typeof codeMap>[0]);

@@ -20,6 +20,15 @@
  * fails the check even when the command exited 0: a wrapper ending in
  * `|| true` must not turn a red suite green for the gate.
  *
+ * **A failing test is run once more** (`flaky.ts`, ADR 0034). The failing tests
+ * are re-run alone when the runner named them; a test that failed and then
+ * passed is reported FLAKY — not green, not retried until it is — and
+ * remembered per project. Two failures in a row are a real failure.
+ *
+ * **Every check that runs leaves a `check/run` record** in the session log
+ * (exit code, counts, retry), which is what the change packet reports; a check
+ * that did not run leaves nothing, so "not run" can be said and be true.
+ *
  * **Format and lint on request.** The project's own formatter and linter
  * (`style-tools.ts`) run when named in `only`, in check form; `fix: true`
  * runs their fix form. They are not part of the gate — that module says why.
@@ -42,6 +51,8 @@ import { selects, styleChecks } from '../style-tools.js';
 import { writtenFiles } from '../checks.js';
 import { currentRunContext } from '../run-context.js';
 import { securityCheck } from '../security/project-scan.js';
+import { classifyRerun, flakyReport, knownFlaky, planRerun, recordFlaky, type FlakyVerdict, type RerunPlan } from '../flaky.js';
+import type { SessionEventMap } from '../session/events.js';
 
 /**
  * Every check this turn is held to: the project's own (profile first, manifest
@@ -84,6 +95,12 @@ export interface RunChecksInput {
   force?: boolean;
   /** Run the project's own formatter/linter in fix mode instead of the checks. */
   fix?: boolean;
+  /**
+   * Re-run a failing test check's failing tests once to tell a flake from a
+   * failure (default true). Not in the tool's schema: it would grow every
+   * request for a switch only a caller in code wants.
+   */
+  retryFlaky?: boolean;
 }
 
 /**
@@ -136,6 +153,43 @@ function freshJUnit(dir: string, since: number): TestSummary | undefined {
   return found > 0 ? merged : undefined;
 }
 
+/** Whether a check runs tests: a linter's "0 errors in 1.2s" is not a pytest summary. */
+function isTestRun(check: Check): boolean {
+  return /test|jest|vitest|mocha|pytest|\btap\b|\bspec\b/i.test(`${check.name} ${check.command}`);
+}
+
+/** The counts a `check/run` record keeps: names only, so the log stays small. */
+function testCounts(t: TestSummary | undefined): SessionEventMap['check/run']['tests'] | undefined {
+  return t ? {
+    runner: t.runner, passed: t.passed, failed: t.failed, skipped: t.skipped,
+    ...(t.unit ? { unit: t.unit } : {}),
+    failures: t.failures.slice(0, 8).map(f => f.name),
+  } : undefined;
+}
+
+/**
+ * Re-run a failing test check once and say what that showed (ADR 0034).
+ *
+ * Only for a failure the runner attributed to tests (`failed > 0`), or one it
+ * could not read at all while the check is quick: a non-zero exit with all-green
+ * counts is a coverage threshold or a crash, and running that again proves
+ * nothing. Changes nothing but the run's own arguments.
+ */
+async function retryFailing(
+  check: Check, cwd: string, tests: TestSummary | undefined, firstMs: number, timeout: number,
+): Promise<{ plan: RerunPlan; verdict: FlakyVerdict } | undefined> {
+  if (tests && tests.failed === 0) return undefined;
+  const plan = planRerun(check.command, tests, firstMs);
+  if (!plan) return undefined;
+  const started = Date.now();
+  const result = await bash({ command: plan.command, timeout, cwd });
+  const raw = [result.stdout, result.stderr].filter(Boolean).join('\n');
+  const rerun = readTests(raw, cwd, started, check);
+  const passed = result.exit_code === 0 && !(rerun && rerun.failed > 0);
+  const firstNames = tests?.failures.map(f => f.name) ?? [];
+  return { plan, verdict: classifyRerun(plan, firstNames, { passed, tests: rerun }) };
+}
+
 /**
  * A test summary for a test check's output: the console first, then a JUnit
  * report this run wrote — an old one lying in the tree is not this run's result.
@@ -143,7 +197,7 @@ function freshJUnit(dir: string, since: number): TestSummary | undefined {
 function readTests(raw: string, cwd: string, started: number, check: Check): TestSummary | undefined {
   // Only a test run is read as one: a linter's "0 errors in 1.2s" is not a
   // pytest summary, and a typecheck that "ran no tests" is not news.
-  if (!/test|jest|vitest|mocha|pytest|\btap\b|\bspec\b/i.test(`${check.name} ${check.command}`)) return undefined;
+  if (!isTestRun(check)) return undefined;
   // Coarse filesystem timestamps (1–2 s) must not make this run's report look old.
   const tests = parseTestOutput(raw) ?? freshJUnit(cwd, started - 2000);
   if (!tests) return undefined;
@@ -193,6 +247,12 @@ export async function runChecks(input: RunChecksInput = {}): Promise<string> {
   const results: CheckResult[] = [];
   const notes: string[] = [];
   let failedAt: Check | undefined;
+  /** Checks whose failing tests passed on the one re-run: not green, but not a failure to fix. */
+  const flakyChecks: string[] = [];
+  const log = currentRunContext()?.sessionLog;
+  const logRun = (check: Check, run: Omit<SessionEventMap['check/run'], 'name' | 'command'>): void => {
+    log?.record('check/run', { name: check.name, command: check.command, ...(check.cwd ? { cwd: path.relative(root, check.cwd).replace(/\\/g, '/') || '.' } : {}), ...run });
+  };
 
   for (const check of wanted) {
     const started = Date.now();
@@ -203,6 +263,7 @@ export async function runChecks(input: RunChecksInput = {}): Promise<string> {
       const record: CheckResult = { name: check.name, command: check.command, passed: sec.passed, ms, output: sec.output, at: Date.now(), sourceMtimeMs };
       recordCheck(record);
       results.push(record);
+      logRun(check, { outcome: sec.passed ? 'passed' : 'failed', exitCode: null, ms, builtin: 'security', findings: sec.counts });
       lines.push(`${sec.passed ? 'PASS' : 'FAIL'}  ${check.name.padEnd(10)} ${check.command}  (${(ms / 1000).toFixed(1)}s)`);
       if (sec.passed && sec.counts.medium > 0) notes.push(sec.output);
       if (!sec.passed) { failedAt = check; break; }
@@ -238,20 +299,60 @@ export async function runChecks(input: RunChecksInput = {}): Promise<string> {
       output = listed ? `Needs formatting:\n${tail(result.stdout)}` : tail(raw);
     }
 
+    // One more run of what failed, to tell a flake from a failure (ADR 0034).
+    let flaky: string[] | undefined;
+    let retry: SessionEventMap['check/run']['retry'];
+    if (!passed && input.retryFlaky !== false && isTestRun(check) && !check.failOnOutput) {
+      const again = await retryFailing(check, cwd, tests, ms, input.timeout ?? 600);
+      if (again) {
+        const { plan, verdict } = again;
+        retry = { basis: plan.basis, tests: plan.tests, passed: verdict.outcome === 'flaky', ...(verdict.flaky.length > 0 ? { flaky: verdict.flaky } : {}) };
+        const history = knownFlaky(root);
+        if (verdict.outcome === 'flaky') {
+          flaky = verdict.flaky;
+          recordFlaky(root, (verdict.flaky.length > 0 ? verdict.flaky : [`(check: ${check.name})`])
+            .map(test => ({ at: Date.now(), test, check: check.name, ...(tests ? { runner: tests.runner } : {}) })));
+          notes.push(...flakyReport(check.name, verdict, plan, history));
+        } else if (verdict.outcome === 'failed') {
+          if (verdict.flaky.length > 0) {
+            recordFlaky(root, verdict.flaky.map(test => ({ at: Date.now(), test, check: check.name, ...(tests ? { runner: tests.runner } : {}) })));
+            notes.push(`Re-run: ${verdict.flaky.length} of the failing test(s) passed the second time (flaky: ${verdict.flaky.slice(0, 5).join(', ')}); ${verdict.stillFailing.length} failed again and are real failures.`);
+          } else {
+            notes.push(`Re-run: the failing test(s) failed again, so this is a real failure, not a flake.`);
+          }
+        } else {
+          notes.push(`The failing tests were re-run (${plan.basis === 'tests' ? 'targeted' : 'whole check'}) but the re-run's output could not be read, so the failure is reported as it first appeared.`);
+        }
+      }
+    }
+    if (!flaky && tests && !passed) {
+      // A failure the project has failed on before for no reason: say so, so it is not chased as new.
+      const history = knownFlaky(root);
+      const known = tests.failures.map(f => f.name).filter(n => history.has(n));
+      if (known.length > 0) notes.push(`Known flaky in this project: ${known.slice(0, 5).join(', ')} — seen failing and passing before.`);
+    }
+
     const record: CheckResult = {
       name: check.name, command: check.command, passed, ms, output, at: Date.now(), sourceMtimeMs,
       ...(tests ? { tests } : {}),
+      ...(flaky ? { flaky } : {}),
     };
     recordCheck(record);
     results.push(record);
+    logRun(check, {
+      outcome: flaky ? 'flaky' : passed ? 'passed' : 'failed', exitCode: result.exit_code, ms,
+      ...(tests ? { tests: testCounts(tests)! } : {}),
+      ...(retry ? { retry } : {}),
+    });
 
-    lines.push(`${passed ? 'PASS' : 'FAIL'}  ${check.name.padEnd(10)} ${check.command}  (${(ms / 1000).toFixed(1)}s)`);
+    lines.push(`${flaky ? 'FLAKY' : passed ? 'PASS' : 'FAIL'}  ${check.name.padEnd(10)} ${check.command}  (${(ms / 1000).toFixed(1)}s)`);
     if (tests && passed) lines.push(`      ${output.split('\n')[0]}`);
 
+    if (flaky) { flakyChecks.push(check.name); continue; }
     if (!passed) { failedAt = check; break; }
   }
 
-  if (!failedAt) {
+  if (!failedAt && flakyChecks.length === 0) {
     // Everything asked for passed on this code. A later partial run is covered
     // only for the names it asked about; a full run covers all of them.
     const names = new Set([...(green?.sourceMtimeMs === sourceMtimeMs && green.commands === commands ? green.names : []), ...wanted.map(c => c.name)]);
@@ -265,7 +366,9 @@ export async function runChecks(input: RunChecksInput = {}): Promise<string> {
 
   report.push(failedAt
     ? `FAILED — ${failedAt.name} did not pass. The project is not in a working state.`
-    : `PASSED — ${results.length} check${results.length === 1 ? '' : 's'}, all green.`);
+    : flakyChecks.length > 0
+      ? `FLAKY — ${flakyChecks.join(', ')} failed and then passed on a re-run. That is not green: a non-deterministic failure was seen.`
+      : `PASSED — ${results.length} check${results.length === 1 ? '' : 's'}, all green.`);
   report.push('');
   report.push(...lines);
   if (notes.length > 0) report.push('', ...notes);

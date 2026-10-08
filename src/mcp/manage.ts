@@ -1,3 +1,4 @@
+import { assertExtensionAllowed } from '../policy/enforce.js';
 import { loadSettings, saveProjectMcpServers, getProjectLocalSettingsPath } from '../settings.js';
 import { mcpRegistry } from './registry.js';
 import { disabledIn } from '../registry-state.js';
@@ -69,6 +70,7 @@ async function persistAndReload(servers: Record<string, McpServerConfigV2>): Pro
 
 export async function addMcpServer(input: McpAddServerInput, actor: McpActor = 'agent:McpManage'): Promise<string> {
   assertValidName(input.name);
+  assertExtensionAllowed('mcp', input.name); // the organisation's policy (ADR 0035): one door for the panel, McpManage and /mcp add
   const settings = await loadSettings();
   const current = settings.mcpServers ?? {};
   // A literal secret goes to the vault before anything is written (mcp/secrets).
@@ -100,6 +102,7 @@ export async function addMcpServer(input: McpAddServerInput, actor: McpActor = '
  */
 export async function updateMcpServer(input: McpAddServerInput, actor: McpActor = 'agent:McpManage'): Promise<string> {
   assertValidName(input.name);
+  assertExtensionAllowed('mcp', input.name);
   const settings = await loadSettings();
   const current = settings.mcpServers ?? {};
   const existing = current[input.name];
