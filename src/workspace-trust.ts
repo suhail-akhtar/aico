@@ -50,7 +50,7 @@ import { projectToolFilesIn } from './custom-tools/files.js';
 import { projectPolicyNotes } from './settings-project-policy.js';
 
 /** Settings sections that make AICO execute something, and so need trust from a project file. */
-export const TRUST_GATED_SECTIONS = ['mcpServers', 'hooks', 'env'] as const;
+export const TRUST_GATED_SECTIONS = ['mcpServers', 'hooks', 'env', 'delivery'] as const;
 
 export type TrustState = 'none' | 'trusted' | 'untrusted';
 
@@ -120,6 +120,16 @@ function describe(gated: Layer[], tools: ProjectTool[] = []): { summary: string;
         names.push(`${event} hook`);
         lines.push(`${event} hook: ${String(command)}`);
       }
+    }
+    // Delivery's two commands (ADR 0038): shown exactly, because approving them lets a board run them.
+    const delivery = (layer.delivery ?? {}) as { deployCommand?: unknown; worktreeSetup?: unknown };
+    if (typeof delivery.worktreeSetup === 'string' && delivery.worktreeSetup.trim()) {
+      names.push('Delivery worktree setup');
+      lines.push(`Delivery worktree setup (runs in every new task worktree): ${delivery.worktreeSetup}`);
+    }
+    if (typeof delivery.deployCommand === 'string' && delivery.deployCommand.trim()) {
+      names.push('Delivery deploy command');
+      lines.push(`Delivery deploy command (runs when a person deploys a release): ${delivery.deployCommand}`);
     }
     const env = Object.keys((layer.env ?? {}) as object);
     if (env.length) {

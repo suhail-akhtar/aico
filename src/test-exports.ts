@@ -648,7 +648,7 @@ export { certifyAgent, planCertification, describeCertificate, clampBudget, MAX_
 export {
   dependencyHash, statusOfSpec, certificationStatus, isCertified, listCertificates, writeCertificate, certificatesDir,
 } from './evals/certificate.js';
-export { spawnBackgroundAgent, getBackgroundAgents } from './background/index.js';
+export { spawnBackgroundAgent, getBackgroundAgents, setBackgroundAgentOpts, getBackgroundAgentOpts } from './background/index.js';
 
 // Long jobs (longjob/, tools/long-job.ts).
 export {
@@ -846,6 +846,24 @@ export { compareTest, isTestFile, assertionCount, skipMarkers, deletedTestPaths 
 export { scanWrittenFiles } from './security/project-scan.js';
 export { runFindingSink } from './security/finding.js';
 export { testCheckFailedThisTurn } from './checks.js';
+
+// Delivery (ADR 0038).
+export * as Delivery from './delivery/index.js';
+export * as DeliveryStore from './delivery/store.js';
+export * as DeliveryGit from './delivery/git.js';
+export * as DeliveryRelease from './delivery/release.js';
+export * as DeliveryEnv from './delivery/env.js';
+export { deliveryConfig } from './delivery/config.js';
+export { runCommand as deliveryRunCommand } from './delivery/exec.js';
+export { sessionRunner as deliverySessionRunner } from './server/delivery-runner.js';
+export { pushNotification, subscribeToNotifications } from './background/notifications.js';
+export { assessRisk, numstat as deliveryNumstat, levelOf as riskLevelOf } from './delivery/risk.js';
+export { predictTouches, overlap as touchOverlap } from './delivery/touches.js';
+export { verifyTree } from './delivery/verify.js';
+export { runPrompt as deliveryRunPrompt, planPrompt as deliveryPlanPrompt } from './delivery/prompts.js';
+export { isDeliveryWorktree, deliveryRunDenial, worktreePath as deliveryWorktreePath } from './delivery/paths.js';
+export { deliveryTool, deliveryDefinition } from './tools/delivery.js';
+export { handleDeliveryRoute } from './server/delivery-routes.js';
 
 // Design boards (ADR 0037).
 export { designBoardIn, designBoardTool, designBoardDefinition, insideBoard, boardDirIn, readBoardAt, describeBoard } from './canvas/board-tool.js';

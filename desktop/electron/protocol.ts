@@ -129,7 +129,15 @@ export interface ProtocolOptions {
  * and a grant needs the app transport's JSON + `x-aico-intent` request
  * (protocol-policy.ts humanIntent), which a form or a frame cannot make.
  */
-const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit', '/api/editor/open', '/api/brief/fix-all']);
+const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit', '/api/editor/open', '/api/brief/fix-all', '/api/delivery/dispatch', '/api/delivery/approve-batch', '/api/delivery/releases']);
+
+/**
+ * Human routes with an id in the path (HUMAN_ROUTES matches whole paths): the delivery board's
+ * approve (lands a task on the trunk), request-changes (restarts a run), a person's comment (it
+ * reaches an agent's prompt as the person's word), and a release's deploy (runs a command) and
+ * rollback (creates a reverting task), ADR 0038.
+ */
+const HUMAN_ROUTE_PATTERNS = [/^\/api\/delivery\/(?:tasks\/[a-f0-9]{8}\/(?:approve|request-changes|comment)|releases\/\d+\.\d+\.\d+\/(?:deploy|rollback))$/];
 
 /**
  * Vault routes the interface may never call: they return a value, or mint
@@ -185,7 +193,7 @@ export function handleProtocol({ rendererDir, pluginDir, engine, decidePermissio
     if (pathname.startsWith('/api/')) {
       // A grant only for the app's own JSON request with the intent header: a plugin frame's form post,
       // or any simple request, cannot set it (protocol-policy.ts humanIntent).
-      const grant = mintHumanGrant && HUMAN_ROUTES.has(pathname) && humanIntent(request, APP_ORIGIN) ? mintHumanGrant() : undefined;
+      const grant = mintHumanGrant && (HUMAN_ROUTES.has(pathname) && humanIntent(request, APP_ORIGIN) || HUMAN_ROUTE_PATTERNS.some(re => re.test(pathname)) && humanIntent(request, APP_ORIGIN)) ? mintHumanGrant() : undefined;
       return proxy(request, url, engine, grant);
     }
 

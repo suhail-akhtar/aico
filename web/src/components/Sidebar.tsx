@@ -559,6 +559,13 @@ export function Sidebar(
             Apps
           </NavButton>
           <NavButton
+            icon="fork"
+            active={route.destination === 'delivery'}
+            onClick={() => { onRoute(toggleDestination(route, 'delivery')); onClose(); }}
+          >
+            Delivery
+          </NavButton>
+          <NavButton
             icon="clock"
             active={route.destination === 'inbox'}
             onClick={() => { onRoute(toggleDestination(route, 'inbox')); onClose(); }}

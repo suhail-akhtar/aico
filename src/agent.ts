@@ -147,6 +147,7 @@ import { engineVersion } from './policy/managed.js';
 import { toolRequiresPermission } from './permissions.js';
 import { isMcpToolName, isReadOnlyMcpTool, parseMcpToolName } from './mcp/policy.js';
 import { activeJob, isLongEstimate, pendingJob, propose, proposalResult, subAgentMaxMs } from './longjob/index.js';
+import { deliveryRunDenial, isDeliveryWorktree } from './delivery/paths.js';
 import { longJobDefinition, longJobTool } from './tools/long-job.js';
 import { proposePlan, type PlanInput } from './tools/plan.js';
 import {
@@ -1088,6 +1089,8 @@ const PLAN_MODE_TOOLS = new Set([
   // Structural search only reads, and finding every site is what planning a
   // wide change starts with. Its writing siblings are not here.
   'CodeSearch',
+  // The board's tasks are the plan itself (ADR 0038): a planning turn writes only the board, never the project.
+  'Delivery',
   /*
     Read-only, and a planning turn is exactly when it is worth asking. "What is
     already broken here?" is the first question of most plans, and answering it
@@ -1677,6 +1680,8 @@ export async function runAgent(rawOpts: AgentOptions): Promise<string> {
       ...(opts.applyEdit ? { applyEdit: opts.applyEdit } : {}),
       // Which editor, if any, this run can ask to do things it cannot.
       ...(opts.host ? { host: opts.host } : {}),
+      // Who answers this run's questions: its own channel, else the delegating run's (concurrent runs must not share one).
+      ...((opts.onAskUser ?? parentRun?.askUser) ? { askUser: (opts.onAskUser ?? parentRun!.askUser)! } : {}),
       // The browser copilot's way to hand work to a full chat; absent elsewhere.
       ...(opts.handOff ? { handOff: opts.handOff } : {}),
       /*
@@ -2346,6 +2351,19 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
     const denial = configWriteDenial(ctx.name, ctx.arguments, aicoHome(), runCwd);
     return denial ? { kind: 'deny', reason: denial } : { kind: 'abstain' };
   });
+
+  /*
+    A delivery task's run (ADR 0038) works in its own worktree on its own branch.
+    Pushing, pulling, merging, switching branches or managing worktrees is refused
+    for any run whose directory is inside one: the merge queue and a person land
+    the work. A guard, not a prompt line: it holds however the model is asked.
+  */
+  if (isDeliveryWorktree(runCwd)) {
+    pipeline.onGuard('delivery-run', (ctx) => {
+      const denial = deliveryRunDenial(ctx.name, ctx.arguments as Record<string, unknown>, shellCommandOf(ctx.name, ctx.arguments), runCwd);
+      return denial ? { kind: 'deny', reason: denial } : { kind: 'abstain' };
+    });
+  }
 
   // Add Task tool (sub-agent dispatch) if within depth limit. Browser QA
   // removes it for sub-agents only — see resolveToolSet on why depth 0 keeps

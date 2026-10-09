@@ -173,6 +173,46 @@
     "deck/images/upload": {
       "gate": "token"
     },
+    "delivery/approve-batch": {
+      "gate": "token+human",
+      "note": "lands several low-risk, green tasks on the trunk with one yes: human(); the set is refused whole if any member is not eligible"
+    },
+    "delivery/attention": {
+      "gate": "token",
+      "note": "read: compact task state of every registered board, for notifications"
+    },
+    "delivery/board": {
+      "gate": "token",
+      "note": "read: the board of a registered project"
+    },
+    "delivery/dispatch": {
+      "gate": "token+human",
+      "note": "start (or raising maxParallel) lets the board spend money: human(); pause needs only the token"
+    },
+    "delivery/events": {
+      "gate": "token (SSE)",
+      "note": "delivery/board frames for a registered project"
+    },
+    "delivery/plan": {
+      "gate": "token",
+      "note": "starts a plan-mode chat turn that can only write backlog tasks (Delivery tool); spends one planning turn"
+    },
+    "delivery/releases": {
+      "gate": "token+human",
+      "note": "GET reads the release history and plan (token); POST makes the version-bump commit and a local tag on the trunk: human()"
+    },
+    "delivery/releases/*": {
+      "gate": "token+human",
+      "note": "deploy runs the configured command and rollback creates a reverting task: both human() (ADR 0038)"
+    },
+    "delivery/tasks": {
+      "gate": "token",
+      "note": "create a task in the backlog; nothing runs until a person promotes it and starts the dispatcher"
+    },
+    "delivery/tasks/*": {
+      "gate": "token+human",
+      "note": "PATCH edits/cancels (token); approve (lands on the trunk), request-changes (restarts a run) and comment (reaches an agent's prompt as the person's word) need human(); diff is a read (ADR 0038)"
+    },
     "editor/file": {
       "gate": "token",
       "note": "the web viewer: registered projects only, real path inside the project, text up to 2 MB, credential-looking files refused (server/editor)"

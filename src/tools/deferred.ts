@@ -144,6 +144,12 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ['Evidence'],
   },
   {
+    // ADR 0038. Loaded outright by a request about a backlog, board, tasks or a sprint (REQUEST_LOADS), and by a task's own run prompt.
+    id: 'delivery',
+    summary: 'task board: plan a backlog, submit a task',
+    tools: ['Delivery'],
+  },
+  {
     // ADR 0037. Loaded outright by a request for a mockup, prototype or screens (REQUEST_LOADS) and by the design-board skill.
     id: 'design',
     summary: 'clickable HTML mockups of screens on a design board (mockup, prototype, UX flow)',
@@ -220,6 +226,11 @@ const REQUEST_LOADS: Array<{ re: RegExp; groups: readonly string[] }> = [
     // A PR description, a commit message or "what did you verify": the record beats the model's recollection (ADR 0034).
     re: /\b(?:pull request|PR (?:description|body|summary)|pr (?:description|body)|commit (?:message|body)|change (?:packet|evidence|report)|evidence (?:report|packet)|what (?:did|have) you (?:verify|verified|check|run|test)|prove it works)\b/i,
     groups: ['evidence'],
+  },
+  {
+    // A backlog, a board of tasks, a sprint, or a delivery task (ADR 0038): the Delivery tool, not a loose list in chat.
+    re: /\b(?:backlog|task board|delivery (?:board|task)|kanban|sprint|break (?:this|it|that|the \w+) (?:down )?into (?:independent |separate |parallel )?tasks)\b/i,
+    groups: ['delivery'],
   },
   {
     // A mockup, prototype, wireframe or set of screens (ADR 0037): the board tool, not a pile of loose HTML files.

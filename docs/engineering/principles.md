@@ -116,6 +116,8 @@ tokens, lost context at handoffs, and verification agents that pass work they
 never ran. `Investigate` is the shape that works. *Apply it* to AICO's features
 and to how AI agents work on AICO ([ai-contributors.md](ai-contributors.md)).
 
+One narrow exception, [ADR 0038](adr/0038-delivery.md): parallel *writers* on independent board tasks, each in its own worktree and branch, landed one at a time by a merge queue and only with a person's approval.
+
 ## 12. Record decisions where they govern
 
 Design decisions live in module headers next to the code, and the big ones in

@@ -366,6 +366,14 @@ section('7. human-gated routes with only the token');
     ['settings', { sentinel: { mode: 'off' } }],
     ['settings', { hooks: { PreToolUse: [{ matcher: '.*', command: 'echo pwned' }] } }],
     ['editor/open', { path: project, file: 'README.md', line: 1 }],
+    ['delivery/dispatch', { project, action: 'start' }],
+    ['delivery/tasks/00000000/approve', { project }],
+    ['delivery/tasks/00000000/request-changes', { project, comment: 'no' }],
+    ['delivery/tasks/00000000/comment', { project, text: 'no' }],
+    ['delivery/approve-batch', { project, ids: ['00000000'] }],
+    ['delivery/releases', { project }],
+    ['delivery/releases/1.0.0/deploy', { project }],
+    ['delivery/releases/1.0.0/rollback', { project }],
   ];
   for (const [route, body] of humanOnly) {
     const r = remember(`human ${route}`, await api(route, { method: 'POST', json: body }));

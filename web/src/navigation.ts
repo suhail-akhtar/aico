@@ -20,7 +20,7 @@
  * @module navigation
  */
 
-export type Destination = 'sessions' | 'apps' | 'system' | 'project' | 'group' | 'inbox';
+export type Destination = 'sessions' | 'apps' | 'system' | 'project' | 'group' | 'inbox' | 'delivery';
 export type SessionTab = 'chat' | 'changes' | 'trajectory';
 
 export interface Route {
@@ -35,7 +35,7 @@ export interface Route {
 
 export const DEFAULT_ROUTE: Route = { destination: 'sessions', tab: 'chat' };
 
-const DESTINATIONS: readonly Destination[] = ['sessions', 'apps', 'system', 'project', 'group', 'inbox'];
+const DESTINATIONS: readonly Destination[] = ['sessions', 'apps', 'system', 'project', 'group', 'inbox', 'delivery'];
 const TABS: readonly SessionTab[] = ['chat', 'changes', 'trajectory'];
 
 export function isDestination(value: unknown): value is Destination {
@@ -65,6 +65,7 @@ export function headerTitle(route: Route, sessionTitle: string | undefined, proj
   if (route.destination === 'apps') return 'Apps';
   if (route.destination === 'system') return 'System';
   if (route.destination === 'inbox') return 'Waiting for you';
+  if (route.destination === 'delivery') return 'Delivery';
   if (route.destination === 'project') return projectLabel?.trim() || 'Workspace';
   if (route.destination === 'group') return projectLabel?.trim() || 'Group';
   return sessionTitle?.trim() || 'New session';
@@ -100,6 +101,11 @@ export function parseView(search: string): { destination: Destination; projectPa
     const projectPath = params.get('path')?.trim();
     if (!projectPath) return null;
     return { destination: value, projectPath };
+  }
+  // The Delivery board names its project when it can; without `path` it follows the open chat's project.
+  if (value === 'delivery') {
+    const projectPath = params.get('path')?.trim();
+    return projectPath ? { destination: value, projectPath } : { destination: value };
   }
   return { destination: value };
 }

@@ -732,6 +732,19 @@ export interface AicoSettings {
    */
   brief?: BriefSettings;
   /**
+   * Delivery (src/delivery, ADR 0038): two commands the board may run. Both are
+   * commands, so a project's own `.aico/settings.json` can set them only once a
+   * person has approved that exact file (workspace trust, like `hooks`); the
+   * person's own settings apply at once.
+   *  - `deployCommand`: what "Deploy" runs for a release (a person clicks it).
+   *  - `worktreeSetup`: runs once in a task's fresh worktree before its agent
+   *    starts (install or generate what the stack needs).
+   */
+  delivery?: {
+    deployCommand?: string;
+    worktreeSetup?: string;
+  };
+  /**
    * "About you" (src/profile, ADR 0018): a background learner the person
    * controls. Read from the user's own settings file only — a project's
    * `.aico/settings.json` cannot switch it on or widen it (profile/service

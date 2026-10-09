@@ -142,6 +142,13 @@ export interface RunContext {
    */
   approve?: (title: string, detail: string) => Promise<boolean>;
   /**
+   * Who answers this run's `AskUserQuestion`. On the context, not only in a module
+   * variable: a server holds several runs at once (a chat, and each Delivery task's run),
+   * and a single global callback sends a question to whichever run registered last.
+   * A sub-agent started inside this run inherits it.
+   */
+  askUser?: (question: string) => Promise<string>;
+  /**
    * The run's autonomy level (design §4.2), when one was set. On the context
    * so a delegated run can never sit above the run that started it: a child's
    * level is the minimum of its own and this. Only L4 (park instead of ask)

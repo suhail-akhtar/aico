@@ -596,6 +596,141 @@ your project's checks run; if they fail you see why, and one call
 dependency: if your platform skipped it, install it in the project
 (`npm i -D @ast-grep/cli`) or put `ast-grep` on PATH.
 
+## Delivery: a board of tasks, delivered in parallel
+
+For work that is several independent pieces rather than one change, the project
+gets a **delivery board**. The engine side (this section) is what runs under any
+client; the board screens are in the clients.
+
+**The flow.** Describe the work and the agent (in plan mode, so it can read the
+code and write only the board) breaks it into tasks in the *backlog*, each with a
+title, what and why, checkable acceptance criteria, a priority (1 is most
+urgent), dependencies and labels (name the folders or files a task touches, for
+example `src/auth`). Nothing runs yet. You promote the tasks you want to *ready*
+and start the **dispatcher**; that, approving, and requesting changes are the
+three things that need *you* in the AICO window (the API token alone is
+refused), because they spend money or move your trunk.
+
+**What the dispatcher does.** It runs up to *max parallel* ready tasks (default
+2, at most 4). A task starts only when the tasks it depends on are **merged**
+and no running task is touching the same files (it predicts a task's files from
+the code graph and the task's text, then uses the files the run really
+changed). Each task gets its own `git worktree` on a branch `aico/task-<id>`
+under the AICO home (never inside your repository, and your checkout is never
+touched), and a background agent bounded by a spend ceiling
+(`safetyLimits.maxCostPerSubagent`, default $3) and a 45-minute deadline. The
+agent commits locally and submits with the `Delivery` tool. It cannot push,
+pull, merge, switch branches or manage worktrees. If AICO restarts, the
+dispatcher comes back **paused**, and a run that was lost goes back to ready
+with its branch and commits.
+
+**The merge queue.** A submitted task is rebased onto the current trunk, the
+project's checks run on the rebased tree (the same tree is never checked
+twice), and the task gets an evidence report and a **risk score**: size, how
+many other files depend on the change, weakened or deleted tests, secrets and
+unsafe code in the added lines, and sensitive files (dependencies, CI,
+authentication). It then waits in *review*. A rebase conflict or a failing check
+sends it back to *changes* and the agent resumes in the same worktree with the
+conflict files or the failure. **Approve** lands it on the trunk by
+fast-forward (rebased and checked again first if the trunk moved), then removes
+its worktree and branch. **Request changes** adds your comment and resumes the
+run. If your checkout is on the trunk, landing updates its files (uncommitted
+changes the merge would overwrite make git refuse; approve says so and changes
+nothing). Nothing is ever pushed. The board setting `autoLandLowRisk` (off) lands low-risk work whose
+checks are green without asking.
+
+**Where things are.** The board is a journal under
+`<AICO home>/delivery/<project>/board.jsonl`; branches are `aico/task-<id>`. A
+branch that still holds unmerged commits (a cancelled task, say) is kept and
+named rather than deleted. HTTP: `GET /api/delivery/board?project=`,
+`POST /api/delivery/tasks`, `PATCH /api/delivery/tasks/:id`,
+`POST /api/delivery/plan`, `POST /api/delivery/dispatch`,
+`POST /api/delivery/tasks/:id/approve` and `/request-changes`,
+`GET /api/delivery/tasks/:id/diff?project=`, and `GET /api/delivery/events?project=`
+(an event stream of `delivery/board` frames). The design and what was rejected
+are in [ADR 0038](docs/engineering/adr/0038-delivery.md).
+
+### The Delivery screen
+
+**Delivery** is in the sidebar (browser and desktop; it follows the open
+project, with a project switcher in its header). The **board** has columns for
+Backlog, Ready, Running, Review and Changes, and a thin **Merged** rail you can
+open; **Blocked** and **Cancelled** are filter chips that add a column. Tasks are
+numbered `#1`, `#2`… in the order they were made, and a task waiting on another
+says so ("waits for #3"). A running card shows its elapsed time, what it has cost
+and a link to the agent's session; a review card shows a risk badge (a coloured
+spine and a word: high, medium or low) and the one-line result of its checks.
+
+You move cards only where a person may: among Backlog, Ready, Blocked and
+Cancelled, by dragging or by the card's **Move** menu (the keyboard and touch
+path, which also says why a move is refused: Running belongs to the agents, and
+work lands through Review, not by a drag). **Start agents** asks how many may run
+at once (1 to 4) and says plainly that it spends money; **Pause** is one click.
+**Plan from a brief** takes a paragraph and starts the planning chat (the link
+opens it; tasks appear in Backlog as it writes them). **New task** takes a title,
+details, acceptance criteria, priority, dependencies and labels.
+
+Open a card for its **drawer**: the brief and acceptance criteria (editable while
+the task is in Backlog or Ready), the files it touched (each opens the Code map on
+that file), the **diff** file by file (collapsible, with line numbers), the agent's
+**evidence report**, and the discussion. For a task in Review, **Approve and land**
+and **Request changes** stay at the foot of the drawer; a high-risk change asks you
+to confirm the landing a second time. The **Review queue** tab lists everything
+waiting, riskiest first, and after each decision opens the next, so a batch is
+arrow keys, read, decide. Shortcuts: `n` new task, `/` filter.
+
+**Landing several at once.** In the Review queue, rows for **low-risk tasks whose
+checks are green** have a checkbox (Space ticks the focused row; **Select all low
+risk** ticks them all). **Approve and land N** is one yes; they land one at a time,
+each rebased and checked again if the trunk moved. A task that no longer rebases
+cleanly goes back for changes and the rest still land; if your checkout cannot take
+a landing at all (uncommitted edits in the way) nothing lands and you are told why.
+Medium- and high-risk tasks have no checkbox ("Open it to approve on its own"), and
+the engine refuses a batch that contains one.
+
+**When a run needs you.** Each task runs as a chat, and the card's **Session** link
+opens that chat (also after the task is done). If the agent asks a question, wants a
+tool call allowed, or has a call waiting in *Waiting for you*, the card shows
+**Needs you** with the question and an answer box, **Allow / Deny** or **Approve /
+Deny** (they use the same routes as the chat and the inbox, so the same rules apply:
+in a browser, *Allow* is accepted only from a window that is showing that chat, and the
+card says so and offers to open it; the desktop allows it from the window itself). The
+header counts how many tasks need you and filters to them, and the desktop raises a
+notification when a task needs you, is ready for review, lands or fails (under the
+existing *needs you* and *background work* switches). Your own note on a task
+(`Discussion`) and a note an agent leaves for a task that depends on it are part of
+the thread the next run is started with.
+
+**Releases.** The **Releases** tab lists what has landed since the last `v1.2.3` tag
+and proposes the next version from the commit messages (`feat` a minor, `fix` and the
+rest a patch, `!` or a `BREAKING CHANGE:` line a major), from the higher of the last
+tag and your own version file; you may type another, higher version. The notes are
+the tasks' titles with the checks they passed. **Create release** makes one commit
+(it bumps `package.json`, `pyproject.toml`, `Cargo.toml` or a `.csproj` where there
+is one, and adds a `CHANGELOG.md` section) and an annotated tag `vX.Y.Z` on your
+trunk. Nothing is pushed; push the tag yourself when you are ready. It is refused,
+and nothing changes, if you have uncommitted edits to a file it would overwrite.
+**Deploy** shows the exact command first and runs it in your project folder: for an
+AICO app, the app's own deploy script; otherwise `delivery.deployCommand` from your
+AICO settings. **Roll back** creates a task that reverts that release's commits and
+sends it through the same checks and review as any other task; if later work
+conflicts, nothing is created and the files are named.
+
+Two settings (in your own `settings.json`, or in a project's `.aico/settings.json`
+**after you approve that file**, as for hooks): `delivery.deployCommand` and
+`delivery.worktreeSetup`, a command that runs once in each new task worktree before
+its agent starts (install or generate what the stack needs).
+
+**What a new worktree gets.** Node's `node_modules`, a Python `.venv`/`venv` and PHP's
+`vendor` are linked from your project, so the checks run at once; an AICO app that
+declares its own install runs it once instead; .NET, Go, Java, Rust and Ruby use their
+global caches. Because a link is shared, an agent's `npm install`, `pip install` or
+`composer require` is refused while its folder is still a link (it would change your
+checkout and every other task), and the refusal tells it to call the `Delivery` tool's
+`localise` action, which gives that worktree a private copy (or, for Python and PHP,
+removes the link so the agent creates its own).
+
+
 ## The code map
 
 AICO keeps a dependency graph of each project — which file imports what,

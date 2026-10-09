@@ -16,6 +16,7 @@
     "supplyChain": "packageCheck:false switches off the check that installed packages exist and are not brand-new or lookalikes",
     "hooks": "runs commands",
     "env": "sets the process environment",
-    "mcpServers": "spawns processes / connects out"
+    "mcpServers": "spawns processes / connects out",
+    "delivery": "deployCommand and worktreeSetup run commands (trust-gated like hooks)"
   }
 }

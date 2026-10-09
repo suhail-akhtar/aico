@@ -74,7 +74,7 @@ await block('Every top-level setting has a project policy; new keys default to u
     modelCapabilities: 'allow', maxIterations: 'allow', maxParallelToolCalls: 'allow', completionGate: 'tighten', safetyLimits: 'tighten',
     agentModels: 'allow', disabledTools: 'allow', dependencyAudit: 'allow', supplyChain: 'tighten', codeGraph: 'tighten', editor: 'user-only', deferTools: 'allow', imageGeneration: 'allow',
     sandbox: 'tighten', shell: 'user-only', vault: 'user-only', repeatGuard: 'allow', longJobs: 'allow', sentinel: 'tighten', brief: 'allow',
-    profile: 'user-only', models: 'user-only',
+    profile: 'user-only', models: 'user-only', delivery: 'trust-gated',
   };
   // The interface itself, read from source: a key added there without a policy fails here too.
   const src = fs.readFileSync(path.join(repoRoot, 'src', 'settings.ts'), 'utf8');

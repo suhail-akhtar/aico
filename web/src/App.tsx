@@ -29,6 +29,7 @@ import { VaultPrompts } from './components/VaultPrompts';
 
 import { SystemPanel } from './components/SystemPanel';
 import { InboxPanel } from './components/InboxPanel';
+import { DeliveryPage } from './components/delivery/DeliveryPage';
 import { Trajectory } from './components/Trajectory';
 import { GoalBar } from './components/GoalBar';
 import { ActivityLine } from './components/ActivityLine';
@@ -313,6 +314,13 @@ export function App(): React.ReactElement {
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
             <div className="mx-auto max-w-3xl"><InboxPanel /></div>
           </div>
+        )}
+        {view === 'delivery' && (
+          <DeliveryPage
+            projectPath={route.projectPath}
+            onProject={(path) => setRoute(r => ({ ...r, destination: 'delivery', projectPath: path }))}
+            onOpenChat={() => setRoute(withTab(route, 'chat'))}
+          />
         )}
         {view === 'apps' && <AppsPane onOpenChat={() => setRoute(withTab(route, 'chat'))} />}
         {view === 'group' && route.groupId && (

@@ -168,6 +168,7 @@ function safeParse(text: string): unknown {
 }
 
 import type { ParkedAction } from './inbox';
+import type { AttentionSnapshot, BatchResult, BoardState, NewTaskInput, Release, ReleasePlan, Task } from './delivery-types';
 import type { CgFileDetail, CgPayload, CgSymbolDetail } from './components/codegraph/model';
 import type { BriefLatest, Brief, BriefSummaryRow, FixPlanResponse, FixAllResponse } from './brief';
 export type { ParkedAction } from './inbox';
@@ -677,6 +678,45 @@ export const api = {
 
   /** The Sentinel's recent verdicts and totals (engine: sentinel/, ADR 0015). Read-only. */
   sentinel: (limit = 30) => get<SentinelList>(`sentinel/list?limit=${limit}`),
+  /**
+   * Delivery (engine: src/delivery, routes /api/delivery/*): a work board where agents take
+   * tasks in parallel and a person reviews and lands their work. Starting the dispatcher,
+   * approving (which lands the branch) and requesting changes are a person's act, so they go
+   * as a person; everything else is a plain call.
+   */
+  deliveryBoard: (project: string) => get<BoardState>(`delivery/board?project=${encodeURIComponent(project)}`),
+  deliveryCreate: (input: NewTaskInput) => post<Task>('delivery/tasks', input),
+  deliveryUpdate: (id: string, project: string, patch: Partial<Pick<Task, 'title' | 'body' | 'acceptance' | 'status' | 'priority' | 'dependsOn' | 'labels'>>) =>
+    request<Task>(`delivery/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ project, ...patch }) }),
+  deliveryPlan: (project: string, brief: string) => post<{ sessionId: string }>('delivery/plan', { project, brief }),
+  deliveryDispatch: (project: string, action: 'start' | 'pause', maxParallel?: number) =>
+    postAsPerson<BoardState>('delivery/dispatch', { project, action, ...(maxParallel ? { maxParallel } : {}) }),
+  deliveryApprove: (id: string, project: string) =>
+    postAsPerson<Task>(`delivery/tasks/${encodeURIComponent(id)}/approve`, { project }),
+  deliveryRequestChanges: (id: string, project: string, comment: string) =>
+    postAsPerson<Task>(`delivery/tasks/${encodeURIComponent(id)}/request-changes`, { project, comment }),
+  deliveryDiff: (id: string, project: string) =>
+    get<{ diff: string }>(`delivery/tasks/${encodeURIComponent(id)}/diff?project=${encodeURIComponent(project)}`),
+  /** Land several low-risk, green tasks with one yes; the engine refuses the whole set if any is not eligible. */
+  deliveryApproveBatch: (project: string, ids: string[]) => postAsPerson<BatchResult>('delivery/approve-batch', { project, ids }),
+  /** A person's note on a task's thread (it reaches the agent's prompt as the person's word). */
+  deliveryComment: (id: string, project: string, text: string) =>
+    postAsPerson<Task>(`delivery/tasks/${encodeURIComponent(id)}/comment`, { project, text }),
+  /** The releases the board made, and what a release would be now (`version` previews a version you chose). */
+  deliveryReleases: (project: string, version?: string) =>
+    get<{ releases: Release[]; plan: ReleasePlan }>(`delivery/releases?project=${encodeURIComponent(project)}${version ? `&version=${encodeURIComponent(version)}` : ''}`),
+  /** Make the release: version bump, notes, a local annotated tag. A person's act. */
+  deliveryRelease: (project: string, opts: { version?: string; changelog?: boolean } = {}) =>
+    postAsPerson<Release>('delivery/releases', { project, ...opts }),
+  /** Run the project's deploy command for a release. A person's act. */
+  deliveryDeploy: (project: string, version: string) =>
+    postAsPerson<Release>(`delivery/releases/${encodeURIComponent(version)}/deploy`, { project }),
+  /** Create the task that reverts a release's commits; it goes through the normal queue. A person's act. */
+  deliveryRollback: (project: string, version: string) =>
+    postAsPerson<Task>(`delivery/releases/${encodeURIComponent(version)}/rollback`, { project }),
+  /** Compact state of every board, for notifications. */
+  deliveryAttention: () => get<AttentionSnapshot>('delivery/attention'),
+
 
   /** Long jobs (engine: longjob/): proposals over the size threshold and the jobs they became. */
   longJobs: (sessionId: string) =>

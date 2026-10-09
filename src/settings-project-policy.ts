@@ -104,6 +104,8 @@ export const PROJECT_POLICY = {
   brief: 'allow',
   profile: 'user-only',
   models: 'user-only',
+  // Two commands the Delivery board runs (a release's deploy, a worktree's setup): trust-gated like hooks (ADR 0038).
+  delivery: 'trust-gated',
 } as const satisfies Record<keyof Required<AicoSettings>, ProjectPolicy>;
 
 /** The policy for a top-level key; unknown keys are user-only. */

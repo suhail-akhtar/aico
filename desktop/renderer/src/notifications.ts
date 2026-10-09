@@ -13,7 +13,9 @@ import { useStore } from '@web/store';
 import { api } from '@web/api';
 import { newlyPending, originLabel, type ParkedAction } from '@web/inbox';
 import { freshNotices } from '@web/brief';
-import { toast, useDesk } from '@/state/desk';
+import type { AttentionSnapshot } from '@web/delivery-types';
+import { attentionEvents, describeAttention } from '@web/delivery-model';
+import { go, toast, useDesk } from '@/state/desk';
 import { desktop } from '@/desktop';
 import { markSeen } from '@/lib/local';
 import { openChat } from '@/chat/actions';
@@ -23,12 +25,13 @@ let focused = true;
 export function installNotifications(): void {
   desktop.win.onFocus((f) => { focused = f; if (f) void desktop.badge(0); });
   desktop.onNotificationClick((data) => {
-    const d = data as { sessionId?: string; view?: string } | null;
+    const d = data as { sessionId?: string; view?: string; path?: string } | null;
     if (d?.sessionId) void openChat(d.sessionId);
     else if (d?.view) {
       // Home is an empty chat: the brief card lives there, under a fresh composer.
       if (d.view === 'home' && useStore.getState().logged.size > 0) useStore.getState().newSession();
-      useDesk.getState().navigate({ view: d.view });
+      // A notification about one project's board opens that project's board, not the chat's project.
+      useDesk.getState().navigate(d.path ? { view: d.view, params: { path: d.path } } : { view: d.view });
     }
   });
 
@@ -82,6 +85,7 @@ export function installNotifications(): void {
 
   watchInbox(bump);
   watchBrief(bump);
+  watchDelivery(bump);
 }
 
 /**
@@ -148,4 +152,51 @@ function watchBrief(bump: () => void): void {
   };
   void poll();
   setInterval(() => void poll(), 60_000);
+}
+
+/**
+ * The Delivery board (engine: delivery/). Agents work in the background and a
+ * person is needed at a few moments — a run asks something, a task reaches
+ * review, work lands, a run fails — and none of those happen in an open chat, so
+ * the board is polled (a compact cross-project snapshot, GET /api/delivery/attention)
+ * every 15 s and the DIFF of two snapshots decides what to say (`attentionEvents`,
+ * pure and tested). The first poll is a baseline and announces nothing, so starting
+ * the app does not replay what was already true.
+ *
+ * Preferences, as for the inbox: a run waiting on you is "attention"; review,
+ * landed and failed are "background". At most three per poll, most pressing
+ * first. A native notification when the window is behind, a toast when it is in
+ * front; both open the Delivery page on that project.
+ */
+function watchDelivery(bump: () => void): void {
+  let last: AttentionSnapshot | undefined;
+  const poll = async (): Promise<void> => {
+    try {
+      const next = await api.deliveryAttention();
+      const prev = last;
+      last = next;
+      const events = attentionEvents(prev, next);
+      if (events.length === 0) return;
+      const prefs = useDesk.getState().prefs.notifications;
+      const multi = next.boards.length > 1;
+      let sent = 0;
+      for (const ev of events) {
+        if (sent >= 3) break;
+        const n = describeAttention(ev, multi);
+        if (!prefs[n.pref]) continue;
+        sent++;
+        if (focused) {
+          useDesk.getState().toast({
+            kind: ev.kind === 'needs' || ev.kind === 'failed' ? 'warning' : 'info', title: n.title, body: n.body,
+            action: { label: 'Open Delivery', run: () => go('delivery', { path: ev.project }) },
+          });
+        } else {
+          void desktop.notify({ title: n.title, body: n.body, data: { view: 'delivery', path: ev.project }, onlyWhenUnfocused: true });
+          bump();
+        }
+      }
+    } catch { /* the engine is starting or restarting, or predates Delivery; the next poll catches up */ }
+  };
+  void poll();
+  setInterval(() => void poll(), 15_000);
 }

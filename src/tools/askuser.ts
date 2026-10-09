@@ -25,7 +25,13 @@ export interface AskUserInput {
   question: string;
 }
 
-/** Global callback — set by the Ink UI, the readline REPL, or the web server. */
+import { currentRunContext } from '../run-context.js';
+
+/**
+ * Global callback — set by the Ink UI, the readline REPL, or the web server. A run that
+ * has its own (`RunContext.askUser`) uses that instead, so concurrent runs do not
+ * answer each other.
+ */
 let askUserCallback: ((question: string) => Promise<string>) | null = null;
 
 export function setAskUserCallback(cb: (question: string) => Promise<string>): void {
@@ -41,7 +47,7 @@ export function setAskUserCallback(cb: (question: string) => Promise<string>): v
  * waiting forever.
  */
 export function canAskUser(): boolean {
-  return askUserCallback !== null || process.stdin.isTTY === true;
+  return currentRunContext()?.askUser !== undefined || askUserCallback !== null || process.stdin.isTTY === true;
 }
 
 /** What a headless run is told instead of being left to wait. */
@@ -52,6 +58,8 @@ export const NO_ONE_TO_ASK =
   + 'stop and report exactly what you needed to know and why.';
 
 export async function askUser(input: AskUserInput): Promise<string> {
+  const own = currentRunContext()?.askUser;
+  if (own) return own(input.question);
   if (askUserCallback) {
     return askUserCallback(input.question);
   }

@@ -15857,7 +15857,9 @@ console.log('\n══ ENGINEERING: ON-DEMAND TOOLS, THE DELEGATION CONTRACT, DEL
   // have to argue its way past this line.
   // 11,100 since ADR 0028: the `graph` group's one LoadTools line (~21 tokens) is the price of the
   // CodeGraph tool being discoverable; its schema itself is deferred.
-  assert(tokens(lean) < 11_100, `always-sent built-in schemas stay under ~11.1K tokens (${tokens(lean)})`);
+  // 11,150 since ADR 0038: the `delivery` group's one LoadTools line (~20 tokens) is the price of the Delivery
+  // tool being discoverable; its schema itself is deferred.
+  assert(tokens(lean) < 11_150, `always-sent built-in schemas stay under ~11.15K tokens (${tokens(lean)})`);
 
   const withRemote = T.buildToolDefs({ settings: {}, loadedGroups: new Set(['remote']) });
   assert(names(withRemote).includes('SshExec') && !/\bremote:/.test(withRemote.find(d => d.name === T.LOAD_TOOLS).description),

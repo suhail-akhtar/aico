@@ -57,6 +57,7 @@ const GitPage = lazyPage(() => import('@/ide/GitPage'), 'GitPage');
 const GitHubPage = lazyPage(() => import('@/ide/GitHubPage'), 'GitHubPage');
 const FilesPage = lazyPage(() => import('@/ide/FilesPage'), 'FilesPage');
 const CodeMapPage = lazyPage(() => import('@/pages/CodeMapPage'), 'CodeMapPage');
+const DeliveryPage = lazyPage(() => import('@/pages/DeliveryPage'), 'DeliveryPage');
 
 function manifest(m: Omit<PluginManifest, 'version' | 'contributes'> & { contributes?: PluginManifest['contributes'] }): PluginManifest {
   return { version: __DESKTOP_VERSION__, contributes: {}, ...m } as PluginManifest;
@@ -165,6 +166,15 @@ export const BUILTINS: BuiltinPlugin[] = [
     commands: [
       { id: 'codemap.open', title: 'Code map: open for the current project', category: 'Projects', icon: 'map', keybinding: 'Ctrl+Shift+M', run: () => go('codemap', { path: useStore.getState().project ?? '' }) },
       { id: 'codemap.changes', title: 'Code map: what my uncommitted change affects', category: 'Projects', icon: 'map', run: () => go('codemap', { path: useStore.getState().project ?? '', mode: 'changes' }) },
+    ],
+  },
+  {
+    manifest: manifest({ id: 'aico.delivery', name: 'Delivery', icon: 'rocket', category: 'Projects', description: 'A work board: agents take tasks in parallel, you review the diff and evidence and land their work.', contributes: {
+      navItems: [{ id: 'delivery', title: 'Delivery', icon: 'rocket', view: 'delivery', order: 51 }],
+    } }),
+    views: [{ id: 'delivery', title: 'Delivery', icon: 'rocket', component: DeliveryPage }],
+    commands: [
+      { id: 'delivery.open', title: 'Delivery: open the board for the current project', category: 'Projects', icon: 'rocket', run: () => go('delivery', { path: useStore.getState().project ?? '' }) },
     ],
   },
   {

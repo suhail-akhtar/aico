@@ -53,6 +53,11 @@ import { handleBoardRoute } from './board-routes.js';
 import { handleDeckVisualRoute } from './deck-visual-routes.js';
 import { handleCodeGraphRoute } from './codegraph-routes.js';
 import { handleEvidenceRoute } from './evidence-routes.js';
+import { handleDeliveryRoute } from './delivery-routes.js';
+import { bootDelivery, configureDelivery, onBoardChange, boardState as deliveryBoardState, sessionDirOf as deliverySessionDir, DEFAULT_TASK_BUDGET_USD } from '../delivery/index.js';
+import { sessionRunner } from './delivery-runner.js';
+import { planPrompt } from '../delivery/prompts.js';
+import { projectKey } from '../learning/proposals.js';
 import { handleEditorRoute } from './editor.js';
 import { readUserSettingsFile } from '../settings-project-policy.js';
 import { onCanvasActivity, onCanvasChange, onCanvasComments } from '../canvas/store.js';
@@ -492,6 +497,12 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     if (found) {
       sessionCwd.set(sessionId, found);
       return found;
+    }
+    // A delivery task's chat is filed under its worktree, which is not a listed project (and may be gone by now).
+    const taskDir = deliverySessionDir(sessionId);
+    if (taskDir) {
+      sessionCwd.set(sessionId, taskDir);
+      return taskDir;
     }
     // A sub-agent's log (`sub-<id>`) is filed in its conversation's directory,
     // which need not be a listed project; its spec remembers where.
@@ -1382,6 +1393,34 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     // The change packet (server/evidence-routes, ADR 0034): registered projects only, read-only.
     if (await handleEvidenceRoute(route, req, res, url, { send, isKnownProject: dir => isKnownProject(cwd, dir) })) return;
 
+    // The delivery board (server/delivery-routes, ADR 0038): registered projects only; starting, approving and requesting changes need a person.
+    if (route.startsWith('delivery/')) {
+      const live = await loadSettings();
+      const perTask = live.safetyLimits?.maxCostPerSubagent;
+      configureDelivery({ budgetUsd: () => (typeof perTask === 'number' && perTask > 0 ? perTask : DEFAULT_TASK_BUDGET_USD) });
+    }
+    if (await handleDeliveryRoute(route, req, res, url, {
+      send, readJson: r => readJson(r), isKnownProject: dir => isKnownProject(cwd, dir),
+      human: (r, body) => gate.checkHuman({
+        grant: r.headers['x-aico-grant'],
+        client: (body as { client?: unknown }).client ?? r.headers['x-aico-client'],
+        uiKey: r.headers['x-aico-ui-key'],
+        fetchSite: typeof r.headers['sec-fetch-site'] === 'string' ? r.headers['sec-fetch-site'] : undefined,
+      }),
+      subscribe: (project, response) => hub.subscribeTopic(`delivery:${projectKey(project)}`, response),
+      // A planning chat in the project: plan mode, so it can read the code and write only the board.
+      startPlan: async (project, brief) => {
+        const sessionId = mintSessionId();
+        const runCwd = await resolveCwd(sessionId, project);
+        await runs.ensure(sessionId, runCwd);
+        runs.rename(sessionId, `Plan: ${brief.replace(/\s+/g, ' ').slice(0, 60)}`);
+        const chosen = runs.modelOf(sessionId) ?? await currentDefaultModel();
+        void runs.submit(sessionId, runCwd, planPrompt(brief), chosen, { approval: 'auto', planMode: true })
+          .catch(() => { /* already reported on the chat's own stream as turn-end */ });
+        return { sessionId };
+      },
+    })) return;
+
     // The Artifacts panel: everything this chat made or opened (server/artifact-routes).
     if (await handleArtifactRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;
     // Design boards: the board, its export, the person's notes (server/board-routes, ADR 0037).
@@ -2086,6 +2125,20 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       })().catch(() => { /* reported on the chat's stream as turn-end; the journal keeps the job */ });
     },
     cancel: (sessionId) => { runs.cancel(sessionId); },
+  });
+  // Delivery boards (ADR 0038): a task's run is a chat session (server/delivery-runner), so it can be opened, can ask
+  // a question and can wait for a person; a running dispatcher comes back paused, finished tasks' worktrees are swept,
+  // and every change to a board is pushed to the clients watching it.
+  configureDelivery({
+    runner: sessionRunner({
+      runs, mintSessionId, model: () => currentDefaultModel(), settings: () => loadSettings(),
+      onSession: (sessionId, dir) => { sessionCwd.set(sessionId, dir); },
+    }),
+  });
+  void bootDelivery().catch(() => { /* the next dispatch or sweep tries again */ });
+  onBoardChange(project => {
+    const topic = `delivery:${projectKey(project)}`;
+    if (hub.topicSize(topic) > 0) hub.publishTopic(topic, 'delivery/board', deliveryBoardState(project));
   });
   const resumed = resumeAfterRestart();
   if (resumed) console.log(`  Resuming ${resumed} long job(s) from their journals.`);

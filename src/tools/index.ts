@@ -20,6 +20,7 @@ import { runChecks, runChecksDefinition } from './run-checks.js';
 import { codeMap, codeMapDefinition } from './codemap.js';
 import { codeGraphTool, codeGraphDefinition } from './codegraph.js';
 import { evidenceTool, evidenceDefinition } from './evidence.js';
+import { deliveryTool, deliveryDefinition } from './delivery.js';
 import { afterRead, afterWrite, beforeWrite, takeQueuedEditNotes } from '../codegraph/edit-note.js';
 import { gitTool, gitDefinition } from './git.js';
 import { knowledgeTool, knowledgeDefinition } from './knowledge.js';
@@ -316,6 +317,8 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...codeGraphDefinition, isConcurrencySafe: true, maxResultSizeChars: 30_000 },
   // The deferred `evidence` group (ADR 0034): reads the run's own log and runs read-only git.
   { ...evidenceDefinition, isConcurrencySafe: true, maxResultSizeChars: 40_000 },
+  // The task board (ADR 0038). Deferred (group `delivery`). Exclusive: create/update/submit read, change and rewrite the board. No permission prompt: it only edits the board; spending and landing are a person's (decision gate).
+  { ...deliveryDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
   { ...contextWindowToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 5_000 },
   { ...agentCreateToolDefinition, isConcurrencySafe: false, maxResultSizeChars: 5_000 },
@@ -468,7 +471,16 @@ let _exclusiveLock: Promise<void> | null = null;
 let _exclusiveRelease: (() => void) | null = null;
 const _waitQueue: Array<() => void> = [];
 
+/**
+ * Tools that only wait for a person and change nothing. They take no part in the lock below:
+ * it is process-wide, so a question one run is waiting on (for minutes, or for as long as the
+ * person is away) would otherwise freeze every other run's tools, and Delivery runs several
+ * at once (ADR 0038).
+ */
+const WAITS_FOR_A_PERSON: ReadonlySet<string> = new Set(['AskUserQuestion']);
+
 async function acquireToolLock(toolName: string): Promise<void> {
+  if (WAITS_FOR_A_PERSON.has(toolName)) return;
   const def = toolDefinitions.find(d => d.name === toolName);
   const isSafe = def?.isConcurrencySafe ?? false;
 
@@ -495,6 +507,7 @@ async function acquireToolLock(toolName: string): Promise<void> {
 }
 
 function releaseToolLock(toolName: string): void {
+  if (WAITS_FOR_A_PERSON.has(toolName)) return;
   const def = toolDefinitions.find(d => d.name === toolName);
   const isSafe = def?.isConcurrencySafe ?? false;
 
@@ -713,6 +726,9 @@ export async function executeTool(
       break;
     case 'Evidence':
       result = await evidenceTool(args as unknown as Parameters<typeof evidenceTool>[0]);
+      break;
+    case 'Delivery':
+      result = await deliveryTool(args as unknown as Parameters<typeof deliveryTool>[0]);
       break;
     case 'CodebaseMap':
       result = await codeMap(args as unknown as Parameters<typeof codeMap>[0]);

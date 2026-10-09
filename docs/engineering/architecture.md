@@ -56,6 +56,7 @@ agents changing the code. Paths were verified against the tree on 2026-09-30.
 | `work/` | the work ledger (`aicoHome()/work.jsonl`, `AICO_WORK_LOG`), handles, supervisor (limits enforced by the loop), watchers, `<running_work>` projection |
 | `cron/` | scheduler + store (`AICO_CRON_STORE` or `aicoHome()/cron.json`) + Cron tools |
 | `background/` | background agents, mirrored into the ledger via `work/adapters.ts` |
+| `delivery/` | the task board ([ADR 0038](adr/0038-delivery.md)): journal (`aicoHome()/delivery/<project>/`), dispatcher over background agents in per-task worktrees, serial merge queue (rebase, checks by tree hash, evidence, risk), landing; wire types in `shared/delivery/types.ts`; routes in `server/delivery-routes.ts`; the deferred `Delivery` tool |
 | `sandbox/` | file-write confinement and its pipeline guard (`guard.ts`) |
 | `skills/` | skill loader/registry (builtin → user → project; `skills/builtin/`) |
 | `agents/` | agent specs, built-in specialist prompts (`prompts-registry.ts`), user agents, per-role model economy |

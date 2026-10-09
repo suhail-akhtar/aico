@@ -22,7 +22,6 @@ import { ensureProjectTrust, projectTrustStatus, untrustedNotice } from '../work
 import { instructionsFor } from './projects.js';
 import { groupInstructions } from './groups.js';
 import { Inbox, deliveryStep, inboxView } from '../session/inbox.js';
-import { setAskUserCallback } from '../tools/askuser.js';
 import type { Session } from '../session/session.js';
 import type { AicoSettings } from '../settings.js';
 import type { EventHub } from './events.js';
@@ -592,10 +591,10 @@ export class RunManager {
     // terminal and the turn blocked on stdin nobody was watching — a silent
     // hang for up to the hour that tool is allowed. Registered per turn, so
     // the answer is delivered to the run that asked.
-    setAskUserCallback((question) => new Promise<string>((resolve) => {
+    const askUserHere = (question: string): Promise<string> => new Promise<string>((resolve) => {
       run.pendingQuestion = { question, resolve, at: Date.now() };
       emit('question', { question });
-    }));
+    });
 
     /**
      * Hand a file write to the client instead of writing it here.
@@ -945,6 +944,8 @@ export class RunManager {
         inbox: run.inbox,
         tokenTracker: run.tokenTracker,
         settings,
+        // On the run's own context as well as the process-wide fallback: Delivery runs several sessions at once.
+        onAskUser: askUserHere,
         // The agent's own system prompt, with its skills' procedures inlined.
         // Same resolver the Task tool uses, so an agent behaves identically
         // whether it was delegated to or is being spoken to directly.
