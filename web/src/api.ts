@@ -32,6 +32,7 @@ import { transportFetch } from './transport';
 import type { HostAnswer, HostCall, HostToolName } from '../../shared/host-tools';
 import type { CanvasDoc, CanvasSummary, CanvasWriteResult, DeckImageCandidate, DocSettings, ExportFormat } from '../../shared/ui/canvas/host';
 import type { DeckImage } from '../../shared/ui/canvas/deck-model';
+import type { Board, BoardNote } from '../../shared/ui/board/board-model';
 import type { PartEditRequest, PartEditResponse } from '../../shared/ui/canvas/scoped-edit';
 import type { CanvasComment, CommentAnchor } from '../../shared/ui/canvas/comments';
 import type { ImportReview, ReviewedSkill, SkillProvenance } from './skill-review';
@@ -226,7 +227,8 @@ const get = <T,>(path: string): Promise<T> => request<T>(path, { method: 'GET' }
 /** One thing a chat made or opened, as `artifacts/list` returns it (engine: `server/artifact-routes`). */
 export interface ArtifactItem {
   key: string;
-  kind: 'document' | 'sheet' | 'deck' | 'code' | 'image' | 'file' | 'export';
+  /** `board`: a design board's board.json (ADR 0037); its `id` is that file's path. */
+  kind: 'document' | 'sheet' | 'deck' | 'code' | 'image' | 'file' | 'export' | 'board';
   source: 'canvas' | 'file' | 'attachment';
   /** Canvas id, path inside the chat's artifacts folder, or attachment id. */
   id: string;
@@ -1013,6 +1015,25 @@ export const api = {
     const res = await transportFetch(`/api/${q}`, { headers: { 'x-aico-token': getToken() } });
     if (!res.ok) throw new Error(`could not fetch the file (${res.status})`);
     return res.blob();
+  },
+  // ── Design boards (server/board-routes, ADR 0037) ──
+  /** A board, normalised by the engine, with the problems it found. `path` is its board.json in the artifacts folder. */
+  boardGet: (sessionId: string, path: string) =>
+    get<{ board: Board; problems: string[] }>(`boards/get?session=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`),
+  boardNotes: (sessionId: string, path: string, notes: BoardNote[]) =>
+    post<{ notes: BoardNote[] }>('boards/notes', { session: sessionId, path, notes }),
+  /** A screen as PNG, the board as PDF, or its folder as a zip — drawn by the engine's headless browser. */
+  boardExport: async (sessionId: string, path: string, format: 'png' | 'pdf' | 'zip', frame?: string): Promise<{ blob: Blob; name: string }> => {
+    const q = `session=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&format=${format}${frame ? `&frame=${encodeURIComponent(frame)}` : ''}`;
+    const res = await transportFetch(`/api/boards/export?${q}`, { headers: { 'x-aico-token': getToken() } });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const body = text ? safeParse(text) as { error?: string } : {};
+      throw new ApiError(body.error ?? `HTTP ${res.status}`, res.status, body);
+    }
+    const cd = res.headers.get('content-disposition') ?? '';
+    const name = /filename\*=UTF-8''([^;]+)/i.exec(cd)?.[1] ?? /filename="?([^";]+)"?/i.exec(cd)?.[1];
+    return { blob: await res.blob(), name: name ? decodeURIComponent(name) : `board.${format}` };
   },
   /** A spreadsheet's cells or a Word file's content, read by the engine for the Artifacts viewer. */
   artifactPreview: (sessionId: string, ref: { path?: string; attachment?: string }) =>

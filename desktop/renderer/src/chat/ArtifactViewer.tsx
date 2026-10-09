@@ -13,6 +13,9 @@
  *   PDF            Chromium's own viewer, on a typed blob
  *   SVG            as an <img> from a typed blob (an <img> never runs its scripts)
  *   audio / video  the native players
+ *   design board   the board canvas (web/components/board, ADR 0037); each screen is
+ *                  composed into one document and registered as an in-memory page on
+ *                  the preview origin, so its scripts run and its links reach the board
  *   anything else  what it is, with Open / Show in folder / Save
  *
  * Why not `srcdoc`: a srcdoc (or blob:, or data:) frame inherits the window's
@@ -35,6 +38,7 @@ import { wrapDocument } from '@aico/shared/ui/HtmlPreview';
 import { api, type ArtifactItem, type ArtifactPreview } from '@web/api';
 import { Icon } from '@/lib/icons';
 import { desktop } from '@/desktop';
+import { DesignBoardView } from '@web/components/board/DesignBoardView';
 import { bytes as fmtBytes, cls } from '@/lib/util';
 import {
   MAX_TEXT_PREVIEW, isTextual, languageFor, mimeFor, parseDelimited, typeLabel, type ArtifactEntry,
@@ -57,6 +61,7 @@ export function typeStyle(e: Pick<ArtifactEntry, 'kind' | 'item'>): { icon: stri
   switch (k) {
     case 'sheet': case 'csv': case 'xlsx': return { icon: 'table', tint: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' };
     case 'html': return { icon: 'globe', tint: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' };
+    case 'board': return { icon: 'grid', tint: 'bg-teal-500/10 text-teal-600 dark:text-teal-400' };
     case 'deck': return { icon: 'monitor', tint: 'bg-orange-500/10 text-orange-600 dark:text-orange-400' };
     case 'code': return { icon: 'code', tint: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' };
     case 'pdf': return { icon: 'file-text', tint: 'bg-rose-500/10 text-rose-600 dark:text-rose-400' };
@@ -66,6 +71,23 @@ export function typeStyle(e: Pick<ArtifactEntry, 'kind' | 'item'>): { icon: stri
     case 'document': case 'markdown': case 'docx': case 'text': return { icon: 'file-text', tint: 'bg-aico-accent-soft text-aico-accent' };
     default: return { icon: 'file', tint: 'bg-aico-hover text-aico-secondary' };
   }
+}
+
+/**
+ * A board screen as an in-memory page on the preview origin (ADR 0020): a srcdoc frame here would
+ * inherit the window's CSP and run no script. Remembered per document, so a frame scrolled away and
+ * back reuses its page instead of minting another token (the registry keeps the last 200).
+ */
+const boardPages = new Map<string, Promise<string>>();
+function boardFrameHost(html: string): Promise<string> {
+  let p = boardPages.get(html);
+  if (!p) {
+    p = desktop.preview.register({ html }).then(r => r.url);
+    p.catch(() => boardPages.delete(html));
+    boardPages.set(html, p);
+    while (boardPages.size > 120) boardPages.delete(boardPages.keys().next().value!);
+  }
+  return p;
 }
 
 type Loaded =
@@ -106,6 +128,8 @@ export interface ViewerActions {
   openWith?: () => void;
   reveal?: () => void;
   save: () => void;
+  /** Save bytes the viewer made (a board's export) under a name. */
+  saveBlob?: (name: string, blob: Blob) => void;
   openCanvas?: () => void;
 }
 
@@ -122,6 +146,9 @@ export function ArtifactViewer({ sessionId, entry, actions }: {
     );
   }
   if (entry.kind === 'image') return <ImageView key={entry.item.key} src={artifactUrl(sessionId, entry.item)} alt={entry.name} />;
+  if (entry.kind === 'board') {
+    return <DesignBoardView key={entry.item.key} sessionId={sessionId} path={entry.item.id} version={entry.item.updatedAt} frameHost={boardFrameHost} {...(actions.saveBlob ? { save: actions.saveBlob } : {})} />;
+  }
   return <LoadedView key={entry.item.key} sessionId={sessionId} entry={entry} actions={actions} />;
 }
 

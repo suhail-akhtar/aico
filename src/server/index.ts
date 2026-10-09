@@ -49,6 +49,7 @@ import { PROVIDER_DEFAULT_MODELS } from '../providers/index.js';
 import { handleSystemRoute } from './api-system.js';
 import { handleCanvasRoute } from './canvas-routes.js';
 import { handleArtifactRoute } from './artifact-routes.js';
+import { handleBoardRoute } from './board-routes.js';
 import { handleDeckVisualRoute } from './deck-visual-routes.js';
 import { handleCodeGraphRoute } from './codegraph-routes.js';
 import { handleEvidenceRoute } from './evidence-routes.js';
@@ -1383,6 +1384,8 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
 
     // The Artifacts panel: everything this chat made or opened (server/artifact-routes).
     if (await handleArtifactRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;
+    // Design boards: the board, its export, the person's notes (server/board-routes, ADR 0037).
+    if (await handleBoardRoute(route, req, res, url, { resolveCwd: id => resolveCwd(id), readJson, send })) return;
 
     // Deck pictures, licensed image search and brand colours (server/deck-visual-routes, ADR 0025).
     if (await handleDeckVisualRoute(route, req, res, url, {

@@ -59,7 +59,7 @@ export interface ArtifactRouteDeps {
   send: (res: http.ServerResponse, status: number, body: unknown) => void;
 }
 
-export type ArtifactKind = 'document' | 'sheet' | 'deck' | 'code' | 'image' | 'file' | 'export';
+export type ArtifactKind = 'document' | 'sheet' | 'deck' | 'code' | 'image' | 'file' | 'export' | 'board';
 
 export interface Artifact {
   /** Unique in the list: `canvas:<id>`, `file:<relative path>`, `attachment:<id>`. */
@@ -115,7 +115,11 @@ async function walk(root: string, rel = '', depth = 0, out: Array<{ rel: string;
   return out;
 }
 
-/** A path inside the artifacts folder, or undefined when it is not (traversal, absolute, a link out). */
+/** A path inside the artifacts folder, or undefined when it is not (traversal, absolute, a link out). Also used by the board routes. */
+export async function insideArtifacts(root: string, rel: string): Promise<string | undefined> {
+  return inside(root, rel);
+}
+
 async function inside(root: string, rel: string): Promise<string | undefined> {
   if (!rel || rel.includes('\0') || path.isAbsolute(rel) || /^[a-z]:/i.test(rel)) return undefined;
   const full = path.resolve(root, rel);
@@ -143,14 +147,31 @@ export async function listArtifacts(input: { cwd: string; sessionId: string }): 
   const byBase = new Map(canvases.map(c => [fileBase(c.title), c.title]));
   const root = getWorkspaceInfo(ctx).artifactsDir;
   if (root) {
-    for (const f of await walk(root)) {
+    const files = await walk(root);
+    // A design board (ADR 0037) is its board.json: listed as one `board` artifact titled by the board;
+    // its screens and shared files keep their own rows, grouped under the board's title.
+    const boards = new Map<string, string>();
+    for (const f of files) {
+      if (path.posix.basename(f.rel) !== 'board.json') continue;
+      let title = 'Design board';
+      try { title = (JSON.parse(await readFile(path.join(root, f.rel), 'utf8')) as { title?: unknown }).title as string || title; } catch { /* listed under its default name */ }
+      boards.set(path.posix.dirname(f.rel), String(title).slice(0, 120));
+    }
+    for (const f of files) {
       const name = path.posix.basename(f.rel);
+      const dir = path.posix.dirname(f.rel);
+      if (name === 'board.json' && boards.has(dir)) {
+        const title = boards.get(dir)!;
+        out.push({ key: `file:${f.rel}`, kind: 'board', source: 'file', id: f.rel, title, ext: 'json', bytes: f.bytes, updatedAt: f.at, topic: title, path: path.join(root, f.rel) });
+        continue;
+      }
       const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
       const base = name.replace(/\.[^.]+$/, '');
+      const board = [...boards.keys()].find(d => dir === d || dir.startsWith(`${d}/`));
       const from = byBase.get(base);
       out.push({
         key: `file:${f.rel}`, kind: from ? 'export' : IMAGE_EXT.has(ext) ? 'image' : 'file', source: 'file', id: f.rel, title: name,
-        ...(ext ? { ext } : {}), bytes: f.bytes, updatedAt: f.at, topic: from ?? 'Files', path: path.join(root, f.rel),
+        ...(ext ? { ext } : {}), bytes: f.bytes, updatedAt: f.at, topic: from ?? (board ? boards.get(board)! : 'Files'), path: path.join(root, f.rel),
       });
     }
   }

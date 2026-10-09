@@ -144,6 +144,12 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ['Evidence'],
   },
   {
+    // ADR 0037. Loaded outright by a request for a mockup, prototype or screens (REQUEST_LOADS) and by the design-board skill.
+    id: 'design',
+    summary: 'clickable HTML mockups of screens on a design board (mockup, prototype, UX flow)',
+    tools: ['DesignBoard'],
+  },
+  {
     id: 'audit',
     summary: 'dependency vulnerabilities and licences',
     tools: ['DependencyAudit'],
@@ -179,12 +185,14 @@ export function groupOf(tool: string): string | undefined {
 /**
  * Groups a procedure is known to need, loaded when it is opened.
  *
- * Kept to the one documented flow that needs a group: the server-ops skill is
- * nothing but the remote and credential tools, and making it spend a step
- * loading them would be the mechanism getting in the way of its own purpose.
+ * Kept to the documented flows that need a group: the server-ops skill is
+ * nothing but the remote and credential tools, and the design-board skill is
+ * a procedure for the DesignBoard tool — making either spend a step loading
+ * them would be the mechanism getting in the way of its own purpose.
  */
 const SKILL_LOADS: Record<string, readonly string[]> = {
   'server-ops': ['remote', 'credentials'],
+  'design-board': ['design'],
 };
 
 /**
@@ -212,6 +220,11 @@ const REQUEST_LOADS: Array<{ re: RegExp; groups: readonly string[] }> = [
     // A PR description, a commit message or "what did you verify": the record beats the model's recollection (ADR 0034).
     re: /\b(?:pull request|PR (?:description|body|summary)|pr (?:description|body)|commit (?:message|body)|change (?:packet|evidence|report)|evidence (?:report|packet)|what (?:did|have) you (?:verify|verified|check|run|test)|prove it works)\b/i,
     groups: ['evidence'],
+  },
+  {
+    // A mockup, prototype, wireframe or set of screens (ADR 0037): the board tool, not a pile of loose HTML files.
+    re: /\b(?:mock[- ]?ups?|wire-?frames?|prototypes?|clickable (?:demo|design|flow)|ux flows?|user flows?|screen (?:designs?|flows?)|design board|(?:design|mock) (?:the |some |a few )?screens)\b/i,
+    groups: ['design'],
   },
   {
     // A question about earlier work: the same "cannot ask for what it cannot see" reason.

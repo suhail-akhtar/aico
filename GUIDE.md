@@ -691,6 +691,37 @@ Open a canvas, **Open beside** to put a document and a sheet side by side,
 rename, export or download, and **Show in chat** to jump to where it came
 from. The web client shows the same list in the side rail.
 
+### Design boards: clickable mockups
+
+Ask for a **mockup**, prototype, wireframe or UX flow ("mock up the screens
+for a team notebook: today, a workspace, a document, settings") and the agent
+builds a **design board**: real HTML screens laid out as titled frames under
+section headings ("Today and the start", "Making things"), on a canvas you
+zoom and pan. It appears in **Artifacts** as a design board (in the web
+client, click it in the side rail and it opens over the whole window).
+
+- **Look around.** Wheel or pinch zooms toward the pointer; drag the canvas,
+  hold Space, or pick the hand tool (H) to pan. − / + step the zoom, the %
+  goes to 100%, Fit (Shift+1) shows the whole board. Only the screens in view
+  load, so a big board stays quick.
+- **Play** (the button on a frame, a double-click, or Enter on a selected
+  frame) opens that screen at its device size. Its links and buttons open the
+  board's other screens, so you can click through the whole flow; ← → step
+  through the board, Esc goes back.
+- **Present** walks every screen in order, full screen.
+- **Notes.** Pick the note tool (N) and click to pin a note — on a screen or
+  on the board. The agent reads your notes with the board, so "address my
+  notes on the board" works.
+- **Download** a screen as one self-contained HTML file (the frame's download
+  button), or **Export** the board as a PDF (a page per screen), the selected
+  screen as PNG, or the whole folder as a zip whose screens open in any
+  browser and still link to each other.
+
+Screens run in a sandbox with no network: they cannot reach AICO, your files
+or the internet, and a link that does not lead to another screen of the board
+does nothing (the board says so). The boards live in the chat's artifacts
+folder under `boards/`.
+
 ## In VS Code
 
 aico is a tab of its own in the Secondary Side Bar, beside Chat — a native

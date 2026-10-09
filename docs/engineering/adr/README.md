@@ -61,6 +61,7 @@ in the module header of the code they govern.
 | [0035](0035-managed-policy-and-audit-export.md) | Managed policy: a machine-wide, restrict-only policy file (MDM/GPO deployable) above user and project settings, enforced at the settings merge, model selection, the tool pipeline and run start; plus a redacted, versioned audit export (JSONL/CEF/CSV) and a usage report for SIEM; SSO/SCIM/RBAC/admin console are not built | Accepted |
 | [0034](0034-evidence-ci-agent-flaky-tests.md) | Change evidence report built from the session log (two new record events), a read-only-by-default GitHub Action CI agent (review and gated fix-ci, engine-made branch, token never in the model's process), and one-shot flaky-test re-run that reports FLAKY instead of green and never quarantines | Accepted |
 | [0036](0036-licence-fsl.md) | Licence: Functional Source License 1.1 with Apache 2.0 future licence (FSL-1.1-ALv2) from 0.48.0; earlier versions keep MIT / PolyForm Noncommercial | Accepted |
+| [0037](0037-design-board.md) | Design boards: UI mockups as linked standalone HTML screens on a zoomable canvas (sections, frames, Play with working links, Present, notes); a deferred `DesignBoard` tool that enforces board-folder paths and no-network screens; screens composed into sandboxed documents in every client; PNG/PDF/zip export | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

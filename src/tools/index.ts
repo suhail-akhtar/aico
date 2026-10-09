@@ -36,6 +36,7 @@ import { sportsScores, sportsScoresDefinition } from './sports.js';
 import { generateImage, generateImageDefinition } from './generate-image.js';
 import { dependencyAudit, dependencyAuditDefinition, type DependencyAuditInput } from './dependency-audit.js';
 import { canvasTool, canvasDefinition } from './canvas.js';
+import { designBoardTool, designBoardDefinition } from '../canvas/board-tool.js';
 import { notebookEdit, notebookEditDefinition } from './notebook.js';
 import { todoRead, todoReadDefinition, todoWrite, todoWriteDefinition } from './todo.js';
 import { askUser, askUserDefinition } from './askuser.js';
@@ -250,6 +251,9 @@ export const toolDefinitions: ToolDefinition[] = [
   // Sized for a `read` of a long document: truncating it would hand the model
   // half a text to edit.
   { ...canvasDefinition, isConcurrencySafe: false, maxResultSizeChars: 450_000 },
+  // Writes only the chat's own artifacts folder (boards/<id>/), like Canvas: no permission prompt,
+  // exclusive because add_frame reads, changes and rewrites board.json. Deferred group `design` (ADR 0037).
+  { ...designBoardDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   // Spends the user's money and writes files: exclusive, and asks permission.
   { ...generateImageDefinition, isConcurrencySafe: false, maxResultSizeChars: 10_000 },
   // Runs package managers that share caches and lock files with RunChecks and
@@ -675,6 +679,9 @@ export async function executeTool(
       break;
     case 'Canvas':
       result = await canvasTool(args as unknown as Parameters<typeof canvasTool>[0]);
+      break;
+    case 'DesignBoard':
+      result = await designBoardTool(args as unknown as Parameters<typeof designBoardTool>[0]);
       break;
     case 'CurrencyRates':
       result = await currencyRates(args as unknown as Parameters<typeof currencyRates>[0]);

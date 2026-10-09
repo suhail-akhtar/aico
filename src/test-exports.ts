@@ -846,3 +846,13 @@ export { compareTest, isTestFile, assertionCount, skipMarkers, deletedTestPaths 
 export { scanWrittenFiles } from './security/project-scan.js';
 export { runFindingSink } from './security/finding.js';
 export { testCheckFailedThisTurn } from './checks.js';
+
+// Design boards (ADR 0037).
+export { designBoardIn, designBoardTool, designBoardDefinition, insideBoard, boardDirIn, readBoardAt, describeBoard } from './canvas/board-tool.js';
+export { exportBoard, boardFiles } from './canvas/board-export.js';
+export { handleBoardRoute } from './server/board-routes.js';
+export {
+  parseBoard, serializeBoard, safeRelPath, resolveHref, frameForHref, linkReport, networkProblems, layoutBoard, frameSize,
+  DEVICES as BOARD_DEVICES,
+} from '../shared/ui/board/board-model.js';
+export { composeScreen } from '../shared/ui/board/board-compose.js';

@@ -228,6 +228,7 @@ export function ArtifactsPanel(): React.ReactElement | null {
       reveal: () => void desktop.shell.showItemInFolder(a.path!),
     } : {}),
     save: () => void fileBlob(a).then(b => saveAs(a.title, b), (err: unknown) => toast.error('Not saved', err instanceof Error ? err.message : String(err))),
+    saveBlob: (name, blob) => void saveAs(name, blob).catch((err: unknown) => toast.error('Not saved', err instanceof Error ? err.message : String(err))),
     openCanvas: () => openCanvas(a),
   });
   const copyPath = (p: string): void => {

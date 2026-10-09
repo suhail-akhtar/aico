@@ -4,7 +4,8 @@
  *
  * The desktop has the full panel (open beside, split view, rename, export
  * menu); the browser has no side slot for a canvas, so here a canvas row
- * scrolls to its card in the conversation and opens it in place, and a file
+ * scrolls to its card in the conversation and opens it in place, a design
+ * board opens over the whole window (components/board, ADR 0037), and a file
  * row downloads. The list comes from the engine (`GET artifacts/list`), the
  * same one the desktop draws; it stays collapsed until opened, refreshes when
  * a turn ends, and hides itself while the chat has made nothing.
@@ -15,9 +16,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { api, type ArtifactItem } from '../api';
+import { DesignBoardOverlay } from './board/DesignBoardView';
+import { Portal } from './Portal';
 
 const LABEL: Record<ArtifactItem['kind'], string> = {
-  document: 'Document', sheet: 'Sheet', deck: 'Presentation', code: 'Code', image: 'Image', file: 'File', export: 'Export',
+  document: 'Document', sheet: 'Sheet', deck: 'Presentation', code: 'Code', image: 'Image', file: 'File', export: 'Export', board: 'Board',
 };
 
 function download(name: string, blob: Blob): void {
@@ -34,6 +37,7 @@ export function ArtifactsCard(): React.ReactElement | null {
   const busy = useStore(s => s.busy);
   const [items, setItems] = useState<ArtifactItem[]>([]);
   const [open, setOpen] = useState(false);
+  const [board, setBoard] = useState<ArtifactItem | null>(null);
 
   const load = useCallback(() => {
     if (!sessionId) return;
@@ -45,6 +49,7 @@ export function ArtifactsCard(): React.ReactElement | null {
   if (!items.length) return null;
 
   const act = (a: ArtifactItem): void => {
+    if (a.kind === 'board') { setBoard(a); return; }
     if (a.source === 'canvas') {
       const card = document.querySelector<HTMLElement>(`[data-canvas-card="${a.id}"]`);
       if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); card.click(); }
@@ -65,7 +70,7 @@ export function ArtifactsCard(): React.ReactElement | null {
           {items.map(a => (
             <li key={a.key}>
               <button onClick={() => act(a)} className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left hover:bg-aico-hover"
-                title={a.source === 'canvas' ? 'Show it in the chat' : 'Download'}>
+                title={a.kind === 'board' ? 'Open the design board' : a.source === 'canvas' ? 'Show it in the chat' : 'Download'}>
                 <span className="w-[54px] shrink-0 text-[10px] uppercase tracking-wide text-aico-muted">{LABEL[a.kind]}</span>
                 <span className="min-w-0 flex-1 truncate text-[12px] text-aico-primary">{a.title}</span>
               </button>
@@ -73,6 +78,7 @@ export function ArtifactsCard(): React.ReactElement | null {
           ))}
         </ul>
       )}
+      {board && <Portal><DesignBoardOverlay sessionId={sessionId} path={board.id} version={board.updatedAt} onClose={() => setBoard(null)} /></Portal>}
     </section>
   );
 }

@@ -28,7 +28,7 @@ import { dayBucket } from '../lib/util';
 /** How an artifact is shown in the viewer. `canvas` opens the canvas editor beside the chat. */
 export type PreviewKind =
   | 'canvas' | 'image' | 'svg' | 'html' | 'markdown' | 'csv' | 'xlsx' | 'docx'
-  | 'pdf' | 'code' | 'text' | 'video' | 'audio' | 'none';
+  | 'pdf' | 'code' | 'text' | 'video' | 'audio' | 'board' | 'none';
 
 const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'ico']);
 const VIDEO = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv']);
@@ -60,8 +60,10 @@ export function extOf(item: Pick<ArtifactItem, 'ext' | 'title'>): string {
 }
 
 /** Which viewer an artifact gets. */
-export function previewKind(item: Pick<ArtifactItem, 'source' | 'ext' | 'title'>): PreviewKind {
+export function previewKind(item: Pick<ArtifactItem, 'source' | 'ext' | 'title'> & { kind?: ArtifactItem['kind'] }): PreviewKind {
   if (item.source === 'canvas') return 'canvas';
+  // A design board is its board.json (ADR 0037); the engine marks it, the extension alone would say "code".
+  if (item.kind === 'board') return 'board';
   const ext = extOf(item);
   if (IMAGE.has(ext)) return 'image';
   if (ext === 'svg') return 'svg';
@@ -155,7 +157,7 @@ export function buildEntries(items: ArtifactItem[]): ArtifactEntry[] {
   const byKey = new Map<string, ArtifactEntry>();
   const out: ArtifactEntry[] = [];
   for (const item of sorted) {
-    const canvas = item.source === 'canvas';
+    const canvas = item.source === 'canvas' || item.kind === 'board';
     const key = canvas ? item.key : `${item.title.toLowerCase()}|${item.bytes ?? '?'}`;
     const same = byKey.get(key);
     if (same) { same.copies.push(item); continue; }
@@ -181,6 +183,7 @@ export function buildEntries(items: ArtifactItem[]): ArtifactEntry[] {
 export type Grouping = 'type' | 'time' | 'topic';
 
 const TYPE_ORDER: Array<{ name: string; test: (e: ArtifactEntry) => boolean }> = [
+  { name: 'Design boards', test: e => e.kind === 'board' },
   { name: 'Documents', test: e => (e.kind === 'canvas' && e.item.kind === 'document') || ['markdown', 'docx', 'pdf', 'text'].includes(e.kind) },
   { name: 'Sheets', test: e => (e.kind === 'canvas' && e.item.kind === 'sheet') || e.kind === 'csv' || e.kind === 'xlsx' },
   { name: 'Presentations', test: e => (e.kind === 'canvas' && e.item.kind === 'deck') || e.ext === 'pptx' },
@@ -225,6 +228,7 @@ export function matchesQuery(e: ArtifactEntry, query: string): boolean {
 /** Short label for the type tile and the meta line: "PNG", "Sheet", "Web page". */
 export function typeLabel(e: Pick<ArtifactEntry, 'kind' | 'ext' | 'item'>): string {
   if (e.kind === 'canvas') return e.item.kind === 'sheet' ? 'Sheet' : e.item.kind === 'deck' ? 'Presentation' : e.item.kind === 'code' ? 'Code' : 'Document';
+  if (e.kind === 'board') return 'Design board';
   return e.ext ? e.ext.toUpperCase() : 'File';
 }
 
