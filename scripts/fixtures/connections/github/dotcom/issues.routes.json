@@ -1,0 +1,145 @@
+{
+  "prefix": "/api/v3",
+  "routes": [
+    {
+      "path": "/repos/octo-org/widgets/issues",
+      "query": { "per_page": "1", "state": "all" },
+      "status": 200,
+      "body": [ { "number": 11, "title": "Cache invalidation on widget update", "state": "open" } ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/issues",
+      "query": { "page": "2" },
+      "status": 200,
+      "body": [
+        {
+          "id": 6013, "number": 13, "title": "Document widget API", "state": "open",
+          "body": "Write the reference for `Widget.render`.\n\n## Acceptance\n- [ ] every option documented",
+          "user": { "login": "octo-bot" }, "labels": [ { "name": "docs" }, { "name": "estimate:5" } ],
+          "assignees": [], "milestone": null,
+          "html_url": "https://forge.test/octo-org/widgets/issues/13", "created_at": "2026-09-30T09:00:00Z", "updated_at": "2026-10-02T09:30:00Z"
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/issues",
+      "status": 200,
+      "headers": { "link": "<{{origin}}/api/v3/repos/octo-org/widgets/issues?state=open&per_page=100&sort=updated&direction=desc&page=2>; rel=\"next\", <{{origin}}/api/v3/repos/octo-org/widgets/issues?state=open&per_page=100&sort=updated&direction=desc&page=2>; rel=\"last\"" },
+      "body": [
+        {
+          "id": 6011, "number": 11, "title": "Cache invalidation on widget update", "state": "open",
+          "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+          "user": { "login": "octo-bot" }, "labels": [ { "name": "bug" }, { "name": "sp:3" } ],
+          "assignees": [ { "login": "octo-dev" } ],
+          "milestone": { "number": 1, "title": "Sprint 1", "due_on": "2026-10-16T07:00:00Z" },
+          "html_url": "https://forge.test/octo-org/widgets/issues/11", "created_at": "2026-09-28T09:00:00Z", "updated_at": "2026-10-01T10:00:00Z"
+        },
+        {
+          "id": 6012, "number": 12, "title": "Add widget cache", "state": "open", "body": "Opened by AICO.",
+          "user": { "login": "octo-dev" }, "labels": [], "assignees": [],
+          "pull_request": { "url": "https://forge.test/api/v3/repos/octo-org/widgets/pulls/12" },
+          "html_url": "https://forge.test/octo-org/widgets/pull/12", "created_at": "2026-10-01T09:00:00Z", "updated_at": "2026-10-03T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/issues",
+      "status": 201,
+      "body": {
+        "id": 6014, "number": 14, "title": "Follow-up: cache metrics", "state": "open", "body": "Track hit rate.",
+        "user": { "login": "octo-dev" }, "labels": [ { "name": "aico" } ], "assignees": [], "milestone": null,
+        "html_url": "https://forge.test/octo-org/widgets/issues/14", "created_at": "2026-10-09T12:00:00Z", "updated_at": "2026-10-09T12:00:00Z"
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/issues/11",
+      "status": 200,
+      "bodyFile": "issue-11.json"
+    },
+    {
+      "method": "PATCH",
+      "path": "/repos/octo-org/widgets/issues/11",
+      "bodyIncludes": "\"state\":\"closed\"",
+      "status": 200,
+      "bodyFile": "issue-11-closed.json"
+    },
+    {
+      "method": "PATCH",
+      "path": "/repos/octo-org/widgets/issues/11",
+      "status": 200,
+      "bodyFile": "issue-11-updated.json"
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/issues/11/labels",
+      "status": 200,
+      "body": [ { "name": "bug" }, { "name": "sp:3" }, { "name": "aico:running" } ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/repos/octo-org/widgets/issues/11/labels/gone",
+      "status": 404,
+      "body": { "message": "Label does not exist", "documentation_url": "https://forge.test/docs/labels" }
+    },
+    {
+      "method": "DELETE",
+      "path": "/repos/octo-org/widgets/issues/11/labels/:label",
+      "status": 200,
+      "body": [ { "name": "bug" } ]
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/issues/11/comments",
+      "status": 201,
+      "body": { "id": 8802, "user": { "login": "octo-dev" }, "author_association": "OWNER", "body": "ok", "created_at": "2026-10-09T13:15:00Z" }
+    },
+    {
+      "path": "/search/issues",
+      "status": 200,
+      "body": {
+        "total_count": 3,
+        "items": [
+          {
+            "id": 6011, "number": 11, "title": "Cache invalidation on widget update", "state": "open", "body": "Updating a widget leaves a stale entry.",
+            "user": { "login": "octo-bot" }, "labels": [ { "name": "bug" } ], "assignees": [], "milestone": null,
+            "repository_url": "https://forge.test/api/v3/repos/octo-org/widgets",
+            "html_url": "https://forge.test/octo-org/widgets/issues/11", "updated_at": "2026-10-01T10:00:00Z"
+          },
+          {
+            "id": 6012, "number": 12, "title": "Add widget cache", "state": "open", "body": "",
+            "user": { "login": "octo-dev" }, "labels": [], "assignees": [], "pull_request": { "url": "https://forge.test/api/v3/repos/octo-org/widgets/pulls/12" },
+            "repository_url": "https://forge.test/api/v3/repos/octo-org/widgets",
+            "html_url": "https://forge.test/octo-org/widgets/pull/12", "updated_at": "2026-10-03T09:00:00Z"
+          },
+          {
+            "id": 6999, "number": 99, "title": "Unrelated issue in another repository", "state": "open", "body": "",
+            "user": { "login": "octo-bot" }, "labels": [], "assignees": [], "milestone": null,
+            "repository_url": "https://forge.test/api/v3/repos/octo-org/other",
+            "html_url": "https://forge.test/octo-org/other/issues/99", "updated_at": "2026-10-04T09:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/milestones",
+      "query": { "per_page": "1" },
+      "status": 200,
+      "body": [ { "number": 1, "title": "Sprint 1", "state": "open" } ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/milestones",
+      "status": 200,
+      "body": [
+        { "number": 1, "title": "Sprint 1", "state": "open", "due_on": "2026-10-16T07:00:00Z", "open_issues": 3, "closed_issues": 5, "html_url": "https://forge.test/octo-org/widgets/milestone/1" },
+        { "number": 2, "title": "Sprint 0", "state": "closed", "due_on": "2026-10-02T07:00:00Z", "open_issues": 0, "closed_issues": 9, "html_url": "https://forge.test/octo-org/widgets/milestone/2" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/milestones",
+      "status": 201,
+      "body": { "number": 3, "title": "Sprint 2", "state": "open", "due_on": "2026-10-30T00:00:00Z", "html_url": "https://forge.test/octo-org/widgets/milestone/3" }
+    }
+  ]
+}

@@ -25,8 +25,10 @@ export const ROUTE_FILES = [
   'src/server/api-system.ts',
   'src/server/artifact-routes.ts',
   'src/server/canvas-routes.ts',
+  'src/server/connection-routes.ts',
   'src/server/deck-visual-routes.ts',
   'src/server/delivery-routes.ts',
+  'src/server/scrum-routes.ts',
   'src/server/editor.ts',
   'src/vault/http.ts',
 ];

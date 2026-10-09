@@ -4,8 +4,9 @@
  *
  * Lives in `shared/` because the web, desktop and VS Code clients import it and the
  * engine must not be able to drift from what they read: `src/delivery/types.ts`
- * re-exports this file instead of copying it. Types only — no code, no imports —
- * so any client can use it without pulling the engine in.
+ * re-exports this file instead of copying it. Types only — no code, no runtime imports —
+ * so any client can use it without pulling the engine in. (The one import is a type-only
+ * one from the sibling Connections contract, for `Task.pr` and `Task.remote`, ADR 0039.)
  *
  * Deliberately not here: the journal's event shapes (engine-private; a client
  * sees the fold, never the events) and anything about how a task is run.
@@ -13,8 +14,11 @@
  * @module shared/delivery/types
  */
 
+import type { PullState, RemoteLink, BoardConnection } from '../connections/types.js';
+import type { BoardMode, Proposal, Sprint } from './scrum.js';
+
 export type TaskStatus =
-  | 'backlog' | 'ready' | 'running' | 'review' | 'changes' | 'merged' | 'blocked' | 'cancelled';
+  | 'backlog' | 'ready' | 'running' | 'review' | 'changes' | 'pr' | 'merged' | 'blocked' | 'cancelled';
 
 export type TaskPriority = 1 | 2 | 3 | 4;
 
@@ -71,9 +75,17 @@ export interface Task {
   review?: { comments: { at: string; by: 'person' | 'agent'; text: string }[] };
   /** Set while a run waits for a person; the card shows it and answers go through the chat's own routes. */
   needs?: TaskNeed;
+  /** PR mode (ADR 0039): the remote's view of this task's pull request, refreshed by the poller. Present from `pr` on. */
+  pr?: PullState;
+  /** The remote work item this task was imported from or linked to (ADR 0039). */
+  remote?: RemoteLink;
   /** Where the work landed on the trunk, for release notes and rollback. */
   landed?: { from: string; to: string; at: string; kind: ChangeKind; breaking: boolean; by: 'person' | 'auto' };
   costUsd?: number;
+  /** Scrum mode (ADR 0039 section 4): story points, set by a person or accepted from an agent's proposal. */
+  estimate?: number;
+  /** The sprint the team committed this task to; cleared when a sprint closes without it. */
+  sprintId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -128,10 +140,15 @@ export interface BoardState {
   /** Task ids awaiting landing, in order. */
   queue: string[];
   running: { taskId: string; runId: string; startedAt: string; costUsd: number }[];
-  settings: { maxParallel: number; autoLandLowRisk: boolean; trunk: string };
+  settings: { maxParallel: number; autoLandLowRisk: boolean; trunk: string; /** `kanban` when absent. */ mode?: BoardMode };
   dispatcher: DispatcherState;
   /** Releases this board made, newest first. */
   releases: Release[];
+  /** The project's connection to a forge and tracker, when it has one (ADR 0039); added by the route, not the fold. */
+  connection?: BoardConnection;
+  /** Scrum (ADR 0039 section 4): every sprint, with its scope log, and the agent's open suggestions. Absent on an engine that predates it. */
+  sprints?: Sprint[];
+  proposals?: Proposal[];
 }
 
 /** Compact cross-project snapshot for notifications: what changed state is the client's diff. */

@@ -14,6 +14,7 @@
  * @module delivery/prompts
  */
 
+import { fenceRemote } from '../connections/sanitize.js';
 import type { Task } from './types.js';
 
 export function runPrompt(task: Task, trunk: string, opts: { rework?: boolean } = {}): string {
@@ -23,7 +24,8 @@ export function runPrompt(task: Task, trunk: string, opts: { rework?: boolean } 
     `Work only in this directory${task.worktree ? ` (${task.worktree})` : ''}: it is a git worktree on branch ${task.branch ?? `aico/task-${task.id}`}, made from ${trunk}. Other agents deliver other tasks in parallel in their own worktrees; never touch anything outside this directory, never switch branches, never merge, never push.`,
     '',
     `Task: ${task.title}`,
-    task.body ? `\n${task.body}` : '',
+    // An imported task's text was written on a remote by whoever has an account there: data, never instructions (ADR 0039).
+    task.body ? `\n${task.remote ? fenceRemote('Description', task.body, `the work item ${task.remote.url}`) : task.body}` : '',
   ];
   if (task.acceptance.length > 0) out.push('', 'Acceptance criteria (each must be true when you finish):', ...task.acceptance.map(a => `- ${a}`));
   if (comments.length > 0) {
@@ -40,6 +42,26 @@ export function runPrompt(task: Task, trunk: string, opts: { rework?: boolean } 
     'If you cannot finish, say exactly what is missing in your final answer instead of submitting broken work.',
   );
   return out.filter(l => l !== undefined).join('\n');
+}
+
+/**
+ * Backlog refinement for Scrum (ADR 0039 section 4): the agent only SUGGESTS. Every suggestion is a
+ * `propose_*` call that a person accepts or dismisses; the loop gives it no way to apply one.
+ * "backlog" and "delivery" are deliberate: they load the deferred Delivery tool group.
+ */
+export function refinePrompt(): string {
+  return [
+    'Refine the delivery backlog for sprint planning, using the Delivery tool. This is a refinement pass, not a planning pass: do NOT create tasks and do not edit files.',
+    'You can only make SUGGESTIONS (propose_estimate, propose_split, propose_criteria); a person accepts or dismisses each one, and nothing changes until they do.',
+    '',
+    'Do this:',
+    '1. List the backlog (action "list") and read each item that needs work (action "get"). Read the code it touches first (Read, Grep, CodeGraph) so what you say is about real places.',
+    '2. An item with no estimate: propose_estimate with points on the scale 1, 2, 3, 5, 8, 13. Size is relative effort and uncertainty, not hours. Say why in `note` in one line.',
+    '3. An item of 13, or one that bundles outcomes that could be delivered separately: propose_split into 2-5 parts that each stand alone, each with acceptance criteria and points. Parts must not need the same files at the same time unless one depends on another.',
+    '4. An item with no acceptance criteria: propose_criteria with 2-5 criteria a person can check.',
+    '5. Leave alone what is already estimated, small and clear. Do not propose the same thing twice.',
+    'Finish with one line: how many estimates, splits and criteria you suggested.',
+  ].join('\n');
 }
 
 export function planPrompt(brief: string): string {

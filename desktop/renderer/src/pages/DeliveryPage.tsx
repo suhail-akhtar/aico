@@ -17,7 +17,7 @@ import React, { useMemo } from 'react';
 import { useStore } from '@web/store';
 import { DeliveryView, type DeliveryHost } from '@web/components/delivery/DeliveryView';
 import { relativeToProject } from '@web/components/delivery/DeliveryPage';
-import { go } from '@/state/desk';
+import { go, useDesk } from '@/state/desk';
 import { openChat } from '@/chat/actions';
 import { basename } from '@/lib/util';
 import type { ViewProps } from '@/plugins/registry';
@@ -31,6 +31,7 @@ export function DeliveryPage({ params }: ViewProps): React.ReactElement {
   const host = useMemo<DeliveryHost>(() => ({
     openSession: (id) => { void openChat(id); },
     openCodeMap: (file) => go('codemap', { path, ...(file ? { file: relativeToProject(path, file) } : {}) }),
+    openConnections: () => useDesk.getState().openSettings('connections'),
   }), [path]);
 
   if (!path) {

@@ -1,0 +1,59 @@
+{
+  "prefix": "/api/v3",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 200,
+      "headers": {
+        "x-oauth-scopes": "repo, read:user",
+        "x-accepted-oauth-scopes": "",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4990",
+        "x-ratelimit-reset": "{{epoch+3000}}"
+      },
+      "body": {
+        "login": "octo-dev",
+        "id": 1001,
+        "type": "User",
+        "site_admin": false,
+        "html_url": "https://forge.test/octo-dev",
+        "name": "Octo Developer"
+      }
+    },
+    {
+      "path": "/meta",
+      "status": 200,
+      "body": { "verifiable_password_authentication": true, "hooks": ["192.0.2.0/24"] }
+    },
+    {
+      "path": "/user/repos",
+      "status": 200,
+      "body": [
+        {
+          "id": 5001, "name": "widgets", "full_name": "octo-org/widgets", "private": true,
+          "owner": { "login": "octo-org" }, "html_url": "https://forge.test/octo-org/widgets",
+          "default_branch": "main", "has_issues": true,
+          "permissions": { "admin": true, "maintain": true, "push": true, "triage": true, "pull": true }
+        },
+        {
+          "id": 5002, "name": "gadgets", "full_name": "octo-org/gadgets", "private": false,
+          "owner": { "login": "octo-org" }, "html_url": "https://forge.test/octo-org/gadgets",
+          "default_branch": "trunk", "has_issues": true,
+          "permissions": { "admin": false, "maintain": false, "push": true, "triage": true, "pull": true }
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets",
+      "status": 200,
+      "body": {
+        "id": 5001, "node_id": "R_kgDOAbc", "name": "widgets", "full_name": "octo-org/widgets", "private": true,
+        "owner": { "login": "octo-org", "type": "Organization" },
+        "html_url": "https://forge.test/octo-org/widgets",
+        "clone_url": "https://forge.test/octo-org/widgets.git",
+        "default_branch": "main", "has_issues": true, "archived": false,
+        "permissions": { "admin": true, "maintain": true, "push": true, "triage": true, "pull": true }
+      }
+    }
+  ]
+}

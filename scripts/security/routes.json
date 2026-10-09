@@ -137,6 +137,54 @@
     "chat/handoff/events": {
       "gate": "token (SSE)"
     },
+    "connections/create": {
+      "gate": "token+human",
+      "note": "creates a connection record (a host the engine may later send a token to): human(); the base URL must be https, or opted-in private http"
+    },
+    "connections/credential": {
+      "gate": "token+human",
+      "note": "stores a token in the vault bound to the connection host: human(); the token travels in only and no route returns it"
+    },
+    "connections/detect": {
+      "gate": "token",
+      "note": "read: which provider and repository a registered project origin points at (no network)"
+    },
+    "connections/list": {
+      "gate": "token",
+      "note": "read: connections without credential names, with the managed-policy view"
+    },
+    "connections/map": {
+      "gate": "token+human",
+      "note": "maps a registered project to a repository; switching landing to pr makes the engine push aico/task-* branches, so it needs human() and a confirmed card"
+    },
+    "connections/mapping": {
+      "gate": "token",
+      "note": "read: a registered project mapping and its board chip"
+    },
+    "connections/providers": {
+      "gate": "token",
+      "note": "read: the provider catalogue"
+    },
+    "connections/remove": {
+      "gate": "token+human",
+      "note": "removes a connection and its mappings: human()"
+    },
+    "connections/sync": {
+      "gate": "token",
+      "note": "pulls work items and observes pull requests of a registered project through an already-connected host; cannot widen any host"
+    },
+    "connections/test": {
+      "gate": "token",
+      "note": "runs the capability probe: read calls against the connection own host"
+    },
+    "connections/unmap": {
+      "gate": "token+human",
+      "note": "removes a project mapping (turns pr mode off): human()"
+    },
+    "connections/update": {
+      "gate": "token+human",
+      "note": "renames or turns a connection on or off; base URL and hosts cannot change: human()"
+    },
     "context-window": {
       "gate": "token"
     },
@@ -205,13 +253,29 @@
       "gate": "token+human",
       "note": "deploy runs the configured command and rollback creates a reverting task: both human() (ADR 0038)"
     },
+    "delivery/scrum": {
+      "gate": "token",
+      "note": "read: mode, sprints, suggestions, velocity, the running sprint's burndown and the daily summary of a registered project (ADR 0039)"
+    },
+    "delivery/scrum/*": {
+      "gate": "token+human",
+      "note": "mode switch, estimate, dismiss and refine need only the token (none readies work: the dispatcher only starts tasks a person made ready; refine spends one planning turn like delivery/plan and can only suggest); accepting an agent's suggestion needs human() (ADR 0039)"
+    },
+    "delivery/sprints": {
+      "gate": "token",
+      "note": "create a planned sprint: a date range and a goal; nothing is committed or started"
+    },
+    "delivery/sprints/*": {
+      "gate": "token+human",
+      "note": "commit, start and close need human() (they fix the team's promise and ready work for the agents); summary, review, retro are reads and notes saves text (ADR 0039)"
+    },
     "delivery/tasks": {
       "gate": "token",
       "note": "create a task in the backlog; nothing runs until a person promotes it and starts the dispatcher"
     },
     "delivery/tasks/*": {
       "gate": "token+human",
-      "note": "PATCH edits/cancels (token); approve (lands on the trunk), request-changes (restarts a run) and comment (reaches an agent's prompt as the person's word) need human(); diff is a read (ADR 0038)"
+      "note": "PATCH edits/cancels (token); approve (lands on the trunk, or pushes the branch and opens the pull request in PR mode), merge-pr (asks the remote to merge), request-changes (restarts a run) and comment (reaches an agent's prompt as the person's word) need human(); diff is a read (ADR 0038, 0039)"
     },
     "editor/file": {
       "gate": "token",

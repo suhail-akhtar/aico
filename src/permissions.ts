@@ -28,6 +28,8 @@ const TOOLS_REQUIRING_PERMISSION = new Set([
   'HttpRequest',
   'WinRmExec',
   'SnmpQuery',
+  // Creates a connection to a forge and maps a project to it (ADR 0039); it can never store or read a token (tools/connection-manage).
+  'ConnectionManage',
 ]);
 
 const DANGEROUS_TOOLS = new Set([

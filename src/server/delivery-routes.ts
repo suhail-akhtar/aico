@@ -17,6 +17,7 @@
  *   POST  /api/delivery/releases/:version/deploy    run the project's deploy command                [person]
  *   POST  /api/delivery/releases/:version/rollback  a task that reverts the release's commits       [person]
  *   GET   /api/delivery/attention                   compact state of every board, for notifications (no project)
+ *   POST  /api/delivery/tasks/:id/merge-pr {method?}  ask the remote to merge the task's pull request (PR mode; the remote may refuse) [person]
  *
  * WHO MAY SAY YES. The model can `curl` the loopback port and may learn the token, so
  * the acts that matter ask the decision gate for a person (`checkHuman`, the same
@@ -38,6 +39,9 @@
 import type http from 'node:http';
 import path from 'node:path';
 import * as D from '../delivery/index.js';
+import { withConnection } from '../connections/sync.js';
+import { kickProject } from '../connections/poller.js';
+import { handleScrumRoute } from './scrum-routes.js';
 
 const VERSION = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
 
@@ -48,7 +52,7 @@ export interface DeliveryRouteDeps {
   /** Is a person behind this request? Given the parsed body (the client nonce may ride in it). */
   human: (req: http.IncomingMessage, body: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }>;
   /** Start the planning chat turn; resolves with its session id. */
-  startPlan: (project: string, brief: string) => Promise<{ sessionId: string }>;
+  startPlan: (project: string, brief: string, kind?: 'plan' | 'refine') => Promise<{ sessionId: string }>;
   /** Attach an SSE response to the project's board topic; returns the detach. */
   subscribe: (project: string, res: http.ServerResponse) => () => void;
 }
@@ -60,6 +64,8 @@ export async function handleDeliveryRoute(
   route: string, req: http.IncomingMessage, res: http.ServerResponse, url: URL, deps: DeliveryRouteDeps,
 ): Promise<boolean> {
   if (!route.startsWith('delivery/')) return false;
+  // Sprints, estimates and suggestions (ADR 0039 section 4) have their own file; the same gate and project rules apply there.
+  if (await handleScrumRoute(route, req, res, url, deps)) return true;
   const { send } = deps;
   const method = req.method ?? 'GET';
   const known = route === 'delivery/board' || route === 'delivery/tasks' || route === 'delivery/plan' || route === 'delivery/dispatch'
@@ -89,14 +95,15 @@ export async function handleDeliveryRoute(
 
     if (route === 'delivery/board') {
       if (method !== 'GET') { send(res, 405, { error: 'GET only' }); return true; }
-      send(res, 200, await D.getBoard(project));
+      send(res, 200, withConnection(await D.getBoard(project), project));
       return true;
     }
     if (route === 'delivery/events') {
       if (method !== 'GET') { send(res, 405, { error: 'GET only' }); return true; }
       const detach = deps.subscribe(project, res);
+      kickProject(project);   // a board was opened: look at the remote now (ADR 0039)
       req.on('close', detach);
-      try { res.write(`event: delivery/board\ndata: ${JSON.stringify({ type: 'delivery/board', topic: 'delivery', data: await D.getBoard(project) })}\n\n`); } catch { /* closed already */ }
+      try { res.write(`event: delivery/board\ndata: ${JSON.stringify({ type: 'delivery/board', topic: 'delivery', data: withConnection(await D.getBoard(project), project) })}\n\n`); } catch { /* closed already */ }
       return true;
     }
     if (route === 'delivery/tasks') {
@@ -169,6 +176,13 @@ export async function handleDeliveryRoute(
     if (verb === 'diff') {
       if (method !== 'GET') { send(res, 405, { error: 'GET only' }); return true; }
       send(res, 200, { diff: await D.taskDiff(project, id) });
+      return true;
+    }
+    if (verb === 'merge-pr') {
+      if (method !== 'POST') { send(res, 405, { error: 'POST only' }); return true; }
+      if (!await needPerson()) return true;
+      const m = body.method;
+      send(res, 200, await D.mergePullRequest(project, id, m === 'merge' || m === 'squash' || m === 'rebase' ? { method: m } : {}));
       return true;
     }
     if (verb === 'approve' || verb === 'request-changes' || verb === 'comment') {

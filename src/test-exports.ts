@@ -820,7 +820,7 @@ export {
 export {
   PolicyError, applyManagedPolicy, modelDecision, assertModelAllowed, providerDecision, toolDecision, urlDecision, hostMatches as policyHostMatches,
   extensionDecision, assertExtensionAllowed, isGateRequired, policyCeiling, withPolicyCeiling, runRefusal, dayBudgetCap,
-  dayBudgetRefusal, telemetryOff, forbidsFullAutonomy, createPolicyGuard, lockedSettings, lockFor, publicPolicy, describeRules, policyAllowsTool, urlsIn,
+  dayBudgetRefusal, telemetryOff, forbidsFullAutonomy, createPolicyGuard, lockedSettings, lockFor, publicPolicy, describeRules, policyAllowsTool, urlsIn, connectionDecision,
 } from './policy/enforce.js';
 export { lockedWriteRefusal, handlePolicyRoute } from './policy/routes.js';
 export { collectAudit, parseWhen, AUDIT_SCHEMA, AUDIT_COLUMNS } from './audit/export.js';
@@ -860,10 +860,13 @@ export { pushNotification, subscribeToNotifications } from './background/notific
 export { assessRisk, numstat as deliveryNumstat, levelOf as riskLevelOf } from './delivery/risk.js';
 export { predictTouches, overlap as touchOverlap } from './delivery/touches.js';
 export { verifyTree } from './delivery/verify.js';
-export { runPrompt as deliveryRunPrompt, planPrompt as deliveryPlanPrompt } from './delivery/prompts.js';
+export { runPrompt as deliveryRunPrompt, planPrompt as deliveryPlanPrompt, refinePrompt as deliveryRefinePrompt } from './delivery/prompts.js';
 export { isDeliveryWorktree, deliveryRunDenial, worktreePath as deliveryWorktreePath } from './delivery/paths.js';
 export { deliveryTool, deliveryDefinition } from './tools/delivery.js';
 export { handleDeliveryRoute } from './server/delivery-routes.js';
+export * as DeliveryScrum from './delivery/scrum.js';
+export * as DeliveryScrumFold from './delivery/scrum-fold.js';
+export * as ScrumModel from '../shared/delivery/scrum.js';
 
 // Design boards (ADR 0037).
 export { designBoardIn, designBoardTool, designBoardDefinition, insideBoard, boardDirIn, readBoardAt, describeBoard } from './canvas/board-tool.js';
@@ -874,3 +877,27 @@ export {
   DEVICES as BOARD_DEVICES,
 } from '../shared/ui/board/board-model.js';
 export { composeScreen } from '../shared/ui/board/board-compose.js';
+
+// Connections: the GitHub adapter and the transport it runs on (ADR 0039).
+export { githubAdapter } from './connections/github/index.js';
+export * as GithubAdapterParts from './connections/github/index.js';
+export * as GithubFold from './connections/github/fold.js';
+export * as GithubScopes from './connections/github/scopes.js';
+export { ConnectionClient, ConnectionError, resetConnectionHttpForTest, rateLimitedUntil } from './connections/http.js';
+export { REMOTE_LIMITS, sanitizeRemoteText, sanitizeLine, withoutAttribution } from './connections/sanitize.js';
+
+// Connections core: store, service, sync, landing, git, poller, rate limits (ADR 0039).
+export * as ConnService from './connections/service.js';
+export * as ConnStore from './connections/store.js';
+export * as ConnSync from './connections/sync.js';
+export * as ConnLanding from './connections/landing.js';
+export * as ConnGit from './connections/git.js';
+export * as ConnPoller from './connections/poller.js';
+export * as ConnRate from './connections/ratelimit.js';
+export * as ConnRegistry from './connections/registry.js';
+export * as ConnPrRisk from './connections/pr-risk.js';
+export { registerBuiltinAdapters, installConnections } from './connections/index.js';
+export { auditConnection, auditTarget } from './connections/audit.js';
+export { fenceRemote, stripHtmlComments } from './connections/sanitize.js';
+export { executeConnectionManage, connectionManageDefinition } from './tools/connection-manage.js';
+export { handleConnectionRoute } from './server/connection-routes.js';

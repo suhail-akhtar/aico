@@ -13,6 +13,10 @@
  *    belongs to; the id it passes is checked against the directory, so one run cannot
  *    submit, edit or read-modify another task however it asks.
  *
+ * Scrum refinement (ADR 0039 section 4): `propose_estimate`, `propose_split`, `propose_criteria` only SUGGEST;
+ * a person accepts or dismisses each, and there is deliberately no action that commits, starts or closes a
+ * sprint. `plan` and `sprint` are reads.
+ *
  * Deferred (group `delivery`, tools/deferred.ts): the schema costs nothing until a
  * request about a backlog, board, tasks or sprint loads it; the run prompt names
  * "delivery task" so a task's run has it from its first message.
@@ -27,6 +31,8 @@ import { currentRunContext, projectRoot } from '../run-context.js';
 import { actualTouches } from '../delivery/touches.js';
 import * as D from '../delivery/index.js';
 import * as S from '../delivery/store.js';
+import * as Scrum from '../delivery/scrum.js';
+import { SKIP_TEXT, burndown, daysLeft, defaultCapacity, paceWord, proposePlan } from '../../shared/delivery/scrum.js';
 import type { Task } from '../delivery/types.js';
 
 export interface DeliveryInput {
@@ -45,10 +51,16 @@ export interface DeliveryInput {
   to?: string;
   files?: string[];
   filter?: string;
+  /** propose_estimate: story points (1, 2, 3, 5, 8, 13). */
+  points?: number;
+  /** propose_split: the smaller tasks the item becomes. */
+  parts?: Array<{ title: string; body?: string; acceptance?: string[]; points?: number }>;
+  /** plan: the points the sprint can hold (default: the recent velocity). */
+  capacity?: number;
 }
 
 const line = (t: Task): string =>
-  `${t.id} [${t.status}] P${t.priority} ${t.title}${t.dependsOn.length ? ` (after ${t.dependsOn.join(', ')})` : ''}${t.labels.length ? ` {${t.labels.join(', ')}}` : ''}${t.costUsd ? ` $${t.costUsd.toFixed(2)}` : ''}`;
+  `${t.id} [${t.status}] P${t.priority}${t.estimate ? ` ${t.estimate}pt` : ''} ${t.title}${t.dependsOn.length ? ` (after ${t.dependsOn.join(', ')})` : ''}${t.labels.length ? ` {${t.labels.join(', ')}}` : ''}${t.costUsd ? ` $${t.costUsd.toFixed(2)}` : ''}`;
 
 function describe(t: Task): string {
   return [
@@ -136,10 +148,45 @@ export async function deliveryTool(input: DeliveryInput = {}): Promise<string> {
         }, 'agent');
         return `Updated: ${line(t)}`;
       }
+      // Scrum refinement (ADR 0039 section 4): the agent only SUGGESTS. A person accepts or dismisses each one in the sprint planning
+      // views; there is no action here that commits, starts or closes a sprint, so a prompt cannot talk it into one.
+      case 'propose_estimate': {
+        if (!input.id) return '[error] id required.';
+        await Scrum.proposeEstimate(project, input.id, input.points, input.note);
+        return `Suggested ${input.points} points for ${input.id}. A person accepts or dismisses it; the estimate is not set until then.`;
+      }
+      case 'propose_split': {
+        if (!input.id) return '[error] id required.';
+        const q = await Scrum.proposeSplit(project, input.id, input.parts, input.note);
+        return `Suggested splitting ${input.id} into ${q.parts?.length ?? 0} tasks. A person accepts or dismisses it; nothing changes until then.`;
+      }
+      case 'propose_criteria': {
+        if (!input.id) return '[error] id required.';
+        await Scrum.proposeCriteria(project, input.id, input.acceptance, input.note);
+        return `Suggested acceptance criteria for ${input.id}. A person accepts or dismisses them; the task is unchanged until then.`;
+      }
+      case 'plan': {
+        const b = S.boardState(project);
+        const plan = proposePlan(b.tasks, { capacity: input.capacity, velocityCapacity: defaultCapacity(b.sprints ?? []) });
+        const title = (id: string): string => b.tasks.find(t => t.id === id)?.title ?? id;
+        return [
+          `Proposed sprint plan: ${plan.total} of ${plan.capacity} points (${plan.capacitySource === 'velocity' ? 'capacity from recent velocity' : plan.capacitySource === 'starter' ? 'starter capacity, no history yet' : 'capacity as given'}). A person commits it; you cannot.`,
+          ...plan.items.map(i => `- ${i.taskId} ${i.points}pt ${title(i.taskId)}${i.dependency ? ' (pulled in as a dependency)' : ''}`),
+          ...plan.skipped.map(s => `- skipped ${s.taskId} ${title(s.taskId)}: ${SKIP_TEXT[s.reason]}${s.detail ? ` (${s.detail})` : ''}`),
+          ...plan.overlaps.map(o => `- note: ${title(o.a)} and ${title(o.b)} touch ${o.files.join(', ')}; agents would take turns on them`),
+        ].join('\n');
+      }
+      case 'sprint': {
+        const b = S.boardState(project);
+        const sp = (b.sprints ?? []).find(x => x.status === 'active') ?? (b.sprints ?? []).find(x => x.status === 'planned');
+        if (!sp) return b.settings.mode === 'scrum' ? '(no sprint yet: a person plans the first one)' : '(the board is in Kanban mode; there is no sprint)';
+        const bd = burndown(sp, b.tasks, Date.now(), Scrum.localOffsetMin());
+        return `${sp.name} [${sp.status}] ${sp.start} to ${sp.end}${sp.goal ? ` - ${sp.goal}` : ''}\n${bd.done} of ${bd.scope} points done, ${bd.remaining} remaining, ${daysLeft(sp, Date.now(), Scrum.localOffsetMin())} days left, ${paceWord(bd.status)}.`;
+      }
       case 'progress': case 'touched': case 'submit':
         return '[error] progress, touched and submit are for a task\'s own run, inside its worktree. This is the project folder.';
       default:
-        return `[error] Unknown action "${action}". Planning: create, list, get, update.`;
+        return `[error] Unknown action "${action}". Planning: create, list, get, update, plan, sprint; refinement suggestions: propose_estimate, propose_split, propose_criteria.`;
     }
   } catch (e) {
     if (e instanceof D.DeliveryError) return `[error] ${e.message}`;
@@ -153,13 +200,15 @@ export const deliveryDefinition = {
     'The project\'s delivery board: independent tasks that agents deliver in parallel, each in its own git worktree, landed one at a time after a person approves.\n'
     + 'Planning (from the project folder): create {title, body, acceptance[], priority 1-4, dependsOn[] (task ids or exact titles), labels[] (folders/files it touches, e.g. "src/auth")} -> backlog; '
     + 'list {filter?}; get {id}; update {id, ...fields}. Break a brief into tasks that do not need the same files at once; make one depend on another instead. A person promotes tasks to ready and starts the dispatcher; you cannot.\n'
+    + 'Scrum refinement (a person accepts or dismisses each; you cannot commit, start or close a sprint): propose_estimate {id, points 1/2/3/5/8/13, note}; propose_split {id, parts[{title, body?, acceptance[]?, points?}], note} for an item that is too big; propose_criteria {id, acceptance[], note}; '
+    + 'plan {capacity?} reads the sprint plan that would fit; sprint reads the current sprint and its burndown.\n'
     + 'Delivering (inside a task\'s worktree): progress {note}; touched {files[]}; submit {summary} when the work is committed and the checks pass; '
     + 'localise (the worktree\'s node_modules / venv / vendor are links to the project\'s own: call this before an install that must not change it); '
     + 'handoff {to, note} (a note for a task that depends on yours). You can act only on your own task.',
   inputSchema: {
     type: 'object' as const,
     properties: {
-      action: { type: 'string', enum: ['create', 'list', 'get', 'update', 'progress', 'touched', 'submit', 'localise', 'handoff'] },
+      action: { type: 'string', enum: ['create', 'list', 'get', 'update', 'progress', 'touched', 'submit', 'localise', 'handoff', 'propose_estimate', 'propose_split', 'propose_criteria', 'plan', 'sprint'] },
       id: { type: 'string', description: 'The task id (get, update).' },
       title: { type: 'string' },
       body: { type: 'string', description: 'What to do and why.' },
@@ -173,6 +222,12 @@ export const deliveryDefinition = {
       note: { type: 'string', description: 'progress: what you have done so far. handoff: what the other task needs to know.' },
       to: { type: 'string', description: 'handoff: the id of the task that depends on yours.' },
       files: { type: 'array', items: { type: 'string' }, description: 'touched: project-relative paths you changed.' },
+      points: { type: 'number', description: 'propose_estimate: story points on the usual scale (1, 2, 3, 5, 8, 13).' },
+      parts: {
+        type: 'array', description: 'propose_split: the smaller tasks (2 to 8) the item should become.',
+        items: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, points: { type: 'number' } }, required: ['title'] },
+      },
+      capacity: { type: 'number', description: 'plan: the points the sprint can hold; default is the recent velocity.' },
     },
     required: ['action'],
   },

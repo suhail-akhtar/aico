@@ -150,6 +150,12 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ['Delivery'],
   },
   {
+    // ADR 0039. Loaded outright by a request to connect a project to GitHub or another forge/tracker (REQUEST_LOADS).
+    id: 'connections',
+    summary: 'connect the project to GitHub (or another forge): token scopes test, repo mapping, import issues, pull-request mode',
+    tools: ['ConnectionManage'],
+  },
+  {
     // ADR 0037. Loaded outright by a request for a mockup, prototype or screens (REQUEST_LOADS) and by the design-board skill.
     id: 'design',
     summary: 'clickable HTML mockups of screens on a design board (mockup, prototype, UX flow)',
@@ -231,6 +237,11 @@ const REQUEST_LOADS: Array<{ re: RegExp; groups: readonly string[] }> = [
     // A backlog, a board of tasks, a sprint, or a delivery task (ADR 0038): the Delivery tool, not a loose list in chat.
     re: /\b(?:backlog|task board|delivery (?:board|task)|kanban|sprint|break (?:this|it|that|the \w+) (?:down )?into (?:independent |separate |parallel )?tasks)\b/i,
     groups: ['delivery'],
+  },
+  {
+    // Connecting a project to a forge or tracker (ADR 0039): the tool, not hand-written curl calls with a token.
+    re: /(?:connect (?:this |the |my |our )?(?:project|repo(?:sitory)?|board|backlog)? ?(?:to|with) (?:github|gitlab|azure devops|gitea|forgejo|bitbucket)|(?:github|gitlab|azure devops|gitea|forgejo|bitbucket) (?:connection|integration)|(?:import|sync) (?:the |our |my )?(?:github |gitlab )?issues|pr mode|open (?:the )?(?:pr|pull requests?) (?:from|for) (?:the )?(?:board|tasks?))/i,
+    groups: ['connections'],
   },
   {
     // A mockup, prototype, wireframe or set of screens (ADR 0037): the board tool, not a pile of loose HTML files.

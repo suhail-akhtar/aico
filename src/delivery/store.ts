@@ -31,6 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { aicoHome } from '../home.js';
 import { projectKey } from '../learning/proposals.js';
+import { applyScrum, emptyScrum, openProposals, overlayScrum, sprintList, type ScrumEvent, type ScrumFold } from './scrum-fold.js';
 import type { BoardState, DispatcherState, Release, Task } from './types.js';
 
 export const DEFAULT_MAX_PARALLEL = 2;
@@ -63,7 +64,9 @@ type JournalEvent =
   | { t: 'base'; at: string; id: string; trunkSha: string; tree: string }
   | { t: 'release'; at: string; release: Release }
   | { t: 'deploy'; at: string; version: string; deploy: NonNullable<Release['deploy']> }
-  | { t: 'rollback'; at: string; version: string; taskId: string };
+  | { t: 'rollback'; at: string; version: string; taskId: string }
+  /** Scrum mode (ADR 0039 section 4): sprints, estimates, suggestions. Folded by scrum-fold.ts. */
+  | { t: 'scrum'; at: string; ev: ScrumEvent };
 
 /** What the fold produces; the contract's BoardState is derived from it. */
 export interface Folded {
@@ -79,6 +82,8 @@ export interface Folded {
   base: Map<string, { trunkSha: string; tree: string }>;
   /** Releases the board made, by version. */
   releases: Map<string, Release>;
+  /** Sprints, estimates, memberships and the agent's suggestions (empty on a board that never used Scrum). */
+  scrum: ScrumFold;
 }
 
 export function deliveryRoot(): string {
@@ -116,6 +121,7 @@ function emptyFold(project: string, trunk = 'main'): Folded {
     checks: new Map(),
     base: new Map(),
     releases: new Map(),
+    scrum: emptyScrum(),
   };
 }
 
@@ -177,6 +183,9 @@ function apply(f: Folded, ev: JournalEvent): void {
       if (r) r.rollback = { taskId: ev.taskId, at: ev.at };
       return;
     }
+    case 'scrum':
+      applyScrum(f.scrum, f.tasks, ev.ev, ev.at);
+      return;
   }
 }
 
@@ -189,6 +198,7 @@ export function foldJournal(text: string, project = ''): Folded {
     try { ev = JSON.parse(line) as JournalEvent; } catch { continue; }
     if (ev && typeof ev === 'object' && typeof ev.t === 'string') apply(f, ev);
   }
+  overlayScrum(f.tasks, f.scrum);
   // Not decided here: a dispatcher recorded as running stays running in the fold. The service
   // pauses it at boot (delivery/index bootDelivery), because a restart is not a person's yes to spend.
   return f;
@@ -263,8 +273,11 @@ export function boardState(project: string): BoardState {
     tasks: [...f.tasks.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).map(t => structuredClone(t)),
     queue: [...f.queue],
     running,
-    settings: { ...f.settings },
+    // A board that never used Scrum reads exactly as it did before: the Scrum keys appear with the first Scrum fact.
+    settings: { ...f.settings, ...(f.scrum.mode === 'scrum' ? { mode: 'scrum' as const } : {}) },
     dispatcher: f.dispatcher,
+    ...(f.scrum.sprints.size > 0 ? { sprints: sprintList(f.scrum) } : {}),
+    ...(f.scrum.proposals.size > 0 ? { proposals: openProposals(f.scrum) } : {}),
     releases: [...f.releases.values()].sort((a, b) => b.at.localeCompare(a.at) || b.version.localeCompare(a.version)).map(r => structuredClone(r)),
   };
 }
@@ -334,4 +347,5 @@ export function recordChecks(project: string, tree: string, ok: boolean, results
 export function recordBase(project: string, id: string, trunkSha: string, tree: string): void { append(project, { t: 'base', at: iso(), id, trunkSha, tree }); }
 export function putRelease(project: string, release: Release): void { append(project, { t: 'release', at: iso(), release }); }
 export function setDeploy(project: string, version: string, deploy: NonNullable<Release['deploy']>): void { append(project, { t: 'deploy', at: iso(), version, deploy }); }
+export function recordScrum(project: string, ev: ScrumEvent): void { append(project, { t: 'scrum', at: iso(), ev }); }
 export function setRollback(project: string, version: string, taskId: string): void { append(project, { t: 'rollback', at: iso(), version, taskId }); }

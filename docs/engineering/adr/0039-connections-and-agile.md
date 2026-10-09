@@ -1,9 +1,9 @@
 # 0039 — Connections to the team's forge and tracker, and Scrum as a mode of the Delivery board
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-09)
 - **Date:** 2026-10-09
 - **Deciders:** owner (+ authors)
-- **Supersedes / related:** extends [0038](0038-delivery.md) (Delivery) and **revises one sentence of it** ("Local only … Delivery never pushes") for projects that opt into PR mode; builds on [0006](0006-credential-broker.md) + [0010](0010-secret-file-sink.md) (credentials), [0009](0009-custom-tools.md) (custom tools), [0002](0002-guards-only-deny.md), [0021](0021-background-agents-that-report-back.md), [0034](0034-evidence-ci-agent-flaky-tests.md) (evidence packet), [0035](0035-managed-policy-and-audit-export.md) (policy, audit). Planned code: `src/connections/` (new), `src/tools/connection-manage.ts`, `src/server/connection-routes.ts`, `shared/delivery/` additions, `web/src/components/connections/`. Design only; nothing here is built.
+- **Supersedes / related:** extends [0038](0038-delivery.md) (Delivery) and **revises one sentence of it** ("Local only … Delivery never pushes") for projects that opt into PR mode; builds on [0006](0006-credential-broker.md) + [0010](0010-secret-file-sink.md) (credentials), [0009](0009-custom-tools.md) (custom tools), [0002](0002-guards-only-deny.md), [0021](0021-background-agents-that-report-back.md), [0034](0034-evidence-ci-agent-flaky-tests.md) (evidence packet), [0035](0035-managed-policy-and-audit-export.md) (policy, audit). Planned code: `src/connections/` (new), `src/tools/connection-manage.ts`, `src/server/connection-routes.ts`, `shared/delivery/` additions, `web/src/components/connections/`. Phase 0, the GitHub adapter and PR-mode landing are built (0.50.0 line); the other adapters, dynamic connectors and the OAuth conveniences are not.
 
 ## Context
 
@@ -430,15 +430,52 @@ epic/feature portfolio planning (a parent link is shown read-only); multi-repo o
 mappings (one project ↔ one repo in v1); PRs from forks; inline code-review comments posted by AICO;
 time tracking; SSO/SCIM/RBAC (0035); multi-user real-time assignment; a hosted AICO service.
 
-## Open questions for the owner
+## Decisions on the open questions (owner, 2026-10-09)
 
-1. **Register OAuth apps** (GitHub, GitLab, Entra) in AICO's name for device flow — ongoing ownership
-   and a public client id in the repo — or stay PAT-only until demand is shown?
-2. **Read-once temp file vs. a local named-pipe nonce** for git credentials: the pipe closes the
-   pre-push-hook window but is a new local listener (AGENTS.md §10: ask first).
-3. **Does `pr` as a new `TaskStatus` pass**, or should it be a flag on `review` (smaller contract change,
-   muddier board)?
-4. First adapter after GitHub: **Azure DevOps** (largest and most process-specific) or **GitLab**?
+1. **PAT-only sign-in first.** No OAuth app is registered in AICO's name. Device flow, GitHub App and Entra
+   are later, additive auth methods (phase 7) and need the owner to register apps.
+2. **Git credentials use the read-once temp-file sink plus askpass.** No new local listener (no named pipe,
+   no nonce server). The pre-push-hook window the ADR describes is closed further in the build: the
+   engine's push runs with `core.hooksPath` pointed at an empty directory, so no repository hook runs while
+   the token file exists.
+3. **`pr` is a new `TaskStatus` and a board column, "PR open".** The shared contract grows by one status
+   (plus `Task.pr` and `Task.remote`); clients ship with it.
+4. **Provider order after GitHub:** Azure DevOps, then GitLab / Gitea / Forgejo / GitBucket, then Bitbucket.
+   The phasing table's "2 before 3" is therefore reordered: phase 3 (Azure DevOps) comes next.
+
+## Implementation notes (phase 0, GitHub, PR mode)
+
+Built as designed except where this list says otherwise.
+
+- **Where.** `src/connections/` (store, HTTP client, adapter interface, `github/`, `git.ts`, `sync.ts`,
+  `landing.ts`, `poller.ts`), `shared/connections/types.ts`, `src/server/connection-routes.ts`,
+  `src/tools/connection-manage.ts`, the Connections pane under `web/src/components/connections/`.
+  Delivery stays network-free: it exposes `LandingHooks` and `observePr` / `mergePullRequest`, and
+  `connections/index.ts` installs the hooks, so `src/delivery` still contains no push or fetch.
+- **Fixtures** are under `scripts/fixtures/connections/<provider>/<scenario>/` (not `test/fixtures`) and are
+  hand-written to the documented shapes; the owner still records real ones before an adapter is called
+  supported. The loopback mock forge is `scripts/lib/mock-forge.mjs`; the reusable conformance suite is
+  `scripts/connections-conformance.mjs`.
+- **Journal.** PR and work-item state is recorded with ordinary `patch` events (`Task.pr`, `Task.remote`),
+  not new `remote/*` / `pr/*` event types; a sync conflict is a task comment plus an audit line. Nothing in
+  the fold needed to change.
+- **Credential approval.** The vault credential is `approval: auto`, origin-bound, `allowedTools:
+  ['Connection']`: the person's paste is the approval. The "first write per session is asked" line became
+  the mapping step (a person turns the work-item source on) and the Open PR click. A re-sign-in stores a new
+  credential name, because replacing a person's own credential needs a vault grant by design.
+- **Stronger than the ADR:** `core.hooksPath` points at an empty folder during the engine's git calls, so no
+  repository hook runs while the token file exists; the askpass script answers only for the expected host.
+- **Local trunk.** In PR mode the engine fetches the remote trunk into a private ref
+  (`refs/aico/remote/<trunk>`) and fast-forwards the local trunk when it is a strict ancestor and nothing
+  uncommitted is on it, before preparing a task and after a remote merge.
+- **A connection made by an agent** is a record with no token: it can do nothing until a person pastes one
+  for the host the page shows, so the host-on-an-approval-card step is the token form itself.
+- **Plain http** exists only as a person's opt-in for a private or loopback address (`insecureHttp`); it is
+  how a self-hosted server on a LAN works and how the offline tests run.
+- **Not built:** reassignment detection, Projects v2 writes, iteration sync into Delivery sprints (the adapter
+  lists milestones and Projects v2 iterations; wiring them to sprints is phase 5), dynamic connectors
+  (`draft`, `test-contract`), OAuth, and every adapter except GitHub. `ConnectionManage remove` is limited to
+  a connection with no token.
 
 ## Verification
 

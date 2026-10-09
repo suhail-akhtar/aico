@@ -77,7 +77,7 @@ export interface Group {
 
 export type IconName =
   | 'sliders' | 'stack' | 'shield' | 'gauge' | 'wallet'
-  | 'sun' | 'moon' | 'monitor' | 'lock' | 'pencil' | 'globe' | 'bolt' | 'users' | 'bookmark';
+  | 'sun' | 'moon' | 'monitor' | 'lock' | 'pencil' | 'globe' | 'bolt' | 'users' | 'bookmark' | 'link';
 
 export interface Pane {
   id: string;
@@ -86,7 +86,7 @@ export interface Pane {
   blurb?: string;
   groups: Group[];
   /** Panes that render their own thing rather than a list of fields. */
-  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools' | 'learned' | 'about';
+  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools' | 'learned' | 'about' | 'connections';
 }
 
 /* ── The schema ───────────────────────────────────────────────────── */
@@ -243,6 +243,14 @@ export const PANES: Pane[] = [
     blurb: 'Custom tools: one command or one HTTP call, typed, with an effect class that decides when you are asked. '
       + 'The agent can draft one; only you can enable it.',
     custom: 'tools',
+    groups: [],
+  },
+  {
+    id: 'connections',
+    label: 'Connections',
+    icon: 'link',
+    blurb: 'Your team’s code host and task tracker.',
+    custom: 'connections',
     groups: [],
   },
   {

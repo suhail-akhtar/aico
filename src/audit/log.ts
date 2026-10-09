@@ -29,7 +29,28 @@ import type { LoadedPolicy } from '../policy/managed.js';
 
 export type OwnAuditEvent =
   | { at: number; kind: 'settings.change'; action: 'set' | 'unset'; key: string; valueHash?: string }
+  | ConnectionAuditEvent
   | { at: number; kind: 'policy.load'; active: boolean; hash: string; paths: string[]; problems: number; lockdown: boolean; weak: boolean };
+
+/**
+ * A connection event (ADR 0039): which connection, which operation, against which host and path
+ * WITHOUT a query, the item or PR id, the outcome. Never a body, a title, a comment or a token.
+ */
+export interface ConnectionAuditEvent {
+  at: number;
+  kind: 'connection';
+  /** create, test, map, use, write, push, pr.open, pr.merge, sync, policy.deny, credential, remove. */
+  action: string;
+  connection: string;
+  provider: string;
+  /** Host + path, no query string. */
+  target?: string;
+  /** Item or PR id, branch name. */
+  ref?: string;
+  outcome: 'ok' | 'error' | 'denied';
+  detail?: string;
+  project?: string;
+}
 
 export function auditEventsFile(): string {
   return path.join(aicoHome(), 'audit', 'events.jsonl');

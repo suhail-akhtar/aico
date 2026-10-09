@@ -43,7 +43,16 @@ import {
   COLUMNS, PARKED, STATUS_LABEL, checkMove, countTasks, formatUsd, groupTasks, labelsOf, makeRef, needingYou, needsChipLabel, sortForReview, unmetDeps,
   withoutAnswered, type ColumnDef,
 } from '../../delivery-model';
+import { BoardConnectionBar } from '../connections/BoardConnectionBar';
+import { BoardConnectionContext } from '../connections/context';
+import { activeSprintOf, currentSprintOf, modeOf, plannedSprintOf, skippedBySprint, sprintsOf, type Mode } from '../../delivery-scrum';
 import { NewTaskDialog, PlanDialog, StartDispatcherDialog } from './Dialogs';
+import { ModeSwitch } from './scrum/bits';
+import { BacklogView } from './scrum/BacklogView';
+import { CeremoniesView } from './scrum/CeremoniesView';
+import { AddToSprintDialog, PlanSprintDialog, SprintActionDialog } from './scrum/PlanSprintDialog';
+import { ReportsView } from './scrum/ReportsView';
+import { ScrumHeader } from './scrum/ScrumHeader';
 import { DvIcon } from './icons';
 import { ReleasesView } from './ReleasesView';
 import { ReviewQueue } from './ReviewQueue';
@@ -56,6 +65,8 @@ export interface DeliveryHost {
   openSession: (sessionId: string) => void;
   /** Open the Code map on a file in Focus view (or the map itself, with no file). */
   openCodeMap: (file?: string) => void;
+  /** Open Settings on the Connections page (ADR 0039). Absent in a host with no Settings; the link is then left out. */
+  openConnections?: (() => void) | undefined;
 }
 
 export interface DeliveryViewProps {
@@ -67,8 +78,10 @@ export interface DeliveryViewProps {
   onProjectChange?: (path: string) => void;
 }
 
-type View = 'board' | 'review' | 'releases';
-const VIEWS: readonly View[] = ['board', 'review', 'releases'];
+type View = 'board' | 'review' | 'releases' | 'backlog' | 'reports' | 'ceremonies';
+const VIEWS: readonly View[] = ['board', 'review', 'releases', 'backlog', 'reports', 'ceremonies'];
+/** Views that exist only in Scrum mode (ADR 0039 section 4). */
+const SCRUM_VIEWS: readonly View[] = ['backlog', 'reports', 'ceremonies'];
 const TABS_PREFIX = 'dv-view';
 
 function pref<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
@@ -94,7 +107,11 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
   const [showCancelled, setShowCancelled] = useState(false);
   const [mergedOpen, setMergedOpen] = useState(() => pref('aico.delivery.merged', 'closed', ['open', 'closed']) === 'open');
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'plan' | 'start' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'plan' | 'start' | 'sprint' | null>(null);
+  const [sprintAction, setSprintAction] = useState<'start' | 'close' | null>(null);
+  const [addTask, setAddTask] = useState<Task | null>(null);
+  const [modeBusy, setModeBusy] = useState(false);
+  const [refining, setRefining] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [onlyNeeds, setOnlyNeeds] = useState(false);
@@ -109,7 +126,17 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
   const byId = useMemo(() => new Map(tasks.map(t => [t.id, t])), [tasks]);
   const ref = useMemo(() => makeRef(tasks), [tasks]);
   const waiting = useMemo(() => needingYou(tasks), [tasks]);
-  const groups = useMemo(() => groupTasks(tasks, board?.queue ?? [], { query, label, ref, onlyNeeds }), [tasks, board?.queue, query, label, ref, onlyNeeds]);
+  // Scrum (ADR 0039 section 4): the same board with a time box. The sprint board shows the sprint's tasks and any work already in flight.
+  const mode: Mode = modeOf(board);
+  const scrum = mode === 'scrum';
+  const sprints = sprintsOf(board);
+  const currentSprint = currentSprintOf(sprints);
+  const offsetMin = -new Date().getTimezoneOffset();
+  const boardTasks = useMemo(
+    () => (scrum ? tasks.filter(t => (currentSprint && t.sprintId === currentSprint.id) || ['running', 'review', 'changes', 'pr'].includes(t.status)) : tasks),
+    [scrum, tasks, currentSprint],
+  );
+  const groups = useMemo(() => groupTasks(boardTasks, board?.queue ?? [], { query, label, ref, onlyNeeds }), [boardTasks, board?.queue, query, label, ref, onlyNeeds]);
   const counts = useMemo(() => countTasks(tasks), [tasks]);
   const labels = useMemo(() => labelsOf(tasks), [tasks]);
   const reviewList = useMemo(() => sortForReview(tasks), [tasks]);
@@ -128,6 +155,22 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
 
   // The "need you" filter ends by itself when nobody is waiting any more.
   useEffect(() => { if (onlyNeeds && waiting.length === 0) setOnlyNeeds(false); }, [onlyNeeds, waiting.length]);
+
+  // Back in Kanban the Scrum-only views are gone: land on the board rather than on a blank panel.
+  useEffect(() => { if (board && !scrum && SCRUM_VIEWS.includes(view)) setView('board'); }, [board, scrum, view]);
+
+  const changeMode = async (next: Mode): Promise<void> => {
+    setModeBusy(true); setNotice(null);
+    try { await api.deliveryScrumMode(projectPath, next); await refreshBoard(); if (next === 'kanban' && SCRUM_VIEWS.includes(view)) switchView('board'); }
+    catch (e) { setNotice(`Could not switch to ${next === 'scrum' ? 'Scrum' : 'Kanban'}: ${(e as Error).message}`); }
+    finally { setModeBusy(false); }
+  };
+  const refine = async (): Promise<void> => {
+    setRefining(true); setNotice(null);
+    try { host.openSession((await api.deliveryRefine(projectPath)).sessionId); setInfo('An agent is reading the backlog. Its suggestions appear in the Backlog view for you to accept or dismiss.'); }
+    catch (e) { setNotice(`Could not start refinement: ${(e as Error).message}`); }
+    finally { setRefining(false); }
+  };
 
   // A confirmation fades by itself; an error never does.
   useEffect(() => {
@@ -199,10 +242,23 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
   const columnCtx = (t: Task): CardContext => ({
     now, unmet: unmetDeps(t, byId), run: runs.get(t.id), selected: t.id === selectedId,
     onOpen: open, onMove: (task, to) => void move(task, to), onOpenSession: host.openSession, onHandled: setInfo, onDragStart: dragStart, onDragEnd: dragEnd,
+    ...(scrum ? {
+      scrum: {
+        skipped: skippedBySprint(t, sprints),
+        onEstimate: (task: Task, points: number | null) => { void api.deliveryEstimate(task.id, projectPath, points).then(upsertTask).catch((e: Error) => setNotice(`Could not set the estimate: ${e.message}`)); },
+      },
+    } : {}),
   });
 
+  // "PR open" is a column only for a project that lands through pull requests (or still has one open).
+  const showPr = board?.connection?.landing === 'pr' || counts.byStatus.pr > 0;
+  const connCtx = useMemo(() => ({ connection: board?.connection, trunk: board?.settings.trunk ?? 'main' }), [board?.connection, board?.settings.trunk]);
+
+  // In Scrum the rail counts what this sprint landed, as the column does, not every task the board ever merged.
+  const mergedCount = scrum ? boardTasks.filter(t => t.status === 'merged').length : counts.byStatus.merged;
+
   const visibleColumns: ColumnDef[] = [
-    ...COLUMNS.filter(c => c.id !== 'merged'),
+    ...COLUMNS.filter(c => c.id !== 'merged' && (c.id !== 'pr' || showPr)).map(c => (scrum && c.id === 'backlog' ? { ...c, label: 'Sprint backlog', hint: 'Committed to the sprint; Ready once it starts' } : c)),
     ...(mergedOpen ? COLUMNS.filter(c => c.id === 'merged') : []),
     ...(showBlocked ? PARKED.filter(c => c.id === 'blocked') : []),
     ...(showCancelled ? PARKED.filter(c => c.id === 'cancelled') : []),
@@ -210,25 +266,42 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
 
   return (
     <RefContext.Provider value={ref}>
+    <BoardConnectionContext.Provider value={connCtx}>
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-aico-bg motion-reduce:[&_*]:!animate-none motion-reduce:[&_*]:!transition-none">
       <Header
         board={board} projectName={projectName} projectPath={projectPath} projects={projects} onProjectChange={onProjectChange}
         pausing={pausing} onToggle={() => void toggleDispatcher()}
         onNew={() => setDialog('new')} onPlan={() => setDialog('plan')}
         needs={waiting.length} needsOn={onlyNeeds} onNeeds={toggleNeeds}
+        mode={mode} modeBusy={modeBusy} onMode={m => void changeMode(m)}
+        connectionBar={board ? (
+          <BoardConnectionBar
+            project={projectPath} projectName={projectName} connection={board.connection}
+            onOpenConnections={host.openConnections} onInfo={setInfo} onError={setNotice}
+          />
+        ) : null}
       />
+
+      {scrum && board && (tasks.length > 0 || sprints.length > 0) && (
+        <ScrumHeader
+          sprint={currentSprint} tasks={tasks} now={now} offsetMin={offsetMin}
+          onPlan={() => setDialog('sprint')} onStart={() => setSprintAction('start')} onClose={() => setSprintAction('close')} onRefine={() => void refine()}
+        />
+      )}
 
       {board && tasks.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-aico-border-subtle px-4 py-2 sm:px-6">
           <Tabs
             label="Delivery views" prefix={TABS_PREFIX} value={view} onChange={switchView}
             items={[
-              { id: 'board', label: 'Board' },
+              { id: 'board', label: scrum ? 'Sprint' : 'Board' },
+              ...(scrum ? [{ id: 'backlog' as const, label: 'Backlog', badge: (board.proposals?.length ?? 0) || undefined, badgeTone: 'accent' as const }] : []),
               { id: 'review', label: 'Review queue', badge: reviewList.length || undefined, badgeTone: 'accent' },
+              ...(scrum ? [{ id: 'reports' as const, label: 'Reports' }, { id: 'ceremonies' as const, label: 'Review & retro' }] : []),
               { id: 'releases', label: 'Releases', badge: board.releases.length || undefined },
             ]}
           />
-          {view !== 'releases' && (
+          {(view === 'board' || view === 'review') && (
             <>
               <input
                 ref={searchRef} type="search" value={query} onChange={e => setQuery(e.target.value)} aria-label="Filter tasks" placeholder="Filter tasks  /"
@@ -296,10 +369,10 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
                 {!mergedOpen && (
                   <button
                     type="button" onClick={() => { setMergedOpen(true); setPref('aico.delivery.merged', 'open'); }}
-                    aria-label={`Show Merged, ${counts.byStatus.merged} tasks`}
+                    aria-label={`Show Merged, ${mergedCount} tasks`}
                     className="flex w-10 shrink-0 flex-col items-center gap-2 rounded-xl border border-dashed border-aico-border py-3 text-aico-muted transition-colors hover:bg-aico-hover hover:text-aico-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-aico-accent"
                   >
-                    <span className="rounded-full bg-aico-hover px-1.5 text-[11px] tabular-nums">{counts.byStatus.merged}</span>
+                    <span className="rounded-full bg-aico-hover px-1.5 text-[11px] tabular-nums">{mergedCount}</span>
                     <span className="text-[12px] font-medium [writing-mode:vertical-rl]">Merged</span>
                   </button>
                 )}
@@ -318,6 +391,27 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
         {board && tasks.length > 0 && view === 'review' && (
           <div role="tabpanel" id={panelId(TABS_PREFIX)} aria-labelledby={tabId(TABS_PREFIX, 'review')} className="flex min-h-0 flex-1 flex-col">
             <ReviewQueue list={reviewList} now={now} selectedId={selectedId} project={projectPath} onOpen={open} onShowBoard={() => switchView('board')} />
+          </div>
+        )}
+
+        {board && scrum && view === 'backlog' && (
+          <div role="tabpanel" id={panelId(TABS_PREFIX)} aria-labelledby={tabId(TABS_PREFIX, 'backlog')} className="flex min-h-0 flex-1 flex-col">
+            <BacklogView
+              project={projectPath} tasks={tasks} proposals={board.proposals ?? []} sprint={plannedSprintOf(sprints) ?? activeSprintOf(sprints)}
+              onOpenTask={setSelectedId} onPlan={() => setDialog('sprint')} onAdd={setAddTask} onRefine={() => void refine()} refining={refining} onHandled={setInfo}
+            />
+          </div>
+        )}
+
+        {board && scrum && view === 'reports' && (
+          <div role="tabpanel" id={panelId(TABS_PREFIX)} aria-labelledby={tabId(TABS_PREFIX, 'reports')} className="flex min-h-0 flex-1 flex-col">
+            <ReportsView tasks={tasks} sprints={sprints} now={now} offsetMin={offsetMin} onOpenTask={setSelectedId} />
+          </div>
+        )}
+
+        {board && scrum && view === 'ceremonies' && (
+          <div role="tabpanel" id={panelId(TABS_PREFIX)} aria-labelledby={tabId(TABS_PREFIX, 'ceremonies')} className="flex min-h-0 flex-1 flex-col">
+            <CeremoniesView project={projectPath} sprints={sprints} onSaved={setInfo} />
           </div>
         )}
 
@@ -342,20 +436,27 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
 
       {dialog === 'new' && <NewTaskDialog project={projectPath} tasks={tasks} onClose={() => setDialog(null)} onCreated={t => { setNotice(null); void refreshBoard(); setSelectedId(t.id); }} />}
       {dialog === 'plan' && <PlanDialog project={projectPath} host={host} onClose={() => setDialog(null)} />}
+      {dialog === 'sprint' && board && <PlanSprintDialog project={projectPath} tasks={tasks} sprints={sprints} now={now} offsetMin={offsetMin} onClose={() => setDialog(null)} onDone={setInfo} />}
+      {sprintAction && currentSprint && <SprintActionDialog project={projectPath} sprint={currentSprint} kind={sprintAction} tasks={tasks} onClose={() => setSprintAction(null)} onDone={setInfo} />}
+      {addTask && (plannedSprintOf(sprints) ?? activeSprintOf(sprints)) && <AddToSprintDialog project={projectPath} sprint={(plannedSprintOf(sprints) ?? activeSprintOf(sprints))!} task={addTask} onClose={() => setAddTask(null)} onDone={setInfo} />}
       {dialog === 'start' && board && <StartDispatcherDialog project={projectPath} initial={board.settings.maxParallel} readyCount={counts.byStatus.ready} onClose={() => setDialog(null)} />}
     </div>
+    </BoardConnectionContext.Provider>
     </RefContext.Provider>
   );
 }
 
 // ── header ────────────────────────────────────────────────────────────
 
-function Header({ board, projectName, projectPath, projects, onProjectChange, pausing, onToggle, onNew, onPlan, needs, needsOn, onNeeds }: {
+function Header({ board, projectName, projectPath, projects, onProjectChange, pausing, onToggle, onNew, onPlan, needs, needsOn, onNeeds, connectionBar, mode, modeBusy, onMode }: {
   board: ReturnType<typeof useDelivery.getState>['board'];
   projectName: string; projectPath: string;
   projects: DeliveryViewProps['projects']; onProjectChange: DeliveryViewProps['onProjectChange'];
   pausing: boolean; onToggle: () => void; onNew: () => void; onPlan: () => void;
   needs: number; needsOn: boolean; onNeeds: () => void;
+  /** The project's connection line (components/connections): sync state, Sync now, Connections, or the one-line suggestion. */
+  connectionBar?: React.ReactNode;
+  mode: Mode; modeBusy: boolean; onMode: (m: Mode) => void;
 }): React.ReactElement {
   const state = board?.dispatcher ?? 'idle';
   const running = board?.running.length ?? 0;
@@ -380,6 +481,7 @@ function Header({ board, projectName, projectPath, projects, onProjectChange, pa
           </div>
         </div>
         <span className="flex-1" />
+        {board && <ModeSwitch mode={mode} busy={modeBusy} onChange={onMode} />}
         {board && needs > 0 && (
           <button
             type="button" aria-pressed={needsOn} onClick={onNeeds}
@@ -411,6 +513,7 @@ function Header({ board, projectName, projectPath, projects, onProjectChange, pa
         <button type="button" className={BTN_OUTLINE} onClick={onPlan}><DvIcon name="sparkles" size={14} />Plan from a brief</button>
         <button type="button" className={BTN_PRIMARY} onClick={onNew}><DvIcon name="plus" size={14} />New task</button>
       </div>
+      {connectionBar}
     </header>
   );
 }
@@ -443,7 +546,7 @@ function Column({ col, tasks, dragged, running, ctx, onDrop, onAdd, onCollapse, 
       onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false); }}
       onDrop={e => { e.preventDefault(); setOver(false); if (dragged && accepts) onDrop(dragged, col.id); }}
       title={dragged && !accepts && !isOrigin && verdict && !verdict.ok ? verdict.reason : undefined}
-      className={`flex w-[84vw] min-w-0 shrink-0 snap-start flex-col rounded-xl border transition-colors duration-150 sm:w-[248px] md:w-auto md:min-w-[196px] md:shrink md:grow md:basis-0 ${
+      className={`flex w-[84vw] min-w-0 shrink-0 snap-start flex-col rounded-xl border transition-colors duration-150 sm:w-[248px] md:w-auto md:min-w-[172px] md:shrink md:grow md:basis-0 ${
         over ? 'border-aico-accent bg-aico-accent-soft'
           : accepts ? 'border-dashed border-aico-accent bg-aico-surface'
           : dragged && !isOrigin ? 'border-aico-border-subtle bg-aico-surface opacity-55'
@@ -486,6 +589,7 @@ const EMPTY_COPY: Partial<Record<TaskStatus, string>> = {
   running: 'No agent is working. Start the agents to begin.',
   review: 'Finished work waits here for you.',
   changes: 'Work you sent back appears here.',
+  pr: 'Pull requests wait here for the remote’s checks and reviews.',
   merged: 'Nothing has landed yet.',
   blocked: 'Nothing is blocked.',
   cancelled: 'Nothing was cancelled.',

@@ -1,0 +1,103 @@
+{
+  "prefix": "/api/v3/repos/octo-org/widgets",
+  "routes": [
+    {
+      "path": "/commits/main/check-runs",
+      "status": 200,
+      "body": {
+        "total_count": 1,
+        "check_runs": [
+          { "id": 7001, "name": "build", "status": "completed", "conclusion": "success", "html_url": "https://forge.test/octo-org/widgets/runs/7001" }
+        ]
+      }
+    },
+    {
+      "path": "/commits/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233/check-runs",
+      "status": 200,
+      "body": {
+        "total_count": 4,
+        "check_runs": [
+          { "id": 7101, "name": "build", "status": "completed", "conclusion": "success", "details_url": "https://forge.test/octo-org/widgets/runs/7101", "output": { "title": "Build passed", "summary": "All 212 tests passed." } },
+          { "id": 7102, "name": "docs", "status": "completed", "conclusion": "neutral", "html_url": "https://forge.test/octo-org/widgets/runs/7102", "output": { "title": null, "summary": null } },
+          { "id": 7103, "name": "e2e", "status": "completed", "conclusion": "skipped", "html_url": "https://forge.test/octo-org/widgets/runs/7103" },
+          { "id": 7104, "name": "deploy-preview", "status": "completed", "conclusion": "cancelled", "html_url": "https://forge.test/octo-org/widgets/runs/7104", "output": { "title": "Cancelled", "summary": "The run was cancelled by a newer push." } }
+        ]
+      }
+    },
+    {
+      "path": "/commits/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233/status",
+      "status": 200,
+      "body": {
+        "state": "failure",
+        "total_count": 1,
+        "statuses": [
+          { "context": "ci/legacy", "state": "error", "description": "Runner lost contact.", "target_url": "https://forge.test/legacy/build/55" }
+        ]
+      }
+    },
+    {
+      "path": "/commits/:sha/check-runs",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "total_count": 2,
+            "check_runs": [
+              { "id": 7201, "name": "build", "status": "in_progress", "conclusion": null, "html_url": "https://forge.test/octo-org/widgets/runs/7201", "output": { "title": "Running", "summary": "Compiling." } },
+              { "id": 7202, "name": "test", "status": "queued", "conclusion": null, "html_url": "https://forge.test/octo-org/widgets/runs/7202" }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "total_count": 2,
+            "check_runs": [
+              { "id": 7201, "name": "build", "status": "completed", "conclusion": "failure", "html_url": "https://forge.test/octo-org/widgets/runs/7201", "output": { "title": "Build failed", "summary": "2 tests failed in cache.spec.ts." } },
+              { "id": 7202, "name": "test", "status": "completed", "conclusion": "success", "html_url": "https://forge.test/octo-org/widgets/runs/7202" }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "total_count": 3,
+            "check_runs": [
+              { "id": 7201, "name": "build", "status": "completed", "conclusion": "success", "html_url": "https://forge.test/octo-org/widgets/runs/7201", "output": { "title": "Build passed", "summary": "All tests passed." } },
+              { "id": 7202, "name": "test", "status": "completed", "conclusion": "success", "html_url": "https://forge.test/octo-org/widgets/runs/7202" },
+              { "id": 7203, "name": "docs", "status": "completed", "conclusion": "neutral", "html_url": "https://forge.test/octo-org/widgets/runs/7203" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "path": "/commits/:sha/status",
+      "responses": [
+        {
+          "status": 200,
+          "body": { "state": "pending", "total_count": 1, "statuses": [ { "context": "ci/lint", "state": "pending", "description": "Waiting for a runner.", "target_url": "https://forge.test/lint/1" } ] }
+        },
+        {
+          "status": 200,
+          "body": { "state": "success", "total_count": 1, "statuses": [ { "context": "ci/lint", "state": "success", "description": "Clean.", "target_url": "https://forge.test/lint/1" } ] }
+        }
+      ]
+    },
+    {
+      "path": "/branches/main/protection",
+      "status": 200,
+      "body": {
+        "url": "https://forge.test/api/v3/repos/octo-org/widgets/branches/main/protection",
+        "required_status_checks": { "strict": true, "contexts": ["build"], "checks": [ { "context": "build", "app_id": 15368 } ] },
+        "required_pull_request_reviews": { "dismiss_stale_reviews": true, "required_approving_review_count": 1 },
+        "enforce_admins": { "enabled": false }
+      }
+    },
+    {
+      "path": "/branches/dev/protection",
+      "status": 404,
+      "body": { "message": "Branch not protected", "documentation_url": "https://forge.test/docs/branch-protection" }
+    }
+  ]
+}

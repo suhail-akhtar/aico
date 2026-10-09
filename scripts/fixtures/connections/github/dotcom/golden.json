@@ -1,0 +1,588 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 65536
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "label",
+        "parentLink": false
+      },
+      "iterations": "native",
+      "checks": {
+        "read": true,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": true
+      }
+    },
+    "scopes": {
+      "found": [
+        "repo",
+        "read:user"
+      ],
+      "needed": [
+        {
+          "scope": "repo",
+          "why": "Read and write repositories, pull requests, issues and checks (private repositories need it).",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "read:user",
+          "why": "Show which account the token acts as.",
+          "feature": "repos",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [
+        "repo: full control of every repository the account can reach (a fine-grained token limited to the mapped repository is safer)"
+      ],
+      "reported": true
+    },
+    "warnings": []
+  },
+  "repo": {
+    "ref": {
+      "owner": "octo-org",
+      "name": "widgets",
+      "id": "5001"
+    },
+    "defaultBranch": "main",
+    "cloneUrl": "<origin>/octo-org/widgets.git",
+    "htmlUrl": "<origin>/octo-org/widgets",
+    "private": true,
+    "permissions": {
+      "pull": true,
+      "push": true,
+      "admin": true
+    }
+  },
+  "repos": [
+    {
+      "ref": {
+        "owner": "octo-org",
+        "name": "widgets",
+        "id": "5001"
+      },
+      "defaultBranch": "main",
+      "cloneUrl": "<origin>/octo-org/widgets.git",
+      "htmlUrl": "<origin>/octo-org/widgets",
+      "private": true,
+      "permissions": {
+        "pull": true,
+        "push": true,
+        "admin": true
+      }
+    },
+    {
+      "ref": {
+        "owner": "octo-org",
+        "name": "gadgets",
+        "id": "5002"
+      },
+      "defaultBranch": "trunk",
+      "cloneUrl": "<origin>/octo-org/gadgets.git",
+      "htmlUrl": "<origin>/octo-org/gadgets",
+      "private": false,
+      "permissions": {
+        "pull": true,
+        "push": true,
+        "admin": false
+      }
+    }
+  ],
+  "pull.created": {
+    "connection": "github-dotcom",
+    "id": "7",
+    "url": "https://forge.test/octo-org/widgets/pull/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "none",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "GitHub has not finished working out whether this can be merged yet."
+    ],
+    "observedAt": "<time>"
+  },
+  "pull.1": {
+    "connection": "github-dotcom",
+    "id": "7",
+    "url": "https://forge.test/octo-org/widgets/pull/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "pending",
+      "items": [
+        {
+          "name": "build",
+          "state": "pending",
+          "url": "https://forge.test/octo-org/widgets/runs/7201",
+          "summary": "Compiling."
+        },
+        {
+          "name": "test",
+          "state": "pending",
+          "url": "https://forge.test/octo-org/widgets/runs/7202"
+        },
+        {
+          "name": "ci/lint",
+          "state": "pending",
+          "url": "https://forge.test/lint/1",
+          "summary": "Waiting for a runner."
+        }
+      ]
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "Required reviews or checks are not satisfied.",
+      "0 of 1 required approvals."
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.2": {
+    "connection": "github-dotcom",
+    "id": "7",
+    "url": "https://forge.test/octo-org/widgets/pull/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "failing",
+      "items": [
+        {
+          "name": "build",
+          "state": "failure",
+          "url": "https://forge.test/octo-org/widgets/runs/7201",
+          "summary": "2 tests failed in cache.spec.ts."
+        },
+        {
+          "name": "test",
+          "state": "success",
+          "url": "https://forge.test/octo-org/widgets/runs/7202"
+        },
+        {
+          "name": "ci/lint",
+          "state": "success",
+          "url": "https://forge.test/lint/1",
+          "summary": "Clean."
+        }
+      ]
+    },
+    "reviews": {
+      "state": "changes",
+      "approved": 0,
+      "changesRequested": 1,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "Required reviews or checks are not satisfied.",
+      "A reviewer has requested changes.",
+      "Check failed: build"
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.3": {
+    "connection": "github-dotcom",
+    "id": "7",
+    "url": "https://forge.test/octo-org/widgets/pull/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "build",
+          "state": "success",
+          "url": "https://forge.test/octo-org/widgets/runs/7201",
+          "summary": "All tests passed."
+        },
+        {
+          "name": "test",
+          "state": "success",
+          "url": "https://forge.test/octo-org/widgets/runs/7202"
+        },
+        {
+          "name": "docs",
+          "state": "neutral",
+          "url": "https://forge.test/octo-org/widgets/runs/7203"
+        },
+        {
+          "name": "ci/lint",
+          "state": "success",
+          "url": "https://forge.test/lint/1",
+          "summary": "Clean."
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 1,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": true,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.4": {
+    "connection": "github-dotcom",
+    "id": "7",
+    "url": "https://forge.test/octo-org/widgets/pull/7",
+    "state": "merged",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "build",
+          "state": "success",
+          "url": "https://forge.test/octo-org/widgets/runs/7201",
+          "summary": "All tests passed."
+        },
+        {
+          "name": "test",
+          "state": "success",
+          "url": "https://forge.test/octo-org/widgets/runs/7202"
+        },
+        {
+          "name": "docs",
+          "state": "neutral",
+          "url": "https://forge.test/octo-org/widgets/runs/7203"
+        },
+        {
+          "name": "ci/lint",
+          "state": "success",
+          "url": "https://forge.test/lint/1",
+          "summary": "Clean."
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 1,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "mergedSha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+    "observedAt": "<time>"
+  },
+  "comments": [
+    {
+      "id": "review-301",
+      "author": "octo-bot",
+      "association": "MEMBER",
+      "body": "Please rename the cache key.",
+      "at": "2026-10-09T11:00:00Z",
+      "review": "changes",
+      "url": "https://forge.test/octo-org/widgets/pull/7#pullrequestreview-301"
+    },
+    {
+      "id": "review-303",
+      "author": "drive-by-9",
+      "association": "NONE",
+      "body": "Nice idea.",
+      "at": "2026-10-09T11:30:00Z",
+      "review": "commented",
+      "url": "https://forge.test/octo-org/widgets/pull/7#pullrequestreview-303"
+    },
+    {
+      "id": "802",
+      "author": "stranger-9",
+      "association": "NONE",
+      "body": "Please also add docs.",
+      "at": "2026-10-09T11:45:00Z",
+      "url": "https://forge.test/octo-org/widgets/pull/7#issuecomment-802"
+    },
+    {
+      "id": "review-302",
+      "author": "octo-bot",
+      "association": "MEMBER",
+      "body": "Renamed, thanks.",
+      "at": "2026-10-09T12:00:00Z",
+      "review": "approved",
+      "url": "https://forge.test/octo-org/widgets/pull/7#pullrequestreview-302"
+    },
+    {
+      "id": "801",
+      "author": "octo-bot",
+      "association": "MEMBER",
+      "body": "Looks good after the rename.",
+      "at": "2026-10-09T12:05:00Z",
+      "url": "https://forge.test/octo-org/widgets/pull/7#issuecomment-801"
+    }
+  ],
+  "items": [
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+      "state": "open",
+      "labels": [
+        "bug",
+        "sp:3"
+      ],
+      "assignees": [
+        "octo-dev"
+      ],
+      "author": "octo-bot",
+      "url": "https://forge.test/octo-org/widgets/issues/11",
+      "rev": "2026-10-01T10:00:00Z",
+      "milestone": {
+        "id": "1",
+        "title": "Sprint 1",
+        "dueOn": "2026-10-16T07:00:00Z"
+      },
+      "points": 3
+    },
+    {
+      "id": "13",
+      "number": 13,
+      "title": "Document widget API",
+      "body": "Write the reference for `Widget.render`.\n\n## Acceptance\n- [ ] every option documented",
+      "state": "open",
+      "labels": [
+        "docs",
+        "estimate:5"
+      ],
+      "assignees": [],
+      "author": "octo-bot",
+      "url": "https://forge.test/octo-org/widgets/issues/13",
+      "rev": "2026-10-02T09:30:00Z",
+      "points": 5
+    }
+  ],
+  "items.search": [
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Updating a widget leaves a stale entry.",
+      "state": "open",
+      "labels": [
+        "bug"
+      ],
+      "assignees": [],
+      "author": "octo-bot",
+      "url": "https://forge.test/octo-org/widgets/issues/11",
+      "rev": "2026-10-01T10:00:00Z"
+    }
+  ],
+  "item": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update",
+    "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+    "state": "open",
+    "labels": [
+      "bug",
+      "sp:3"
+    ],
+    "assignees": [
+      "octo-dev"
+    ],
+    "author": "octo-bot",
+    "url": "https://forge.test/octo-org/widgets/issues/11",
+    "rev": "2026-10-01T10:00:00Z",
+    "milestone": {
+      "id": "1",
+      "title": "Sprint 1",
+      "dueOn": "2026-10-16T07:00:00Z"
+    },
+    "points": 3
+  },
+  "item.updated": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update (reworded)",
+    "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+    "state": "open",
+    "labels": [
+      "bug",
+      "sp:3",
+      "aico:running"
+    ],
+    "assignees": [
+      "octo-dev"
+    ],
+    "author": "octo-bot",
+    "url": "https://forge.test/octo-org/widgets/issues/11",
+    "rev": "2026-10-09T12:00:00Z",
+    "milestone": {
+      "id": "2",
+      "title": "Sprint 0",
+      "dueOn": "2026-10-02T07:00:00Z"
+    },
+    "points": 3
+  },
+  "item.closed": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update",
+    "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+    "state": "closed",
+    "labels": [
+      "bug",
+      "sp:3"
+    ],
+    "assignees": [
+      "octo-dev"
+    ],
+    "author": "octo-bot",
+    "url": "https://forge.test/octo-org/widgets/issues/11",
+    "rev": "2026-10-09T12:30:00Z",
+    "milestone": {
+      "id": "1",
+      "title": "Sprint 1",
+      "dueOn": "2026-10-16T07:00:00Z"
+    },
+    "points": 3
+  },
+  "item.created": {
+    "id": "14",
+    "number": 14,
+    "title": "Follow-up: cache metrics",
+    "body": "Track hit rate.",
+    "state": "open",
+    "labels": [
+      "aico"
+    ],
+    "assignees": [],
+    "author": "octo-dev",
+    "url": "https://forge.test/octo-org/widgets/issues/14",
+    "rev": "2026-10-09T12:00:00Z"
+  },
+  "iterations": [
+    {
+      "id": "it_100",
+      "title": "Iteration 3",
+      "kind": "iteration",
+      "state": "open",
+      "start": "2026-10-05",
+      "end": "2026-10-18",
+      "url": "https://forge.test/orgs/octo-org/projects/4"
+    },
+    {
+      "id": "it_099",
+      "title": "Iteration 2",
+      "kind": "iteration",
+      "state": "closed",
+      "start": "2026-09-21",
+      "end": "2026-10-04",
+      "url": "https://forge.test/orgs/octo-org/projects/4"
+    },
+    {
+      "id": "1",
+      "title": "Sprint 1",
+      "kind": "milestone",
+      "state": "open",
+      "end": "2026-10-16T07:00:00Z",
+      "url": "https://forge.test/octo-org/widgets/milestone/1",
+      "openItems": 3,
+      "closedItems": 5
+    },
+    {
+      "id": "2",
+      "title": "Sprint 0",
+      "kind": "milestone",
+      "state": "closed",
+      "end": "2026-10-02T07:00:00Z",
+      "url": "https://forge.test/octo-org/widgets/milestone/2",
+      "openItems": 0,
+      "closedItems": 9
+    }
+  ],
+  "iteration.created": {
+    "id": "3",
+    "title": "Sprint 2",
+    "kind": "milestone",
+    "state": "open",
+    "end": "2026-10-30T00:00:00Z",
+    "url": "https://forge.test/octo-org/widgets/milestone/3"
+  },
+  "checks": [
+    {
+      "name": "build",
+      "state": "success",
+      "url": "https://forge.test/octo-org/widgets/runs/7101",
+      "summary": "All 212 tests passed."
+    },
+    {
+      "name": "docs",
+      "state": "neutral",
+      "url": "https://forge.test/octo-org/widgets/runs/7102"
+    },
+    {
+      "name": "e2e",
+      "state": "skipped",
+      "url": "https://forge.test/octo-org/widgets/runs/7103"
+    },
+    {
+      "name": "deploy-preview",
+      "state": "failure",
+      "url": "https://forge.test/octo-org/widgets/runs/7104",
+      "summary": "The run was cancelled by a newer push."
+    },
+    {
+      "name": "ci/legacy",
+      "state": "failure",
+      "url": "https://forge.test/legacy/build/55",
+      "summary": "Runner lost contact."
+    }
+  ],
+  "protection": {
+    "protected": true,
+    "requiredReviews": 1,
+    "requiredChecks": [
+      "build"
+    ]
+  },
+  "protection.none": {
+    "protected": false
+  }
+}

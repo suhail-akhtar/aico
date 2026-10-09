@@ -230,7 +230,7 @@ export function Tabs<T extends string>({ label, prefix, value, onChange, items, 
     refs.current.get(target.id)?.focus();
   };
   return (
-    <div role="tablist" aria-label={label} onKeyDown={onKey} className={`${variant === 'pill' ? 'inline-flex rounded-lg bg-aico-hover p-0.5' : 'flex gap-1'} ${className}`}>
+    <div role="tablist" aria-label={label} onKeyDown={onKey} className={`${variant === 'pill' ? 'inline-flex max-w-full overflow-x-auto rounded-lg bg-aico-hover p-0.5' : 'flex gap-1'} ${className}`}>
       {items.map(t => {
         const on = t.id === value;
         const badge = t.badge !== undefined && t.badge !== '' && t.badge !== 0 ? (
@@ -242,7 +242,7 @@ export function Tabs<T extends string>({ label, prefix, value, onChange, items, 
             type="button" role="tab" id={tabId(prefix, t.id)} aria-selected={on} aria-controls={panelId(prefix)} tabIndex={on ? 0 : -1}
             onClick={() => onChange(t.id)}
             className={variant === 'pill'
-              ? `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-aico-accent ${on ? 'bg-aico-bg font-medium text-aico-primary shadow-sm' : 'text-aico-secondary hover:text-aico-primary'}`
+              ? `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[12.5px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-aico-accent ${on ? 'bg-aico-bg font-medium text-aico-primary shadow-sm' : 'text-aico-secondary hover:text-aico-primary'}`
               : `relative flex items-center gap-1.5 px-2.5 py-2 text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-aico-accent ${on ? 'font-medium text-aico-primary' : 'text-aico-muted hover:text-aico-secondary'}`}
           >
             {t.label}{badge}

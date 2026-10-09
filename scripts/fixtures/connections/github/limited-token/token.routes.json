@@ -1,0 +1,85 @@
+{
+  "prefix": "/api/v3",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 200,
+      "headers": {
+        "github-authentication-token-expiration": "2026-12-31 00:00:00 UTC",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4998"
+      },
+      "body": { "login": "octo-dev", "id": 1001, "type": "User", "site_admin": false, "html_url": "https://forge.test/octo-dev" }
+    },
+    {
+      "path": "/meta",
+      "status": 200,
+      "body": { "verifiable_password_authentication": true }
+    },
+    {
+      "path": "/user/repos",
+      "status": 200,
+      "body": []
+    },
+    {
+      "path": "/repos/octo-org/widgets",
+      "status": 200,
+      "body": {
+        "id": 5001, "name": "widgets", "full_name": "octo-org/widgets", "private": true,
+        "owner": { "login": "octo-org", "type": "Organization" },
+        "html_url": "https://forge.test/octo-org/widgets",
+        "default_branch": "main", "has_issues": true,
+        "permissions": { "admin": false, "maintain": false, "push": true, "triage": true, "pull": true }
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/pulls",
+      "status": 200,
+      "body": [ { "number": 7, "state": "open", "head": { "ref": "aico/task-42", "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" } } ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/pulls/7",
+      "status": 200,
+      "body": {
+        "id": 9007, "number": 7, "state": "open", "draft": false, "merged": false,
+        "title": "Add widget cache", "user": { "login": "octo-dev" },
+        "html_url": "https://forge.test/octo-org/widgets/pull/7",
+        "head": { "ref": "aico/task-42", "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" },
+        "base": { "ref": "main", "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233" },
+        "merged_at": null, "merge_commit_sha": null,
+        "mergeable": true, "mergeable_state": "blocked",
+        "requested_reviewers": [], "requested_teams": []
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/pulls/7/reviews",
+      "status": 200,
+      "body": []
+    },
+    {
+      "path": "/repos/octo-org/widgets/issues",
+      "status": 200,
+      "body": [ { "number": 11, "title": "Cache invalidation on widget update", "state": "open", "updated_at": "2026-10-01T10:00:00Z" } ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/commits/:sha/check-runs",
+      "status": 403,
+      "body": { "message": "Resource not accessible by personal access token", "documentation_url": "https://forge.test/docs/rest" }
+    },
+    {
+      "path": "/repos/octo-org/widgets/commits/:sha/status",
+      "status": 403,
+      "body": { "message": "Resource not accessible by personal access token", "documentation_url": "https://forge.test/docs/rest" }
+    },
+    {
+      "path": "/repos/octo-org/widgets/branches/main/protection",
+      "status": 403,
+      "body": { "message": "Resource not accessible by personal access token", "documentation_url": "https://forge.test/docs/rest" }
+    },
+    {
+      "path": "/repos/octo-org/widgets/milestones",
+      "status": 200,
+      "body": [ { "number": 1, "title": "Sprint 1", "state": "open", "due_on": "2026-10-16T07:00:00Z", "open_issues": 3, "closed_issues": 5, "html_url": "https://forge.test/octo-org/widgets/milestone/1" } ]
+    }
+  ]
+}

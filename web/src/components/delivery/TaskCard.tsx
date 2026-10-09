@@ -14,6 +14,12 @@
  * line and a Review button — because those are the questions someone asks of
  * a card in that column.
  *
+ * Pull request mode (ADR 0039): a task in "PR open" shows its pull request's link, the remote's
+ * checks and reviews as chips, and the names of failing checks; there is no Merge button on the
+ * card (the drawer has it, and only when the remote says it can merge). An imported task carries
+ * a "from GitHub #12" link, and "Ready on remote" with one click to promote it when the remote
+ * marks it ready.
+ *
  * A task whose run waits for a person carries a "Needs you" box in ANY column,
  * with the controls to answer it in place (NeedsYou), and is not draggable:
  * it is waiting on a decision, not on a column. The "Session" link opens the
@@ -29,8 +35,12 @@ import type { Task, TaskStatus } from '../../delivery-types';
 import {
   PERSON_STATUSES, STATUS_LABEL, ago, checkMove, checksSummary, elapsed, formatUsd, sessionOf, toMs, waitsForLabel,
 } from '../../delivery-model';
+import { failingLine, prChips, prName, providerLabel, remoteChip } from '../../connections';
+import { useBoardConnection } from '../connections/context';
+import { ChipPill, ExternalLink } from '../connections/parts';
 import { DvIcon } from './icons';
 import { NeedsYou } from './NeedsYou';
+import { EstimateChip } from './scrum/bits';
 import { PriorityChip, RiskBadge, edge, riskSpine, useTaskRef } from './ui';
 
 export interface CardContext {
@@ -46,6 +56,8 @@ export interface CardContext {
   onHandled: (message: string) => void;
   onDragStart: (task: Task) => void;
   onDragEnd: () => void;
+  /** Scrum mode (ADR 0039 section 4): the story-point chip, and whether the agents will skip this ready task because it is outside the sprint. */
+  scrum?: { skipped: boolean; onEstimate: (task: Task, points: number | null) => void } | undefined;
 }
 
 export const TaskCard = React.memo(function TaskCard({ task, ctx }: { task: Task; ctx: CardContext }): React.ReactElement {
@@ -58,6 +70,9 @@ export const TaskCard = React.memo(function TaskCard({ task, ctx }: { task: Task
   const draggable = movable && !task.needs;
   const lastNote = task.status === 'changes' ? task.review?.comments.filter(c => c.by === 'person').at(-1)?.text : undefined;
   const muted = task.status === 'merged' || task.status === 'cancelled';
+  const bc = useBoardConnection().connection;
+  const from = remoteChip(task.remote, bc && bc.connection === task.remote?.connection ? providerLabel(bc.provider) : 'the remote');
+  const promote = Boolean(from?.readyOnRemote) && task.status === 'backlog';
 
   return (
     <article
@@ -80,6 +95,8 @@ export const TaskCard = React.memo(function TaskCard({ task, ctx }: { task: Task
         <span className="font-mono tabular-nums">{ref(task.id)}</span>
         <PriorityChip priority={task.priority} />
         <span className="flex-1" />
+        {ctx.scrum?.skipped && <span className="relative z-10 rounded-md border border-dashed border-aico-border px-1.5 text-[10.5px] text-aico-secondary" title="Ready, but not in the running sprint: agents skip it until it joins one">Not in sprint</span>}
+        {ctx.scrum && <EstimateChip id={task.id} title={task.title} estimate={task.estimate} locked={task.status === 'merged' || task.status === 'cancelled'} onSet={p => ctx.scrum!.onEstimate(task, p)} />}
         <MoveMenu task={task} onMove={ctx.onMove} />
       </div>
 
@@ -108,6 +125,24 @@ export const TaskCard = React.memo(function TaskCard({ task, ctx }: { task: Task
             <span key={l} className="rounded-md bg-aico-hover px-1.5 py-px text-[11px] text-aico-secondary">{l}</span>
           ))}
           {task.labels.length > 3 && <span className="text-[11px] text-aico-muted">+{task.labels.length - 3}</span>}
+        </div>
+      )}
+
+      {from && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
+          <span className="relative z-10"><ExternalLink href={from.url} title="Open the original on the remote">{from.text}</ExternalLink></span>
+          {from.closed && <span className="text-aico-muted">closed there</span>}
+          {promote && (
+            <>
+              <span className="text-aico-secondary" title="The remote shows this item as ready. Nothing starts until you move it.">Ready on remote</span>
+              <button
+                type="button" onClick={() => ctx.onMove(task, 'ready')}
+                className="relative z-10 rounded-md px-1.5 py-0.5 text-aico-accent hover:bg-aico-accent-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-aico-accent"
+              >
+                Move to Ready
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -149,6 +184,25 @@ export const TaskCard = React.memo(function TaskCard({ task, ctx }: { task: Task
             <div className="flex justify-end"><SessionLink sessionId={sessionId} onOpen={ctx.onOpenSession} label="Chat" title="Open the agent's chat" /></div>
           )}
         </div>
+      )}
+
+      {task.status === 'pr' && (
+        task.pr ? (
+          <div className="mt-2 space-y-1.5">
+            <div className="flex items-center gap-2 text-[12px]">
+              <span className="relative z-10"><ExternalLink href={task.pr.url} title="Open the pull request on the remote">{prName(task.pr)}</ExternalLink></span>
+              <span className="flex-1" />
+              {sessionId && ctx.onOpenSession && <SessionLink sessionId={sessionId} onOpen={ctx.onOpenSession} label="Chat" title="Open the agent's chat" />}
+            </div>
+            <ul className="flex flex-wrap gap-1" aria-label="Pull request status">
+              {prChips(task.pr, { compact: true }).map(c => <li key={c.id}><ChipPill chip={c} /></li>)}
+            </ul>
+            {failingLine(task.pr) && <p className="line-clamp-2 text-[11.5px] leading-snug text-aico-secondary">{failingLine(task.pr)}</p>}
+          </div>
+        ) : <p className="mt-2 text-[11.5px] text-aico-muted">Waiting for the remote&rsquo;s report.</p>
+      )}
+      {(task.status === 'changes' || task.status === 'merged') && task.pr && (
+        <p className="mt-1.5 text-[11.5px]"><span className="relative z-10"><ExternalLink href={task.pr.url} title="Open the pull request on the remote">{prName(task.pr)}</ExternalLink></span></p>
       )}
 
       {lastNote && <p className="mt-2 line-clamp-2 border-l-2 border-aico-border pl-2 text-[11.5px] italic text-aico-secondary">{lastNote}</p>}

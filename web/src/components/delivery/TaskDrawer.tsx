@@ -22,6 +22,12 @@
  * On a phone the drawer is a full-screen sheet (the board's own header would otherwise
  * eat a third of it); from `sm` up it overlays the board's right edge.
  *
+ * Pull request mode (ADR 0039): in "PR open" the Overview leads with the pull request as the
+ * remote reports it (checks by name, reviews, why it will not merge yet), and the foot offers
+ * "Merge on <platform>" only when the remote itself says it can merge now. The review card's
+ * primary button reads "Open pull request" (or "Update pull request" once one exists) when the
+ * project lands through pull requests, because that is what it does.
+ *
  * Editing is allowed only while the task is Backlog or Ready — once an agent
  * has a branch, changing the brief under it would be a lie about what it did.
  *
@@ -34,6 +40,10 @@ import { api } from '../../api';
 import { upsertTask } from '../../delivery';
 import type { Priority, Task } from '../../delivery-types';
 import { PRIORITY_LABEL, STATUS_LABEL, ago, elapsed, formatUsd, sessionOf, toMs, unmetDeps } from '../../delivery-model';
+import { landingUi, prName } from '../../connections';
+import { useBoardConnection } from '../connections/context';
+import { ExternalLink } from '../connections/parts';
+import { MergeBar, PullRequestPanel, RemoteSource } from '../connections/PullRequestPanel';
 import { DiffViewer } from './DiffViewer';
 import { DvIcon } from './icons';
 import { NeedsYou } from './NeedsYou';
@@ -106,8 +116,9 @@ export function TaskDrawer({ task, tasks, project, host, now, runStartedAt, onCl
           </button>
         </div>
         <h2 className="mt-1.5 text-[17px] font-semibold leading-snug text-aico-primary">{task.title}</h2>
-        {(task.branch || sessionId) && (
+        {(task.branch || sessionId || task.pr) && (
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-aico-muted">
+            {task.pr && <ExternalLink href={task.pr.url} title="Open the pull request on the remote">{prName(task.pr)}</ExternalLink>}
             {task.branch && (
               <p className="flex min-w-0 items-center gap-1.5">
                 <DvIcon name="branch" size={13} className="shrink-0" /><span className="truncate font-mono" title={task.worktree ?? task.branch}>{task.branch}</span>
@@ -133,21 +144,22 @@ export function TaskDrawer({ task, tasks, project, host, now, runStartedAt, onCl
       )}
 
       <div role="tabpanel" id={panelId(prefix)} aria-labelledby={tabId(prefix, tab)} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {tab === 'overview' && <Overview task={task} byId={byId} project={project} host={host} onOpenTask={onOpenTask} />}
+        {tab === 'overview' && <Overview task={task} byId={byId} project={project} host={host} now={now} onOpenTask={onOpenTask} />}
         {tab === 'changes' && <Changes task={task} project={project} host={host} />}
         {tab === 'evidence' && <Evidence task={task} />}
         {tab === 'discussion' && <Discussion task={task} now={now} />}
       </div>
 
       {reviewing && <DecisionBar task={task} project={project} onLanded={onLanded} />}
+      {task.status === 'pr' && <MergeBar task={task} project={project} onHandled={onHandled} />}
     </aside>
   );
 }
 
 // ── Overview ──────────────────────────────────────────────────────────
 
-function Overview({ task, byId, project, host, onOpenTask }: {
-  task: Task; byId: ReadonlyMap<string, Task>; project: string; host: DeliveryHost; onOpenTask: (id: string) => void;
+function Overview({ task, byId, project, host, now, onOpenTask }: {
+  task: Task; byId: ReadonlyMap<string, Task>; project: string; host: DeliveryHost; now: number; onOpenTask: (id: string) => void;
 }): React.ReactElement {
   const ref = useTaskRef();
   const editable = task.status === 'backlog' || task.status === 'ready';
@@ -182,6 +194,9 @@ function Overview({ task, byId, project, host, onOpenTask }: {
 
   return (
     <div className="space-y-5">
+      <PullRequestPanel task={task} now={now} />
+      <RemoteSource task={task} project={project} />
+
       {task.status === 'review' && risk && (
         <section aria-label="Risk">
           <div className="flex items-center gap-2"><RiskBadge level={risk.level} score={risk.score} /><span className="text-[12px] text-aico-muted">score {risk.score}</span></div>
@@ -317,7 +332,7 @@ function Changes({ task, project, host }: { task: Task; project: string; host: D
   const [diff, setDiff] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tries, setTries] = useState(0);
-  const has = Boolean(task.branch) || ['review', 'changes', 'merged', 'running'].includes(task.status);
+  const has = Boolean(task.branch) || ['review', 'changes', 'pr', 'merged', 'running'].includes(task.status);
 
   useEffect(() => {
     if (!has) return;
@@ -392,6 +407,7 @@ function DecisionBar({ task, project, onLanded }: { task: Task; project: string;
   const [busy, setBusy] = useState<'land' | 'changes' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const high = task.risk?.level === 'high';
+  const ui = landingUi(useBoardConnection().connection?.landing, task);
 
   useEffect(() => { setMode('idle'); setComment(''); setError(null); setBusy(null); }, [task.id]);
   useEffect(() => {
@@ -437,10 +453,10 @@ function DecisionBar({ task, project, onLanded }: { task: Task; project: string;
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={`${BTN_PRIMARY} ${mode === 'confirm' ? '!bg-aico-danger !text-white' : ''}`} disabled={busy !== null} onClick={() => void land()}>
             <DvIcon name="check" size={15} />
-            {busy === 'land' ? 'Landing…' : mode === 'confirm' ? 'Confirm: land a high-risk change' : 'Approve and land'}
+            {busy === 'land' ? ui.busy : mode === 'confirm' ? ui.confirm : ui.action}
           </button>
           <button type="button" className={BTN_OUTLINE} disabled={busy !== null} onClick={() => setMode('changes')}>Request changes</button>
-          <span className="ml-auto text-[12px] text-aico-muted">Lands on the trunk</span>
+          <span className="ml-auto text-[12px] text-aico-muted">{ui.foot}</span>
         </div>
       )}
     </footer>

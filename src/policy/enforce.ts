@@ -28,7 +28,7 @@ import type { AicoSettings } from '../settings.js';
 import type { GuardStage } from '../tools/pipeline.js';
 import { levelRank, minLevel, parseLevel, type AutonomyLevel } from '../autonomy/levels.js';
 import {
-  GATE_IDS, anyGlob, globMatch, managedPolicy, type ExtensionRule, type GateId, type LoadedPolicy, type ManagedPolicy,
+  GATE_IDS, anyGlob, globMatch, managedPolicy, type ConnectionsRule, type ExtensionRule, type GateId, type LoadedPolicy, type ManagedPolicy,
 } from './managed.js';
 
 export type Decision = { ok: true } | { ok: false; rule: string; message: string };
@@ -215,6 +215,43 @@ export function extensionDecision(kind: ExtensionKind, name: string, lp: LoadedP
 export function assertExtensionAllowed(kind: ExtensionKind, name: string, lp: LoadedPolicy = managedPolicy()): void {
   const d = extensionDecision(kind, name, lp);
   if (!d.ok) throw new PolicyError(d.message, d.rule);
+}
+
+// ── connections (ADR 0039) ──────────────────────────────────────────
+
+export interface ConnectionFacts {
+  provider?: string;
+  host?: string;
+  /** The landing mode a mapping asks for. */
+  landing?: 'local' | 'pr';
+}
+
+/**
+ * May this provider, host and landing mode be used for a connection? Asked at create/map, again
+ * before every adapter request (the second line: a policy that appears after a connection was
+ * made stops it) and at landing. A "no" from any layer is final.
+ */
+export function connectionDecision(f: ConnectionFacts, lp: LoadedPolicy = managedPolicy()): Decision {
+  if (!lp.active) return OK;
+  const label = f.host ? `The connection to ${f.host}` : f.provider ? `A ${f.provider} connection` : 'Connecting to a forge or tracker';
+  if (lockdown(lp)) return lockdownDecision(lp, label);
+  for (const layer of lp.layers) {
+    const rule: ConnectionsRule | undefined = layer.policy.connections;
+    if (!rule) continue;
+    if (rule.mode === 'forbid') return blocked(lp, label, 'connections.forbid');
+    if (rule.mode === 'allow-list') {
+      if (f.provider !== undefined && rule.providers !== undefined && !rule.providers.some(p => globMatch(p, f.provider!))) {
+        return blocked(lp, `${label} (${f.provider} is not on the approved list)`, 'connections.allow-list.providers');
+      }
+      if (f.host !== undefined && rule.hosts !== undefined && !rule.hosts.some(h => hostMatches(h, f.host!))) {
+        return blocked(lp, `${label} (${f.host} is not on the approved list)`, 'connections.allow-list.hosts');
+      }
+    }
+    if (f.landing === 'pr' && rule.maxLanding === 'local') {
+      return blocked(lp, 'Pull-request mode (AICO pushing a branch and opening a pull request)', 'connections.maxLanding');
+    }
+  }
+  return OK;
 }
 
 // ── gates, autonomy, version, budget ────────────────────────────────
@@ -514,6 +551,12 @@ export function describeRules(lp: LoadedPolicy = managedPolicy()): string[] {
       const r = p[k];
       if (r && r.mode !== 'any') lines.push(`${KIND_LABEL[k]}: ${r.mode === 'forbid' ? 'cannot be added' : `only ${r.allow?.join(', ') || 'none'}`}`);
     }
+    if (p.connections && p.connections.mode !== 'any') {
+      const c = p.connections;
+      lines.push(c.mode === 'forbid' ? 'Connections to forges and trackers: not allowed'
+        : `Connections only to ${[c.providers?.length ? `providers ${c.providers.join(', ')}` : '', c.hosts?.length ? `hosts ${c.hosts.join(', ')}` : ''].filter(Boolean).join(' on ') || 'nothing'}`);
+    }
+    if (p.connections?.maxLanding === 'local') lines.push('Delivery lands changes locally only (no pull-request mode)');
     if (p.network && p.network.mode !== 'off') lines.push(`Network ${p.network.mode}: ${p.network.domains.join(', ') || 'none'}`);
     if (p.budget?.perSessionUsd !== undefined) lines.push(`Spend per session: $${p.budget.perSessionUsd}`);
     if (p.budget?.perDayUsd !== undefined) lines.push(`Spend per day: $${p.budget.perDayUsd}`);

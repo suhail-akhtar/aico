@@ -12,6 +12,9 @@
  *    spend ceiling and a deadline. Progress renews a lease; a
  *    claim whose lease runs out (the process died) goes back to `ready`. A paused
  *    dispatcher starts nothing but still collects finished runs.
+ *  - **Scrum mode** (ADR 0039 section 4, `scrum.ts` / `scrum-fold.ts`): when the board's mode is Scrum the
+ *    dispatcher starts only `ready` tasks that belong to the active sprint (`mayStartInMode`); rework of work
+ *    already begun is never gated. Switching the mode back loses nothing.
  *  - **Merge queue** (`prepare`, `approve`): serial, one change at a time. A submitted
  *    task is rebased onto the current trunk, its checks run on the rebased tree (a tree
  *    already green is not run again), and it gets an evidence report and a risk score
@@ -65,13 +68,16 @@ import { branchOf, relativeToWorktrees, worktreePath, worktreesRoot } from './pa
 import * as R from './release.js';
 import { backgroundRunner, type AgentRunner } from './runner.js';
 import { runPrompt } from './prompts.js';
-import { assessRisk, numstat } from './risk.js';
+import { assessRisk, levelOf, numstat } from './risk.js';
+import { applyRemoteRisk } from '../connections/pr-risk.js';
 import * as S from './store.js';
+import { mayStartInMode } from './scrum-fold.js';
 import { actualTouches, overlap, predictTouches } from './touches.js';
 import { verifyTree } from './verify.js';
 import type {
   AttentionSnapshot, BatchResult, BoardState, DispatcherState, Release, ReleasePlan, Task, TaskNeed, TaskPriority, TaskStatus,
 } from './types.js';
+import type { PullState } from '../../shared/connections/types.js';
 
 export type { BoardState, Task } from './types.js';
 export { boardState, getTask, onChange as onBoardChange, projectOfKey, journaledProjects } from './store.js';
@@ -107,6 +113,29 @@ const config: Config = { runner: undefined, now: Date.now, budgetUsd: () => DEFA
 export function configureDelivery(next: Partial<Config>): void { Object.assign(config, next); }
 
 function runner(): AgentRunner { return (config.runner ??= backgroundRunner()); }
+
+// ── landing hooks (PR mode, ADR 0039) ────────────────────────────────────
+
+/**
+ * How a project lands work when it is not `local`. Delivery stays free of the network (its
+ * tests assert it never runs push/fetch): the connections module installs these at start-up
+ * and owns every remote call. Without hooks, or in `local` mode, nothing here changes.
+ */
+export interface LandingHooks {
+  mode(project: string): 'local' | 'pr';
+  /** PR mode: bring the local trunk up to the remote's (fast-forward only) before a task is prepared. */
+  beforePrepare?(project: string): Promise<void>;
+  /** A person approved: push the task branch and open (or update) its pull request. */
+  openPr(project: string, task: Task): Promise<{ ok: true; pr: PullState } | { ok: false; reason: string; status?: number }>;
+  /** A person clicked Merge: ask the remote to merge (it may refuse). */
+  mergePr(project: string, task: Task, opts: { method?: 'merge' | 'squash' | 'rebase' }): Promise<{ ok: true; pr: PullState } | { ok: false; reason: string; status?: number }>;
+  /** The remote merged it: update the local trunk and say where the work landed. */
+  afterMerged?(project: string, task: Task, pr: PullState): Promise<{ from?: string; to?: string } | undefined>;
+}
+
+let landing: LandingHooks | undefined;
+export function setLandingHooks(hooks: LandingHooks | undefined): void { landing = hooks; }
+const prMode = (project: string): boolean => { try { return landing?.mode(project) === 'pr'; } catch { return false; } };
 
 // ── paths ────────────────────────────────────────────────────────────────
 
@@ -266,14 +295,14 @@ export async function updateTask(project: string, id: string, input: TaskInput, 
     if (!EDITABLE_STATUS.has(status)) throw new DeliveryError('status can be set to backlog, ready, blocked or cancelled; the engine moves a task through running, review, changes and merged');
     if (status === 'cancelled' && by !== 'person' && task.status !== 'backlog' && task.status !== 'blocked') throw new DeliveryError('an agent can cancel only a backlog or blocked task; stopping a task that has started needs a person');
     if (status === 'ready' && by !== 'person') throw new DeliveryError('only a person promotes a task to ready: that is what lets the dispatcher spend money on it');
-    if ((task.status === 'running' || task.status === 'review' || task.status === 'changes') && status !== 'cancelled' && status !== 'blocked') {
+    if ((task.status === 'running' || task.status === 'review' || task.status === 'changes' || task.status === 'pr') && status !== 'cancelled' && status !== 'blocked') {
       throw new DeliveryError(`task ${id} is ${task.status}; it can be cancelled or blocked, or finish its run first`, 409);
     }
   }
   if (Object.keys(set).length > 0 || unset.length > 0) S.patchTask(p, id, set, unset);
   if (status && status !== task.status) {
     if (status === 'cancelled') await cancelTask(p, id);
-    else if (status === 'blocked' && (task.status === 'running' || task.status === 'review' || task.status === 'changes')) await releaseRun(p, id, 'blocked');
+    else if (status === 'blocked' && (task.status === 'running' || task.status === 'review' || task.status === 'changes' || task.status === 'pr')) await releaseRun(p, id, 'blocked');
     else S.patchTask(p, id, { status });
   }
   kick(p);
@@ -289,7 +318,9 @@ async function releaseRun(project: string, id: string, status: TaskStatus, comme
 }
 
 async function cancelTask(project: string, id: string): Promise<void> {
+  const open = S.getTask(project, id)?.pr;
   await releaseRun(project, id, 'cancelled');
+  if (open && open.state === 'open') S.addComment(project, id, 'agent', `Cancelled. The pull request ${open.url} was left open on the remote; close it there if it is no longer wanted.`);
   const kept = await removeWorktreeAndBranch(project, id);
   if (kept.keptBranch) S.addComment(project, id, 'agent', `Cancelled. Branch ${kept.keptBranch} still holds unmerged commits and was kept; delete it with git branch -D ${kept.keptBranch} when you no longer need them.`);
 }
@@ -309,7 +340,7 @@ function insideWorktree(repo: string, project: string, wt: string): string {
 }
 
 /** Remove a task's worktree and, when its work is safely on the trunk (or empty), its branch. Never discards unmerged commits. */
-async function removeWorktreeAndBranch(project: string, id: string): Promise<{ keptBranch?: string }> {
+async function removeWorktreeAndBranch(project: string, id: string, opts: { mergedHead?: string } = {}): Promise<{ keptBranch?: string }> {
   const t = S.getTask(project, id);
   const wt = t?.worktree ?? worktreePath(project, id);
   const branch = t?.branch ?? branchOf(id);
@@ -328,6 +359,8 @@ async function removeWorktreeAndBranch(project: string, id: string): Promise<{ k
   const trunk = S.load(project).settings.trunk;
   const merged = await G.git(['merge-base', '--is-ancestor', branch, trunk], repo);
   if (merged.ok) { await G.branchDelete(repo, branch, true); return {}; }
+  // A squash or rebase merge on the remote leaves the branch looking unmerged here; if its tip is exactly what the remote merged, nothing is lost.
+  if (opts.mergedHead && (await G.revParse(repo, branch)) === opts.mergedHead) { await G.branchDelete(repo, branch, true); return {}; }
   return { keptBranch: branch };
 }
 
@@ -493,7 +526,7 @@ async function startReady(project: string): Promise<void> {
   const max = S.clampParallel(f.settings.maxParallel);
   let running = runningClaims(project);
   const candidates = [...f.tasks.values()]
-    .filter(t => (t.status === 'ready' || t.status === 'changes') && !t.claim && depsMerged(f, t))
+    .filter(t => (t.status === 'ready' || t.status === 'changes') && !t.claim && depsMerged(f, t) && mayStartInMode(f.scrum, t))
     .sort((a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt));
   for (const t of candidates) {
     if (running.length >= max) break;
@@ -649,7 +682,7 @@ async function prepare(project: string, id: string): Promise<void> {
   const pack = await reviewPackage(project, id, outcome);
   S.recordBase(project, id, trunkSha, tree);
   S.patchTask(project, id, { status: 'review', ...pack });
-  if (f.settings.autoLandLowRisk && pack.risk.level === 'low' && v.ok) {
+  if (f.settings.autoLandLowRisk && pack.risk.level === 'low' && v.ok && !prMode(project)) {
     try { await landNow(project, id, 'auto'); return; } catch { /* stays in review for a person */ }
   }
   notify('review', project, S.getTask(project, id)!, `${pack.risk.level} risk · ${firstLine(pack.evidence.summary)}`);
@@ -662,11 +695,17 @@ type Prepared =
 /** Rebase onto the current trunk and run the checks on the result. */
 async function rebaseAndCheck(project: string, id: string, repo: string, wt: string): Promise<Prepared> {
   const trunk = S.load(project).settings.trunk;
-  const rb = await G.rebaseOnto(wt, trunk);
+  // PR mode: start from what the team has, and once the branch is on the remote absorb a moved
+  // trunk by merging it in (a rebase would rewrite pushed history and need a force-push).
+  if (prMode(project)) { try { await landing?.beforePrepare?.(project); } catch { /* the remote being unreachable must not stop a local review */ } }
+  const pushed = Boolean(S.getTask(project, id)?.pr);
+  const rb = pushed ? await G.mergeTrunkInto(wt, trunk) : await G.rebaseOnto(wt, trunk);
   if (!rb.ok) {
-    return { ok: false, text: rb.conflicts.length > 0
-      ? `Rebase conflict against ${trunk} in: ${rb.conflicts.join(', ')}. Rebase this branch onto ${trunk} (git rebase ${trunk}), resolve the conflicts keeping both sides' intent, run the checks and submit again.`
-      : `Rebase conflict against ${trunk}: ${rb.message || 'git could not rebase the branch'}. Fix the branch so it rebases cleanly and submit again.` };
+    return { ok: false, text: pushed
+      ? `Rebase conflict: the pull request's branch no longer merges cleanly with ${trunk}${rb.conflicts.length > 0 ? ` in: ${rb.conflicts.join(', ')}` : ''}. Merge ${trunk} into this branch (git merge ${trunk}; do NOT rebase, the branch is already on the remote), resolve the conflicts keeping both sides' intent, run the checks and submit again.`
+      : rb.conflicts.length > 0
+        ? `Rebase conflict against ${trunk} in: ${rb.conflicts.join(', ')}. Rebase this branch onto ${trunk} (git rebase ${trunk}), resolve the conflicts keeping both sides' intent, run the checks and submit again.`
+        : `Rebase conflict against ${trunk}: ${rb.message || 'git could not rebase the branch'}. Fix the branch so it rebases cleanly and submit again.` };
   }
   const tree = await G.treeOf(wt);
   const trunkSha = await G.revParse(repo, trunk);
@@ -752,6 +791,7 @@ async function landNow(project: string, id: string, by: 'person' | 'auto'): Prom
     // Same patch on a newer trunk: the report and score describe the tree that will land.
     S.patchTask(project, id, await reviewPackage(project, id, again));
   }
+  if (prMode(project)) return openPullRequest(project, id, by);
   const before = await G.revParse(repo, trunk);
   const ff = await G.fastForward(repo, trunk, t.branch);
   if (!ff.ok) {
@@ -773,6 +813,102 @@ async function landNow(project: string, id: string, by: 'person' | 'auto'): Prom
 }
 
 export const approveTask = (project: string, id: string): Promise<Task> => land(path.resolve(project), id, 'person');
+
+/**
+ * PR mode's landing: instead of moving the trunk, push the task branch and open (or update) its
+ * pull request, then wait for the remote's checks and reviews. Still a person's act (the route is
+ * human-gated and `auto` is refused), still one change at a time through the queue lane.
+ */
+async function openPullRequest(project: string, id: string, by: 'person' | 'auto'): Promise<Task> {
+  if (by !== 'person') throw new DeliveryError('only a person opens a pull request', 403);
+  if (!landing) throw new DeliveryError('pull-request mode is not available in this process', 409);
+  const t = S.getTask(project, id)!;
+  const r = await landing.openPr(project, t);
+  if (!r.ok) throw new DeliveryError(r.reason, r.status ?? 502);
+  S.queueDrop(project, id);
+  S.patchTask(project, id, { status: 'pr', pr: r.pr, risk: applyRemoteRisk(t.risk, r.pr, levelOf) }, ['claim', 'needs']);
+  S.addComment(project, id, 'agent', `${t.pr ? 'Updated' : 'Opened'} the pull request: ${r.pr.url}. The remote's checks and reviews decide when it lands; AICO watches it.`);
+  notify('review', project, S.getTask(project, id)!, `pull request ${t.pr ? 'updated' : 'opened'}`);
+  kick(project);
+  return S.getTask(project, id)!;
+}
+
+const prSignature = (pr: PullState): string => JSON.stringify([
+  pr.state, pr.draft, pr.headSha, pr.mergeable, pr.checks.state, pr.checks.items.map(c => `${c.name}:${c.state}`),
+  pr.reviews, pr.canMerge, pr.mergeBlockers, pr.protectedBase, pr.mergedSha,
+]);
+
+/**
+ * What the remote now says about a task's pull request (the poller's observation). Delivery
+ * decides what it means: merged on the remote -> the task is merged and cleaned up; closed
+ * without merging -> blocked for a person; failing checks, requested changes or a conflict ->
+ * back to `changes` with the reason (the dispatcher resumes the run); anything else -> the card
+ * just shows the new state. Remote text in `feedback` is already fenced as untrusted data.
+ */
+export function observePr(project: string, id: string, pr: PullState, extra: { feedback?: string } = {}): Promise<Task | undefined> {
+  const p = path.resolve(project);
+  return serial(p, 'queue', async () => {
+    const t = S.getTask(p, id);
+    if (!t || t.status !== 'pr') return t;
+    if (pr.state === 'merged') return mergedRemotely(p, t, pr);
+    if (pr.state === 'closed') {
+      await releaseRun(p, id, 'blocked', `The pull request ${pr.url} was closed without being merged. The branch and commits are kept. Reopen it on the remote, or set this task to ready to start over.`);
+      S.patchTask(p, id, { pr });
+      notify('failed', p, t, 'pull request closed without merging');
+      return S.getTask(p, id);
+    }
+    const risk = applyRemoteRisk(t.risk, pr, levelOf);
+    // No new journal event when only the observation time moved.
+    if (!t.pr || prSignature(t.pr) !== prSignature(pr) || JSON.stringify(t.risk) !== JSON.stringify(risk)) S.patchTask(p, id, { pr, risk });
+    const sendbackText = pr.checks.state === 'failing'
+      ? `Checks failed on the pull request ${pr.url}: ${pr.checks.items.filter(c => c.state === 'failure').map(c => c.name).slice(0, 6).join(', ') || 'see the pull request'}. Fix the cause on this branch with a new commit (the branch is already on the remote: do not rebase or force-push), run the checks and submit again.${extra.feedback ? `\n${extra.feedback}` : ''}`
+      : pr.mergeable === 'conflicting'
+        ? `Rebase conflict: the pull request ${pr.url} conflicts with its base branch on the remote. Merge the latest ${S.load(p).settings.trunk} into this branch (git merge, not rebase), resolve the conflicts keeping both sides' intent, run the checks and submit again.`
+        : pr.reviews.state === 'changes'
+          ? `A reviewer requested changes on the pull request ${pr.url}. Address them with new commits on this branch (do not rebase or force-push), run the checks and submit again.${extra.feedback ? `\n${extra.feedback}` : ''}`
+          : undefined;
+    if (sendbackText) await sendBack(p, id, sendbackText);
+    return S.getTask(p, id);
+  });
+}
+
+async function mergedRemotely(p: string, t: Task, pr: PullState): Promise<Task> {
+  const id = t.id;
+  const repo = await repoOf(p);
+  let moved: { from?: string; to?: string } | undefined;
+  try { moved = await landing?.afterMerged?.(p, t, pr); } catch { /* the trunk could not be refreshed; the merge still happened */ }
+  const range = moved?.from && moved.to ? await G.logRange(repo, `${moved.from}..${moved.to}`) : [];
+  const landed: NonNullable<Task['landed']> = {
+    from: moved?.from ?? '', to: moved?.to ?? pr.mergedSha ?? '', at: iso(config.now()), by: 'person', ...R.classifyCommits(range),
+  };
+  S.queueDrop(p, id);
+  S.patchTask(p, id, { status: 'merged', pr, ...(landed.from && landed.to ? { landed } : {}) }, ['claim', 'needs']);
+  S.addComment(p, id, 'agent', `Merged on the remote: ${pr.url}.`);
+  const kept = await removeWorktreeAndBranch(p, id, { mergedHead: pr.headSha });
+  if (kept.keptBranch) S.addComment(p, id, 'agent', `Branch ${kept.keptBranch} was kept.`);
+  notify('landed', p, S.getTask(p, id)!, 'merged on the remote');
+  kick(p);
+  return S.getTask(p, id)!;
+}
+
+/**
+ * A person's Merge click (human-gated): ask the remote to merge the task's pull request. The
+ * remote's own rules still apply and it may refuse; AICO never bypasses a protection.
+ */
+export function mergePullRequest(project: string, id: string, opts: { method?: 'merge' | 'squash' | 'rebase' } = {}): Promise<Task> {
+  const p = path.resolve(project);
+  return serial(p, 'queue', async () => {
+    const t = S.getTask(p, id);
+    if (!t) throw new DeliveryError(`no task ${id} on this board`, 404);
+    if (t.status !== 'pr' || !t.pr) throw new DeliveryError(`task ${id} is ${t.status}; only a task with an open pull request can be merged`, 409);
+    if (!landing) throw new DeliveryError('pull-request mode is not available in this process', 409);
+    const r = await landing.mergePr(p, t, opts);
+    if (!r.ok) throw new DeliveryError(r.reason, r.status ?? 502);
+    if (r.pr.state === 'merged') return mergedRemotely(p, S.getTask(p, id)!, r.pr);
+    S.patchTask(p, id, { pr: r.pr });
+    return S.getTask(p, id)!;
+  });
+}
 
 /** Why a task may not be part of a batch landing, or undefined when it may (low risk, in review, its checks green). */
 export function batchBlocker(project: string, t: Task | undefined): string | undefined {

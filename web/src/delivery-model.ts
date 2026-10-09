@@ -37,6 +37,7 @@ export const COLUMNS: readonly ColumnDef[] = [
   { id: 'running', label: 'Running', hint: 'An agent is working on these now' },
   { id: 'review', label: 'Review', hint: 'Finished work waiting for you' },
   { id: 'changes', label: 'Changes', hint: 'You asked for changes; the agent is on it' },
+  { id: 'pr', label: 'PR open', hint: 'A pull request is open on the remote; its checks and reviews decide when it lands' },
   { id: 'merged', label: 'Merged', hint: 'Landed on the trunk' },
 ];
 
@@ -46,7 +47,7 @@ export const PARKED: readonly ColumnDef[] = [
 ];
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
-  backlog: 'Backlog', ready: 'Ready', running: 'Running', review: 'In review', changes: 'Changes requested',
+  backlog: 'Backlog', ready: 'Ready', running: 'Running', review: 'In review', changes: 'Changes requested', pr: 'PR open',
   merged: 'Merged', blocked: 'Blocked', cancelled: 'Cancelled',
 };
 
@@ -136,7 +137,7 @@ function matches(t: Task, o: GroupOptions): boolean {
  * Merged and Changes show the most recently touched first, the rest by priority.
  */
 export function groupTasks(tasks: readonly Task[], queue: readonly string[] = [], opts: GroupOptions = {}): Record<TaskStatus, Task[]> {
-  const out: Record<TaskStatus, Task[]> = { backlog: [], ready: [], running: [], review: [], changes: [], merged: [], blocked: [], cancelled: [] };
+  const out: Record<TaskStatus, Task[]> = { backlog: [], ready: [], running: [], review: [], changes: [], pr: [], merged: [], blocked: [], cancelled: [] };
   for (const t of tasks) if (matches(t, opts) && out[t.status]) out[t.status].push(t);
   const pos = new Map(queue.map((id, i) => [id, i]));
   out.ready.sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9) || byPriority(a, b));
@@ -145,7 +146,7 @@ export function groupTasks(tasks: readonly Task[], queue: readonly string[] = []
   out.blocked.sort(byPriority);
   out.cancelled.sort((a, b) => toMs(b.updatedAt) - toMs(a.updatedAt));
   out.review = sortForReview(out.review);
-  for (const k of ['merged', 'changes'] as const) out[k].sort((a, b) => toMs(b.updatedAt) - toMs(a.updatedAt));
+  for (const k of ['merged', 'changes', 'pr'] as const) out[k].sort((a, b) => toMs(b.updatedAt) - toMs(a.updatedAt));
   // A task waiting on a person floats to the top of whatever column it is in (stable: the rest keep their order).
   for (const k of Object.keys(out) as TaskStatus[]) out[k] = needsFirst(out[k]);
   return out;
@@ -157,6 +158,7 @@ const OWNED_BY_AGENT: Partial<Record<TaskStatus, string>> = {
   running: 'An agent is working on this. It moves to Review when the agent finishes.',
   review: 'Open it to review: Approve and land, or Request changes.',
   changes: 'Waiting for the agent to pick up your requested changes.',
+  pr: 'A pull request is open. The remote’s checks and reviews decide when it lands: open the task to see them.',
   merged: 'Already landed on the trunk. Create a new task for further changes.',
 };
 
@@ -166,8 +168,8 @@ export function checkMove(task: Pick<Task, 'status'>, to: TaskStatus): MoveCheck
   if (from === to) return { ok: false, reason: 'Already here.' };
   if (!PERSON_STATUSES.includes(from)) return { ok: false, reason: OWNED_BY_AGENT[from] ?? 'This task cannot be moved by hand.' };
   if (!PERSON_STATUSES.includes(to)) {
-    return { ok: false, reason: to === 'merged' || to === 'review'
-      ? 'Work lands through Review: open a task in Review and choose Approve and land.'
+    return { ok: false, reason: to === 'merged' || to === 'review' || to === 'pr'
+      ? 'Work lands through Review: open a task in Review and choose Approve and land (or Open pull request).'
       : 'Agents move cards into this column. You can set Backlog, Ready, Blocked or Cancelled.' };
   }
   if (from === 'cancelled' && to !== 'backlog') return { ok: false, reason: 'Restore a cancelled task to Backlog first.' };
@@ -225,7 +227,7 @@ export function checksSummary(task: Pick<Task, 'evidence'>, max = 96): string | 
 export interface BoardCounts { byStatus: Record<TaskStatus, number>; total: number; open: number }
 
 export function countTasks(tasks: readonly Task[]): BoardCounts {
-  const byStatus: Record<TaskStatus, number> = { backlog: 0, ready: 0, running: 0, review: 0, changes: 0, merged: 0, blocked: 0, cancelled: 0 };
+  const byStatus: Record<TaskStatus, number> = { backlog: 0, ready: 0, running: 0, review: 0, changes: 0, pr: 0, merged: 0, blocked: 0, cancelled: 0 };
   for (const t of tasks) if (t.status in byStatus) byStatus[t.status]++;
   return { byStatus, total: tasks.length, open: tasks.length - byStatus.merged - byStatus.cancelled };
 }
@@ -265,6 +267,10 @@ export function normaliseBoard(raw: unknown): BoardState | null {
     settings: { maxParallel: 2, autoLandLowRisk: false, trunk: 'main', ...(r.settings ?? {}) },
     dispatcher: r.dispatcher === 'running' || r.dispatcher === 'paused' ? r.dispatcher : 'idle',
     releases: Array.isArray(r.releases) ? r.releases : [],
+    ...(r.connection ? { connection: r.connection } : {}),
+    // Scrum (ADR 0039 section 4): present once the board has used it; absent means Kanban with no sprints.
+    ...(Array.isArray(r.sprints) ? { sprints: r.sprints } : {}),
+    ...(Array.isArray(r.proposals) ? { proposals: r.proposals } : {}),
   };
 }
 

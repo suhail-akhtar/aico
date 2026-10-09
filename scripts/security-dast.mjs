@@ -374,6 +374,17 @@ section('7. human-gated routes with only the token');
     ['delivery/releases', { project }],
     ['delivery/releases/1.0.0/deploy', { project }],
     ['delivery/releases/1.0.0/rollback', { project }],
+    ['delivery/sprints/00000000/commit', { project, add: ['00000000'] }],
+    ['delivery/sprints/00000000/start', { project }],
+    ['delivery/sprints/00000000/close', { project }],
+    ['delivery/scrum/proposals/00000000/accept', { project }],
+    ['delivery/tasks/00000000/merge-pr', { project }],
+    ['connections/create', { provider: 'github', baseUrl: 'https://ghe.dast.example' }],
+    ['connections/credential', { id: 'github-github-com', token: 'ghp_DastCanaryNotARealToken000000000000' }], // standards-allow: secret (DAST canary)
+    ['connections/update', { id: 'github-github-com', disabled: true }],
+    ['connections/remove', { id: 'github-github-com' }],
+    ['connections/map', { project, connection: 'github-github-com', landing: 'pr', confirmLanding: true }],
+    ['connections/unmap', { project }],
   ];
   for (const [route, body] of humanOnly) {
     const r = remember(`human ${route}`, await api(route, { method: 'POST', json: body }));

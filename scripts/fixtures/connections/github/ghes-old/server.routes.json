@@ -1,0 +1,180 @@
+{
+  "prefix": "/api/v3",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 200,
+      "headers": {
+        "x-github-enterprise-version": "3.8.4",
+        "x-oauth-scopes": "repo, read:user, admin:repo_hook, delete_repo",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4999"
+      },
+      "body": {
+        "login": "octo-dev",
+        "id": 1001,
+        "type": "User",
+        "site_admin": false,
+        "html_url": "https://forge.test/octo-dev"
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets",
+      "status": 200,
+      "body": {
+        "id": 5001,
+        "name": "widgets",
+        "full_name": "octo-org/widgets",
+        "private": true,
+        "owner": {
+          "login": "octo-org",
+          "type": "Organization"
+        },
+        "html_url": "https://forge.test/octo-org/widgets",
+        "default_branch": "main",
+        "has_issues": true,
+        "permissions": {
+          "admin": false,
+          "maintain": false,
+          "push": true,
+          "triage": true,
+          "pull": true
+        }
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/pulls",
+      "status": 200,
+      "body": [
+        {
+          "number": 7,
+          "state": "open",
+          "head": {
+            "ref": "aico/task-42",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/issues",
+      "query": {
+        "per_page": "1",
+        "state": "all"
+      },
+      "status": 200,
+      "body": [
+        {
+          "number": 11,
+          "title": "Cache invalidation on widget update",
+          "state": "open"
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/issues",
+      "status": 200,
+      "body": [
+        {
+          "id": 6011,
+          "number": 11,
+          "title": "Cache invalidation on widget update",
+          "state": "open",
+          "body": "Updating a widget leaves a stale entry in the cache.",
+          "user": {
+            "login": "octo-bot"
+          },
+          "labels": [
+            {
+              "name": "bug"
+            },
+            {
+              "name": "points:2"
+            }
+          ],
+          "assignees": [],
+          "milestone": {
+            "number": 1,
+            "title": "Release 3.2",
+            "due_on": "2026-11-01T07:00:00Z"
+          },
+          "html_url": "https://forge.test/octo-org/widgets/issues/11",
+          "updated_at": "2026-10-01T10:00:00Z"
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/commits/main/check-runs",
+      "status": 200,
+      "body": {
+        "total_count": 0,
+        "check_runs": []
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/commits/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233/check-runs",
+      "status": 200,
+      "body": {
+        "total_count": 0,
+        "check_runs": []
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/commits/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233/status",
+      "status": 200,
+      "body": {
+        "state": "pending",
+        "total_count": 0,
+        "statuses": []
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/branches/main/protection",
+      "status": 200,
+      "body": {
+        "required_status_checks": {
+          "strict": false,
+          "contexts": [
+            "jenkins/build"
+          ]
+        }
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/branches/dev/protection",
+      "status": 404,
+      "body": {
+        "message": "Branch not protected"
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/milestones",
+      "query": {
+        "per_page": "1"
+      },
+      "status": 200,
+      "body": [
+        {
+          "number": 1,
+          "title": "Release 3.2",
+          "state": "open"
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/milestones",
+      "status": 200,
+      "body": [
+        {
+          "number": 1,
+          "title": "Release 3.2",
+          "state": "open",
+          "due_on": "2026-11-01T07:00:00Z",
+          "open_issues": 4,
+          "closed_issues": 1,
+          "html_url": "https://forge.test/octo-org/widgets/milestone/1"
+        }
+      ]
+    }
+  ]
+}

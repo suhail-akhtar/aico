@@ -1,0 +1,8 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/graphql",
+    "status": 200,
+    "body": { "errors": [ { "message": "Field 'projectsV2' doesn't exist on type 'Repository'", "locations": [ { "line": 1, "column": 60 } ] } ] }
+  }
+]

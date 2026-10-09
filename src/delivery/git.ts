@@ -139,6 +139,22 @@ export async function rebaseOnto(dir: string, onto: string): Promise<RebaseResul
   return { ok: false, conflicts, message: (r.err || r.out).trim().slice(0, 600) };
 }
 
+/**
+ * Merge the trunk INTO the worktree's branch (a merge commit), the way PR mode absorbs a moved
+ * trunk once the branch is on the remote: rebasing would rewrite pushed history and need a
+ * force-push, which AICO never does (ADR 0039 section 2). On conflict the files are named and
+ * the merge is aborted, so nothing half-applied is left.
+ */
+export async function mergeTrunkInto(dir: string, trunk: string): Promise<RebaseResult> {
+  if (await isAncestor(dir, trunk, 'HEAD')) return { ok: true, conflicts: [], message: '' };
+  const r = await git(['merge', '--no-edit', '-m', `chore: merge ${trunk} into the task branch`, trunk], dir);
+  if (r.ok) return { ok: true, conflicts: [], message: '' };
+  const u = await git(['diff', '--name-only', '--diff-filter=U'], dir);
+  const conflicts = lines(u.out);
+  await git(['merge', '--abort'], dir);
+  return { ok: false, conflicts, message: (r.err || r.out).trim().slice(0, 600) };
+}
+
 /** Stage everything except credential-looking paths and commit. Returns false when there was nothing to commit or git refused. */
 export async function commitAll(dir: string, message: string, isSecretPath: (p: string) => boolean): Promise<{ committed: boolean; kept: string[]; error?: string }> {
   if ((await porcelain(dir)).length === 0) return { committed: false, kept: [] };

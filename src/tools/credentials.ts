@@ -220,6 +220,8 @@ export const VAULT_TOOL_CLASSES: Readonly<Record<string, 'metadata' | 'consumer'
   HttpRequest: 'consumer',
   WinRmExec: 'consumer',
   SnmpQuery: 'consumer',
+  // Tests a connection through the broker (ADR 0039); no action takes or returns a token.
+  ConnectionManage: 'consumer',
 };
 
 /** Register a future consumer tool (documented hook; see docs/security/credential-broker.md). */

@@ -57,6 +57,7 @@ agents changing the code. Paths were verified against the tree on 2026-09-30.
 | `cron/` | scheduler + store (`AICO_CRON_STORE` or `aicoHome()/cron.json`) + Cron tools |
 | `background/` | background agents, mirrored into the ledger via `work/adapters.ts` |
 | `delivery/` | the task board ([ADR 0038](adr/0038-delivery.md)): journal (`aicoHome()/delivery/<project>/`), dispatcher over background agents in per-task worktrees, serial merge queue (rebase, checks by tree hash, evidence, risk), landing; wire types in `shared/delivery/types.ts`; routes in `server/delivery-routes.ts`; the deferred `Delivery` tool |
+| `connections/` | connections to a forge and tracker ([ADR 0039](adr/0039-connections-and-agile.md)): store (`aicoHome()/connections/`, mappings beside the Delivery journal), the HTTP client (policy, SSRF guard, TLS, rate limits, ETag; the only transport), the `ProviderAdapter` interface and `github/` adapter, `git.ts` (the only place AICO pushes or fetches: `aico/task-*`, never forced, read-once askpass sink), `sync.ts` (work items), `landing.ts` (PR mode hooks into Delivery), `poller.ts`; wire types in `shared/connections/types.ts`; routes in `server/connection-routes.ts`; the deferred `ConnectionManage` tool |
 | `sandbox/` | file-write confinement and its pipeline guard (`guard.ts`) |
 | `skills/` | skill loader/registry (builtin → user → project; `skills/builtin/`) |
 | `agents/` | agent specs, built-in specialist prompts (`prompts-registry.ts`), user agents, per-role model economy |

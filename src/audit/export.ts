@@ -43,7 +43,7 @@ import { listJobs } from '../longjob/index.js';
 
 export const AUDIT_SCHEMA = 'aico.audit/1';
 
-export type AuditKind = 'tool.call' | 'turn.end' | 'subagent' | 'approval' | 'credential' | 'settings.change' | 'policy.load' | 'work' | 'longjob';
+export type AuditKind = 'tool.call' | 'turn.end' | 'subagent' | 'approval' | 'credential' | 'settings.change' | 'policy.load' | 'work' | 'longjob' | 'connection';
 export type AuditOutcome = 'ok' | 'error' | 'denied' | 'escalated' | 'aborted' | 'declined' | 'expired' | 'timeout';
 
 export interface AuditRecord {
@@ -392,6 +392,15 @@ function fromOwn(o: ExportOptions, emit: (r: never) => void): void {
     if (typeof e.at !== 'number' || !inRange(e.at)) continue;
     if (e.kind === 'settings.change') {
       emit({ schema: AUDIT_SCHEMA, id: sha(`own|${e.at}|${e.key}|${e.action}`), time: iso(e.at), kind: 'settings.change', action: e.action, outcome: 'ok', target: auditText(e.key, 200), ...(e.valueHash ? { reason: `value hash ${e.valueHash}` } : {}) } as never);
+    } else if (e.kind === 'connection') {
+      // The key carries host + path without a query; titles, bodies and tokens never reach this record (audit/log.ts).
+      emit({
+        schema: AUDIT_SCHEMA, id: sha(`own|${e.at}|conn|${e.connection}|${e.action}|${e.ref ?? ''}|${e.target ?? ''}`), time: iso(e.at), kind: 'connection',
+        action: auditText(e.action, 40), outcome: e.outcome, ...(e.outcome === 'denied' ? { decision: 'deny' } : e.outcome === 'ok' ? { decision: 'allow' } : {}),
+        tool: auditText(`${e.provider}:${e.connection}`, 80), ...(e.target ? { target: auditText(e.target, 200) } : {}),
+        ...(e.detail || e.ref ? { reason: auditText([e.ref, e.detail].filter(Boolean).join(' - '), 300) } : {}),
+        ...(e.project ? { project: e.project } : {}),
+      } as never);
     } else if (e.kind === 'policy.load') {
       emit({
         schema: AUDIT_SCHEMA, id: sha(`own|${e.at}|policy|${e.hash}`), time: iso(e.at), kind: 'policy.load', action: e.active ? 'loaded' : 'removed',
@@ -437,7 +446,7 @@ export async function collectAudit(o: ExportOptions = {}): Promise<AuditRecord[]
     ['longjob', () => fromLongJobs(o, push)],
     ['settings.change', () => fromOwn(o, push)],
   ] as Array<[AuditKind, () => void]>) {
-    if (!want(kind) && !(kind === 'settings.change' && want('policy.load'))) continue;
+    if (!want(kind) && !(kind === 'settings.change' && (want('policy.load') || want('connection')))) continue;
     try { step(); } catch { /* skip a damaged source */ }
   }
   if (want('work')) { try { await fromWork(o, scope, push); } catch { /* skip */ } }

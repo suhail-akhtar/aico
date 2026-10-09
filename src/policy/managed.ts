@@ -60,6 +60,19 @@ export interface NetworkRule {
   allowLoopback?: boolean;
 }
 
+/**
+ * Connections to a forge or tracker (ADR 0039). Restrict-only like every key here: `allow-list`
+ * names the providers and/or hosts that may be connected (a list left out means "any" for that
+ * dimension), `forbid` removes connections, and `maxLanding: 'local'` stops projects from
+ * switching to pull-request mode (the engine would push).
+ */
+export interface ConnectionsRule {
+  mode: 'any' | 'forbid' | 'allow-list';
+  providers?: string[];
+  hosts?: string[];
+  maxLanding?: 'local' | 'pr';
+}
+
 export interface ManagedPolicy {
   version?: number;
   /** Shown with every block. */
@@ -77,6 +90,7 @@ export interface ManagedPolicy {
   mcp?: ExtensionRule;
   plugins?: ExtensionRule;
   customTools?: ExtensionRule;
+  connections?: ConnectionsRule;
   network?: NetworkRule;
   budget?: { perSessionUsd?: number; perDayUsd?: number };
   sentinelRequired?: boolean;
@@ -124,7 +138,7 @@ export interface LoadedPolicy {
 const KNOWN_KEYS = new Set([
   'version', 'message', 'contact', 'minAicoVersion', 'allowedProviders', 'deniedProviders', 'allowedModels',
   'deniedModels', 'localOnly', 'deniedTools', 'maxAutonomyLevel', 'requiredGates', 'mcp', 'plugins',
-  'customTools', 'network', 'budget', 'sentinelRequired', 'telemetry', 'audit',
+  'customTools', 'connections', 'network', 'budget', 'sentinelRequired', 'telemetry', 'audit',
   // Free-form notes for the people who maintain the file; never read.
   '$schema', '_comment', 'comment',
 ]);
@@ -251,6 +265,33 @@ export function validatePolicy(raw: Record<string, unknown>): { policy: ManagedP
     if (raw[key] !== undefined) policy[key] = extension(raw[key], key, problems);
   }
 
+  if (raw.connections !== undefined) {
+    const c = raw.connections;
+    if (!isObj(c)) { bad('connections', 'must be an object like { "mode": "forbid" }', 'forbid'); policy.connections = { mode: 'forbid' }; }
+    else {
+      warnUnknown(c, ['mode', 'providers', 'hosts', 'maxLanding'], 'connections', problems);
+      const mode = c.mode === 'any' || c.mode === 'forbid' || c.mode === 'allow-list' ? c.mode : undefined;
+      if (!mode) { bad('connections.mode', 'must be "any", "forbid" or "allow-list"', 'forbid'); policy.connections = { mode: 'forbid' }; }
+      else {
+        const rule: ConnectionsRule = { mode };
+        for (const k of ['providers', 'hosts'] as const) {
+          if (c[k] === undefined) continue;
+          const list = strList(c[k]);
+          if (list) rule[k] = list; else { bad(`connections.${k}`, 'must be a list of names', 'allow none'); rule[k] = []; }
+        }
+        if (mode === 'allow-list' && rule.providers === undefined && rule.hosts === undefined) {
+          problems.push({ level: 'error', key: 'connections', message: '"connections" is an allow-list with no "providers" or "hosts"; allowing none.' });
+          rule.providers = [];
+        }
+        if (c.maxLanding !== undefined) {
+          if (c.maxLanding === 'local' || c.maxLanding === 'pr') rule.maxLanding = c.maxLanding;
+          else { bad('connections.maxLanding', 'must be "local" or "pr"', 'local'); rule.maxLanding = 'local'; }
+        }
+        policy.connections = rule;
+      }
+    }
+  }
+
   if (raw.network !== undefined) {
     const n = raw.network;
     if (!isObj(n)) { bad('network', 'must be an object', 'allow-list with no domains'); policy.network = { mode: 'allow-list', domains: [], allowLoopback: false }; }
@@ -313,7 +354,7 @@ export function validatePolicy(raw: Record<string, unknown>): { policy: ManagedP
 function lockdownPolicy(): ManagedPolicy {
   return {
     allowedProviders: [], allowedModels: [], deniedTools: ['*'], localOnly: true, maxAutonomyLevel: 'L0',
-    requiredGates: [...GATE_IDS], mcp: { mode: 'forbid' }, plugins: { mode: 'forbid' }, customTools: { mode: 'forbid' },
+    requiredGates: [...GATE_IDS], mcp: { mode: 'forbid' }, plugins: { mode: 'forbid' }, customTools: { mode: 'forbid' }, connections: { mode: 'forbid' },
     network: { mode: 'allow-list', domains: [], allowLoopback: false }, sentinelRequired: true, telemetry: 'off',
   };
 }

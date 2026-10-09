@@ -1,0 +1,8 @@
+{
+  "id": 6011, "number": 11, "title": "Cache invalidation on widget update", "state": "closed", "state_reason": "completed",
+  "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+  "user": { "login": "octo-bot" }, "labels": [ { "name": "bug" }, { "name": "sp:3" } ],
+  "assignees": [ { "login": "octo-dev" } ],
+  "milestone": { "number": 1, "title": "Sprint 1", "due_on": "2026-10-16T07:00:00Z" },
+  "html_url": "https://forge.test/octo-org/widgets/issues/11", "created_at": "2026-09-28T09:00:00Z", "updated_at": "2026-10-09T12:30:00Z"
+}

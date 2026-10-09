@@ -129,15 +129,16 @@ export interface ProtocolOptions {
  * and a grant needs the app transport's JSON + `x-aico-intent` request
  * (protocol-policy.ts humanIntent), which a form or a frame cannot make.
  */
-const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit', '/api/editor/open', '/api/brief/fix-all', '/api/delivery/dispatch', '/api/delivery/approve-batch', '/api/delivery/releases']);
+const HUMAN_ROUTES = new Set(['/api/manage', '/api/skills/install', '/api/skills/upload', '/api/skills/import', '/api/inbox/decide', '/api/longjob/decide', '/api/longjob/control', '/api/learning/preferences/act', '/api/profile/act', '/api/profile/add', '/api/profile/run', '/api/profile/settings', '/api/settings', '/api/settings/path', '/api/mcp/add', '/api/skills/create', '/api/learning/adopt', '/api/submit', '/api/editor/open', '/api/brief/fix-all', '/api/delivery/dispatch', '/api/delivery/approve-batch', '/api/delivery/releases', '/api/connections/create', '/api/connections/credential', '/api/connections/update', '/api/connections/remove', '/api/connections/map', '/api/connections/unmap']);
 
 /**
  * Human routes with an id in the path (HUMAN_ROUTES matches whole paths): the delivery board's
  * approve (lands a task on the trunk), request-changes (restarts a run), a person's comment (it
  * reaches an agent's prompt as the person's word), and a release's deploy (runs a command) and
- * rollback (creates a reverting task), ADR 0038.
+ * rollback (creates a reverting task), ADR 0038; and Scrum's commit, start and close of a sprint
+ * and the acceptance of an agent's suggestion, ADR 0039.
  */
-const HUMAN_ROUTE_PATTERNS = [/^\/api\/delivery\/(?:tasks\/[a-f0-9]{8}\/(?:approve|request-changes|comment)|releases\/\d+\.\d+\.\d+\/(?:deploy|rollback))$/];
+const HUMAN_ROUTE_PATTERNS = [/^\/api\/delivery\/(?:tasks\/[a-f0-9]{8}\/(?:approve|request-changes|comment|merge-pr)|releases\/\d+\.\d+\.\d+\/(?:deploy|rollback)|sprints\/[a-f0-9]{8}\/(?:commit|start|close)|scrum\/proposals\/[a-f0-9]{8}\/accept)$/];
 
 /**
  * Vault routes the interface may never call: they return a value, or mint

@@ -1,0 +1,110 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 65536
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "label",
+        "parentLink": false
+      },
+      "iterations": "milestone",
+      "checks": {
+        "read": false,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": false
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "Repository access: only the repositories you map",
+          "why": "Repository access: only the repositories you map",
+          "feature": "repos",
+          "required": false
+        },
+        {
+          "scope": "Contents: read and write (to push aico/task-* branches)",
+          "why": "Contents: read and write (to push aico/task-* branches)",
+          "feature": "repos",
+          "required": true
+        },
+        {
+          "scope": "Pull requests: read and write",
+          "why": "Pull requests: read and write",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "Issues: read and write",
+          "why": "Issues: read and write",
+          "feature": "items",
+          "required": false
+        },
+        {
+          "scope": "Commit statuses and Checks: read",
+          "why": "Commit statuses and Checks: read",
+          "feature": "checks",
+          "required": false
+        },
+        {
+          "scope": "Metadata: read",
+          "why": "Metadata: read",
+          "feature": "repos",
+          "required": true
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "Checks are unreadable with this token (it needs Checks: read), so pull requests will show no checks.",
+      "Branch protection unreadable (needs repo admin): AICO cannot see which reviews and checks main requires.",
+      "Projects v2 is not available here, so milestones stand in for iterations."
+    ],
+    "tokenExpiresAt": "2026-12-31T00:00:00.000Z"
+  },
+  "pull": {
+    "connection": "github-limited-token",
+    "id": "7",
+    "url": "https://forge.test/octo-org/widgets/pull/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "none",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "Required reviews or checks are not satisfied."
+    ],
+    "observedAt": "<time>"
+  },
+  "protection": {
+    "protected": false,
+    "unreadable": "needs repo admin"
+  }
+}

@@ -730,6 +730,130 @@ checkout and every other task), and the refusal tells it to call the `Delivery` 
 `localise` action, which gives that worktree a private copy (or, for Python and PHP,
 removes the link so the agent creates its own).
 
+### Scrum: sprints on the same board
+
+The Delivery header has a **Kanban | Scrum** switch. Kanban is the default and does not change. Scrum
+puts a time box on the same board and adds nothing else: no second app, no settings page, and switching
+back loses nothing (sprints, estimates and notes stay in the journal).
+
+**What changes in Scrum.** A **sprint header** shows the sprint's name, goal, dates, days left, points done
+of points committed, a pace word (**Ahead**, **On track**, **Behind**) and a small burndown. The board
+becomes the **Sprint** view: the sprint's tasks plus any work already running or in review (its Backlog
+column reads "Sprint backlog"). Cards get a **story-point chip**: click it to pick 1, 2, 3, 5, 8 or 13 (any
+number up to 100 is accepted through the API). The dispatcher starts **only ready tasks that are in the
+running sprint**; a ready task outside it says "Not in sprint" and is left alone until it joins one or you
+switch back to Kanban. Work already begun (changes requested) is never stranded by this.
+
+**Refine the backlog.** The **Backlog** view lists what could join a sprint, by priority, with what each
+item still needs ("No estimate", "No criteria", "Large (13+): consider splitting"). **Refine with an agent**
+starts one planning turn that can only *suggest*: an estimate, a split into two to eight smaller tasks, or
+acceptance criteria. Suggestions appear at the top as cards you **Accept** or **Dismiss**. Nothing changes
+until you accept (accepting a split creates the parts, cancels the original, re-points what depended on it
+and keeps the original's place in the sprint). The agent's `Delivery` tool has `propose_estimate`,
+`propose_split`, `propose_criteria`, and the read-only `plan` and `sprint`; it has no action that commits,
+starts or closes a sprint.
+
+**Plan a sprint.** **Plan sprint** proposes the top-priority *estimated* items that fit the capacity,
+dependencies first (a task is never planned before something it waits for; items that need the same files are
+flagged because agents would take turns). Capacity starts at the mean of your last three closed sprints, or a
+labelled starter value (20) when there is no history. Tick and untick freely; the capacity bar follows; an item
+with no estimate can be estimated right there. **Commit** records the plan, and with "Start the sprint now" it
+also starts: the sprint's tasks become **Ready** (starting the agents is still its own act, and a restart
+still comes back paused). **Committing, starting and closing a sprint, and accepting a suggestion, need you in
+the AICO window** (the API token alone is refused); creating a planned sprint, estimating, dismissing, saving
+notes and the mode switch need only the token. Adding a task to a *running* sprint asks first: it is recorded as
+a scope change and shows as a step in the burndown, never folded in silently. Closing a sprint sends unfinished
+work back to the backlog (running agents are not stopped) and records the result for velocity.
+
+**Reports.** The **daily summary** is built from the log with no model call: what landed since the previous
+working day (a Monday covers the weekend), what is in progress, waiting for review, blocked (with the reason)
+and waiting for you, and the pace; **Copy as text** gives a stand-up note. The **burndown** draws points
+remaining against an ideal line that is flat over weekends; scope added or removed after the start is a step
+and a chip. **Velocity** is points completed per closed sprint with a rolling average of the last three; tasks
+that merged without an estimate count as 0 and the page says how many. Every chart has its data as a table for
+screen readers.
+
+**Review and retro.** **Review & retro** drafts the sprint review from what merged (each task's evidence summary
+and acceptance criteria) with the unfinished listed, not omitted, and a retrospective from the sprint's facts
+(median time from first run to landing, trips back for changes and why, flaky checks, time agents waited on
+you, cost per point) plus three open questions. Both are editable markdown; nothing is saved until you press
+Save and nothing is posted anywhere.
+
+HTTP (all under `/api/delivery`, registered projects only): `GET /scrum?project=[&tz=]`, `POST /scrum/mode`,
+`PATCH /scrum/tasks/:id {estimate}`, `POST /scrum/refine`, `POST /scrum/proposals/:id/accept` (a person) and
+`/dismiss`, `POST /sprints`, `POST /sprints/:id/commit|start|close` (a person), `GET /sprints/:id/summary|review|retro`,
+`POST /sprints/:id/notes`. The design is [ADR 0039](docs/engineering/adr/0039-connections-and-agile.md) section 4.
+
+## Connections: your GitHub, pull requests and backlog
+
+Delivery works on its own, on your machine. **Connections** let it meet the place your team
+already works. Today that is **GitHub** (github.com, or GitHub Enterprise Server at an address
+you give); Azure DevOps, GitLab, Gitea/Forgejo/GitBucket and Bitbucket follow, each as one more
+adapter behind the same page. What you get:
+
+- **A backlog from your issues.** Issues assigned to you, with a label, or matching a query
+  become **backlog** tasks. Their title, description, `## Acceptance` checklist, labels and a
+  `P1`..`P4` or `priority: high` label are read from the issue, and a later edit on GitHub
+  overwrites the task's copy: **people own the issue, the remote wins.** Importing never starts
+  anything: a task labelled `ready` on GitHub shows **Ready on remote** and waits for your click.
+  AICO writes back only its own progress: `aico:running`, `aico:in-review`, `aico:pr-open`,
+  `aico:blocked` labels, a comment linking the pull request, and it closes the issue when the
+  task merges. It never edits your text or your comments. If an issue is closed upstream while a
+  task is running, the task is **blocked** ("closed upstream") for you to decide.
+- **Pull requests instead of a local landing.** Set a project's **Landing** to **Pull request**
+  and the review card's button becomes **Open pull request**. Your click pushes the task branch
+  (`aico/task-<id>`, nothing else, never forced) and opens a PR whose description is the change
+  evidence. The task moves to **PR open** and AICO watches the PR: if the remote's checks fail,
+  a member or collaborator requests changes, or it conflicts, the task goes back to **changes**
+  with the reason and the run continues on the same branch with a **new commit** (it never
+  rewrites a branch that is already on the remote). **The remote's rules are the gate**: required
+  checks, required reviews and branch protection decide, and AICO never bypasses them. When the
+  PR is merged on GitHub the task is merged, your local trunk catches up (fast-forward only) and
+  the worktree is cleaned up. You can also press **Merge** on the card (a confirm): it shows only
+  while GitHub says the PR can be merged, and GitHub can still refuse. Auto-merge, deleting remote
+  branches and editing protections are yours, on the platform.
+- **Plain, quiet sync.** There is no webhook (your machine has no public address), so AICO polls
+  while a board is open or its dispatcher runs: issues every 5 minutes, pull requests every
+  minute, with conditional requests, a rate limit of its own, and backoff. The board header shows
+  the connection and **Sync now**.
+
+### Connect a project (about a minute)
+
+1. Open **Settings, Connections** (or the **Connections** link on a Delivery board) and choose
+   **Add connection**, then **GitHub**. For GitHub Enterprise Server, switch on that option and
+   enter your server's address.
+2. Create a **fine-grained personal access token** (the page links to where, and lists what it
+   needs: Contents, Pull requests and Issues read and write; Checks, Statuses and Metadata read;
+   limit it to the repositories you will map). Paste it. It goes into the credential vault bound to
+   that host; the page, the log and the agent never see it again.
+3. Press **Test**. You see who the token acts as, what it can do, the permissions it is missing
+   (in red) and any power it has beyond what is needed (a warning). Fix the token and test again.
+4. **Use for this project.** The repository is read from the project's `origin`; confirm it. Pick
+   **Landing** (Local or Pull request: a confirm card explains the engine will then push), **Work
+   items** (Off, Assigned to me, Label, Query) and, only if your team uses other names, the seven
+   state names. A server with a private certificate authority gets its CA file under
+   **Advanced**; certificate checks are never turned off.
+
+You can also say it in a chat: *"connect this project to our GitHub, import the issues labelled
+aico, and open PRs"*. The agent's `ConnectionManage` tool creates the connection and maps the
+project, and tells you to paste the token on the page: **it cannot store or read a token, change
+the host later, or switch pull-request mode on** (it asks you to).
+
+### Limits, said plainly
+
+- **Your token decides what works.** A token without permission for branch protection shows
+  "protection unreadable"; one without pull-request write cannot open PRs. The Test result says
+  which.
+- **PR mode gives up a linear task branch.** Once a branch is on the remote, a moved trunk is
+  merged into it rather than rebased; your platform's squash or rebase merge makes the trunk
+  linear again.
+- **Pull requests from forks, reassigned issues, Projects v2 writes and creating repositories or
+  protections are not handled.** Iterations and milestones are read for Scrum; the page shows
+  what it found.
+- **Managed policy.** A `connections` rule (see "For organisations") can forbid connections,
+  limit providers and hosts, or keep Delivery local; the page says so and sends nothing.
+- **Nothing reaches the platform in local mode.** A project with no connection, or landing set to
+  Local, behaves exactly as before: nothing is pushed.
 
 ## The code map
 
@@ -1049,6 +1173,11 @@ can say:
 - **Extension points** — `mcp`, `plugins`, `customTools`: `forbid`, or an
   `allow-list` of names. Servers already configured that are not on the list
   stop being loaded.
+- **Connections** — `connections` (`mode`: `any`, `forbid` or `allow-list`, with
+  `providers` and/or `hosts` lists, and `maxLanding: "local"` to keep Delivery from
+  ever pushing): which forges and trackers may be connected. Asked when a connection
+  is made or mapped and again before every request, so a policy that appears later
+  stops traffic at once; connection activity is in the audit export as kind `connection`.
 - **Network** — `network` allow-list or deny-list of domains for the tools that
   carry a URL (WebFetch, the browser tools, MCP tools that take a URL).
 - **Spend** — `budget.perSessionUsd` and `budget.perDayUsd`.

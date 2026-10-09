@@ -74,7 +74,12 @@ export function App(): React.ReactElement {
     const go = (e: Event): void => {
       const dest = (e as CustomEvent<unknown>).detail;
       if (dest === 'inbox') setRoute(r => ({ ...r, destination: 'inbox' }));
-      else if (dest && typeof dest === 'object' && (dest as { destination?: unknown }).destination === 'project') {
+      else if (dest && typeof dest === 'object' && (dest as { destination?: unknown }).destination === 'settings') {
+        // The Delivery board's "Connections" link: open Settings on a pane.
+        const pane = (dest as { pane?: unknown }).pane;
+        setSettingsPane(typeof pane === 'string' && pane ? pane : undefined);
+        setSettingsOpen(true);
+      } else if (dest && typeof dest === 'object' && (dest as { destination?: unknown }).destination === 'project') {
         const d = dest as { projectPath?: unknown; codemap?: { file?: unknown; mode?: unknown } };
         if (typeof d.projectPath !== 'string' || !d.projectPath) return;
         setRoute(r => ({ ...r, destination: 'project', projectPath: d.projectPath as string }));
@@ -104,7 +109,7 @@ export function App(): React.ReactElement {
     `settings=skills` lands on the skill bench, which is what the VS Code
     panel's "Measure skills" reaches for.
   */
-  const [settingsPane] = useState<string | undefined>(() => {
+  const [settingsPane, setSettingsPane] = useState<string | undefined>(() => {
     try {
       const value = new URL(window.location.href).searchParams.get('settings');
       return value && value !== '1' ? value : undefined;
@@ -340,7 +345,7 @@ export function App(): React.ReactElement {
 
       {settingsOpen && (
         <SettingsModal
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => { setSettingsOpen(false); setSettingsPane(undefined); }}
           {...(settingsPane ? { initialPane: settingsPane } : {})}
         />
       )}

@@ -1,0 +1,11 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/graphql",
+    "status": 200,
+    "body": {
+      "data": { "repository": null },
+      "errors": [ { "type": "FORBIDDEN", "path": ["repository", "projectsV2"], "message": "Resource not accessible by personal access token" } ]
+    }
+  }
+]

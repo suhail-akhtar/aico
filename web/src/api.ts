@@ -169,6 +169,9 @@ function safeParse(text: string): unknown {
 
 import type { ParkedAction } from './inbox';
 import type { AttentionSnapshot, BatchResult, BoardState, NewTaskInput, Release, ReleasePlan, Task } from './delivery-types';
+import type { Proposal as SprintProposal, RetroFacts, Sprint } from '../../shared/delivery/scrum';
+import type { BoardConnection, Connection, ConnectionsPolicyView, ProjectMapping, ProviderInfo, RepoDetection } from '../../shared/connections/types';
+import type { CreateBody, MapBody, SyncResult } from './connections';
 import type { CgFileDetail, CgPayload, CgSymbolDetail } from './components/codegraph/model';
 import type { BriefLatest, Brief, BriefSummaryRow, FixPlanResponse, FixAllResponse } from './brief';
 export type { ParkedAction } from './inbox';
@@ -714,8 +717,58 @@ export const api = {
   /** Create the task that reverts a release's commits; it goes through the normal queue. A person's act. */
   deliveryRollback: (project: string, version: string) =>
     postAsPerson<Task>(`delivery/releases/${encodeURIComponent(version)}/rollback`, { project }),
+  /**
+   * Merge a task's pull request on the remote (ADR 0039). A person's act; the remote can still refuse,
+   * and its reason comes back as the error.
+   */
+  deliveryMergePr: (id: string, project: string) =>
+    postAsPerson<Task>(`delivery/tasks/${encodeURIComponent(id)}/merge-pr`, { project }),
   /** Compact state of every board, for notifications. */
   deliveryAttention: () => get<AttentionSnapshot>('delivery/attention'),
+
+  /**
+   * Scrum as a mode of the Delivery board (engine: src/delivery/scrum.ts, routes /api/delivery/scrum and /sprints, ADR 0039).
+   * Committing, starting and closing a sprint and accepting an agent's suggestion are a person's acts and go as one;
+   * the mode, estimates, notes and dismissing need only the token.
+   */
+  deliveryScrumMode: (project: string, mode: 'kanban' | 'scrum') => post<{ mode: 'kanban' | 'scrum' }>('delivery/scrum/mode', { project, mode }),
+  deliveryEstimate: (id: string, project: string, estimate: number | null) =>
+    request<Task>(`delivery/scrum/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ project, estimate }) }),
+  deliveryCreateSprint: (project: string, input: { name?: string; goal?: string; start: string; end: string; capacityPoints?: number }) =>
+    post<Sprint>('delivery/sprints', { project, ...input }),
+  deliveryCommitSprint: (project: string, id: string, add: string[], remove: string[] = []) =>
+    postAsPerson<Sprint>(`delivery/sprints/${encodeURIComponent(id)}/commit`, { project, add, remove }),
+  deliveryStartSprint: (project: string, id: string) => postAsPerson<Sprint>(`delivery/sprints/${encodeURIComponent(id)}/start`, { project }),
+  deliveryCloseSprint: (project: string, id: string) => postAsPerson<Sprint>(`delivery/sprints/${encodeURIComponent(id)}/close`, { project }),
+  deliverySprintReview: (project: string, id: string) =>
+    get<{ draft: string; saved?: { text: string; at: string } }>(`delivery/sprints/${encodeURIComponent(id)}/review?project=${encodeURIComponent(project)}&tz=${-new Date().getTimezoneOffset()}`),
+  deliverySprintRetro: (project: string, id: string) =>
+    get<{ facts: RetroFacts; draft: string; saved?: { text: string; at: string } }>(`delivery/sprints/${encodeURIComponent(id)}/retro?project=${encodeURIComponent(project)}`),
+  deliverySaveNotes: (project: string, id: string, kind: 'review' | 'retro', text: string) =>
+    post<Sprint>(`delivery/sprints/${encodeURIComponent(id)}/notes`, { project, kind, text }),
+  deliveryAcceptProposal: (project: string, id: string) =>
+    postAsPerson<{ proposal: SprintProposal; created: Task[] }>(`delivery/scrum/proposals/${encodeURIComponent(id)}/accept`, { project }),
+  deliveryDismissProposal: (project: string, id: string) => post<SprintProposal>(`delivery/scrum/proposals/${encodeURIComponent(id)}/dismiss`, { project }),
+  /** One planning turn that may only suggest estimates, splits and criteria (it spends like "Plan from a brief"). */
+  deliveryRefine: (project: string) => post<{ sessionId: string }>('delivery/scrum/refine', { project }),
+
+  /**
+   * Connections to a team's forge and tracker (engine: src/connections, routes /api/connections/*, ADR 0039).
+   * Creating, storing a token for, changing, removing and mapping a connection are a person's acts, so
+   * they go as a person. The token travels in `connectionCredential` only, and is never returned.
+   */
+  connectionProviders: () => get<{ providers: ProviderInfo[] }>('connections/providers'),
+  connectionList: () => get<{ connections: Connection[]; policy: ConnectionsPolicyView }>('connections/list'),
+  connectionCreate: (body: CreateBody) => postAsPerson<Connection>('connections/create', { ...body }),
+  connectionCredential: (id: string, token: string) => postAsPerson<Connection>('connections/credential', { id, token }),
+  connectionTest: (id: string) => post<Connection>('connections/test', { id }),
+  connectionUpdate: (id: string, patch: { label?: string; disabled?: boolean }) => postAsPerson<Connection>('connections/update', { id, ...patch }),
+  connectionRemove: (id: string) => postAsPerson<{ ok: true }>('connections/remove', { id }),
+  connectionDetect: (project: string) => get<RepoDetection>(`connections/detect?project=${encodeURIComponent(project)}`),
+  connectionMapping: (project: string) => get<{ mapping?: ProjectMapping; connection?: BoardConnection }>(`connections/mapping?project=${encodeURIComponent(project)}`),
+  connectionMap: (body: MapBody) => postAsPerson<{ mapping: ProjectMapping }>('connections/map', { ...body }),
+  connectionUnmap: (project: string) => postAsPerson<{ ok: true }>('connections/unmap', { project }),
+  connectionSync: (project: string) => post<SyncResult>('connections/sync', { project }),
 
 
   /** Long jobs (engine: longjob/): proposals over the size threshold and the jobs they became. */

@@ -54,9 +54,12 @@ import { handleDeckVisualRoute } from './deck-visual-routes.js';
 import { handleCodeGraphRoute } from './codegraph-routes.js';
 import { handleEvidenceRoute } from './evidence-routes.js';
 import { handleDeliveryRoute } from './delivery-routes.js';
+import { handleConnectionRoute } from './connection-routes.js';
+import { installConnections } from '../connections/index.js';
+import { onSyncStatus, withConnection } from '../connections/sync.js';
 import { bootDelivery, configureDelivery, onBoardChange, boardState as deliveryBoardState, sessionDirOf as deliverySessionDir, DEFAULT_TASK_BUDGET_USD } from '../delivery/index.js';
 import { sessionRunner } from './delivery-runner.js';
-import { planPrompt } from '../delivery/prompts.js';
+import { planPrompt, refinePrompt } from '../delivery/prompts.js';
 import { projectKey } from '../learning/proposals.js';
 import { handleEditorRoute } from './editor.js';
 import { readUserSettingsFile } from '../settings-project-policy.js';
@@ -1393,6 +1396,17 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     // The change packet (server/evidence-routes, ADR 0034): registered projects only, read-only.
     if (await handleEvidenceRoute(route, req, res, url, { send, isKnownProject: dir => isKnownProject(cwd, dir) })) return;
 
+    // Connections to a forge and tracker (server/connection-routes, ADR 0039): storing a token, creating, mapping and unmapping need a person.
+    if (await handleConnectionRoute(route, req, res, url, {
+      send, readJson: r => readJson(r), isKnownProject: dir => isKnownProject(cwd, dir),
+      human: (r, body) => gate.checkHuman({
+        grant: r.headers['x-aico-grant'],
+        client: (body as { client?: unknown }).client ?? r.headers['x-aico-client'],
+        uiKey: r.headers['x-aico-ui-key'],
+        fetchSite: typeof r.headers['sec-fetch-site'] === 'string' ? r.headers['sec-fetch-site'] : undefined,
+      }),
+    })) return;
+
     // The delivery board (server/delivery-routes, ADR 0038): registered projects only; starting, approving and requesting changes need a person.
     if (route.startsWith('delivery/')) {
       const live = await loadSettings();
@@ -1409,13 +1423,13 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
       }),
       subscribe: (project, response) => hub.subscribeTopic(`delivery:${projectKey(project)}`, response),
       // A planning chat in the project: plan mode, so it can read the code and write only the board.
-      startPlan: async (project, brief) => {
+      startPlan: async (project, brief, kind) => {
         const sessionId = mintSessionId();
         const runCwd = await resolveCwd(sessionId, project);
         await runs.ensure(sessionId, runCwd);
-        runs.rename(sessionId, `Plan: ${brief.replace(/\s+/g, ' ').slice(0, 60)}`);
+        runs.rename(sessionId, kind === 'refine' ? 'Refine the backlog' : `Plan: ${brief.replace(/\s+/g, ' ').slice(0, 60)}`);
         const chosen = runs.modelOf(sessionId) ?? await currentDefaultModel();
-        void runs.submit(sessionId, runCwd, planPrompt(brief), chosen, { approval: 'auto', planMode: true })
+        void runs.submit(sessionId, runCwd, kind === 'refine' ? refinePrompt() : planPrompt(brief), chosen, { approval: 'auto', planMode: true })
           .catch(() => { /* already reported on the chat's own stream as turn-end */ });
         return { sessionId };
       },
@@ -2136,10 +2150,17 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
     }),
   });
   void bootDelivery().catch(() => { /* the next dispatch or sweep tries again */ });
-  onBoardChange(project => {
+  const publishBoard = (project: string): void => {
     const topic = `delivery:${projectKey(project)}`;
-    if (hub.topicSize(topic) > 0) hub.publishTopic(topic, 'delivery/board', deliveryBoardState(project));
+    if (hub.topicSize(topic) > 0) hub.publishTopic(topic, 'delivery/board', withConnection(deliveryBoardState(project), project));
+  };
+  onBoardChange(publishBoard);
+  // Connections (ADR 0039): adapters, PR-mode landing and the poller, which looks at a remote only while a board
+  // for the project is open or its dispatcher is running. The sync chip in the board header follows its status.
+  installConnections({
+    isActive: project => hub.topicSize(`delivery:${projectKey(project)}`) > 0 || deliveryBoardState(project).dispatcher === 'running',
   });
+  onSyncStatus(publishBoard);
   const resumed = resumeAfterRestart();
   if (resumed) console.log(`  Resuming ${resumed} long job(s) from their journals.`);
 

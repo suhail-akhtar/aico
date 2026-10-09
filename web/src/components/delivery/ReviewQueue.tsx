@@ -33,6 +33,8 @@ import {
   ago, batchButtonLabel, batchCheck, checksSummary, formatUsd, orderSelection, pruneSelection, selectAllLow, summariseBatch, toMs, toggleSelection,
   type BatchSummary,
 } from '../../delivery-model';
+import { batchLandingLabel } from '../../connections';
+import { useBoardConnection } from '../connections/context';
 import { DvIcon } from './icons';
 import { BTN_GHOST, BTN_OUTLINE, BTN_PRIMARY, Callout, ErrorLine, PriorityChip, RiskBadge, Spinner, riskSpine, useTaskRef } from './ui';
 
@@ -41,6 +43,7 @@ export function ReviewQueue({ list, now, selectedId, project, onOpen, onShowBoar
   onOpen: (t: Task) => void; onShowBoard: () => void;
 }): React.ReactElement {
   const taskRef = useTaskRef();
+  const landing = useBoardConnection().connection?.landing;
   const ul = useRef<HTMLUListElement>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -223,11 +226,11 @@ export function ReviewQueue({ list, now, selectedId, project, onOpen, onShowBoar
             {!allLowPicked && lowIds.length > chosen.length && (
               <button type="button" className={BTN_GHOST} disabled={busy} onClick={() => setSelected(selectAllLow(list))}>Select all low risk ({lowIds.length})</button>
             )}
-            <span className="hidden flex-1 text-[12px] text-aico-muted lg:block">Lands in the order shown. Anything that cannot land is skipped, with the reason.</span>
+            <span className="hidden flex-1 text-[12px] text-aico-muted lg:block">{landing === 'pr' ? 'Opens a pull request for each, in the order shown.' : 'Lands in the order shown.'} Anything that cannot go ahead is skipped, with the reason.</span>
             <span className="flex-1 lg:hidden" />
             <button type="button" className={BTN_GHOST} disabled={busy} onClick={() => setSelected([])}>Clear</button>
             <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void land()}>
-              {busy ? <Spinner /> : <DvIcon name="check" size={15} />}{batchButtonLabel(chosen.length, busy)}
+              {busy ? <Spinner /> : <DvIcon name="check" size={15} />}{landing === 'pr' ? batchLandingLabel(chosen.length, landing, busy) : batchButtonLabel(chosen.length, busy)}
             </button>
           </div>
         </div>

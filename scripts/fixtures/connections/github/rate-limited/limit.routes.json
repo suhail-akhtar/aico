@@ -1,0 +1,17 @@
+{
+  "prefix": "/api/v3",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 403,
+      "headers": {
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": "{{epoch+3600}}",
+        "x-ratelimit-resource": "core",
+        "retry-after": "60"
+      },
+      "body": { "message": "API rate limit exceeded for user ID 1001.", "documentation_url": "https://forge.test/docs/rate-limits" }
+    }
+  ]
+}

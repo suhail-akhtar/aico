@@ -25,6 +25,7 @@ import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection
 import { CredentialManager } from '@/settings/CredentialManager';
 import { ToolsPane } from '@web/components/settings/ToolsPane';
 import { LearnedPane } from '@web/components/settings/LearnedPane';
+import { ConnectionsPane } from '@web/components/connections/ConnectionsPage';
 
 import { ModelsSection, SkillsSection, McpSection, AgentsSection, enginePaneSection } from '@/settings/sections/AgentSections';
 
@@ -32,6 +33,8 @@ import { ModelsSection, SkillsSection, McpSection, AgentsSection, enginePaneSect
 const CredentialsSection = (): React.ReactElement => <CredentialManager />;
 // Settings → Custom tools: the engine's shared panel (web ToolsPane) — list, read, enable, test.
 const ToolsSection = (): React.ReactElement => <ToolsPane />;
+// Settings → Connections: the team's code host and tracker (ADR 0039); the same shared page the web portal shows.
+const ConnectionsSection = (): React.ReactElement => <ConnectionsPane />;
 // Settings → What AICO learned: the engine's shared page (web LearnedPane) plus its two switches (ADR 0016).
 const LearnedPaneSettings = enginePaneSection('learned');
 const LearnedSection = (): React.ReactElement => <><LearnedPane /><div className="mt-6"><LearnedPaneSettings /></div></>;
@@ -109,6 +112,7 @@ export const BUILTINS: BuiltinPlugin[] = [
       { id: 'skills', title: 'Skills', icon: 'book', group: 'integrations', order: 20, component: SkillsSection },
       { id: 'mcp', title: 'MCP servers', icon: 'plug', group: 'integrations', order: 21, component: McpSection },
       { id: 'tools', title: 'Custom tools', icon: 'wrench', group: 'integrations', order: 22, component: ToolsSection },
+      { id: 'connections', title: 'Connections', icon: 'link', group: 'integrations', order: 23, component: ConnectionsSection },
     ],
   },
   {

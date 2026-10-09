@@ -1,0 +1,32 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/graphql",
+    "bodyIncludes": "projectsV2",
+    "status": 200,
+    "body": {
+      "data": {
+        "repository": {
+          "projectsV2": {
+            "nodes": [
+              {
+                "id": "PVT_kwDOAbc123",
+                "title": "Widgets roadmap",
+                "url": "https://forge.test/orgs/octo-org/projects/4",
+                "field": {
+                  "__typename": "ProjectV2IterationField",
+                  "id": "PVTIF_lADOAbc",
+                  "name": "Iteration",
+                  "configuration": {
+                    "iterations": [ { "id": "it_100", "title": "Iteration 3", "startDate": "2026-10-05", "duration": 14 } ],
+                    "completedIterations": [ { "id": "it_099", "title": "Iteration 2", "startDate": "2026-09-21", "duration": 14 } ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+]

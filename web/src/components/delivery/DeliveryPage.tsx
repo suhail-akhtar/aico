@@ -44,6 +44,7 @@ export function DeliveryPage({ projectPath, onProject, onOpenChat }: {
     openCodeMap: (file) => window.dispatchEvent(new CustomEvent('aico:navigate', {
       detail: { destination: 'project', projectPath: path, codemap: file ? { file: relativeToProject(path, file) } : {} },
     })),
+    openConnections: () => window.dispatchEvent(new CustomEvent('aico:navigate', { detail: { destination: 'settings', pane: 'connections' } })),
   }), [openSession, onOpenChat, path]);
 
   if (!path) {

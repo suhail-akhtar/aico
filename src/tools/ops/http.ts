@@ -195,11 +195,17 @@ export function jsonPath(value: unknown, p: string): unknown {
 
 // ── the request ──────────────────────────────────────────────────────
 
-interface RawResponse { status: number; statusText: string; headers: http.IncomingHttpHeaders; body: Buffer; truncated: boolean }
+export interface RawResponse { status: number; statusText: string; headers: http.IncomingHttpHeaders; body: Buffer; truncated: boolean }
 
-function send(opts: {
+/**
+ * The one transport. `ca` is for a connection to a self-hosted server with a private CA
+ * (ADR 0039): extra trust anchors for THIS request only, never a process-wide setting and
+ * never a way to skip verification (`rejectUnauthorized` stays whatever the caller passed).
+ * The caller must pass the default roots too, because `ca` replaces them.
+ */
+export function send(opts: {
   url: URL; method: string; headers: Record<string, string>; body?: Buffer; address: string;
-  rejectUnauthorized: boolean; maxBytes: number; signal: AbortSignal;
+  rejectUnauthorized: boolean; maxBytes: number; signal: AbortSignal; ca?: string | Buffer | Array<string | Buffer>;
 }): Promise<RawResponse> {
   const family = net.isIPv6(opts.address) ? 6 : 4;
   const lib = opts.url.protocol === 'https:' ? https : http;
@@ -216,7 +222,7 @@ function send(opts: {
         if (options?.all) cb(null, [{ address: opts.address, family }]);
         else cb(null, opts.address, family);
       }) as unknown as net.LookupFunction,
-      ...(opts.url.protocol === 'https:' ? { rejectUnauthorized: opts.rejectUnauthorized, servername: net.isIP(opts.url.hostname.replace(/^\[|\]$/g, '')) ? undefined : opts.url.hostname } : {}),
+      ...(opts.url.protocol === 'https:' ? { rejectUnauthorized: opts.rejectUnauthorized, servername: net.isIP(opts.url.hostname.replace(/^\[|\]$/g, '')) ? undefined : opts.url.hostname, ...(opts.ca ? { ca: opts.ca } : {}) } : {}),
       signal: opts.signal,
       agent: false,
     }, (res) => {
