@@ -1,0 +1,134 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "Dana Dev (dana.dev@example.test)",
+    "version": "Azure DevOps Server (REST 6.0)",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 4000
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "field",
+        "parentLink": false
+      },
+      "iterations": "native",
+      "checks": {
+        "read": true,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": true
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "Code: read and write",
+          "why": "Read repositories, open and update pull requests, and push aico/task-* branches.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "Work Items: read and write",
+          "why": "Import work items and move them forward as the task progresses.",
+          "feature": "items",
+          "required": false
+        },
+        {
+          "scope": "Build: read",
+          "why": "Show the builds that gate a pull request.",
+          "feature": "checks",
+          "required": false
+        },
+        {
+          "scope": "Project and Team: read",
+          "why": "Read sprints and iterations.",
+          "feature": "iterations",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "This server speaks REST 6.0, not 7.1: newer features (some policy and iteration details) may be absent.",
+      "Azure DevOps does not say what a token may write, so opening and merging pull requests is confirmed by the first one; a refusal names the missing permission."
+    ]
+  },
+  "repo": {
+    "ref": {
+      "owner": "Shop",
+      "name": "web",
+      "id": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00"
+    },
+    "defaultBranch": "main",
+    "cloneUrl": "<origin>/Shop/_git/web",
+    "htmlUrl": "<origin>/Shop/_git/web",
+    "private": true
+  },
+  "items": [
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Widgets stay stale after an update.\n\n- Check the cache\n\n## Acceptance\n- The cache is invalidated\n- A test covers it",
+      "state": "open",
+      "labels": [
+        "bug",
+        "needs-triage",
+        "area:Shop\\Web"
+      ],
+      "assignees": [
+        "Dana Dev"
+      ],
+      "author": "Riley Reviewer",
+      "url": "<origin>/Shop/_workitems/edit/11",
+      "rev": "5",
+      "points": 5,
+      "iteration": "Shop\\Sprint 1",
+      "stateName": "Active",
+      "stateCategory": "inprogress",
+      "kind": "User Story"
+    }
+  ],
+  "iterations": [
+    {
+      "id": "11111111-0000-4000-8000-000000000001",
+      "title": "Sprint 1",
+      "kind": "iteration",
+      "state": "open",
+      "start": "2026-09-28",
+      "end": "2026-10-09",
+      "itemKey": "Shop\\Sprint 1",
+      "timeFrame": "current"
+    },
+    {
+      "id": "11111111-0000-4000-8000-000000000002",
+      "title": "Sprint 2",
+      "kind": "iteration",
+      "state": "open",
+      "start": "2026-10-12",
+      "end": "2026-10-23",
+      "itemKey": "Shop\\Sprint 2",
+      "timeFrame": "future"
+    }
+  ],
+  "checks": [],
+  "protection": {
+    "protected": true,
+    "requiredReviews": 2,
+    "requiredChecks": []
+  }
+}

@@ -1,0 +1,95 @@
+[
+  {
+    "path": "/plugins/servlet/applinks/whoami",
+    "text": "octo-dev"
+  },
+  {
+    "path": "/rest/api/1.0/application-properties",
+    "body": {
+      "version": "8.19.4",
+      "buildNumber": "8019004",
+      "displayName": "Bitbucket"
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets",
+    "body": {
+      "slug": "widgets",
+      "id": 5,
+      "name": "widgets",
+      "public": false,
+      "state": "AVAILABLE",
+      "project": {
+        "key": "ACME",
+        "name": "Acme"
+      },
+      "links": {
+        "clone": [
+          {
+            "name": "http",
+            "href": "https://octo-dev@forge.test/scm/acme/widgets.git"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/branches/default",
+    "body": {
+      "id": "refs/heads/main",
+      "displayId": "main",
+      "type": "BRANCH",
+      "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233",
+      "isDefault": true
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests",
+    "query": {
+      "state": "ALL"
+    },
+    "body": {
+      "size": 0,
+      "limit": 1,
+      "isLastPage": true,
+      "values": [],
+      "start": 0
+    }
+  },
+  {
+    "path": "/rest/build-status/1.0/commits/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233",
+    "body": {
+      "size": 0,
+      "limit": 100,
+      "isLastPage": true,
+      "values": [],
+      "start": 0
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/settings/pull-requests",
+    "body": {
+      "requiredApprovers": {
+        "enable": false,
+        "count": 0
+      },
+      "requiredSuccessfulBuilds": {
+        "enable": false,
+        "count": 0
+      },
+      "requiredAllTasksComplete": {
+        "enable": false
+      }
+    }
+  },
+  {
+    "path": "/rest/branch-permissions/2.0/projects/ACME/repos/widgets/restrictions",
+    "body": {
+      "size": 0,
+      "limit": 100,
+      "isLastPage": true,
+      "values": [],
+      "start": 0
+    }
+  }
+]

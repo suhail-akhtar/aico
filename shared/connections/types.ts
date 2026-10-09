@@ -94,6 +94,10 @@ export interface Connection {
   /** Path of a PEM CA bundle applied only to this connection's requests (and its git child). */
   caBundle?: string;
   disabled?: boolean;
+  /** The account name some providers pair with a token for Basic auth (Bitbucket Cloud: the Atlassian email). Not a secret. */
+  username?: string;
+  /** A connector pack (ADR 0039 section 3) this connection runs on: `provider` is `custom`. */
+  pack?: string;
   createdAt: string;
   createdBy: 'person' | 'agent';
   /** The connection exists but nobody has stored a token for it yet. */
@@ -141,6 +145,8 @@ export interface RepoDetection {
   repo?: RepoRef;
   /** An existing connection whose host matches the origin. */
   connection?: string;
+  /** The address to connect when the origin names an organization (Azure DevOps: https://dev.azure.com/acme). */
+  baseUrl?: string;
   /** The trunk branch name the project uses. */
   trunk?: string;
 }
@@ -196,6 +202,14 @@ export interface PullState {
   protectedBase?: boolean;
   /** SHA of the merge commit once merged. */
   mergedSha?: string;
+  /**
+   * The remote can merge this by itself once its pipeline passes and a PERSON asks it to (GitLab's
+   * "merge when pipeline succeeds"). `available`: the only thing between this MR and a merge is a
+   * pipeline that has not finished, so the Merge click may arm it. `armed`: it is already armed
+   * (by a person, on the remote or from here) and the remote will merge it. Absent where the
+   * provider has no such thing; AICO never arms it without a click.
+   */
+  autoMerge?: { kind: 'pipeline'; available: boolean; armed: boolean };
   observedAt: string;
 }
 
@@ -213,6 +227,10 @@ export interface RemoteLink {
   remoteState: 'open' | 'closed';
   /** The remote shows it as ready/committed but nobody here promoted it (the card offers one click). */
   readyOnRemote?: boolean;
+  /** The iteration (sprint/milestone) the item belonged to at the last pull: the base of the three-way merge of membership. */
+  iteration?: string;
+  /** The story points the item carried at the last pull: the base of the three-way merge of estimates. */
+  points?: number;
 }
 
 // ── route bodies (the page's requests; all JSON) ─────────────────────────
@@ -239,6 +257,8 @@ export interface ConnectionsPolicyView {
   providers?: string[];
   hosts?: string[];
   maxLanding?: LandingMode;
+  /** The organisation does not allow agent-built connector packs. */
+  packs?: 'forbid';
   /** Short plain statement for the page when anything restricts connections. */
   message?: string;
 }
@@ -257,15 +277,73 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     tokenHelpUrl: 'https://github.com/settings/personal-access-tokens/new',
   },
   {
-    id: 'azure-devops', label: 'Azure DevOps', asksUrl: true, supported: false, note: 'Next after GitHub.',
-    tokenAdvice: ['Code: read and write', 'Work Items: read and write', 'Build: read'],
+    // Services is `https://dev.azure.com/<organization>` (the page asks for the organization name and builds the
+    // address); Server is the collection URL a person's company runs. No `cloudUrl`: an organization is part of it.
+    id: 'azure-devops', label: 'Azure DevOps', asksUrl: false, supported: true,
+    tokenAdvice: [
+      'Code: read and write (to push aico/task-* branches and open pull requests)',
+      'Work Items: read and write',
+      'Build: read',
+      'Project and Team: read (sprints and iterations)',
+    ],
+    tokenHelpUrl: 'https://dev.azure.com/_usersSettings/tokens',
   },
-  { id: 'gitlab', label: 'GitLab', cloudUrl: 'https://gitlab.com', asksUrl: false, supported: false, note: 'After Azure DevOps.', tokenAdvice: ['api (or a project access token with the Developer role)'] },
-  { id: 'gitea', label: 'Gitea', asksUrl: true, supported: false, note: 'After Azure DevOps.', tokenAdvice: ['repository and issue read/write'] },
-  { id: 'forgejo', label: 'Forgejo', asksUrl: true, supported: false, note: 'After Azure DevOps.', tokenAdvice: ['repository and issue read/write'] },
-  { id: 'gitbucket', label: 'GitBucket', asksUrl: true, supported: false, note: 'After Azure DevOps.', tokenAdvice: ['repo'] },
-  { id: 'bitbucket-cloud', label: 'Bitbucket Cloud', cloudUrl: 'https://bitbucket.org', asksUrl: false, supported: false, note: 'After the others.', tokenAdvice: ['pull requests and repositories: read and write'] },
-  { id: 'bitbucket-dc', label: 'Bitbucket Data Center', asksUrl: true, supported: false, note: 'After the others.', tokenAdvice: ['project and repository: write'] },
+  {
+    id: 'gitlab', label: 'GitLab', cloudUrl: 'https://gitlab.com', asksUrl: false, supported: true,
+    tokenAdvice: [
+      'Scope api (merge requests, issues and pipelines)',
+      'Best: a project access token with the Developer role, so it cannot push protected branches',
+      'Nothing else: no sudo, no admin_mode',
+    ],
+    tokenHelpUrl: 'https://gitlab.com/-/user_settings/personal_access_tokens?name=AICO&scopes=api',
+  },
+  {
+    id: 'gitea', label: 'Gitea', asksUrl: true, supported: true,
+    tokenAdvice: [
+      'Repository: read and write (to push aico/task-* branches and open pull requests)',
+      'Issue: read and write',
+      'User: read',
+    ],
+  },
+  {
+    id: 'forgejo', label: 'Forgejo', asksUrl: true, supported: true,
+    tokenAdvice: [
+      'Repository: read and write (to push aico/task-* branches and open pull requests)',
+      'Issue: read and write',
+      'User: read',
+    ],
+  },
+  {
+    id: 'gitbucket', label: 'GitBucket', asksUrl: true, supported: true,
+    tokenAdvice: [
+      'A personal access token (Account settings, Applications). GitBucket tokens have no scopes, so give it to a dedicated account with write access to the repository only',
+    ],
+  },
+  {
+    // REST 2.0. An Atlassian API token (with scopes) is sent as Basic auth with the account email; a repository,
+    // project or workspace access token is sent as Bearer, so the page asks for the email only for the former.
+    // Issues are an optional per-repository feature and Jira is out of scope: this is a pull-request and checks
+    // connector, not a planning one (ADR 0039).
+    id: 'bitbucket-cloud', label: 'Bitbucket Cloud', cloudUrl: 'https://bitbucket.org', asksUrl: false, supported: false,
+    note: 'Pull requests and checks only; Jira is not supported.',
+    tokenAdvice: [
+      'API token scopes: read:repository, write:repository (push aico/task-* branches)',
+      'read:pullrequest, write:pullrequest (open, comment, merge on your click)',
+      'read:pipeline (build results); read:issue, write:issue only if the repository uses the issue tracker',
+      'Or a repository access token with Repositories write and Pull requests write (no email needed)',
+    ],
+    tokenHelpUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+  },
+  {
+    // REST 1.0 under /rest/api/1.0; an HTTP access token is sent as Bearer. Merge needs the pull request's current
+    // `version`, which the adapter reads fresh each time. No work items or sprints (Jira-linked): PR and checks only.
+    id: 'bitbucket-dc', label: 'Bitbucket Data Center', asksUrl: true, supported: false,
+    note: 'Pull requests and build statuses only; Jira is not supported.',
+    tokenAdvice: [
+      'HTTP access token with Project write (or Repository write) permission',
+      'Repository admin only if you want AICO to read the required approvers and branch permissions',
+    ],
+  },
 ];
 
 /** A connection id is a slug: letters, digits, `-`, `_`. */

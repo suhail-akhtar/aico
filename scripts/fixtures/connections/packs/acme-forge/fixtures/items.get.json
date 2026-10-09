@@ -1,0 +1,40 @@
+{
+  "operation": "items.get",
+  "cases": [
+    {
+      "name": "one",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "A-1"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/issues/A-1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "A-1",
+          "number": 1,
+          "title": "Issue 1",
+          "body": "Steps.",
+          "state": "open",
+          "labels": [
+            "bug"
+          ],
+          "assignees": [
+            "sam"
+          ],
+          "author": "robin",
+          "url": "https://app.acme-forge.example/acme/widgets/issues/A-1",
+          "rev": "r1"
+        }
+      },
+      "expect": {
+        "id": "A-1",
+        "rev": "r1"
+      }
+    }
+  ]
+}

@@ -1,0 +1,403 @@
+{
+  "format": 1,
+  "id": "acme-forge",
+  "label": "Acme Forge",
+  "provider": "Acme Forge",
+  "baseUrl": "https://api.acme-forge.example",
+  "hosts": [
+    "api.acme-forge.example"
+  ],
+  "auth": {
+    "scheme": "bearer",
+    "help": "Create a personal token under Settings, Tokens (scopes: repo, issues)."
+  },
+  "capabilities": {
+    "pulls": {
+      "draft": true,
+      "bodyMax": 20000
+    },
+    "items": {
+      "estimate": "none"
+    }
+  },
+  "operations": {
+    "probe": {
+      "tool": "acme_whoami",
+      "effect": "read",
+      "result": {
+        "map": {
+          "user": "/login",
+          "version": "/apiVersion"
+        }
+      }
+    },
+    "repos.get": {
+      "tool": "acme_repo",
+      "effect": "read",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}"
+      },
+      "result": {
+        "map": {
+          "defaultBranch": "/default_branch",
+          "cloneUrl": "/clone_url",
+          "htmlUrl": "/web_url",
+          "private": "/private",
+          "id": "/id"
+        }
+      }
+    },
+    "pulls.find": {
+      "tool": "acme_pr_find",
+      "effect": "read",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "head": "{head}"
+      },
+      "result": {
+        "list": "/pulls",
+        "map": {
+          "id": "/number",
+          "url": "/html_url",
+          "state": "/state",
+          "draft": "/draft",
+          "headSha": "/head/sha",
+          "mergeable": "/merge_state",
+          "canMerge": "/can_merge",
+          "mergeBlockers": "/blockers",
+          "approved": "/reviews/approved",
+          "changesRequested": "/reviews/changes",
+          "requiredApprovals": "/reviews/required",
+          "mergedSha": "/merge_sha"
+        },
+        "values": {
+          "state": {
+            "map": {
+              "open": "open",
+              "merged": "merged",
+              "closed": "closed",
+              "declined": "closed"
+            }
+          },
+          "mergeable": {
+            "map": {
+              "clean": "mergeable",
+              "conflict": "conflicting"
+            },
+            "default": "unknown"
+          }
+        }
+      }
+    },
+    "pulls.create": {
+      "tool": "acme_pr_create",
+      "effect": "external",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "head": "{head}",
+        "base": "{base}",
+        "title": "{title}",
+        "body": "{body}",
+        "draft": "{draft}"
+      },
+      "result": {
+        "map": {
+          "id": "/number",
+          "url": "/html_url",
+          "state": "/state",
+          "draft": "/draft",
+          "headSha": "/head/sha",
+          "mergeable": "/merge_state",
+          "canMerge": "/can_merge",
+          "mergeBlockers": "/blockers",
+          "approved": "/reviews/approved",
+          "changesRequested": "/reviews/changes",
+          "requiredApprovals": "/reviews/required",
+          "mergedSha": "/merge_sha"
+        },
+        "values": {
+          "state": {
+            "map": {
+              "open": "open",
+              "merged": "merged",
+              "closed": "closed",
+              "declined": "closed"
+            }
+          },
+          "mergeable": {
+            "map": {
+              "clean": "mergeable",
+              "conflict": "conflicting"
+            },
+            "default": "unknown"
+          }
+        }
+      }
+    },
+    "pulls.get": {
+      "tool": "acme_pr_get",
+      "effect": "read",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "id": "{id}"
+      },
+      "result": {
+        "map": {
+          "id": "/number",
+          "url": "/html_url",
+          "state": "/state",
+          "draft": "/draft",
+          "headSha": "/head/sha",
+          "mergeable": "/merge_state",
+          "canMerge": "/can_merge",
+          "mergeBlockers": "/blockers",
+          "approved": "/reviews/approved",
+          "changesRequested": "/reviews/changes",
+          "requiredApprovals": "/reviews/required",
+          "mergedSha": "/merge_sha"
+        },
+        "values": {
+          "state": {
+            "map": {
+              "open": "open",
+              "merged": "merged",
+              "closed": "closed",
+              "declined": "closed"
+            }
+          },
+          "mergeable": {
+            "map": {
+              "clean": "mergeable",
+              "conflict": "conflicting"
+            },
+            "default": "unknown"
+          }
+        },
+        "checks": {
+          "list": "/checks",
+          "map": {
+            "name": "/name",
+            "state": "/status",
+            "url": "/url",
+            "summary": "/summary"
+          },
+          "values": {
+            "state": {
+              "map": {
+                "ok": "success",
+                "failed": "failure",
+                "running": "pending",
+                "skipped": "skipped"
+              },
+              "default": "neutral"
+            }
+          }
+        }
+      }
+    },
+    "pulls.comment": {
+      "tool": "acme_pr_comment",
+      "effect": "external",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "id": "{id}",
+        "text": "{body}"
+      }
+    },
+    "pulls.comments": {
+      "tool": "acme_pr_comments",
+      "effect": "read",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "id": "{id}"
+      },
+      "result": {
+        "list": "/comments",
+        "map": {
+          "id": "/id",
+          "author": "/user",
+          "association": "/role",
+          "body": "/text",
+          "at": "/created"
+        },
+        "values": {
+          "association": {
+            "map": {
+              "owner": "OWNER",
+              "member": "MEMBER",
+              "outside": "NONE"
+            },
+            "default": "NONE"
+          }
+        }
+      }
+    },
+    "pulls.merge": {
+      "tool": "acme_pr_merge",
+      "effect": "destructive",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "id": "{id}",
+        "method": "{method}",
+        "sha": "{sha}"
+      },
+      "result": {
+        "map": {
+          "sha": "/merge_sha"
+        }
+      }
+    },
+    "items.query": {
+      "tool": "acme_issues",
+      "effect": "read",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "state": "{state}",
+        "label": "{value}",
+        "updatedSince": "{since}"
+      },
+      "result": {
+        "list": "/issues",
+        "map": {
+          "id": "/id",
+          "number": "/number",
+          "title": "/title",
+          "body": "/body",
+          "state": "/state",
+          "labels": "/labels",
+          "assignees": "/assignees",
+          "author": "/author",
+          "url": "/url",
+          "rev": "/rev",
+          "points": "/points"
+        },
+        "values": {
+          "state": {
+            "map": {
+              "open": "open",
+              "closed": "closed"
+            }
+          }
+        }
+      },
+      "pagination": {
+        "style": "cursor",
+        "cursorPath": "/next",
+        "param": "cursor",
+        "maxPages": 4
+      }
+    },
+    "items.get": {
+      "tool": "acme_issue",
+      "effect": "read",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "id": "{id}"
+      },
+      "result": {
+        "map": {
+          "id": "/id",
+          "number": "/number",
+          "title": "/title",
+          "body": "/body",
+          "state": "/state",
+          "labels": "/labels",
+          "assignees": "/assignees",
+          "author": "/author",
+          "url": "/url",
+          "rev": "/rev",
+          "points": "/points"
+        },
+        "values": {
+          "state": {
+            "map": {
+              "open": "open",
+              "closed": "closed"
+            }
+          }
+        }
+      }
+    },
+    "items.comment": {
+      "tool": "acme_issue_comment",
+      "effect": "external",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "id": "{id}",
+        "text": "{body}"
+      }
+    },
+    "items.transition": {
+      "tool": "acme_issue_state",
+      "effect": "external",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "id": "{id}",
+        "state": "{to}",
+        "rev": "{ifRev}"
+      },
+      "result": {
+        "map": {
+          "id": "/id",
+          "number": "/number",
+          "title": "/title",
+          "body": "/body",
+          "state": "/state",
+          "labels": "/labels",
+          "assignees": "/assignees",
+          "author": "/author",
+          "url": "/url",
+          "rev": "/rev",
+          "points": "/points"
+        },
+        "values": {
+          "state": {
+            "map": {
+              "open": "open",
+              "closed": "closed"
+            }
+          }
+        }
+      }
+    },
+    "checks.forCommit": {
+      "tool": "acme_checks",
+      "effect": "read",
+      "args": {
+        "owner": "{owner}",
+        "name": "{name}",
+        "sha": "{sha}"
+      },
+      "result": {
+        "list": "/checks",
+        "map": {
+          "name": "/name",
+          "state": "/status",
+          "url": "/url",
+          "summary": "/summary"
+        },
+        "values": {
+          "state": {
+            "map": {
+              "ok": "success",
+              "failed": "failure",
+              "running": "pending"
+            },
+            "default": "neutral"
+          }
+        }
+      }
+    }
+  }
+}

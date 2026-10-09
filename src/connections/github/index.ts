@@ -229,6 +229,13 @@ function cleanBody(t: string, max: number): { head: string; overflow?: string } 
 
 const ITERATION_QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){projectsV2(first:20){nodes{id title url field(name:"Iteration"){__typename ... on ProjectV2IterationField{id name configuration{iterations{id title startDate duration} completedIterations{id title startDate duration}}}}}}}}`;
 
+/**
+ * Which iteration and how many points each ISSUE has on the repository's Projects v2 boards, in one request (the first 100
+ * items of each of the first 10 projects). Field names are the ones GitHub's own board templates use: "Iteration", and
+ * "Estimate" or "Story Points" for the number. Read only; Projects v2 writes are not built.
+ */
+const MEMBERS_QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){projectsV2(first:10){nodes{items(first:100){nodes{content{__typename ... on Issue{number}} iteration:fieldValueByName(name:"Iteration"){__typename ... on ProjectV2ItemFieldIterationValue{iterationId}} estimate:fieldValueByName(name:"Estimate"){__typename ... on ProjectV2ItemFieldNumberValue{number}} points:fieldValueByName(name:"Story Points"){__typename ... on ProjectV2ItemFieldNumberValue{number}}}}}}}}`;
+
 interface NativeIterations { available: boolean; iterations: Iteration[]; hasIterationField: boolean }
 
 function addDays(day: string, days: number): string | undefined {
@@ -704,6 +711,39 @@ export const githubAdapter: ProviderAdapter = {
   },
 
   iterations: {
+    async members(ctx) {
+      const r = repoOf(ctx);
+      const res = await call(ctx, {
+        method: 'POST', path: githubGraphqlUrl(ctx.conn), json: { query: MEMBERS_QUERY, variables: { owner: r.owner, name: r.name } },
+        conditional: false, audit: 'use', ref: 'graphql',
+      });
+      const j = asObj(res.json);
+      const projects = asObj(asObj(asObj(j.data).repository).projectsV2);
+      // No Projects v2 on this server or repository: there is nothing to overlay, which is an answer, not a failure.
+      if (res.status === 200 && !asArr(j.errors).length && !projects.nodes) return new Map();
+      if (res.status !== 200 || asArr(j.errors).length) {
+        throw new ConnectionError('The Projects boards could not be read (the token needs Projects: read), so sprint membership was left as it is.', 'http', res.status);
+      }
+      const out = new Map<string, { iteration?: string; points?: number }>();
+      for (const p of asArr(projects.nodes)) {
+        for (const n of asArr(asObj(asObj(asObj(p).items)).nodes)) {
+          const item = asObj(n);
+          const content = asObj(item.content);
+          if (content.__typename !== 'Issue' || typeof content.number !== 'number') continue;
+          const it = asObj(item.iteration);
+          const iteration = it.__typename === 'ProjectV2ItemFieldIterationValue' && typeof it.iterationId === 'string' ? it.iterationId : undefined;
+          const sized = [asObj(item.estimate), asObj(item.points)].find(f => f.__typename === 'ProjectV2ItemFieldNumberValue' && typeof f.number === 'number');
+          const key = String(content.number);
+          const prev = out.get(key) ?? {};
+          // The first board that places or sizes an issue wins; a later board does not move it.
+          const placed = prev.iteration ?? iteration;
+          const points = prev.points ?? (sized ? (sized.number as number) : undefined);
+          out.set(key, { ...(placed !== undefined ? { iteration: placed } : {}), ...(points !== undefined ? { points } : {}) });
+        }
+      }
+      return out;
+    },
+
     async list(ctx) {
       const base = repoPath(ctx);
       const out: Iteration[] = [];

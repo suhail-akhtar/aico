@@ -20,13 +20,15 @@
  */
 
 import {
-  computeResult, memberAt, ms, type BoardMode, type Proposal, type Sprint,
+  computeResult, memberAt, ms, type BoardMode, type Proposal, type Sprint, type SprintRemote,
 } from '../../shared/delivery/scrum.js';
 import type { Task } from './types.js';
 
 export type ScrumEvent =
   | { k: 'mode'; mode: BoardMode }
-  | { k: 'sprint'; id: string; name: string; goal: string; start: string; end: string; capacityPoints?: number }
+  | { k: 'sprint'; id: string; name: string; goal: string; start: string; end: string; capacityPoints?: number; remote?: SprintRemote }
+  /** The platform changed a mirrored sprint's name or dates (it owns them); `remote` refreshes the link. */
+  | { k: 'sprint-sync'; sprint: string; name?: string; start?: string; end?: string; remote: SprintRemote }
   | { k: 'commit'; sprint: string; add: string[]; remove: string[] }
   | { k: 'start'; sprint: string }
   | { k: 'close'; sprint: string }
@@ -80,9 +82,22 @@ export function applyScrum(s: ScrumFold, tasks: ReadonlyMap<string, Task>, ev: S
       s.sprints.set(ev.id, {
         id: ev.id, name: ev.name, goal: ev.goal, start: ev.start, end: ev.end,
         ...(ev.capacityPoints !== undefined ? { capacityPoints: ev.capacityPoints } : {}),
+        ...(ev.remote ? { remote: { ...ev.remote } } : {}),
         status: 'planned', createdAt: at, scope: [],
       });
       return;
+    case 'sprint-sync': {
+      const sp = s.sprints.get(ev.sprint);
+      if (!sp) return;
+      // A closed sprint is history: only the link's own state moves, never its name or dates.
+      if (sp.status !== 'closed') {
+        if (ev.name) sp.name = ev.name;
+        if (ev.start) sp.start = ev.start;
+        if (ev.end) sp.end = ev.end;
+      }
+      sp.remote = { ...ev.remote };
+      return;
+    }
     case 'commit': {
       const sp = s.sprints.get(ev.sprint);
       if (!sp || sp.status === 'closed') return;

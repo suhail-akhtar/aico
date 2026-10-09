@@ -1,0 +1,44 @@
+{
+  "name": "acme_issues",
+  "description": "List issues.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "name": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "open",
+          "closed",
+          "all"
+        ]
+      },
+      "label": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9 _.:-]{1,80}$"
+      },
+      "updatedSince": {
+        "type": "string",
+        "pattern": "^[0-9T:.Z-]{10,40}$"
+      }
+    },
+    "required": [
+      "owner",
+      "name",
+      "state"
+    ]
+  },
+  "http": {
+    "method": "GET",
+    "url": "https://api.acme-forge.example/v1/repos/{owner}/{name}/issues?state={state}&label={label}&updated={updatedSince}"
+  },
+  "effect": "read"
+}

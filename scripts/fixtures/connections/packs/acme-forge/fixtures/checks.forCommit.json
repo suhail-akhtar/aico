@@ -1,0 +1,50 @@
+{
+  "operation": "checks.forCommit",
+  "cases": [
+    {
+      "name": "three",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/commits/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/checks"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "checks": [
+            {
+              "name": "build",
+              "status": "ok"
+            },
+            {
+              "name": "lint",
+              "status": "failed"
+            },
+            {
+              "name": "deploy",
+              "status": "running"
+            }
+          ]
+        }
+      },
+      "expect": [
+        {
+          "name": "build",
+          "state": "success"
+        },
+        {
+          "name": "lint",
+          "state": "failure"
+        },
+        {
+          "name": "deploy",
+          "state": "pending"
+        }
+      ]
+    }
+  ]
+}

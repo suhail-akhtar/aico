@@ -1,0 +1,62 @@
+[
+  {
+    "path": "/Shop/Shop Team/_apis/work/teamsettings/iterations",
+    "status": 200,
+    "body": {
+      "count": 3,
+      "value": [
+        {
+          "id": "11111111-0000-4000-8000-000000000001",
+          "name": "Sprint 1",
+          "path": "Shop\\Sprint 1",
+          "attributes": {
+            "startDate": "2026-09-28T00:00:00Z",
+            "finishDate": "2026-10-09T00:00:00Z",
+            "timeFrame": "current"
+          }
+        },
+        {
+          "id": "11111111-0000-4000-8000-000000000002",
+          "name": "Sprint 2",
+          "path": "Shop\\Sprint 2",
+          "attributes": {
+            "startDate": "2026-10-12T00:00:00Z",
+            "finishDate": "2026-10-23T00:00:00Z",
+            "timeFrame": "future"
+          }
+        },
+        {
+          "id": "11111111-0000-4000-8000-000000000000",
+          "name": "Sprint 0",
+          "path": "Shop\\Sprint 0",
+          "attributes": {
+            "startDate": "2026-09-14T00:00:00Z",
+            "finishDate": "2026-09-25T00:00:00Z",
+            "timeFrame": "past"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/wit/classificationnodes/iterations",
+    "status": 201,
+    "body": {
+      "id": 9,
+      "identifier": "11111111-0000-4000-8000-000000000009",
+      "name": "Sprint 3",
+      "structureType": "iteration",
+      "path": "\\Shop\\Iteration\\Sprint 3"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/Shop Team/_apis/work/teamsettings/iterations",
+    "status": 200,
+    "body": {
+      "id": "11111111-0000-4000-8000-000000000009",
+      "name": "Sprint 3"
+    }
+  }
+]

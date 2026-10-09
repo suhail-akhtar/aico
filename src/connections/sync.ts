@@ -38,9 +38,14 @@ import { asError, ctxFor } from './service.js';
 import * as Store from './store.js';
 import { connectionDecision } from '../policy/enforce.js';
 import { DEFAULT_STATE_MAP, type BoardConnection, type ProjectMapping, type RemoteLink, type StoredConnection, type SyncStatus } from './types.js';
+import { categoryWord, needsMove, type StateCategory } from '../../shared/connections/process.js';
+import { syncIterations } from './iterations.js';
 
 export interface SyncResult {
-  imported: number; updated: number; pushed: number; observed: number; conflicts: number; message?: string;
+  imported: number; updated: number; pushed: number; observed: number; conflicts: number;
+  /** Sprints imported or refreshed from the platform's iterations, plus tasks moved between them (iterations.ts). */
+  sprints?: number;
+  message?: string;
 }
 
 const statuses = new Map<string, SyncStatus>();
@@ -107,21 +112,32 @@ export function priorityFromLabels(labels: readonly string[]): TaskPriority | un
 
 export const readyOnRemote = (labels: readonly string[]): boolean => labels.some(l => /^(?:aico:)?ready$/i.test(l.trim()));
 
-/** The label AICO shows for a task status, from the project's state map; undefined for open/closed. */
-export function stateLabel(status: Task['status'], stateMap: Record<string, string>): string | undefined {
+/**
+ * The label AICO shows for a task status, from the project's state map; undefined for open/closed.
+ * On a platform with workflow states (`categories`: Azure DevOps) a value that names a state category
+ * ("InProgress") is a state to move to, not a label, and is returned by {@link categoryTarget} instead.
+ */
+export function stateLabel(status: Task['status'], stateMap: Record<string, string>, categories = false): string | undefined {
   const key = status === 'changes' ? 'running' : status;
   const v = stateMap[key] ?? DEFAULT_STATE_MAP[key];
+  if (categories && categoryWord(v)) return undefined;
   return v && v !== 'open' && v !== 'closed' ? v : undefined;
 }
 
+/** The state category the map sends this task status to, or undefined when it maps to a label (or to open/closed). */
+export function categoryTarget(status: Task['status'], stateMap: Record<string, string>): StateCategory | undefined {
+  const key = status === 'changes' ? 'running' : status;
+  return categoryWord(stateMap[key] ?? DEFAULT_STATE_MAP[key]);
+}
+
 /** The labels AICO manages on an item (everything the state map can produce). */
-export function managedLabels(stateMap: Record<string, string>): Set<string> {
-  return new Set(Object.values({ ...DEFAULT_STATE_MAP, ...stateMap }).filter(v => v !== 'open' && v !== 'closed'));
+export function managedLabels(stateMap: Record<string, string>, categories = false): Set<string> {
+  return new Set(Object.values({ ...DEFAULT_STATE_MAP, ...stateMap }).filter(v => v !== 'open' && v !== 'closed' && !(categories && categoryWord(v))));
 }
 
 /** The task fields a pull may overwrite, from a remote item. */
-export function fieldsFromItem(item: RemoteItem, stateMap: Record<string, string>): { title: string; body: string; acceptance: string[]; labels: string[]; priority?: TaskPriority } {
-  const managed = managedLabels(stateMap);
+export function fieldsFromItem(item: RemoteItem, stateMap: Record<string, string>, categories = false): { title: string; body: string; acceptance: string[]; labels: string[]; priority?: TaskPriority } {
+  const managed = managedLabels(stateMap, categories);
   const labels = item.labels.filter(l => !managed.has(l) && !/^aico:/i.test(l)).map(l => sanitizeLine(l, REMOTE_LIMITS.label)).filter(Boolean).slice(0, 20);
   const priority = priorityFromLabels(item.labels);
   return {
@@ -138,11 +154,13 @@ export function fieldsFromItem(item: RemoteItem, stateMap: Record<string, string
 const TERMINAL: ReadonlySet<Task['status']> = new Set(['merged', 'cancelled']);
 const STARTED: ReadonlySet<Task['status']> = new Set(['running', 'review', 'changes', 'pr']);
 
-function linkOf(conn: StoredConnection, item: RemoteItem, _prev?: RemoteLink): RemoteLink {
+function linkOf(conn: StoredConnection, item: RemoteItem, prev?: RemoteLink): RemoteLink {
   const ready = readyOnRemote(item.labels);
   return {
     connection: conn.id, kind: 'item', id: item.id, url: item.url, rev: item.rev, syncedAt: new Date().toISOString(),
     remoteState: item.state, ...(ready ? { readyOnRemote: true } : {}),
+    // The bases of the sprint and estimate merges belong to iterations.ts; a pull of the item's other fields must not forget them.
+    ...(prev?.iteration !== undefined ? { iteration: prev.iteration } : {}), ...(prev?.points !== undefined ? { points: prev.points } : {}),
   };
 }
 
@@ -158,7 +176,7 @@ async function pullItems(project: string, mapping: ProjectMapping, conn: StoredC
   for (const item of items) {
     seen.set(item.id, item);
     const existing = byRemote.get(item.id);
-    const f = fieldsFromItem(item, mapping.stateMap);
+    const f = fieldsFromItem(item, mapping.stateMap, Boolean(adapter.items.transitionCategory));
     if (!existing) {
       const created = await D.createTask(project, { title: f.title, body: f.body, acceptance: f.acceptance, labels: f.labels, ...(f.priority ? { priority: f.priority } : {}) });
       S.patchTask(project, created.id, { remote: linkOf(conn, item) });
@@ -211,31 +229,51 @@ async function pullItems(project: string, mapping: ProjectMapping, conn: StoredC
 
 async function pushState(project: string, mapping: ProjectMapping, conn: StoredConnection, adapter: ProviderAdapter, ctx: AdapterCtx, items: Map<string, RemoteItem>, r: SyncResult): Promise<void> {
   if (!adapter.items || mapping.workItems.source === 'off') return;
-  const managed = managedLabels(mapping.stateMap);
+  const ops = adapter.items;
+  const categories = Boolean(ops.transitionCategory);
+  const managed = managedLabels(mapping.stateMap, categories);
+  /** A write that moved the item's revision reports it, so the next write in this pass carries the new one. */
+  const track = (item: RemoteItem, w: void | { rev: string }): RemoteItem => {
+    if (!w || !w.rev) return item;
+    const next = { ...item, rev: w.rev };
+    items.set(next.id, next);
+    return next;
+  };
   for (const t of S.boardState(project).tasks) {
     if (!t.remote || t.remote.connection !== conn.id) continue;
     let item = items.get(t.remote.id);
     if (!item) continue;
-    const want = stateLabel(t.status, mapping.stateMap);
+    const want = stateLabel(t.status, mapping.stateMap, categories);
+    const wantCat = categories ? categoryTarget(t.status, mapping.stateMap) : undefined;
     const have = item.labels.filter(l => managed.has(l));
     try {
       // Forward only: a closed item is the remote's final word unless AICO is the one closing it.
       if (item.state === 'open' && want !== undefined && !have.includes(want) && !TERMINAL.has(t.status)) {
         const stale = have.filter(l => l !== want);
-        for (const l of stale) await adapter.items.removeLabel(ctx, item.id, l);
-        await adapter.items.addLabels(ctx, item.id, [want]);
-        if (want === stateLabel('pr', mapping.stateMap) && t.pr) await adapter.items.comment(ctx, item.id, `A pull request was opened for this item: ${t.pr.url}`);
+        for (const l of stale) item = track(item, await ops.removeLabel(ctx, item.id, l));
+        item = track(item, await ops.addLabels(ctx, item.id, [want]));
+        if (want === stateLabel('pr', mapping.stateMap, categories) && t.pr) item = track(item, await ops.comment(ctx, item.id, `A pull request was opened for this item: ${t.pr.url}`));
         r.pushed++;
       } else if (item.state === 'open' && want === undefined && have.length > 0 && (t.status === 'backlog' || t.status === 'ready')) {
-        for (const l of have) await adapter.items.removeLabel(ctx, item.id, l);
+        for (const l of have) item = track(item, await ops.removeLabel(ctx, item.id, l));
         r.pushed++;
       }
-      if (t.status === 'merged' && item.state === 'open') {
-        await adapter.items.comment(ctx, item.id, t.pr ? `Merged: ${t.pr.url}` : 'This work was merged.');
-        item = await adapter.items.transition(ctx, item.id, 'closed', item.rev);
+      // Workflow states move by category and only forward from where the item is (a person's later state is never undone).
+      if (wantCat && !TERMINAL.has(t.status) && item.stateCategory !== undefined && needsMove(item.stateCategory, wantCat)) {
+        item = await ops.transitionCategory!(ctx, item.id, wantCat, item.rev);
         items.set(item.id, item);
-        S.patchTask(project, t.id, { remote: { ...t.remote, remoteState: 'closed', rev: item.rev, syncedAt: new Date().toISOString() } });
         r.pushed++;
+      }
+      if (t.status === 'merged') {
+        const mergedCat = ops.transitionCategory ? categoryTarget('merged', mapping.stateMap) ?? 'completed' : undefined;
+        const move = mergedCat && item.stateCategory !== undefined ? needsMove(item.stateCategory, mergedCat) : item.state === 'open';
+        if (move) {
+          item = track(item, await ops.comment(ctx, item.id, t.pr ? `Merged: ${t.pr.url}` : 'This work was merged.'));
+          item = mergedCat ? await ops.transitionCategory!(ctx, item.id, mergedCat, item.rev) : await ops.transition(ctx, item.id, 'closed', item.rev);
+          items.set(item.id, item);
+          S.patchTask(project, t.id, { remote: { ...t.remote, remoteState: item.state, rev: item.rev, syncedAt: new Date().toISOString() } });
+          r.pushed++;
+        }
       }
     } catch (e) {
       if (e instanceof ConnectionError && e.code === 'conflict') { r.conflicts++; continue; }
@@ -262,6 +300,8 @@ export function syncProject(project: string, opts: { signal?: AbortSignal; items
       const { adapter, ctx } = ctxFor(conn, { repo: mapping.repo, project, ...(opts.signal ? { signal: opts.signal } : {}) });
       const items = opts.items === false ? new Map<string, RemoteItem>() : await pullItems(project, mapping, conn, adapter, ctx, r);
       if (opts.items !== false) await pushState(project, mapping, conn, adapter, ctx, items, r);
+      // Sprints and estimates mirror the platform's iterations when a person turned that on for this project.
+      if (opts.items !== false) await syncIterations(project, mapping, conn, adapter, ctx, items, r);
       if (opts.prs !== false) {
         const o = await observeProject(project, opts.signal);
         r.observed = o.observed;

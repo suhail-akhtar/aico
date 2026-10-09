@@ -788,7 +788,7 @@ HTTP (all under `/api/delivery`, registered projects only): `GET /scrum?project=
 
 Delivery works on its own, on your machine. **Connections** let it meet the place your team
 already works. Today that is **GitHub** (github.com, or GitHub Enterprise Server at an address
-you give); Azure DevOps, GitLab, Gitea/Forgejo/GitBucket and Bitbucket follow, each as one more
+you give), Azure DevOps, GitLab, Gitea, Forgejo, GitBucket and Bitbucket (below), each one
 adapter behind the same page. What you get:
 
 - **A backlog from your issues.** Issues assigned to you, with a label, or matching a query
@@ -838,6 +838,122 @@ You can also say it in a chat: *"connect this project to our GitHub, import the 
 aico, and open PRs"*. The agent's `ConnectionManage` tool creates the connection and maps the
 project, and tells you to paste the token on the page: **it cannot store or read a token, change
 the host later, or switch pull-request mode on** (it asks you to).
+
+### GitLab, Gitea, Forgejo and GitBucket
+
+Same page, same four steps; pick the tile. A server you run takes its address (a private CA goes
+under **Advanced**, and certificate checks are never turned off). What differs:
+
+- **GitLab** (gitlab.com, or **Self-managed GitLab** at your server's address, also under a path).
+  Create a personal access token with the `api` scope, or better a **project access token with
+  the Developer role**: it cannot push protected branches and reaches one project. The Test result
+  lists the token's scopes and expiry and warns about `sudo` and `admin_mode`. Nested groups work:
+  enter the project as `group/subgroup/project`. Merge requests carry the change evidence; pipelines
+  show job by job; GitLab's own word decides whether a merge request can be merged. When the only
+  thing in the way is a running pipeline, the card offers **Merge on GitLab when the pipeline
+  succeeds**: your click sets it, and GitLab then merges by itself only if every rule still holds.
+  AICO never sets it otherwise. Issues bring their labels, their **weight** as story points where
+  your GitLab has weights (otherwise an `sp:5` label), milestones, and **iterations on Premium**
+  (without them the page says so and milestones stand in). Epics are not read.
+- **Gitea and Forgejo** (two tiles, one implementation). Create a token with Repository and Issue
+  read and write. These servers do not list a token's permissions, so Test checks them with real
+  requests and shows what worked. Actions results show as checks. A pull request GitLab-style
+  "can merge" does not exist here, so **Merge** is offered when the server says the pull request is
+  mergeable, nobody is waiting on or against it, and every check it can see is green; to merge
+  over a red or running check, do it on the server. A conflict is reported once a pull request has
+  been unchanged for two minutes (before that it may still be checking). Sprints are milestones
+  and estimates are `sp:5` labels.
+- **GitBucket** (a subset of GitHub's API). Pull requests, issues, milestones and commit statuses
+  work. It has no check-runs, reviews, draft pull requests, scopes or search, and each of those
+  shows as a missing chip rather than a failure; the merge refuses a pull request whose head moved
+  after you saw it.
+
+### Azure DevOps (Services and Server), with your sprints
+
+Pick **Azure DevOps**. For Azure DevOps Services give your **organization** (the name after
+`dev.azure.com/`; pasting the whole address works); for a server your company runs, tick **I use
+Azure DevOps Server** and give its collection address (for example
+`https://tfs.example.com/tfs/DefaultCollection`). Create a **personal access token** with **Code**
+(read and write), **Work Items** (read and write), **Build** (read) and **Project and Team** (read).
+Azure DevOps does not list a token's permissions, so Test checks each with a real request and shows
+what worked; it also warns if the token looks like a Full access token. Pick the repository as
+`Project/Repository` (spaces in names are fine; the page offers the ones your token can see).
+
+- **Pull requests.** Your **Open pull request** click pushes `aico/task-<id>` and opens a PR from it.
+  Azure DevOps limits a description to 4000 characters, so the change evidence is cut there and the
+  rest follows as a comment. AICO's own comments are posted as **resolved** threads, so they never
+  trip a "resolve all comments" policy. Whether a PR can be merged comes from its **branch policies**
+  (minimum reviewers, required reviewers, build validation, comment resolution, work item linking):
+  **Merge** is offered only when the merge succeeds and every blocking policy says yes; a policy AICO
+  cannot fix by writing code (a missing linked work item, unresolved comments) is shown as a reason,
+  not as a failing check. If your token cannot read policies, AICO does not guess: it says so and you
+  merge on Azure DevOps. AICO never bypasses a policy and never deletes the source branch.
+- **Work items.** Import **assigned to me**, a **tag**, or a **WIQL condition** (the part after
+  `WHERE`; Epics, Features and test items are never imported). Titles, descriptions, acceptance
+  criteria and tags are read and a later edit on Azure DevOps wins. AICO moves an item **forward only**
+  by state category: a running task moves it to the type's own *InProgress* state (Active, Committed,
+  Doing), a merged one to *Completed* (Closed, Done), whatever your process calls them. **Settings,
+  Connections, Use for this project, State names** previews what each AICO state becomes for each work
+  item type of your Agile, Scrum, CMMI, Basic or custom process. Blocked is the tag `aico:blocked`. The
+  PR is linked to the work item with a real link.
+- **Sprints (opt in).** Tick **Mirror Azure DevOps iterations as Scrum sprints** and the team's
+  **current and next iteration** arrive as planned sprints with Azure DevOps' name and dates (it owns
+  both: a rename or a moved date is pulled in). Tasks follow their work item's iteration and
+  **Story Points** (or Effort, or Size); if you plan a task into a sprint or estimate it here and the
+  platform has not changed it, AICO writes that decision back once; if the platform changed it,
+  the platform wins. AICO never starts a sprint, never closes one because the platform ended it, and
+  creates an iteration on Azure DevOps only when you ask for it. GitHub milestones and Projects
+  iterations work the same way (a Projects iteration is read, not written: set it on the board).
+- **Older servers.** AICO speaks REST 7.1 and, for a server, tries 7.1, then 7.0, then 6.0 until the
+  server accepts one (Azure DevOps Server 2019 or newer). An older server loses features (a policy or
+  iteration API it lacks becomes a warning), not the connection. An expired token shows as **Sign in
+  again**.
+
+### Bitbucket Cloud and Bitbucket Data Center
+
+Pick **Bitbucket Cloud** (bitbucket.org) or **Bitbucket Data Center** (your server's address,
+also under a path like `/bitbucket`). These are **pull-request and build-status connections, not
+planning ones**: Jira is not supported, and Bitbucket has no sprints, so AICO's sprints stay on
+your machine. The Test result says so.
+
+- **Cloud.** Create an **Atlassian API token** with the scopes the page lists (repository and
+  pull request read and write; pipeline read) and enter it **with your Atlassian account email**;
+  or create a **repository, project or workspace access token** and leave the email empty.
+  (App passwords no longer exist.) Pull requests carry the change evidence. Cloud does not say
+  whether a pull request merges cleanly, so **Merge** is offered only when it is open, not a draft,
+  its builds are green, nobody asked for changes, and someone approved it (or the required number
+  did, when your token can read the branch restrictions); Bitbucket can still refuse. Issues come
+  in only where the repository uses Bitbucket's issue tracker (the **component** plays the label).
+- **Data Center.** Create an **HTTP access token** with project or repository write. AICO asks the
+  server whether each pull request can merge and shows the server's own reasons (required
+  approvers, required builds, open tasks). **Merge** sends the pull request's current version, so
+  if anything changed since you looked it is refused and you are told to look again. Builds come
+  from your CI (Bamboo, Jenkins); with none, a pull request simply shows no checks. Admin rights on
+  the repository let AICO read the required approvers and branch permissions; without them the page
+  says "protection unreadable" and the server enforces them at merge anyway.
+
+### Any other platform: a connector AICO builds
+
+For Linear, YouTrack, Phabricator or an in-house tool, choose **Other** in Add connection: it opens
+a chat with an instruction in the composer. Tell AICO the platform and its API docs (or an OpenAPI
+file). It writes a **connector pack** (a small file of settings, a few HTTP request definitions and
+recorded examples), tests it against those examples on your own machine, and tells you when it is
+ready. Nothing is sent to the platform at that point and AICO never asks for your token in the chat.
+
+Then **Settings, Connections, Connectors built by AICO** shows it. **Review and enable...** opens a
+card with everything you are approving: the hosts it may contact (a closed list), how your token
+is sent, and every operation grouped by what it can change: *reads*, *writes* (comments, status
+changes, new pull requests) and *cannot be undone* (merge, which only ever runs from your click).
+Where AICO raised an operation's class above what the file claimed, it says so; operations whose
+test failed stay off. **Enable** approves exactly that content. **If anything in the connector is
+edited later, by anyone, it switches itself off ("Needs re-approval") until you review it again.**
+After enabling, **Add a connection** makes the connection, you paste the token (it is bound to those
+hosts in the vault) and press Test, like any other.
+
+A connector is weaker than a built-in one: it has no labels (progress shows on the pull request and
+in comments), no branch-protection read, no sprints, and "can merge" is whatever the platform
+reports, narrowed (never a draft, a failing check or a requested change). An organisation can
+forbid connectors (`connections.packs: "forbid"` in the managed policy) or limit them by host.
 
 ### Limits, said plainly
 
@@ -1178,6 +1294,8 @@ can say:
   ever pushing): which forges and trackers may be connected. Asked when a connection
   is made or mapped and again before every request, so a policy that appears later
   stops traffic at once; connection activity is in the audit export as kind `connection`.
+  `packs: "forbid"` stops agent-built connector packs (they can also be limited by host,
+  or by name in the `customTools` list as `connector:<id>`).
 - **Network** — `network` allow-list or deny-list of domains for the tools that
   carry a URL (WebFetch, the browser tools, MCP tools that take a URL).
 - **Spend** — `budget.perSessionUsd` and `budget.perDayUsd`.

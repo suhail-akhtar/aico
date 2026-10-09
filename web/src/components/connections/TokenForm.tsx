@@ -16,7 +16,7 @@
 import React, { useId, useRef, useState } from 'react';
 import { api } from '../../api';
 import type { Connection } from '../../../../shared/connections/types';
-import { providerInfo } from '../../connections';
+import { providerInfo, tokenPageUrl } from '../../connections';
 import { BTN_GHOST, BTN_PRIMARY, ErrorLine, INPUT, LABEL, Spinner } from '../delivery/ui';
 import { ExternalLink } from './parts';
 
@@ -30,6 +30,8 @@ export function TokenForm({ connection, onSaved, onCancel }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const info = providerInfo(connection.provider);
+  // The provider's own page for a cloud product, else the token page of the server this connection points at.
+  const tokenLink = info?.cloudUrl && new URL(info.cloudUrl).host === connection.host ? info.tokenHelpUrl : tokenPageUrl(connection.provider, connection.baseUrl) ?? undefined;
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -59,7 +61,7 @@ export function TokenForm({ connection, onSaved, onCancel }: {
         />
         <p className="mt-1 text-[12px] text-aico-muted">
           It replaces the stored token and stays bound to {connection.host}.
-          {info?.tokenHelpUrl && connection.provider === 'github' && connection.host === 'github.com' ? <> <ExternalLink href={info.tokenHelpUrl}>Create a token</ExternalLink></> : null}
+          {tokenLink ? <> <ExternalLink href={tokenLink}>Create a token</ExternalLink></> : null}
         </p>
       </div>
       {error && <ErrorLine>{error}</ErrorLine>}

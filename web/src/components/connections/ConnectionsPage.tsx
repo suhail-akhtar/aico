@@ -28,11 +28,12 @@ import { api } from '../../api';
 import { useStore } from '../../store';
 import { basename } from '../../grouping';
 import type { Connection, ProviderId } from '../../../../shared/connections/types';
-import { connectionStatus, policyView, providerInfo, providerLabel } from '../../connections';
+import { connectionStatus, connectorPrompt, packsAllowed, policyView, providerInfo, providerLabel } from '../../connections';
 import { BTN_GHOST, BTN_OUTLINE, BTN_PRIMARY, Callout, ErrorLine, Modal, Skeleton, Spinner } from '../delivery/ui';
 import { DvIcon } from '../delivery/icons';
 import { AddConnection } from './AddConnection';
 import { MappingDialog } from './MappingDialog';
+import { PacksSection } from './PacksSection';
 import { Monogram, ProbePanel, StatusPill } from './parts';
 import { TokenForm } from './TokenForm';
 import { useConnections } from './useConnections';
@@ -47,7 +48,10 @@ function useProjectOptions(): { project: string | undefined; projects: ProjectOp
   return { project, projects };
 }
 
-export function ConnectionsPane(): React.ReactElement {
+export function ConnectionsPane({ startChat }: {
+  /** Open a new chat with this text in the composer (the host closes its Settings window / navigates). Default: a new chat in the store. */
+  startChat?: (prompt: string) => void;
+} = {}): React.ReactElement {
   const data = useConnections();
   const { project, projects } = useProjectOptions();
   const [adding, setAdding] = useState(false);
@@ -56,6 +60,15 @@ export function ConnectionsPane(): React.ReactElement {
   const [now, setNow] = useState(() => Date.now());
   const pol = policyView(data.policy);
   const { connections, loading, error } = data;
+  const askConnector = useCallback((): void => {
+    const prompt = connectorPrompt();
+    if (startChat) { startChat(prompt); return; }
+    const st = useStore.getState();
+    st.newSession();
+    st.prefillComposer(prompt);
+    setAdding(false);
+    setNotice('A new chat is ready with the instruction in the composer. Read it, then press Enter to send.');
+  }, [startChat]);
 
   // The "ago" and rate-limit wording ticks over once a minute, not on every render.
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(t); }, []);
@@ -93,6 +106,7 @@ export function ConnectionsPane(): React.ReactElement {
           onUse={c => { setAdding(false); setMapFor(c); }}
           onCancel={removed => { if (removed) data.drop(removed); setAdding(false); }}
           onDone={() => { setAdding(false); void data.refresh(); }}
+          onAskConnector={askConnector}
         />
       )}
 
@@ -109,7 +123,7 @@ export function ConnectionsPane(): React.ReactElement {
           <DvIcon name="link" size={26} className="mx-auto text-aico-muted" />
           <p className="mt-3 text-[15px] font-medium text-aico-primary">No connections yet</p>
           <p className="mx-auto mt-1 max-w-md text-[13px] leading-relaxed text-aico-secondary">
-            Add GitHub to import issues as tasks and to open pull requests for the work an agent finishes. It takes a minute and a token.
+            Add your team’s code host (GitHub, GitLab, Gitea, Azure DevOps and others) to import issues as tasks and to open pull requests for the work an agent finishes. It takes a minute and a token.
           </p>
           <div className="mt-4">{addButton}</div>
         </div>
@@ -128,6 +142,8 @@ export function ConnectionsPane(): React.ReactElement {
           ))}
         </ul>
       )}
+
+      <PacksSection allowed={packsAllowed(data.policy)} onAsk={askConnector} onConnected={c => { data.upsert(c); }} />
 
       {mapFor && project && (
         <MappingDialog

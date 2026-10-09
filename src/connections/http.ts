@@ -100,6 +100,18 @@ export interface ClientOptions {
   /** Retries for reads on 5xx and network errors. */
   retries?: number;
   rand?: () => number;
+  /**
+   * A provider that answers a dead token with something other than 401 (Azure DevOps sends 203 and an HTML
+   * sign-in page for an expired PAT) says so here; it is then handled exactly like a 401.
+   */
+  authFailure?: (status: number, headers: Record<string, string>, contentType: string) => boolean;
+  /**
+   * A connector pack's contract test (packs/contract.ts) talks to a loopback server the engine itself
+   * started, with this fixed fake token and no vault. It exists only for that: nothing a model or a
+   * route can reach constructs a client with it, and it skips the managed `connections` policy
+   * (which is about real forges) while the `network` policy and the SSRF guard still apply.
+   */
+  contractSecret?: string;
   /** Called when a 401 says the token no longer works, so the page can say "Sign in again". */
   onAuthFailed?: (conn: StoredConnection) => void;
   /** Called with the rate-limit state after each response, for the page's chip. */
@@ -164,7 +176,7 @@ export class ConnectionClient {
     const c = this.conn;
     if (c.disabled) throw new ConnectionError(`The connection "${c.label}" is turned off.`, 'config');
     if (!c.credential) throw new ConnectionError(`The connection "${c.label}" has no token yet. Add one on the Connections page.`, 'credential');
-    const d = connectionDecision({ provider: c.provider, host: url.hostname });
+    const d = this.opts.contractSecret !== undefined ? { ok: true as const } : connectionDecision({ provider: c.provider, host: url.hostname, ...(c.pack ? { pack: true } : {}) });
     if (!d.ok) {
       auditConnection({ action: 'policy.deny', connection: c.id, provider: c.provider, target: url.toString(), outcome: 'denied', detail: d.rule });
       throw new ConnectionError(d.message, 'policy');
@@ -258,13 +270,16 @@ export class ConnectionClient {
     let secret: ResolvedSecret | undefined;
     try {
       const origin = originOf(url);
-      secret = await getVault().resolve(c.credential!, {
-        tool: CONNECTION_TOOL,
-        origin,
-        purpose: `${method} ${url.origin}${url.pathname} for the connection "${c.label}"`.slice(0, 480),
-      }).catch((e: unknown) => {
-        throw new ConnectionError(e instanceof Error ? e.message : 'The credential could not be used.', 'credential');
-      });
+      const fake = this.opts.contractSecret;
+      secret = fake !== undefined
+        ? ({ name: 'contract-test', kind: 'api-token', fields: { token: fake }, allowSelfSigned: false, value: () => fake, release: () => undefined } as unknown as ResolvedSecret)
+        : await getVault().resolve(c.credential!, {
+          tool: CONNECTION_TOOL,
+          origin,
+          purpose: `${method} ${url.origin}${url.pathname} for the connection "${c.label}"`.slice(0, 480),
+        }).catch((e: unknown) => {
+          throw new ConnectionError(e instanceof Error ? e.message : 'The credential could not be used.', 'credential');
+        });
       let body: Buffer | undefined = req.json !== undefined ? Buffer.from(JSON.stringify(req.json), 'utf8') : undefined;
       let curMethod = method;
       for (let hops = 0; ; hops++) {
@@ -312,9 +327,9 @@ export class ConnectionClient {
       throw new ConnectionError(`${c.label} is rate-limiting this token until ${new Date(until).toISOString()}.`, 'rate-limited', res.status);
     }
     if (blocked.has(c.id) && (blocked.get(c.id) ?? 0) <= this.clock.now()) { blocked.delete(c.id); this.opts.onRateLimit?.(c, undefined); }
-    if (res.status === 401) {
+    if (res.status === 401 || this.opts.authFailure?.(res.status, headers, headers['content-type'] ?? '')) {
       this.opts.onAuthFailed?.(c);
-      throw new ConnectionError(`${c.label} rejected the token (401). It may have expired or been revoked; sign in again.`, 'auth', 401);
+      throw new ConnectionError(`${c.label} rejected the token (${res.status === 401 ? '401' : 'not signed in'}). It may have expired or been revoked; sign in again.`, 'auth', 401);
     }
     if (res.status === 304 && (res as { cached?: boolean }).cached) {
       const hit = this.cache.get(res.key);

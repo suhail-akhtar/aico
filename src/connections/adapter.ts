@@ -19,6 +19,7 @@
  */
 
 import type { Capabilities, ProbeResult, ProviderId, PullState, RemoteCheck, RepoRef, WorkItemSource } from '../../shared/connections/types.js';
+import type { StateCategory, TypeStates } from '../../shared/connections/process.js';
 import type { ConnectionClient } from './http.js';
 import type { StoredConnection } from './types.js';
 
@@ -30,6 +31,11 @@ export interface AdapterCtx {
   signal?: AbortSignal;
   /** The project path, for audit lines. */
   project?: string;
+  /**
+   * A person asked for this call (their click in AICO): set only by the human-gated landing path.
+   * The built-in adapters ignore it; a connector pack's destructive operation (merge) refuses to run without it.
+   */
+  person?: boolean;
 }
 
 export interface RepoInfo {
@@ -51,6 +57,8 @@ export interface NewPull {
   /** Markdown; the adapter clips it to `Capabilities.pulls.bodyMax` and returns the overflow. */
   body: string;
   draft?: boolean;
+  /** Remote work items this change implements (their ids); an adapter whose platform links them on create does it there. */
+  itemIds?: string[];
 }
 
 export interface Comment {
@@ -80,6 +88,13 @@ export interface RemoteItem {
   milestone?: { id: string; title: string; dueOn?: string };
   /** Story points, when a field/label convention yields one. */
   points?: number;
+  /** The iteration the item belongs to, as `Iteration.itemKey ?? Iteration.id` (a milestone's `id` on GitHub). */
+  iteration?: string;
+  /** The platform's own state name ("Active"), and its category where the platform has categories (Azure DevOps). */
+  stateName?: string;
+  stateCategory?: StateCategory;
+  /** The work item type ("User Story", "Bug"), where the platform has types. */
+  kind?: string;
 }
 
 export interface ItemQuery {
@@ -103,7 +118,14 @@ export interface Iteration {
   url?: string;
   openItems?: number;
   closedItems?: number;
+  /** What `RemoteItem.iteration` holds for a member of this iteration when that is not `id` (an Azure DevOps path). */
+  itemKey?: string;
+  /** Where it is in time, when the platform says so (Azure DevOps team iterations). */
+  timeFrame?: 'past' | 'current' | 'future';
 }
+
+/** A write that moved the item's revision reports the new one, so a later write in the same pass carries it. */
+export type WriteResult = void | { rev: string };
 
 export interface ProtectionInfo {
   /** The base branch is protected on the remote. */
@@ -122,9 +144,27 @@ export interface ProviderAdapter {
   /** Hosts a connection to `baseUrl` may contact (the API host and the clone host). */
   hostsFor(baseUrl: string): string[];
   /** How the client should authenticate. */
-  clientOptions(conn: StoredConnection): Pick<import('./http.js').ClientOptions, 'apiBase' | 'auth' | 'username' | 'headers'>;
+  clientOptions(conn: StoredConnection): Pick<import('./http.js').ClientOptions, 'apiBase' | 'auth' | 'username' | 'headers' | 'authFailure'>;
   /** Parse an `origin` remote URL into a repository, or undefined if it is not this provider's. */
   parseRemote(url: string, baseUrl: string): RepoRef | undefined;
+  /**
+   * Why a repository reference is not usable (a message), or undefined. The default is `owner/name` made of
+   * letters, digits, `_`, `.` and `-`; a platform whose projects can have spaces (Azure DevOps) says its own.
+   */
+  validateRepo?(ref: RepoRef): string | undefined;
+  /**
+   * A cloud product with no fixed address (an Azure DevOps organization is part of it) recognises its own
+   * remote here, so the page can offer "Connect it for this repo?" without a connection existing yet.
+   */
+  suggestFromRemote?(origin: string): { baseUrl: string; repo: RepoRef } | undefined;
+  /** The state map a new mapping starts with, when the platform's states are not the generic labels. */
+  defaultStateMap?: Readonly<Record<string, string>>;
+  /**
+   * The user name git pairs with the token over https (git.ts askpass). Default `x-access-token`.
+   * Bitbucket needs the right one: `x-bitbucket-api-token-auth` for an Atlassian API token,
+   * `x-token-auth` for an access token, the account for Data Center.
+   */
+  gitUsername?(conn: StoredConnection): string;
 
   /** Runs at Test time and on version change: reads who the token is, its scopes, and one cheap call per optional capability. */
   probe(ctx: AdapterCtx): Promise<ProbeResult>;
@@ -144,8 +184,12 @@ export interface ProviderAdapter {
     get(ctx: AdapterCtx, id: string): Promise<PullState>;
     /** Conversation comments and reviews, newest last, each with the author's association. */
     comments(ctx: AdapterCtx, id: string): Promise<Comment[]>;
-    /** Merge. Only called by a person's click and only when `PullState.canMerge`; never an admin bypass. */
-    merge?(ctx: AdapterCtx, id: string, opts: { method: 'merge' | 'squash' | 'rebase'; sha: string }): Promise<{ sha: string }>;
+    /**
+     * Merge. Only called by a person's click and only when `PullState.canMerge`; never an admin bypass.
+     * `whenChecksPass`: the person chose "merge when the pipeline succeeds" (`PullState.autoMerge.available`); the
+     * remote then merges later, applying every one of its own rules at that moment, and the result has an empty `sha`.
+     */
+    merge?(ctx: AdapterCtx, id: string, opts: { method: 'merge' | 'squash' | 'rebase'; sha: string; whenChecksPass?: boolean }): Promise<{ sha: string }>;
   };
 
   items?: {
@@ -155,15 +199,35 @@ export interface ProviderAdapter {
     /** `ifRev`: the `rev` this change is based on; a mismatch is a ConnectionError('conflict'). */
     update(ctx: AdapterCtx, id: string, patch: { title?: string; body?: string; labels?: string[]; milestone?: string | null }, ifRev: string): Promise<RemoteItem>;
     transition(ctx: AdapterCtx, id: string, to: 'open' | 'closed', ifRev: string): Promise<RemoteItem>;
-    comment(ctx: AdapterCtx, id: string, markdown: string): Promise<void>;
-    addLabels(ctx: AdapterCtx, id: string, labels: string[]): Promise<void>;
-    removeLabel(ctx: AdapterCtx, id: string, label: string): Promise<void>;
+    comment(ctx: AdapterCtx, id: string, markdown: string): Promise<WriteResult>;
+    addLabels(ctx: AdapterCtx, id: string, labels: string[]): Promise<WriteResult>;
+    removeLabel(ctx: AdapterCtx, id: string, label: string): Promise<WriteResult>;
+    /**
+     * Move the item to the work item type's state of this CATEGORY (forward only; the caller checked). Present only
+     * where the platform has workflow states (Azure DevOps); elsewhere progress is a label. A mismatch is a `conflict`.
+     */
+    transitionCategory?(ctx: AdapterCtx, id: string, category: StateCategory, ifRev: string): Promise<RemoteItem>;
+    /** Write the estimate into the platform's points field. A person's estimate, pushed only when the remote has not changed. */
+    setEstimate?(ctx: AdapterCtx, id: string, points: number, ifRev: string): Promise<RemoteItem>;
+    /** Link the work item to the pull request (an artifact link); idempotent. */
+    linkPull?(ctx: AdapterCtx, itemId: string, pullId: string): Promise<WriteResult>;
   };
 
   iterations?: {
     list(ctx: AdapterCtx): Promise<Iteration[]>;
-    assign?(ctx: AdapterCtx, itemId: string, iterationId: string): Promise<void>;
+    /** `known` is the iteration as `list` returned it, so an adapter that needs more than the id (its path) does not list again. */
+    assign?(ctx: AdapterCtx, itemId: string, iterationId: string, known?: Iteration): Promise<WriteResult>;
     create?(ctx: AdapterCtx, input: { title: string; start?: string; end?: string }): Promise<Iteration>;
+    /**
+     * Which iteration (and how many points) each item has, when the platform keeps them somewhere other than the
+     * item itself (a GitHub Projects v2 board). Keyed by `RemoteItem.id`. Read only.
+     */
+    members?(ctx: AdapterCtx): Promise<Map<string, { iteration?: string; points?: number }>>;
+  };
+
+  /** What the page previews before a mapping is saved: the project's process, its work item types and their states. */
+  process?: {
+    describe(ctx: AdapterCtx): Promise<{ name: string; types: TypeStates[]; pointsField?: string }>;
   };
 
   checks?: {

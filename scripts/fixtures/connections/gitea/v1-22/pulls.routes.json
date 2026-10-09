@@ -1,0 +1,724 @@
+{
+  "prefix": "/api/v1",
+  "routes": [
+    {
+      "path": "/repos/octo-org/widgets/pulls",
+      "query": {
+        "state": "all",
+        "limit": "1"
+      },
+      "status": 200,
+      "body": [
+        {
+          "id": 9007,
+          "number": 7,
+          "state": "open",
+          "title": "Add widget cache",
+          "body": "Opened by AICO.",
+          "draft": false,
+          "merged": false,
+          "merged_at": null,
+          "merge_commit_sha": null,
+          "mergeable": true,
+          "user": {
+            "id": 1001,
+            "login": "octo-dev"
+          },
+          "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+          "head": {
+            "ref": "aico/task-42",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          },
+          "base": {
+            "ref": "main",
+            "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          },
+          "requested_reviewers": [],
+          "created_at": "2026-10-01T09:00:00Z",
+          "updated_at": "2026-10-01T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/pulls",
+      "query": {
+        "state": "open",
+        "sort": "recentupdate"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": []
+        },
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": 9007,
+              "number": 7,
+              "state": "open",
+              "title": "Add widget cache",
+              "body": "Opened by AICO.",
+              "draft": false,
+              "merged": false,
+              "merged_at": null,
+              "merge_commit_sha": null,
+              "mergeable": true,
+              "user": {
+                "id": 1001,
+                "login": "octo-dev"
+              },
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+              "head": {
+                "ref": "aico/task-42",
+                "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+              },
+              "base": {
+                "ref": "main",
+                "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+              },
+              "requested_reviewers": [],
+              "created_at": "2026-10-01T09:00:00Z",
+              "updated_at": "2026-10-01T09:00:00Z"
+            },
+            {
+              "id": 9003,
+              "number": 3,
+              "state": "open",
+              "title": "Add widget cache",
+              "body": "Opened by AICO.",
+              "draft": false,
+              "merged": false,
+              "merged_at": null,
+              "merge_commit_sha": null,
+              "mergeable": true,
+              "user": {
+                "id": 1001,
+                "login": "octo-dev"
+              },
+              "html_url": "https://forge.test/octo-org/widgets/pulls/3",
+              "head": {
+                "ref": "aico/task-42",
+                "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+              },
+              "base": {
+                "ref": "main",
+                "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+              },
+              "requested_reviewers": [],
+              "created_at": "2026-10-01T09:00:00Z",
+              "updated_at": "2026-10-01T09:00:00Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/pulls",
+      "status": 201,
+      "body": {
+        "id": 9007,
+        "number": 7,
+        "state": "open",
+        "title": "Add widget cache",
+        "body": "Opened by AICO.",
+        "draft": false,
+        "merged": false,
+        "merged_at": null,
+        "merge_commit_sha": null,
+        "mergeable": false,
+        "user": {
+          "id": 1001,
+          "login": "octo-dev"
+        },
+        "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+        "head": {
+          "ref": "aico/task-42",
+          "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+        },
+        "base": {
+          "ref": "main",
+          "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+        },
+        "requested_reviewers": [],
+        "created_at": "2026-10-01T09:00:00Z",
+        "updated_at": "2999-01-01T00:00:00Z"
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/pulls/7",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "number": 7,
+            "state": "open",
+            "title": "Add widget cache",
+            "body": "Opened by AICO.",
+            "draft": false,
+            "merged": false,
+            "merged_at": null,
+            "merge_commit_sha": null,
+            "mergeable": true,
+            "user": {
+              "id": 1001,
+              "login": "octo-dev"
+            },
+            "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+            "head": {
+              "ref": "aico/task-42",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+            },
+            "base": {
+              "ref": "main",
+              "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+            },
+            "requested_reviewers": [
+              {
+                "id": 2002,
+                "login": "octo-bot"
+              }
+            ],
+            "created_at": "2026-10-01T09:00:00Z",
+            "updated_at": "2026-10-01T09:00:00Z"
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "number": 7,
+            "state": "open",
+            "title": "Add widget cache",
+            "body": "Opened by AICO.",
+            "draft": false,
+            "merged": false,
+            "merged_at": null,
+            "merge_commit_sha": null,
+            "mergeable": true,
+            "user": {
+              "id": 1001,
+              "login": "octo-dev"
+            },
+            "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+            "head": {
+              "ref": "aico/task-42",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+            },
+            "base": {
+              "ref": "main",
+              "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+            },
+            "requested_reviewers": [],
+            "created_at": "2026-10-01T09:00:00Z",
+            "updated_at": "2026-10-01T09:00:00Z"
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "number": 7,
+            "state": "open",
+            "title": "Add widget cache",
+            "body": "Opened by AICO.",
+            "draft": false,
+            "merged": false,
+            "merged_at": null,
+            "merge_commit_sha": null,
+            "mergeable": true,
+            "user": {
+              "id": 1001,
+              "login": "octo-dev"
+            },
+            "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+            "head": {
+              "ref": "aico/task-42",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+            },
+            "base": {
+              "ref": "main",
+              "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+            },
+            "requested_reviewers": [],
+            "created_at": "2026-10-01T09:00:00Z",
+            "updated_at": "2026-10-01T09:00:00Z"
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "number": 7,
+            "state": "open",
+            "title": "Add widget cache",
+            "body": "Opened by AICO.",
+            "draft": false,
+            "merged": false,
+            "merged_at": null,
+            "merge_commit_sha": null,
+            "mergeable": false,
+            "user": {
+              "id": 1001,
+              "login": "octo-dev"
+            },
+            "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+            "head": {
+              "ref": "aico/task-42",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+            },
+            "base": {
+              "ref": "main",
+              "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+            },
+            "requested_reviewers": [],
+            "created_at": "2026-10-01T09:00:00Z",
+            "updated_at": "2026-10-01T09:00:00Z"
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "number": 7,
+            "state": "closed",
+            "title": "Add widget cache",
+            "body": "Opened by AICO.",
+            "draft": false,
+            "merged": true,
+            "merged_at": "2026-10-09T13:00:00Z",
+            "merge_commit_sha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+            "mergeable": false,
+            "user": {
+              "id": 1001,
+              "login": "octo-dev"
+            },
+            "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+            "head": {
+              "ref": "aico/task-42",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+            },
+            "base": {
+              "ref": "main",
+              "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+            },
+            "requested_reviewers": [],
+            "created_at": "2026-10-01T09:00:00Z",
+            "updated_at": "2026-10-01T09:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/repos/octo-org/widgets/pulls/7",
+      "status": 200,
+      "body": {
+        "id": 9007,
+        "number": 7,
+        "state": "closed",
+        "title": "Add widget cache (renamed)",
+        "body": "Opened by AICO.",
+        "draft": false,
+        "merged": true,
+        "merged_at": null,
+        "merge_commit_sha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "mergeable": true,
+        "user": {
+          "id": 1001,
+          "login": "octo-dev"
+        },
+        "html_url": "https://forge.test/octo-org/widgets/pulls/7",
+        "head": {
+          "ref": "aico/task-42",
+          "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+        },
+        "base": {
+          "ref": "main",
+          "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+        },
+        "requested_reviewers": [],
+        "created_at": "2026-10-01T09:00:00Z",
+        "updated_at": "2026-10-01T09:00:00Z"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/pulls/7/merge",
+      "bodyIncludes": "\"head_commit_id\":\"0000000000000000000000000000000000000000\"",
+      "status": 409,
+      "body": {
+        "message": "The head commit changed since the merge was requested.",
+        "url": "https://forge.test/api/swagger"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/pulls/7/merge",
+      "bodyIncludes": "\"head_commit_id\":\"1111111111111111111111111111111111111111\"",
+      "status": 405,
+      "body": {
+        "message": "Please try again later",
+        "url": "https://forge.test/api/swagger"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/pulls/7/merge",
+      "status": 200
+    },
+    {
+      "path": "/repos/octo-org/widgets/pulls/7/reviews",
+      "responses": [
+        {
+          "status": 200,
+          "body": []
+        },
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": 301,
+              "user": {
+                "id": 2002,
+                "login": "octo-bot"
+              },
+              "state": "REQUEST_CHANGES",
+              "body": "Please rename the cache key.",
+              "official": true,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T11:00:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-301"
+            }
+          ]
+        },
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": 301,
+              "user": {
+                "id": 2002,
+                "login": "octo-bot"
+              },
+              "state": "REQUEST_CHANGES",
+              "body": "Please rename the cache key.",
+              "official": true,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T11:00:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-301"
+            },
+            {
+              "id": 303,
+              "user": {
+                "id": 2002,
+                "login": "drive-by-9"
+              },
+              "state": "COMMENT",
+              "body": "Nice idea.",
+              "official": false,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T11:30:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-303"
+            },
+            {
+              "id": 302,
+              "user": {
+                "id": 2002,
+                "login": "octo-bot"
+              },
+              "state": "APPROVED",
+              "body": "Renamed, thanks.",
+              "official": true,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T12:00:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-302"
+            }
+          ]
+        },
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": 301,
+              "user": {
+                "id": 2002,
+                "login": "octo-bot"
+              },
+              "state": "REQUEST_CHANGES",
+              "body": "Please rename the cache key.",
+              "official": true,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T11:00:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-301"
+            },
+            {
+              "id": 303,
+              "user": {
+                "id": 2002,
+                "login": "drive-by-9"
+              },
+              "state": "COMMENT",
+              "body": "Nice idea.",
+              "official": false,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T11:30:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-303"
+            },
+            {
+              "id": 302,
+              "user": {
+                "id": 2002,
+                "login": "octo-bot"
+              },
+              "state": "APPROVED",
+              "body": "Renamed, thanks.",
+              "official": true,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T12:00:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-302"
+            }
+          ]
+        },
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": 301,
+              "user": {
+                "id": 2002,
+                "login": "octo-bot"
+              },
+              "state": "REQUEST_CHANGES",
+              "body": "Please rename the cache key.",
+              "official": true,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T11:00:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-301"
+            },
+            {
+              "id": 303,
+              "user": {
+                "id": 2002,
+                "login": "drive-by-9"
+              },
+              "state": "COMMENT",
+              "body": "Nice idea.",
+              "official": false,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T11:30:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-303"
+            },
+            {
+              "id": 302,
+              "user": {
+                "id": 2002,
+                "login": "octo-bot"
+              },
+              "state": "APPROVED",
+              "body": "Renamed, thanks.",
+              "official": true,
+              "dismissed": false,
+              "stale": false,
+              "submitted_at": "2026-10-09T12:00:00Z",
+              "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-302"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets/issues/7/comments",
+      "status": 200,
+      "body": [
+        {
+          "id": 801,
+          "user": {
+            "id": 2002,
+            "login": "octo-bot"
+          },
+          "body": "Looks good after the rename.",
+          "created_at": "2026-10-09T12:05:00Z",
+          "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-801"
+        },
+        {
+          "id": 802,
+          "user": {
+            "id": 3009,
+            "login": "stranger-9"
+          },
+          "body": "Please also add docs.",
+          "created_at": "2026-10-09T11:45:00Z",
+          "html_url": "https://forge.test/octo-org/widgets/pulls/7#issuecomment-802"
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/repos/octo-org/widgets/issues/7/comments",
+      "status": 201,
+      "body": {
+        "id": 8801,
+        "user": {
+          "login": "octo-dev"
+        },
+        "body": "ok",
+        "created_at": "2026-10-09T13:10:00Z"
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/commits/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/status",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "state": "pending",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "total_count": 2,
+            "statuses": [
+              {
+                "id": 1,
+                "status": "pending",
+                "context": "ci/lint",
+                "description": "Waiting for a runner.",
+                "target_url": "https://forge.test/lint/1",
+                "created_at": "2026-10-01T09:00:00Z"
+              },
+              {
+                "id": 2,
+                "status": "pending",
+                "context": "CI / build (push)",
+                "description": null,
+                "target_url": null,
+                "created_at": "2026-10-01T09:00:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "state": "pending",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "total_count": 2,
+            "statuses": [
+              {
+                "id": 1,
+                "status": "failure",
+                "context": "ci/lint",
+                "description": "Lint failed in cache.ts.",
+                "target_url": "https://forge.test/lint/1",
+                "created_at": "2026-10-01T09:00:00Z"
+              },
+              {
+                "id": 2,
+                "status": "success",
+                "context": "CI / build (push)",
+                "description": null,
+                "target_url": null,
+                "created_at": "2026-10-01T09:00:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "state": "pending",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "total_count": 3,
+            "statuses": [
+              {
+                "id": 1,
+                "status": "success",
+                "context": "ci/lint",
+                "description": "Clean.",
+                "target_url": "https://forge.test/lint/1",
+                "created_at": "2026-10-01T09:00:00Z"
+              },
+              {
+                "id": 2,
+                "status": "success",
+                "context": "CI / build (push)",
+                "description": null,
+                "target_url": null,
+                "created_at": "2026-10-01T09:00:00Z"
+              },
+              {
+                "id": 3,
+                "status": "warning",
+                "context": "docs",
+                "description": "Docs are advisory.",
+                "target_url": null,
+                "created_at": "2026-10-01T09:00:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "state": "pending",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "total_count": 2,
+            "statuses": [
+              {
+                "id": 1,
+                "status": "success",
+                "context": "ci/lint",
+                "description": "Clean.",
+                "target_url": null,
+                "created_at": "2026-10-01T09:00:00Z"
+              },
+              {
+                "id": 2,
+                "status": "success",
+                "context": "CI / build (push)",
+                "description": null,
+                "target_url": null,
+                "created_at": "2026-10-01T09:00:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "state": "pending",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "total_count": 2,
+            "statuses": [
+              {
+                "id": 1,
+                "status": "success",
+                "context": "ci/lint",
+                "description": "Clean.",
+                "target_url": null,
+                "created_at": "2026-10-01T09:00:00Z"
+              },
+              {
+                "id": 2,
+                "status": "success",
+                "context": "CI / build (push)",
+                "description": null,
+                "target_url": null,
+                "created_at": "2026-10-01T09:00:00Z"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

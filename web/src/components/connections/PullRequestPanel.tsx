@@ -10,7 +10,8 @@
  *
  * Merging is the one thing the person can ask AICO to do here, and it is offered only when
  * the remote itself reports the pull request mergeable with its requirements met
- * (`canMergeOnRemote`). It is a destructive-style action: the first click turns the button
+ * (`canMergeOnRemote`), or, where the remote offers it, as "merge when the pipeline succeeds" while a running
+ * pipeline is the one thing in the way (`canArmAutoMerge`). It is a destructive-style action: the first click turns the button
  * into a confirmation that names the pull request and the trunk. The remote can still
  * refuse (a check started, someone pushed); its reason is shown as written. AICO never
  * merges on its own and never bypasses a protection.
@@ -27,7 +28,7 @@ import { upsertTask } from '../../delivery';
 import type { Task } from '../../delivery-types';
 import type { RemoteCheck } from '../../../../shared/connections/types';
 import {
-  canMergeOnRemote, mergeBlockers, mergeButtonLabel, mergeConfirmText, prChips, prName, prStateWord, providerLabel, remoteChip,
+  autoMergeConfirmText, autoMergeLabel, canArmAutoMerge, canMergeOnRemote, mergeBlockers, mergeButtonLabel, mergeConfirmText, prChips, prName, prStateWord, providerLabel, remoteChip,
 } from '../../connections';
 import { ago } from '../../delivery-model';
 import { DvIcon } from '../delivery/icons';
@@ -148,12 +149,13 @@ export function MergeBar({ task, project, onHandled }: { task: Task; project: st
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (!task.pr || !canMergeOnRemote(task)) return null;
+  const arm = canArmAutoMerge(task);
+  if (!task.pr || (!canMergeOnRemote(task) && !arm)) return null;
   const pr = task.pr;
 
   const merge = async (): Promise<void> => {
     setBusy(true); setError(null);
-    try { upsertTask(await api.deliveryMergePr(task.id, project)); onHandled(`Merged ${prName(pr)} into ${trunk}.`); setConfirm(false); }
+    try { upsertTask(await api.deliveryMergePr(task.id, project)); onHandled(arm ? `${prName(pr)} will merge into ${trunk} when its pipeline succeeds.` : `Merged ${prName(pr)} into ${trunk}.`); setConfirm(false); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); setConfirm(false); }
     finally { setBusy(false); }
   };
@@ -163,10 +165,10 @@ export function MergeBar({ task, project, onHandled }: { task: Task; project: st
       {error && <ErrorLine>{error}</ErrorLine>}
       {confirm ? (
         <div className="space-y-2" role="alert">
-          <p className="text-[13px] text-aico-primary">{mergeConfirmText(pr, trunk)}</p>
+          <p className="text-[13px] text-aico-primary">{arm ? autoMergeConfirmText(pr, trunk, connection?.provider) : mergeConfirmText(pr, trunk)}</p>
           <div className="flex gap-2">
             <button type="button" className={`${BTN_PRIMARY} !bg-aico-danger !text-white`} disabled={busy} onClick={() => void merge()}>
-              {busy ? <><Spinner />Merging…</> : `Merge ${prName(pr)}`}
+              {busy ? <><Spinner />{arm ? 'Setting…' : 'Merging…'}</> : arm ? `Merge ${prName(pr)} when the pipeline succeeds` : `Merge ${prName(pr)}`}
             </button>
             <button type="button" className={BTN_GHOST} disabled={busy} onClick={() => setConfirm(false)}>Cancel</button>
           </div>
@@ -174,9 +176,9 @@ export function MergeBar({ task, project, onHandled }: { task: Task; project: st
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={BTN_PRIMARY} onClick={() => { setError(null); setConfirm(true); }}>
-            <DvIcon name="check" size={15} />{mergeButtonLabel(connection?.provider)}
+            <DvIcon name="check" size={15} />{arm ? autoMergeLabel(connection?.provider) : mergeButtonLabel(connection?.provider)}
           </button>
-          <span className="ml-auto text-[12px] text-aico-muted">The remote confirmed it can be merged</span>
+          <span className="ml-auto text-[12px] text-aico-muted">{arm ? 'Only the running pipeline is in the way' : 'The remote confirmed it can be merged'}</span>
         </div>
       )}
     </footer>

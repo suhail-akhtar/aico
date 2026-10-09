@@ -1,0 +1,293 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "version": "8.19.4",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 30000
+      },
+      "items": {
+        "query": false,
+        "create": false,
+        "transition": false,
+        "comment": false,
+        "estimate": "none",
+        "parentLink": false
+      },
+      "iterations": "none",
+      "checks": {
+        "read": true,
+        "rerun": false,
+        "logsUrl": false
+      },
+      "protection": {
+        "read": true
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "Project or Repository write",
+          "why": "Read repositories, push aico/task-* branches, open and merge pull requests.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "Repository admin (optional)",
+          "why": "Read the required approvers and branch permissions.",
+          "feature": "protection",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "Bitbucket does not say whether this token may write; if a push or pull request is refused, the token needs Repository (or Project) write.",
+      "Bitbucket Data Center has no sprints or work items here (they live in Jira, which is not supported), so AICO's sprints stay local."
+    ]
+  },
+  "repo": {
+    "ref": {
+      "owner": "ACME",
+      "name": "widgets",
+      "id": "5"
+    },
+    "defaultBranch": "main",
+    "cloneUrl": "<origin>/scm/acme/widgets.git",
+    "htmlUrl": "<origin>/projects/ACME/repos/widgets/browse",
+    "private": true
+  },
+  "repos": [
+    {
+      "ref": {
+        "owner": "ACME",
+        "name": "widgets",
+        "id": "5"
+      },
+      "defaultBranch": "main",
+      "cloneUrl": "<origin>/scm/acme/widgets.git",
+      "htmlUrl": "<origin>/projects/ACME/repos/widgets/browse",
+      "private": true
+    },
+    {
+      "ref": {
+        "owner": "ACME",
+        "name": "gadgets",
+        "id": "6"
+      },
+      "defaultBranch": "main",
+      "cloneUrl": "<origin>/scm/acme/gadgets.git",
+      "htmlUrl": "<origin>/projects/ACME/repos/gadgets/browse",
+      "private": true
+    }
+  ],
+  "pull.created": {
+    "connection": "bitbucket-dc-dc",
+    "id": "7",
+    "url": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "Just opened: Bitbucket has not checked whether it can be merged yet."
+    ],
+    "observedAt": "<time>"
+  },
+  "pull.1": {
+    "connection": "bitbucket-dc-dc",
+    "id": "7",
+    "url": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "pending",
+      "items": [
+        {
+          "name": "Bamboo #13",
+          "state": "pending",
+          "url": "https://ci.forge.test/job/10",
+          "summary": "Bamboo #13: INPROGRESS"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0,
+      "required": 2
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "Not all required builds are successful yet",
+      "Requires 2 approvals"
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.2": {
+    "connection": "bitbucket-dc-dc",
+    "id": "7",
+    "url": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "failing",
+      "items": [
+        {
+          "name": "Bamboo #13",
+          "state": "failure",
+          "url": "https://ci.forge.test/job/10",
+          "summary": "Bamboo #13: FAILED"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "changes",
+      "approved": 0,
+      "changesRequested": 1,
+      "required": 2
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "Build failed",
+      "A reviewer has marked it \"needs work\"."
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.3": {
+    "connection": "bitbucket-dc-dc",
+    "id": "7",
+    "url": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "Bamboo #13",
+          "state": "success",
+          "url": "https://ci.forge.test/job/10",
+          "summary": "Bamboo #13: SUCCESSFUL"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 2,
+      "changesRequested": 0,
+      "required": 2
+    },
+    "canMerge": true,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.4": {
+    "connection": "bitbucket-dc-dc",
+    "id": "7",
+    "url": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7",
+    "state": "merged",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "Bamboo #13",
+          "state": "success",
+          "url": "https://ci.forge.test/job/10",
+          "summary": "Bamboo #13: SUCCESSFUL"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 2,
+      "changesRequested": 0,
+      "required": 2
+    },
+    "canMerge": false,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "mergedSha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+    "observedAt": "<time>"
+  },
+  "comments": [
+    {
+      "id": "10",
+      "author": "rev-one",
+      "association": "COLLABORATOR",
+      "body": "Looks good to me.",
+      "at": "2025-10-09T09:03:20.000Z"
+    },
+    {
+      "id": "11",
+      "author": "octo-dev",
+      "association": "OWNER",
+      "body": "Thanks.",
+      "at": "2025-10-09T09:08:20.000Z"
+    },
+    {
+      "id": "12",
+      "author": "stranger-9",
+      "association": "NONE",
+      "body": "Please also delete the old cache.",
+      "at": "2025-10-09T09:53:20.000Z"
+    }
+  ],
+  "checks": [
+    {
+      "name": "Bamboo #12",
+      "state": "success",
+      "url": "https://ci.forge.test/job/10",
+      "summary": "Bamboo #12: SUCCESSFUL"
+    },
+    {
+      "name": "lint",
+      "state": "failure",
+      "url": "https://ci.forge.test/job/4",
+      "summary": "lint: FAILED"
+    },
+    {
+      "name": "deploy-preview",
+      "state": "pending",
+      "url": "https://ci.forge.test/job/14",
+      "summary": "deploy-preview: INPROGRESS"
+    }
+  ],
+  "protection": {
+    "protected": true,
+    "requiredReviews": 2,
+    "requiredChecks": [
+      "1 successful build"
+    ]
+  }
+}

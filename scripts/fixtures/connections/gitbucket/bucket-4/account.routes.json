@@ -1,0 +1,91 @@
+{
+  "prefix": "/api/v3",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 200,
+      "body": {
+        "login": "octo-dev",
+        "type": "User",
+        "site_admin": false,
+        "html_url": "https://forge.test/octo-dev"
+      }
+    },
+    {
+      "path": "/user/repos",
+      "status": 200,
+      "body": [
+        {
+          "id": 5001,
+          "name": "widgets",
+          "full_name": "octo-org/widgets",
+          "private": true,
+          "owner": {
+            "login": "octo-org",
+            "type": "Organization"
+          },
+          "html_url": "https://forge.test/octo-org/widgets",
+          "clone_url": "https://forge.test/octo-org/widgets.git",
+          "default_branch": "main",
+          "permissions": {
+            "admin": true,
+            "push": true,
+            "pull": true
+          }
+        },
+        {
+          "id": 5002,
+          "name": "gadgets",
+          "full_name": "octo-org/gadgets",
+          "private": true,
+          "owner": {
+            "login": "octo-org",
+            "type": "Organization"
+          },
+          "html_url": "https://forge.test/octo-org/widgets",
+          "clone_url": "https://forge.test/octo-org/widgets.git",
+          "default_branch": "master",
+          "permissions": {
+            "admin": true,
+            "push": true,
+            "pull": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/repos/octo-org/widgets",
+      "status": 200,
+      "body": {
+        "id": 5001,
+        "name": "widgets",
+        "full_name": "octo-org/widgets",
+        "private": true,
+        "owner": {
+          "login": "octo-org",
+          "type": "Organization"
+        },
+        "html_url": "https://forge.test/octo-org/widgets",
+        "clone_url": "https://forge.test/octo-org/widgets.git",
+        "default_branch": "main",
+        "permissions": {
+          "admin": true,
+          "push": true,
+          "pull": true
+        }
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/collaborators",
+      "status": 200,
+      "body": [
+        {
+          "login": "octo-bot"
+        },
+        {
+          "login": "octo-dev"
+        }
+      ]
+    }
+  ]
+}

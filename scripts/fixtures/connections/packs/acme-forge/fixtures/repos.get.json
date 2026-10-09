@@ -1,0 +1,57 @@
+{
+  "operation": "repos.get",
+  "cases": [
+    {
+      "name": "a repository",
+      "input": {
+        "owner": "acme",
+        "name": "widgets"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "default_branch": "main",
+          "clone_url": "https://api.acme-forge.example/acme/widgets.git",
+          "web_url": "https://app.acme-forge.example/acme/widgets",
+          "private": true,
+          "id": 42
+        }
+      },
+      "expect": {
+        "ref": {
+          "owner": "acme",
+          "name": "widgets",
+          "id": "42"
+        },
+        "defaultBranch": "main",
+        "cloneUrl": "https://api.acme-forge.example/acme/widgets.git",
+        "private": true
+      }
+    },
+    {
+      "name": "a clone URL with credentials is dropped",
+      "input": {
+        "owner": "acme",
+        "name": "widgets"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "default_branch": "main",
+          "clone_url": "https://user:pw@api.acme-forge.example/acme/widgets.git"
+        }
+      },
+      "expect": {
+        "cloneUrl": ""
+      }
+    }
+  ]
+}

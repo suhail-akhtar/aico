@@ -385,6 +385,9 @@ section('7. human-gated routes with only the token');
     ['connections/remove', { id: 'github-github-com' }],
     ['connections/map', { project, connection: 'github-github-com', landing: 'pr', confirmLanding: true }],
     ['connections/unmap', { project }],
+    ['connections/pack-enable', { id: 'dast-pack', hash: 'f'.repeat(64) }],
+    ['connections/pack-disable', { id: 'dast-pack' }],
+    ['connections/pack-connect', { id: 'dast-pack' }],
   ];
   for (const [route, body] of humanOnly) {
     const r = remember(`human ${route}`, await api(route, { method: 'POST', json: body }));

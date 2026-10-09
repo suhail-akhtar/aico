@@ -1,0 +1,120 @@
+{
+  "operation": "items.query",
+  "cases": [
+    {
+      "name": "two pages",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "source": "label",
+        "value": "bug",
+        "state": "open",
+        "since": "2026-09-01T00:00:00Z"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/issues",
+        "query": {
+          "state": "open",
+          "label": "bug",
+          "updated": "2026-09-01T00:00:00Z"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "issues": [
+            {
+              "id": "A-1",
+              "number": 1,
+              "title": "Issue 1",
+              "body": "Steps.",
+              "state": "open",
+              "labels": [
+                "bug"
+              ],
+              "assignees": [
+                "sam"
+              ],
+              "author": "robin",
+              "url": "https://app.acme-forge.example/acme/widgets/issues/A-1",
+              "rev": "r1"
+            },
+            {
+              "id": "A-2",
+              "number": 2,
+              "title": "Issue 2",
+              "body": "Steps.",
+              "state": "closed",
+              "labels": [
+                "bug"
+              ],
+              "assignees": [
+                "sam"
+              ],
+              "author": "robin",
+              "url": "https://app.acme-forge.example/acme/widgets/issues/A-2",
+              "rev": "r2"
+            }
+          ],
+          "next": "c2"
+        }
+      },
+      "next": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/repos/acme/widgets/issues",
+            "query": {
+              "cursor": "c2",
+              "label": "bug"
+            }
+          },
+          "response": {
+            "status": 200,
+            "body": {
+              "issues": [
+                {
+                  "id": "A-3",
+                  "number": 3,
+                  "title": "Issue 3",
+                  "body": "Steps.",
+                  "state": "open",
+                  "labels": [
+                    "bug"
+                  ],
+                  "assignees": [
+                    "sam"
+                  ],
+                  "author": "robin",
+                  "url": "https://app.acme-forge.example/acme/widgets/issues/A-3",
+                  "rev": "r3",
+                  "points": 5
+                }
+              ],
+              "next": null
+            }
+          }
+        }
+      ],
+      "expect": [
+        {
+          "id": "A-1",
+          "title": "Issue 1",
+          "state": "open",
+          "labels": [
+            "bug"
+          ]
+        },
+        {
+          "id": "A-2",
+          "state": "closed"
+        },
+        {
+          "id": "A-3",
+          "points": 5
+        }
+      ]
+    }
+  ]
+}

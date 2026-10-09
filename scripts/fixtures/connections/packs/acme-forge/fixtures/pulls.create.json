@@ -1,0 +1,60 @@
+{
+  "operation": "pulls.create",
+  "cases": [
+    {
+      "name": "opens",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "head": "aico/task-42",
+        "base": "main",
+        "title": "Add widget cache",
+        "body": "Evidence packet.\n\n```\nnpm test\n```",
+        "draft": false
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v1/repos/acme/widgets/pulls",
+        "bodyIncludes": "\"head\":\"aico/task-42\""
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "number": 7,
+          "html_url": "https://app.acme-forge.example/acme/widgets/pulls/7",
+          "state": "open",
+          "draft": false,
+          "head": {
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          },
+          "merge_state": "clean",
+          "can_merge": false,
+          "blockers": [],
+          "reviews": {
+            "approved": 0,
+            "changes": 0,
+            "required": 2
+          },
+          "merge_sha": null,
+          "checks": [
+            {
+              "name": "build",
+              "status": "ok",
+              "url": "https://ci.acme-forge.example/1",
+              "summary": "passed"
+            },
+            {
+              "name": "lint",
+              "status": "skipped"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "id": "7",
+        "state": "open",
+        "canMerge": false
+      }
+    }
+  ]
+}

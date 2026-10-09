@@ -172,6 +172,8 @@ import type { AttentionSnapshot, BatchResult, BoardState, NewTaskInput, Release,
 import type { Proposal as SprintProposal, RetroFacts, Sprint } from '../../shared/delivery/scrum';
 import type { BoardConnection, Connection, ConnectionsPolicyView, ProjectMapping, ProviderInfo, RepoDetection } from '../../shared/connections/types';
 import type { CreateBody, MapBody, SyncResult } from './connections';
+import type { ConnectorPackView } from '../../shared/connections/packs';
+import type { ProcessInfo } from './connections-azure';
 import type { CgFileDetail, CgPayload, CgSymbolDetail } from './components/codegraph/model';
 import type { BriefLatest, Brief, BriefSummaryRow, FixPlanResponse, FixAllResponse } from './brief';
 export type { ParkedAction } from './inbox';
@@ -769,6 +771,17 @@ export const api = {
   connectionMap: (body: MapBody) => postAsPerson<{ mapping: ProjectMapping }>('connections/map', { ...body }),
   connectionUnmap: (project: string) => postAsPerson<{ ok: true }>('connections/unmap', { project }),
   connectionSync: (project: string) => post<SyncResult>('connections/sync', { project }),
+  /** Agent-built connector packs (ADR 0039 section 3): list, replay the fixtures, and a person's enable / disable / connect. */
+  connectionPacks: () => get<{ packs: ConnectorPackView[] }>('connections/packs'),
+  connectionPackTest: (id: string) => post<ConnectorPackView>('connections/pack-test', { id }),
+  connectionPackEnable: (id: string, hash: string) => postAsPerson<ConnectorPackView>('connections/pack-enable', { id, hash }),
+  connectionPackDisable: (id: string) => postAsPerson<ConnectorPackView>('connections/pack-disable', { id }),
+  connectionPackConnect: (id: string, insecureHttp?: boolean) => postAsPerson<Connection>('connections/pack-connect', { id, ...(insecureHttp ? { insecureHttp: true } : {}) }),
+  /** Repositories a connection can see (to pick from), and a project's work item process (to preview state names). Reads only. */
+  connectionRepos: (connection: string, q?: string) => get<{ repos: Array<{ owner: string; name: string; defaultBranch: string; private: boolean }> }>(
+    `connections/discover?kind=repos&connection=${encodeURIComponent(connection)}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
+  connectionProcess: (connection: string, owner: string) => get<{ process: ProcessInfo | null }>(
+    `connections/discover?kind=process&connection=${encodeURIComponent(connection)}&owner=${encodeURIComponent(owner)}`),
 
 
   /** Long jobs (engine: longjob/): proposals over the size threshold and the jobs they became. */

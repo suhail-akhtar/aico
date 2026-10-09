@@ -1,0 +1,88 @@
+{
+  "prefix": "/api/v3",
+  "routes": [
+    {
+      "path": "/repos/octo-org/widgets/branches/main",
+      "status": 200,
+      "body": {
+        "name": "main",
+        "commit": {
+          "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+        },
+        "protected": true,
+        "protection": {
+          "enabled": true,
+          "required_status_checks": {
+            "enforcement_level": "everyone",
+            "contexts": [
+              "ci/lint"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/branches/dev",
+      "status": 200,
+      "body": {
+        "name": "dev",
+        "commit": {
+          "sha": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+        },
+        "protected": false,
+        "protection": {
+          "enabled": false,
+          "required_status_checks": {
+            "enforcement_level": "off",
+            "contexts": []
+          }
+        }
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/commits/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233/status",
+      "status": 200,
+      "body": {
+        "state": "pending",
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "total_count": 4,
+        "statuses": [
+          {
+            "context": "ci/build",
+            "state": "success",
+            "description": null,
+            "target_url": "https://forge.test/octo-org/widgets/builds/1"
+          },
+          {
+            "context": "deploy-preview",
+            "state": "error",
+            "description": "Runner lost contact.",
+            "target_url": "https://forge.test/octo-org/widgets/builds/4"
+          },
+          {
+            "context": "ci/legacy",
+            "state": "failure",
+            "description": "Exit code 1.",
+            "target_url": "https://forge.test/legacy/build/55"
+          },
+          {
+            "context": "ci/queue",
+            "state": "pending",
+            "description": null,
+            "target_url": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repos/octo-org/widgets/commits/:ref/status",
+      "status": 200,
+      "body": {
+        "state": "pending",
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "total_count": 0,
+        "statuses": []
+      }
+    }
+  ]
+}

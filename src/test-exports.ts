@@ -883,6 +883,14 @@ export { githubAdapter } from './connections/github/index.js';
 export * as GithubAdapterParts from './connections/github/index.js';
 export * as GithubFold from './connections/github/fold.js';
 export * as GithubScopes from './connections/github/scopes.js';
+// Connections: the Azure DevOps adapter, its pure folds and the shared state-category logic.
+export { azureDevopsAdapter } from './connections/azure-devops/index.js';
+export * as AzureAdapterParts from './connections/azure-devops/index.js';
+export * as AzureFold from './connections/azure-devops/fold.js';
+export * as AzureUrls from './connections/azure-devops/urls.js';
+export * as AzureWiql from './connections/azure-devops/wiql.js';
+export * as StateCategories from '../shared/connections/process.js';
+export * as ConnIterations from './connections/iterations.js';
 export { ConnectionClient, ConnectionError, resetConnectionHttpForTest, rateLimitedUntil } from './connections/http.js';
 export { REMOTE_LIMITS, sanitizeRemoteText, sanitizeLine, withoutAttribution } from './connections/sanitize.js';
 
@@ -901,3 +909,31 @@ export { auditConnection, auditTarget } from './connections/audit.js';
 export { fenceRemote, stripHtmlComments } from './connections/sanitize.js';
 export { executeConnectionManage, connectionManageDefinition } from './tools/connection-manage.js';
 export { handleConnectionRoute } from './server/connection-routes.js';
+
+// Connections: Bitbucket Cloud and Data Center (scripts/connections-bitbucket-test.mjs).
+export { bitbucketCloudAdapter } from './connections/bitbucket/cloud.js';
+export { bitbucketDcAdapter } from './connections/bitbucket/dc.js';
+export * as BitbucketCloudParts from './connections/bitbucket/cloud.js';
+export * as BitbucketDcParts from './connections/bitbucket/dc.js';
+export * as BitbucketFold from './connections/bitbucket/fold.js';
+
+// Connections: GitLab, Gitea/Forgejo and GitBucket (scripts/connections-gitlab-test.mjs, connections-gitea-test.mjs).
+export { gitlabAdapter } from './connections/gitlab/index.js';
+export * as GitlabAdapterParts from './connections/gitlab/index.js';
+export * as GitlabFold from './connections/gitlab/fold.js';
+export * as GitlabScopes from './connections/gitlab/scopes.js';
+export { giteaAdapter, forgejoAdapter } from './connections/gitea/index.js';
+export * as GiteaAdapterParts from './connections/gitea/index.js';
+export * as GiteaFold from './connections/gitea/fold.js';
+export { gitbucketAdapter } from './connections/gitbucket/index.js';
+export * as GitbucketAdapterParts from './connections/gitbucket/index.js';
+export * as GitbucketFold from './connections/gitbucket/fold.js';
+export * as ConnRest from './connections/rest.js';
+
+// Connections: agent-built connector packs (scripts/connector-packs-test.mjs).
+export * as ConnPacks from './connections/packs/index.js';
+export * as ConnPackFormat from './connections/packs/format.js';
+export * as ConnPackStore from './connections/packs/store.js';
+export * as ConnPackRunner from './connections/packs/runner.js';
+export * as ConnPackNormalise from './connections/packs/normalise.js';
+export { customAdapter } from './connections/packs/adapter.js';

@@ -1,0 +1,80 @@
+{
+  "operation": "pulls.find",
+  "cases": [
+    {
+      "name": "one open",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "head": "aico/task-42"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/pulls",
+        "query": {
+          "head": "aico/task-42",
+          "state": "open"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "pulls": [
+            {
+              "number": 7,
+              "html_url": "https://app.acme-forge.example/acme/widgets/pulls/7",
+              "state": "open",
+              "draft": false,
+              "head": {
+                "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+              },
+              "merge_state": "clean",
+              "can_merge": true,
+              "blockers": [],
+              "reviews": {
+                "approved": 2,
+                "changes": 0,
+                "required": 2
+              },
+              "merge_sha": null,
+              "checks": [
+                {
+                  "name": "build",
+                  "status": "ok",
+                  "url": "https://ci.acme-forge.example/1",
+                  "summary": "passed"
+                },
+                {
+                  "name": "lint",
+                  "status": "skipped"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "id": "7",
+        "state": "open"
+      }
+    },
+    {
+      "name": "none",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "head": "aico/task-43"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/pulls"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "pulls": []
+        }
+      }
+    }
+  ]
+}

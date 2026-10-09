@@ -35,7 +35,7 @@ import * as S from '../delivery/store.js';
 import type { AdapterCtx, ProviderAdapter } from './adapter.js';
 import { auditConnection } from './audit.js';
 import { ConnectionClient, ConnectionError, originsOf, rateLimitedUntil } from './http.js';
-import { adapterFor, providerInfo } from './registry.js';
+import { adapterFor, providerCatalogue, providerInfo } from './registry.js';
 import * as Store from './store.js';
 import {
   CONNECTION_ID_RE, DEFAULT_STATE_MAP,
@@ -43,6 +43,7 @@ import {
   type RepoDetection, type RepoRef, type StoredConnection, type WorkItemSource,
 } from './types.js';
 import { managedPolicy } from '../policy/managed.js';
+import { loadPack } from './packs/store.js';
 
 export class ConnectionsError extends Error {
   constructor(message: string, readonly status = 400, readonly code?: string) { super(message); }
@@ -55,13 +56,16 @@ const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n) : s
 /** What a client sees of a stored connection. No credential name, no secret. */
 export function viewOf(c: StoredConnection): Connection {
   const projects = Store.mappingsOf(c.id).map(m => m.project);
-  const decision = connectionDecision({ provider: c.provider, host: new URL(c.baseUrl).hostname });
+  const decision = connectionDecision({ provider: c.provider, host: new URL(c.baseUrl).hostname, ...(c.pack ? { pack: true } : {}) });
+  const pack = c.pack ? loadPack(c.pack) : undefined;
   const limited = rateLimitedUntil(c.id);
   const missing = c.probe?.scopes.missing ?? [];
   let state: Connection['state'] = 'connected';
   let stateDetail: string | undefined;
   if (c.disabled) { state = 'off'; stateDetail = 'Turned off'; }
   else if (!decision.ok) { state = 'needs-attention'; stateDetail = 'Blocked by policy'; }
+  else if (c.pack && pack?.status === 'needs-approval') { state = 'needs-attention'; stateDetail = 'Needs re-approval: the connector changed since a person enabled it'; }
+  else if (c.pack && pack?.status !== 'enabled') { state = 'needs-attention'; stateDetail = pack ? 'The connector is not enabled' : 'The connector is gone'; }
   else if (!c.credential) { state = 'needs-attention'; stateDetail = 'Add a token'; }
   else if (c.authFailedAt && (!c.probe || c.authFailedAt > c.probe.at)) { state = 'needs-attention'; stateDetail = 'Sign in again'; }
   else if (!c.probe) { state = 'needs-attention'; stateDetail = 'Not tested yet'; }
@@ -70,6 +74,7 @@ export function viewOf(c: StoredConnection): Connection {
   return {
     id: c.id, provider: c.provider, label: c.label, baseUrl: c.baseUrl, host: new URL(c.baseUrl).host, hosts: [...c.hosts],
     ...(c.insecureHttp ? { insecureHttp: true } : {}), ...(c.caBundle ? { caBundle: c.caBundle } : {}),
+    ...(c.username ? { username: c.username } : {}), ...(c.pack ? { pack: c.pack } : {}),
     ...(c.disabled ? { disabled: true } : {}), createdAt: c.createdAt, createdBy: c.createdBy,
     hasCredential: Boolean(c.credential), state, ...(stateDetail ? { stateDetail } : {}),
     ...(c.probe ? { probe: c.probe } : {}),
@@ -92,7 +97,7 @@ export function policyView(): ConnectionsPolicyView {
       : maxLanding === 'local' ? 'Your organisation keeps delivery local: pull-request mode is not available.' : undefined;
   return {
     mode: strict.mode, ...(strict.providers ? { providers: strict.providers } : {}), ...(strict.hosts ? { hosts: strict.hosts } : {}),
-    ...(maxLanding ? { maxLanding } : {}), ...(message ? { message } : {}),
+    ...(maxLanding ? { maxLanding } : {}), ...(rules.some(r => r.packs === 'forbid') ? { packs: 'forbid' as const } : {}), ...(message ? { message } : {}),
   };
 }
 
@@ -116,9 +121,9 @@ export function clientFor(conn: StoredConnection): { adapter: ProviderAdapter; c
   return { adapter, client };
 }
 
-export function ctxFor(conn: StoredConnection, opts: { repo?: RepoRef; project?: string; signal?: AbortSignal } = {}): { adapter: ProviderAdapter; ctx: AdapterCtx } {
+export function ctxFor(conn: StoredConnection, opts: { repo?: RepoRef; project?: string; signal?: AbortSignal; person?: boolean } = {}): { adapter: ProviderAdapter; ctx: AdapterCtx } {
   const { adapter, client } = clientFor(conn);
-  return { adapter, ctx: { conn, client, ...(opts.repo ? { repo: opts.repo } : {}), ...(opts.project ? { project: opts.project } : {}), ...(opts.signal ? { signal: opts.signal } : {}) } };
+  return { adapter, ctx: { conn, client, ...(opts.repo ? { repo: opts.repo } : {}), ...(opts.project ? { project: opts.project } : {}), ...(opts.signal ? { signal: opts.signal } : {}), ...(opts.person ? { person: true } : {}) } };
 }
 
 /** Throw a plain error for the HTTP/tool layers when an operation fails below. */
@@ -137,6 +142,8 @@ export interface CreateInput {
   /** A person opted into plain http for this private address. Ignored for an agent. */
   insecureHttp?: boolean;
   caBundle?: string;
+  /** Bitbucket Cloud API token: the Atlassian account email that goes with it (Basic auth). Not a secret. */
+  username?: string;
   by: 'person' | 'agent';
 }
 
@@ -153,10 +160,14 @@ function normaliseBaseUrl(raw: string, insecure: boolean): URL {
 }
 
 export async function createConnection(input: CreateInput): Promise<StoredConnection> {
+  // A connector pack is a connection of its own kind (packs/index.ts connectPack): it takes its hosts from the approved pack, never from a typed URL.
+  if (input.provider === 'custom') throw new ConnectionsError('Connect a custom connector from its pack: pick an enabled pack on the Connections page.', 400, 'pack');
   const info = providerInfo(input.provider);
   if (!info) throw new ConnectionsError(`Unknown provider "${input.provider}".`);
   const adapter = requireAdapter(input.provider);
   const insecure = input.by === 'person' && input.insecureHttp === true;
+  const username = input.username?.trim();
+  if (username && (username.length > 200 || /[\s:]/.test(username))) throw new ConnectionsError('The account name must be a single word or an email address, without a colon.');
   const raw = input.baseUrl?.trim() || info.cloudUrl;
   if (!raw) throw new ConnectionsError(`${info.label} needs a base URL (the address of your server).`);
   const base = normaliseBaseUrl(raw, insecure);
@@ -182,7 +193,7 @@ export async function createConnection(input: CreateInput): Promise<StoredConnec
   const id = Store.newConnectionId(input.provider, base.host);
   const stored: StoredConnection = {
     id, provider: input.provider, label: clip(input.label?.trim() || `${info.label}${info.cloudUrl && baseUrl === info.cloudUrl ? '' : ` (${base.host})`}`, 60),
-    baseUrl, hosts, ...(insecure ? { insecureHttp: true } : {}), ...(caBundle ? { caBundle } : {}),
+    baseUrl, hosts, ...(insecure ? { insecureHttp: true } : {}), ...(caBundle ? { caBundle } : {}), ...(username ? { username } : {}),
     createdAt: new Date().toISOString(), createdBy: input.by,
   };
   if (!CONNECTION_ID_RE.test(stored.id)) throw new ConnectionsError('Could not make an id for this connection.');
@@ -293,10 +304,17 @@ export async function detectRepo(project: string): Promise<RepoDetection> {
     if (ref) { out.connection = c.id; out.provider = c.provider; out.repo = ref; return out; }
   }
   // No connection yet: say which provider this looks like so the page can offer to connect it.
-  for (const info of [providerInfo('github')].filter(Boolean)) {
+  for (const info of providerCatalogue().filter(p => p.cloudUrl)) {
     const a = adapterFor(info!.id);
     const ref = info!.cloudUrl ? a?.parseRemote(origin, info!.cloudUrl) : undefined;
     if (ref) { out.provider = info!.id; out.repo = ref; break; }
+  }
+  // A cloud product whose address includes the organization (Azure DevOps) recognises its own remote and says what to connect.
+  if (!out.repo) {
+    for (const info of providerCatalogue()) {
+      const s = adapterFor(info.id)?.suggestFromRemote?.(origin);
+      if (s) { out.provider = info.id; out.repo = s.repo; out.baseUrl = s.baseUrl; break; }
+    }
   }
   return out;
 }
@@ -340,10 +358,18 @@ export async function mapProject(input: MapInput): Promise<MapResult> {
     const cap = conn.probe?.capabilities.pulls.create;
     if (cap === false) throw new ConnectionsError('This connection cannot open pull requests (the last test showed the token lacks that permission).', 409);
   }
+  // Sprint sync lets AICO write a task's sprint and story points back to the platform (a person's planning, pushed once): a standing change a person makes.
+  if (input.by === 'agent' && input.iterations === 'native' && prior?.iterations !== 'native') {
+    throw new ConnectionsError('Sprint sync is turned on by a person, on the Connections page: it lets AICO write a task\'s sprint and story points back to the platform.', 403, 'human-required');
+  }
   const detection = await detectRepo(project);
   const repo = input.repo ?? prior?.repo ?? detection.repo;
   if (!repo) throw new ConnectionsError('Could not tell which repository this project is. Its "origin" does not match this connection; enter the repository as owner/name.', 400);
-  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(repo.owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo.name)) throw new ConnectionsError('The repository must look like owner/name.');
+  // GitLab groups nest (group/subgroup/project): the owner is every segment before the last.
+  // A platform whose projects can hold spaces (Azure DevOps) validates its own references; the rest share the owner/name shape.
+  const ownValidation = requireAdapter(conn.provider).validateRepo;
+  if (ownValidation) { const why = ownValidation(repo); if (why) throw new ConnectionsError(why); }
+  else if (!/^~?[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.-]{1,100}){0,19}$/.test(repo.owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo.name)) throw new ConnectionsError('The repository must look like owner/name.');
   // Confirm the repository exists and the token can see it (a read; also learns the default branch).
   const adapter = requireAdapter(conn.provider);
   const { ctx } = ctxFor(conn, { project });
@@ -359,7 +385,7 @@ export async function mapProject(input: MapInput): Promise<MapResult> {
     project, connection: conn.id, repo,
     workItems: { source: wi.source, ...(wi.value?.trim() ? { value: clip(wi.value.trim(), 200) } : {}) },
     landing, trunk, iterations: input.iterations ?? prior?.iterations ?? 'off',
-    stateMap: { ...DEFAULT_STATE_MAP, ...(prior?.stateMap ?? {}), ...cleanStateMap(input.stateMap) },
+    stateMap: { ...DEFAULT_STATE_MAP, ...(requireAdapter(conn.provider).defaultStateMap ?? {}), ...(prior?.stateMap ?? {}), ...cleanStateMap(input.stateMap) },
     ...((input.trustedCommenters ?? prior?.trustedCommenters)?.length ? { trustedCommenters: (input.trustedCommenters ?? prior?.trustedCommenters)!.slice(0, 50).map(s => clip(s.trim(), 80)).filter(Boolean) } : {}),
   };
   Store.putMapping(mapping);

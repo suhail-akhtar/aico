@@ -1,0 +1,32 @@
+{
+  "name": "acme_issue",
+  "description": "One issue.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "name": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._:-]{1,80}$"
+      }
+    },
+    "required": [
+      "owner",
+      "name",
+      "id"
+    ]
+  },
+  "http": {
+    "method": "GET",
+    "url": "https://api.acme-forge.example/v1/repos/{owner}/{name}/issues/{id}"
+  },
+  "effect": "read"
+}

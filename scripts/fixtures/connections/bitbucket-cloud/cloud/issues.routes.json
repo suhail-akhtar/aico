@@ -1,0 +1,297 @@
+{
+  "prefix": "/2.0",
+  "routes": [
+    {
+      "path": "/repositories/acme/widgets/issues",
+      "query": {
+        "pagelen": "1"
+      },
+      "body": {
+        "pagelen": 1,
+        "page": 1,
+        "size": 1,
+        "values": [
+          {
+            "type": "issue",
+            "id": 11,
+            "title": "Cache invalidation on widget update",
+            "content": {
+              "raw": "Steps to reproduce.\n\n## Acceptance\n- [ ] cache is cleared"
+            },
+            "state": "open",
+            "kind": "bug",
+            "priority": "major",
+            "reporter": {
+              "type": "user",
+              "nickname": "reporter-1",
+              "display_name": "reporter-1",
+              "uuid": "{reporter-1}"
+            },
+            "assignee": {
+              "type": "user",
+              "nickname": "octo-dev",
+              "display_name": "octo-dev",
+              "uuid": "{octo-dev}"
+            },
+            "component": {
+              "name": "cache"
+            },
+            "milestone": {
+              "name": "Sprint 1"
+            },
+            "updated_on": "2026-10-01T10:00:00.000000+00:00",
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets/issues/11"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/issues",
+      "query": {
+        "q": "*"
+      },
+      "body": {
+        "pagelen": 100,
+        "page": 1,
+        "size": 2,
+        "values": [
+          {
+            "type": "issue",
+            "id": 11,
+            "title": "Cache invalidation on widget update",
+            "content": {
+              "raw": "Steps to reproduce.\n\n## Acceptance\n- [ ] cache is cleared"
+            },
+            "state": "open",
+            "kind": "bug",
+            "priority": "major",
+            "reporter": {
+              "type": "user",
+              "nickname": "reporter-1",
+              "display_name": "reporter-1",
+              "uuid": "{reporter-1}"
+            },
+            "assignee": {
+              "type": "user",
+              "nickname": "octo-dev",
+              "display_name": "octo-dev",
+              "uuid": "{octo-dev}"
+            },
+            "component": {
+              "name": "cache"
+            },
+            "milestone": {
+              "name": "Sprint 1"
+            },
+            "updated_on": "2026-10-01T10:00:00.000000+00:00",
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets/issues/11"
+              }
+            }
+          },
+          {
+            "type": "issue",
+            "id": 12,
+            "title": "Second issue",
+            "content": {
+              "raw": "Steps to reproduce.\n\n## Acceptance\n- [ ] cache is cleared"
+            },
+            "state": "open",
+            "kind": "bug",
+            "priority": "major",
+            "reporter": {
+              "type": "user",
+              "nickname": "reporter-1",
+              "display_name": "reporter-1",
+              "uuid": "{reporter-1}"
+            },
+            "assignee": null,
+            "component": null,
+            "milestone": {
+              "name": "Sprint 1"
+            },
+            "updated_on": "2026-10-01T10:00:00.000000+00:00",
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets/issues/12"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/repositories/acme/widgets/issues",
+      "status": 201,
+      "body": {
+        "type": "issue",
+        "id": 13,
+        "title": "Follow-up: cache metrics",
+        "content": {
+          "raw": "Steps to reproduce.\n\n## Acceptance\n- [ ] cache is cleared"
+        },
+        "state": "open",
+        "kind": "bug",
+        "priority": "major",
+        "reporter": {
+          "type": "user",
+          "nickname": "reporter-1",
+          "display_name": "reporter-1",
+          "uuid": "{reporter-1}"
+        },
+        "assignee": {
+          "type": "user",
+          "nickname": "octo-dev",
+          "display_name": "octo-dev",
+          "uuid": "{octo-dev}"
+        },
+        "component": {
+          "name": "cache"
+        },
+        "milestone": {
+          "name": "Sprint 1"
+        },
+        "updated_on": "2026-10-01T10:00:00.000000+00:00",
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets/issues/13"
+          }
+        }
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/issues/11",
+      "body": {
+        "type": "issue",
+        "id": 11,
+        "title": "Cache invalidation on widget update",
+        "content": {
+          "raw": "Steps to reproduce.\n\n## Acceptance\n- [ ] cache is cleared"
+        },
+        "state": "open",
+        "kind": "bug",
+        "priority": "major",
+        "reporter": {
+          "type": "user",
+          "nickname": "reporter-1",
+          "display_name": "reporter-1",
+          "uuid": "{reporter-1}"
+        },
+        "assignee": {
+          "type": "user",
+          "nickname": "octo-dev",
+          "display_name": "octo-dev",
+          "uuid": "{octo-dev}"
+        },
+        "component": {
+          "name": "cache"
+        },
+        "milestone": {
+          "name": "Sprint 1"
+        },
+        "updated_on": "2026-10-01T10:00:00.000000+00:00",
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets/issues/11"
+          }
+        }
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/repositories/acme/widgets/issues/11",
+      "bodyIncludes": "\"state\":\"resolved\"",
+      "body": {
+        "type": "issue",
+        "id": 11,
+        "title": "Cache invalidation on widget update",
+        "content": {
+          "raw": "Steps to reproduce.\n\n## Acceptance\n- [ ] cache is cleared"
+        },
+        "state": "resolved",
+        "kind": "bug",
+        "priority": "major",
+        "reporter": {
+          "type": "user",
+          "nickname": "reporter-1",
+          "display_name": "reporter-1",
+          "uuid": "{reporter-1}"
+        },
+        "assignee": {
+          "type": "user",
+          "nickname": "octo-dev",
+          "display_name": "octo-dev",
+          "uuid": "{octo-dev}"
+        },
+        "component": {
+          "name": "cache"
+        },
+        "milestone": {
+          "name": "Sprint 1"
+        },
+        "updated_on": "2026-10-09T10:00:00.000000+00:00",
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets/issues/11"
+          }
+        }
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/repositories/acme/widgets/issues/11",
+      "body": {
+        "type": "issue",
+        "id": 11,
+        "title": "Cache invalidation on widget update (reworded)",
+        "content": {
+          "raw": "Steps to reproduce.\n\n## Acceptance\n- [ ] cache is cleared"
+        },
+        "state": "open",
+        "kind": "bug",
+        "priority": "major",
+        "reporter": {
+          "type": "user",
+          "nickname": "reporter-1",
+          "display_name": "reporter-1",
+          "uuid": "{reporter-1}"
+        },
+        "assignee": {
+          "type": "user",
+          "nickname": "octo-dev",
+          "display_name": "octo-dev",
+          "uuid": "{octo-dev}"
+        },
+        "component": {
+          "name": "cache"
+        },
+        "milestone": {
+          "name": "Sprint 1"
+        },
+        "updated_on": "2026-10-09T09:00:00.000000+00:00",
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets/issues/11"
+          }
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/repositories/acme/widgets/issues/11/comments",
+      "status": 201,
+      "body": {
+        "id": 1,
+        "content": {
+          "raw": "ok"
+        }
+      }
+    }
+  ]
+}

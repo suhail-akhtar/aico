@@ -1,0 +1,87 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "version": "16.9.2",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": false,
+        "comment": true,
+        "merge": false,
+        "draft": false,
+        "bodyMax": 1000000
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "label",
+        "parentLink": false
+      },
+      "iterations": "milestone",
+      "checks": {
+        "read": false,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": false
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "api",
+          "why": "Open merge requests, comment on them, import and update issues and read pipelines. Also lets git push over https.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "read_user",
+          "why": "Show which account the token acts as.",
+          "feature": "repos",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "This token can only read the project (it needs the Developer role to push branches and open merge requests).",
+      "Checks (pipelines) are unreadable with this token, or CI/CD is turned off, so merge requests will show no checks.",
+      "Branch protection unreadable (the token cannot read branch settings): AICO cannot see which reviews and pipelines main requires.",
+      "Iterations are not available here (they need GitLab Premium), so milestones stand in for them."
+    ]
+  },
+  "pull": {
+    "connection": "gitlab-limited-token",
+    "id": "7",
+    "url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "none",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "It needs more approvals."
+    ],
+    "observedAt": "<time>"
+  },
+  "protection": {
+    "protected": false,
+    "unreadable": "the token cannot read branch settings"
+  }
+}

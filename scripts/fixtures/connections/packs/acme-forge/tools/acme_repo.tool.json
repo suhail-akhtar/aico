@@ -1,0 +1,27 @@
+{
+  "name": "acme_repo",
+  "description": "A repository.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "name": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      }
+    },
+    "required": [
+      "owner",
+      "name"
+    ]
+  },
+  "http": {
+    "method": "GET",
+    "url": "https://api.acme-forge.example/v1/repos/{owner}/{name}"
+  },
+  "effect": "read"
+}

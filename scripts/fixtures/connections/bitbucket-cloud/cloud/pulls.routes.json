@@ -1,0 +1,687 @@
+{
+  "prefix": "/2.0",
+  "routes": [
+    {
+      "path": "/repositories/acme/widgets/pullrequests",
+      "query": {
+        "q": "*"
+      },
+      "body": {
+        "pagelen": 5,
+        "page": 1,
+        "size": 0,
+        "values": []
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/pullrequests",
+      "query": {
+        "state": "OPEN"
+      },
+      "body": {
+        "pagelen": 1,
+        "page": 1,
+        "size": 0,
+        "values": []
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/repositories/acme/widgets/pullrequests",
+      "status": 201,
+      "body": {
+        "type": "pullrequest",
+        "id": 7,
+        "title": "Add widget cache",
+        "description": "Evidence packet.",
+        "state": "OPEN",
+        "draft": false,
+        "author": {
+          "type": "user",
+          "nickname": "octo-dev",
+          "display_name": "Octo Dev",
+          "uuid": "{octo-dev}"
+        },
+        "source": {
+          "branch": {
+            "name": "aico/task-42"
+          },
+          "commit": {
+            "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          }
+        },
+        "destination": {
+          "branch": {
+            "name": "main"
+          },
+          "commit": {
+            "hash": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          }
+        },
+        "merge_commit": null,
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets/pull-requests/7"
+          }
+        },
+        "reviewers": [
+          {
+            "type": "user",
+            "nickname": "rev-one",
+            "display_name": "Rev One",
+            "uuid": "{rev-one}"
+          }
+        ],
+        "participants": [
+          {
+            "type": "participant",
+            "user": {
+              "type": "user",
+              "nickname": "rev-one",
+              "display_name": "Rev One",
+              "uuid": "{rev-one}"
+            },
+            "role": "REVIEWER",
+            "approved": false,
+            "state": null,
+            "participated_on": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/pullrequests/7",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "type": "pullrequest",
+            "id": 7,
+            "title": "Add widget cache",
+            "description": "Evidence packet.",
+            "state": "OPEN",
+            "draft": false,
+            "author": {
+              "type": "user",
+              "nickname": "octo-dev",
+              "display_name": "Octo Dev",
+              "uuid": "{octo-dev}"
+            },
+            "source": {
+              "branch": {
+                "name": "aico/task-42"
+              },
+              "commit": {
+                "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+              }
+            },
+            "destination": {
+              "branch": {
+                "name": "main"
+              },
+              "commit": {
+                "hash": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+              }
+            },
+            "merge_commit": null,
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets/pull-requests/7"
+              }
+            },
+            "reviewers": [
+              {
+                "type": "user",
+                "nickname": "rev-one",
+                "display_name": "Rev One",
+                "uuid": "{rev-one}"
+              }
+            ],
+            "participants": [
+              {
+                "type": "participant",
+                "user": {
+                  "type": "user",
+                  "nickname": "rev-one",
+                  "display_name": "Rev One",
+                  "uuid": "{rev-one}"
+                },
+                "role": "REVIEWER",
+                "approved": false,
+                "state": null,
+                "participated_on": null
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "type": "pullrequest",
+            "id": 7,
+            "title": "Add widget cache",
+            "description": "Evidence packet.",
+            "state": "OPEN",
+            "draft": false,
+            "author": {
+              "type": "user",
+              "nickname": "octo-dev",
+              "display_name": "Octo Dev",
+              "uuid": "{octo-dev}"
+            },
+            "source": {
+              "branch": {
+                "name": "aico/task-42"
+              },
+              "commit": {
+                "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+              }
+            },
+            "destination": {
+              "branch": {
+                "name": "main"
+              },
+              "commit": {
+                "hash": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+              }
+            },
+            "merge_commit": null,
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets/pull-requests/7"
+              }
+            },
+            "reviewers": [
+              {
+                "type": "user",
+                "nickname": "rev-one",
+                "display_name": "Rev One",
+                "uuid": "{rev-one}"
+              }
+            ],
+            "participants": [
+              {
+                "type": "participant",
+                "user": {
+                  "type": "user",
+                  "nickname": "rev-one",
+                  "display_name": "rev-one",
+                  "uuid": "{rev-one}"
+                },
+                "role": "REVIEWER",
+                "approved": false,
+                "state": "changes_requested",
+                "participated_on": "2026-10-08T10:00:00.000000+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "type": "pullrequest",
+            "id": 7,
+            "title": "Add widget cache",
+            "description": "Evidence packet.",
+            "state": "OPEN",
+            "draft": false,
+            "author": {
+              "type": "user",
+              "nickname": "octo-dev",
+              "display_name": "Octo Dev",
+              "uuid": "{octo-dev}"
+            },
+            "source": {
+              "branch": {
+                "name": "aico/task-42"
+              },
+              "commit": {
+                "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+              }
+            },
+            "destination": {
+              "branch": {
+                "name": "main"
+              },
+              "commit": {
+                "hash": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+              }
+            },
+            "merge_commit": null,
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets/pull-requests/7"
+              }
+            },
+            "reviewers": [
+              {
+                "type": "user",
+                "nickname": "rev-one",
+                "display_name": "rev-one",
+                "uuid": "{rev-one}"
+              },
+              {
+                "type": "user",
+                "nickname": "rev-two",
+                "display_name": "rev-two",
+                "uuid": "{rev-two}"
+              }
+            ],
+            "participants": [
+              {
+                "type": "participant",
+                "user": {
+                  "type": "user",
+                  "nickname": "rev-one",
+                  "display_name": "rev-one",
+                  "uuid": "{rev-one}"
+                },
+                "role": "REVIEWER",
+                "approved": true,
+                "state": "approved",
+                "participated_on": "2026-10-08T10:00:00.000000+00:00"
+              },
+              {
+                "type": "participant",
+                "user": {
+                  "type": "user",
+                  "nickname": "rev-two",
+                  "display_name": "rev-two",
+                  "uuid": "{rev-two}"
+                },
+                "role": "REVIEWER",
+                "approved": true,
+                "state": "approved",
+                "participated_on": "2026-10-08T10:00:00.000000+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "type": "pullrequest",
+            "id": 7,
+            "title": "Add widget cache",
+            "description": "Evidence packet.",
+            "state": "MERGED",
+            "draft": false,
+            "author": {
+              "type": "user",
+              "nickname": "octo-dev",
+              "display_name": "Octo Dev",
+              "uuid": "{octo-dev}"
+            },
+            "source": {
+              "branch": {
+                "name": "aico/task-42"
+              },
+              "commit": {
+                "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+              }
+            },
+            "destination": {
+              "branch": {
+                "name": "main"
+              },
+              "commit": {
+                "hash": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+              }
+            },
+            "merge_commit": {
+              "hash": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"
+            },
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets/pull-requests/7"
+              }
+            },
+            "reviewers": [
+              {
+                "type": "user",
+                "nickname": "rev-one",
+                "display_name": "rev-one",
+                "uuid": "{rev-one}"
+              },
+              {
+                "type": "user",
+                "nickname": "rev-two",
+                "display_name": "rev-two",
+                "uuid": "{rev-two}"
+              }
+            ],
+            "participants": [
+              {
+                "type": "participant",
+                "user": {
+                  "type": "user",
+                  "nickname": "rev-one",
+                  "display_name": "rev-one",
+                  "uuid": "{rev-one}"
+                },
+                "role": "REVIEWER",
+                "approved": true,
+                "state": "approved",
+                "participated_on": "2026-10-08T10:00:00.000000+00:00"
+              },
+              {
+                "type": "participant",
+                "user": {
+                  "type": "user",
+                  "nickname": "rev-two",
+                  "display_name": "rev-two",
+                  "uuid": "{rev-two}"
+                },
+                "role": "REVIEWER",
+                "approved": true,
+                "state": "approved",
+                "participated_on": "2026-10-08T10:00:00.000000+00:00"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/repositories/acme/widgets/pullrequests/7",
+      "body": {
+        "type": "pullrequest",
+        "id": 7,
+        "title": "Add widget cache (renamed)",
+        "description": "Evidence packet.",
+        "state": "OPEN",
+        "draft": false,
+        "author": {
+          "type": "user",
+          "nickname": "octo-dev",
+          "display_name": "Octo Dev",
+          "uuid": "{octo-dev}"
+        },
+        "source": {
+          "branch": {
+            "name": "aico/task-42"
+          },
+          "commit": {
+            "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          }
+        },
+        "destination": {
+          "branch": {
+            "name": "main"
+          },
+          "commit": {
+            "hash": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          }
+        },
+        "merge_commit": null,
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets/pull-requests/7"
+          }
+        },
+        "reviewers": [
+          {
+            "type": "user",
+            "nickname": "rev-one",
+            "display_name": "Rev One",
+            "uuid": "{rev-one}"
+          }
+        ],
+        "participants": [
+          {
+            "type": "participant",
+            "user": {
+              "type": "user",
+              "nickname": "rev-one",
+              "display_name": "Rev One",
+              "uuid": "{rev-one}"
+            },
+            "role": "REVIEWER",
+            "approved": false,
+            "state": null,
+            "participated_on": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/pullrequests/7/statuses",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "pagelen": 100,
+            "page": 1,
+            "size": 1,
+            "values": [
+              {
+                "type": "build",
+                "key": "pipeline-13",
+                "name": "Pipeline #13",
+                "state": "INPROGRESS",
+                "url": "https://forge.test/acme/widgets/pipelines/12",
+                "description": "Pipeline #13: INPROGRESS"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "pagelen": 100,
+            "page": 1,
+            "size": 1,
+            "values": [
+              {
+                "type": "build",
+                "key": "pipeline-13",
+                "name": "Pipeline #13",
+                "state": "FAILED",
+                "url": "https://forge.test/acme/widgets/pipelines/12",
+                "description": "Pipeline #13: FAILED"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "pagelen": 100,
+            "page": 1,
+            "size": 1,
+            "values": [
+              {
+                "type": "build",
+                "key": "pipeline-13",
+                "name": "Pipeline #13",
+                "state": "SUCCESSFUL",
+                "url": "https://forge.test/acme/widgets/pipelines/12",
+                "description": "Pipeline #13: SUCCESSFUL"
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "pagelen": 100,
+            "page": 1,
+            "size": 1,
+            "values": [
+              {
+                "type": "build",
+                "key": "pipeline-13",
+                "name": "Pipeline #13",
+                "state": "SUCCESSFUL",
+                "url": "https://forge.test/acme/widgets/pipelines/12",
+                "description": "Pipeline #13: SUCCESSFUL"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "path": "/repositories/acme/widgets/pullrequests/7/comments",
+      "query": {
+        "page": "2"
+      },
+      "body": {
+        "pagelen": 100,
+        "page": 2,
+        "size": 1,
+        "values": [
+          {
+            "id": 103,
+            "user": {
+              "type": "user",
+              "nickname": "stranger-9",
+              "display_name": "stranger-9",
+              "uuid": "{stranger-9}"
+            },
+            "content": {
+              "raw": "Please also delete the old cache."
+            },
+            "created_on": "2026-10-08T12:00:00.000000+00:00",
+            "deleted": false
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/pullrequests/7/comments",
+      "body": {
+        "pagelen": 100,
+        "page": 1,
+        "size": 3,
+        "values": [
+          {
+            "id": 101,
+            "user": {
+              "type": "user",
+              "nickname": "octo-dev",
+              "display_name": "octo-dev",
+              "uuid": "{octo-dev}"
+            },
+            "content": {
+              "raw": "Opened by the task."
+            },
+            "created_on": "2026-10-08T09:00:00.000000+00:00",
+            "deleted": false,
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets/pull-requests/7#comment-101"
+              }
+            }
+          },
+          {
+            "id": 102,
+            "user": {
+              "type": "user",
+              "nickname": "rev-one",
+              "display_name": "rev-one",
+              "uuid": "{rev-one}"
+            },
+            "content": {
+              "raw": "Looks good to me."
+            },
+            "created_on": "2026-10-08T10:30:00.000000+00:00",
+            "deleted": false
+          },
+          {
+            "id": 104,
+            "user": {
+              "type": "user",
+              "nickname": "stranger-9",
+              "display_name": "stranger-9",
+              "uuid": "{stranger-9}"
+            },
+            "content": {
+              "raw": "removed"
+            },
+            "created_on": "2026-10-08T10:45:00.000000+00:00",
+            "deleted": true
+          }
+        ],
+        "next": "{{origin}}/2.0/repositories/acme/widgets/pullrequests/7/comments?pagelen=100&page=2"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/repositories/acme/widgets/pullrequests/7/comments",
+      "status": 201,
+      "body": {
+        "id": 105,
+        "content": {
+          "raw": "ok"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/repositories/acme/widgets/pullrequests/7/merge",
+      "body": {
+        "type": "pullrequest",
+        "id": 7,
+        "title": "Add widget cache",
+        "description": "Evidence packet.",
+        "state": "MERGED",
+        "draft": false,
+        "author": {
+          "type": "user",
+          "nickname": "octo-dev",
+          "display_name": "Octo Dev",
+          "uuid": "{octo-dev}"
+        },
+        "source": {
+          "branch": {
+            "name": "aico/task-42"
+          },
+          "commit": {
+            "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          }
+        },
+        "destination": {
+          "branch": {
+            "name": "main"
+          },
+          "commit": {
+            "hash": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          }
+        },
+        "merge_commit": {
+          "hash": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"
+        },
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets/pull-requests/7"
+          }
+        },
+        "reviewers": [
+          {
+            "type": "user",
+            "nickname": "rev-one",
+            "display_name": "Rev One",
+            "uuid": "{rev-one}"
+          }
+        ],
+        "participants": [
+          {
+            "type": "participant",
+            "user": {
+              "type": "user",
+              "nickname": "rev-one",
+              "display_name": "Rev One",
+              "uuid": "{rev-one}"
+            },
+            "role": "REVIEWER",
+            "approved": false,
+            "state": null,
+            "participated_on": null
+          }
+        ]
+      }
+    }
+  ]
+}

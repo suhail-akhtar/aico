@@ -1,0 +1,119 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "version": "12.10.14",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 1000000
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "label",
+        "parentLink": false
+      },
+      "iterations": "milestone",
+      "checks": {
+        "read": true,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": true
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "api",
+          "why": "Open merge requests, comment on them, import and update issues and read pipelines. Also lets git push over https.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "read_user",
+          "why": "Show which account the token acts as.",
+          "feature": "repos",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "Developers cannot merge into a protected branch by default; the Merge button appears only when GitLab says this account may merge.",
+      "Iterations are not available here (they need GitLab Premium), so milestones stand in for them."
+    ]
+  },
+  "repo": {
+    "ref": {
+      "owner": "acme/platform",
+      "name": "widgets",
+      "id": "4242"
+    },
+    "defaultBranch": "main",
+    "cloneUrl": "<origin>/acme/platform/widgets.git",
+    "htmlUrl": "<origin>/acme/platform/widgets",
+    "private": true,
+    "permissions": {
+      "pull": true,
+      "push": true,
+      "admin": false
+    }
+  },
+  "items": [
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Updating a widget leaves a stale entry.",
+      "state": "open",
+      "labels": [
+        "bug",
+        "estimate:5"
+      ],
+      "assignees": [
+        "octo-dev"
+      ],
+      "author": "octo-bot",
+      "url": "https://forge.test/acme/platform/widgets/-/issues/11",
+      "rev": "2026-10-01T10:00:00.000Z",
+      "milestone": {
+        "id": "41",
+        "title": "Sprint 1",
+        "dueOn": "2026-10-16"
+      },
+      "points": 5,
+      "iteration": "41"
+    }
+  ],
+  "iterations": [
+    {
+      "id": "41",
+      "title": "Sprint 1",
+      "kind": "milestone",
+      "state": "open",
+      "start": "2026-10-05",
+      "end": "2026-10-16",
+      "url": "https://forge.test/acme/platform/widgets/-/milestones/1"
+    }
+  ],
+  "checks": [],
+  "protection": {
+    "protected": true,
+    "requiredReviews": 0,
+    "requiredChecks": [
+      "Pipeline must succeed"
+    ]
+  }
+}

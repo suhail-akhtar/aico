@@ -1,0 +1,50 @@
+{
+  "name": "acme_pr_merge",
+  "description": "Merge a pull request.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "name": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._:-]{1,80}$"
+      },
+      "method": {
+        "type": "string",
+        "enum": [
+          "merge",
+          "squash",
+          "rebase"
+        ]
+      },
+      "sha": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{7,64}$"
+      }
+    },
+    "required": [
+      "owner",
+      "name",
+      "id",
+      "method",
+      "sha"
+    ]
+  },
+  "http": {
+    "method": "POST",
+    "url": "https://api.acme-forge.example/v1/repos/{owner}/{name}/pulls/{id}/merge",
+    "body": {
+      "method": "{method}",
+      "expectedHead": "{sha}"
+    }
+  },
+  "effect": "destructive"
+}

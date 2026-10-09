@@ -224,6 +224,8 @@ export interface ConnectionFacts {
   host?: string;
   /** The landing mode a mapping asks for. */
   landing?: 'local' | 'pr';
+  /** The connection runs on an agent-built connector pack. */
+  pack?: boolean;
 }
 
 /**
@@ -247,6 +249,7 @@ export function connectionDecision(f: ConnectionFacts, lp: LoadedPolicy = manage
         return blocked(lp, `${label} (${f.host} is not on the approved list)`, 'connections.allow-list.hosts');
       }
     }
+    if (f.pack && rule.packs === 'forbid') return blocked(lp, `${label} (connector packs are not allowed)`, 'connections.packs');
     if (f.landing === 'pr' && rule.maxLanding === 'local') {
       return blocked(lp, 'Pull-request mode (AICO pushing a branch and opening a pull request)', 'connections.maxLanding');
     }
@@ -557,6 +560,7 @@ export function describeRules(lp: LoadedPolicy = managedPolicy()): string[] {
         : `Connections only to ${[c.providers?.length ? `providers ${c.providers.join(', ')}` : '', c.hosts?.length ? `hosts ${c.hosts.join(', ')}` : ''].filter(Boolean).join(' on ') || 'nothing'}`);
     }
     if (p.connections?.maxLanding === 'local') lines.push('Delivery lands changes locally only (no pull-request mode)');
+    if (p.connections?.packs === 'forbid') lines.push('Agent-built connector packs: not allowed');
     if (p.network && p.network.mode !== 'off') lines.push(`Network ${p.network.mode}: ${p.network.domains.join(', ') || 'none'}`);
     if (p.budget?.perSessionUsd !== undefined) lines.push(`Spend per session: $${p.budget.perSessionUsd}`);
     if (p.budget?.perDayUsd !== undefined) lines.push(`Spend per day: $${p.budget.perDayUsd}`);

@@ -1,0 +1,189 @@
+{
+  "prefix": "/api/v4",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 200,
+      "body": {
+        "id": 1001,
+        "username": "octo-dev",
+        "name": "Octo Developer",
+        "state": "active"
+      }
+    },
+    {
+      "path": "/version",
+      "status": 200,
+      "body": {
+        "version": "12.10.14",
+        "revision": "old"
+      }
+    },
+    {
+      "path": "/personal_access_tokens/self",
+      "status": 404,
+      "body": {
+        "message": "404 Not Found"
+      }
+    },
+    {
+      "path": "/projects/:project",
+      "status": 200,
+      "body": {
+        "id": 4242,
+        "name": "widgets",
+        "path": "widgets",
+        "path_with_namespace": "acme/platform/widgets",
+        "default_branch": "main",
+        "visibility": "private",
+        "web_url": "https://forge.test/acme/platform/widgets",
+        "http_url_to_repo": "https://forge.test/acme/platform/widgets.git",
+        "issues_enabled": true,
+        "merge_requests_enabled": true,
+        "only_allow_merge_if_pipeline_succeeds": true,
+        "permissions": {
+          "project_access": {
+            "access_level": 30
+          }
+        }
+      }
+    },
+    {
+      "path": "/projects/:project/merge_requests",
+      "query": {
+        "per_page": "1"
+      },
+      "status": 200,
+      "body": [
+        {
+          "iid": 7,
+          "state": "opened"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/issues",
+      "query": {
+        "per_page": "1",
+        "state": "all"
+      },
+      "status": 200,
+      "body": [
+        {
+          "id": 6011,
+          "iid": 11,
+          "project_id": 4242,
+          "title": "Cache invalidation on widget update",
+          "description": "",
+          "state": "opened",
+          "labels": [
+            "bug",
+            "estimate:5"
+          ],
+          "milestone": {
+            "id": 41,
+            "iid": 1,
+            "title": "Sprint 1",
+            "due_date": "2026-10-16"
+          },
+          "author": {
+            "username": "octo-bot"
+          },
+          "assignees": [
+            {
+              "username": "octo-dev"
+            }
+          ],
+          "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+          "created_at": "2026-09-28T09:00:00.000Z",
+          "updated_at": "2026-10-01T10:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/issues",
+      "status": 200,
+      "body": [
+        {
+          "id": 6011,
+          "iid": 11,
+          "project_id": 4242,
+          "title": "Cache invalidation on widget update",
+          "description": "Updating a widget leaves a stale entry.",
+          "state": "opened",
+          "labels": [
+            "bug",
+            "estimate:5"
+          ],
+          "milestone": {
+            "id": 41,
+            "iid": 1,
+            "title": "Sprint 1",
+            "due_date": "2026-10-16"
+          },
+          "author": {
+            "username": "octo-bot"
+          },
+          "assignees": [
+            {
+              "username": "octo-dev"
+            }
+          ],
+          "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+          "created_at": "2026-09-28T09:00:00.000Z",
+          "updated_at": "2026-10-01T10:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/pipelines",
+      "query": {
+        "per_page": "1"
+      },
+      "status": 200,
+      "body": []
+    },
+    {
+      "path": "/projects/:project/repository/branches/main",
+      "status": 200,
+      "body": {
+        "name": "main",
+        "protected": true
+      }
+    },
+    {
+      "path": "/projects/:project/approval_rules",
+      "status": 404,
+      "body": {
+        "message": "404 Not Found"
+      }
+    },
+    {
+      "path": "/projects/:project/iterations",
+      "status": 404,
+      "body": {
+        "message": "404 Not Found"
+      }
+    },
+    {
+      "path": "/projects/:project/milestones",
+      "status": 200,
+      "body": [
+        {
+          "id": 41,
+          "iid": 1,
+          "title": "Sprint 1",
+          "state": "active",
+          "start_date": "2026-10-05",
+          "due_date": "2026-10-16",
+          "web_url": "https://forge.test/acme/platform/widgets/-/milestones/1"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/repository/commits/:sha/statuses",
+      "status": 200,
+      "body": []
+    }
+  ]
+}

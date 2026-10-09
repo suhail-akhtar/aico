@@ -31,15 +31,16 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../../api';
 import type { Connection, ConnectionsPolicyView, ProviderId, ProviderInfo } from '../../../../shared/connections/types';
 import {
-  asksForUrl, checkBaseUrl, defaultLabel, hostAllowed, policyView, probeVerdict, providerInfo, providerTiles, serverSwitchLabel,
-  validateConnectionForm, wantsHttpOptIn, type ConnectionForm, type FormField,
+  asksForAccount, asksForUrl, checkBaseUrl, defaultLabel, hostAllowed, policyView, probeVerdict, providerInfo, providerTiles, serverSwitchLabel,
+  tokenPageUrl, validateConnectionForm, wantsHttpOptIn, type ConnectionForm, type FormField,
 } from '../../connections';
 import { BTN_GHOST, BTN_PRIMARY, Callout, ErrorLine, INPUT, LABEL, Spinner } from '../delivery/ui';
+import { parseAzureOrg } from '../../connections-azure';
 import { ExternalLink, Monogram, ProbePanel } from './parts';
 
-const EMPTY_FORM: Omit<ConnectionForm, 'provider'> = { label: '', serverUrl: false, baseUrl: '', insecureHttp: false, caBundle: '' };
+const EMPTY_FORM: Omit<ConnectionForm, 'provider'> = { label: '', serverUrl: false, baseUrl: '', insecureHttp: false, caBundle: '', username: '' };
 
-export function AddConnection({ providers, policy, projectName, initialProvider, onChanged, onUse, onCancel, onDone, policyShownAbove }: {
+export function AddConnection({ providers, policy, projectName, initialProvider, onChanged, onUse, onCancel, onDone, policyShownAbove, onAskConnector }: {
   providers: readonly ProviderInfo[];
   policy: ConnectionsPolicyView | undefined;
   /** The page around this form already shows the organisation banner; do not repeat it. */
@@ -53,6 +54,8 @@ export function AddConnection({ providers, policy, projectName, initialProvider,
   /** Cancel; the connection that never got a token (if any) is removed first. */
   onCancel: (removed?: string) => void;
   onDone: (c: Connection) => void;
+  /** "Other": open a chat that asks AICO to build a connector for a platform it has no adapter for. */
+  onAskConnector?: (() => void) | undefined;
 }): React.ReactElement {
   const uid = useId();
   const [provider, setProvider] = useState<ProviderId | null>(initialProvider ?? null);
@@ -80,10 +83,15 @@ export function AddConnection({ providers, policy, projectName, initialProvider,
   const set = (patch: Partial<typeof form>): void => { setForm(f => ({ ...f, ...patch })); setErrors({}); };
   const wipe = (): void => { if (token.current) token.current.value = ''; };
 
+  // Azure DevOps Services: the organization is part of the address, so the page asks for its name (not a URL).
+  const azureServices = provider === 'azure-devops' && !form.serverUrl;
+  const azureOrg = azureServices ? parseAzureOrg(form.organization ?? '') : null;
   const helpUrl = ((): string | undefined => {
-    if (info?.id === 'github' && form.serverUrl) {
+    if (azureServices) return azureOrg?.ok ? `https://dev.azure.com/${azureOrg.org}/_usersSettings/tokens` : info?.tokenHelpUrl;
+    if (info && (form.serverUrl || (info.asksUrl && !info.cloudUrl))) {
+      // A server a person runs: the token page lives on that server (GitHub Enterprise, self-managed GitLab, Gitea, Forgejo).
       const u = checkBaseUrl(form.baseUrl, form.insecureHttp);
-      return u.ok ? `${u.url}/settings/tokens` : undefined;
+      return u.ok ? tokenPageUrl(info.id, u.url) ?? undefined : undefined;
     }
     return info?.tokenHelpUrl;
   })();
@@ -161,7 +169,7 @@ export function AddConnection({ providers, policy, projectName, initialProvider,
               return (
                 <button
                   key={t.id} type="button" role="radio" aria-checked={on} aria-disabled={!t.enabled || locked} title={t.note}
-                  onClick={() => { if (t.enabled && !locked && t.id !== 'other') { setProvider(t.id); setForm(EMPTY_FORM); setErrors({}); setError(null); } }}
+                  onClick={() => { if (t.enabled && !locked && t.id === 'other') onAskConnector?.(); else if (t.enabled && !locked && t.id !== 'other') { setProvider(t.id); setForm(EMPTY_FORM); setErrors({}); setError(null); } }}
                   className={`flex min-h-[78px] flex-col items-start gap-1.5 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-aico-accent ${
                     on ? 'border-aico-accent bg-aico-accent-soft' : t.enabled && !locked ? 'border-aico-border-subtle bg-aico-bg hover:bg-aico-hover' : 'cursor-not-allowed border-aico-border-subtle bg-aico-bg opacity-60'}`}
                 >
@@ -185,12 +193,27 @@ export function AddConnection({ providers, policy, projectName, initialProvider,
                     I use {switchLabel} (a server my company runs)
                   </label>
                 )}
-                {asksUrl ? (
+                {azureServices ? (
+                  <div>
+                    <label className={LABEL} htmlFor={`${uid}-org`}>Organization</label>
+                    <div className="flex items-center gap-2">
+                      <span className="shrink-0 text-[13px] text-aico-muted">dev.azure.com/</span>
+                      <input
+                        id={`${uid}-org`} className={INPUT} value={form.organization ?? ''} onChange={e => set({ organization: e.target.value })}
+                        placeholder="acme" autoComplete="off" spellCheck={false}
+                        aria-invalid={Boolean(err('baseUrl'))} aria-describedby={`${uid}-org-note`}
+                      />
+                    </div>
+                    <p id={`${uid}-org-note`} role={err('baseUrl') ? 'alert' : undefined} className={`mt-1 text-[12px] ${err('baseUrl') ? 'text-aico-danger' : 'text-aico-muted'}`}>
+                      {err('baseUrl') ?? 'The name after dev.azure.com/ in your project’s address. You can paste the whole address too.'}
+                    </p>
+                  </div>
+                ) : asksUrl ? (
                   <div>
                     <label className={LABEL} htmlFor={`${uid}-url`}>Server address</label>
                     <input
                       id={`${uid}-url`} className={INPUT} value={form.baseUrl} onChange={e => set({ baseUrl: e.target.value })}
-                      placeholder="https://git.example.com" inputMode="url" autoComplete="off" spellCheck={false}
+                      placeholder={provider === 'azure-devops' ? 'https://tfs.example.com/DefaultCollection' : 'https://git.example.com'} inputMode="url" autoComplete="off" spellCheck={false}
                       aria-invalid={Boolean(err('baseUrl'))} aria-describedby={err('baseUrl') ? `${uid}-url-err` : undefined}
                     />
                     {err('baseUrl') && <p id={`${uid}-url-err`} role="alert" className="mt-1 text-[12px] text-aico-danger">{err('baseUrl')}</p>}
@@ -205,10 +228,22 @@ export function AddConnection({ providers, policy, projectName, initialProvider,
                   <label className={LABEL} htmlFor={`${uid}-label`}>Name <span className="font-normal text-aico-muted">(optional)</span></label>
                   <input
                     id={`${uid}-label`} className={INPUT} value={form.label} onChange={e => set({ label: e.target.value })}
-                    placeholder={defaultLabel(info, form.baseUrl)} autoComplete="off" aria-invalid={Boolean(err('label'))}
+                    placeholder={defaultLabel(info, azureServices ? (azureOrg?.ok ? azureOrg.baseUrl : '') : form.baseUrl)} autoComplete="off" aria-invalid={Boolean(err('label'))}
                   />
                   {err('label') && <p role="alert" className="mt-1 text-[12px] text-aico-danger">{err('label')}</p>}
                 </div>
+                {provider && asksForAccount(provider) && (
+                  <div>
+                    <label className={LABEL} htmlFor={`${uid}-account`}>Atlassian account email <span className="font-normal text-aico-muted">(API token only)</span></label>
+                    <input
+                      id={`${uid}-account`} className={INPUT} value={form.username ?? ''} onChange={e => set({ username: e.target.value })}
+                      placeholder="you@company.com" inputMode="email" autoComplete="off" spellCheck={false} aria-invalid={Boolean(err('username'))}
+                    />
+                    <p className={`mt-1 text-[12px] ${err('username') ? 'text-aico-danger' : 'text-aico-muted'}`} role={err('username') ? 'alert' : undefined}>
+                      {err('username') ?? 'An Atlassian API token is used with your account email. Leave this empty for a repository, project or workspace access token.'}
+                    </p>
+                  </div>
+                )}
                 {asksUrl && (
                   <details open={optIn || Boolean(err('insecureHttp')) || Boolean(err('caBundle'))} className="rounded-lg border border-aico-border-subtle">
                     <summary className="cursor-pointer select-none rounded-lg px-3 py-2 text-[13px] text-aico-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-aico-accent">Private network options</summary>

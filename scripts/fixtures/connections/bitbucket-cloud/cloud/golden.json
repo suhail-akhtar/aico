@@ -1,0 +1,314 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 30000
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "none",
+        "parentLink": false
+      },
+      "iterations": "none",
+      "checks": {
+        "read": true,
+        "rerun": false,
+        "logsUrl": false
+      },
+      "protection": {
+        "read": true
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "read:repository, write:repository",
+          "why": "Read the repository and push aico/task-* branches.",
+          "feature": "repos",
+          "required": true
+        },
+        {
+          "scope": "read:pullrequest, write:pullrequest",
+          "why": "Open pull requests, comment, and merge on your click.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "read:pipeline",
+          "why": "Read build results (they arrive as commit statuses).",
+          "feature": "checks",
+          "required": false
+        },
+        {
+          "scope": "read:issue, write:issue",
+          "why": "Import issues, only for repositories that use the issue tracker.",
+          "feature": "items",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "Bitbucket Cloud has no sprints, so AICO's sprints stay local. Jira is not supported."
+    ]
+  },
+  "repo": {
+    "ref": {
+      "owner": "acme",
+      "name": "widgets",
+      "id": "{repo-1}"
+    },
+    "defaultBranch": "main",
+    "cloneUrl": "<origin>/acme/widgets.git",
+    "htmlUrl": "<origin>/acme/widgets",
+    "private": true
+  },
+  "repos": [
+    {
+      "ref": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "{repo-1}"
+      },
+      "defaultBranch": "main",
+      "cloneUrl": "<origin>/acme/widgets.git",
+      "htmlUrl": "<origin>/acme/widgets",
+      "private": true
+    },
+    {
+      "ref": {
+        "owner": "acme",
+        "name": "gadgets",
+        "id": "{repo-2}"
+      },
+      "defaultBranch": "main",
+      "cloneUrl": "<origin>/acme/gadgets.git",
+      "htmlUrl": "<origin>/acme/gadgets",
+      "private": true
+    }
+  ],
+  "pull.created": {
+    "connection": "bitbucket-cloud-cloud",
+    "id": "7",
+    "url": "https://forge.test/acme/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "Nobody has approved it yet (Bitbucket did not say whether approvals are required)."
+    ],
+    "observedAt": "<time>"
+  },
+  "pull.1": {
+    "connection": "bitbucket-cloud-cloud",
+    "id": "7",
+    "url": "https://forge.test/acme/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "pending",
+      "items": [
+        {
+          "name": "Pipeline #13",
+          "state": "pending",
+          "url": "https://forge.test/acme/widgets/pipelines/12",
+          "summary": "Pipeline #13: INPROGRESS"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0,
+      "required": 2
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "0 of 2 required approvals.",
+      "A build is still running."
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.2": {
+    "connection": "bitbucket-cloud-cloud",
+    "id": "7",
+    "url": "https://forge.test/acme/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "failing",
+      "items": [
+        {
+          "name": "Pipeline #13",
+          "state": "failure",
+          "url": "https://forge.test/acme/widgets/pipelines/12",
+          "summary": "Pipeline #13: FAILED"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "changes",
+      "approved": 0,
+      "changesRequested": 1,
+      "required": 2
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "A reviewer has requested changes.",
+      "0 of 2 required approvals.",
+      "Build failed: Pipeline #13"
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.3": {
+    "connection": "bitbucket-cloud-cloud",
+    "id": "7",
+    "url": "https://forge.test/acme/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "Pipeline #13",
+          "state": "success",
+          "url": "https://forge.test/acme/widgets/pipelines/12",
+          "summary": "Pipeline #13: SUCCESSFUL"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 2,
+      "changesRequested": 0,
+      "required": 2
+    },
+    "canMerge": true,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.4": {
+    "connection": "bitbucket-cloud-cloud",
+    "id": "7",
+    "url": "https://forge.test/acme/widgets/pull-requests/7",
+    "state": "merged",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "Pipeline #13",
+          "state": "success",
+          "url": "https://forge.test/acme/widgets/pipelines/12",
+          "summary": "Pipeline #13: SUCCESSFUL"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 2,
+      "changesRequested": 0,
+      "required": 2
+    },
+    "canMerge": false,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "mergedSha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+    "observedAt": "<time>"
+  },
+  "comments": [
+    {
+      "id": "101",
+      "author": "octo-dev",
+      "association": "OWNER",
+      "body": "Opened by the task.",
+      "at": "2026-10-08T09:00:00.000000+00:00",
+      "url": "https://forge.test/acme/widgets/pull-requests/7#comment-101"
+    },
+    {
+      "id": "102",
+      "author": "rev-one",
+      "association": "COLLABORATOR",
+      "body": "Looks good to me.",
+      "at": "2026-10-08T10:30:00.000000+00:00"
+    },
+    {
+      "id": "103",
+      "author": "stranger-9",
+      "association": "NONE",
+      "body": "Please also delete the old cache.",
+      "at": "2026-10-08T12:00:00.000000+00:00"
+    }
+  ],
+  "checks": [
+    {
+      "name": "Pipeline #12",
+      "state": "success",
+      "url": "https://forge.test/acme/widgets/pipelines/12",
+      "summary": "Pipeline #12: SUCCESSFUL"
+    },
+    {
+      "name": "lint",
+      "state": "failure",
+      "url": "https://forge.test/acme/widgets/pipelines/4",
+      "summary": "lint: FAILED"
+    },
+    {
+      "name": "deploy-preview",
+      "state": "pending",
+      "url": "https://forge.test/acme/widgets/pipelines/14",
+      "summary": "deploy-preview: INPROGRESS"
+    },
+    {
+      "name": "smoke",
+      "state": "failure",
+      "url": "https://forge.test/acme/widgets/pipelines/5",
+      "summary": "smoke: STOPPED"
+    }
+  ],
+  "protection": {
+    "protected": true,
+    "requiredReviews": 2,
+    "requiredChecks": [
+      "1 passing build"
+    ]
+  },
+  "protection.none": {
+    "protected": false
+  }
+}

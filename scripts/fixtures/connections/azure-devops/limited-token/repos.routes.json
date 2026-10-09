@@ -1,0 +1,89 @@
+[
+  {
+    "path": "/Shop/_apis/git/repositories/web",
+    "status": 200,
+    "body": {
+      "id": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00",
+      "name": "web",
+      "project": {
+        "id": "5d3f1b0e-5a1c-4e0f-9b0d-0a1b2c3d4e51",
+        "name": "Shop",
+        "visibility": "private"
+      },
+      "defaultBranch": "refs/heads/main",
+      "isDisabled": false,
+      "remoteUrl": "https://dana@dev.azure.com/acme/Shop/_git/web",
+      "webUrl": "https://dev.azure.com/acme/Shop/_git/web"
+    }
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests",
+    "query": {
+      "searchCriteria.status": "all"
+    },
+    "status": 200,
+    "body": {
+      "count": 1,
+      "value": [
+        {
+          "pullRequestId": 7
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests/:id",
+    "status": 200,
+    "bodyFile": "pull.json"
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests/:id/statuses",
+    "status": 403,
+    "body": {
+      "message": "TF401027: You need the Git Read permission to perform this action."
+    }
+  },
+  {
+    "path": "/Shop/_apis/policy/evaluations",
+    "status": 403,
+    "body": {
+      "message": "TF401027: You need the Git Read permission to perform this action."
+    }
+  },
+  {
+    "path": "/Shop/_apis/policy/configurations",
+    "status": 403,
+    "body": {
+      "message": "TF401027: You need the Git Read permission to perform this action."
+    }
+  },
+  {
+    "path": "/Shop/_apis/build/builds",
+    "status": 403,
+    "body": {
+      "message": "TF401027: You need the Build Read permission to perform this action."
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/wit/wiql",
+    "status": 403,
+    "body": {
+      "message": "TF401027: You need the Work Items Read permission to perform this action."
+    }
+  },
+  {
+    "path": "/Shop/Shop Team/_apis/work/teamsettings/iterations",
+    "status": 403,
+    "body": {
+      "message": "TF401027: You need the Work Read permission to perform this action."
+    }
+  },
+  {
+    "path": "/Shop/_apis/wit/classificationnodes/iterations",
+    "status": 403,
+    "body": {
+      "message": "TF401027: You need the Work Read permission to perform this action."
+    }
+  }
+]

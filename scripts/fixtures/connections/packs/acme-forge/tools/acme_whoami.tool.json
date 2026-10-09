@@ -1,0 +1,15 @@
+{
+  "name": "acme_whoami",
+  "description": "Who the token belongs to.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {},
+    "required": []
+  },
+  "http": {
+    "method": "GET",
+    "url": "https://api.acme-forge.example/v1/me"
+  },
+  "effect": "read"
+}

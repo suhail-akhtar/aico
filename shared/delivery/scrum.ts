@@ -62,6 +62,26 @@ export interface SprintResult {
   carried: string[];
 }
 
+/**
+ * Where a sprint came from when it mirrors an iteration or milestone on a connected platform (ADR 0039
+ * section 4). The platform owns the name and the dates; AICO owns everything else about the sprint
+ * (committing, starting, closing, the plan). Absent for a sprint made here.
+ */
+export interface SprintRemote {
+  connection: string;
+  /** The platform's id for the iteration or milestone. */
+  id: string;
+  kind: 'iteration' | 'milestone';
+  /** What an item carries to say it belongs to this iteration, when that is not `id` (an Azure DevOps path). */
+  itemKey?: string;
+  url?: string;
+  /** Where the platform says it is in time (Azure DevOps team iterations). */
+  timeFrame?: 'past' | 'current' | 'future';
+  /** The platform closed or finished it. Closing the sprint here stays a person's act. */
+  state: 'open' | 'closed';
+  syncedAt: string;
+}
+
 export interface Sprint {
   id: string;
   name: string;
@@ -77,6 +97,8 @@ export interface Sprint {
   closedAt?: string;
   scope: ScopeEntry[];
   result?: SprintResult;
+  /** Present when the sprint mirrors a platform iteration or milestone. */
+  remote?: SprintRemote;
   /** Saved notes: edited by people, never generated into the log without a person saving them. */
   notes?: { review?: { text: string; at: string }; retro?: { text: string; at: string } };
 }

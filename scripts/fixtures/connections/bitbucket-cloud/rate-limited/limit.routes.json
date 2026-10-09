@@ -1,0 +1,18 @@
+{
+  "prefix": "/2.0",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 429,
+      "headers": {
+        "retry-after": "60"
+      },
+      "body": {
+        "type": "error",
+        "error": {
+          "message": "Rate limit for this resource has been exceeded"
+        }
+      }
+    }
+  ]
+}

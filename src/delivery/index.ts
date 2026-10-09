@@ -835,7 +835,7 @@ async function openPullRequest(project: string, id: string, by: 'person' | 'auto
 
 const prSignature = (pr: PullState): string => JSON.stringify([
   pr.state, pr.draft, pr.headSha, pr.mergeable, pr.checks.state, pr.checks.items.map(c => `${c.name}:${c.state}`),
-  pr.reviews, pr.canMerge, pr.mergeBlockers, pr.protectedBase, pr.mergedSha,
+  pr.reviews, pr.canMerge, pr.mergeBlockers, pr.protectedBase, pr.mergedSha, pr.autoMerge,
 ]);
 
 /**

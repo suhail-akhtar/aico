@@ -477,6 +477,162 @@ Built as designed except where this list says otherwise.
   (`draft`, `test-contract`), OAuth, and every adapter except GitHub. `ConnectionManage remove` is limited to
   a connection with no token.
 
+## Implementation notes (phase 2: GitLab, Gitea, Forgejo, GitBucket)
+
+Built as designed except where this list says otherwise. Fixtures are hand-written to the documented
+shapes (`scripts/fixtures/connections/{gitlab,gitea,gitbucket}/`); none of these adapters has met a live
+server, so the provider table above is **not** yet corrected by recorded fixtures and each is "built", not
+"supported", until the owner has done the live add (the verification list in section 7).
+
+- **Where.** `src/connections/gitlab/`, `gitea/` (one adapter, `makeGiteaAdapter('gitea' | 'forgejo')`),
+  `gitbucket/`, and `rest.ts`, the request helpers they share (a non-2xx page is an error, never an empty list;
+  provider-named messages; optional reads swallow only 403/404; bounded `Link: rel=next` paging). The GitHub
+  adapter keeps its own copy and was deliberately not refactored to use `rest.ts`.
+- **GitLab.** Projects are addressed by URL-encoded full path, so `RepoRef.owner` may contain slashes (nested
+  groups); `mapProject` and the mapping form accept that for every provider (GitHub's own parser still takes two
+  segments). Mergeability is `detailed_merge_status` (15.6+) with a conservative fallback to `merge_status` plus the
+  head pipeline; an unknown status blocks and is shown in GitLab's words. Scopes and expiry come from
+  `personal_access_tokens/self` (15.5+), unreported before. Iterations are probed (Premium) and fall back to
+  milestones with a warning; a native iteration is set with the GraphQL `issueSetIteration` mutation because REST
+  cannot, and its id is prefixed `iteration-` so it cannot collide with a milestone id. Weights are points where the
+  tier returns them. Epics are not read; job re-run is not wired (no check id reaches the caller).
+- **"Merge when pipeline succeeds" (the one contract change).** `PullState.autoMerge?: { kind: 'pipeline';
+  available; armed }`, `ProviderAdapter.pulls.merge(..., { whenChecksPass })`, and `landing.mergePlan`: the click may
+  arm it only when the remote offers it because a running pipeline is the one obstacle; GitLab applies every rule
+  when it merges. The ADR's "AICO neither sets nor unsets auto-merge" stays true for every other case and provider.
+  The Gitea family has `merge_when_checks_succeed`; it is not used.
+- **Gitea / Forgejo.** Same API, a flavour for names and a version cross-check that warns (never fails) when a
+  server reports the other name. `Authorization: token` (the transport's bearer auth gained a `scheme`). Scopes are
+  never reported, so capabilities are probed. `mergeable: false` is "checking" for two minutes after the pull
+  request's last update, then a conflict (rejected alternative: always a conflict, which would send a fresh pull
+  request back to the agent). `canMerge` is conservative (mergeable, not a draft, no requested changes, no awaited
+  review, every visible check green); the merge sends `head_commit_id` and never `force_merge`. Labels are ids on
+  these servers, so names are resolved and the missing `aico:*` ones created. Trust is derived (the owner, the
+  collaborators and `official` reviewers); nobody is trusted when those lists are unreadable. Estimates are `sp:N`
+  labels; there is no Actions rerun.
+- **GitBucket.** Not "the GitHub adapter with flags" after all: issues, labels, milestones and the merge-less
+  pull request calls are delegated to `githubAdapter` (errors re-worded), but the pull request fold, probe,
+  statuses, protection, issue listing (every filter applied client-side) and merge (head SHA compared first) are its
+  own, because there is no `mergeable_state`, check-runs, reviews or search. Every gap is a capability that stays
+  off. Whether GitBucket accepts a personal access token as the git https password is unverified.
+- **Conformance suite.** `subject.wire` hooks (`authScheme`, `itemsQueryOk`, `assignedOk`, `updateVerb`,
+  `updateSentOk`, `updateWrites`, `closeOk`, `labelsOk`, `assignOk`) let a provider say what a correct request
+  looks like; the defaults are GitHub's, so the GitHub suite is unchanged.
+- **Not built:** epics (GitLab), job/Actions re-run, GitLab merge trains, a Gitea `merge_when_checks_succeed`,
+  OAuth device flow for GitLab, reading GitBucket reviews (it has none).
+
+## Implementation notes (phase 4: Bitbucket; phase 6: connector packs)
+
+Built as designed except where this list says otherwise.
+
+**Bitbucket** (`src/connections/bitbucket/`: `cloud.ts`, `dc.ts`, `fold.ts`, `common.ts`)
+
+- **Auth.** Atlassian retired app passwords (June 2026). A Cloud **API token** is Basic with the account email,
+  so `StoredConnection.username` (not a secret, sent on create) picks Basic; with none the token is Bearer
+  (repository, project and workspace access tokens). Data Center is Bearer with an HTTP access token. Git needs a
+  different user name per kind, so the adapter interface gained `gitUsername(conn)` (default `x-access-token`):
+  `x-bitbucket-api-token-auth`, `x-token-auth`, or the account the probe found.
+- **Cloud cannot say whether a pull request merges.** `mergeable` is always `unknown`; `canMerge` is derived (open,
+  not a draft, no failing or pending build, no changes requested, approvals at least the requirement). When the
+  requirement is unreadable (it needs repository admin) one approval stands in for "reviewed", so a merge click is
+  never offered on a pull request nobody approved. Cloud's merge has no head-sha parameter: `merge` re-reads the PR
+  and refuses if the head moved since the caller looked (a small window the server's own restrictions still cover).
+- **Data Center uses the server's merge check** (`GET .../merge`: `canMerge`, `conflicted`, vetoes) and the optimistic
+  lock: the merge sends the PR's current `version`; a 409 is a `conflict`, never a retried merge. Required approvers
+  and builds come from `settings/pull-requests` (admin); unreadable is a warning, and the server enforces them anyway.
+- **Not built:** Jira (out of scope), sprints and iterations (none exist), inline comments, approving (AICO never
+  approves a pull request). Cloud issues exist only where the repository enables the tracker; the component stands
+  in for a label, and the label calls are no-ops. A personal Data Center repository (`~user`) is a valid owner.
+- **Unverified against the real services.** Like the other adapters, the fixtures are hand-written to the documented
+  shapes. Two points are from memory of the documentation and are the first to check when the owner records real
+  ones: the Data Center merge body (`strategyId` only; `version` as a query parameter) and Cloud's description limit
+  (30,000 characters is used, conservatively).
+
+**Connector packs** (`src/connections/packs/`: `format.ts`, `store.ts`, `runner.ts`, `normalise.ts`, `contract.ts`,
+`adapter.ts`, `index.ts`; the skill is `src/skills/builtin/connector-pack/`)
+
+- **The credential is the connection's own vault record**, not a name in the pack: a pack says only HOW it is sent
+  (`bearer`, `basic` with a username, or one header; never a query parameter). `storeToken` binds it to the pack's
+  hosts, exactly as for a built-in provider. Anything credential-shaped in any pack file is refused.
+- **The unit of approval is a digest** of `connector.json`, every tool and every fixture (hosts and mappings are in
+  `connector.json`). `packs.json` records the digest a person enabled; `requireEnabled` compares it on EVERY request.
+  Restoring the exact approved bytes is the approved content again (the record is a hash, not a flag).
+- **Operations run through the shared `ConnectionClient`** with the tool's rendered request, not through the
+  `HttpRequest` tool: the connection's policy, origin-bound vault resolution, rate limit and audit apply unchanged.
+  The ADR 0009 `validateArgs` shell rules do not (a markdown body has newlines and backticks and never reaches a shell);
+  `validatePackArgs` checks types, enum, pattern and bounds, and refuses `.`/`..` path values. Header values in a pack
+  tool are literals.
+- **Effect class = stricter of** the declared claim, the operation's own class (by name), the tool's `effect` and its
+  HTTP method; a read must be GET unless `readOnlyPost`; a destructive operation (merge) refuses to run unless the
+  caller says a person asked (`AdapterCtx.person`, set only by the human-gated landing path).
+- **Contract test.** A loopback server the engine starts replays fixtures: method, path, query, body fragment and the
+  declared credential scheme are checked on the request; the answer goes through normalisation, so a missing required
+  field or an unmapped enum value fails. `ClientOptions.contractSecret` lets that one client skip the vault and the
+  managed `connections` policy (loopback only; the network policy and SSRF guard still apply). MCP-backed operations
+  are tested from the recorded tool result only (field maps and normalisation); the server itself is exercised by the
+  person's live Test.
+- **Weaker than a built-in adapter, said once:** no labels, no protection read, no iterations, one request per
+  operation, mergeability is the connector's word narrowed by the normaliser, and pagination is the three declared styles.
+- **Policy.** `connections.packs: "forbid"`; a provider allow-list without `custom`, and host lists, apply as for any
+  provider; `customTools` is asked as `connector:<id>`; an MCP-backed operation asks the `mcp` rule at run time.
+  Draft, test, enable and connect are all refused when packs are forbidden.
+- **Who enables.** `ConnectionManage` has no enable action and imports no enable function (a test greps for it); the
+  route `connections/pack-enable` needs the decision gate's human and the digest the person was shown (409 if stale).
+  Disable and connect are person-only too. `create {provider: "custom", pack}` by the agent makes a token-less record
+  with the approved hosts, like any agent-made connection.
+
+## Implementation notes (phase 3: Azure DevOps; phase 5: iteration sync)
+
+Built as designed except where this list says otherwise. **Every request and response shape follows the documented
+REST reference (api-version 7.1, 7.0, 6.0) and hand-written fixtures; nothing has been run against a real Azure DevOps
+Services organization or Server.** The owner still records real fixtures before the adapter is called supported.
+
+- **Where.** `src/connections/azure-devops/` (`index.ts` the adapter, `fold.ts` the pure folds, `urls.ts`, `wiql.ts`,
+  `scopes.ts`), `src/connections/iterations.ts` (provider-generic), `shared/connections/process.ts` (state categories,
+  shared with the page so the preview and the write are one function), `web/src/connections-azure.ts`.
+- **Repository identity.** `RepoRef.owner` is the Azure DevOps PROJECT and `name` the Git repository; the organization
+  (or collection) is the connection's base URL. Projects may hold spaces, so `ProviderAdapter.validateRepo` replaces the
+  generic `owner/name` pattern for this provider only. Services is entered as an organization name (the address is built
+  from it); `suggestFromRemote` lets the board offer "Connect Azure DevOps for this repo?" from any of the six remote
+  spellings before a connection exists.
+- **Auth is Basic with an empty user name** (a new `basic-empty-user` mode in the ops transport; `Basic` with a
+  username would have needed a fake one). A revoked or expired PAT is answered with `203` and an HTML sign-in page, not
+  `401`; `ClientOptions.authFailure` makes the transport treat it as the 401 it is.
+- **Versions.** Services is `7.1`. A Server is walked down 7.1, 7.0, 6.0, 5.1 by `GET _apis/projects?$top=1` until one is
+  not answered with `400`; the result is written into `ProbeResult.version` ("Azure DevOps Server (REST 6.0)") and read
+  back into the `Accept: application/json;api-version=X` header of every later request (a client built before any probe
+  speaks 6.0). Policy evaluations are `X-preview.1`. Server 2019 or newer; older is refused with that sentence.
+- **Mergeability is the policies'.** `canMerge` = merge status `succeeded` AND evaluations readable AND no blocking
+  evaluation unapproved AND no change requested. Unreadable evaluations are "cannot tell", with a sentence, never a guess.
+  Only build and status policies are CHECKS (they send a task back to the agent); policies code cannot fix (comment
+  resolution, work item linking, required reviewers) are blockers. Merge sends `lastMergeSourceCommit` (re-checked
+  against the PR first), `bypassPolicy: false`, `deleteSourceBranch: false`; completion is asynchronous so the PR is
+  re-read. AICO's own threads are `closed` so they cannot trip a comment-resolution policy. Comment authors have no
+  `author_association`: in a private project every commenter is a member (commenting needs permission), in a public one
+  only the creator and the reviewers are.
+- **Work items.** WIQL (`timePrecision=true` so a `since` filter compares times, not days) then `workitemsbatch` in chunks
+  of 200; a person-typed condition is checked and parenthesised, and every returned item is verified to be in the mapped
+  project. Writes are JSON-Patch with a `test /rev` operation after a re-read; tags are read-modify-write. `rev` is the
+  revision number as text. Comments go through `System.History` (the comments API is preview-only).
+- **State map is categories** (ADR section 2 said "map by category, never by name"): `Proposed`, `InProgress`,
+  `Resolved`, `Completed`; `blocked` stays a tag. `ProviderAdapter.defaultStateMap` supplies it, `items.transitionCategory`
+  writes it, forward only. A stored value that names a category is a state, not a label, only for an adapter that has
+  `transitionCategory`, so a GitHub project that calls a label "InProgress" is unaffected.
+- **Writes report their revision** (`WriteResult`): Azure DevOps bumps `rev` on every write, including AICO's own note,
+  so the next write in the same sync pass must carry the new one or it conflicts with itself.
+- **Iterations to sprints** (`iterations.ts`): the current and next iteration become PLANNED sprints (`Sprint.remote`,
+  `sprint` and `sprint-sync` journal events, additive); the platform's timeFrame beats this machine's clock; a milestone
+  has no start, so its sprint runs from the day it is first imported. Membership and points are a three-way merge with the
+  base stored on `RemoteLink` (`iteration`, `points`): remote moved, remote wins; only local moved, push once; neither,
+  nothing. `placeFromRemote` never makes a task ready. Unknown membership (a Projects read that failed) is not "none".
+  An iteration is created on the platform only by `createRemoteIteration` from a human-gated route; an agent cannot turn
+  sprint sync on (`human-required`).
+- **Not built:** a Services OAuth/Entra sign-in (PAT only, as decided), Boards beyond items and iterations, Area-path
+  filtering beyond a WIQL condition (the area is shown as an `area:` label), a UI tick for "create on Azure DevOps" at sprint
+  start (the route and function exist), GitHub Projects v2 writes, test plans, wikis, and pipelines beyond reading builds
+  and statuses. `checks.rerun` is off. Connections to a project whose process adds a state category AICO does not know
+  read the unknown category as `proposed`, never as done.
+
 ## Verification
 
 When built: the conformance suite and the invariant assertions above run in `npm test`; reversing any of

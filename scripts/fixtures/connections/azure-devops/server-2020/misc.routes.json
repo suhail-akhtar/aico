@@ -1,0 +1,199 @@
+[
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests",
+    "query": {
+      "searchCriteria.status": "all"
+    },
+    "status": 200,
+    "body": {
+      "count": 1,
+      "value": [
+        {
+          "pullRequestId": 7
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/policy/configurations",
+    "status": 200,
+    "body": {
+      "count": 1,
+      "value": [
+        {
+          "id": 32,
+          "isEnabled": true,
+          "isBlocking": true,
+          "type": {
+            "id": "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd",
+            "displayName": "Minimum number of reviewers"
+          },
+          "settings": {
+            "minimumApproverCount": 2,
+            "scope": [
+              {
+                "refName": "refs/heads/main",
+                "matchKind": "Exact",
+                "repositoryId": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/build/builds",
+    "status": 200,
+    "body": {
+      "count": 0,
+      "value": []
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/wit/wiql",
+    "status": 200,
+    "body": {
+      "queryType": "flat",
+      "workItems": [
+        {
+          "id": 11
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/wit/workitemsbatch",
+    "status": 200,
+    "body": {
+      "count": 1,
+      "value": [
+        {
+          "id": 11,
+          "rev": 5,
+          "fields": {
+            "System.TeamProject": "Shop",
+            "System.WorkItemType": "User Story",
+            "System.Title": "Cache invalidation on widget update",
+            "System.State": "Active",
+            "System.Tags": "bug; needs-triage",
+            "System.AssignedTo": {
+              "displayName": "Dana Dev",
+              "uniqueName": "dana.dev@example.test"
+            },
+            "System.CreatedBy": {
+              "displayName": "Riley Reviewer",
+              "uniqueName": "riley@example.test"
+            },
+            "System.IterationPath": "Shop\\Sprint 1",
+            "System.AreaPath": "Shop\\Web",
+            "System.Description": "<div>Widgets stay <b>stale</b> after an update.</div><ul><li>Check the cache</li></ul>",
+            "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>The cache is invalidated</li><li>A test covers it</li></ul>",
+            "Microsoft.VSTS.Scheduling.Effort": 5
+          },
+          "url": "https://forge.test/_apis/wit/workItems/11"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/wit/workitemtypes",
+    "status": 200,
+    "body": {
+      "count": 2,
+      "value": [
+        {
+          "name": "User Story"
+        },
+        {
+          "name": "Task"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/wit/workitemtypes/:type/states",
+    "status": 200,
+    "body": {
+      "count": 4,
+      "value": [
+        {
+          "name": "New",
+          "category": "Proposed"
+        },
+        {
+          "name": "Active",
+          "category": "InProgress"
+        },
+        {
+          "name": "Resolved",
+          "category": "Resolved"
+        },
+        {
+          "name": "Closed",
+          "category": "Completed"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/Shop Team/_apis/work/teamsettings/iterations",
+    "status": 404,
+    "body": {
+      "message": "TF400499: You have not set your team field."
+    }
+  },
+  {
+    "path": "/Shop/_apis/wit/classificationnodes/iterations",
+    "status": 200,
+    "body": {
+      "id": 1,
+      "identifier": "root-iter",
+      "name": "Iteration",
+      "structureType": "iteration",
+      "hasChildren": true,
+      "path": "\\Shop\\Iteration",
+      "children": [
+        {
+          "id": 2,
+          "identifier": "11111111-0000-4000-8000-000000000001",
+          "name": "Sprint 1",
+          "structureType": "iteration",
+          "path": "\\Shop\\Iteration\\Sprint 1",
+          "attributes": {
+            "startDate": "2026-09-28T00:00:00Z",
+            "finishDate": "2026-10-09T00:00:00Z"
+          }
+        },
+        {
+          "id": 3,
+          "identifier": "11111111-0000-4000-8000-000000000002",
+          "name": "Sprint 2",
+          "structureType": "iteration",
+          "path": "\\Shop\\Iteration\\Sprint 2",
+          "attributes": {
+            "startDate": "2026-10-12T00:00:00Z",
+            "finishDate": "2026-10-23T00:00:00Z"
+          }
+        },
+        {
+          "id": 4,
+          "identifier": "11111111-0000-4000-8000-000000000003",
+          "name": "Backlog",
+          "structureType": "iteration",
+          "path": "\\Shop\\Iteration\\Backlog"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/commits/:sha/statuses",
+    "status": 200,
+    "body": {
+      "count": 0,
+      "value": []
+    }
+  }
+]

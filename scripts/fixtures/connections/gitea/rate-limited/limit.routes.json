@@ -1,0 +1,15 @@
+{
+  "prefix": "/api/v1",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 429,
+      "headers": {
+        "retry-after": "60"
+      },
+      "body": {
+        "message": "Too Many Requests"
+      }
+    }
+  ]
+}

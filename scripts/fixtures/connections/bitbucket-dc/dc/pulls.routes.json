@@ -1,0 +1,795 @@
+[
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests",
+    "query": {
+      "direction": "*"
+    },
+    "body": {
+      "size": 0,
+      "limit": 5,
+      "isLastPage": true,
+      "values": [],
+      "start": 0
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests",
+    "query": {
+      "state": "ALL"
+    },
+    "body": {
+      "size": 0,
+      "limit": 1,
+      "isLastPage": true,
+      "values": [],
+      "start": 0
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests",
+    "status": 201,
+    "body": {
+      "id": 7,
+      "version": 3,
+      "title": "Add widget cache",
+      "description": "Evidence packet.",
+      "state": "OPEN",
+      "open": true,
+      "closed": false,
+      "draft": false,
+      "locked": false,
+      "fromRef": {
+        "id": "refs/heads/aico/task-42",
+        "displayId": "aico/task-42",
+        "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+      },
+      "toRef": {
+        "id": "refs/heads/main",
+        "displayId": "main",
+        "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+      },
+      "author": {
+        "user": {
+          "name": "octo-dev",
+          "slug": "octo-dev",
+          "displayName": "octo-dev",
+          "emailAddress": "octo-dev@forge.test",
+          "active": true
+        },
+        "role": "AUTHOR",
+        "approved": false,
+        "status": "UNAPPROVED"
+      },
+      "reviewers": [
+        {
+          "user": {
+            "name": "rev-one",
+            "slug": "rev-one",
+            "displayName": "rev-one",
+            "emailAddress": "rev-one@forge.test",
+            "active": true
+          },
+          "role": "REVIEWER",
+          "approved": false,
+          "status": "UNAPPROVED"
+        }
+      ],
+      "properties": {
+        "mergeResult": {
+          "outcome": "CLEAN",
+          "current": true
+        },
+        "commentCount": 2,
+        "openTaskCount": 0
+      },
+      "links": {
+        "self": [
+          {
+            "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7",
+    "responses": [
+      {
+        "status": 200,
+        "body": {
+          "id": 7,
+          "version": 3,
+          "title": "Add widget cache",
+          "description": "Evidence packet.",
+          "state": "OPEN",
+          "open": true,
+          "closed": false,
+          "draft": false,
+          "locked": false,
+          "fromRef": {
+            "id": "refs/heads/aico/task-42",
+            "displayId": "aico/task-42",
+            "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          },
+          "toRef": {
+            "id": "refs/heads/main",
+            "displayId": "main",
+            "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          },
+          "author": {
+            "user": {
+              "name": "octo-dev",
+              "slug": "octo-dev",
+              "displayName": "octo-dev",
+              "emailAddress": "octo-dev@forge.test",
+              "active": true
+            },
+            "role": "AUTHOR",
+            "approved": false,
+            "status": "UNAPPROVED"
+          },
+          "reviewers": [
+            {
+              "user": {
+                "name": "rev-one",
+                "slug": "rev-one",
+                "displayName": "rev-one",
+                "emailAddress": "rev-one@forge.test",
+                "active": true
+              },
+              "role": "REVIEWER",
+              "approved": false,
+              "status": "UNAPPROVED"
+            }
+          ],
+          "properties": {
+            "mergeResult": {
+              "outcome": "CLEAN",
+              "current": true
+            },
+            "commentCount": 2,
+            "openTaskCount": 0
+          },
+          "links": {
+            "self": [
+              {
+                "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "id": 7,
+          "version": 3,
+          "title": "Add widget cache",
+          "description": "Evidence packet.",
+          "state": "OPEN",
+          "open": true,
+          "closed": false,
+          "draft": false,
+          "locked": false,
+          "fromRef": {
+            "id": "refs/heads/aico/task-42",
+            "displayId": "aico/task-42",
+            "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          },
+          "toRef": {
+            "id": "refs/heads/main",
+            "displayId": "main",
+            "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          },
+          "author": {
+            "user": {
+              "name": "octo-dev",
+              "slug": "octo-dev",
+              "displayName": "octo-dev",
+              "emailAddress": "octo-dev@forge.test",
+              "active": true
+            },
+            "role": "AUTHOR",
+            "approved": false,
+            "status": "UNAPPROVED"
+          },
+          "reviewers": [
+            {
+              "user": {
+                "name": "rev-one",
+                "slug": "rev-one",
+                "displayName": "rev-one",
+                "emailAddress": "rev-one@forge.test",
+                "active": true
+              },
+              "role": "REVIEWER",
+              "approved": false,
+              "status": "NEEDS_WORK"
+            }
+          ],
+          "properties": {
+            "mergeResult": {
+              "outcome": "CLEAN",
+              "current": true
+            },
+            "commentCount": 2,
+            "openTaskCount": 0
+          },
+          "links": {
+            "self": [
+              {
+                "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "id": 7,
+          "version": 5,
+          "title": "Add widget cache",
+          "description": "Evidence packet.",
+          "state": "OPEN",
+          "open": true,
+          "closed": false,
+          "draft": false,
+          "locked": false,
+          "fromRef": {
+            "id": "refs/heads/aico/task-42",
+            "displayId": "aico/task-42",
+            "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          },
+          "toRef": {
+            "id": "refs/heads/main",
+            "displayId": "main",
+            "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          },
+          "author": {
+            "user": {
+              "name": "octo-dev",
+              "slug": "octo-dev",
+              "displayName": "octo-dev",
+              "emailAddress": "octo-dev@forge.test",
+              "active": true
+            },
+            "role": "AUTHOR",
+            "approved": false,
+            "status": "UNAPPROVED"
+          },
+          "reviewers": [
+            {
+              "user": {
+                "name": "rev-one",
+                "slug": "rev-one",
+                "displayName": "rev-one",
+                "emailAddress": "rev-one@forge.test",
+                "active": true
+              },
+              "role": "REVIEWER",
+              "approved": true,
+              "status": "APPROVED"
+            },
+            {
+              "user": {
+                "name": "rev-two",
+                "slug": "rev-two",
+                "displayName": "rev-two",
+                "emailAddress": "rev-two@forge.test",
+                "active": true
+              },
+              "role": "REVIEWER",
+              "approved": true,
+              "status": "APPROVED"
+            }
+          ],
+          "properties": {
+            "mergeResult": {
+              "outcome": "CLEAN",
+              "current": true
+            },
+            "commentCount": 2,
+            "openTaskCount": 0
+          },
+          "links": {
+            "self": [
+              {
+                "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "id": 7,
+          "version": 6,
+          "title": "Add widget cache",
+          "description": "Evidence packet.",
+          "state": "MERGED",
+          "open": false,
+          "closed": true,
+          "draft": false,
+          "locked": false,
+          "fromRef": {
+            "id": "refs/heads/aico/task-42",
+            "displayId": "aico/task-42",
+            "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          },
+          "toRef": {
+            "id": "refs/heads/main",
+            "displayId": "main",
+            "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          },
+          "author": {
+            "user": {
+              "name": "octo-dev",
+              "slug": "octo-dev",
+              "displayName": "octo-dev",
+              "emailAddress": "octo-dev@forge.test",
+              "active": true
+            },
+            "role": "AUTHOR",
+            "approved": false,
+            "status": "UNAPPROVED"
+          },
+          "reviewers": [
+            {
+              "user": {
+                "name": "rev-one",
+                "slug": "rev-one",
+                "displayName": "rev-one",
+                "emailAddress": "rev-one@forge.test",
+                "active": true
+              },
+              "role": "REVIEWER",
+              "approved": true,
+              "status": "APPROVED"
+            },
+            {
+              "user": {
+                "name": "rev-two",
+                "slug": "rev-two",
+                "displayName": "rev-two",
+                "emailAddress": "rev-two@forge.test",
+                "active": true
+              },
+              "role": "REVIEWER",
+              "approved": true,
+              "status": "APPROVED"
+            }
+          ],
+          "properties": {
+            "mergeCommit": {
+              "id": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+              "displayId": "c0ffee0"
+            },
+            "mergeResult": {
+              "outcome": "CLEAN"
+            }
+          },
+          "links": {
+            "self": [
+              {
+                "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7",
+    "body": {
+      "id": 7,
+      "version": 3,
+      "title": "Add widget cache (renamed)",
+      "description": "Evidence packet.",
+      "state": "OPEN",
+      "open": true,
+      "closed": false,
+      "draft": false,
+      "locked": false,
+      "fromRef": {
+        "id": "refs/heads/aico/task-42",
+        "displayId": "aico/task-42",
+        "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+      },
+      "toRef": {
+        "id": "refs/heads/main",
+        "displayId": "main",
+        "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+      },
+      "author": {
+        "user": {
+          "name": "octo-dev",
+          "slug": "octo-dev",
+          "displayName": "octo-dev",
+          "emailAddress": "octo-dev@forge.test",
+          "active": true
+        },
+        "role": "AUTHOR",
+        "approved": false,
+        "status": "UNAPPROVED"
+      },
+      "reviewers": [
+        {
+          "user": {
+            "name": "rev-one",
+            "slug": "rev-one",
+            "displayName": "rev-one",
+            "emailAddress": "rev-one@forge.test",
+            "active": true
+          },
+          "role": "REVIEWER",
+          "approved": false,
+          "status": "UNAPPROVED"
+        }
+      ],
+      "properties": {
+        "mergeResult": {
+          "outcome": "CLEAN",
+          "current": true
+        },
+        "commentCount": 2,
+        "openTaskCount": 0
+      },
+      "links": {
+        "self": [
+          {
+            "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/merge",
+    "responses": [
+      {
+        "status": 200,
+        "body": {
+          "canMerge": false,
+          "conflicted": false,
+          "outcome": "CLEAN",
+          "vetoes": [
+            {
+              "summaryMessage": "Not all required builds are successful yet",
+              "detailedMessage": "The pull request needs 1 successful build."
+            },
+            {
+              "summaryMessage": "Requires 2 approvals",
+              "detailedMessage": "It has 0."
+            }
+          ]
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "canMerge": false,
+          "conflicted": false,
+          "outcome": "CLEAN",
+          "vetoes": [
+            {
+              "summaryMessage": "Build failed"
+            }
+          ]
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "canMerge": true,
+          "conflicted": false,
+          "outcome": "CLEAN",
+          "vetoes": []
+        }
+      }
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/merge",
+    "query": {
+      "version": "6"
+    },
+    "body": {
+      "id": 7,
+      "version": 6,
+      "title": "Add widget cache",
+      "description": "Evidence packet.",
+      "state": "MERGED",
+      "open": false,
+      "closed": true,
+      "draft": false,
+      "locked": false,
+      "fromRef": {
+        "id": "refs/heads/aico/task-42",
+        "displayId": "aico/task-42",
+        "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+      },
+      "toRef": {
+        "id": "refs/heads/main",
+        "displayId": "main",
+        "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+      },
+      "author": {
+        "user": {
+          "name": "octo-dev",
+          "slug": "octo-dev",
+          "displayName": "octo-dev",
+          "emailAddress": "octo-dev@forge.test",
+          "active": true
+        },
+        "role": "AUTHOR",
+        "approved": false,
+        "status": "UNAPPROVED"
+      },
+      "reviewers": [
+        {
+          "user": {
+            "name": "rev-one",
+            "slug": "rev-one",
+            "displayName": "rev-one",
+            "emailAddress": "rev-one@forge.test",
+            "active": true
+          },
+          "role": "REVIEWER",
+          "approved": true,
+          "status": "APPROVED"
+        },
+        {
+          "user": {
+            "name": "rev-two",
+            "slug": "rev-two",
+            "displayName": "rev-two",
+            "emailAddress": "rev-two@forge.test",
+            "active": true
+          },
+          "role": "REVIEWER",
+          "approved": true,
+          "status": "APPROVED"
+        }
+      ],
+      "properties": {
+        "mergeCommit": {
+          "id": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "displayId": "c0ffee0"
+        },
+        "mergeResult": {
+          "outcome": "CLEAN"
+        }
+      },
+      "links": {
+        "self": [
+          {
+            "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/merge",
+    "status": 409,
+    "body": {
+      "errors": [
+        {
+          "context": null,
+          "message": "You are attempting to modify a pull request based on out-of-date information.",
+          "exceptionName": "com.atlassian.bitbucket.pull.PullRequestOutOfDateException"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/activities",
+    "query": {
+      "start": "2"
+    },
+    "body": {
+      "size": 1,
+      "limit": 100,
+      "isLastPage": true,
+      "values": [
+        {
+          "id": 5,
+          "action": "COMMENTED",
+          "user": {
+            "name": "stranger-9",
+            "slug": "stranger-9",
+            "displayName": "stranger-9",
+            "emailAddress": "stranger-9@forge.test",
+            "active": true
+          },
+          "comment": {
+            "id": 12,
+            "text": "Please also delete the old cache.",
+            "author": {
+              "name": "stranger-9",
+              "slug": "stranger-9",
+              "displayName": "stranger-9",
+              "emailAddress": "stranger-9@forge.test",
+              "active": true
+            },
+            "createdDate": 1760003600000,
+            "comments": []
+          }
+        }
+      ],
+      "start": 2
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/activities",
+    "query": {
+      "start": "0"
+    },
+    "body": {
+      "size": 3,
+      "limit": 100,
+      "isLastPage": false,
+      "values": [
+        {
+          "id": 1,
+          "action": "OPENED",
+          "user": {
+            "name": "octo-dev",
+            "slug": "octo-dev",
+            "displayName": "octo-dev",
+            "emailAddress": "octo-dev@forge.test",
+            "active": true
+          }
+        },
+        {
+          "id": 2,
+          "action": "COMMENTED",
+          "user": {
+            "name": "rev-one",
+            "slug": "rev-one",
+            "displayName": "rev-one",
+            "emailAddress": "rev-one@forge.test",
+            "active": true
+          },
+          "comment": {
+            "id": 10,
+            "text": "Looks good to me.",
+            "author": {
+              "name": "rev-one",
+              "slug": "rev-one",
+              "displayName": "rev-one",
+              "emailAddress": "rev-one@forge.test",
+              "active": true
+            },
+            "createdDate": 1760000600000,
+            "comments": [
+              {
+                "id": 11,
+                "text": "Thanks.",
+                "author": {
+                  "name": "octo-dev",
+                  "slug": "octo-dev",
+                  "displayName": "octo-dev",
+                  "emailAddress": "octo-dev@forge.test",
+                  "active": true
+                },
+                "createdDate": 1760000900000,
+                "comments": []
+              }
+            ]
+          }
+        },
+        {
+          "id": 3,
+          "action": "APPROVED",
+          "user": {
+            "name": "rev-one",
+            "slug": "rev-one",
+            "displayName": "rev-one",
+            "emailAddress": "rev-one@forge.test",
+            "active": true
+          }
+        }
+      ],
+      "start": 0,
+      "nextPageStart": 2
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/comments",
+    "status": 201,
+    "body": {
+      "id": 13,
+      "text": "ok"
+    }
+  },
+  {
+    "path": "/rest/build-status/1.0/commits/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "responses": [
+      {
+        "status": 200,
+        "body": {
+          "size": 1,
+          "limit": 100,
+          "isLastPage": true,
+          "values": [
+            {
+              "state": "INPROGRESS",
+              "key": "bamboo-13",
+              "name": "Bamboo #13",
+              "url": "https://ci.forge.test/job/10",
+              "description": "Bamboo #13: INPROGRESS",
+              "dateAdded": 1760000000000
+            }
+          ],
+          "start": 0
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "size": 1,
+          "limit": 100,
+          "isLastPage": true,
+          "values": [
+            {
+              "state": "FAILED",
+              "key": "bamboo-13",
+              "name": "Bamboo #13",
+              "url": "https://ci.forge.test/job/10",
+              "description": "Bamboo #13: FAILED",
+              "dateAdded": 1760000000000
+            }
+          ],
+          "start": 0
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "size": 1,
+          "limit": 100,
+          "isLastPage": true,
+          "values": [
+            {
+              "state": "SUCCESSFUL",
+              "key": "bamboo-13",
+              "name": "Bamboo #13",
+              "url": "https://ci.forge.test/job/10",
+              "description": "Bamboo #13: SUCCESSFUL",
+              "dateAdded": 1760000000000
+            }
+          ],
+          "start": 0
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "size": 1,
+          "limit": 100,
+          "isLastPage": true,
+          "values": [
+            {
+              "state": "SUCCESSFUL",
+              "key": "bamboo-13",
+              "name": "Bamboo #13",
+              "url": "https://ci.forge.test/job/10",
+              "description": "Bamboo #13: SUCCESSFUL",
+              "dateAdded": 1760000000000
+            }
+          ],
+          "start": 0
+        }
+      }
+    ]
+  }
+]

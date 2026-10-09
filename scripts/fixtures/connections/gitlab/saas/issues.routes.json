@@ -1,0 +1,332 @@
+{
+  "prefix": "/api/v4",
+  "routes": [
+    {
+      "path": "/projects/:project/issues",
+      "query": {
+        "per_page": "1",
+        "state": "all"
+      },
+      "status": 200,
+      "body": [
+        {
+          "id": 6011,
+          "iid": 11,
+          "project_id": 4242,
+          "title": "Cache invalidation on widget update",
+          "description": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+          "state": "opened",
+          "labels": [
+            "bug",
+            "sp:3"
+          ],
+          "milestone": {
+            "id": 41,
+            "iid": 1,
+            "title": "Sprint 1",
+            "due_date": "2026-10-16"
+          },
+          "author": {
+            "username": "octo-bot"
+          },
+          "assignees": [
+            {
+              "username": "octo-dev"
+            }
+          ],
+          "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+          "created_at": "2026-09-28T09:00:00.000Z",
+          "updated_at": "2026-10-01T10:00:00.000Z",
+          "weight": 3
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/issues",
+      "query": {
+        "page": "2"
+      },
+      "status": 200,
+      "body": [
+        {
+          "id": 6013,
+          "iid": 13,
+          "project_id": 4242,
+          "title": "Document widget API",
+          "description": "Write the reference for `Widget.render`.\n\n## Acceptance\n- [ ] every option documented",
+          "state": "opened",
+          "labels": [
+            "docs",
+            "estimate:5"
+          ],
+          "milestone": null,
+          "author": {
+            "username": "octo-bot"
+          },
+          "assignees": [],
+          "web_url": "https://forge.test/acme/platform/widgets/-/issues/13",
+          "created_at": "2026-09-28T09:00:00.000Z",
+          "updated_at": "2026-10-02T09:30:00.000Z",
+          "weight": null
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/issues",
+      "status": 200,
+      "headers": {
+        "link": "<{{origin}}/api/v4/projects/acme%2Fplatform%2Fwidgets/issues?state=opened&per_page=100&page=2>; rel=\"next\""
+      },
+      "body": [
+        {
+          "id": 6011,
+          "iid": 11,
+          "project_id": 4242,
+          "title": "Cache invalidation on widget update",
+          "description": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+          "state": "opened",
+          "labels": [
+            "bug",
+            "sp:3"
+          ],
+          "milestone": {
+            "id": 41,
+            "iid": 1,
+            "title": "Sprint 1",
+            "due_date": "2026-10-16"
+          },
+          "author": {
+            "username": "octo-bot"
+          },
+          "assignees": [
+            {
+              "username": "octo-dev"
+            }
+          ],
+          "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+          "created_at": "2026-09-28T09:00:00.000Z",
+          "updated_at": "2026-10-01T10:00:00.000Z",
+          "weight": 3
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/projects/:project/issues",
+      "status": 201,
+      "body": {
+        "id": 6014,
+        "iid": 14,
+        "project_id": 4242,
+        "title": "Follow-up: cache metrics",
+        "description": "Track hit rate.",
+        "state": "opened",
+        "labels": [
+          "aico"
+        ],
+        "milestone": null,
+        "author": {
+          "username": "octo-dev"
+        },
+        "assignees": [],
+        "web_url": "https://forge.test/acme/platform/widgets/-/issues/14",
+        "created_at": "2026-09-28T09:00:00.000Z",
+        "updated_at": "2026-10-09T12:00:00.000Z",
+        "weight": null
+      }
+    },
+    {
+      "path": "/projects/:project/issues/11",
+      "status": 200,
+      "body": {
+        "id": 6011,
+        "iid": 11,
+        "project_id": 4242,
+        "title": "Cache invalidation on widget update",
+        "description": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+        "state": "opened",
+        "labels": [
+          "bug",
+          "sp:3"
+        ],
+        "milestone": {
+          "id": 41,
+          "iid": 1,
+          "title": "Sprint 1",
+          "due_date": "2026-10-16"
+        },
+        "author": {
+          "username": "octo-bot"
+        },
+        "assignees": [
+          {
+            "username": "octo-dev"
+          }
+        ],
+        "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+        "created_at": "2026-09-28T09:00:00.000Z",
+        "updated_at": "2026-10-01T10:00:00.000Z",
+        "weight": 3
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/:project/issues/11",
+      "bodyIncludes": "\"state_event\"",
+      "status": 200,
+      "body": {
+        "id": 6011,
+        "iid": 11,
+        "project_id": 4242,
+        "title": "Cache invalidation on widget update",
+        "description": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+        "state": "closed",
+        "labels": [
+          "bug",
+          "sp:3"
+        ],
+        "milestone": {
+          "id": 41,
+          "iid": 1,
+          "title": "Sprint 1",
+          "due_date": "2026-10-16"
+        },
+        "author": {
+          "username": "octo-bot"
+        },
+        "assignees": [
+          {
+            "username": "octo-dev"
+          }
+        ],
+        "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+        "created_at": "2026-09-28T09:00:00.000Z",
+        "updated_at": "2026-10-09T12:30:00.000Z",
+        "weight": 3
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/:project/issues/11",
+      "bodyIncludes": "\"add_labels\"",
+      "status": 200,
+      "body": {
+        "id": 6011,
+        "iid": 11,
+        "project_id": 4242,
+        "title": "Cache invalidation on widget update",
+        "description": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+        "state": "opened",
+        "labels": [
+          "bug",
+          "sp:3",
+          "aico:running"
+        ],
+        "milestone": {
+          "id": 41,
+          "iid": 1,
+          "title": "Sprint 1",
+          "due_date": "2026-10-16"
+        },
+        "author": {
+          "username": "octo-bot"
+        },
+        "assignees": [
+          {
+            "username": "octo-dev"
+          }
+        ],
+        "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+        "created_at": "2026-09-28T09:00:00.000Z",
+        "updated_at": "2026-10-01T10:00:00.000Z",
+        "weight": 3
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/:project/issues/11",
+      "bodyIncludes": "\"remove_labels\"",
+      "status": 200,
+      "body": {
+        "id": 6011,
+        "iid": 11,
+        "project_id": 4242,
+        "title": "Cache invalidation on widget update",
+        "description": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+        "state": "opened",
+        "labels": [
+          "bug",
+          "sp:3"
+        ],
+        "milestone": {
+          "id": 41,
+          "iid": 1,
+          "title": "Sprint 1",
+          "due_date": "2026-10-16"
+        },
+        "author": {
+          "username": "octo-bot"
+        },
+        "assignees": [
+          {
+            "username": "octo-dev"
+          }
+        ],
+        "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+        "created_at": "2026-09-28T09:00:00.000Z",
+        "updated_at": "2026-10-01T10:00:00.000Z",
+        "weight": 3
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/:project/issues/11",
+      "status": 200,
+      "body": {
+        "id": 6011,
+        "iid": 11,
+        "project_id": 4242,
+        "title": "Cache invalidation on widget update (reworded)",
+        "description": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+        "state": "opened",
+        "labels": [
+          "bug",
+          "sp:3",
+          "aico:running"
+        ],
+        "milestone": {
+          "id": 41,
+          "iid": 1,
+          "title": "Sprint 1",
+          "due_date": "2026-10-16"
+        },
+        "author": {
+          "username": "octo-bot"
+        },
+        "assignees": [
+          {
+            "username": "octo-dev"
+          }
+        ],
+        "web_url": "https://forge.test/acme/platform/widgets/-/issues/11",
+        "created_at": "2026-09-28T09:00:00.000Z",
+        "updated_at": "2026-10-09T12:10:00.000Z",
+        "weight": 3
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/projects/:project/issues/11/notes",
+      "status": 201,
+      "body": {
+        "id": 8802,
+        "body": "ok",
+        "author": {
+          "username": "octo-dev"
+        },
+        "created_at": "2026-10-09T13:15:00.000Z",
+        "system": false
+      }
+    }
+  ]
+}

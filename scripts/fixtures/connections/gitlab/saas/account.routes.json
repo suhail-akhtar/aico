@@ -1,0 +1,103 @@
+{
+  "prefix": "/api/v4",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 200,
+      "body": {
+        "id": 1001,
+        "username": "octo-dev",
+        "name": "Octo Developer",
+        "state": "active"
+      }
+    },
+    {
+      "path": "/version",
+      "status": 200,
+      "body": {
+        "version": "17.5.1-ee",
+        "revision": "abc123"
+      }
+    },
+    {
+      "path": "/personal_access_tokens/self",
+      "status": 200,
+      "body": {
+        "id": 3,
+        "name": "aico",
+        "scopes": [
+          "api"
+        ],
+        "active": true,
+        "revoked": false,
+        "expires_at": "2026-12-31"
+      }
+    },
+    {
+      "path": "/projects",
+      "status": 200,
+      "body": [
+        {
+          "id": 4242,
+          "path_with_namespace": "acme/platform/widgets",
+          "default_branch": "main",
+          "visibility": "private",
+          "web_url": "https://forge.test/acme/platform/widgets"
+        },
+        {
+          "id": 4243,
+          "path_with_namespace": "acme/gadgets",
+          "default_branch": "trunk",
+          "visibility": "internal",
+          "web_url": "https://forge.test/acme/gadgets"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project",
+      "status": 200,
+      "body": {
+        "id": 4242,
+        "name": "widgets",
+        "path": "widgets",
+        "path_with_namespace": "acme/platform/widgets",
+        "default_branch": "main",
+        "visibility": "private",
+        "web_url": "https://forge.test/acme/platform/widgets",
+        "http_url_to_repo": "https://forge.test/acme/platform/widgets.git",
+        "issues_enabled": true,
+        "merge_requests_enabled": true,
+        "only_allow_merge_if_pipeline_succeeds": true,
+        "permissions": {
+          "project_access": {
+            "access_level": 30
+          },
+          "group_access": {
+            "access_level": 40
+          }
+        }
+      }
+    },
+    {
+      "path": "/projects/:project/members/all",
+      "status": 200,
+      "body": [
+        {
+          "id": 2002,
+          "username": "octo-bot",
+          "access_level": 40
+        },
+        {
+          "id": 1001,
+          "username": "octo-dev",
+          "access_level": 30
+        },
+        {
+          "id": 2003,
+          "username": "viewer-1",
+          "access_level": 20
+        }
+      ]
+    }
+  ]
+}

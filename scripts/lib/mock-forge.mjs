@@ -152,7 +152,7 @@ function pickResponse(responses, count) {
 }
 
 /**
- * @param {{ fixtures: string, scenario?: string, requireAuth?: boolean, token?: string }} opts
+ * @param {{ fixtures: string, scenario?: string, requireAuth?: boolean, token?: string, basicUser?: string }} opts  `basicUser` switches the auth check to Basic `user:token`
  * @returns {Promise<{ url: string, host: string, port: number, requests: object[],
  *   setScenario(name: string): void, reset(): void, stop(): Promise<void> }>}
  */
@@ -183,7 +183,13 @@ export async function startMockForge(opts) {
         res.end(status === 204 || status === 304 ? undefined : text);
       };
 
-      if (requireAuth) {
+      if (requireAuth && opts.basicUser !== undefined) {
+        // Basic auth (Bitbucket Cloud API tokens): `user:token`, base64 in the Authorization header.
+        const m = /^Basic\s+(\S+)$/i.exec(String(req.headers.authorization ?? ''));
+        const got = m ? Buffer.from(m[1], 'base64').toString('utf8') : '';
+        if (!m) return finish(401, { 'content-type': 'application/json' }, JSON.stringify({ message: 'Requires authentication' }));
+        if (token !== undefined && got !== `${opts.basicUser}:${token}`) return finish(401, { 'content-type': 'application/json' }, JSON.stringify({ message: 'Bad credentials' }));
+      } else if (requireAuth) {
         const m = /^(?:Bearer|token)\s+(\S+)$/i.exec(String(req.headers.authorization ?? ''));
         if (!m) return finish(401, { 'content-type': 'application/json' }, JSON.stringify({ message: 'Requires authentication' }));
         if (token !== undefined && m[1] !== token) return finish(401, { 'content-type': 'application/json' }, JSON.stringify({ message: 'Bad credentials' }));

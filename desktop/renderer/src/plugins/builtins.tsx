@@ -34,7 +34,7 @@ const CredentialsSection = (): React.ReactElement => <CredentialManager />;
 // Settings → Custom tools: the engine's shared panel (web ToolsPane) — list, read, enable, test.
 const ToolsSection = (): React.ReactElement => <ToolsPane />;
 // Settings → Connections: the team's code host and tracker (ADR 0039); the same shared page the web portal shows.
-const ConnectionsSection = (): React.ReactElement => <ConnectionsPane />;
+const ConnectionsSection = (): React.ReactElement => <ConnectionsPane startChat={prompt => newChat({ prompt })} />;
 // Settings → What AICO learned: the engine's shared page (web LearnedPane) plus its two switches (ADR 0016).
 const LearnedPaneSettings = enginePaneSection('learned');
 const LearnedSection = (): React.ReactElement => <><LearnedPane /><div className="mt-6"><LearnedPaneSettings /></div></>;

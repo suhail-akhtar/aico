@@ -1,0 +1,23 @@
+{
+  "operation": "items.comment",
+  "cases": [
+    {
+      "name": "posts",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "A-1",
+        "body": "Merged."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v1/repos/acme/widgets/issues/A-1/comments",
+        "bodyIncludes": "\"text\":\"Merged.\""
+      },
+      "response": {
+        "status": 201,
+        "body": {}
+      }
+    }
+  ]
+}

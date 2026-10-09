@@ -1,0 +1,703 @@
+{
+  "prefix": "/api/v4",
+  "routes": [
+    {
+      "path": "/projects/:project/merge_requests",
+      "query": {
+        "per_page": "1",
+        "state": "all"
+      },
+      "status": 200,
+      "body": [
+        {
+          "id": 9007,
+          "iid": 7,
+          "project_id": 4242,
+          "title": "Add widget cache",
+          "state": "opened",
+          "draft": false,
+          "work_in_progress": false,
+          "source_branch": "aico/task-42",
+          "target_branch": "main",
+          "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          "merge_status": "can_be_merged",
+          "detailed_merge_status": "ci_still_running",
+          "has_conflicts": false,
+          "blocking_discussions_resolved": true,
+          "merge_commit_sha": null,
+          "squash_commit_sha": null,
+          "merged_at": null,
+          "author": {
+            "id": 1001,
+            "username": "octo-dev"
+          },
+          "reviewers": [],
+          "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+          "user": {
+            "can_merge": true
+          },
+          "updated_at": "2026-10-09T12:00:00.000Z",
+          "head_pipeline": null
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/merge_requests",
+      "query": {
+        "source_branch": "*"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": []
+        },
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": 9007,
+              "iid": 7,
+              "project_id": 4242,
+              "title": "Add widget cache",
+              "state": "opened",
+              "draft": false,
+              "work_in_progress": false,
+              "source_branch": "aico/task-42",
+              "target_branch": "main",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+              "merge_status": "can_be_merged",
+              "detailed_merge_status": "ci_still_running",
+              "has_conflicts": false,
+              "blocking_discussions_resolved": true,
+              "merge_commit_sha": null,
+              "squash_commit_sha": null,
+              "merged_at": null,
+              "author": {
+                "id": 1001,
+                "username": "octo-dev"
+              },
+              "reviewers": [],
+              "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+              "user": {
+                "can_merge": true
+              },
+              "updated_at": "2026-10-09T12:00:00.000Z",
+              "head_pipeline": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/projects/:project/merge_requests",
+      "status": 201,
+      "body": {
+        "id": 9007,
+        "iid": 7,
+        "project_id": 4242,
+        "title": "Add widget cache",
+        "state": "opened",
+        "draft": false,
+        "work_in_progress": false,
+        "source_branch": "aico/task-42",
+        "target_branch": "main",
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "merge_status": "checking",
+        "detailed_merge_status": "checking",
+        "has_conflicts": false,
+        "blocking_discussions_resolved": true,
+        "merge_commit_sha": null,
+        "squash_commit_sha": null,
+        "merged_at": null,
+        "author": {
+          "id": 1001,
+          "username": "octo-dev"
+        },
+        "reviewers": [],
+        "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+        "user": {
+          "can_merge": true
+        },
+        "updated_at": "2026-10-09T12:00:00.000Z",
+        "head_pipeline": null
+      }
+    },
+    {
+      "path": "/projects/:project/merge_requests/:iid",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "iid": 7,
+            "project_id": 4242,
+            "title": "Add widget cache",
+            "state": "opened",
+            "draft": false,
+            "work_in_progress": false,
+            "source_branch": "aico/task-42",
+            "target_branch": "main",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "merge_status": "can_be_merged",
+            "detailed_merge_status": "ci_still_running",
+            "has_conflicts": false,
+            "blocking_discussions_resolved": true,
+            "merge_commit_sha": null,
+            "squash_commit_sha": null,
+            "merged_at": null,
+            "author": {
+              "id": 1001,
+              "username": "octo-dev"
+            },
+            "reviewers": [
+              {
+                "id": 2002,
+                "username": "octo-bot"
+              }
+            ],
+            "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+            "user": {
+              "can_merge": true
+            },
+            "updated_at": "2026-10-09T12:00:00.000Z",
+            "head_pipeline": {
+              "id": 501,
+              "status": "running",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+              "ref": "aico/task-42",
+              "web_url": "https://forge.test/acme/platform/widgets/-/pipelines/501"
+            }
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "iid": 7,
+            "project_id": 4242,
+            "title": "Add widget cache",
+            "state": "opened",
+            "draft": false,
+            "work_in_progress": false,
+            "source_branch": "aico/task-42",
+            "target_branch": "main",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "merge_status": "can_be_merged",
+            "detailed_merge_status": "ci_must_pass",
+            "has_conflicts": false,
+            "blocking_discussions_resolved": true,
+            "merge_commit_sha": null,
+            "squash_commit_sha": null,
+            "merged_at": null,
+            "author": {
+              "id": 1001,
+              "username": "octo-dev"
+            },
+            "reviewers": [],
+            "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+            "user": {
+              "can_merge": true
+            },
+            "updated_at": "2026-10-09T12:00:00.000Z",
+            "head_pipeline": {
+              "id": 502,
+              "status": "failed",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+              "ref": "aico/task-42",
+              "web_url": "https://forge.test/acme/platform/widgets/-/pipelines/502"
+            }
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "iid": 7,
+            "project_id": 4242,
+            "title": "Add widget cache",
+            "state": "opened",
+            "draft": false,
+            "work_in_progress": false,
+            "source_branch": "aico/task-42",
+            "target_branch": "main",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "merge_status": "can_be_merged",
+            "detailed_merge_status": "requested_changes",
+            "has_conflicts": false,
+            "blocking_discussions_resolved": true,
+            "merge_commit_sha": null,
+            "squash_commit_sha": null,
+            "merged_at": null,
+            "author": {
+              "id": 1001,
+              "username": "octo-dev"
+            },
+            "reviewers": [],
+            "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+            "user": {
+              "can_merge": true
+            },
+            "updated_at": "2026-10-09T12:00:00.000Z",
+            "head_pipeline": {
+              "id": 503,
+              "status": "success",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+              "ref": "aico/task-42",
+              "web_url": "https://forge.test/acme/platform/widgets/-/pipelines/503"
+            }
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "iid": 7,
+            "project_id": 4242,
+            "title": "Add widget cache",
+            "state": "opened",
+            "draft": false,
+            "work_in_progress": false,
+            "source_branch": "aico/task-42",
+            "target_branch": "main",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "merge_status": "can_be_merged",
+            "detailed_merge_status": "mergeable",
+            "has_conflicts": false,
+            "blocking_discussions_resolved": true,
+            "merge_commit_sha": null,
+            "squash_commit_sha": null,
+            "merged_at": null,
+            "author": {
+              "id": 1001,
+              "username": "octo-dev"
+            },
+            "reviewers": [],
+            "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+            "user": {
+              "can_merge": true
+            },
+            "updated_at": "2026-10-09T12:00:00.000Z",
+            "head_pipeline": {
+              "id": 504,
+              "status": "success",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+              "ref": "aico/task-42",
+              "web_url": "https://forge.test/acme/platform/widgets/-/pipelines/504"
+            }
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": 9007,
+            "iid": 7,
+            "project_id": 4242,
+            "title": "Add widget cache",
+            "state": "merged",
+            "draft": false,
+            "work_in_progress": false,
+            "source_branch": "aico/task-42",
+            "target_branch": "main",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "merge_status": "can_be_merged",
+            "detailed_merge_status": "not_open",
+            "has_conflicts": false,
+            "blocking_discussions_resolved": true,
+            "merge_commit_sha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+            "squash_commit_sha": null,
+            "merged_at": "2026-10-09T13:00:00.000Z",
+            "author": {
+              "id": 1001,
+              "username": "octo-dev"
+            },
+            "reviewers": [],
+            "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+            "user": {
+              "can_merge": true
+            },
+            "updated_at": "2026-10-09T12:00:00.000Z",
+            "head_pipeline": {
+              "id": 505,
+              "status": "success",
+              "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+              "ref": "aico/task-42",
+              "web_url": "https://forge.test/acme/platform/widgets/-/pipelines/505"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/:project/merge_requests/:iid",
+      "status": 200,
+      "body": {
+        "id": 9007,
+        "iid": 7,
+        "project_id": 4242,
+        "title": "Add widget cache",
+        "state": "merged",
+        "draft": false,
+        "work_in_progress": false,
+        "source_branch": "aico/task-42",
+        "target_branch": "main",
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "merge_status": "can_be_merged",
+        "detailed_merge_status": "not_open",
+        "has_conflicts": false,
+        "blocking_discussions_resolved": true,
+        "merge_commit_sha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "squash_commit_sha": null,
+        "merged_at": "2026-10-09T13:00:00.000Z",
+        "author": {
+          "id": 1001,
+          "username": "octo-dev"
+        },
+        "reviewers": [],
+        "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+        "user": {
+          "can_merge": true
+        },
+        "updated_at": "2026-10-09T12:00:00.000Z",
+        "head_pipeline": {
+          "id": 505,
+          "status": "success",
+          "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          "ref": "aico/task-42",
+          "web_url": "https://forge.test/acme/platform/widgets/-/pipelines/505"
+        }
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/:project/merge_requests/:iid/merge",
+      "bodyIncludes": "\"sha\":\"0000000000000000000000000000000000000000\"",
+      "status": 409,
+      "body": {
+        "message": "SHA does not match HEAD of source branch: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/:project/merge_requests/:iid/merge",
+      "bodyIncludes": "\"sha\":\"1111111111111111111111111111111111111111\"",
+      "status": 405,
+      "body": {
+        "message": "405 Method Not Allowed"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/:project/merge_requests/:iid/merge",
+      "status": 200,
+      "body": {
+        "id": 9007,
+        "iid": 7,
+        "project_id": 4242,
+        "title": "Add widget cache",
+        "state": "merged",
+        "draft": false,
+        "work_in_progress": false,
+        "source_branch": "aico/task-42",
+        "target_branch": "main",
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "merge_status": "can_be_merged",
+        "detailed_merge_status": "not_open",
+        "has_conflicts": false,
+        "blocking_discussions_resolved": true,
+        "merge_commit_sha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "squash_commit_sha": null,
+        "merged_at": "2026-10-09T13:00:00.000Z",
+        "author": {
+          "id": 1001,
+          "username": "octo-dev"
+        },
+        "reviewers": [],
+        "web_url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+        "user": {
+          "can_merge": true
+        },
+        "updated_at": "2026-10-09T12:00:00.000Z",
+        "head_pipeline": {
+          "id": 505,
+          "status": "success",
+          "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          "ref": "aico/task-42",
+          "web_url": "https://forge.test/acme/platform/widgets/-/pipelines/505"
+        }
+      }
+    },
+    {
+      "path": "/projects/:project/merge_requests/:iid/approvals",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "approved": false,
+            "approvals_required": 1,
+            "approvals_left": 1,
+            "approved_by": []
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "approved": false,
+            "approvals_required": 1,
+            "approvals_left": 1,
+            "approved_by": []
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "approved": false,
+            "approvals_required": 1,
+            "approvals_left": 1,
+            "approved_by": []
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "approved": true,
+            "approvals_required": 1,
+            "approvals_left": 0,
+            "approved_by": [
+              {
+                "user": {
+                  "id": 2002,
+                  "username": "octo-bot"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "approved": true,
+            "approvals_required": 1,
+            "approvals_left": 0,
+            "approved_by": [
+              {
+                "user": {
+                  "id": 2002,
+                  "username": "octo-bot"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/merge_requests/:iid/notes",
+      "status": 200,
+      "body": [
+        {
+          "id": 801,
+          "body": "Looks good after the rename.",
+          "author": {
+            "id": 2002,
+            "username": "octo-bot"
+          },
+          "created_at": "2026-10-09T12:05:00.000Z",
+          "system": false,
+          "noteable_type": "MergeRequest"
+        },
+        {
+          "id": 802,
+          "body": "Please also add docs.",
+          "author": {
+            "id": 3009,
+            "username": "stranger-9"
+          },
+          "created_at": "2026-10-09T11:45:00.000Z",
+          "system": false,
+          "noteable_type": "MergeRequest"
+        },
+        {
+          "id": 803,
+          "body": "approved this merge request",
+          "author": {
+            "id": 2002,
+            "username": "octo-bot"
+          },
+          "created_at": "2026-10-09T12:00:00.000Z",
+          "system": true,
+          "noteable_type": "MergeRequest"
+        },
+        {
+          "id": 804,
+          "body": "added 1 commit",
+          "author": {
+            "id": 1001,
+            "username": "octo-dev"
+          },
+          "created_at": "2026-10-09T11:00:00.000Z",
+          "system": true,
+          "noteable_type": "MergeRequest"
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/projects/:project/merge_requests/:iid/notes",
+      "status": 201,
+      "body": {
+        "id": 8801,
+        "body": "ok",
+        "author": {
+          "username": "octo-dev"
+        },
+        "created_at": "2026-10-09T13:10:00.000Z",
+        "system": false
+      }
+    },
+    {
+      "path": "/projects/:project/pipelines/501/jobs",
+      "status": 200,
+      "body": [
+        {
+          "id": 5011,
+          "name": "build",
+          "status": "running",
+          "stage": "build",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5011"
+        },
+        {
+          "id": 5012,
+          "name": "test",
+          "status": "created",
+          "stage": "test",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5012"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/pipelines/502/jobs",
+      "status": 200,
+      "body": [
+        {
+          "id": 5021,
+          "name": "build",
+          "status": "success",
+          "stage": "build",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5021"
+        },
+        {
+          "id": 5022,
+          "name": "test",
+          "status": "failed",
+          "stage": "test",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5022",
+          "failure_reason": "script_failure"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/pipelines/503/jobs",
+      "status": 200,
+      "body": [
+        {
+          "id": 5031,
+          "name": "build",
+          "status": "success",
+          "stage": "build",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5031"
+        },
+        {
+          "id": 5032,
+          "name": "test",
+          "status": "success",
+          "stage": "test",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5032"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/pipelines/504/jobs",
+      "status": 200,
+      "body": [
+        {
+          "id": 5041,
+          "name": "build",
+          "status": "success",
+          "stage": "build",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5041"
+        },
+        {
+          "id": 5042,
+          "name": "test",
+          "status": "success",
+          "stage": "test",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5042"
+        },
+        {
+          "id": 5043,
+          "name": "lint",
+          "status": "failed",
+          "stage": "test",
+          "allow_failure": true,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5043"
+        },
+        {
+          "id": 5044,
+          "name": "deploy-preview",
+          "status": "manual",
+          "stage": "deploy",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5044"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/pipelines/505/jobs",
+      "status": 200,
+      "body": [
+        {
+          "id": 5051,
+          "name": "build",
+          "status": "success",
+          "stage": "build",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5051"
+        },
+        {
+          "id": 5052,
+          "name": "test",
+          "status": "success",
+          "stage": "test",
+          "allow_failure": false,
+          "web_url": "https://forge.test/acme/platform/widgets/-/jobs/5052"
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/pipelines",
+      "query": {
+        "per_page": "1"
+      },
+      "status": 200,
+      "body": [
+        {
+          "id": 505,
+          "status": "success",
+          "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          "ref": "aico/task-42",
+          "web_url": "https://forge.test/acme/platform/widgets/-/pipelines/505"
+        }
+      ]
+    }
+  ]
+}

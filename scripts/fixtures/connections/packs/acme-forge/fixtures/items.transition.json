@@ -1,0 +1,67 @@
+{
+  "operation": "items.transition",
+  "cases": [
+    {
+      "name": "closes",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "A-1",
+        "to": "closed",
+        "ifRev": "r1"
+      },
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/repos/acme/widgets/issues/A-1",
+        "bodyIncludes": "\"expectedRev\":\"r1\""
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "A-1",
+          "number": 1,
+          "title": "Issue 1",
+          "body": "Steps.",
+          "state": "closed",
+          "labels": [
+            "bug"
+          ],
+          "assignees": [
+            "sam"
+          ],
+          "author": "robin",
+          "url": "https://app.acme-forge.example/acme/widgets/issues/A-1",
+          "rev": "r2"
+        }
+      },
+      "expect": {
+        "state": "closed",
+        "rev": "r2"
+      }
+    },
+    {
+      "name": "someone edited it first",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "A-1",
+        "to": "closed",
+        "ifRev": "old"
+      },
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/repos/acme/widgets/issues/A-1"
+      },
+      "response": {
+        "status": 412,
+        "body": {}
+      },
+      "expect": {
+        "error": {
+          "code": "conflict",
+          "status": 412
+        }
+      }
+    }
+  ]
+}

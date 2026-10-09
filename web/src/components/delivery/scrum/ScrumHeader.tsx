@@ -27,8 +27,10 @@ import { DvIcon } from '../icons';
 import { BTN_OUTLINE, BTN_PRIMARY } from '../ui';
 import { PaceChip, Sparkline } from './bits';
 
-export function ScrumHeader({ sprint, tasks, now, offsetMin, onPlan, onStart, onClose, onRefine }: {
+export function ScrumHeader({ sprint, tasks, now, offsetMin, onPlan, onStart, onClose, onRefine, source }: {
   sprint: Sprint | undefined;
+  /** The connected platform's name, when the sprint mirrors one of its iterations. */
+  source?: string | undefined;
   tasks: readonly Task[];
   now: number;
   offsetMin: number;
@@ -56,6 +58,17 @@ export function ScrumHeader({ sprint, tasks, now, offsetMin, onPlan, onStart, on
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h2 className="text-[15px] font-semibold tracking-tight text-aico-primary">{sprint.name}</h2>
             <span className="rounded-full bg-aico-hover px-2 py-0.5 text-[11px] text-aico-secondary">{planned ? 'Planning' : closed ? 'Closed' : 'Active'}</span>
+            {sprint.remote && (
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[11px] ${sprint.remote.state === 'closed' && !closed ? 'border-aico-warning text-aico-warning' : 'border-aico-border-subtle text-aico-secondary'}`}
+                title={sprint.remote.state === 'closed' && !closed
+                  ? `${source ?? 'The platform'} has ended this sprint. Close it here when the work is done.`
+                  : `The name and dates of this sprint follow ${source ?? 'the platform'}; planning, starting and closing stay here.`}
+                data-sprint-remote={sprint.remote.kind}
+              >
+                {sprint.remote.state === 'closed' && !closed ? `Ended on ${source ?? 'the platform'}` : `Synced with ${source ?? 'the platform'}`}
+              </span>
+            )}
           </div>
           {sprint.goal && <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-aico-secondary">{sprint.goal}</p>}
           <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[12px] tabular-nums text-aico-muted">

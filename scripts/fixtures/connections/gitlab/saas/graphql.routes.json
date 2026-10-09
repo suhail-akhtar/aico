@@ -1,0 +1,21 @@
+{
+  "prefix": "/api",
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/graphql",
+      "bodyIncludes": "issueSetIteration",
+      "status": 200,
+      "body": {
+        "data": {
+          "issueSetIteration": {
+            "errors": [],
+            "issue": {
+              "iid": "11"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

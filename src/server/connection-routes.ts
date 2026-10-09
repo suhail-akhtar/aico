@@ -13,6 +13,13 @@
  *   POST  /api/connections/map                {project,connection,repo?,workItems?,landing?,trunk?,stateMap?,confirmLanding?} [person]
  *   POST  /api/connections/unmap              {project}                                                [person]
  *   POST  /api/connections/sync               {project}: pull items, push state, observe pull requests now
+ *   GET   /api/connections/packs              {packs}: agent-built connector packs with their status (shared/connections/packs.ts)
+ *   POST  /api/connections/pack-test          {id}: replay the pack's fixtures on loopback through the real engine path
+ *   POST  /api/connections/pack-enable        {id,hash}: a person approves exactly the content they were shown            [person]
+ *   POST  /api/connections/pack-disable       {id}                                                                          [person]
+ *   POST  /api/connections/pack-connect       {id,insecureHttp?}: a connection for an enabled pack (then: token, test)      [person]
+ *   GET   /api/connections/discover?connection=&kind=repos|process[&q=|&owner=]   repositories to pick from, or the project's process
+ *   POST  /api/connections/iteration-create   {project,sprint}: create the sprint's iteration on the platform         [person]
  *
  * WHO MAY SAY YES. The model can `curl` the loopback port and may learn the token, so everything
  * that stores a credential, changes where the engine sends one, or makes the engine push
@@ -27,11 +34,13 @@
 
 import type http from 'node:http';
 import path from 'node:path';
+import * as Packs from '../connections/packs/index.js';
 import { providerCatalogue } from '../connections/registry.js';
 import * as C from '../connections/service.js';
 import * as Store from '../connections/store.js';
 import { kickProject } from '../connections/poller.js';
 import { boardConnection, syncProject } from '../connections/sync.js';
+import { createRemoteIteration } from '../connections/iterations.js';
 import type { ProviderId } from '../connections/types.js';
 
 export interface ConnectionRouteDeps {
@@ -55,7 +64,10 @@ export async function handleConnectionRoute(
   const known = route === 'connections/providers' || route === 'connections/list' || route === 'connections/create'
     || route === 'connections/credential' || route === 'connections/test' || route === 'connections/update'
     || route === 'connections/remove' || route === 'connections/detect' || route === 'connections/mapping'
-    || route === 'connections/map' || route === 'connections/unmap' || route === 'connections/sync';
+    || route === 'connections/map' || route === 'connections/unmap' || route === 'connections/sync'
+    || route === 'connections/packs' || route === 'connections/pack-test' || route === 'connections/pack-enable'
+    || route === 'connections/pack-disable' || route === 'connections/pack-connect'
+    || route === 'connections/discover' || route === 'connections/iteration-create';
   if (!known) { send(res, 404, { error: 'not found' }); return true; }
   try {
     const body = (method === 'GET' ? {} : await deps.readJson(req)) as Record<string, unknown>;
@@ -73,6 +85,12 @@ export async function handleConnectionRoute(
       const p = path.resolve(raw);
       if (!await deps.isKnownProject(p)) { send(res, 403, { error: 'not a registered project' }); return undefined; }
       return p;
+    };
+    const packFail = (e: unknown): boolean => {
+      if (!(e instanceof Packs.PackError)) throw e;
+      const status = e.code === 'not-found' ? 404 : e.code === 'stale' || e.code === 'not-tested' || e.code === 'not-enabled' ? 409 : e.code === 'policy' ? 403 : 400;
+      send(res, status, { error: e.message, code: e.code });
+      return true;
     };
     const idOf = (): string | undefined => {
       const id = str(body.id, 60);
@@ -99,6 +117,7 @@ export async function handleConnectionRoute(
           ...(str(body.baseUrl, 300) ? { baseUrl: str(body.baseUrl, 300)! } : {}),
           ...(body.insecureHttp === true ? { insecureHttp: true } : {}),
           ...(str(body.caBundle, 400) ? { caBundle: str(body.caBundle, 400)! } : {}),
+          ...(str(body.username, 200) ? { username: str(body.username, 200)! } : {}),
         });
         send(res, 200, C.viewOf(stored));
         return true;
@@ -187,11 +206,81 @@ export async function handleConnectionRoute(
         send(res, 200, { ok: true });
         return true;
       }
+      case 'discover': {
+        // Reads through an already-connected host with its stored token; nothing here can widen a host or write.
+        if (!getOnly()) return true;
+        const id = str(url.searchParams.get('connection'), 60);
+        const conn = id ? Store.getConnection(id) : undefined;
+        if (!conn) { send(res, 404, { error: 'no such connection' }); return true; }
+        const { adapter, ctx } = C.ctxFor(conn);
+        const kind = url.searchParams.get('kind');
+        if (kind === 'repos') {
+          const repos = await adapter.repos.list(ctx, str(url.searchParams.get('q'), 100));
+          send(res, 200, { repos: repos.slice(0, 200).map(r => ({ owner: r.ref.owner, name: r.ref.name, defaultBranch: r.defaultBranch, private: r.private })) });
+          return true;
+        }
+        if (kind === 'process') {
+          const owner = str(url.searchParams.get('owner'), 128);
+          if (!adapter.process || !owner) { send(res, 200, { process: null }); return true; }
+          const repoCtx = C.ctxFor(conn, { repo: { owner, name: '-' } }).ctx;
+          const err = adapter.validateRepo?.({ owner, name: 'x' });
+          if (err) { send(res, 400, { error: err }); return true; }
+          send(res, 200, { process: await adapter.process.describe(repoCtx) });
+          return true;
+        }
+        send(res, 400, { error: 'kind must be repos or process' });
+        return true;
+      }
+      case 'iteration-create': {
+        if (!postOnly()) return true;
+        const project = await projectOf();
+        if (!project || !await needPerson()) return true;
+        const sprint = str(body.sprint, 80);
+        if (!sprint) { send(res, 400, { error: 'sprint required' }); return true; }
+        const out = await createRemoteIteration(project, sprint);
+        send(res, 200, { iteration: out.iteration, sprint: out.sprint });
+        return true;
+      }
       case 'sync': {
         if (!postOnly()) return true;
         const project = await projectOf();
         if (!project) return true;
         send(res, 200, await syncProject(project));
+        return true;
+      }
+      case 'packs':
+        if (!getOnly()) return true;
+        send(res, 200, { packs: Packs.listPacks() });
+        return true;
+      case 'pack-test': {
+        if (!postOnly()) return true;
+        const id = idOf();
+        if (!id) return true;
+        try { send(res, 200, (await Packs.testPack(id)).view); } catch (e) { return packFail(e); }
+        return true;
+      }
+      case 'pack-enable': {
+        // The approval is bound to the digest the person saw; a pack that changed since is refused (409), never enabled blind.
+        if (!postOnly() || !await needPerson()) return true;
+        const id = idOf();
+        if (!id) return true;
+        const hash = str(body.hash, 80);
+        if (!hash) { send(res, 400, { error: 'hash required: the content digest of the pack as you reviewed it' }); return true; }
+        try { send(res, 200, Packs.enablePack(id, hash)); } catch (e) { return packFail(e); }
+        return true;
+      }
+      case 'pack-disable': {
+        if (!postOnly() || !await needPerson()) return true;
+        const id = idOf();
+        if (!id) return true;
+        try { send(res, 200, Packs.disablePack(id)); } catch (e) { return packFail(e); }
+        return true;
+      }
+      case 'pack-connect': {
+        if (!postOnly() || !await needPerson()) return true;
+        const id = idOf();
+        if (!id) return true;
+        try { send(res, 200, C.viewOf(Packs.connectPack(id, { by: 'person', ...(body.insecureHttp === true ? { insecureHttp: true } : {}) }))); } catch (e) { return packFail(e); }
         return true;
       }
     }

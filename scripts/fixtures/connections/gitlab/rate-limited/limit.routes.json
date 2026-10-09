@@ -1,0 +1,18 @@
+{
+  "prefix": "/api/v4",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 429,
+      "headers": {
+        "retry-after": "60",
+        "ratelimit-limit": "2000",
+        "ratelimit-remaining": "0",
+        "ratelimit-reset": "{{epoch+60}}"
+      },
+      "body": {
+        "message": "Retry later"
+      }
+    }
+  ]
+}

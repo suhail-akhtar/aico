@@ -151,7 +151,8 @@ table('repo suggestion', [
   [{ project: '/p', provider: 'github', repo: { owner: 'acme', name: 'shop' } }, [], false, { text: 'Connect GitHub for this repo?', detail: 'acme/shop', action: 'connect', provider: 'github' }],
   [{ project: '/p', provider: 'github', connection: 'gh' }, [conn()], false, { text: 'Use GitHub for this repo?', action: 'map', connection: 'gh', provider: 'github' }],
   [{ project: '/p', provider: 'github' }, [], true, null],
-  [{ project: '/p', provider: 'azure-devops' }, [], false, null],
+  [{ project: '/p', provider: 'custom' }, [], false, null],
+  [{ project: '/p', provider: 'azure-devops', repo: { owner: 'Shop', name: 'web' }, baseUrl: 'https://dev.azure.com/acme' }, [], false, { text: 'Connect Azure DevOps for this repo?', detail: 'Shop/web', action: 'connect', provider: 'azure-devops' }],
   [{ project: '/p' }, [], false, null],
   [{ project: '/p', provider: 'github', connection: 'gh' }, [conn({ disabled: true })], false, { text: 'Connect GitHub for this repo?', action: 'connect', provider: 'github' }],
 ], (det, conns, mapped, want) => {
@@ -260,7 +261,7 @@ test('detection prefills the repo and the trunk; an existing mapping wins', () =
 });
 
 table('repo text', [
-  ['acme/shop', { owner: 'acme', name: 'shop' }], [' acme/shop.git ', { owner: 'acme', name: 'shop' }], ['acme', null], ['a/b/c', null], ['', null], ['ac me/shop', null],
+  ['acme/shop', { owner: 'acme', name: 'shop' }], [' acme/shop.git ', { owner: 'acme', name: 'shop' }], ['acme', null], ['a/b/c', { owner: 'a/b', name: 'c' }], ['a//c', null], ['', null], ['ac me/shop', null],
 ], (text, want) => assert.deepEqual(C.parseRepo(text), want));
 
 test('label and query sources need a value; off and assigned-to-me do not', () => {
@@ -343,9 +344,12 @@ test('provider tiles: supported first, the rest disabled with their note, Other 
   assert.equal(tiles[0].id, 'github');
   assert.equal(tiles[0].enabled, true);
   assert.equal(tiles.at(-1).id, 'other');
-  assert.equal(tiles.at(-1).enabled, false);
+  assert.equal(tiles.at(-1).enabled, true, 'Other asks AICO to build a connector');
+  assert.match(tiles.at(-1).note, /Ask AICO to build a connector/);
+  const noPacks = C.providerTiles(PROVIDERS, { mode: 'any', packs: 'forbid' }).at(-1);
+  assert.deepEqual([noPacks.enabled, noPacks.note], [false, 'Not allowed by your organization.']);
   const az = tiles.find(t => t.id === 'azure-devops');
-  assert.deepEqual([az.enabled, az.note], [false, 'Next after GitHub.']);
+  assert.deepEqual([az.enabled, az.note], [true, undefined]);
   const blocked = C.providerTiles(PROVIDERS, { mode: 'allow-list', providers: ['gitlab'] }).find(t => t.id === 'github');
   assert.deepEqual([blocked.enabled, blocked.note], [false, 'Not allowed by your organization.']);
 });
@@ -528,6 +532,158 @@ test('the board keeps its connection, and a board without one has none', () => {
   assert.ok(!('connection' in M.normaliseBoard({ project: '/p', tasks: [] })));
   const t = M.normaliseBoard({ project: '/p', tasks: [task('x', { status: 'pr', pr: { id: '1' }, remote: { id: '2' } })] }).tasks[0];
   assert.deepEqual([t.pr.id, t.remote.id], ['1', '2']);
+});
+
+// ── GitLab, Gitea, Forgejo, GitBucket (ADR 0039 phase 2) ─────────────────
+
+test('the host policy compares host names: a port in the address does not hide a listed host', () => {
+  const pol = { mode: 'allow-list', hosts: ['git.corp.example', '*.corp.test'] };
+  assert.equal(C.hostAllowed(pol, 'git.corp.example:8443'), true);
+  assert.equal(C.hostAllowed(pol, 'a.corp.test:3000'), true);
+  assert.equal(C.hostAllowed(pol, 'evil.example:443'), false);
+});
+
+test('a repository may be a nested GitLab path: the owner is every segment before the last', () => {
+  assert.deepEqual(C.parseRepo('acme/shop'), { owner: 'acme', name: 'shop' });
+  assert.deepEqual(C.parseRepo('acme/platform/shop.git'), { owner: 'acme/platform', name: 'shop' });
+  assert.deepEqual(C.parseRepo(' a/b/c/d/shop '), { owner: 'a/b/c/d', name: 'shop' });
+  assert.equal(C.parseRepo('shop'), null);
+  assert.equal(C.parseRepo('acme/ shop'), null);
+  assert.equal(C.parseRepo('acme//shop'), null);
+});
+
+table('the token page of a server a person runs', [
+  ['github', 'https://ghe.corp.test', 'https://ghe.corp.test/settings/tokens'],
+  ['gitlab', 'https://git.corp.test/', 'https://git.corp.test/-/profile/personal_access_tokens?name=AICO&scopes=api'],
+  ['gitea', 'https://git.corp.test', 'https://git.corp.test/user/settings/applications'],
+  ['forgejo', 'https://codeberg.test/forge', 'https://codeberg.test/forge/user/settings/applications'],
+  ['gitbucket', 'https://git.corp.test', null],
+], (provider, url, want) => assert.equal(C.tokenPageUrl(provider, url), want));
+
+test('the four providers are on the tile list, enabled, and self-hosted ones ask for an address', () => {
+  const live = PROVIDERS.map(p => ({ ...p, supported: true }));
+  const tiles = C.providerTiles(live);
+  for (const id of ['gitlab', 'gitea', 'forgejo', 'gitbucket']) assert.equal(tiles.find(t => t.id === id)?.enabled, true, id);
+  assert.equal(PROVIDERS.find(p => p.id === 'gitlab').asksUrl, false, 'gitlab.com is pre-filled');
+  for (const id of ['gitea', 'forgejo', 'gitbucket']) assert.equal(PROVIDERS.find(p => p.id === id).asksUrl, true, id);
+  assert.equal(C.serverSwitchLabel('gitlab'), 'Self-managed GitLab');
+});
+
+test('a self-managed GitLab form needs an address; gitlab.com does not', () => {
+  const gl = PROVIDERS.find(p => p.id === 'gitlab');
+  const cloud = C.validateConnectionForm({ provider: 'gitlab', label: '', serverUrl: false, baseUrl: '', insecureHttp: false, caBundle: '' }, gl);
+  assert.equal(cloud.ok, true);
+  assert.equal(cloud.body.baseUrl, undefined);
+  const own = C.validateConnectionForm({ provider: 'gitlab', label: '', serverUrl: true, baseUrl: 'https://git.corp.test/gitlab/', insecureHttp: false, caBundle: '' }, gl);
+  assert.equal(own.ok, true);
+  assert.equal(own.body.baseUrl, 'https://git.corp.test/gitlab');
+  assert.equal(C.validateConnectionForm({ provider: 'gitlab', label: '', serverUrl: true, baseUrl: '', insecureHttp: false, caBundle: '' }, gl).ok, false);
+});
+
+const autoPr = (over = {}) => ({
+  connection: 'gl', id: '7', url: 'https://gitlab.test/a/b/-/merge_requests/7', state: 'open', draft: false, headSha: 'h', mergeable: 'mergeable',
+  checks: { state: 'pending', items: [{ name: 'build', state: 'pending' }] }, reviews: { state: 'none', approved: 0, changesRequested: 0 },
+  canMerge: false, mergeBlockers: ['The pipeline is still running.'], observedAt: '2026-10-09T12:00:00Z', ...over,
+});
+const offered = { kind: 'pipeline', available: true, armed: false };
+
+table('"merge when the pipeline succeeds" is offered only while a running pipeline is the one obstacle', [
+  ['offered', autoPr({ autoMerge: offered }), true],
+  ['no such thing on this provider', autoPr(), false],
+  ['mergeable now: that is Merge, not this', autoPr({ canMerge: true, autoMerge: offered }), false],
+  ['already armed', autoPr({ autoMerge: { kind: 'pipeline', available: false, armed: true } }), false],
+  ['a draft', autoPr({ draft: true, autoMerge: offered }), false],
+  ['already merged', autoPr({ state: 'merged', autoMerge: offered }), false],
+], (_label, pr, want) => {
+  assert.equal(C.canArmAutoMerge({ pr }), want);
+  assert.equal(C.canMergeOnRemote({ pr }), pr.canMerge && pr.state === 'open' && !pr.draft);
+});
+
+test('an armed auto-merge reads as a chip, and the confirmation names the provider and what stays true', () => {
+  const chips = C.prChips(autoPr({ autoMerge: { kind: 'pipeline', available: false, armed: true } }));
+  assert.ok(chips.some(c => c.id === 'auto-merge' && /when the pipeline succeeds/.test(c.label)));
+  assert.ok(!C.prChips(autoPr({ autoMerge: offered })).some(c => c.id === 'auto-merge'), 'offering it is not a state');
+  assert.match(C.autoMergeLabel('gitlab'), /Merge on GitLab when the pipeline succeeds/);
+  const text = C.autoMergeConfirmText({ id: '7' }, 'main', 'gitlab');
+  assert.match(text, /#7 to merge into main when its pipeline succeeds/);
+  assert.match(text, /GitLab merges it by itself, and only if every rule still holds/);
+});
+
+// ── connector packs ─────────────────────────────────────────────────────
+const packView = (over = {}) => ({
+  id: 'acme', label: 'Acme', provider: 'Acme Forge', baseUrl: 'https://api.acme.example', hosts: ['api.acme.example'], auth: 'Authorization: Bearer', mcpServers: [],
+  status: 'tests-passing', statusDetail: 'Every operation passed.', hash: 'a'.repeat(64), errors: [], warnings: [], connections: [], can: ['read repositories', 'open pull requests'],
+  operations: [
+    { name: 'probe', declared: 'read', effective: 'read', does: 'GET https://api.acme.example/v1/me', contract: 'passed' },
+    { name: 'items.comment', declared: 'read', effective: 'external', does: 'POST https://api.acme.example/c', contract: 'passed' },
+    { name: 'pulls.merge', declared: 'destructive', effective: 'destructive', does: 'POST https://api.acme.example/m', contract: 'passed' },
+    { name: 'checks.forCommit', declared: 'read', effective: 'read', does: 'GET https://api.acme.example/k', contract: 'failed', detail: 'x' },
+  ], ...over,
+});
+
+test('pack statuses are words with a tone: draft, tests passing, enabled, needs re-approval, problems', () => {
+  const label = (status) => C.packChip({ status }).label;
+  assert.deepEqual(['draft', 'tests-passing', 'enabled', 'needs-approval', 'invalid'].map(label), ['Draft', 'Tests passing', 'Enabled', 'Needs re-approval', 'Has problems']);
+  assert.equal(C.packChip({ status: 'needs-approval' }).tone, 'warning');
+  assert.equal(C.packChip({ status: 'enabled' }).tone, 'success');
+});
+
+test('the Enable button is live only when the probe passed, nothing is invalid, policy allows it and it is not already enabled', () => {
+  assert.equal(C.canEnablePack(packView()).ok, true);
+  assert.equal(C.canEnablePack(packView({ status: 'enabled' })).ok, false);
+  assert.equal(C.canEnablePack(packView({ status: 'invalid' })).ok, false);
+  assert.match(C.canEnablePack(packView({ blockedByPolicy: 'Your organisation does not allow connector packs.' })).why, /organisation/);
+  const noProbe = packView({ operations: packView().operations.map(o => (o.name === 'probe' ? { ...o, contract: 'failed' } : o)) });
+  assert.match(C.canEnablePack(noProbe).why, /probe/);
+  assert.equal(C.canEnablePack(packView({ status: 'needs-approval' })).ok, true, 'a changed pack can be re-approved once it is tested again');
+});
+
+test('the review groups operations by what they can change and shows what the engine raised', () => {
+  const r = C.packReview(packView());
+  assert.deepEqual(r.reads.map(o => o.name), ['probe']);
+  assert.deepEqual(r.writes.map(o => o.name), ['items.comment']);
+  assert.deepEqual(r.destructive.map(o => o.name), ['pulls.merge']);
+  assert.deepEqual(r.raised.map(o => o.name), ['items.comment'], 'declared read, applied external');
+  assert.deepEqual(r.off.map(o => o.name), ['checks.forCommit'], 'a failed operation is listed as off');
+});
+
+test('pack summary: what it can do, or why it cannot yet', () => {
+  assert.equal(C.packSummary(packView()), 'Can read repositories, open pull requests.');
+  assert.match(C.packSummary(packView({ can: [] })), /Nothing passes its test yet/);
+  assert.equal(C.packSummary(packView({ status: 'invalid', errors: ['a', 'b'] })), '2 problems to fix.');
+  assert.match(C.packSummary(packView({ can: ['a', 'b', 'c', 'd', 'e', 'f'] })), /and 2 more/);
+});
+
+test('policy: packs are refused by forbid, by packs:forbid and by a provider allow-list without custom', () => {
+  assert.equal(C.packsAllowed(undefined), true);
+  assert.equal(C.packsAllowed({ mode: 'any' }), true);
+  assert.equal(C.packsAllowed({ mode: 'any', packs: 'forbid' }), false);
+  assert.equal(C.packsAllowed({ mode: 'forbid' }), false);
+  assert.equal(C.packsAllowed({ mode: 'allow-list', providers: ['github'] }), false);
+  assert.equal(C.packsAllowed({ mode: 'allow-list', providers: ['github', 'custom'] }), true);
+});
+
+test('the Other tile instruction asks for docs and a test, and keeps the token out of the chat', () => {
+  const p = C.connectorPrompt();
+  assert.match(p, /Build a connector pack/);
+  assert.match(p, /API docs/);
+  assert.match(p, /test it with the recorded examples/);
+  assert.match(p, /Do not ask me for a token in chat/);
+});
+
+test('Bitbucket Cloud asks for the account email (API token); nothing else does', () => {
+  assert.equal(C.asksForAccount('bitbucket-cloud'), true);
+  assert.equal(C.asksForAccount('github'), false);
+  assert.equal(C.asksForAccount('bitbucket-dc'), false);
+  const info = PROVIDERS.find(p => p.id === 'bitbucket-cloud');
+  const ok = C.validateConnectionForm({ provider: 'bitbucket-cloud', label: '', serverUrl: false, baseUrl: '', insecureHttp: false, caBundle: '', username: ' me@corp.example ' }, info);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.body.username, 'me@corp.example', 'trimmed and sent');
+  assert.equal(C.validateConnectionForm({ provider: 'bitbucket-cloud', label: '', serverUrl: false, baseUrl: '', insecureHttp: false, caBundle: '', username: 'me corp' }, info).errors.username !== undefined, true);
+  const none = C.validateConnectionForm({ provider: 'bitbucket-cloud', label: '', serverUrl: false, baseUrl: '', insecureHttp: false, caBundle: '' }, info);
+  assert.equal(none.ok && 'username' in none.body, false, 'empty means an access token: no username is sent');
+  const gh = C.validateConnectionForm({ provider: 'github', label: '', serverUrl: false, baseUrl: '', insecureHttp: false, caBundle: '', username: 'x@y.z' }, PROVIDERS.find(p => p.id === 'github'));
+  assert.equal('username' in gh.body, false, 'a provider that does not use one never sends it');
 });
 
 console.log(`connections: ${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

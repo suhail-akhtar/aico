@@ -1,0 +1,155 @@
+{
+  "prefix": "/2.0",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 403,
+      "body": {
+        "type": "error",
+        "error": {
+          "message": "Your credentials lack one or more required privilege scopes."
+        }
+      }
+    },
+    {
+      "path": "/user/permissions/repositories",
+      "status": 403,
+      "body": {
+        "type": "error",
+        "error": {
+          "message": "Your credentials lack one or more required privilege scopes."
+        }
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets",
+      "body": {
+        "type": "repository",
+        "full_name": "acme/widgets",
+        "slug": "widgets",
+        "uuid": "{repo-1}",
+        "is_private": true,
+        "has_issues": false,
+        "mainbranch": {
+          "type": "branch",
+          "name": "main"
+        },
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets"
+          },
+          "clone": [
+            {
+              "name": "https",
+              "href": "https://octo-dev@forge.test/acme/widgets.git"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/pullrequests",
+      "query": {
+        "state": "OPEN"
+      },
+      "body": {
+        "pagelen": 1,
+        "page": 1,
+        "size": 0,
+        "values": []
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/commit/main/statuses",
+      "status": 403,
+      "body": {
+        "type": "error",
+        "error": {
+          "message": "Your credentials lack one or more required privilege scopes."
+        }
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/branch-restrictions",
+      "status": 403,
+      "body": {
+        "type": "error",
+        "error": {
+          "message": "You do not have permission to read branch restrictions."
+        }
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/pullrequests/7",
+      "body": {
+        "type": "pullrequest",
+        "id": 7,
+        "title": "Add widget cache",
+        "description": "Evidence packet.",
+        "state": "OPEN",
+        "draft": false,
+        "author": {
+          "type": "user",
+          "nickname": "octo-dev",
+          "display_name": "Octo Dev",
+          "uuid": "{octo-dev}"
+        },
+        "source": {
+          "branch": {
+            "name": "aico/task-42"
+          },
+          "commit": {
+            "hash": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          }
+        },
+        "destination": {
+          "branch": {
+            "name": "main"
+          },
+          "commit": {
+            "hash": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+          }
+        },
+        "merge_commit": null,
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets/pull-requests/7"
+          }
+        },
+        "reviewers": [
+          {
+            "type": "user",
+            "nickname": "rev-one",
+            "display_name": "Rev One",
+            "uuid": "{rev-one}"
+          }
+        ],
+        "participants": [
+          {
+            "type": "participant",
+            "user": {
+              "type": "user",
+              "nickname": "rev-one",
+              "display_name": "rev-one",
+              "uuid": "{rev-one}"
+            },
+            "role": "REVIEWER",
+            "approved": false,
+            "state": "changes_requested",
+            "participated_on": "2026-10-08T10:00:00.000000+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/pullrequests/7/statuses",
+      "status": 403,
+      "body": {
+        "type": "error",
+        "error": {
+          "message": "Your credentials lack one or more required privilege scopes."
+        }
+      }
+    }
+  ]
+}

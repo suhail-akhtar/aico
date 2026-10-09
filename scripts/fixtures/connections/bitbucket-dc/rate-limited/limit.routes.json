@@ -1,0 +1,16 @@
+[
+  {
+    "path": "/plugins/servlet/applinks/whoami",
+    "status": 429,
+    "headers": {
+      "retry-after": "60"
+    },
+    "body": {
+      "errors": [
+        {
+          "message": "Rate limit exceeded"
+        }
+      ]
+    }
+  }
+]

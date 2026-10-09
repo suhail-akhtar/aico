@@ -80,7 +80,7 @@ const SECRET_KEY_RE = /(?:^|[_-])(?:pass(?:word|wd|phrase)?|secret|token|api[_-]
 
 // ── auth (pure) ──────────────────────────────────────────────────────
 
-export type AuthMode = { kind: 'none' } | { kind: 'bearer' } | { kind: 'basic' } | { kind: 'header'; name: string } | { kind: 'query'; name: string };
+export type AuthMode = { kind: 'none' } | { kind: 'bearer'; /** The word before the token; default `Bearer`. Gitea, Forgejo and GitBucket document `token`. */ scheme?: 'Bearer' | 'token' } | { kind: 'basic' } | { kind: 'basic-empty-user' } | { kind: 'header'; name: string } | { kind: 'query'; name: string };
 
 /** Parse the `auth` argument, defaulting by credential kind. */
 export function parseAuth(auth: string | undefined, credentialKind?: CredentialKind): AuthMode {
@@ -110,7 +110,9 @@ export function applyAuth(mode: AuthMode, url: URL, value: string, username?: st
   const u = new URL(url.toString());
   switch (mode.kind) {
     case 'none': return { headers: {}, url: u };
-    case 'bearer': return { headers: { Authorization: `Bearer ${value}` }, url: u };
+    case 'bearer': return { headers: { Authorization: `${mode.scheme ?? 'Bearer'} ${value}` }, url: u };
+    // A personal access token as Basic's password with an empty user name (Azure DevOps): `base64(":" + token)`.
+    case 'basic-empty-user': return { headers: { Authorization: `Basic ${Buffer.from(`:${value}`, 'utf8').toString('base64')}` }, url: u };
     case 'basic': {
       if (!username) throw new OpsError('Basic auth needs a username: the credential does not name one.');
       if (username.includes(':')) throw new OpsError('A Basic auth username cannot contain ":".');

@@ -1,0 +1,14 @@
+[
+  {
+    "path": "/_apis/connectionData",
+    "status": 429,
+    "headers": {
+      "retry-after": "120",
+      "x-ratelimit-resource": "core"
+    },
+    "body": {
+      "message": "TF400733: The request has been canceled: Request was blocked due to exceeding usage of resource.",
+      "typeKey": "RequestBlockedException"
+    }
+  }
+]

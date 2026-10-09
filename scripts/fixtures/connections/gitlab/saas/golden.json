@@ -1,0 +1,609 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "version": "17.5.1-ee",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 1000000
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "field",
+        "parentLink": false
+      },
+      "iterations": "native",
+      "checks": {
+        "read": true,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": true
+      }
+    },
+    "scopes": {
+      "found": [
+        "api"
+      ],
+      "needed": [
+        {
+          "scope": "api",
+          "why": "Open merge requests, comment on them, import and update issues and read pipelines. Also lets git push over https.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "read_user",
+          "why": "Show which account the token acts as.",
+          "feature": "repos",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": true
+    },
+    "warnings": [],
+    "tokenExpiresAt": "2026-12-31T23:59:59.000Z"
+  },
+  "repo": {
+    "ref": {
+      "owner": "acme/platform",
+      "name": "widgets",
+      "id": "4242"
+    },
+    "defaultBranch": "main",
+    "cloneUrl": "<origin>/acme/platform/widgets.git",
+    "htmlUrl": "<origin>/acme/platform/widgets",
+    "private": true,
+    "permissions": {
+      "pull": true,
+      "push": true,
+      "admin": true
+    }
+  },
+  "repos": [
+    {
+      "ref": {
+        "owner": "acme/platform",
+        "name": "widgets",
+        "id": "4242"
+      },
+      "defaultBranch": "main",
+      "cloneUrl": "<origin>/acme/platform/widgets.git",
+      "htmlUrl": "<origin>/acme/platform/widgets",
+      "private": true
+    },
+    {
+      "ref": {
+        "owner": "acme",
+        "name": "gadgets",
+        "id": "4243"
+      },
+      "defaultBranch": "trunk",
+      "cloneUrl": "<origin>/acme/gadgets.git",
+      "htmlUrl": "<origin>/acme/gadgets",
+      "private": true
+    }
+  ],
+  "pull.created": {
+    "connection": "gitlab-saas",
+    "id": "7",
+    "url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "none",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "GitLab has not finished working out whether this can be merged yet."
+    ],
+    "observedAt": "<time>"
+  },
+  "pull.1": {
+    "connection": "gitlab-saas",
+    "id": "7",
+    "url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "pending",
+      "items": [
+        {
+          "name": "build",
+          "state": "pending",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5011"
+        },
+        {
+          "name": "test",
+          "state": "pending",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5012"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "The pipeline is still running."
+    ],
+    "protectedBase": true,
+    "autoMerge": {
+      "kind": "pipeline",
+      "available": true,
+      "armed": false
+    },
+    "observedAt": "<time>"
+  },
+  "pull.2": {
+    "connection": "gitlab-saas",
+    "id": "7",
+    "url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "failing",
+      "items": [
+        {
+          "name": "build",
+          "state": "success",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5021"
+        },
+        {
+          "name": "test",
+          "state": "failure",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5022",
+          "summary": "Failed: script failure"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "The pipeline must succeed before this can be merged.",
+      "Check failed: test"
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.3": {
+    "connection": "gitlab-saas",
+    "id": "7",
+    "url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "build",
+          "state": "success",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5031"
+        },
+        {
+          "name": "test",
+          "state": "success",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5032"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "changes",
+      "approved": 0,
+      "changesRequested": 1,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "A reviewer has requested changes."
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.4": {
+    "connection": "gitlab-saas",
+    "id": "7",
+    "url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "build",
+          "state": "success",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5041"
+        },
+        {
+          "name": "test",
+          "state": "success",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5042"
+        },
+        {
+          "name": "lint",
+          "state": "neutral",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5043",
+          "summary": "Failed, but this job is allowed to fail"
+        },
+        {
+          "name": "deploy-preview",
+          "state": "neutral",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5044"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 1,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": true,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.5": {
+    "connection": "gitlab-saas",
+    "id": "7",
+    "url": "https://forge.test/acme/platform/widgets/-/merge_requests/7",
+    "state": "merged",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "build",
+          "state": "success",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5051"
+        },
+        {
+          "name": "test",
+          "state": "success",
+          "url": "https://forge.test/acme/platform/widgets/-/jobs/5052"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 1,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "mergedSha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+    "observedAt": "<time>"
+  },
+  "comments": [
+    {
+      "id": "note-802",
+      "author": "stranger-9",
+      "association": "NONE",
+      "body": "Please also add docs.",
+      "at": "2026-10-09T11:45:00.000Z"
+    },
+    {
+      "id": "note-803",
+      "author": "octo-bot",
+      "association": "MEMBER",
+      "body": "",
+      "at": "2026-10-09T12:00:00.000Z",
+      "review": "approved"
+    },
+    {
+      "id": "note-801",
+      "author": "octo-bot",
+      "association": "MEMBER",
+      "body": "Looks good after the rename.",
+      "at": "2026-10-09T12:05:00.000Z"
+    }
+  ],
+  "items": [
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+      "state": "open",
+      "labels": [
+        "bug",
+        "sp:3"
+      ],
+      "assignees": [
+        "octo-dev"
+      ],
+      "author": "octo-bot",
+      "url": "https://forge.test/acme/platform/widgets/-/issues/11",
+      "rev": "2026-10-01T10:00:00.000Z",
+      "milestone": {
+        "id": "41",
+        "title": "Sprint 1",
+        "dueOn": "2026-10-16"
+      },
+      "points": 3,
+      "iteration": "41"
+    },
+    {
+      "id": "13",
+      "number": 13,
+      "title": "Document widget API",
+      "body": "Write the reference for `Widget.render`.\n\n## Acceptance\n- [ ] every option documented",
+      "state": "open",
+      "labels": [
+        "docs",
+        "estimate:5"
+      ],
+      "assignees": [],
+      "author": "octo-bot",
+      "url": "https://forge.test/acme/platform/widgets/-/issues/13",
+      "rev": "2026-10-02T09:30:00.000Z",
+      "points": 5
+    }
+  ],
+  "items.search": [
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+      "state": "open",
+      "labels": [
+        "bug",
+        "sp:3"
+      ],
+      "assignees": [
+        "octo-dev"
+      ],
+      "author": "octo-bot",
+      "url": "https://forge.test/acme/platform/widgets/-/issues/11",
+      "rev": "2026-10-01T10:00:00.000Z",
+      "milestone": {
+        "id": "41",
+        "title": "Sprint 1",
+        "dueOn": "2026-10-16"
+      },
+      "points": 3,
+      "iteration": "41"
+    },
+    {
+      "id": "13",
+      "number": 13,
+      "title": "Document widget API",
+      "body": "Write the reference for `Widget.render`.\n\n## Acceptance\n- [ ] every option documented",
+      "state": "open",
+      "labels": [
+        "docs",
+        "estimate:5"
+      ],
+      "assignees": [],
+      "author": "octo-bot",
+      "url": "https://forge.test/acme/platform/widgets/-/issues/13",
+      "rev": "2026-10-02T09:30:00.000Z",
+      "points": 5
+    }
+  ],
+  "item": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update",
+    "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+    "state": "open",
+    "labels": [
+      "bug",
+      "sp:3"
+    ],
+    "assignees": [
+      "octo-dev"
+    ],
+    "author": "octo-bot",
+    "url": "https://forge.test/acme/platform/widgets/-/issues/11",
+    "rev": "2026-10-01T10:00:00.000Z",
+    "milestone": {
+      "id": "41",
+      "title": "Sprint 1",
+      "dueOn": "2026-10-16"
+    },
+    "points": 3,
+    "iteration": "41"
+  },
+  "item.updated": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update (reworded)",
+    "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+    "state": "open",
+    "labels": [
+      "bug",
+      "sp:3",
+      "aico:running"
+    ],
+    "assignees": [
+      "octo-dev"
+    ],
+    "author": "octo-bot",
+    "url": "https://forge.test/acme/platform/widgets/-/issues/11",
+    "rev": "2026-10-09T12:10:00.000Z",
+    "milestone": {
+      "id": "41",
+      "title": "Sprint 1",
+      "dueOn": "2026-10-16"
+    },
+    "points": 3,
+    "iteration": "41"
+  },
+  "item.closed": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update",
+    "body": "Updating a widget leaves a stale entry in the cache.\n\n## Acceptance\n- [ ] entry removed on update",
+    "state": "closed",
+    "labels": [
+      "bug",
+      "sp:3"
+    ],
+    "assignees": [
+      "octo-dev"
+    ],
+    "author": "octo-bot",
+    "url": "https://forge.test/acme/platform/widgets/-/issues/11",
+    "rev": "2026-10-09T12:30:00.000Z",
+    "milestone": {
+      "id": "41",
+      "title": "Sprint 1",
+      "dueOn": "2026-10-16"
+    },
+    "points": 3,
+    "iteration": "41"
+  },
+  "item.created": {
+    "id": "14",
+    "number": 14,
+    "title": "Follow-up: cache metrics",
+    "body": "Track hit rate.",
+    "state": "open",
+    "labels": [
+      "aico"
+    ],
+    "assignees": [],
+    "author": "octo-dev",
+    "url": "https://forge.test/acme/platform/widgets/-/issues/14",
+    "rev": "2026-10-09T12:00:00.000Z"
+  },
+  "iterations": [
+    {
+      "id": "iteration-61",
+      "title": "Sprint 14",
+      "kind": "iteration",
+      "state": "open",
+      "timeFrame": "current",
+      "start": "2026-10-05",
+      "end": "2026-10-18",
+      "url": "https://forge.test/groups/acme/-/iterations/14"
+    },
+    {
+      "id": "iteration-60",
+      "title": "2026-09-21 to 2026-10-04",
+      "kind": "iteration",
+      "state": "closed",
+      "timeFrame": "past",
+      "start": "2026-09-21",
+      "end": "2026-10-04",
+      "url": "https://forge.test/groups/acme/-/iterations/13"
+    },
+    {
+      "id": "iteration-62",
+      "title": "Sprint 15",
+      "kind": "iteration",
+      "state": "open",
+      "timeFrame": "future",
+      "start": "2026-10-19",
+      "end": "2026-11-01",
+      "url": "https://forge.test/groups/acme/-/iterations/15"
+    },
+    {
+      "id": "41",
+      "title": "Sprint 1",
+      "kind": "milestone",
+      "state": "open",
+      "start": "2026-10-05",
+      "end": "2026-10-16",
+      "url": "https://forge.test/acme/platform/widgets/-/milestones/1"
+    },
+    {
+      "id": "42",
+      "title": "Sprint 0",
+      "kind": "milestone",
+      "state": "closed",
+      "start": "2026-09-21",
+      "end": "2026-10-02",
+      "url": "https://forge.test/acme/platform/widgets/-/milestones/2"
+    }
+  ],
+  "iteration.created": {
+    "id": "43",
+    "title": "Sprint 2",
+    "kind": "milestone",
+    "state": "open",
+    "end": "2026-10-30",
+    "url": "https://forge.test/acme/platform/widgets/-/milestones/3"
+  },
+  "checks": [
+    {
+      "name": "build",
+      "state": "success",
+      "url": "https://forge.test/acme/platform/widgets/-/jobs/1"
+    },
+    {
+      "name": "docs",
+      "state": "neutral",
+      "url": "https://forge.test/acme/platform/widgets/-/jobs/2",
+      "summary": "Docs build is advisory."
+    },
+    {
+      "name": "e2e",
+      "state": "skipped",
+      "url": "https://forge.test/acme/platform/widgets/-/jobs/3"
+    },
+    {
+      "name": "deploy-preview",
+      "state": "failure",
+      "url": "https://forge.test/acme/platform/widgets/-/jobs/4",
+      "summary": "Cancelled by a newer push."
+    },
+    {
+      "name": "ci/legacy",
+      "state": "failure",
+      "url": "https://forge.test/legacy/build/55",
+      "summary": "Runner lost contact."
+    }
+  ],
+  "protection": {
+    "protected": true,
+    "requiredReviews": 1,
+    "requiredChecks": [
+      "Pipeline must succeed"
+    ]
+  },
+  "protection.none": {
+    "protected": false
+  }
+}

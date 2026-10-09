@@ -1,0 +1,96 @@
+[
+  {
+    "path": "/Shop/_apis/build/builds",
+    "query": {
+      "repositoryId": "*"
+    },
+    "status": 200,
+    "body": {
+      "count": 3,
+      "value": [
+        {
+          "id": 9001,
+          "buildNumber": "20261009.1",
+          "status": "completed",
+          "result": "succeeded",
+          "definition": {
+            "name": "CI build"
+          },
+          "sourceVersion": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+        },
+        {
+          "id": 9002,
+          "buildNumber": "20261009.2",
+          "status": "completed",
+          "result": "failed",
+          "definition": {
+            "name": "Nightly"
+          },
+          "sourceVersion": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+        },
+        {
+          "id": 9003,
+          "buildNumber": "20261009.3",
+          "status": "inProgress",
+          "definition": {
+            "name": "Docs"
+          },
+          "sourceVersion": "ffffffffffffffffffffffffffffffffffffffff"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/build/builds",
+    "status": 200,
+    "body": {
+      "count": 1,
+      "value": [
+        {
+          "id": 9001,
+          "status": "completed",
+          "result": "succeeded",
+          "definition": {
+            "name": "CI build"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/commits/:sha/statuses",
+    "status": 200,
+    "body": {
+      "count": 3,
+      "value": [
+        {
+          "id": 11,
+          "state": "succeeded",
+          "description": "No lint errors",
+          "context": {
+            "name": "lint",
+            "genre": "continuous-integration"
+          },
+          "targetUrl": "https://forge.test/lint/1"
+        },
+        {
+          "id": 12,
+          "state": "failed",
+          "description": "Two tests failed",
+          "context": {
+            "name": "unit"
+          },
+          "targetUrl": "javascript:alert(1)"
+        },
+        {
+          "id": 13,
+          "state": "pending",
+          "description": "Running",
+          "context": {
+            "name": "e2e"
+          }
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,100 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "Dana Dev (dana.dev@example.test)",
+    "version": "Azure DevOps Server (REST 7.1)",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 4000
+      },
+      "items": {
+        "query": false,
+        "create": false,
+        "transition": false,
+        "comment": false,
+        "estimate": "field",
+        "parentLink": false
+      },
+      "iterations": "none",
+      "checks": {
+        "read": false,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": false
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "Code: read and write",
+          "why": "Read repositories, open and update pull requests, and push aico/task-* branches.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "Work Items: read and write",
+          "why": "Import work items and move them forward as the task progresses.",
+          "feature": "items",
+          "required": false
+        },
+        {
+          "scope": "Build: read",
+          "why": "Show the builds that gate a pull request.",
+          "feature": "checks",
+          "required": false
+        },
+        {
+          "scope": "Project and Team: read",
+          "why": "Read sprints and iterations.",
+          "feature": "iterations",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "Azure DevOps does not say what a token may write, so opening and merging pull requests is confirmed by the first one; a refusal names the missing permission.",
+      "Work items are unreadable with this token (it needs Work Items: read and write).",
+      "Build checks are unreadable with this token (it needs Build: read), so pull requests will show no build results.",
+      "Branch protection unreadable (branch policies need Code: read): AICO cannot see which reviews and builds main requires, so it will not offer to merge.",
+      "Sprints are unreadable with this token (it needs Project and Team: read)."
+    ]
+  },
+  "pull": {
+    "connection": "azure-devops-limited-token",
+    "id": "7",
+    "url": "<origin>/Shop/_git/web/pullrequest/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "The branch policies could not be read with this token, so AICO cannot tell whether they are met. Merge it on Azure DevOps."
+    ],
+    "observedAt": "<time>"
+  },
+  "protection": {
+    "protected": false,
+    "unreadable": "needs Code (read) and policy access"
+  }
+}

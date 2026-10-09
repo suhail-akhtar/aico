@@ -1,0 +1,87 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 30000
+      },
+      "items": {
+        "query": false,
+        "create": false,
+        "transition": false,
+        "comment": false,
+        "estimate": "none",
+        "parentLink": false
+      },
+      "iterations": "none",
+      "checks": {
+        "read": false,
+        "rerun": false,
+        "logsUrl": false
+      },
+      "protection": {
+        "read": false
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "Project or Repository write",
+          "why": "Read repositories, push aico/task-* branches, open and merge pull requests.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "Repository admin (optional)",
+          "why": "Read the required approvers and branch permissions.",
+          "feature": "protection",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "Bitbucket does not say whether this token may write; if a push or pull request is refused, the token needs Repository (or Project) write.",
+      "Checks (build statuses) are unreadable with this token, so pull requests will show no builds.",
+      "Branch protection unreadable (needs repository admin): AICO cannot see which approvers and builds main requires. The server still enforces them at merge.",
+      "Bitbucket Data Center has no sprints or work items here (they live in Jira, which is not supported), so AICO's sprints stay local."
+    ]
+  },
+  "pull": {
+    "connection": "bitbucket-dc-limited-token",
+    "id": "7",
+    "url": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "changes",
+      "approved": 0,
+      "changesRequested": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "A reviewer has marked it \"needs work\".",
+      "Bitbucket was not asked whether this can be merged (the token cannot read it)."
+    ],
+    "observedAt": "<time>"
+  },
+  "protection": {
+    "protected": false,
+    "unreadable": "needs repository admin"
+  }
+}

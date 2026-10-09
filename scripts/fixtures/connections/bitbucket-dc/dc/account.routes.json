@@ -1,0 +1,188 @@
+[
+  {
+    "path": "/plugins/servlet/applinks/whoami",
+    "text": "octo-dev"
+  },
+  {
+    "path": "/rest/api/1.0/application-properties",
+    "body": {
+      "version": "8.19.4",
+      "buildNumber": "8019004",
+      "displayName": "Bitbucket"
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets",
+    "body": {
+      "slug": "widgets",
+      "id": 5,
+      "name": "widgets",
+      "public": false,
+      "state": "AVAILABLE",
+      "project": {
+        "key": "ACME",
+        "name": "Acme"
+      },
+      "links": {
+        "clone": [
+          {
+            "name": "http",
+            "href": "https://octo-dev@forge.test/scm/acme/widgets.git"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/branches/default",
+    "body": {
+      "id": "refs/heads/main",
+      "displayId": "main",
+      "type": "BRANCH",
+      "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233",
+      "isDefault": true
+    }
+  },
+  {
+    "path": "/rest/api/1.0/repos",
+    "body": {
+      "size": 2,
+      "limit": 100,
+      "isLastPage": true,
+      "values": [
+        {
+          "slug": "widgets",
+          "id": 5,
+          "name": "widgets",
+          "public": false,
+          "state": "AVAILABLE",
+          "project": {
+            "key": "ACME",
+            "name": "Acme"
+          },
+          "links": {
+            "clone": [
+              {
+                "name": "http",
+                "href": "https://octo-dev@forge.test/scm/acme/widgets.git"
+              }
+            ]
+          }
+        },
+        {
+          "slug": "gadgets",
+          "id": 6,
+          "name": "widgets",
+          "public": false,
+          "state": "AVAILABLE",
+          "project": {
+            "key": "ACME",
+            "name": "Acme"
+          },
+          "links": {
+            "clone": [
+              {
+                "name": "http",
+                "href": "https://octo-dev@forge.test/scm/acme/widgets.git"
+              }
+            ]
+          }
+        }
+      ],
+      "start": 0
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/settings/pull-requests",
+    "body": {
+      "requiredApprovers": {
+        "enable": true,
+        "count": 2
+      },
+      "requiredSuccessfulBuilds": {
+        "enable": true,
+        "count": 1
+      },
+      "requiredAllTasksComplete": {
+        "enable": false
+      },
+      "mergeConfig": {
+        "defaultStrategy": {
+          "id": "no-ff"
+        }
+      }
+    }
+  },
+  {
+    "path": "/rest/branch-permissions/2.0/projects/ACME/repos/widgets/restrictions",
+    "body": {
+      "size": 2,
+      "limit": 100,
+      "isLastPage": true,
+      "values": [
+        {
+          "id": 1,
+          "type": "pull-request-only",
+          "matcher": {
+            "id": "refs/heads/main",
+            "displayId": "main",
+            "type": {
+              "id": "BRANCH",
+              "name": "Branch"
+            },
+            "active": true
+          }
+        },
+        {
+          "id": 2,
+          "type": "no-deletes",
+          "matcher": {
+            "id": "release/*",
+            "displayId": "release/*",
+            "type": {
+              "id": "PATTERN",
+              "name": "Pattern"
+            },
+            "active": true
+          }
+        }
+      ],
+      "start": 0
+    }
+  },
+  {
+    "path": "/rest/build-status/1.0/commits/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233",
+    "body": {
+      "size": 3,
+      "limit": 100,
+      "isLastPage": true,
+      "values": [
+        {
+          "state": "SUCCESSFUL",
+          "key": "bamboo-12",
+          "name": "Bamboo #12",
+          "url": "https://ci.forge.test/job/10",
+          "description": "Bamboo #12: SUCCESSFUL",
+          "dateAdded": 1760000000000
+        },
+        {
+          "state": "FAILED",
+          "key": "lint",
+          "name": "lint",
+          "url": "https://ci.forge.test/job/4",
+          "description": "lint: FAILED",
+          "dateAdded": 1760000000000
+        },
+        {
+          "state": "INPROGRESS",
+          "key": "deploy-preview",
+          "name": "deploy-preview",
+          "url": "https://ci.forge.test/job/14",
+          "description": "deploy-preview: INPROGRESS",
+          "dateAdded": 1760000000000
+        }
+      ],
+      "start": 0
+    }
+  }
+]

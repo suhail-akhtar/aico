@@ -26,7 +26,7 @@ import path from 'node:path';
 import {
   MAX_POINTS, burndown, dailyMarkdown, dailySummary, defaultCapacity, isDateKey, memberAt, mergedAt, ms, normalisePoints,
   retroMarkdown, reviewMarkdown, sprintTaskIds, velocity, diffDays,
-  type Burndown, type DailySummary, type Proposal, type RetroFacts, type SplitPart, type Sprint, type Velocity, type BoardMode,
+  type Burndown, type DailySummary, type Proposal, type RetroFacts, type SplitPart, type Sprint, type SprintRemote, type Velocity, type BoardMode,
 } from '../../shared/delivery/scrum.js';
 import * as G from './git.js';
 import { DeliveryError, createTask, updateTask } from './index.js';
@@ -89,6 +89,76 @@ export async function createSprint(project: string, input: SprintInput): Promise
     start: input.start, end: input.end, ...(capacity !== undefined ? { capacityPoints: capacity } : {}),
   });
   return sprintOf(p, id);
+}
+
+// ── sprints that mirror a platform's iterations ──────────────────────────
+
+export interface MirroredSprintInput { name: string; start: string; end: string; remote: SprintRemote }
+
+function checkDates(start: unknown, end: unknown): asserts start is string {
+  if (!isDateKey(start) || !isDateKey(end)) throw new DeliveryError('start and end must be dates like 2026-10-12');
+  const length = diffDays(start, end as string) + 1;
+  if (length < 1) throw new DeliveryError('the sprint cannot end before it starts');
+  if (length > MAX_SPRINT_DAYS) throw new DeliveryError(`a sprint is at most ${MAX_SPRINT_DAYS} days; this one is ${length}`);
+}
+
+/**
+ * A planned sprint that mirrors an iteration on a connected platform. The connections layer calls this with
+ * plain data (this module stays free of the network). It only ever creates a PLANNED sprint: starting it makes
+ * tasks ready, which is spend, and stays a person's act. Several may be planned at once (the current and the
+ * next iteration), which `createSprint` refuses for a sprint a person makes by hand.
+ */
+export async function importMirroredSprint(project: string, input: MirroredSprintInput): Promise<Sprint> {
+  const p = await board(project);
+  checkDates(input.start, input.end);
+  const f = S.load(p);
+  const existing = [...f.scrum.sprints.values()].find(x => x.remote?.connection === input.remote.connection && x.remote.id === input.remote.id);
+  if (existing) return sprintOf(p, existing.id);
+  const id = S.newTaskId();
+  S.recordScrum(p, {
+    k: 'sprint', id, name: clip(input.name, 80) || `Sprint ${f.scrum.sprints.size + 1}`, goal: '', start: input.start, end: input.end, remote: input.remote,
+  });
+  return sprintOf(p, id);
+}
+
+/** The platform renamed or re-dated a mirrored sprint (it owns both): pull the change in. A no-op when nothing differs. */
+export async function syncMirroredSprint(project: string, sprintId: string, patch: { name?: string; start?: string; end?: string; remote: SprintRemote }): Promise<Sprint> {
+  const p = await board(project);
+  const sp = sprintOf(p, sprintId);
+  const name = patch.name !== undefined ? clip(patch.name, 80) : undefined;
+  const start = patch.start ?? sp.start;
+  const end = patch.end ?? sp.end;
+  const datesOk = isDateKey(start) && isDateKey(end) && diffDays(start, end) + 1 >= 1 && diffDays(start, end) + 1 <= MAX_SPRINT_DAYS;
+  const changed = sp.status !== 'closed' && ((name && name !== sp.name) || (datesOk && (start !== sp.start || end !== sp.end)));
+  const r = sp.remote;
+  const linkMoved = !r || r.state !== patch.remote.state || r.timeFrame !== patch.remote.timeFrame || r.url !== patch.remote.url || r.itemKey !== patch.remote.itemKey;
+  if (!changed && !linkMoved) return sp;
+  S.recordScrum(p, {
+    k: 'sprint-sync', sprint: sprintId, remote: patch.remote,
+    ...(changed && name && name !== sp.name ? { name } : {}),
+    ...(changed && datesOk && start !== sp.start ? { start } : {}), ...(changed && datesOk && end !== sp.end ? { end } : {}),
+  });
+  return sprintOf(p, sprintId);
+}
+
+/**
+ * Put tasks in a sprint, or take them out, because the PLATFORM says so (ADR 0039 section 4: membership of
+ * imported items is a planning decision made in either place). Unlike {@link commitSprint} it never makes a
+ * task ready, even in a running sprint: a remote planning change must not start spend. Joining a running
+ * sprint is still recorded as a scope change in the log.
+ */
+export async function placeFromRemote(project: string, sprintId: string, add: readonly string[] = [], remove: readonly string[] = []): Promise<void> {
+  const p = await board(project);
+  const sp = sprintOf(p, sprintId);
+  if (sp.status === 'closed') return;
+  const f = S.load(p);
+  const addIds = [...new Set(add)].filter(id => {
+    const t = f.tasks.get(id);
+    return t && t.status !== 'merged' && t.status !== 'cancelled' && f.scrum.sprintOf.get(id) === undefined;
+  });
+  const removeIds = [...new Set(remove)].filter(id => f.scrum.sprintOf.get(id) === sprintId);
+  if (addIds.length === 0 && removeIds.length === 0) return;
+  S.recordScrum(p, { k: 'commit', sprint: sprintId, add: addIds, remove: removeIds });
 }
 
 /** Set or clear (`null`) a task's story points. A person's PATCH, or the acceptance of a suggestion. */

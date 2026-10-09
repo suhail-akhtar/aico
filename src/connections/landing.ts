@@ -141,11 +141,13 @@ async function openPr(project: string, task: Task): Promise<Opened> {
     const existing = await adapter.pulls.find(ctx, task.branch);
     if (existing) {
       const updated = await adapter.pulls.update(ctx, existing.id, { title: prTitle(task), body });
+      // A platform with real work item links (Azure DevOps artifact links) gets the link, idempotently; a failure to link never stops the update.
+      if (closes && adapter.items?.linkPull) await adapter.items.linkPull(ctx, closes, existing.id).catch(() => undefined);
       await adapter.pulls.comment(ctx, existing.id, withoutAttribution(`New commits were pushed to \`${task.branch}\` for task \`${task.id}\`.`)).catch(() => undefined);
       auditConnection({ action: 'pr.open', connection: conn.id, provider: conn.provider, ref: `${mapping.repo.owner}/${mapping.repo.name}#${existing.id}`, detail: 'updated', project });
       return { ok: true, pr: updated };
     }
-    const created = await adapter.pulls.create(ctx, { head: task.branch, base: mapping.trunk, title: prTitle(task), body });
+    const created = await adapter.pulls.create(ctx, { head: task.branch, base: mapping.trunk, title: prTitle(task), body, ...(closes ? { itemIds: [closes] } : {}) });
     if (created.overflow) await adapter.pulls.comment(ctx, created.pull.id, withoutAttribution(`The rest of the change report:\n\n${created.overflow}`)).catch(() => undefined);
     auditConnection({ action: 'pr.open', connection: conn.id, provider: conn.provider, ref: `${mapping.repo.owner}/${mapping.repo.name}#${created.pull.id}`, project });
     return { ok: true, pr: created.pull };
@@ -155,6 +157,18 @@ async function openPr(project: string, task: Task): Promise<Opened> {
   }
 }
 
+/**
+ * What a person's Merge click may do with the remote's current word on the pull request. It merges now only when the
+ * remote says it can. "Merge when the pipeline succeeds" (GitLab) is allowed only when the remote offers it
+ * (`autoMerge.available`: a running pipeline is the one thing in the way); the remote then applies every one of its own
+ * rules at the moment it merges. Nothing else arms it, and nothing here ever bypasses a rule.
+ */
+export function mergePlan(now: PullState): { allow: true; arm: boolean } | { allow: false; reason: string } {
+  if (now.canMerge) return { allow: true, arm: false };
+  if (now.autoMerge?.available === true) return { allow: true, arm: true };
+  return { allow: false, reason: `The remote says this pull request cannot be merged yet: ${now.mergeBlockers.join('; ') || 'its requirements are not met'}.` };
+}
+
 async function mergePr(project: string, task: Task, opts: { method?: 'merge' | 'squash' | 'rebase' }): Promise<Opened> {
   const linked = linkedFor(project);
   if (!linked || !task.pr) return { ok: false, reason: 'This task has no pull request on a connected remote.', status: 409 };
@@ -162,14 +176,14 @@ async function mergePr(project: string, task: Task, opts: { method?: 'merge' | '
   const d = connectionDecision({ provider: conn.provider, host: new URL(conn.baseUrl).hostname, landing: 'pr' });
   if (!d.ok) return { ok: false, reason: d.message, status: 403 };
   try {
-    const { adapter, ctx } = ctxFor(conn, { repo: mapping.repo, project });
+    // `person`: mergePr is reached only from the human-gated Merge click, which is what a connector pack's destructive operation requires.
+    const { adapter, ctx } = ctxFor(conn, { repo: mapping.repo, project, person: true });
     if (!adapter.pulls?.merge) return { ok: false, reason: `${conn.label} cannot merge from here; merge on the platform.`, status: 409 };
     const now = await adapter.pulls.get(ctx, task.pr.id);
     if (now.state === 'merged') return { ok: true, pr: now };
-    if (!now.canMerge) {
-      return { ok: false, reason: `The remote says this pull request cannot be merged yet: ${now.mergeBlockers.join('; ') || 'its requirements are not met'}.`, status: 409 };
-    }
-    await adapter.pulls.merge(ctx, task.pr.id, { method: opts.method ?? 'merge', sha: now.headSha });
+    const plan = mergePlan(now);
+    if (!plan.allow) return { ok: false, reason: plan.reason, status: 409 };
+    await adapter.pulls.merge(ctx, task.pr.id, { method: opts.method ?? 'merge', sha: now.headSha, ...(plan.arm ? { whenChecksPass: true } : {}) });
     auditConnection({ action: 'pr.merge', connection: conn.id, provider: conn.provider, ref: `${mapping.repo.owner}/${mapping.repo.name}#${task.pr.id}`, project });
     return { ok: true, pr: await adapter.pulls.get(ctx, task.pr.id) };
   } catch (e) {

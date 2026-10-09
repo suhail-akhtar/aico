@@ -1,0 +1,100 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo.dev@example.test",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 30000
+      },
+      "items": {
+        "query": false,
+        "create": false,
+        "transition": false,
+        "comment": false,
+        "estimate": "none",
+        "parentLink": false
+      },
+      "iterations": "none",
+      "checks": {
+        "read": false,
+        "rerun": false,
+        "logsUrl": false
+      },
+      "protection": {
+        "read": false
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "read:repository, write:repository",
+          "why": "Read the repository and push aico/task-* branches.",
+          "feature": "repos",
+          "required": true
+        },
+        {
+          "scope": "read:pullrequest, write:pullrequest",
+          "why": "Open pull requests, comment, and merge on your click.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "read:pipeline",
+          "why": "Read build results (they arrive as commit statuses).",
+          "feature": "checks",
+          "required": false
+        },
+        {
+          "scope": "read:issue, write:issue",
+          "why": "Import issues, only for repositories that use the issue tracker.",
+          "feature": "items",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "This token cannot read its own account (normal for a repository or workspace access token), so \"assigned to me\" cannot be used.",
+      "The issue tracker is turned off for this repository (common on Bitbucket Cloud), so work items are unavailable. Jira is not supported.",
+      "Checks are unreadable with this token (it needs read:pipeline), so pull requests will show no builds.",
+      "Branch protection unreadable (needs repository admin): AICO cannot see which approvals and builds main requires.",
+      "Bitbucket Cloud has no sprints, so AICO's sprints stay local. Jira is not supported."
+    ]
+  },
+  "pull": {
+    "connection": "bitbucket-cloud-limited-token",
+    "id": "7",
+    "url": "https://forge.test/acme/widgets/pull-requests/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "changes",
+      "approved": 0,
+      "changesRequested": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "A reviewer has requested changes.",
+      "Nobody has approved it yet (Bitbucket did not say whether approvals are required)."
+    ],
+    "observedAt": "<time>"
+  },
+  "protection": {
+    "protected": false,
+    "unreadable": "needs repository admin"
+  }
+}

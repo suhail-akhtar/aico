@@ -1,0 +1,123 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "version": "1.16.9",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 65000
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "label",
+        "parentLink": false
+      },
+      "iterations": "milestone",
+      "checks": {
+        "read": true,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": true
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "Repository: read and write",
+          "why": "Push aico/task-* branches, open and merge pull requests, read commit statuses.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "Issue: read and write",
+          "why": "Import issues as tasks and keep their labels and state in step.",
+          "feature": "items",
+          "required": false
+        },
+        {
+          "scope": "User: read",
+          "why": "Show which account the token acts as.",
+          "feature": "repos",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "Gitea has milestones, not iterations or story points: milestones stand in for sprints and an \"sp:5\" label carries an estimate."
+    ]
+  },
+  "repo": {
+    "ref": {
+      "owner": "octo-org",
+      "name": "widgets",
+      "id": "5001"
+    },
+    "defaultBranch": "main",
+    "cloneUrl": "<origin>/octo-org/widgets.git",
+    "htmlUrl": "<origin>/octo-org/widgets",
+    "private": true,
+    "permissions": {
+      "pull": true,
+      "push": true,
+      "admin": false
+    }
+  },
+  "items": [
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Updating a widget leaves a stale entry.",
+      "state": "open",
+      "labels": [
+        "bug",
+        "estimate:5"
+      ],
+      "assignees": [
+        "octo-dev"
+      ],
+      "author": "octo-bot",
+      "url": "https://forge.test/octo-org/widgets/issues/11",
+      "rev": "2026-10-01T10:00:00Z",
+      "milestone": {
+        "id": "31",
+        "title": "Sprint 1",
+        "dueOn": "2026-10-16T07:00:00Z"
+      },
+      "points": 5,
+      "iteration": "31"
+    }
+  ],
+  "iterations": [
+    {
+      "id": "31",
+      "title": "Sprint 1",
+      "kind": "milestone",
+      "state": "open",
+      "end": "2026-10-16T07:00:00Z",
+      "url": "<origin>/octo-org/widgets/milestone/31"
+    }
+  ],
+  "checks": [],
+  "protection": {
+    "protected": true,
+    "requiredReviews": 0,
+    "requiredChecks": [
+      "build"
+    ]
+  }
+}

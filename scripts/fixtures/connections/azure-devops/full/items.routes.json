@@ -1,0 +1,433 @@
+[
+  {
+    "path": "/Shop/_apis/wit/workitemtypes",
+    "status": 200,
+    "body": {
+      "count": 4,
+      "value": [
+        {
+          "name": "User Story",
+          "referenceName": "Microsoft.VSTS.WorkItemTypes.UserStory",
+          "isDisabled": false,
+          "states": [
+            {
+              "name": "New",
+              "color": "b2b2b2",
+              "category": "Proposed"
+            },
+            {
+              "name": "Active",
+              "color": "007acc",
+              "category": "InProgress"
+            },
+            {
+              "name": "Resolved",
+              "color": "ff9d00",
+              "category": "Resolved"
+            },
+            {
+              "name": "Closed",
+              "color": "339933",
+              "category": "Completed"
+            },
+            {
+              "name": "Removed",
+              "color": "ffffff",
+              "category": "Removed"
+            }
+          ]
+        },
+        {
+          "name": "Bug",
+          "isDisabled": false,
+          "states": [
+            {
+              "name": "New",
+              "category": "Proposed"
+            },
+            {
+              "name": "Active",
+              "category": "InProgress"
+            },
+            {
+              "name": "Resolved",
+              "category": "Resolved"
+            },
+            {
+              "name": "Closed",
+              "category": "Completed"
+            }
+          ]
+        },
+        {
+          "name": "Task",
+          "isDisabled": false,
+          "states": [
+            {
+              "name": "New",
+              "category": "Proposed"
+            },
+            {
+              "name": "Active",
+              "category": "InProgress"
+            },
+            {
+              "name": "Closed",
+              "category": "Completed"
+            },
+            {
+              "name": "Removed",
+              "category": "Removed"
+            }
+          ]
+        },
+        {
+          "name": "Epic",
+          "isDisabled": false,
+          "states": [
+            {
+              "name": "New",
+              "category": "Proposed"
+            },
+            {
+              "name": "Done",
+              "category": "Completed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/wit/workitemtypes/:type",
+    "status": 200,
+    "body": {
+      "name": "User Story",
+      "fields": [
+        {
+          "referenceName": "Microsoft.VSTS.Scheduling.StoryPoints",
+          "name": "Story Points"
+        },
+        {
+          "referenceName": "System.Title",
+          "name": "Title"
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/wit/wiql",
+    "bodyIncludes": "ORDER BY [System.ChangedDate] DESC",
+    "status": 200,
+    "body": {
+      "queryType": "flat",
+      "workItems": [
+        {
+          "id": 13
+        },
+        {
+          "id": 11
+        },
+        {
+          "id": 14
+        },
+        {
+          "id": 99
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/wit/wiql",
+    "status": 200,
+    "body": {
+      "queryType": "flat",
+      "workItems": [
+        {
+          "id": 11
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/wit/workitemsbatch",
+    "status": 200,
+    "body": {
+      "count": 4,
+      "value": [
+        {
+          "id": 11,
+          "rev": 5,
+          "fields": {
+            "System.TeamProject": "Shop",
+            "System.WorkItemType": "User Story",
+            "System.Title": "Cache invalidation on widget update",
+            "System.State": "Active",
+            "System.Tags": "bug; needs-triage",
+            "System.AssignedTo": {
+              "displayName": "Dana Dev",
+              "uniqueName": "dana.dev@example.test"
+            },
+            "System.CreatedBy": {
+              "displayName": "Riley Reviewer",
+              "uniqueName": "riley@example.test"
+            },
+            "System.IterationPath": "Shop\\Sprint 1",
+            "System.AreaPath": "Shop\\Web",
+            "Microsoft.VSTS.Scheduling.StoryPoints": 3,
+            "System.Description": "<div>Widgets stay <b>stale</b> after an update.</div><ul><li>Check the cache</li></ul>",
+            "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>The cache is invalidated</li><li>A test covers it</li></ul>"
+          },
+          "url": "https://forge.test/_apis/wit/workItems/11"
+        },
+        {
+          "id": 99,
+          "rev": 1,
+          "fields": {
+            "System.TeamProject": "Other",
+            "System.WorkItemType": "Bug",
+            "System.Title": "Not this project",
+            "System.State": "New"
+          }
+        },
+        {
+          "id": 14,
+          "rev": 9,
+          "fields": {
+            "System.TeamProject": "Shop",
+            "System.WorkItemType": "Task",
+            "System.Title": "Remove old flag",
+            "System.State": "Closed",
+            "System.IterationPath": "Shop\\Sprint 1",
+            "System.AreaPath": "Shop\\Web"
+          },
+          "url": "https://forge.test/_apis/wit/workItems/14"
+        },
+        {
+          "id": 13,
+          "rev": 2,
+          "fields": {
+            "System.TeamProject": "Shop",
+            "System.WorkItemType": "Bug",
+            "System.Title": "Widget count is wrong",
+            "System.State": "New",
+            "System.Tags": "bug",
+            "System.CreatedBy": {
+              "displayName": "Riley Reviewer"
+            },
+            "System.IterationPath": "Shop",
+            "System.AreaPath": "Shop",
+            "Microsoft.VSTS.TCM.ReproSteps": "<div>1. Open the page<br>2. Count the widgets &amp; compare</div>"
+          },
+          "url": "https://forge.test/_apis/wit/workItems/13"
+        }
+      ]
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/Shop/_apis/wit/workitems/:id",
+    "bodyIncludes": "System.Title",
+    "status": 200,
+    "body": {
+      "id": 11,
+      "rev": 6,
+      "fields": {
+        "System.TeamProject": "Shop",
+        "System.WorkItemType": "User Story",
+        "System.Title": "Cache invalidation on widget update (reworded)",
+        "System.State": "Active",
+        "System.Tags": "bug; sp:3; aico:running",
+        "System.AssignedTo": {
+          "displayName": "Dana Dev",
+          "uniqueName": "dana.dev@example.test"
+        },
+        "System.CreatedBy": {
+          "displayName": "Riley Reviewer",
+          "uniqueName": "riley@example.test"
+        },
+        "System.IterationPath": "Shop\\Sprint 1",
+        "System.AreaPath": "Shop\\Web",
+        "Microsoft.VSTS.Scheduling.StoryPoints": 3,
+        "System.Description": "<div>Widgets stay <b>stale</b> after an update.</div><ul><li>Check the cache</li></ul>",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>The cache is invalidated</li><li>A test covers it</li></ul>"
+      },
+      "url": "https://forge.test/_apis/wit/workItems/11"
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/Shop/_apis/wit/workitems/:id",
+    "bodyIncludes": "System.State",
+    "status": 200,
+    "body": {
+      "id": 11,
+      "rev": 7,
+      "fields": {
+        "System.TeamProject": "Shop",
+        "System.WorkItemType": "User Story",
+        "System.Title": "Cache invalidation on widget update",
+        "System.State": "Closed",
+        "System.Tags": "bug; needs-triage",
+        "System.AssignedTo": {
+          "displayName": "Dana Dev",
+          "uniqueName": "dana.dev@example.test"
+        },
+        "System.CreatedBy": {
+          "displayName": "Riley Reviewer",
+          "uniqueName": "riley@example.test"
+        },
+        "System.IterationPath": "Shop\\Sprint 1",
+        "System.AreaPath": "Shop\\Web",
+        "Microsoft.VSTS.Scheduling.StoryPoints": 3,
+        "System.Description": "<div>Widgets stay <b>stale</b> after an update.</div><ul><li>Check the cache</li></ul>",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>The cache is invalidated</li><li>A test covers it</li></ul>"
+      },
+      "url": "https://forge.test/_apis/wit/workItems/11"
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/Shop/_apis/wit/workitems/:id",
+    "bodyIncludes": "System.History",
+    "status": 200,
+    "body": {
+      "id": 11,
+      "rev": 6,
+      "fields": {
+        "System.TeamProject": "Shop",
+        "System.WorkItemType": "User Story",
+        "System.Title": "Cache invalidation on widget update",
+        "System.State": "Active",
+        "System.Tags": "bug; needs-triage",
+        "System.AssignedTo": {
+          "displayName": "Dana Dev",
+          "uniqueName": "dana.dev@example.test"
+        },
+        "System.CreatedBy": {
+          "displayName": "Riley Reviewer",
+          "uniqueName": "riley@example.test"
+        },
+        "System.IterationPath": "Shop\\Sprint 1",
+        "System.AreaPath": "Shop\\Web",
+        "Microsoft.VSTS.Scheduling.StoryPoints": 3,
+        "System.Description": "<div>Widgets stay <b>stale</b> after an update.</div><ul><li>Check the cache</li></ul>",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>The cache is invalidated</li><li>A test covers it</li></ul>"
+      },
+      "url": "https://forge.test/_apis/wit/workItems/11"
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/Shop/_apis/wit/workitems/:id",
+    "bodyIncludes": "System.IterationPath",
+    "status": 200,
+    "body": {
+      "id": 11,
+      "rev": 8,
+      "fields": {
+        "System.TeamProject": "Shop",
+        "System.WorkItemType": "User Story",
+        "System.Title": "Cache invalidation on widget update",
+        "System.State": "Active",
+        "System.Tags": "bug; needs-triage",
+        "System.AssignedTo": {
+          "displayName": "Dana Dev",
+          "uniqueName": "dana.dev@example.test"
+        },
+        "System.CreatedBy": {
+          "displayName": "Riley Reviewer",
+          "uniqueName": "riley@example.test"
+        },
+        "System.IterationPath": "Shop\\Sprint 2",
+        "System.AreaPath": "Shop\\Web",
+        "Microsoft.VSTS.Scheduling.StoryPoints": 3,
+        "System.Description": "<div>Widgets stay <b>stale</b> after an update.</div><ul><li>Check the cache</li></ul>",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>The cache is invalidated</li><li>A test covers it</li></ul>"
+      },
+      "url": "https://forge.test/_apis/wit/workItems/11"
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/Shop/_apis/wit/workitems/:id",
+    "bodyIncludes": "System.Tags",
+    "status": 200,
+    "body": {
+      "id": 11,
+      "rev": 6,
+      "fields": {
+        "System.TeamProject": "Shop",
+        "System.WorkItemType": "User Story",
+        "System.Title": "Cache invalidation on widget update",
+        "System.State": "Active",
+        "System.Tags": "bug; aico:running",
+        "System.AssignedTo": {
+          "displayName": "Dana Dev",
+          "uniqueName": "dana.dev@example.test"
+        },
+        "System.CreatedBy": {
+          "displayName": "Riley Reviewer",
+          "uniqueName": "riley@example.test"
+        },
+        "System.IterationPath": "Shop\\Sprint 1",
+        "System.AreaPath": "Shop\\Web",
+        "Microsoft.VSTS.Scheduling.StoryPoints": 3,
+        "System.Description": "<div>Widgets stay <b>stale</b> after an update.</div><ul><li>Check the cache</li></ul>",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>The cache is invalidated</li><li>A test covers it</li></ul>"
+      },
+      "url": "https://forge.test/_apis/wit/workItems/11"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/wit/workitems/:type",
+    "status": 200,
+    "body": {
+      "id": 15,
+      "rev": 1,
+      "fields": {
+        "System.TeamProject": "Shop",
+        "System.WorkItemType": "User Story",
+        "System.Title": "Follow-up: cache metrics",
+        "System.State": "New",
+        "System.Tags": "aico",
+        "System.IterationPath": "Shop",
+        "System.AreaPath": "Shop"
+      },
+      "url": "https://forge.test/_apis/wit/workItems/15"
+    }
+  },
+  {
+    "path": "/Shop/_apis/wit/workitems/:id",
+    "status": 200,
+    "body": {
+      "id": 11,
+      "rev": 5,
+      "fields": {
+        "System.TeamProject": "Shop",
+        "System.WorkItemType": "User Story",
+        "System.Title": "Cache invalidation on widget update",
+        "System.State": "Active",
+        "System.Tags": "bug; needs-triage",
+        "System.AssignedTo": {
+          "displayName": "Dana Dev",
+          "uniqueName": "dana.dev@example.test"
+        },
+        "System.CreatedBy": {
+          "displayName": "Riley Reviewer",
+          "uniqueName": "riley@example.test"
+        },
+        "System.IterationPath": "Shop\\Sprint 1",
+        "System.AreaPath": "Shop\\Web",
+        "Microsoft.VSTS.Scheduling.StoryPoints": 3,
+        "System.Description": "<div>Widgets stay <b>stale</b> after an update.</div><ul><li>Check the cache</li></ul>",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>The cache is invalidated</li><li>A test covers it</li></ul>"
+      },
+      "url": "https://forge.test/_apis/wit/workItems/11"
+    }
+  }
+]

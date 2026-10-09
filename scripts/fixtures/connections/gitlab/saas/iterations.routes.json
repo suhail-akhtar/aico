@@ -1,0 +1,82 @@
+{
+  "prefix": "/api/v4",
+  "routes": [
+    {
+      "path": "/projects/:project/iterations",
+      "status": 200,
+      "body": [
+        {
+          "id": 61,
+          "iid": 14,
+          "sequence": 14,
+          "group_id": 77,
+          "title": "Sprint 14",
+          "state": 2,
+          "start_date": "2026-10-05",
+          "due_date": "2026-10-18",
+          "web_url": "https://forge.test/groups/acme/-/iterations/14"
+        },
+        {
+          "id": 60,
+          "iid": 13,
+          "sequence": 13,
+          "group_id": 77,
+          "title": null,
+          "state": 3,
+          "start_date": "2026-09-21",
+          "due_date": "2026-10-04",
+          "web_url": "https://forge.test/groups/acme/-/iterations/13"
+        },
+        {
+          "id": 62,
+          "iid": 15,
+          "sequence": 15,
+          "group_id": 77,
+          "title": "Sprint 15",
+          "state": 1,
+          "start_date": "2026-10-19",
+          "due_date": "2026-11-01",
+          "web_url": "https://forge.test/groups/acme/-/iterations/15"
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/projects/:project/milestones",
+      "status": 201,
+      "body": {
+        "id": 43,
+        "iid": 3,
+        "title": "Sprint 2",
+        "state": "active",
+        "start_date": null,
+        "due_date": "2026-10-30",
+        "web_url": "https://forge.test/acme/platform/widgets/-/milestones/3"
+      }
+    },
+    {
+      "path": "/projects/:project/milestones",
+      "status": 200,
+      "body": [
+        {
+          "id": 41,
+          "iid": 1,
+          "title": "Sprint 1",
+          "state": "active",
+          "start_date": "2026-10-05",
+          "due_date": "2026-10-16",
+          "web_url": "https://forge.test/acme/platform/widgets/-/milestones/1"
+        },
+        {
+          "id": 42,
+          "iid": 2,
+          "title": "Sprint 0",
+          "state": "closed",
+          "start_date": "2026-09-21",
+          "due_date": "2026-10-02",
+          "web_url": "https://forge.test/acme/platform/widgets/-/milestones/2"
+        }
+      ]
+    }
+  ]
+}

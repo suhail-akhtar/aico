@@ -1,0 +1,96 @@
+{
+  "prefix": "/api/v4",
+  "routes": [
+    {
+      "path": "/projects/:project/repository/branches/main",
+      "status": 200,
+      "body": {
+        "name": "main",
+        "protected": true,
+        "default": true,
+        "developers_can_merge": false
+      }
+    },
+    {
+      "path": "/projects/:project/repository/branches/dev",
+      "status": 200,
+      "body": {
+        "name": "dev",
+        "protected": false,
+        "default": false
+      }
+    },
+    {
+      "path": "/projects/:project/approval_rules",
+      "status": 200,
+      "body": [
+        {
+          "id": 1,
+          "name": "All eligible users",
+          "rule_type": "any_approver",
+          "approvals_required": 1,
+          "protected_branches": [],
+          "applies_to_all_protected_branches": true
+        },
+        {
+          "id": 2,
+          "name": "Release managers",
+          "rule_type": "regular",
+          "approvals_required": 2,
+          "protected_branches": [
+            {
+              "name": "release/*"
+            }
+          ],
+          "applies_to_all_protected_branches": false
+        }
+      ]
+    },
+    {
+      "path": "/projects/:project/repository/commits/:sha/statuses",
+      "status": 200,
+      "body": [
+        {
+          "id": 1,
+          "name": "build",
+          "status": "success",
+          "target_url": "https://forge.test/acme/platform/widgets/-/jobs/1",
+          "description": null,
+          "allow_failure": false
+        },
+        {
+          "id": 2,
+          "name": "docs",
+          "status": "failed",
+          "target_url": "https://forge.test/acme/platform/widgets/-/jobs/2",
+          "description": "Docs build is advisory.",
+          "allow_failure": true
+        },
+        {
+          "id": 3,
+          "name": "e2e",
+          "status": "skipped",
+          "target_url": "https://forge.test/acme/platform/widgets/-/jobs/3",
+          "description": null,
+          "allow_failure": false
+        },
+        {
+          "id": 4,
+          "name": "deploy-preview",
+          "status": "canceled",
+          "target_url": "https://forge.test/acme/platform/widgets/-/jobs/4",
+          "description": "Cancelled by a newer push.",
+          "allow_failure": false
+        },
+        {
+          "id": 5,
+          "name": "ci/legacy",
+          "status": "failed",
+          "target_url": "https://forge.test/legacy/build/55",
+          "description": "Runner lost contact.",
+          "allow_failure": false
+        }
+      ]
+    }
+  ]
+}

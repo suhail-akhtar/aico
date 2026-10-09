@@ -1,0 +1,32 @@
+{
+  "name": "acme_checks",
+  "description": "Checks of a commit.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "name": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "sha": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{7,64}$"
+      }
+    },
+    "required": [
+      "owner",
+      "name",
+      "sha"
+    ]
+  },
+  "http": {
+    "method": "GET",
+    "url": "https://api.acme-forge.example/v1/repos/{owner}/{name}/commits/{sha}/checks"
+  },
+  "effect": "read"
+}

@@ -1,0 +1,99 @@
+[
+  {
+    "path": "/Shop/_apis/policy/configurations",
+    "query": {
+      "refName": "refs/heads/main"
+    },
+    "status": 200,
+    "body": {
+      "count": 4,
+      "value": [
+        {
+          "id": 32,
+          "isEnabled": true,
+          "isBlocking": true,
+          "type": {
+            "id": "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd",
+            "displayName": "Minimum number of reviewers"
+          },
+          "settings": {
+            "minimumApproverCount": 2,
+            "scope": [
+              {
+                "refName": "refs/heads/main",
+                "matchKind": "Exact",
+                "repositoryId": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00"
+              }
+            ]
+          }
+        },
+        {
+          "id": 31,
+          "isEnabled": true,
+          "isBlocking": true,
+          "type": {
+            "id": "0609b952-1397-4640-95ec-e00a01b2c241",
+            "displayName": "Build"
+          },
+          "settings": {
+            "displayName": "CI build",
+            "buildDefinitionId": 4,
+            "scope": [
+              {
+                "refName": "refs/heads/main",
+                "matchKind": "Exact",
+                "repositoryId": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00"
+              }
+            ]
+          }
+        },
+        {
+          "id": 34,
+          "isEnabled": true,
+          "isBlocking": false,
+          "type": {
+            "id": "0609b952-1397-4640-95ec-e00a01b2c241",
+            "displayName": "Build"
+          },
+          "settings": {
+            "displayName": "Optional lint",
+            "scope": [
+              {
+                "refName": "refs/heads/main",
+                "matchKind": "Exact",
+                "repositoryId": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00"
+              }
+            ]
+          }
+        },
+        {
+          "id": 35,
+          "isEnabled": true,
+          "isBlocking": true,
+          "type": {
+            "id": "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd",
+            "displayName": "Minimum number of reviewers"
+          },
+          "settings": {
+            "minimumApproverCount": 5,
+            "scope": [
+              {
+                "refName": "refs/heads/release/",
+                "matchKind": "Prefix",
+                "repositoryId": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/policy/configurations",
+    "status": 200,
+    "body": {
+      "count": 0,
+      "value": []
+    }
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7",
+    "body": {
+      "id": 7, "version": 4, "title": "Add widget cache", "state": "OPEN", "open": true, "closed": false, "draft": false,
+      "fromRef": { "id": "refs/heads/aico/task-42", "displayId": "aico/task-42", "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" },
+      "toRef": { "id": "refs/heads/main", "displayId": "main", "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233" },
+      "author": { "user": { "name": "octo-dev", "slug": "octo-dev" }, "role": "AUTHOR" },
+      "reviewers": [],
+      "links": { "self": [ { "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7" } ] }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/merge",
+    "query": { "version": "5" },
+    "body": { "id": 7, "version": 5, "state": "MERGED" }
+  },
+  {
+    "method": "POST",
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/merge",
+    "status": 409,
+    "body": { "errors": [ { "context": null, "message": "You are attempting to modify a pull request based on out-of-date information.", "exceptionName": "com.atlassian.bitbucket.pull.PullRequestOutOfDateException" } ] }
+  }
+]

@@ -32,7 +32,10 @@ import {
   type ProjectMapping, type ProviderId, type ProviderInfo, type PullState, type RemoteCheck, type RemoteLink, type RepoDetection,
   type ScopeAdvice, type SyncStatus, type WorkItemSource,
 } from '../../shared/connections/types';
+import { CATEGORY_STATE_MAP } from '../../shared/connections/process';
+import { AZURE_SOURCE_WORDS, orgOfBaseUrl, parseAzureOrg, parseAzureRepo } from './connections-azure';
 import { ago, toMs } from './delivery-model';
+import type { ConnectorPackView, PackOperationView, PackStatus } from '../../shared/connections/packs';
 
 export type ChipTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
 
@@ -63,6 +66,7 @@ export function providerLabel(id: ProviderId | string, providers: readonly Provi
 export function serverSwitchLabel(id: ProviderId): string | null {
   if (id === 'github') return 'GitHub Enterprise Server';
   if (id === 'gitlab') return 'Self-managed GitLab';
+  if (id === 'azure-devops') return 'Azure DevOps Server';
   return null;
 }
 
@@ -89,7 +93,8 @@ export function providerTiles(providers: readonly ProviderInfo[], policy?: Conne
       return { id: p.id, label: p.label, enabled, ...(note ? { note } : {}) };
     });
   tiles.sort((a, b) => Number(b.enabled) - Number(a.enabled));
-  tiles.push({ id: 'other', label: 'Other', enabled: false, note: 'Ask AICO to build a connector for it later.' });
+  const packs = packsAllowed(policy);
+  tiles.push({ id: 'other', label: 'Other', enabled: packs, note: packs ? 'Ask AICO to build a connector for it.' : 'Not allowed by your organization.' });
   return tiles;
 }
 
@@ -107,7 +112,8 @@ export function hostAllowed(policy: ConnectionsPolicyView | undefined, host: str
   if (!policy || policy.mode === 'any') return true;
   if (policy.mode === 'forbid') return false;
   if (!policy.hosts) return true;
-  const h = host.toLowerCase();
+  // The engine compares host names; a port in the address (a server on :8443) is not part of the pattern.
+  const h = host.toLowerCase().replace(/:\d+$/, '');
   return policy.hosts.some(p => {
     const pat = p.toLowerCase();
     return pat.startsWith('*.') ? h.endsWith(pat.slice(1)) : h === pat;
@@ -323,8 +329,12 @@ export interface ConnectionForm {
   /** The person switched to a server they run (Enterprise Server, self-managed). */
   serverUrl: boolean;
   baseUrl: string;
+  /** Azure DevOps Services: the organization name (the address is built from it). */
+  organization?: string;
   insecureHttp: boolean;
   caBundle: string;
+  /** Bitbucket Cloud: the Atlassian account email that goes with an API token (empty for an access token). */
+  username?: string;
 }
 
 export interface CreateBody {
@@ -333,9 +343,13 @@ export interface CreateBody {
   baseUrl?: string;
   insecureHttp?: boolean;
   caBundle?: string;
+  username?: string;
 }
 
-export type FormField = 'label' | 'baseUrl' | 'insecureHttp' | 'caBundle';
+export type FormField = 'label' | 'baseUrl' | 'insecureHttp' | 'caBundle' | 'username';
+
+/** Does this provider pair its token with an account name (Basic auth)? Only Bitbucket Cloud's API tokens do. */
+export function asksForAccount(id: ProviderId): boolean { return id === 'bitbucket-cloud'; }
 
 export interface FormCheck {
   ok: boolean;
@@ -381,6 +395,22 @@ export function checkBaseUrl(raw: string, insecureHttp: boolean): UrlCheck {
   return { ok: true, url, plainHttp, host: u.host };
 }
 
+/**
+ * Where a person creates a token on a server they run, from its address. A plain link, never filled with anything
+ * secret; null where the provider has no stable page for it (GitBucket's depends on the account name).
+ */
+export function tokenPageUrl(provider: ProviderId, serverUrl: string): string | null {
+  const root = serverUrl.replace(/\/+$/, '');
+  switch (provider) {
+    case 'github': return `${root}/settings/tokens`;
+    case 'gitlab': return `${root}/-/profile/personal_access_tokens?name=AICO&scopes=api`;
+    case 'gitea':
+    case 'forgejo': return `${root}/user/settings/applications`;
+    case 'azure-devops': return `${root}/_usersSettings/tokens`;
+    default: return null;
+  }
+}
+
 /** Does the typed address call for the opt-in checkbox (plain http, private address)? */
 export function wantsHttpOptIn(raw: string): boolean {
   const t = raw.trim();
@@ -402,7 +432,11 @@ export function validateConnectionForm(form: ConnectionForm, info: ProviderInfo 
   let baseUrl: string | undefined;
   let plainHttp = false;
   let needsHttpOptIn = false;
-  if (asksForUrl(info, form)) {
+  if (form.provider === 'azure-devops' && !form.serverUrl) {
+    // Azure DevOps Services: the organization is part of the address, so the page asks for its name and builds the address.
+    const org = parseAzureOrg(form.organization ?? '');
+    if (org.ok) baseUrl = org.baseUrl; else errors.baseUrl = org.error;
+  } else if (asksForUrl(info, form)) {
     needsHttpOptIn = wantsHttpOptIn(form.baseUrl) && !form.insecureHttp;
     const r = checkBaseUrl(form.baseUrl, form.insecureHttp);
     if (r.ok) { baseUrl = r.url; plainHttp = r.plainHttp; }
@@ -414,9 +448,12 @@ export function validateConnectionForm(form: ConnectionForm, info: ProviderInfo 
     if (baseUrl && plainHttp) errors.caBundle = 'A CA bundle only applies to https addresses.';
     else if (!PEM_RE.test(ca)) errors.caBundle = 'Use the path of a PEM file (.pem, .crt or .cer).';
   }
+  const username = asksForAccount(form.provider) ? (form.username ?? '').trim() : '';
+  if (username && (username.length > 200 || /[\s:]/.test(username))) errors.username = 'Use the email address of your Atlassian account, without spaces.';
   const ok = Object.keys(errors).length === 0;
   const body: CreateBody | undefined = ok ? {
     provider: form.provider,
+    ...(username ? { username } : {}),
     ...(label ? { label } : {}),
     ...(baseUrl ? { baseUrl } : {}),
     ...(plainHttp ? { insecureHttp: true } : {}),
@@ -429,7 +466,8 @@ export function validateConnectionForm(form: ConnectionForm, info: ProviderInfo 
 export function defaultLabel(info: ProviderInfo | undefined, baseUrl: string): string {
   const name = info?.label ?? 'Connection';
   const r = baseUrl.trim() ? checkBaseUrl(baseUrl, true) : null;
-  return r && r.ok ? `${name} (${r.host})` : name;
+  const org = info?.id === 'azure-devops' ? orgOfBaseUrl(baseUrl) : undefined;
+  return org ? `${name} (${org})` : r && r.ok ? `${name} (${r.host})` : name;
 }
 
 // ── project mapping ──────────────────────────────────────────────────────
@@ -451,6 +489,12 @@ export const WORK_ITEM_OPTIONS: ReadonlyArray<{ id: WorkItemSource; label: strin
   { id: 'query', label: 'Query', hint: 'Open items matching a search in the platform\'s own syntax.', valueLabel: 'Query', placeholder: 'is:open label:bug' },
 ];
 
+/** The work-item source choices in the words of the provider (Azure DevOps has tags and WIQL, not labels and search text). */
+export function workItemOptions(provider?: ProviderId): typeof WORK_ITEM_OPTIONS {
+  if (provider !== 'azure-devops') return WORK_ITEM_OPTIONS;
+  return WORK_ITEM_OPTIONS.map(o => ({ ...o, ...(AZURE_SOURCE_WORDS[o.id] ?? {}) }));
+}
+
 export interface MappingForm {
   connection: string;
   /** "owner/name". */
@@ -464,6 +508,10 @@ export interface MappingForm {
   stateMap: Record<string, string>;
   /** Comma- or space-separated logins. */
   trustedCommenters: string;
+  /** Set by the dialog: the connection's provider, which decides how the repository is written and how states read. */
+  provider?: ProviderId;
+  /** Mirror the platform's current and next iteration as Scrum sprints, and keep story points in step. */
+  iterations?: 'off' | 'native';
 }
 
 export function repoText(repo: { owner: string; name: string } | undefined): string {
@@ -471,13 +519,15 @@ export function repoText(repo: { owner: string; name: string } | undefined): str
 }
 
 /** The seven state names, the engine's current ones over its defaults. */
-export function stateMapOf(existing?: Record<string, string>): Record<string, string> {
+export function stateMapOf(existing?: Record<string, string>, provider?: ProviderId): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const r of STATE_ROWS) out[r.id] = (existing?.[r.id] ?? DEFAULT_STATE_MAP[r.id]) as string;
+  // Azure DevOps has workflow states, so its defaults are state CATEGORIES (the engine's `defaultStateMap`).
+  const defaults = provider === 'azure-devops' ? CATEGORY_STATE_MAP : DEFAULT_STATE_MAP;
+  for (const r of STATE_ROWS) out[r.id] = (existing?.[r.id] ?? defaults[r.id]) as string;
   return out;
 }
 
-export function initialMappingForm(o: { connection: string; existing?: ProjectMapping | undefined; detection?: RepoDetection | null | undefined; trunk?: string | undefined }): MappingForm {
+export function initialMappingForm(o: { connection: string; existing?: ProjectMapping | undefined; detection?: RepoDetection | null | undefined; trunk?: string | undefined; provider?: ProviderId | undefined }): MappingForm {
   const e = o.existing;
   return {
     connection: e?.connection ?? o.connection,
@@ -487,13 +537,16 @@ export function initialMappingForm(o: { connection: string; existing?: ProjectMa
     prConfirmed: false,
     source: e?.workItems.source ?? 'off',
     value: e?.workItems.value ?? '',
-    stateMap: stateMapOf(e?.stateMap),
+    stateMap: stateMapOf(e?.stateMap, o.provider),
     trustedCommenters: (e?.trustedCommenters ?? []).join(', '),
+    ...(o.provider ? { provider: o.provider, iterations: e?.iterations ?? 'off' } : {}),
   };
 }
 
-export function parseRepo(text: string): { owner: string; name: string } | null {
-  const m = /^\s*([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\s*$/.exec(text);
+export function parseRepo(text: string, provider?: ProviderId): { owner: string; name: string } | null {
+  if (provider === 'azure-devops') return parseAzureRepo(text);
+  // The owner is every segment before the last: GitLab nests groups (acme/platform/widgets).
+  const m = /^\s*([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){0,19})\/([A-Za-z0-9_.-]+?)(?:\.git)?\s*$/.exec(text);
   return m ? { owner: m[1]!, name: m[2]! } : null;
 }
 
@@ -505,7 +558,7 @@ export type MappingErrors = Partial<Record<'repo' | 'trunk' | 'value' | 'landing
 
 export function validateMapping(form: MappingForm, policy?: ConnectionsPolicyView): { ok: boolean; errors: MappingErrors } {
   const errors: MappingErrors = {};
-  if (!parseRepo(form.repo)) errors.repo = 'Use owner/name, for example acme/shop.';
+  if (!parseRepo(form.repo, form.provider)) errors.repo = form.provider === 'azure-devops' ? 'Use project/repository, for example Shop/web.' : 'Use owner/name, for example acme/shop.';
   const trunk = form.trunk.trim();
   if (!trunk || !/^[A-Za-z0-9._/-]+$/.test(trunk) || trunk.includes('..')) errors.trunk = 'Use the branch name, for example main.';
   const opt = WORK_ITEM_OPTIONS.find(o => o.id === form.source);
@@ -540,12 +593,13 @@ export interface MapBody {
   trunk: string;
   stateMap: Record<string, string>;
   trustedCommenters?: string[];
+  iterations?: 'off' | 'native';
   confirmLanding?: true;
 }
 
 /** What `connections/map` is sent. `confirmLanding` goes only with a switch to pull request mode the person accepted. */
 export function mappingBody(project: string, form: MappingForm, existing?: Pick<ProjectMapping, 'landing'> | null): MapBody | null {
-  const repo = parseRepo(form.repo);
+  const repo = parseRepo(form.repo, form.provider);
   if (!repo) return null;
   const needsConfirm = landingNeedsConfirm(form, existing);
   if (needsConfirm && !form.prConfirmed) return null;
@@ -558,6 +612,7 @@ export function mappingBody(project: string, form: MappingForm, existing?: Pick<
     project, connection: form.connection, repo,
     workItems: { source: form.source, ...(value ? { value } : {}) },
     landing: form.landing, trunk: form.trunk.trim(), stateMap,
+    ...(form.iterations ? { iterations: form.iterations } : {}),
     ...(logins.length ? { trustedCommenters: logins } : {}),
     ...(needsConfirm ? { confirmLanding: true as const } : {}),
   };
@@ -616,6 +671,7 @@ export function prChips(pr: PullState, opts: { compact?: boolean } = {}): Chip[]
   }
   if (pr.mergeable === 'conflicting') out.push({ id: 'conflicts', label: 'Conflicts', tone: 'danger', title: 'It conflicts with the target branch. The agent resolves it by merging the trunk into the branch.' });
   else if (pr.canMerge && !pr.draft) out.push({ id: 'ready', label: 'Ready to merge', tone: 'success', title: 'The remote says it can be merged now.' });
+  if (pr.autoMerge?.armed) out.push({ id: 'auto-merge', label: 'Will merge when the pipeline succeeds', tone: 'info', title: 'Someone set it to merge by itself once the pipeline passes. The remote still applies every rule at that moment.' });
   return opts.compact ? out.filter(c => !c.quiet) : out;
 }
 
@@ -641,6 +697,25 @@ export function mergeBlockers(pr: PullState): string[] {
 export function canMergeOnRemote(task: { pr?: PullState | undefined }): boolean {
   const pr = task.pr;
   return Boolean(pr && pr.state === 'open' && pr.canMerge && !pr.draft);
+}
+
+/**
+ * "Merge when the pipeline succeeds" (GitLab): offered when the remote says a running pipeline is the one thing in the
+ * way. It is a person's click like any merge; the remote then merges by itself and applies every one of its rules at
+ * that moment. Never offered once it is armed, and never for a pull request that can merge now (that is Merge).
+ */
+export function canArmAutoMerge(task: { pr?: PullState | undefined }): boolean {
+  const pr = task.pr;
+  return Boolean(pr && pr.state === 'open' && !pr.draft && !pr.canMerge && pr.autoMerge?.available === true);
+}
+
+export function autoMergeLabel(provider: ProviderId | string | undefined): string {
+  return provider ? `Merge on ${providerLabel(provider)} when the pipeline succeeds` : 'Merge when the pipeline succeeds';
+}
+
+export function autoMergeConfirmText(pr: Pick<PullState, 'id'>, trunk: string, provider: ProviderId | string | undefined): string {
+  const where = provider ? providerLabel(provider) : 'The remote';
+  return `Set #${String(pr.id).replace(/^#/, '')} to merge into ${trunk} when its pipeline succeeds? ${where} merges it by itself, and only if every rule still holds at that moment. You can cancel it there.`;
 }
 
 export function mergeButtonLabel(provider: ProviderId | string | undefined): string {
@@ -736,7 +811,7 @@ export function landingWord(landing: LandingMode): string {
   return landing === 'pr' ? 'Pull requests' : 'Local';
 }
 
-export interface SyncResult { imported: number; updated: number; pushed: number; observed: number; conflicts: number; message?: string }
+export interface SyncResult { imported: number; updated: number; pushed: number; observed: number; conflicts: number; sprints?: number; message?: string }
 
 /** What a "Sync now" did, in one sentence. Conflicts say whose version was kept. */
 export function syncResultLine(r: SyncResult): string {
@@ -744,8 +819,82 @@ export function syncResultLine(r: SyncResult): string {
   if (r.imported) parts.push(`${r.imported} imported`);
   if (r.updated) parts.push(`${r.updated} updated`);
   if (r.pushed) parts.push(`${r.pushed} pushed`);
+  if (r.sprints) parts.push(`${r.sprints} sprint change${r.sprints === 1 ? '' : 's'}`);
   if (r.observed) parts.push(`${r.observed} pull request${r.observed === 1 ? '' : 's'} checked`);
   const base = parts.length ? `Synced: ${parts.join(', ')}.` : 'Already up to date.';
   const conflicts = r.conflicts ? ` ${r.conflicts} conflict${r.conflicts === 1 ? '' : 's'}: the remote's version was kept.` : '';
   return `${base}${conflicts}${r.message ? ` ${r.message}` : ''}`;
+}
+
+// ── connector packs (agent-built connectors) ───────────────────────────────
+
+/** May agent-built connector packs be used? The engine enforces it; this only keeps the page from offering what is refused. */
+export function packsAllowed(policy: ConnectionsPolicyView | undefined): boolean {
+  if (!policy) return true;
+  if (policy.mode === 'forbid' || policy.packs === 'forbid') return false;
+  if (policy.mode === 'allow-list' && policy.providers && !policy.providers.includes('custom')) return false;
+  return true;
+}
+
+export const PACK_STATUS_CHIP: Record<PackStatus, { label: string; tone: ChipTone; title: string }> = {
+  invalid: { label: 'Has problems', tone: 'danger', title: 'The files do not validate; the agent has to fix them.' },
+  draft: { label: 'Draft', tone: 'neutral', title: 'Not yet tested for this content.' },
+  'tests-passing': { label: 'Tests passing', tone: 'info', title: 'Every operation passed its recorded examples. A person has to enable it.' },
+  enabled: { label: 'Enabled', tone: 'success', title: 'A person approved exactly this content.' },
+  'needs-approval': { label: 'Needs re-approval', tone: 'warning', title: 'It changed after a person approved it, so it is switched off until it is reviewed again.' },
+};
+
+export function packChip(p: Pick<ConnectorPackView, 'status'>): Chip {
+  const c = PACK_STATUS_CHIP[p.status];
+  return { id: p.status, label: c.label, tone: c.tone, title: c.title };
+}
+
+/** The sentence the "Other" tile puts in the composer. It is not sent: the person reads it first. */
+export function connectorPrompt(): string {
+  return [
+    'I want to connect a platform AICO does not support yet. Build a connector pack for it.',
+    '',
+    "Ask me for the platform's name and a link to its API docs (or an OpenAPI file), and what I want AICO to do with it: import tasks, open pull requests, read checks.",
+    'Then draft the pack, test it with the recorded examples, and tell me how to review and enable it. Do not ask me for a token in chat: I will add it on the Connections page.',
+  ].join('\n');
+}
+
+export interface PackEnableCheck { ok: boolean; why?: string }
+
+/** Can a person enable this pack now? The engine re-checks all of it; this decides whether the button is live. */
+export function canEnablePack(p: ConnectorPackView): PackEnableCheck {
+  if (p.blockedByPolicy) return { ok: false, why: p.blockedByPolicy };
+  if (p.status === 'invalid') return { ok: false, why: 'Fix the problems first.' };
+  if (p.status === 'enabled') return { ok: false, why: 'Already enabled.' };
+  const probe = p.operations.find(o => o.name === 'probe');
+  if (!probe || probe.contract !== 'passed') return { ok: false, why: 'Run the test first: the probe operation has to pass.' };
+  return { ok: true };
+}
+
+export interface PackReview {
+  reads: PackOperationView[];
+  writes: PackOperationView[];
+  destructive: PackOperationView[];
+  /** Operations whose class is higher than the file declared (a claim the engine raised). */
+  raised: PackOperationView[];
+  off: PackOperationView[];
+}
+
+/** What a person is asked to approve, grouped by what it can change. */
+export function packReview(p: ConnectorPackView): PackReview {
+  const on = p.operations.filter(o => o.contract === 'passed');
+  return {
+    reads: on.filter(o => o.effective === 'read'),
+    writes: on.filter(o => o.effective === 'external'),
+    destructive: on.filter(o => o.effective === 'destructive'),
+    raised: p.operations.filter(o => o.declared !== o.effective),
+    off: p.operations.filter(o => o.contract !== 'passed'),
+  };
+}
+
+/** One line under a pack's name: what it can do once enabled, or why it cannot yet. */
+export function packSummary(p: ConnectorPackView): string {
+  if (p.status === 'invalid') return `${p.errors.length} problem${p.errors.length === 1 ? '' : 's'} to fix.`;
+  if (p.can.length === 0) return 'Nothing passes its test yet.';
+  return `Can ${p.can.slice(0, 4).join(', ')}${p.can.length > 4 ? `, and ${p.can.length - 4} more` : ''}.`;
 }

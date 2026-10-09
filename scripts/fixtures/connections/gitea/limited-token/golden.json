@@ -1,0 +1,93 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "octo-dev",
+    "version": "1.22.3",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": false,
+        "comment": true,
+        "merge": false,
+        "draft": false,
+        "bodyMax": 65000
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": false,
+        "comment": true,
+        "estimate": "label",
+        "parentLink": false
+      },
+      "iterations": "milestone",
+      "checks": {
+        "read": false,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": false
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "Repository: read and write",
+          "why": "Push aico/task-* branches, open and merge pull requests, read commit statuses.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "Issue: read and write",
+          "why": "Import issues as tasks and keep their labels and state in step.",
+          "feature": "items",
+          "required": false
+        },
+        {
+          "scope": "User: read",
+          "why": "Show which account the token acts as.",
+          "feature": "repos",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "This token can only read the repository, so AICO cannot open or merge pull requests.",
+      "Checks are unreadable with this token (it needs Repository: read), so pull requests will show no checks. Gitea Actions report as commit statuses.",
+      "Branch protection unreadable (the token cannot read branch settings): AICO cannot see which reviews and checks main requires.",
+      "Gitea has milestones, not iterations or story points: milestones stand in for sprints and an \"sp:5\" label carries an estimate."
+    ]
+  },
+  "pull": {
+    "connection": "gitea-limited-token",
+    "id": "7",
+    "url": "https://forge.test/octo-org/widgets/pulls/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "conflicting",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "none",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "The branch has conflicts with the base branch."
+    ],
+    "observedAt": "<time>"
+  },
+  "protection": {
+    "protected": false,
+    "unreadable": "the token cannot read branch settings"
+  }
+}

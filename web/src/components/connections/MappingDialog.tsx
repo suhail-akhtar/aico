@@ -25,10 +25,12 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../../api';
 import { DEFAULT_STATE_MAP, type Connection, type ConnectionsPolicyView, type ProjectMapping, type RepoDetection } from '../../../../shared/connections/types';
+import { CATEGORY_STATE_MAP } from '../../../../shared/connections/process';
 import {
-  WORK_ITEM_OPTIONS, STATE_ROWS, initialMappingForm, landingNeedsConfirm, mappingBody, policyView, prConfirmText, providerLabel,
-  stateMapOf, validateMapping, type MappingForm,
+  STATE_ROWS, initialMappingForm, landingNeedsConfirm, mappingBody, parseRepo, policyView, prConfirmText, providerLabel,
+  stateMapOf, validateMapping, workItemOptions, type MappingForm,
 } from '../../connections';
+import { azureStatePreview, processSummary, type ProcessInfo } from '../../connections-azure';
 import { basename } from '../../grouping';
 import { BTN_GHOST, BTN_OUTLINE, BTN_PRIMARY, Callout, ErrorLine, INPUT, LABEL, Modal, Skeleton, Spinner } from '../delivery/ui';
 
@@ -57,7 +59,13 @@ export function MappingDialog({ connection, project, projects, policy, onClose, 
   const caps = connection.probe?.capabilities;
   const canItems = !caps || caps.items.query;
   const canPulls = !caps || caps.pulls.create;
+  const canIterations = !caps || caps.iterations !== 'none';
   const pol = policyView(policy);
+  const isAzure = connection.provider === 'azure-devops';
+  const options = workItemOptions(connection.provider);
+  // Azure DevOps: the repositories to pick from, and the project's work item process to preview state names with.
+  const [repos, setRepos] = useState<Array<{ owner: string; name: string }>>([]);
+  const [proc, setProc] = useState<{ owner: string; info: ProcessInfo | null; error?: string } | null>(null);
 
   // Read the project's current mapping and what its origin looks like; a fresh form per project.
   useEffect(() => {
@@ -69,15 +77,33 @@ export function MappingDialog({ connection, project, projects, policy, onClose, 
         const existing = m.mapping && m.mapping.connection === connection.id ? m.mapping : undefined;
         const other = m.mapping && m.mapping.connection !== connection.id ? m.connection?.label ?? m.mapping.connection : undefined;
         setLoaded({ existing, other, detection: d });
-        setForm(initialMappingForm({ connection: connection.id, existing, detection: d }));
+        setForm(initialMappingForm({ connection: connection.id, existing, detection: d, provider: connection.provider }));
       })
       .catch(e => { if (live) setLoadError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
   }, [path, connection.id]);
 
+  useEffect(() => {
+    if (!isAzure) return;
+    let live = true;
+    api.connectionRepos(connection.id).then(r => { if (live) setRepos(r.repos); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [isAzure, connection.id]);
+
+  const repoOwner = form && isAzure ? parseRepo(form.repo, 'azure-devops')?.owner : undefined;
+  useEffect(() => {
+    if (!isAzure || !repoOwner) { setProc(null); return; }
+    let live = true;
+    api.connectionProcess(connection.id, repoOwner)
+      .then(r => { if (live) setProc({ owner: repoOwner, info: r.process }); })
+      .catch(e => { if (live) setProc({ owner: repoOwner, info: null, error: e instanceof Error ? e.message : String(e) }); });
+    return () => { live = false; };
+  }, [isAzure, connection.id, repoOwner]);
+
   const existing = loaded?.existing;
   const check = useMemo(() => (form ? validateMapping(form, policy) : { ok: false, errors: {} }), [form, policy]);
-  const customised = form ? STATE_ROWS.some(r => form.stateMap[r.id] !== DEFAULT_STATE_MAP[r.id]) : false;
+  const defaultMap = isAzure ? CATEGORY_STATE_MAP : DEFAULT_STATE_MAP;
+  const customised = form ? STATE_ROWS.some(r => form.stateMap[r.id] !== defaultMap[r.id]) : false;
   const set = (patch: Partial<MappingForm>): void => { setForm(f => (f ? { ...f, ...patch } : f)); setTouched(true); };
 
   const chooseLanding = (landing: 'local' | 'pr'): void => {
@@ -134,11 +160,13 @@ export function MappingDialog({ connection, project, projects, policy, onClose, 
           <section aria-label="Repository">
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
               <div>
-                <label className={LABEL} htmlFor={`${uid}-repo`}>Repository on {providerLabel(connection.provider)}</label>
+                <label className={LABEL} htmlFor={`${uid}-repo`}>{isAzure ? 'Project / repository' : 'Repository'} on {providerLabel(connection.provider)}</label>
                 <input
-                  id={`${uid}-repo`} className={INPUT} value={form.repo} onChange={e => set({ repo: e.target.value })} placeholder="owner/name"
+                  id={`${uid}-repo`} className={INPUT} value={form.repo} onChange={e => set({ repo: e.target.value })} placeholder={isAzure ? 'Shop/web' : 'owner/name'}
                   autoComplete="off" spellCheck={false} aria-invalid={Boolean(err.repo)} aria-describedby={`${uid}-repo-note`}
+                  {...(isAzure && repos.length ? { list: `${uid}-repos` } : {})}
                 />
+                {isAzure && repos.length > 0 && <datalist id={`${uid}-repos`}>{repos.map(r => <option key={`${r.owner}/${r.name}`} value={`${r.owner}/${r.name}`} />)}</datalist>}
               </div>
               <div>
                 <label className={LABEL} htmlFor={`${uid}-trunk`}>Branch</label>
@@ -187,7 +215,7 @@ export function MappingDialog({ connection, project, projects, policy, onClose, 
             {canItems ? (
               <>
                 <div className="grid gap-1.5" role="radiogroup" aria-label="Tasks from the remote">
-                  {WORK_ITEM_OPTIONS.map(o => (
+                  {options.map(o => (
                     <label key={o.id} className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-[13px] ${form.source === o.id ? 'border-aico-accent bg-aico-accent-soft' : 'border-aico-border-subtle hover:bg-aico-hover'}`}>
                       <input type="radio" name={`${uid}-source`} className="mt-0.5 accent-[var(--aico-accent)]" checked={form.source === o.id} onChange={() => set({ source: o.id })} />
                       <span className="min-w-0 flex-1">
@@ -197,12 +225,12 @@ export function MappingDialog({ connection, project, projects, policy, onClose, 
                     </label>
                   ))}
                 </div>
-                {WORK_ITEM_OPTIONS.find(o => o.id === form.source)?.valueLabel && (
+                {options.find(o => o.id === form.source)?.valueLabel && (
                   <div className="mt-2">
-                    <label className={LABEL} htmlFor={`${uid}-value`}>{WORK_ITEM_OPTIONS.find(o => o.id === form.source)?.valueLabel}</label>
+                    <label className={LABEL} htmlFor={`${uid}-value`}>{options.find(o => o.id === form.source)?.valueLabel}</label>
                     <input
                       id={`${uid}-value`} className={INPUT} value={form.value} onChange={e => set({ value: e.target.value })}
-                      placeholder={WORK_ITEM_OPTIONS.find(o => o.id === form.source)?.placeholder} autoComplete="off" spellCheck={false} aria-invalid={Boolean(err.value)}
+                      placeholder={options.find(o => o.id === form.source)?.placeholder} autoComplete="off" spellCheck={false} aria-invalid={Boolean(err.value)}
                     />
                     {err.value && <p className="mt-1 text-[12px] text-aico-danger">{err.value}</p>}
                   </div>
@@ -214,13 +242,34 @@ export function MappingDialog({ connection, project, projects, policy, onClose, 
             )}
           </fieldset>
 
+          {/* Sprints */}
+          {canIterations && canItems && (
+            <fieldset>
+              <legend className={LABEL}>Sprints</legend>
+              <label className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-[13px] ${form.iterations === 'native' ? 'border-aico-accent bg-aico-accent-soft' : 'border-aico-border-subtle hover:bg-aico-hover'}`}>
+                <input
+                  type="checkbox" className="mt-0.5 accent-[var(--aico-accent)]" checked={form.iterations === 'native'}
+                  onChange={e => set({ iterations: e.target.checked ? 'native' : 'off' })}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium text-aico-primary">Mirror {isAzure ? 'Azure DevOps iterations' : 'the platform’s sprints'} as Scrum sprints</span>
+                  <span className="block text-[12px] text-aico-secondary">
+                    The current and next one arrive as planned sprints with the platform’s name and dates; story points and sprint membership follow it (the platform wins when both changed). AICO never starts a sprint, and creates none on the platform unless you ask.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+          )}
+
           {/* State names */}
-          <details open={customised} className="rounded-lg border border-aico-border-subtle">
+          <details open={customised || isAzure} className="rounded-lg border border-aico-border-subtle">
             <summary className="cursor-pointer select-none rounded-lg px-3 py-2 text-[13px] text-aico-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-aico-accent">
               State names on the remote <span className="text-aico-muted">{customised ? '(customised)' : '(defaults)'}</span>
             </summary>
             <div className="border-t border-aico-border-subtle px-3 py-3">
-              <p className="mb-2 text-[12px] text-aico-muted">What AICO writes to the remote when a task reaches each state: a label, or a status name. AICO writes only its own fields.</p>
+              <p className="mb-2 text-[12px] text-aico-muted">{isAzure
+                ? 'What AICO does on the work item when a task reaches each state: move it to the work item type’s own state of that category (Proposed, InProgress, Resolved or Completed), or add a tag. It only moves items forward and never reopens one.'
+                : 'What AICO writes to the remote when a task reaches each state: a label, or a status name. AICO writes only its own fields.'}</p>
               <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2">
                 {STATE_ROWS.map(r => (
                   <div key={r.id}>
@@ -234,7 +283,8 @@ export function MappingDialog({ connection, project, projects, policy, onClose, 
                   </div>
                 ))}
               </div>
-              {customised && <button type="button" className={`${BTN_GHOST} mt-2 !px-2 !py-1 !text-[12px]`} onClick={() => set({ stateMap: stateMapOf() })}>Reset to defaults</button>}
+              {customised && <button type="button" className={`${BTN_GHOST} mt-2 !px-2 !py-1 !text-[12px]`} onClick={() => set({ stateMap: stateMapOf(undefined, connection.provider) })}>Reset to defaults</button>}
+              {isAzure && <StatePreview stateMap={form.stateMap} proc={proc} hasProject={Boolean(repoOwner)} />}
             </div>
           </details>
 
@@ -274,6 +324,46 @@ export function MappingDialog({ connection, project, projects, policy, onClose, 
         </form>
       )}
     </Modal>
+  );
+}
+
+/** What each state would become, per work item type of the project's process: the same function the engine writes with. */
+function StatePreview({ stateMap, proc, hasProject }: { stateMap: Record<string, string>; proc: { owner: string; info: ProcessInfo | null; error?: string } | null; hasProject: boolean }): React.ReactElement {
+  if (!hasProject) return <p className="mt-3 text-[12px] text-aico-muted">Enter the project above to see which state each type would move to.</p>;
+  if (!proc) return <p className="mt-3 text-[12px] text-aico-muted" aria-busy="true">Reading the project&rsquo;s process…</p>;
+  if (!proc.info) return <p className="mt-3 text-[12px] text-aico-secondary">{proc.error ? `The project’s states could not be read: ${proc.error}` : 'The project’s work item states could not be read with this token (it needs Work Items: read).'}</p>;
+  const rows = azureStatePreview(stateMap, proc.info, STATE_ROWS.map(r => r.id));
+  const types = proc.info.types.slice(0, 4);
+  return (
+    <div className="mt-3 overflow-x-auto" data-testid="state-preview">
+      <p className="mb-1.5 text-[12px] text-aico-secondary">{processSummary(proc.info)}</p>
+      <table className="w-full min-w-[420px] border-collapse text-left text-[12px]">
+        <caption className="sr-only">The work item state each AICO state moves an item to, per work item type</caption>
+        <thead>
+          <tr className="text-aico-muted">
+            <th scope="col" className="py-1 pr-3 font-medium">When a task is</th>
+            <th scope="col" className="py-1 pr-3 font-medium">Becomes</th>
+            {types.map(t => <th key={t.name} scope="col" className="py-1 pr-3 font-medium">{t.name}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.aico} className="border-t border-aico-border-subtle">
+              <th scope="row" className="py-1 pr-3 font-normal text-aico-primary">{STATE_ROWS.find(s => s.id === r.aico)?.label ?? r.aico}</th>
+              {r.kind === 'tag'
+                ? <td colSpan={types.length + 1} className="py-1 pr-3 text-aico-secondary">adds the tag <span className="font-mono">{r.value}</span></td>
+                : <>
+                  <td className="py-1 pr-3 font-mono text-aico-secondary">{r.value}</td>
+                  {types.map(t => {
+                    const cell = r.perType.find(p => p.type === t.name)?.state;
+                    return <td key={t.name} className={`py-1 pr-3 ${cell ? 'text-aico-primary' : 'text-aico-muted'}`}>{cell ?? 'left as it is'}</td>;
+                  })}
+                </>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

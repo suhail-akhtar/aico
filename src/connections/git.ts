@@ -48,6 +48,7 @@ import { sinkRedactText } from '../vault/sink.js';
 import * as G from '../delivery/git.js';
 import { auditConnection } from './audit.js';
 import { CONNECTION_TOOL, originsOf } from './http.js';
+import { adapterFor } from './registry.js';
 import type { StoredConnection } from './types.js';
 
 export const TASK_REF_RE = /^aico\/task-[A-Za-z0-9_-]{1,64}$/;
@@ -206,7 +207,7 @@ async function withToken(conn: StoredConnection, urlStr: string, purpose: string
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: askpass, SSH_ASKPASS: askpass,
-      AICO_ASKPASS_FILE: sink.tokenFile.replace(/\\/g, '/'), AICO_ASKPASS_HOST: url.host, AICO_ASKPASS_USER: 'x-access-token',
+      AICO_ASKPASS_FILE: sink.tokenFile.replace(/\\/g, '/'), AICO_ASKPASS_HOST: url.host, AICO_ASKPASS_USER: adapterFor(conn.provider)?.gitUsername?.(conn) ?? 'x-access-token',
       GIT_EDITOR: 'true', GIT_PAGER: 'cat',
       ...(conn.caBundle ? { GIT_SSL_CAINFO: conn.caBundle } : {}),
     };

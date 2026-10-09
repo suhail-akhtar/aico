@@ -1,0 +1,85 @@
+[
+  {
+    "path": "/_apis/connectionData",
+    "status": 200,
+    "body": {
+      "authenticatedUser": {
+        "id": "c0ffee00-0000-4000-8000-000000000001",
+        "providerDisplayName": "Dana Dev",
+        "properties": {
+          "Account": {
+            "$value": "dana.dev@example.test"
+          }
+        }
+      },
+      "deploymentType": "onPremises"
+    }
+  },
+  {
+    "path": "/_apis/projects",
+    "responses": [
+      {
+        "status": 400,
+        "times": 2,
+        "body": {
+          "message": "The requested version \"7.x\" of the resource is under preview or not supported. The latest version this server supports is \"6.0\".",
+          "typeKey": "VssVersionOutOfRangeException"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "value": [
+            {
+              "id": "5d3f1b0e-5a1c-4e0f-9b0d-0a1b2c3d4e51",
+              "name": "Shop",
+              "visibility": "private"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "path": "/_apis/projects/:project",
+    "status": 200,
+    "body": {
+      "id": "5d3f1b0e-5a1c-4e0f-9b0d-0a1b2c3d4e51",
+      "name": "Shop",
+      "visibility": "private",
+      "defaultTeam": {
+        "name": "Shop Team"
+      }
+    }
+  },
+  {
+    "path": "/_apis/git/repositories",
+    "status": 200,
+    "body": {
+      "count": 1,
+      "value": [
+        {
+          "id": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00",
+          "name": "web",
+          "project": {
+            "id": "5d3f1b0e-5a1c-4e0f-9b0d-0a1b2c3d4e51",
+            "name": "Shop",
+            "visibility": "private"
+          },
+          "defaultBranch": "refs/heads/main",
+          "isDisabled": false,
+          "remoteUrl": "https://dana@dev.azure.com/acme/Shop/_git/web",
+          "webUrl": "https://dev.azure.com/acme/Shop/_git/web"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/_apis/hooks/subscriptions",
+    "status": 404,
+    "body": {
+      "message": "VS800075: not found"
+    }
+  }
+]

@@ -71,6 +71,8 @@ export interface ConnectionsRule {
   providers?: string[];
   hosts?: string[];
   maxLanding?: 'local' | 'pr';
+  /** `forbid`: no connector packs (agent-built connectors for platforms AICO has no adapter for). Default: allowed. */
+  packs?: 'allow' | 'forbid';
 }
 
 export interface ManagedPolicy {
@@ -269,7 +271,7 @@ export function validatePolicy(raw: Record<string, unknown>): { policy: ManagedP
     const c = raw.connections;
     if (!isObj(c)) { bad('connections', 'must be an object like { "mode": "forbid" }', 'forbid'); policy.connections = { mode: 'forbid' }; }
     else {
-      warnUnknown(c, ['mode', 'providers', 'hosts', 'maxLanding'], 'connections', problems);
+      warnUnknown(c, ['mode', 'providers', 'hosts', 'maxLanding', 'packs'], 'connections', problems);
       const mode = c.mode === 'any' || c.mode === 'forbid' || c.mode === 'allow-list' ? c.mode : undefined;
       if (!mode) { bad('connections.mode', 'must be "any", "forbid" or "allow-list"', 'forbid'); policy.connections = { mode: 'forbid' }; }
       else {
@@ -286,6 +288,10 @@ export function validatePolicy(raw: Record<string, unknown>): { policy: ManagedP
         if (c.maxLanding !== undefined) {
           if (c.maxLanding === 'local' || c.maxLanding === 'pr') rule.maxLanding = c.maxLanding;
           else { bad('connections.maxLanding', 'must be "local" or "pr"', 'local'); rule.maxLanding = 'local'; }
+        }
+        if (c.packs !== undefined) {
+          if (c.packs === 'allow' || c.packs === 'forbid') rule.packs = c.packs;
+          else { bad('connections.packs', 'must be "allow" or "forbid"', 'forbid'); rule.packs = 'forbid'; }
         }
         policy.connections = rule;
       }

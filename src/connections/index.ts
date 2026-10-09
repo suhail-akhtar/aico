@@ -8,7 +8,14 @@
  * @module connections
  */
 
+import { azureDevopsAdapter } from './azure-devops/index.js';
+import { bitbucketCloudAdapter } from './bitbucket/cloud.js';
+import { customAdapter } from './packs/adapter.js';
+import { bitbucketDcAdapter } from './bitbucket/dc.js';
 import { githubAdapter } from './github/index.js';
+import { gitbucketAdapter } from './gitbucket/index.js';
+import { forgejoAdapter, giteaAdapter } from './gitea/index.js';
+import { gitlabAdapter } from './gitlab/index.js';
 import { installLanding } from './landing.js';
 import { startConnectionPoller } from './poller.js';
 import { registerAdapter } from './registry.js';
@@ -16,6 +23,14 @@ import { registerAdapter } from './registry.js';
 /** Register the adapters that ship. Idempotent. */
 export function registerBuiltinAdapters(): void {
   registerAdapter(githubAdapter);
+  registerAdapter(gitlabAdapter);
+  registerAdapter(giteaAdapter);
+  registerAdapter(forgejoAdapter);
+  registerAdapter(gitbucketAdapter);
+  registerAdapter(azureDevopsAdapter);
+  registerAdapter(bitbucketCloudAdapter);
+  registerAdapter(bitbucketDcAdapter);
+  registerAdapter(customAdapter);
 }
 
 export interface InstallOptions {

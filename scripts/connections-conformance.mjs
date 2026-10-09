@@ -125,7 +125,7 @@ export async function runConformance(opts) {
   for (const sc of scenarios) {
     console.log(`\n══ ${name}: ${sc.scenario} (${sc.profile}) ══`);
     T.resetConnectionHttpForTest();
-    const forge = await startMockForge({ fixtures: fixturesDir, scenario: sc.scenario, requireAuth: true, token });
+    const forge = await startMockForge({ fixtures: fixturesDir, scenario: sc.scenario, requireAuth: true, token, ...(subject.basicUser !== undefined ? { basicUser: subject.basicUser } : {}) });
     const outputs = [];
     const errors = [];
     const goldenFile = path.join(fixturesDir, sc.scenario, 'golden.json');
@@ -171,7 +171,9 @@ export async function runConformance(opts) {
       assert(inUrl.length === 0, 'the credential appears in no request URL, query or body');
       const inOtherHeader = forge.requests.filter(r => Object.entries(r.headers).some(([k, v]) => k !== 'authorization' && leaked(String(v))));
       assert(inOtherHeader.length === 0, 'the credential appears in no header except Authorization');
-      assert(forge.requests.length > 0 && forge.requests.every(r => r.headers.authorization === `Bearer ${token}`), `every request carried "Authorization: Bearer <token>" (${forge.requests.length} requests)`);
+      const scheme = subject.wire?.authScheme ?? 'Bearer';
+      const wantAuth = subject.basicUser !== undefined ? `Basic ${Buffer.from(`${subject.basicUser}:${token}`).toString('base64')}` : `${scheme} ${token}`;
+      assert(forge.requests.length > 0 && forge.requests.every(r => r.headers.authorization === wantAuth), `every request carried "Authorization: ${subject.basicUser !== undefined ? 'Basic <user:token>' : `${scheme} <token>`}" (${forge.requests.length} requests)`);
       assert(!leaked(JSON.stringify(outputs)), 'no adapter output contains the credential');
       assert(!errors.some(leaked), `no error message contains the credential (${errors.length} errors seen)`);
       const unmatched = forge.requests.filter(r => !r.matched && r.status !== 401 && sc.profile !== 'rate-limit');
@@ -227,7 +229,7 @@ export async function runConformance(opts) {
     if (created) {
       cmp('pull.created', created.pull, 'pulls.create: the new PR folds to the golden (mergeability still unknown)');
       const sent = reqs('POST', S.createPath).at(-1);
-      const sentBody = String(sent?.body?.body ?? '');
+      const sentBody = String((S.prBodyOf ? S.prBodyOf(sent?.body) : sent?.body?.body) ?? '');
       env.assert(!!sent && sentBody.length > 0 && sentBody.length <= bodyMax, `the PR body sent was clipped to the probed limit (${sentBody.length} <= ${bodyMax})`);
       env.assert(typeof created.overflow === 'string' && created.overflow.length > 0, 'the overflow is returned for the caller to post as a first comment');
       env.assert(sentBody.length + (created.overflow?.length ?? 0) === strippedLen, 'nothing was lost: sent body + overflow = the body minus the attribution lines');
@@ -267,69 +269,84 @@ export async function runConformance(opts) {
     env.assert(isCodeOf(unmergeable, 'conflict'), 'merge the provider refuses (not mergeable) is a `conflict`');
     const merged = await run('pulls.merge', () => adapter.pulls.merge(ctx, S.pullId, { method: S.mergeMethod, sha: S.headSha }));
     env.assert(merged?.sha === S.mergeSha, 'merge returns the merge commit sha');
-    const mreq = reqs('PUT', S.mergePath).at(-1);
-    const keys = Object.keys(mreq?.body ?? {});
-    env.assert(mreq?.body?.sha === S.headSha && mreq?.body?.merge_method === S.mergeMethod, 'merge sends the expected head sha and the chosen method');
-    env.assert(keys.every(k => ['merge_method', 'sha', 'commit_title', 'commit_message'].includes(k)), `merge asks for nothing else (no admin bypass): ${keys.join(', ')}`);
-
-    console.log('  — work items');
-    const q = { source: 'label', value: 'bug', state: 'open', since: '2026-09-01T00:00:00Z' };
-    const first = await run('items.query', () => adapter.items.query(ctx, q));
-    if (first) {
-      cmp('items', first.items, 'items.query: normalised items match the golden');
-      env.assert(first.notModified === false, 'the first query is a full fetch');
-      env.assert(S.prNumbers.every(n => !first.items.some(i => i.number === n)), `pull requests are excluded from the import (${S.prNumbers.join(', ')})`);
-      env.assert(S.pagedNumbers.every(n => first.items.some(i => i.number === n)), 'a second page was followed');
-    }
-    const before = forge.requests.length;
-    const second = await run('items.query (again)', () => adapter.items.query(ctx, q));
-    if (second && first) {
-      env.assert(second.notModified === true, 'the second identical query is `notModified`');
-      env.assert(stable(second.items) === stable(first.items), 'a 304 serves the same items from cache');
-      const sent = forge.requests.slice(before).filter(r => r.method === 'GET' && S.issuesPath.test(r.path));
-      env.assert(sent.length > 0 && sent.every(r => r.headers['if-none-match']) && sent.every(r => r.status === 304), `If-None-Match was sent and answered 304 (${sent.length} requests)`);
-    }
-    const firstReq = reqs('GET', S.issuesPath).find(r => r.query.labels === 'bug');
-    env.assert(!!firstReq && firstReq.query.state === 'open' && firstReq.query.since === '2026-09-01T00:00:00.000Z' && firstReq.query.per_page === '100', 'the query asked for labels, state, since and per_page=100');
-    const mine = await run('items.query (assigned)', () => adapter.items.query(ctx, { source: 'assigned-to-me', me: S.me, state: 'open' }));
-    env.assert(!!mine && reqs('GET', S.issuesPath).some(r => r.query.assignee === S.me), 'assigned-to-me asks for the token owner\'s items');
-    const search = await run('items.query (query)', () => adapter.items.query(ctx, { source: 'query', value: 'label:bug', state: 'open' }));
-    if (search) {
-      cmp('items.search', search.items, 'items.query (query text): only this repository\'s issues, no PRs');
-      env.assert(search.items.every(i => !S.prNumbers.includes(i.number)), 'the search excludes pull requests too');
+    const mreq = reqs(S.mergeHttpMethod ?? 'PUT', S.mergePath).at(-1);
+    if (S.mergeRequestOk) {
+      // A provider whose merge request is not GitHub-shaped says what a correct (and bypass-free) one looks like.
+      const why = S.mergeRequestOk(mreq);
+      env.assert(why === true, `merge request is correct and asks for no bypass${why === true ? '' : `: ${why}`}`);
+    } else {
+      const keys = Object.keys(mreq?.body ?? {});
+      env.assert(mreq?.body?.sha === S.headSha && mreq?.body?.merge_method === S.mergeMethod, 'merge sends the expected head sha and the chosen method');
+      env.assert(keys.every(k => ['merge_method', 'sha', 'commit_title', 'commit_message'].includes(k)), `merge asks for nothing else (no admin bypass): ${keys.join(', ')}`);
     }
 
-    const item = await run('items.get', () => adapter.items.get(ctx, S.issueId));
-    if (item) { cmp('item', item, 'items.get matches the golden'); env.assert(item.rev === S.issueRev, 'the item carries its revision (updated_at)'); }
-    const writesBefore = forge.requests.filter(r => r.method !== 'GET').length;
-    const updated = await run('items.update', () => adapter.items.update(ctx, S.issueId, { title: 'Cache invalidation on widget update (reworded)', labels: ['bug', 'sp:3', 'aico:running'], milestone: S.milestoneId }, S.issueRev));
-    if (updated) cmp('item.updated', updated, 'items.update with the right ifRev: the result matches the golden');
-    const patch = reqs('PATCH', S.issuePath).at(-1);
-    env.assert(!!patch && patch.body?.title === 'Cache invalidation on widget update (reworded)' && JSON.stringify(patch.body?.labels) === JSON.stringify(['bug', 'sp:3', 'aico:running']), 'the update sent exactly the changed fields');
-    const writesMid = forge.requests.filter(r => r.method !== 'GET').length;
-    const conflict = await env.attempt(() => adapter.items.update(ctx, S.issueId, { title: 'Overwrites someone else' }, S.staleRev));
-    env.assert(isCodeOf(conflict, 'conflict') && conflict.error.status === 409, 'update with a stale ifRev is a `conflict` (409)');
-    env.assert(forge.requests.filter(r => r.method !== 'GET').length === writesMid && writesMid === writesBefore + 1, 'the stale update wrote nothing');
-    const closed = await run('items.transition', () => adapter.items.transition(ctx, S.issueId, 'closed', S.issueRev));
-    if (closed) cmp('item.closed', closed, 'items.transition(closed): the result matches the golden');
-    const tr = reqs('PATCH', S.issuePath).at(-1);
-    env.assert(tr?.body?.state === 'closed' && tr?.body?.state_reason === 'completed', 'closing says it was completed');
-    const staleT = await env.attempt(() => adapter.items.transition(ctx, S.issueId, 'open', S.staleRev));
-    env.assert(isCodeOf(staleT, 'conflict'), 'transition with a stale ifRev is a `conflict`');
-    await run('items.comment', () => adapter.items.comment(ctx, S.issueId, `Update.\n${attributionA}\nDone.`));
-    const ic = reqs('POST', S.issueCommentPath).at(-1);
-    env.assert(!!ic && /Update/.test(ic.rawBody) && !/co-authored-by/i.test(ic.rawBody), 'items.comment sent, with no AI attribution');
-    await run('items.addLabels', () => adapter.items.addLabels(ctx, S.issueId, ['aico:running']));
-    env.assert(reqs('POST', S.labelsPath).length === 1, 'addLabels posted the labels');
-    await run('items.removeLabel', () => adapter.items.removeLabel(ctx, S.issueId, S.removableLabel));
-    const gone = await env.attempt(() => adapter.items.removeLabel(ctx, S.issueId, S.goneLabel));
-    env.assert(!gone.error, 'removing a label that is not on the issue is not an error');
-    const made = await run('items.create', () => adapter.items.create(ctx, { title: 'Follow-up: cache metrics', body: `Track hit rate.\n${attributionB}`, labels: ['aico'] }));
-    if (made) cmp('item.created', made, 'items.create matches the golden');
-    const cr = reqs('POST', S.issuesPath).at(-1);
-    env.assert(!!cr && !/generated with|🤖/i.test(cr.rawBody), 'items.create sent, with no AI attribution');
+    const has = (name) => (S.sections ?? ['items', 'iterations', 'checks', 'protection']).includes(name);
+    if (has('items')) {
+      console.log('  — work items');
+      const q = { source: 'label', value: 'bug', state: 'open', since: '2026-09-01T00:00:00Z' };
+      const first = await run('items.query', () => adapter.items.query(ctx, q));
+      if (first) {
+        cmp('items', first.items, 'items.query: normalised items match the golden');
+        env.assert(first.notModified === false, 'the first query is a full fetch');
+        env.assert(S.prNumbers.every(n => !first.items.some(i => i.number === n)), `pull requests are excluded from the import (${S.prNumbers.join(', ')})`);
+        env.assert(S.pagedNumbers.every(n => first.items.some(i => i.number === n)), 'a second page was followed');
+      }
+      const before = forge.requests.length;
+      const second = await run('items.query (again)', () => adapter.items.query(ctx, q));
+      if (second && first && S.wire?.conditional === false) {
+        // A platform with no ETag (Azure DevOps) is never `notModified`: the same query gives the same items, fetched again.
+        env.assert(second.notModified === false && stable(second.items) === stable(first.items), 'a platform without ETags re-fetches and gets the same items');
+      } else if (second && first) {
+        env.assert(second.notModified === true, 'the second identical query is `notModified`');
+        env.assert(stable(second.items) === stable(first.items), 'a 304 serves the same items from cache');
+        const sent = forge.requests.slice(before).filter(r => r.method === 'GET' && S.issuesPath.test(r.path));
+        env.assert(sent.length > 0 && sent.every(r => r.headers['if-none-match']) && sent.every(r => r.status === 304), `If-None-Match was sent and answered 304 (${sent.length} requests)`);
+      }
+      const itemsVerb = S.wire?.itemsMethod ?? 'GET';
+      const firstReq = reqs(itemsVerb, S.issuesPath).find(r => r.query.labels === 'bug');
+      env.assert(S.wire?.itemsQueryOk ? S.wire.itemsQueryOk(reqs(itemsVerb, S.issuesPath)) : !!firstReq && firstReq.query.state === 'open' && firstReq.query.since === '2026-09-01T00:00:00.000Z' && firstReq.query.per_page === '100', 'the query asked for labels, state, since and the page size');
+      const mine = await run('items.query (assigned)', () => adapter.items.query(ctx, { source: 'assigned-to-me', me: S.me, state: 'open' }));
+      env.assert(!!mine && (S.wire?.assignedOk ? S.wire.assignedOk(reqs(itemsVerb, S.issuesPath), mine.items) : reqs('GET', S.issuesPath).some(r => r.query.assignee === S.me)), 'assigned-to-me asks for the token owner\'s items');
+      const search = await run('items.query (query)', () => adapter.items.query(ctx, { source: 'query', value: 'label:bug', state: 'open' }));
+      if (search) {
+        cmp('items.search', search.items, 'items.query (query text): only this repository\'s issues, no PRs');
+        env.assert(search.items.every(i => !S.prNumbers.includes(i.number)), 'the search excludes pull requests too');
+      }
+
+      const item = await run('items.get', () => adapter.items.get(ctx, S.issueId));
+      if (item) { cmp('item', item, 'items.get matches the golden'); env.assert(item.rev === S.issueRev, 'the item carries its revision (updated_at)'); }
+      const writesBefore = forge.requests.filter(r => r.method !== 'GET').length;
+      const updated = await run('items.update', () => adapter.items.update(ctx, S.issueId, { title: 'Cache invalidation on widget update (reworded)', labels: ['bug', 'sp:3', 'aico:running'], milestone: S.milestoneId }, S.issueRev));
+      if (updated) cmp('item.updated', updated, 'items.update with the right ifRev: the result matches the golden');
+      const patch = reqs(S.wire?.updateVerb ?? 'PATCH', S.issuePath).at(-1);
+      env.assert(S.wire?.updateSentOk ? S.wire.updateSentOk(forge.requests) : !!patch && patch.body?.title === 'Cache invalidation on widget update (reworded)' && JSON.stringify(patch.body?.labels) === JSON.stringify(['bug', 'sp:3', 'aico:running']), 'the update sent exactly the changed fields');
+      const writesMid = forge.requests.filter(r => r.method !== 'GET').length;
+      const conflict = await env.attempt(() => adapter.items.update(ctx, S.issueId, { title: 'Overwrites someone else' }, S.staleRev));
+      env.assert(isCodeOf(conflict, 'conflict') && conflict.error.status === 409, 'update with a stale ifRev is a `conflict` (409)');
+      env.assert(forge.requests.filter(r => r.method !== 'GET').length === writesMid && writesMid === writesBefore + (S.wire?.updateWrites ?? 1), 'the stale update wrote nothing');
+      const closed = await run('items.transition', () => adapter.items.transition(ctx, S.issueId, 'closed', S.issueRev));
+      if (closed) cmp('item.closed', closed, 'items.transition(closed): the result matches the golden');
+      const tr = reqs(S.wire?.updateVerb ?? 'PATCH', S.issuePath).at(-1);
+      env.assert(S.wire?.closeOk ? S.wire.closeOk(tr?.body) : tr?.body?.state === 'closed' && tr?.body?.state_reason === 'completed', 'closing says it was completed');
+      const staleT = await env.attempt(() => adapter.items.transition(ctx, S.issueId, 'open', S.staleRev));
+      env.assert(isCodeOf(staleT, 'conflict'), 'transition with a stale ifRev is a `conflict`');
+      await run('items.comment', () => adapter.items.comment(ctx, S.issueId, `Update.\n${attributionA}\nDone.`));
+      const ic = reqs('POST', S.issueCommentPath).at(-1);
+      env.assert(S.wire?.itemCommentOk ? S.wire.itemCommentOk(forge.requests) : !!ic && /Update/.test(ic.rawBody) && !/co-authored-by/i.test(ic.rawBody), 'items.comment sent, with no AI attribution');
+      await run('items.addLabels', () => adapter.items.addLabels(ctx, S.issueId, ['aico:running']));
+      env.assert(S.wire?.labelsOk ? S.wire.labelsOk(forge.requests) : reqs('POST', S.labelsPath).length === 1, 'addLabels posted the labels');
+      await run('items.removeLabel', () => adapter.items.removeLabel(ctx, S.issueId, S.removableLabel));
+      const gone = await env.attempt(() => adapter.items.removeLabel(ctx, S.issueId, S.goneLabel));
+      env.assert(!gone.error, 'removing a label that is not on the issue is not an error');
+      const made = await run('items.create', () => adapter.items.create(ctx, { title: 'Follow-up: cache metrics', body: `Track hit rate.\n${attributionB}`, labels: ['aico'] }));
+      if (made) cmp('item.created', made, 'items.create matches the golden');
+      const cr = reqs('POST', S.issuesPath).at(-1);
+      env.assert(S.wire?.createItemOk ? S.wire.createItemOk(forge.requests) : !!cr && !/generated with|🤖/i.test(cr.rawBody), 'items.create sent, with no AI attribution');
+
+    }
 
     console.log('  — iterations, checks, protection');
+    if (has('iterations')) {
     const its = await run('iterations.list', () => adapter.iterations.list(ctx));
     if (its) cmp('iterations', its, 'iterations.list matches the golden');
     if (adapter.iterations?.create) {
@@ -338,14 +355,20 @@ export async function runConformance(opts) {
     }
     if (adapter.iterations?.assign) {
       await run('iterations.assign', () => adapter.iterations.assign(ctx, S.issueId, S.milestoneId));
-      env.assert(reqs('PATCH', S.issuePath).at(-1)?.body?.milestone === Number(S.milestoneId), 'iterations.assign set the milestone');
+      env.assert(S.wire?.assignOk ? S.wire.assignOk(reqs(S.wire?.updateVerb ?? 'PATCH', S.issuePath).at(-1)?.body, forge.requests) : reqs('PATCH', S.issuePath).at(-1)?.body?.milestone === Number(S.milestoneId), 'iterations.assign set the milestone');
     }
+    }
+    if (has('checks')) {
     const checks = await run('checks.forCommit', () => adapter.checks.forCommit(ctx, S.baseSha));
     if (checks) cmp('checks', checks, 'checks.forCommit: runs and statuses merged, states normalised');
+    }
+    if (has('protection')) {
     const prot = await run('protection.read', () => adapter.protection.read(ctx, S.protectedBranch));
     if (prot) cmp('protection', prot, 'protection.read (protected branch) matches the golden');
-    const unprot = await run('protection.read (unprotected)', () => adapter.protection.read(ctx, S.unprotectedBranch));
+    // A provider whose protection is repository-wide (Bitbucket Data Center) has no unprotected branch to ask about.
+    const unprot = S.skipUnprotected ? undefined : await run('protection.read (unprotected)', () => adapter.protection.read(ctx, S.unprotectedBranch));
     if (unprot) { cmp('protection.none', unprot, 'protection.read (unprotected branch) matches the golden'); env.assert(unprot.protected === false && !unprot.unreadable, 'an unprotected branch is readable and reported as not protected'); }
+    }
 
     // Writes are audited with their operation names.
     const auditFile = path.join(process.env.AICO_HOME ?? '', 'audit', 'events.jsonl');
@@ -354,7 +377,7 @@ export async function runConformance(opts) {
     if (audit.length) {
       env.assert(audit.some(e => e.action === 'pr.open' && e.outcome === 'ok'), 'opening the PR was audited as pr.open');
       env.assert(audit.some(e => e.action === 'pr.merge'), 'the merge attempts were audited as pr.merge');
-      env.assert(audit.some(e => e.action === 'write'), 'item writes were audited as write');
+      env.assert(audit.some(e => e.action === 'write'), 'writes were audited as write');
       env.assert(!JSON.stringify(audit).includes(token) && audit.every(e => !/\?/.test(e.target ?? '')), 'audit lines carry no token and no query string');
     } else env.assert(false, 'the audit log recorded the connection writes');
   }
@@ -374,12 +397,12 @@ export async function runConformance(opts) {
     const items = await run('items.query', () => adapter.items.query(ctx, { source: 'label', value: 'bug' }));
     if (items) cmp('items', items.items, 'items.query matches the golden (estimate label, milestone)');
     const its = await run('iterations.list', () => adapter.iterations.list(ctx));
-    if (its) { cmp('iterations', its, 'iterations.list falls back to milestones'); env.assert(its.every(i => i.kind === 'milestone'), 'no native iterations are invented'); }
+    if (its) { cmp('iterations', its, 'iterations.list falls back to milestones'); env.assert(S.wire?.degradedIterationsOk ? S.wire.degradedIterationsOk(its) : its.every(i => i.kind === 'milestone'), 'no native iterations are invented'); }
     const checks = await run('checks.forCommit', () => adapter.checks.forCommit(ctx, S.baseSha));
     if (checks) { cmp('checks', checks, 'checks.forCommit on a commit with nothing is empty'); env.assert(checks.length === 0, 'no checks means an empty list'); }
     const prot = await run('protection.read', () => adapter.protection.read(ctx, S.protectedBranch));
     if (prot) cmp('protection', prot, 'protection.read (only required checks configured) matches the golden');
-    env.assert(forge.requests.every(r => r.method === 'GET' || r.path.endsWith('graphql')), 'a read-only script made no writes (the GraphQL probe is a POST read)');
+    env.assert(forge.requests.every(r => r.method === 'GET' || r.path.endsWith('graphql') || (S.wire?.readPostsOk?.(r) ?? false)), 'a read-only script made no writes (the GraphQL probe is a POST read)');
   }
 
   async function limited(env) {
@@ -411,12 +434,13 @@ export async function runConformance(opts) {
   async function rateLimit(env) {
     const { ctx, forge } = env;
     const first = await env.attempt(() => adapter.probe(ctx));
-    env.assert(isCodeOf(first, 'rate-limited'), 'a 403 with x-ratelimit-remaining 0 is a `rate-limited` error');
-    env.assert(first.error?.status === 403 && /rate-limiting this token until \d{4}-/.test(first.error?.message ?? ''), 'the message says until when');
+    env.assert(isCodeOf(first, 'rate-limited'), `a ${subject.rateLimitStatus ?? 403} that says "wait" is a \`rate-limited\` error`);
+    env.assert(first.error?.status === (subject.rateLimitStatus ?? 403) && /rate-limiting this token until \d{4}-/.test(first.error?.message ?? ''), 'the message says until when');
     const count = forge.requests.length;
     env.assert(count >= 1, `the provider was asked once (${count})`);
     const later = await env.attempt(() => adapter.repos.get(ctx, subject.repo));
-    const items = await env.attempt(() => adapter.items.query(ctx, { source: 'label', value: 'bug' }));
+    // A provider with no work items is asked something else that must also fail fast.
+    const items = await env.attempt(() => (adapter.items ? adapter.items.query(ctx, { source: 'label', value: 'bug' }) : adapter.checks.forCommit(ctx, 'a'.repeat(40))));
     const write = await env.attempt(() => adapter.pulls.comment(ctx, subject.pullId, 'hello'));
     env.assert(isCodeOf(later, 'rate-limited') && isCodeOf(items, 'rate-limited') && isCodeOf(write, 'rate-limited'), 'while blocked every operation fails fast as `rate-limited`');
     env.assert(forge.requests.length === count, `no further request reached the provider while blocked (${forge.requests.length} = ${count})`);
@@ -432,8 +456,8 @@ export async function runConformance(opts) {
       if (r.error) env.assert(false, `${label}: threw ${r.error.code ?? ''} ${String(r.error.message).slice(0, 200)}`);
       return r.value;
     };
-    const list = await run('items.query', () => adapter.items.query(ctx, { source: 'label', value: 'bug' }));
-    const big = await run('items.get', () => adapter.items.get(ctx, S.hostileBigIssue));
+    const list = adapter.items ? await run('items.query', () => adapter.items.query(ctx, { source: 'label', value: 'bug' })) : undefined;
+    const big = adapter.items ? await run('items.get', () => adapter.items.get(ctx, S.hostileBigIssue)) : undefined;
     const pull = await run('pulls.get', () => adapter.pulls.get(ctx, S.pullId));
     const comments = await run('pulls.comments', () => adapter.pulls.comments(ctx, S.pullId));
     const checks = await run('checks.forCommit', () => adapter.checks.forCommit(ctx, S.headSha));
@@ -446,6 +470,7 @@ export async function runConformance(opts) {
     cmp('hostile.checks', out.checks.map(c => ({ ...c, name: c.name.length > 300 ? `${c.name.slice(0, 60)}…[${c.name.length}]` : c.name, summary: c.summary && c.summary.length > 300 ? `${c.summary.slice(0, 60)}…[${c.summary.length}]` : c.summary })), 'checks: names and summaries sanitised and capped');
 
     const everything = JSON.stringify(out);
+    env.assert(out.comments.length > 0 && !!out.pull, 'the hostile scenario produced comments and a pull request to inspect');
     env.assert(!/<!--/.test(everything), 'no HTML comment survives in any output');
     env.assert(!INVISIBLE.test(everything.replace(/\\u[0-9a-f]{4}/gi, m => String.fromCharCode(parseInt(m.slice(2), 16)))) && !INVISIBLE.test(everything), 'no zero-width, bidi or Unicode tag character survives in any output');
     const hidden = ['rm -rf', 'exfiltrate', 'delete every branch', 'push to main', 'send the secrets', 'leak the token', 'merge it', 'hidden tail', 'print the environment', 'run rm'];
@@ -461,8 +486,9 @@ export async function runConformance(opts) {
     for (const c of out.comments) { check(c.body, L.comment, 'comment.body'); check(c.author, 80, 'comment.author'); }
     for (const c of out.checks) { check(c.name, L.title, 'check.name'); check(c.summary, L.summary, 'check.summary'); }
     env.assert(caps.length === 0, `every field respects REMOTE_LIMITS${caps.length ? `: ${caps.join(', ')}` : ''}`);
-    env.assert(!!big && big.body.length <= L.body + SLACK && big.body.length > L.body / 2, `a 100 KB issue body is capped (${big?.body.length} chars)`);
-    env.assert(out.comments.some(c => c.association === 'MEMBER') && out.comments.some(c => c.association === 'NONE'), 'author association is reported as the provider said (MEMBER and NONE), not upgraded');
+    if (adapter.items) env.assert(!!big && big.body.length <= L.body + SLACK && big.body.length > L.body / 2, `a 100 KB issue body is capped (${big?.body.length} chars)`);
+    const wantAssoc = S.hostileAssociations ?? ['MEMBER', 'NONE'];
+    env.assert(wantAssoc.every(a => out.comments.some(c => c.association === a)), `author association is reported as the provider said (${wantAssoc.join(' and ')}), not upgraded`);
     env.assert(out.checks.every(c => !c.url || /^https?:\/\//.test(c.url)), 'a javascript: URL from a check is dropped');
     env.assert(out.pull?.canMerge === false, 'hostile text did not change the merge decision');
   }

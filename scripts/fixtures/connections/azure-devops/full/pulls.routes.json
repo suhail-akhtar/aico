@@ -1,0 +1,409 @@
+[
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests",
+    "query": {
+      "searchCriteria.status": "all",
+      "$top": "1"
+    },
+    "status": 200,
+    "body": {
+      "count": 1,
+      "value": [
+        {
+          "pullRequestId": 7,
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests",
+    "query": {
+      "searchCriteria.sourceRefName": "refs/heads/aico/task-42"
+    },
+    "responses": [
+      {
+        "status": 200,
+        "body": {
+          "count": 0,
+          "value": []
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "value": [
+            {
+              "pullRequestId": 7,
+              "status": "active",
+              "sourceRefName": "refs/heads/aico/task-42"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/git/repositories/web/pullrequests",
+    "status": 201,
+    "bodyFile": "pull-created.json"
+  },
+  {
+    "method": "PATCH",
+    "path": "/Shop/_apis/git/repositories/web/pullrequests/:id",
+    "bodyIncludes": "\"status\":\"completed\"",
+    "status": 200,
+    "bodyFile": "pull-4.json"
+  },
+  {
+    "method": "PATCH",
+    "path": "/Shop/_apis/git/repositories/web/pullrequests/:id",
+    "status": 200,
+    "bodyFile": "pull-4.json"
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests/:id",
+    "responses": [
+      {
+        "status": 200,
+        "bodyFile": "pull-1.json"
+      },
+      {
+        "status": 200,
+        "bodyFile": "pull-2.json"
+      },
+      {
+        "status": 200,
+        "bodyFile": "pull-3.json"
+      },
+      {
+        "status": 200,
+        "bodyFile": "pull-4.json"
+      }
+    ]
+  },
+  {
+    "path": "/Shop/_apis/policy/evaluations",
+    "query": {
+      "artifactId": "*"
+    },
+    "responses": [
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "value": [
+            {
+              "evaluationId": "ev-build-running",
+              "status": "running",
+              "configuration": {
+                "id": 31,
+                "isEnabled": true,
+                "isBlocking": true,
+                "type": {
+                  "id": "0609b952-1397-4640-95ec-e00a01b2c241",
+                  "displayName": "Build"
+                },
+                "settings": {
+                  "buildDefinitionId": 4,
+                  "displayName": "CI build"
+                }
+              },
+              "context": {
+                "buildId": 9001,
+                "isExpired": false
+              }
+            },
+            {
+              "evaluationId": "ev-min-running",
+              "status": "running",
+              "configuration": {
+                "id": 32,
+                "isEnabled": true,
+                "isBlocking": true,
+                "type": {
+                  "id": "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd",
+                  "displayName": "Minimum number of reviewers"
+                },
+                "settings": {
+                  "minimumApproverCount": 1,
+                  "creatorVoteCounts": false
+                }
+              },
+              "context": {}
+            }
+          ]
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "value": [
+            {
+              "evaluationId": "ev-build-rejected",
+              "status": "rejected",
+              "configuration": {
+                "id": 31,
+                "isEnabled": true,
+                "isBlocking": true,
+                "type": {
+                  "id": "0609b952-1397-4640-95ec-e00a01b2c241",
+                  "displayName": "Build"
+                },
+                "settings": {
+                  "buildDefinitionId": 4,
+                  "displayName": "CI build"
+                }
+              },
+              "context": {
+                "buildId": 9001,
+                "isExpired": false
+              }
+            },
+            {
+              "evaluationId": "ev-min-running",
+              "status": "running",
+              "configuration": {
+                "id": 32,
+                "isEnabled": true,
+                "isBlocking": true,
+                "type": {
+                  "id": "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd",
+                  "displayName": "Minimum number of reviewers"
+                },
+                "settings": {
+                  "minimumApproverCount": 1,
+                  "creatorVoteCounts": false
+                }
+              },
+              "context": {}
+            }
+          ]
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "value": [
+            {
+              "evaluationId": "ev-build-approved",
+              "status": "approved",
+              "configuration": {
+                "id": 31,
+                "isEnabled": true,
+                "isBlocking": true,
+                "type": {
+                  "id": "0609b952-1397-4640-95ec-e00a01b2c241",
+                  "displayName": "Build"
+                },
+                "settings": {
+                  "buildDefinitionId": 4,
+                  "displayName": "CI build"
+                }
+              },
+              "context": {
+                "buildId": 9001,
+                "isExpired": false
+              }
+            },
+            {
+              "evaluationId": "ev-min-approved",
+              "status": "approved",
+              "configuration": {
+                "id": 32,
+                "isEnabled": true,
+                "isBlocking": true,
+                "type": {
+                  "id": "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd",
+                  "displayName": "Minimum number of reviewers"
+                },
+                "settings": {
+                  "minimumApproverCount": 1,
+                  "creatorVoteCounts": false
+                }
+              },
+              "context": {}
+            }
+          ]
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "value": [
+            {
+              "evaluationId": "ev-build-approved",
+              "status": "approved",
+              "configuration": {
+                "id": 31,
+                "isEnabled": true,
+                "isBlocking": true,
+                "type": {
+                  "id": "0609b952-1397-4640-95ec-e00a01b2c241",
+                  "displayName": "Build"
+                },
+                "settings": {
+                  "buildDefinitionId": 4,
+                  "displayName": "CI build"
+                }
+              },
+              "context": {
+                "buildId": 9001,
+                "isExpired": false
+              }
+            },
+            {
+              "evaluationId": "ev-min-approved",
+              "status": "approved",
+              "configuration": {
+                "id": 32,
+                "isEnabled": true,
+                "isBlocking": true,
+                "type": {
+                  "id": "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd",
+                  "displayName": "Minimum number of reviewers"
+                },
+                "settings": {
+                  "minimumApproverCount": 1,
+                  "creatorVoteCounts": false
+                }
+              },
+              "context": {}
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests/:id/statuses",
+    "status": 200,
+    "body": {
+      "count": 1,
+      "value": [
+        {
+          "id": 5,
+          "state": "succeeded",
+          "description": "Quality gate passed",
+          "context": {
+            "name": "quality-gate",
+            "genre": "sonar"
+          },
+          "targetUrl": "https://forge.test/sonar/7",
+          "createdDate": "2026-10-09T10:00:00Z"
+        },
+        {
+          "id": 2,
+          "state": "pending",
+          "description": "older",
+          "context": {
+            "name": "quality-gate",
+            "genre": "sonar"
+          },
+          "createdDate": "2026-10-09T09:30:00Z"
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/Shop/_apis/git/repositories/web/pullrequests/:id/threads",
+    "status": 201,
+    "body": {
+      "id": 40,
+      "status": "closed",
+      "comments": [
+        {
+          "id": 1,
+          "content": "ok"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/Shop/_apis/git/repositories/web/pullrequests/:id/threads",
+    "status": 200,
+    "body": {
+      "count": 4,
+      "value": [
+        {
+          "id": 1,
+          "status": "active",
+          "comments": [
+            {
+              "id": 1,
+              "parentCommentId": 0,
+              "author": {
+                "id": "c0ffee00-0000-4000-8000-000000000002",
+                "displayName": "Riley Reviewer",
+                "uniqueName": "riley@example.test"
+              },
+              "content": "Please rename the cache key.",
+              "publishedDate": "2026-10-09T11:00:00Z",
+              "commentType": "text"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "status": "closed",
+          "comments": [
+            {
+              "id": 1,
+              "parentCommentId": 0,
+              "author": {
+                "id": "c0ffee00-0000-4000-8000-000000000001",
+                "displayName": "Dana Dev",
+                "uniqueName": "dana.dev@example.test"
+              },
+              "content": "Renamed, thanks.",
+              "publishedDate": "2026-10-09T11:20:00Z",
+              "commentType": "text"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "status": "closed",
+          "comments": [
+            {
+              "id": 1,
+              "parentCommentId": 0,
+              "author": {
+                "id": "c0ffee00-0000-4000-8000-000000000001",
+                "displayName": "Dana Dev",
+                "uniqueName": "dana.dev@example.test"
+              },
+              "content": "Dana Dev updated the pull request status to Active",
+              "publishedDate": "2026-10-09T09:01:00Z",
+              "commentType": "system"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "status": "active",
+          "comments": [
+            {
+              "id": 1,
+              "parentCommentId": 0,
+              "author": {
+                "id": "c0ffee00-0000-4000-8000-000000000003",
+                "displayName": "Drive By",
+                "uniqueName": "driveby@elsewhere.test"
+              },
+              "content": "Nice idea.",
+              "publishedDate": "2026-10-09T10:30:00Z",
+              "commentType": "text"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

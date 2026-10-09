@@ -1,0 +1,207 @@
+{
+  "prefix": "/2.0",
+  "routes": [
+    {
+      "path": "/user",
+      "body": {
+        "type": "user",
+        "nickname": "octo-dev",
+        "display_name": "Octo Dev",
+        "uuid": "{octo-dev}"
+      }
+    },
+    {
+      "path": "/user/permissions/repositories",
+      "body": {
+        "pagelen": 1,
+        "page": 1,
+        "size": 1,
+        "values": [
+          {
+            "type": "repository_permission",
+            "permission": "write"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets",
+      "body": {
+        "type": "repository",
+        "full_name": "acme/widgets",
+        "slug": "widgets",
+        "uuid": "{repo-1}",
+        "is_private": true,
+        "has_issues": true,
+        "mainbranch": {
+          "type": "branch",
+          "name": "main"
+        },
+        "links": {
+          "html": {
+            "href": "https://forge.test/acme/widgets"
+          },
+          "clone": [
+            {
+              "name": "https",
+              "href": "https://octo-dev@forge.test/acme/widgets.git"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/repositories",
+      "query": {
+        "role": "*"
+      },
+      "body": {
+        "pagelen": 100,
+        "page": 1,
+        "size": 2,
+        "values": [
+          {
+            "type": "repository",
+            "full_name": "acme/widgets",
+            "slug": "widgets",
+            "uuid": "{repo-1}",
+            "is_private": true,
+            "has_issues": true,
+            "mainbranch": {
+              "type": "branch",
+              "name": "main"
+            },
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets"
+              },
+              "clone": [
+                {
+                  "name": "https",
+                  "href": "https://octo-dev@forge.test/acme/widgets.git"
+                }
+              ]
+            }
+          },
+          {
+            "type": "repository",
+            "full_name": "acme/gadgets",
+            "slug": "gadgets",
+            "uuid": "{repo-2}",
+            "is_private": true,
+            "has_issues": true,
+            "mainbranch": {
+              "type": "branch",
+              "name": "main"
+            },
+            "links": {
+              "html": {
+                "href": "https://forge.test/acme/widgets"
+              },
+              "clone": [
+                {
+                  "name": "https",
+                  "href": "https://octo-dev@forge.test/acme/widgets.git"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/branch-restrictions",
+      "body": {
+        "pagelen": 100,
+        "page": 1,
+        "size": 3,
+        "values": [
+          {
+            "type": "branchrestriction",
+            "id": 1,
+            "kind": "require_approvals_to_merge",
+            "branch_match_kind": "glob",
+            "pattern": "main",
+            "value": 2
+          },
+          {
+            "type": "branchrestriction",
+            "id": 2,
+            "kind": "require_passing_builds_to_merge",
+            "branch_match_kind": "glob",
+            "pattern": "main",
+            "value": 1
+          },
+          {
+            "type": "branchrestriction",
+            "id": 3,
+            "kind": "push",
+            "branch_match_kind": "glob",
+            "pattern": "release/*",
+            "value": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/commit/main/statuses",
+      "body": {
+        "pagelen": 100,
+        "page": 1,
+        "size": 1,
+        "values": [
+          {
+            "type": "build",
+            "key": "pipeline-12",
+            "name": "Pipeline #12",
+            "state": "SUCCESSFUL",
+            "url": "https://forge.test/acme/widgets/pipelines/12",
+            "description": "Pipeline #12: SUCCESSFUL"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/repositories/acme/widgets/commit/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233/statuses",
+      "body": {
+        "pagelen": 100,
+        "page": 1,
+        "size": 4,
+        "values": [
+          {
+            "type": "build",
+            "key": "pipeline-12",
+            "name": "Pipeline #12",
+            "state": "SUCCESSFUL",
+            "url": "https://forge.test/acme/widgets/pipelines/12",
+            "description": "Pipeline #12: SUCCESSFUL"
+          },
+          {
+            "type": "build",
+            "key": "lint",
+            "name": "lint",
+            "state": "FAILED",
+            "url": "https://forge.test/acme/widgets/pipelines/4",
+            "description": "lint: FAILED"
+          },
+          {
+            "type": "build",
+            "key": "deploy-preview",
+            "name": "deploy-preview",
+            "state": "INPROGRESS",
+            "url": "https://forge.test/acme/widgets/pipelines/14",
+            "description": "deploy-preview: INPROGRESS"
+          },
+          {
+            "type": "build",
+            "key": "smoke",
+            "name": "smoke",
+            "state": "STOPPED",
+            "url": "https://forge.test/acme/widgets/pipelines/5",
+            "description": "smoke: STOPPED"
+          }
+        ]
+      }
+    }
+  ]
+}

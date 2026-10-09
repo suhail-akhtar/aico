@@ -24,6 +24,10 @@ export interface StoredConnection {
   insecureHttp?: boolean;
   caBundle?: string;
   disabled?: boolean;
+  /** Basic-auth account name some providers pair with a token (Bitbucket Cloud: the Atlassian email). Not a secret. */
+  username?: string;
+  /** The connector pack this connection runs on (`provider` is `custom`); see connections/packs. */
+  pack?: string;
   createdAt: string;
   createdBy: 'person' | 'agent';
   /** Vault credential name; present once a person has stored a token. */

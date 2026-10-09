@@ -1,0 +1,550 @@
+{
+  "probe": {
+    "at": "<time>",
+    "user": "Dana Dev (dana.dev@example.test)",
+    "version": "Azure DevOps Server (REST 7.1)",
+    "capabilities": {
+      "repos": true,
+      "pulls": {
+        "create": true,
+        "comment": true,
+        "merge": true,
+        "draft": true,
+        "bodyMax": 4000
+      },
+      "items": {
+        "query": true,
+        "create": true,
+        "transition": true,
+        "comment": true,
+        "estimate": "field",
+        "parentLink": false
+      },
+      "iterations": "native",
+      "checks": {
+        "read": true,
+        "rerun": false,
+        "logsUrl": true
+      },
+      "protection": {
+        "read": true
+      }
+    },
+    "scopes": {
+      "found": [],
+      "needed": [
+        {
+          "scope": "Code: read and write",
+          "why": "Read repositories, open and update pull requests, and push aico/task-* branches.",
+          "feature": "pulls",
+          "required": true
+        },
+        {
+          "scope": "Work Items: read and write",
+          "why": "Import work items and move them forward as the task progresses.",
+          "feature": "items",
+          "required": false
+        },
+        {
+          "scope": "Build: read",
+          "why": "Show the builds that gate a pull request.",
+          "feature": "checks",
+          "required": false
+        },
+        {
+          "scope": "Project and Team: read",
+          "why": "Read sprints and iterations.",
+          "feature": "iterations",
+          "required": false
+        }
+      ],
+      "missing": [],
+      "extra": [],
+      "reported": false
+    },
+    "warnings": [
+      "Azure DevOps does not say what a token may write, so opening and merging pull requests is confirmed by the first one; a refusal names the missing permission."
+    ]
+  },
+  "repo": {
+    "ref": {
+      "owner": "Shop",
+      "name": "web",
+      "id": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00"
+    },
+    "defaultBranch": "main",
+    "cloneUrl": "<origin>/Shop/_git/web",
+    "htmlUrl": "<origin>/Shop/_git/web",
+    "private": true
+  },
+  "repos": [
+    {
+      "ref": {
+        "owner": "Shop",
+        "name": "web",
+        "id": "8c2e7f60-1d3b-4f58-a6a7-5b4c3d2e1f00"
+      },
+      "defaultBranch": "main",
+      "cloneUrl": "<origin>/Shop/_git/web",
+      "htmlUrl": "<origin>/Shop/_git/web",
+      "private": true
+    },
+    {
+      "ref": {
+        "owner": "Shop",
+        "name": "docs",
+        "id": "9d3f8071-2e4c-4069-b7b8-6c5d4e3f2a11"
+      },
+      "defaultBranch": "main",
+      "cloneUrl": "<origin>/Shop/_git/docs",
+      "htmlUrl": "<origin>/Shop/_git/docs",
+      "private": true
+    }
+  ],
+  "pull.created": {
+    "connection": "azure-devops-full",
+    "id": "7",
+    "url": "<origin>/Shop/_git/web/pullrequest/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "unknown",
+    "checks": {
+      "state": "none",
+      "items": []
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "Azure DevOps has not finished working out whether this can be merged yet.",
+      "Azure DevOps is still evaluating the branch policies."
+    ],
+    "observedAt": "<time>"
+  },
+  "pull.1": {
+    "connection": "azure-devops-full",
+    "id": "7",
+    "url": "<origin>/Shop/_git/web/pullrequest/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "pending",
+      "items": [
+        {
+          "name": "CI build",
+          "state": "pending",
+          "url": "<origin>/Shop/_build/results?buildId=9001"
+        },
+        {
+          "name": "sonar/quality-gate",
+          "state": "success",
+          "url": "https://forge.test/sonar/7",
+          "summary": "Quality gate passed"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "pending",
+      "approved": 0,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "CI build is still running.",
+      "0 of 1 required approvals."
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.2": {
+    "connection": "azure-devops-full",
+    "id": "7",
+    "url": "<origin>/Shop/_git/web/pullrequest/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "failing",
+      "items": [
+        {
+          "name": "CI build",
+          "state": "failure",
+          "url": "<origin>/Shop/_build/results?buildId=9001"
+        },
+        {
+          "name": "sonar/quality-gate",
+          "state": "success",
+          "url": "https://forge.test/sonar/7",
+          "summary": "Quality gate passed"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "changes",
+      "approved": 0,
+      "changesRequested": 1,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [
+      "CI build has not passed.",
+      "0 of 1 required approvals.",
+      "A reviewer has requested changes."
+    ],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.3": {
+    "connection": "azure-devops-full",
+    "id": "7",
+    "url": "<origin>/Shop/_git/web/pullrequest/7",
+    "state": "open",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "CI build",
+          "state": "success",
+          "url": "<origin>/Shop/_build/results?buildId=9001"
+        },
+        {
+          "name": "sonar/quality-gate",
+          "state": "success",
+          "url": "https://forge.test/sonar/7",
+          "summary": "Quality gate passed"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 1,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": true,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "observedAt": "<time>"
+  },
+  "pull.4": {
+    "connection": "azure-devops-full",
+    "id": "7",
+    "url": "<origin>/Shop/_git/web/pullrequest/7",
+    "state": "merged",
+    "draft": false,
+    "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "mergeable": "mergeable",
+    "checks": {
+      "state": "passing",
+      "items": [
+        {
+          "name": "CI build",
+          "state": "success",
+          "url": "<origin>/Shop/_build/results?buildId=9001"
+        },
+        {
+          "name": "sonar/quality-gate",
+          "state": "success",
+          "url": "https://forge.test/sonar/7",
+          "summary": "Quality gate passed"
+        }
+      ]
+    },
+    "reviews": {
+      "state": "approved",
+      "approved": 1,
+      "changesRequested": 0,
+      "required": 1
+    },
+    "canMerge": false,
+    "mergeBlockers": [],
+    "protectedBase": true,
+    "mergedSha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+    "observedAt": "<time>"
+  },
+  "comments": [
+    {
+      "id": "4.1",
+      "author": "Drive By",
+      "association": "MEMBER",
+      "body": "Nice idea.",
+      "at": "2026-10-09T10:30:00Z"
+    },
+    {
+      "id": "1.1",
+      "author": "Riley Reviewer",
+      "association": "MEMBER",
+      "body": "Please rename the cache key.",
+      "at": "2026-10-09T11:00:00Z"
+    },
+    {
+      "id": "2.1",
+      "author": "Dana Dev",
+      "association": "MEMBER",
+      "body": "Renamed, thanks.",
+      "at": "2026-10-09T11:20:00Z"
+    }
+  ],
+  "items": [
+    {
+      "id": "13",
+      "number": 13,
+      "title": "Widget count is wrong",
+      "body": "1. Open the page\n2. Count the widgets & compare",
+      "state": "open",
+      "labels": [
+        "bug"
+      ],
+      "assignees": [],
+      "author": "Riley Reviewer",
+      "url": "<origin>/Shop/_workitems/edit/13",
+      "rev": "2",
+      "stateName": "New",
+      "stateCategory": "proposed",
+      "kind": "Bug"
+    },
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Widgets stay stale after an update.\n\n- Check the cache\n\n## Acceptance\n- The cache is invalidated\n- A test covers it",
+      "state": "open",
+      "labels": [
+        "bug",
+        "needs-triage",
+        "area:Shop\\Web"
+      ],
+      "assignees": [
+        "Dana Dev"
+      ],
+      "author": "Riley Reviewer",
+      "url": "<origin>/Shop/_workitems/edit/11",
+      "rev": "5",
+      "points": 3,
+      "iteration": "Shop\\Sprint 1",
+      "stateName": "Active",
+      "stateCategory": "inprogress",
+      "kind": "User Story"
+    }
+  ],
+  "items.search": [
+    {
+      "id": "13",
+      "number": 13,
+      "title": "Widget count is wrong",
+      "body": "1. Open the page\n2. Count the widgets & compare",
+      "state": "open",
+      "labels": [
+        "bug"
+      ],
+      "assignees": [],
+      "author": "Riley Reviewer",
+      "url": "<origin>/Shop/_workitems/edit/13",
+      "rev": "2",
+      "stateName": "New",
+      "stateCategory": "proposed",
+      "kind": "Bug"
+    },
+    {
+      "id": "11",
+      "number": 11,
+      "title": "Cache invalidation on widget update",
+      "body": "Widgets stay stale after an update.\n\n- Check the cache\n\n## Acceptance\n- The cache is invalidated\n- A test covers it",
+      "state": "open",
+      "labels": [
+        "bug",
+        "needs-triage",
+        "area:Shop\\Web"
+      ],
+      "assignees": [
+        "Dana Dev"
+      ],
+      "author": "Riley Reviewer",
+      "url": "<origin>/Shop/_workitems/edit/11",
+      "rev": "5",
+      "points": 3,
+      "iteration": "Shop\\Sprint 1",
+      "stateName": "Active",
+      "stateCategory": "inprogress",
+      "kind": "User Story"
+    }
+  ],
+  "item": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update",
+    "body": "Widgets stay stale after an update.\n\n- Check the cache\n\n## Acceptance\n- The cache is invalidated\n- A test covers it",
+    "state": "open",
+    "labels": [
+      "bug",
+      "needs-triage",
+      "area:Shop\\Web"
+    ],
+    "assignees": [
+      "Dana Dev"
+    ],
+    "author": "Riley Reviewer",
+    "url": "<origin>/Shop/_workitems/edit/11",
+    "rev": "5",
+    "points": 3,
+    "iteration": "Shop\\Sprint 1",
+    "stateName": "Active",
+    "stateCategory": "inprogress",
+    "kind": "User Story"
+  },
+  "item.updated": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update (reworded)",
+    "body": "Widgets stay stale after an update.\n\n- Check the cache\n\n## Acceptance\n- The cache is invalidated\n- A test covers it",
+    "state": "open",
+    "labels": [
+      "bug",
+      "sp:3",
+      "aico:running",
+      "area:Shop\\Web"
+    ],
+    "assignees": [
+      "Dana Dev"
+    ],
+    "author": "Riley Reviewer",
+    "url": "<origin>/Shop/_workitems/edit/11",
+    "rev": "6",
+    "points": 3,
+    "iteration": "Shop\\Sprint 1",
+    "stateName": "Active",
+    "stateCategory": "inprogress",
+    "kind": "User Story"
+  },
+  "item.closed": {
+    "id": "11",
+    "number": 11,
+    "title": "Cache invalidation on widget update",
+    "body": "Widgets stay stale after an update.\n\n- Check the cache\n\n## Acceptance\n- The cache is invalidated\n- A test covers it",
+    "state": "closed",
+    "labels": [
+      "bug",
+      "needs-triage",
+      "area:Shop\\Web"
+    ],
+    "assignees": [
+      "Dana Dev"
+    ],
+    "author": "Riley Reviewer",
+    "url": "<origin>/Shop/_workitems/edit/11",
+    "rev": "7",
+    "points": 3,
+    "iteration": "Shop\\Sprint 1",
+    "stateName": "Closed",
+    "stateCategory": "completed",
+    "kind": "User Story"
+  },
+  "item.created": {
+    "id": "15",
+    "number": 15,
+    "title": "Follow-up: cache metrics",
+    "body": "",
+    "state": "open",
+    "labels": [
+      "aico"
+    ],
+    "assignees": [],
+    "author": "",
+    "url": "<origin>/Shop/_workitems/edit/15",
+    "rev": "1",
+    "stateName": "New",
+    "stateCategory": "proposed",
+    "kind": "User Story"
+  },
+  "iterations": [
+    {
+      "id": "11111111-0000-4000-8000-000000000000",
+      "title": "Sprint 0",
+      "kind": "iteration",
+      "state": "closed",
+      "start": "2026-09-14",
+      "end": "2026-09-25",
+      "itemKey": "Shop\\Sprint 0",
+      "timeFrame": "past"
+    },
+    {
+      "id": "11111111-0000-4000-8000-000000000001",
+      "title": "Sprint 1",
+      "kind": "iteration",
+      "state": "open",
+      "start": "2026-09-28",
+      "end": "2026-10-09",
+      "itemKey": "Shop\\Sprint 1",
+      "timeFrame": "current"
+    },
+    {
+      "id": "11111111-0000-4000-8000-000000000002",
+      "title": "Sprint 2",
+      "kind": "iteration",
+      "state": "open",
+      "start": "2026-10-12",
+      "end": "2026-10-23",
+      "itemKey": "Shop\\Sprint 2",
+      "timeFrame": "future"
+    }
+  ],
+  "iteration.created": {
+    "id": "11111111-0000-4000-8000-000000000009",
+    "title": "Sprint 2",
+    "kind": "iteration",
+    "state": "open",
+    "end": "2026-10-30",
+    "itemKey": "Shop\\Sprint 2"
+  },
+  "checks": [
+    {
+      "name": "continuous-integration/lint",
+      "state": "success",
+      "url": "https://forge.test/lint/1",
+      "summary": "No lint errors"
+    },
+    {
+      "name": "unit",
+      "state": "failure",
+      "summary": "Two tests failed"
+    },
+    {
+      "name": "e2e",
+      "state": "pending",
+      "summary": "Running"
+    },
+    {
+      "name": "CI build",
+      "state": "success",
+      "url": "<origin>/Shop/_build/results?buildId=9001",
+      "summary": "Build 20261009.1"
+    },
+    {
+      "name": "Nightly",
+      "state": "failure",
+      "url": "<origin>/Shop/_build/results?buildId=9002",
+      "summary": "Build 20261009.2"
+    }
+  ],
+  "protection": {
+    "protected": true,
+    "requiredReviews": 2,
+    "requiredChecks": [
+      "CI build"
+    ]
+  },
+  "protection.none": {
+    "protected": false
+  }
+}

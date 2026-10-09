@@ -274,7 +274,11 @@ console.log('\n-- connections: create, the token\'s journey, views --');
   const e1 = await errOf(() => ConnService.createConnection({ provider: 'github', baseUrl: 'http://ghe.corp.example', insecureHttp: true, by: 'person' }));
   ok(/never a public host|private or loopback/.test(e1?.message ?? ''), 'the plain-http opt-in only works for a private address');
   ok(/username or password/.test((await errOf(() => ConnService.createConnection({ provider: 'github', baseUrl: 'https://user:pw@ghe.corp.example', by: 'person' })))?.message ?? ''), 'credentials in the base URL are refused');
+  // Every catalogued provider has an adapter now; one taken away for a moment shows what a person would be told.
+  const gitlabAdapter = ConnRegistry.adapterFor('gitlab');
+  ConnRegistry.unregisterAdapter('gitlab');
   ok(/not available yet/.test((await errOf(() => ConnService.createConnection({ provider: 'gitlab', by: 'person' })))?.message ?? ''), 'a provider with no adapter yet says so');
+  ConnRegistry.registerAdapter(gitlabAdapter);
   ok(/needs a base URL/.test((await errOf(() => ConnService.createConnection({ provider: 'gitea', by: 'person' })))?.message ?? '') || true, 'a self-hosted provider asks for its address');
 
   const dotcom = await ConnService.createConnection({ provider: 'github', by: 'person' });
@@ -390,7 +394,7 @@ console.log('\n-- routes: a person for anything that stores or changes where a t
     ok(r.status === 403 && r.body.code === 'human-required', `${route} refuses the token alone`);
   }
   const prov = await call('connections/providers', 'GET');
-  ok(prov.status === 200 && prov.body.providers.find(p => p.id === 'github')?.supported === true && prov.body.providers.find(p => p.id === 'gitlab')?.supported === false, 'providers: GitHub supported, GitLab not yet');
+  ok(prov.status === 200 && prov.body.providers.find(p => p.id === 'github')?.supported === true && ['gitlab', 'gitea', 'forgejo', 'gitbucket'].every(id => prov.body.providers.find(p => p.id === id)?.supported === true), 'providers: GitHub, GitLab, Gitea, Forgejo and GitBucket supported');
   const list = await call('connections/list', 'GET');
   const text = JSON.stringify(list.body);
   ok(list.status === 200 && list.body.connections.length >= 2 && !text.includes(TOKEN) && !text.includes(TOKEN2) && !/"credential"/.test(text) && !/"conn-[a-z]/.test(text), 'list: connections without any credential name or value');

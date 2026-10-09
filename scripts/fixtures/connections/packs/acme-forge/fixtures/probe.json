@@ -1,0 +1,24 @@
+{
+  "operation": "probe",
+  "cases": [
+    {
+      "name": "the token owner",
+      "input": {},
+      "request": {
+        "method": "GET",
+        "path": "/v1/me"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "login": "octo-dev",
+          "apiVersion": "2.4"
+        }
+      },
+      "expect": {
+        "user": "octo-dev",
+        "version": "2.4"
+      }
+    }
+  ]
+}

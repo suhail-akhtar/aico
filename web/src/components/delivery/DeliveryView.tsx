@@ -284,7 +284,7 @@ export function DeliveryView({ projectPath, projectName, host, projects, onProje
 
       {scrum && board && (tasks.length > 0 || sprints.length > 0) && (
         <ScrumHeader
-          sprint={currentSprint} tasks={tasks} now={now} offsetMin={offsetMin}
+          sprint={currentSprint} tasks={tasks} now={now} offsetMin={offsetMin} source={board.connection?.label}
           onPlan={() => setDialog('sprint')} onStart={() => setSprintAction('start')} onClose={() => setSprintAction('close')} onRefine={() => void refine()}
         />
       )}
@@ -496,10 +496,14 @@ function Header({ board, projectName, projectPath, projects, onProjectChange, pa
         {board && (
           <div className="flex items-center gap-2 text-[12.5px] text-aico-secondary" role="status" aria-live="polite">
             <span className="relative flex h-2 w-2" aria-hidden="true">
-              {state === 'running' && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-aico-success opacity-60 motion-reduce:animate-none" />}
+              {state === 'running' && running > 0 && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-aico-success opacity-60 motion-reduce:animate-none" />}
               <span className={`relative inline-flex h-2 w-2 rounded-full ${state === 'running' ? 'bg-aico-success' : state === 'paused' ? 'bg-aico-warning' : 'bg-aico-muted'}`} />
             </span>
-            {state === 'running' ? <span>Agents running <span className="tabular-nums">{running}/{max}</span></span>
+            {state === 'running' && running === 0
+              // On but idle must not look like work: say what the agents are waiting for.
+              ? <span title="Nothing is running. Agents pick up tasks in the Ready column; move a task there or plan from a brief.">
+                  Agents on · {board.tasks.some(t => t.status === 'ready') ? 'starting…' : 'waiting for Ready tasks'}</span>
+              : state === 'running' ? <span>Agents working <span className="tabular-nums">{running}/{max}</span></span>
               : state === 'paused' ? <span>Paused{running ? ` · ${running} finishing` : ''}</span>
               : <span>Agents stopped</span>}
           </div>

@@ -1,0 +1,134 @@
+{
+  "operation": "pulls.get",
+  "cases": [
+    {
+      "name": "ready",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "7"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/pulls/7"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "number": 7,
+          "html_url": "https://app.acme-forge.example/acme/widgets/pulls/7",
+          "state": "open",
+          "draft": false,
+          "head": {
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          },
+          "merge_state": "clean",
+          "can_merge": true,
+          "blockers": [],
+          "reviews": {
+            "approved": 2,
+            "changes": 0,
+            "required": 2
+          },
+          "merge_sha": null,
+          "checks": [
+            {
+              "name": "build",
+              "status": "ok",
+              "url": "https://ci.acme-forge.example/1",
+              "summary": "passed"
+            },
+            {
+              "name": "lint",
+              "status": "skipped"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "id": "7",
+        "state": "open",
+        "mergeable": "mergeable",
+        "canMerge": true,
+        "headSha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "checks": {
+          "state": "passing"
+        },
+        "reviews": {
+          "state": "approved",
+          "approved": 2,
+          "required": 2
+        }
+      }
+    },
+    {
+      "name": "a failing check narrows canMerge",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "7"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/pulls/7"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "number": 7,
+          "html_url": "https://app.acme-forge.example/acme/widgets/pulls/7",
+          "state": "open",
+          "draft": false,
+          "head": {
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+          },
+          "merge_state": "clean",
+          "can_merge": true,
+          "blockers": [],
+          "reviews": {
+            "approved": 2,
+            "changes": 0,
+            "required": 2
+          },
+          "merge_sha": null,
+          "checks": [
+            {
+              "name": "build",
+              "status": "failed"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "canMerge": false,
+        "checks": {
+          "state": "failing"
+        }
+      }
+    },
+    {
+      "name": "not found",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "999"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/pulls/999"
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "message": "no such pull request"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": "not-found",
+          "status": 404
+        }
+      }
+    }
+  ]
+}

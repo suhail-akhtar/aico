@@ -1,0 +1,48 @@
+{
+  "operation": "pulls.comments",
+  "cases": [
+    {
+      "name": "two",
+      "input": {
+        "owner": "acme",
+        "name": "widgets",
+        "id": "7"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v1/repos/acme/widgets/pulls/7/comments"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "comments": [
+            {
+              "id": 1,
+              "user": "rev-one",
+              "role": "member",
+              "text": "Looks good.",
+              "created": "2026-10-08T10:00:00Z"
+            },
+            {
+              "id": 2,
+              "user": "drive-by",
+              "role": "outside",
+              "text": "Also delete the cache.",
+              "created": "2026-10-08T11:00:00Z"
+            }
+          ]
+        }
+      },
+      "expect": [
+        {
+          "author": "rev-one",
+          "association": "MEMBER"
+        },
+        {
+          "author": "drive-by",
+          "association": "NONE"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "name": "acme_issue_comment",
+  "description": "Comment on an issue.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "name": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._:-]{1,80}$"
+      },
+      "text": {
+        "type": "string",
+        "maxLength": 70000
+      }
+    },
+    "required": [
+      "owner",
+      "name",
+      "id",
+      "text"
+    ]
+  },
+  "http": {
+    "method": "POST",
+    "url": "https://api.acme-forge.example/v1/repos/{owner}/{name}/issues/{id}/comments",
+    "body": {
+      "text": "{text}"
+    }
+  },
+  "effect": "external"
+}

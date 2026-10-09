@@ -1,0 +1,186 @@
+[
+  {
+    "path": "/plugins/servlet/applinks/whoami",
+    "text": "octo-dev"
+  },
+  {
+    "path": "/rest/api/1.0/application-properties",
+    "status": 404,
+    "body": {
+      "errors": [
+        {
+          "message": "not found"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets",
+    "body": {
+      "slug": "widgets",
+      "id": 5,
+      "name": "widgets",
+      "public": false,
+      "state": "AVAILABLE",
+      "project": {
+        "key": "ACME",
+        "name": "Acme"
+      },
+      "links": {
+        "clone": [
+          {
+            "name": "http",
+            "href": "https://octo-dev@forge.test/scm/acme/widgets.git"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/branches/default",
+    "body": {
+      "id": "refs/heads/main",
+      "displayId": "main",
+      "type": "BRANCH",
+      "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests",
+    "query": {
+      "state": "ALL"
+    },
+    "body": {
+      "size": 0,
+      "limit": 1,
+      "isLastPage": true,
+      "values": [],
+      "start": 0
+    }
+  },
+  {
+    "path": "/rest/build-status/1.0/commits/b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233",
+    "status": 403,
+    "body": {
+      "errors": [
+        {
+          "message": "You are not permitted to access this resource",
+          "exceptionName": "AuthorisationException"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/rest/build-status/1.0/commits/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "status": 403,
+    "body": {
+      "errors": [
+        {
+          "message": "You are not permitted to access this resource",
+          "exceptionName": "AuthorisationException"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/settings/pull-requests",
+    "status": 403,
+    "body": {
+      "errors": [
+        {
+          "message": "You are not permitted to access this resource",
+          "exceptionName": "AuthorisationException"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/rest/branch-permissions/2.0/projects/ACME/repos/widgets/restrictions",
+    "status": 403,
+    "body": {
+      "errors": [
+        {
+          "message": "You are not permitted to access this resource",
+          "exceptionName": "AuthorisationException"
+        }
+      ]
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7",
+    "body": {
+      "id": 7,
+      "version": 3,
+      "title": "Add widget cache",
+      "description": "Evidence packet.",
+      "state": "OPEN",
+      "open": true,
+      "closed": false,
+      "draft": false,
+      "locked": false,
+      "fromRef": {
+        "id": "refs/heads/aico/task-42",
+        "displayId": "aico/task-42",
+        "latestCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+      },
+      "toRef": {
+        "id": "refs/heads/main",
+        "displayId": "main",
+        "latestCommit": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf00112233"
+      },
+      "author": {
+        "user": {
+          "name": "octo-dev",
+          "slug": "octo-dev",
+          "displayName": "octo-dev",
+          "emailAddress": "octo-dev@forge.test",
+          "active": true
+        },
+        "role": "AUTHOR",
+        "approved": false,
+        "status": "UNAPPROVED"
+      },
+      "reviewers": [
+        {
+          "user": {
+            "name": "rev-one",
+            "slug": "rev-one",
+            "displayName": "rev-one",
+            "emailAddress": "rev-one@forge.test",
+            "active": true
+          },
+          "role": "REVIEWER",
+          "approved": false,
+          "status": "NEEDS_WORK"
+        }
+      ],
+      "properties": {
+        "mergeResult": {
+          "outcome": "CLEAN",
+          "current": true
+        },
+        "commentCount": 2,
+        "openTaskCount": 0
+      },
+      "links": {
+        "self": [
+          {
+            "href": "https://forge.test/projects/ACME/repos/widgets/pull-requests/7"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/rest/api/1.0/projects/ACME/repos/widgets/pull-requests/7/merge",
+    "status": 403,
+    "body": {
+      "errors": [
+        {
+          "message": "You are not permitted to access this resource",
+          "exceptionName": "AuthorisationException"
+        }
+      ]
+    }
+  }
+]

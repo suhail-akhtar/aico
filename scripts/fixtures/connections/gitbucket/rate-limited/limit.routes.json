@@ -1,0 +1,18 @@
+{
+  "prefix": "/api/v3",
+  "routes": [
+    {
+      "path": "/user",
+      "status": 403,
+      "headers": {
+        "x-ratelimit-limit": "60",
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": "{{epoch+3600}}",
+        "retry-after": "60"
+      },
+      "body": {
+        "message": "API rate limit exceeded"
+      }
+    }
+  ]
+}

@@ -145,9 +145,17 @@
       "gate": "token+human",
       "note": "stores a token in the vault bound to the connection host: human(); the token travels in only and no route returns it"
     },
+    "connections/discover": {
+      "gate": "token",
+      "note": "read: repositories (or a project's work item process) through an already-connected host with its own stored token; cannot widen a host or write"
+    },
     "connections/detect": {
       "gate": "token",
       "note": "read: which provider and repository a registered project origin points at (no network)"
+    },
+    "connections/iteration-create": {
+      "gate": "token+human",
+      "note": "creates an iteration on the platform for a local sprint (the one place AICO creates a remote iteration): human()"
     },
     "connections/list": {
       "gate": "token",
@@ -160,6 +168,26 @@
     "connections/mapping": {
       "gate": "token",
       "note": "read: a registered project mapping and its board chip"
+    },
+    "connections/pack-connect": {
+      "gate": "token+human",
+      "note": "makes a connection for an ENABLED connector pack with the hosts a person approved; the token is added separately by a person: human()"
+    },
+    "connections/pack-disable": {
+      "gate": "token+human",
+      "note": "switches a connector pack off: human()"
+    },
+    "connections/pack-enable": {
+      "gate": "token+human",
+      "note": "a person approves exactly the pack content they were shown (hash-bound; a pack that changed is refused); never reachable from the agent tool: human()"
+    },
+    "connections/pack-test": {
+      "gate": "token",
+      "note": "replays a pack's fixtures on a loopback server the engine starts and records which operations pass; no external request, grants nothing"
+    },
+    "connections/packs": {
+      "gate": "token",
+      "note": "read: connector packs with status, hosts, operations and effect classes (no credential exists in a pack)"
     },
     "connections/providers": {
       "gate": "token",

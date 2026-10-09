@@ -1,0 +1,49 @@
+{
+  "name": "acme_issue_state",
+  "description": "Open or close an issue if it is still at the revision given.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "name": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+      },
+      "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._:-]{1,80}$"
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "open",
+          "closed"
+        ]
+      },
+      "rev": {
+        "type": "string",
+        "maxLength": 80
+      }
+    },
+    "required": [
+      "owner",
+      "name",
+      "id",
+      "state",
+      "rev"
+    ]
+  },
+  "http": {
+    "method": "PATCH",
+    "url": "https://api.acme-forge.example/v1/repos/{owner}/{name}/issues/{id}",
+    "body": {
+      "state": "{state}",
+      "expectedRev": "{rev}"
+    }
+  },
+  "effect": "external"
+}
