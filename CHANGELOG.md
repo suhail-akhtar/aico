@@ -3,6 +3,12 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Changed
+
+- **Licence: Functional Source License 1.1 with an Apache 2.0 future licence (FSL-1.1-ALv2), from 0.48.0 (ADR 0036).** AICO is source-available: free to use, change and run — including inside a company — for anything except building a competing product or service, and each release becomes Apache 2.0 two years after it ships. It replaces PolyForm Noncommercial 1.0.0, which companies could not adopt. **Earlier versions keep their licences and are not relicensed:** releases before 0.28.0 remain MIT and 0.28.0–0.47.x remain PolyForm Noncommercial 1.0.0. App templates keep their own MIT licences. `LICENSE` (and the VS Code extension's copy) is the official FSL text with a short plain-words summary; the `Required Notice:` credit lines of the previous licence are gone (FSL requires keeping the copyright notices and the terms). The `license` field of the three packages is now `FSL-1.1-ALv2`, the desktop About text and the website say so, and `check-standards` now also fails on current-tense Apache or PolyForm claims.
+
 ## 0.47.0 — 2026-10-08
 
 ### Added

@@ -9,8 +9,10 @@
  *              dependency can slip in through a lockfile edit, and package.json
  *              specs say the same. Offline.
  *   licences   production dependencies of every package we distribute carry a
- *              licence compatible with shipping AICO under PolyForm
- *              Noncommercial (permissive: MIT, ISC, BSD, Apache-2.0, …).
+ *              licence compatible with shipping AICO under FSL-1.1-ALv2
+ *              (permissive: MIT, ISC, BSD, Apache-2.0, …; the same list was
+ *              right under PolyForm Noncommercial before 0.48.0). This reads
+ *              only the dependencies' licences, never AICO's own.
  *              Copyleft (GPL/AGPL/LGPL/SSPL/EUPL), non-commercial and unknown
  *              licences fail unless scripts/security/licence-exceptions.json
  *              records a reviewed reason. Read from the lockfiles' own

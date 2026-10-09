@@ -17,7 +17,9 @@
  *                 missed file is a broken download link on the release page.
  *   changelog     every released version has a CHANGELOG section.
  *   licence       the licence changed from MIT to PolyForm Noncommercial in
- *                 0.28.0; an old "MIT" or "open source" claim is now false.
+ *                 0.28.0 and to FSL-1.1-ALv2 in 0.48.0 (ADR 0036); an old
+ *                 "MIT", "Apache", "PolyForm" or "open source" claim about the
+ *                 current version is now false.
  *   secrets       a key in a public commit is compromised the moment it lands.
  *   headers       modules explain WHY in a header comment; new ones must too.
  *
@@ -102,7 +104,10 @@ const ATTRIBUTION = [
  */
 
 /** The licence every package of ours declares. */
-const LICENCE_SPDX = 'PolyForm-Noncommercial-1.0.0';
+const LICENCE_SPDX = 'FSL-1.1-ALv2';
+
+/** A line about Apache that is about the future licence, or about someone else's licence. */
+const FUTURE_OR_THIRD_PARTY = /\b(?:becomes?|converts?|future|ALv2|anniversary|years after|compatible|dependenc|upstream|third-party|their own)/i;
 
 /** Files the attribution and licence scans must not read: they quote the patterns. */
 const SELF = [
@@ -330,7 +335,12 @@ function isDisclaimer(line, index) {
   return /["“'`]$/.test(before);
 }
 
-/** package.json licence fields, and no stale MIT / open-source claims. */
+/**
+ * package.json licence fields, and no stale MIT / Apache / PolyForm / open-source
+ * claims about the current version. Apache 2.0 is true of AICO only as the
+ * future licence ("becomes Apache 2.0 two years after it ships"), and the
+ * earlier licences are history, so a line may name them when it says so.
+ */
 function checkLicence(files) {
   ran.push('licence');
   for (const rel of ['package.json', 'desktop/package.json', 'vscode-extension/package.json']) {
@@ -349,18 +359,28 @@ function checkLicence(files) {
       if (/standards-allow:\s*licen[cs]e/i.test(line)) return;
       const at = `${rel}:${i + 1}`;
       if (isOurPkg) {
-        if (/"license"\s*:\s*"MIT"/.test(line)) fail('licence', at, 'declares MIT; AICO is PolyForm Noncommercial from 0.28.0');
+        if (/"license"\s*:\s*"(?:MIT|Apache-2\.0|PolyForm-Noncommercial-1\.0\.0)"/.test(line)) fail('licence', at, 'declares an earlier or future licence; AICO is FSL-1.1-ALv2 from 0.48.0');
         return;
       }
       // History is allowed to say what it was.
       if (/before 0\.28|pre-0\.28|until 0\.27|up to 0\.27|<= ?0\.27/i.test(line)) return;
       const mit = /\b(?:MIT[- ]licen[cs]ed|MIT licen[cs]e|under the MIT|licen[cs]e:\s*MIT)\b/i.exec(line);
       if (mit && !isDisclaimer(line, mit.index)) {
-        fail('licence', at, 'mentions the MIT licence; AICO is PolyForm Noncommercial from 0.28.0 (history may say "before 0.28.0", or mark the line standards-allow: licence)');
+        fail('licence', at, 'mentions the MIT licence; AICO is FSL-1.1-ALv2 from 0.48.0 (history may say "before 0.28.0", or mark the line standards-allow: licence)');
+      }
+      // Apache 2.0 is the future licence of each release, not the current one.
+      const apache = /\b(?:Apache[- ]licen[cs]ed|Apache(?:[- ]?2(?:\.0)?)? licen[cs]e|Apache License|under (?:the )?Apache|licen[cs]e:\s*Apache)/i.exec(line);
+      if (apache && !isDisclaimer(line, apache.index) && !FUTURE_OR_THIRD_PARTY.test(line)) {
+        fail('licence', at, 'mentions the Apache licence; AICO is FSL-1.1-ALv2 and a release only becomes Apache 2.0 two years after it ships (say so, or mark the line standards-allow: licence)');
+      }
+      // PolyForm Noncommercial covered 0.28.0-0.47.x only; ADRs are the record of decisions and are history.
+      const pf = /polyform/i.exec(line);
+      if (pf && !rel.startsWith('docs/engineering/adr/') && !isDisclaimer(line, pf.index) && !/0\.28|0\.47|remain|stay|earlier|at the time|supersed|formerly|was /i.test(line)) {
+        fail('licence', at, 'mentions PolyForm as if it were current; AICO is FSL-1.1-ALv2 from 0.48.0 (history must say 0.28.0 to 0.47.x or "at the time", or mark the line standards-allow: licence)');
       }
       // "open-source repos/projects/models" describes other people's work.
       const os = /\bopen[- ]source\b(?!\s+(?:repos?|repositories|projects?|librar(?:y|ies)|models?|dependencies|packages?|tools?|software\s+by|licen[cs]es?))/i.exec(line);
-      if (os && !isDisclaimer(line, os.index)) fail('licence', at, 'calls something "open source"; AICO is source-available (PolyForm Noncommercial) — never call it open source');
+      if (os && !isDisclaimer(line, os.index)) fail('licence', at, 'calls something "open source"; AICO is source-available (FSL-1.1-ALv2) — never call it open source');
     });
   }
 }

@@ -7,7 +7,7 @@
 [![Release](https://img.shields.io/github/v/release/suhail-akhtar/aico?label=release&color=3B5BDB)](https://github.com/suhail-akhtar/aico/releases/latest)
 [![CI](https://github.com/suhail-akhtar/aico/actions/workflows/ci.yml/badge.svg)](https://github.com/suhail-akhtar/aico/actions/workflows/ci.yml)
 [![Downloads](https://img.shields.io/github/downloads/suhail-akhtar/aico/total?color=7048E8)](https://github.com/suhail-akhtar/aico/releases)
-[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-2f9e44)](LICENSE)
+[![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-2f9e44)](LICENSE)
 ![Platforms](https://img.shields.io/badge/desktop-Windows%20%C2%B7%20Linux-0B1020)
 ![Node](https://img.shields.io/badge/node-22.5%2B-339933)
 
@@ -637,15 +637,22 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 AICO is **source-available** under the
-[PolyForm Noncommercial License 1.0.0](LICENSE) © Suhail Akhtar.
+[Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2)](LICENSE)
+© Suhail Akhtar: free to use, change and run — including inside a company — for
+anything except building a competing product or service; each release becomes
+Apache 2.0 two years after it ships.
 
-- ✅ **Free for personal, study, research and hobby use**, and for charities,
-  schools, public research and government bodies.
-- ❌ **No commercial use** — selling it, selling access to it, hosting it as a
-  paid service or building it into a commercial product needs a separate
-  licence from the author ([open an issue](https://github.com/suhail-akhtar/aico/issues)).
-- 🔗 **Forks and copies must credit the original**: keep the `LICENSE` file and
-  its `Required Notice:` lines, and say *"Based on AICO by Suhail Akhtar —
-  https://github.com/suhail-akhtar/aico"* in your README or about screen.
+- ✅ **Free for any use except a Competing Use**: personal, study, research,
+  internal company use, client work and professional services around AICO.
+- ❌ **No competing product or service** — making AICO (or something that
+  substitutes for it or does substantially the same) available to others in a
+  commercial product or service needs a separate licence from the author
+  ([open an issue](https://github.com/suhail-akhtar/aico/issues)).
+- 🔗 **Forks and copies keep the licence**: include the `LICENSE` file (or a
+  link to it) and leave the copyright notices in place.
+- ⏳ **Each version turns into Apache 2.0** on the second anniversary of the day
+  it was made available.
 
-Releases before 0.28.0 were published under the MIT License.
+FSL-1.1-ALv2 applies from 0.48.0. Releases 0.28.0 to 0.47.x remain under the
+PolyForm Noncommercial License 1.0.0, and releases before 0.28.0 under the MIT
+License; earlier versions are not relicensed.

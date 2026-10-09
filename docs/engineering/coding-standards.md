@@ -118,7 +118,7 @@ header that describes the old design is worse than none.
 ## Dependencies
 
 - No new runtime dependency without an ADR (why this, why not built-in, size,
-  maintenance, licence compatibility with PolyForm Noncommercial distribution).
+  maintenance, licence compatibility with distribution under FSL-1.1-ALv2).
 - Zero deprecated dependencies is a standing goal (0.17.0 removed the last).
 - Lockfiles are committed and changed only by npm.
 

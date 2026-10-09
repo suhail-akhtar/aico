@@ -9,7 +9,7 @@
     "name": "Suhail Akhtar",
     "email": "suhailakhtar@live.com"
   },
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "FSL-1.1-ALv2",
   "homepage": "https://suhail-akhtar.github.io/aico/",
   "main": "dist/main.cjs",
   "scripts": {

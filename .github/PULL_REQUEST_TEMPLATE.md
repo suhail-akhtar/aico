@@ -32,7 +32,7 @@ isolated AICO_HOME, and what you saw. Screenshots for UI. -->
 ## Project policy
 
 - [ ] No AI attribution anywhere (commits, this description, docs)
-- [ ] No "open source"/"MIT" claims about AICO (it is PolyForm Noncommercial)
+- [ ] No "open source"/"MIT"/"Apache" claims about AICO (it is source-available under FSL-1.1-ALv2)
 - [ ] No unrelated changes (reformatting, renames, drive-by refactors)
 
 Standards: [AGENTS.md](../AGENTS.md) · [docs/engineering/review.md](../docs/engineering/review.md)

@@ -474,7 +474,7 @@ export function AboutSection(): React.ReactElement {
         <button className="btn-outline btn-sm" onClick={() => void desktop.shell.openExternal('https://github.com/suhail-akhtar/aico/issues/new')}>Report an issue</button>
       </div>
       <UpdatesGroup />
-      <p className="text-[12px] text-aico-muted">Free for personal use (PolyForm Noncommercial 1.0.0) — © Suhail Akhtar. Electron {info?.electron}, Chromium {info?.chrome}, Node {info?.node}, {info?.platform}/{info?.arch}.</p>
+      <p className="text-[12px] text-aico-muted">Source-available under the Functional Source License (FSL-1.1-ALv2): free to use, change and run, including inside a company, for anything except a competing product or service; each release becomes Apache 2.0 two years after it ships — © Suhail Akhtar. Electron {info?.electron}, Chromium {info?.chrome}, Node {info?.node}, {info?.platform}/{info?.arch}.</p>
     </div>
   );
 }

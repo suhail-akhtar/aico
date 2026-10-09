@@ -21,7 +21,7 @@
     "type": "git",
     "url": "git+https://github.com/suhail-akhtar/aico.git"
   },
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "FSL-1.1-ALv2",
   "author": "Suhail Akhtar",
   "type": "module",
   "bin": {

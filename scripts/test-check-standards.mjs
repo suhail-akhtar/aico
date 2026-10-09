@@ -155,7 +155,7 @@ console.log('\ncheck-standards');
 // ── licence ─────────────────────────────────────────────────────────────────
 {
   const r = repo();
-  r.edit('vscode-extension/package.json', s => s.replace('PolyForm-Noncommercial-1.0.0', 'MIT'));
+  r.edit('vscode-extension/package.json', s => s.replace('FSL-1.1-ALv2', 'MIT'));
   const res = r.run();
   assert(res.code === 1 && /vscode-extension\/package\.json — "license" is "MIT"/.test(res.out), 'a package that declares MIT fails', res.out);
 }
@@ -188,6 +188,32 @@ console.log('\ncheck-standards');
   assert(claim.code === 1 && /calls something "open source"/.test(claim.out) && /mentions the MIT licence/.test(claim.out), 'an affirmative claim is still caught', claim.out);
   // The good fixture already carries "12 open-source repos", "before 0.28.0 … MIT" and a bare MIT table cell.
   assert(repo().run().code === 0, 'other people\'s open-source repos, licence history and a competitor\'s MIT cell pass');
+}
+
+// The 0.48.0 licence: FSL-1.1-ALv2, where Apache 2.0 is only the future licence.
+{
+  const r = repo();
+  r.edit('package.json', s => s.replace('FSL-1.1-ALv2', 'PolyForm-Noncommercial-1.0.0'));
+  const res = r.run();
+  assert(res.code === 1 && /package\.json — "license" is "PolyForm-Noncommercial-1\.0\.0", expected "FSL-1\.1-ALv2"/.test(res.out), 'a package still declaring the previous licence fails', res.out);
+}
+{
+  const r = repo();
+  r.write('docs/about.md', 'AICO is Apache licensed.\n');
+  const res = r.run();
+  assert(res.code === 1 && /docs\/about\.md:1 — mentions the Apache licence/.test(res.out), 'calling AICO Apache licensed fails', res.out);
+  r.write('docs/about.md', 'AICO is released under the Apache License 2.0.\n');
+  assert(/mentions the Apache licence/.test(r.run().out), 'claiming the Apache licence for the current version fails');
+  r.write('docs/about.md', 'Each release becomes Apache 2.0 two years after it ships. Never call AICO "Apache licensed".\n');
+  assert(r.run().code === 0, 'the future-licence wording, and a rule that quotes the claim, pass');
+}
+{
+  const r = repo();
+  r.write('docs/about.md', 'AICO is free for personal use under PolyForm Noncommercial.\n');
+  const res = r.run();
+  assert(res.code === 1 && /docs\/about\.md:1 — mentions PolyForm as if it were current/.test(res.out), 'a current-tense PolyForm claim fails', res.out);
+  r.write('docs/about.md', 'Releases 0.28.0 to 0.47.x remain under PolyForm Noncommercial.\n');
+  assert(r.run().code === 0, 'history that names the 0.28.0 to 0.47.x range passes');
 }
 
 // ── secrets ─────────────────────────────────────────────────────────────────

@@ -62,7 +62,7 @@ every SSH password had to go through `sshpass`-style tricks.
   to build an optional native crypto binding and silently continues when it cannot
   (adds a few seconds to installs with build tools present). Licences: MIT, BSD-3
   (`bcrypt-pbkdf`), Unlicense (`tweetnacl`) — all compatible with distribution under
-  PolyForm Noncommercial.
+  PolyForm Noncommercial (the licence at the time; FSL-1.1-ALv2 since 0.48.0).
 - **Desktop bundle:** the engine is one esbuild ESM file; ssh2's CommonJS reads a free
   `__dirname` at load and its ChaCha20 module reads it lazily. `ssh.ts` supplies a
   global only for the import and offers only AES-GCM/AES-CTR ciphers. Verified by

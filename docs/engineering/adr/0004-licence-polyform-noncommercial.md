@@ -1,6 +1,6 @@
 # 0004 — Licence: PolyForm Noncommercial 1.0.0 from 0.28.0
 
-- **Status:** Accepted (2026-09-29, shipped in 0.28.0)
+- **Status:** Superseded by [0036](0036-licence-fsl.md) (accepted 2026-09-29, shipped in 0.28.0; in force for 0.28.0–0.47.x)
 - **Deciders:** owner
 
 ## Context

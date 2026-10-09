@@ -1,8 +1,8 @@
 # Contributing to AICO
 
-Thanks for helping. AICO is **source-available under the PolyForm Noncommercial
-License 1.0.0** (see [LICENSE](LICENSE)); contributions are accepted under the
-same licence.
+Thanks for helping. AICO is **source-available under the Functional Source License 1.1, Apache
+2.0 future licence (FSL-1.1-ALv2)** (see [LICENSE](LICENSE)); contributions are
+accepted under the same licence.
 
 ## Before you start
 

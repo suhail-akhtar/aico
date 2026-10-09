@@ -30,7 +30,7 @@ in the module header of the code they govern.
 | [0001](0001-append-only-session-log.md) | A session is an append-only event log; the transcript is derived | Accepted |
 | [0002](0002-guards-only-deny.md) | Tool-policy guards may only deny, never grant | Accepted |
 | [0003](0003-desktop-is-a-client.md) | The desktop app is a client of the engine, not a fork | Accepted |
-| [0004](0004-licence-polyform-noncommercial.md) | Licence: PolyForm Noncommercial 1.0.0 from 0.28.0 | Accepted |
+| [0004](0004-licence-polyform-noncommercial.md) | Licence: PolyForm Noncommercial 1.0.0 from 0.28.0 | Superseded by 0036 |
 | [0005](0005-browser-agent-safety-model.md) | Browser agent safety: hand off human checks, never see or fill secrets, approvals | Accepted |
 | [0006](0006-credential-broker.md) | Credential broker: agents use credentials, never read them | Accepted |
 | [0007](0007-ops-tools-and-dependencies.md) | Operate remote machines through trusted consumer tools (SSH via ssh2, HTTP, WinRM via PowerShell, SNMP via net-snmp) | Accepted |
@@ -60,6 +60,7 @@ in the module header of the code they govern.
 | [0033](0033-supply-chain-and-change-safety.md) | Supply-chain and change safety: a deny-only guard checks that packages named in install commands exist on the public registry (and are not brand-new, near-unknown or lookalikes) before they are installed; secrets and a small SAST set in six languages are scanned in the agent's diff (turn-end nudge, commit refusal); weakened tests are named and, unattended, deleting or skipping them needs a person; findings are recorded as `safety/finding` | Accepted |
 | [0035](0035-managed-policy-and-audit-export.md) | Managed policy: a machine-wide, restrict-only policy file (MDM/GPO deployable) above user and project settings, enforced at the settings merge, model selection, the tool pipeline and run start; plus a redacted, versioned audit export (JSONL/CEF/CSV) and a usage report for SIEM; SSO/SCIM/RBAC/admin console are not built | Accepted |
 | [0034](0034-evidence-ci-agent-flaky-tests.md) | Change evidence report built from the session log (two new record events), a read-only-by-default GitHub Action CI agent (review and gated fix-ci, engine-made branch, token never in the model's process), and one-shot flaky-test re-run that reports FLAKY instead of green and never quarantines | Accepted |
+| [0036](0036-licence-fsl.md) | Licence: Functional Source License 1.1 with Apache 2.0 future licence (FSL-1.1-ALv2) from 0.48.0; earlier versions keep MIT / PolyForm Noncommercial | Accepted |
 
 ADRs 0001–0005 record decisions made and shipped before ADRs existed
 (backfilled 2026-09-30 from the code, module headers, CHANGELOG and release notes).

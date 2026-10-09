@@ -16,8 +16,11 @@ runs turns against Anthropic, OpenAI, DeepSeek, OpenRouter, Gemini, Moonshot
 Kimi, Z.AI or a local Ollama. The decision everything follows from: **a session
 is an append-only event log, not a chat buffer** ([ADR 0001](docs/engineering/adr/0001-append-only-session-log.md)).
 
-Licence: **PolyForm Noncommercial 1.0.0** (source-available, not open source;
-releases before 0.28.0 were MIT). Distribution: GitHub releases + `npx
+Licence: **Functional Source License 1.1, Apache 2.0 future licence
+(FSL-1.1-ALv2)** from 0.48.0 (source-available, not open source; each release
+becomes Apache 2.0 two years after it ships). Releases 0.28.0–0.47.x stay under
+PolyForm Noncommercial 1.0.0 and releases before 0.28.0 under MIT — never
+relicensed retroactively ([ADR 0036](docs/engineering/adr/0036-licence-fsl.md)). Distribution: GitHub releases + `npx
 github:suhail-akhtar/aico#vX.Y.Z` — nothing is published to npm.
 
 ## 2. Repo map
@@ -73,8 +76,8 @@ on Node 22 and 24. `desktop.yml` builds installers on `v*` tags.
    committed keys (secret scan); `[A]` otherwise.
 4. **Never force-push, rewrite history, move a tag or delete a branch** without
    the owner's explicit approval in this conversation. `[A]` (`main` is branch-protected on GitHub).
-5. **Never call AICO "open source" or "MIT".** It is source-available under
-   PolyForm Noncommercial. `[M]` licence check.
+5. **Never call AICO "open source", "MIT" or "Apache".** The current version is
+   source-available under FSL-1.1-ALv2 ("Fair Source"). `[M]` licence check.
 6. **Enforce in the loop, not in the prompt.** A behaviour the harness depends
    on is checked in code (tool layer, agent loop, gate), never merely requested
    in the system prompt. [principles.md](docs/engineering/principles.md). `[A]`

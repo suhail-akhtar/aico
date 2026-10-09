@@ -53,7 +53,7 @@ not in the terminal, web, desktop, cron or a sub-agent.
 
 | | |
 |---|---|
-| Licence | MIT (the CLI and every platform package) — compatible with PolyForm Noncommercial distribution |
+| Licence | MIT (the CLI and every platform package) — compatible with PolyForm Noncommercial distribution (the licence at the time) |
 | Shape | a 6 KB launcher plus one prebuilt native binary per platform, as npm `optionalDependencies`: win32 x64/ia32/arm64 (msvc), linux x64/arm64 (gnu), darwin x64/arm64 |
 | Size | the platform binary is large because it embeds ~25 tree-sitter grammars: **~103 MB unpacked on win32-x64, ~53 MB on linux-x64-gnu, ~52 MB on darwin-arm64** |
 | Install script | yes — a `postinstall` that places the platform binary; if it fails the optional dependency is skipped and AICO still installs |

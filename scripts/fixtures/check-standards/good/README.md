@@ -10,4 +10,4 @@
 
 Benchmarked on issues from 12 open-source repos.
 
-Releases before 0.28.0 were published under the MIT License.
+Releases before 0.28.0 were published under the MIT License. Releases 0.28.0 to 0.47.x remain under PolyForm Noncommercial; FSL-1.1-ALv2 applies from 0.48.0 and each release becomes Apache 2.0 two years after it ships.

@@ -161,7 +161,7 @@ browser page text. Rules for code that handles it:
 ## Dependencies and supply chain
 
 - New runtime dependency → ADR: why not built-in, maintenance, size, licence
-  compatible with distributing under PolyForm Noncommercial.
+  compatible with distributing under FSL-1.1-ALv2.
 - Lockfiles committed (root, `web/`, `desktop/`, `vscode-extension/`); CI uses `npm ci`.
 - Zero deprecated dependencies; `overrides` in `package.json` pin transitive
   fixes (`uuid`, `esbuild`) — keep the reason in the PR.
