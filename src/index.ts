@@ -26,6 +26,7 @@ import { registerVaultCommands } from './vault/cli.js';
 import { registerToolCommands } from './custom-tools/cli.js';
 import { registerAgentCommands } from './evals/cli.js';
 import { registerPolicyCommands } from './policy/cli.js';
+import { registerControlCommands } from './control/cli.js';
 import { registerCiCommands } from './ci/cli.js';
 import { initializeFeatures, shutdownFeatures } from './bootstrap.js';
 import { mcpRegistry } from './mcp/index.js';
@@ -392,6 +393,8 @@ registerToolCommands(program);
 registerAgentCommands(program, { pickModel: (m, settings) => resolveModel(m || settings?.model || defaultModel(), settings) });
 // audit export, usage, policy show|check: governance for an organisation (ADR 0035).
 registerPolicyCommands(program);
+// control login|status|logout|sync: sign in to an organisation's AICO Control server (ADR 0040).
+registerControlCommands(program);
 // evidence / review / fix-ci: the commands a pipeline calls (ADR 0034).
 registerCiCommands(program, { pickModel: (m, settings) => resolveModel(m || settings?.model || defaultModel(), settings) });
 

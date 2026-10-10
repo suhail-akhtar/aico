@@ -32,8 +32,12 @@
  *   the operating system does. Each source reports whether the current user
  *   could edit it, and the route shows that as "not a lock".
  *
- * Deliberately not here: fetching a policy from a server, signatures, per-user
- * policies (SSO/SCIM/RBAC are not built — ADR 0035).
+ * A third kind of layer, `control`, is the policy an organisation's AICO Control
+ * server served to this signed-in engine (ADR 0040). It is added AFTER the files
+ * are read, it is just more layers in the same list, and it passes through the
+ * same validator, so it can only restrict and cannot loosen the system file.
+ *
+ * Deliberately not here: fetching a policy from a server (src/control/), signatures.
  *
  * @module policy/managed
  */
@@ -43,6 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { AUTONOMY_LEVELS, type AutonomyLevel } from '../autonomy/levels.js';
+import { controlSnapshot, controlStamp } from '../control/state.js';
 
 /** Gates an organisation can require. `checks` and `security` are the completion gate; the others own their own switch. */
 export const GATE_IDS = ['checks', 'security', 'verification', 'commit', 'supply-chain', 'change-scan'] as const;
@@ -108,7 +113,9 @@ export interface PolicyProblem {
 }
 
 export interface PolicyLayer {
-  origin: 'system' | 'override';
+  origin: 'system' | 'override' | 'control';
+  /** A control layer's label ("Org baseline"), for status screens. */
+  name?: string;
   path: string;
   policy: ManagedPolicy;
   /** The file was unreadable or not a JSON object: nothing may run. */
@@ -116,7 +123,7 @@ export interface PolicyLayer {
 }
 
 export interface PolicySource {
-  origin: 'system' | 'override';
+  origin: 'system' | 'override' | 'control';
   path: string;
   exists: boolean;
   hash?: string;
@@ -455,6 +462,28 @@ export function readManagedPolicyFrom(files: ReadonlyArray<readonly [string, 'sy
   };
 }
 
+/**
+ * Add the signed-in organisation's layers (ADR 0040). Each served document is validated like a
+ * file: an invalid value becomes its most restrictive form, never a loosening.
+ */
+function withControl(base: LoadedPolicy): LoadedPolicy {
+  const snap = controlSnapshot();
+  if (!snap || snap.docs.length === 0) return base;
+  const layers = [...base.layers];
+  const problems = [...base.problems];
+  for (const d of snap.docs) {
+    const { policy, problems: found } = validatePolicy(d.policy);
+    problems.push(...found.map(p => ({ ...p, message: `${snap.org} policy "${d.name}": ${p.message}` })));
+    layers.push({ origin: 'control', path: snap.url, name: d.name, policy, lockdown: false });
+  }
+  const hasher = crypto.createHash('sha256').update(base.hash).update(`control:${snap.hash};`);
+  return {
+    active: true, lockdown: base.lockdown, layers,
+    sources: [...base.sources, { origin: 'control', path: snap.url, exists: true, hash: snap.hash }],
+    problems, hash: hasher.digest('hex').slice(0, 16),
+  };
+}
+
 const NONE: LoadedPolicy = { active: false, lockdown: false, layers: [], sources: [], problems: [], hash: '' };
 let cache: { env: string; state: string; at: number; value: LoadedPolicy } | undefined;
 /** A policy file is re-checked at most this often; editing it takes effect within a second. */
@@ -474,11 +503,11 @@ export function managedPolicy(): LoadedPolicy {
   const envKey = `${system}|${extra ?? ''}`;
   const now = Date.now();
   if (cache && cache.env === envKey && now - cache.at < RECHECK_MS) return cache.value;
-  const state = `${stamp(system)}|${extra ? stamp(path.resolve(extra)) : ''}`;
+  const state = `${stamp(system)}|${extra ? stamp(path.resolve(extra)) : ''}|${controlStamp()}`;
   if (cache && cache.env === envKey && cache.state === state) { cache.at = now; return cache.value; }
   let value: LoadedPolicy;
   try {
-    value = readManagedPolicy();
+    value = withControl(readManagedPolicy());
   } catch (err) {
     // Reading must never throw into the engine; if it somehow does, that is a lockdown, not "no policy".
     value = {

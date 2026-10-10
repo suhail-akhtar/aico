@@ -1,0 +1,29 @@
+{
+  "name": "aico-control",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AICO Control: the organisation server (identity, tenancy, roles, policy, usage, audit) — ADR 0040. Execution stays on each person's machine.",
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "engines": { "node": ">=22.5.0" },
+  "bin": { "aico-control": "dist/index.js" },
+  "scripts": {
+    "build": "npm run build:server && npm run build:portal",
+    "build:server": "tsup",
+    "build:portal": "vite build --config portal/vite.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p portal/tsconfig.json",
+    "test": "node test/run.mjs",
+    "start": "node dist/index.js serve"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

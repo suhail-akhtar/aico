@@ -1343,6 +1343,41 @@ somewhere append-only on a schedule.
 
 ---
 
+## AICO Control: one place for your organisation's people, rules, spend and audit
+
+The managed policy file above is one rule for a whole machine. **AICO Control** is a small server your organisation runs so the rules can differ by role and team, spend is capped across everyone, and every machine's audit records land in one tamper-evident trail. **Nothing runs on the server**: your files, tools, builds and browser stay on your computer. The server knows who you are, what you may do, and what was done. ([ADR 0040](docs/engineering/adr/0040-aico-control.md).)
+
+**If you are a person using AICO.** In *Settings -> Organisation* (desktop or web), or in a terminal:
+
+```
+aico control login https://aico.your-company.com
+```
+
+AICO shows a code and opens your browser. Sign in with your company account and approve the code (only if you started it yourself, just now). Your password never touches AICO. The settings page then reads *Managed by your organisation* and lists the rules in force, your role and any budgets. `aico control status` shows the same; `aico control sync` refreshes now; `aico control logout` signs out (its rules stop applying on this machine).
+
+- The organisation's rules **only ever restrict**: they stack with the managed policy file and your own settings, and none can loosen another.
+- If the server cannot be reached, the last rules keep applying. After the organisation's offline allowance (72 hours by default) model calls pause until you reconnect.
+- When a budget is reached, model calls stop with the reason, until it resets (UTC midnight or the 1st of the month).
+- What is uploaded: the redacted audit records the audit export already builds (no prompts, no file contents, no tool results) and the token and estimated cost of finished turns. Nothing else.
+
+**If you run it.** The server is the `control/` package (Node 22.5 or later, SQLite, no runtime dependencies):
+
+```
+npm --prefix control install && npm --prefix control run build
+node control/dist/index.js bootstrap --data-dir ./data --slug acme --name "Acme" --owner you@acme.com      --issuer https://login.acme.com/ --client-id <id> --client-secret <secret>
+node control/dist/index.js serve --data-dir ./data --port 7350 --public-url https://aico.acme.com --behind-proxy
+```
+
+It must be reached over TLS (it refuses anything else beyond this machine); a `Dockerfile` and `compose.yaml` are in `control/`. Register `https://aico.acme.com/auth/callback` with your identity provider (Entra ID, Okta, Google, Keycloak or any OpenID Connect provider; authorization code with PKCE). In the admin portal:
+
+- **Users & teams** and **Roles**: owner, admin, auditor, team lead, developer, contractor.
+- **Policies**: one policy for everyone, one per role, one per team, written in the same JSON as the policy file, validated as you type with the engine's own checks, and shown in the engine's own words.
+- **Devices**: every enrolled machine; revoke one and it stops at once.
+- **Audit**: search, export, and *Verify chain* (each record is hashed with the one before; an edited or removed record is named). Write the head hash down somewhere separate.
+- **Usage & budgets**: estimated spend by user, team, model and day; budgets per person, team or the whole organisation.
+
+Honest limits: Control is enforced by the AICO on each person's machine, so a person with full control of their own machine can sign out. For rules that must hold, also deploy the policy file with your device management; use Control for per-person differences, spend and audit. Not in this first version: SCIM and SAML, custom roles, serving model keys from the server, Postgres, and a setting that refuses to run unless enrolled.
+
 ## When something goes wrong
 
 **It stopped and said the output limit was reached.** A step was cut off. It gets

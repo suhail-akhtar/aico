@@ -145,13 +145,13 @@
       "gate": "token+human",
       "note": "stores a token in the vault bound to the connection host: human(); the token travels in only and no route returns it"
     },
-    "connections/discover": {
-      "gate": "token",
-      "note": "read: repositories (or a project's work item process) through an already-connected host with its own stored token; cannot widen a host or write"
-    },
     "connections/detect": {
       "gate": "token",
       "note": "read: which provider and repository a registered project origin points at (no network)"
+    },
+    "connections/discover": {
+      "gate": "token",
+      "note": "read: repositories (or a project's work item process) through an already-connected host with its own stored token; cannot widen a host or write"
     },
     "connections/iteration-create": {
       "gate": "token+human",
@@ -215,6 +215,14 @@
     },
     "context-window": {
       "gate": "token"
+    },
+    "control": {
+      "gate": "token",
+      "note": "read-only: the organisation sign-in status; no token is ever returned (control/routes, ADR 0040)"
+    },
+    "control/*": {
+      "gate": "token+human",
+      "note": "control/login (POST) and control/logout (POST): signing in lets an address dictate policy and signing out removes the organisation's restrictions, so a person must be behind them; control/sync and the login poll need only the token and can only tighten (control/routes, ADR 0040)"
     },
     "cron/delete": {
       "gate": "token"
@@ -305,6 +313,9 @@
       "gate": "token+human",
       "note": "PATCH edits/cancels (token); approve (lands on the trunk, or pushes the branch and opens the pull request in PR mode), merge-pr (asks the remote to merge), request-changes (restarts a run) and comment (reaches an agent's prompt as the person's word) need human(); diff is a read (ADR 0038, 0039)"
     },
+    "edit": {
+      "gate": "token"
+    },
     "editor/file": {
       "gate": "token",
       "note": "the web viewer: registered projects only, real path inside the project, text up to 2 MB, credential-looking files refused (server/editor)"
@@ -312,9 +323,6 @@
     "editor/open": {
       "gate": "token+human",
       "note": "starts the person's editor: needs human(); the program comes from the user's own settings or is VS Code on the PATH, never from the request; no shell (server/editor, ADR 0030)"
-    },
-    "edit": {
-      "gate": "token"
     },
     "events": {
       "gate": "token (SSE)"

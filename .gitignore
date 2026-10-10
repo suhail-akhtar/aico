@@ -72,3 +72,6 @@ shared/**/*.js.map
 
 # CycloneDX SBOMs written by `npm run sbom` (CI attaches them to releases)
 /sbom/
+
+# AICO Control server data written when running it from a checkout
+/control/control-data/

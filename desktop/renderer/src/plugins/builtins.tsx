@@ -21,7 +21,7 @@ import { toggleCopilot, useCopilotUi } from '@/browser/copilot-ui';
 import { browserElsewhere, popInBrowser, popOutBrowser, showBrowser } from '@/browser/host';
 import { ChatView } from '@/chat/ChatView';
 import { TasksPage, openTasksPage, toggleTasks } from '@/tasks/TasksHost';
-import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection, BrowserSection, AboutSection } from '@/settings/sections/AppSections';
+import { GeneralSection, ApplicationSection, AppearanceSection, ShortcutsSection, BrowserSection, AboutSection, OrganisationSection } from '@/settings/sections/AppSections';
 import { CredentialManager } from '@/settings/CredentialManager';
 import { ToolsPane } from '@web/components/settings/ToolsPane';
 import { LearnedPane } from '@web/components/settings/LearnedPane';
@@ -100,6 +100,8 @@ export const BUILTINS: BuiltinPlugin[] = [
       { id: 'appearance', title: 'Appearance', icon: 'palette', group: 'app', order: 3, component: AppearanceSection },
       // One manager for the vault: agent-made credentials, your keys and tokens, and the browser's saved logins.
       { id: 'credentials', title: 'Credentials & passwords', icon: 'key', group: 'app', order: 4, component: CredentialsSection },
+      // AICO Control (ADR 0040): the organisation this machine is signed in to.
+      { id: 'organisation', title: 'Organisation', icon: 'shield', group: 'app', order: 5, component: OrganisationSection },
       { id: 'shortcuts', title: 'Shortcuts', icon: 'keyboard', group: 'app', order: 90, component: ShortcutsSection },
       { id: 'about', title: 'About', icon: 'info', group: 'app', order: 99, component: AboutSection },
       { id: 'models', title: 'Models', icon: 'sparkles', group: 'agent', order: 10, component: ModelsSection },

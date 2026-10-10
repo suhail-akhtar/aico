@@ -45,8 +45,11 @@ export class PolicyError extends Error {
 
 // ── wording ─────────────────────────────────────────────────────────
 
-const firstOf = (lp: LoadedPolicy, key: 'message' | 'contact'): string | undefined =>
-  lp.layers.map(l => l.policy[key]).find((v): v is string => typeof v === 'string' && v.length > 0);
+const firstOf = (lp: LoadedPolicy, key: 'message' | 'contact'): string | undefined => {
+  const all = lp.layers.map(l => l.policy[key]).filter((v): v is string => typeof v === 'string' && v.length > 0);
+  // Several layers (an organisation's server serves a baseline plus a budget notice) each have something to say.
+  return key === 'message' ? (all.length ? [...new Set(all)].join(' ') : undefined) : all[0];
+};
 
 /** "<what> is blocked by your organisation's AICO policy (<rule>). <message> Contact: <contact>." */
 export function blocked(lp: LoadedPolicy, what: string, rule: string): Decision {

@@ -17,6 +17,7 @@ import { applyContributedTheme } from '@/plugins/run-action';
 import { Icon } from '@/lib/icons';
 import { ago, bytes, cls, prettyKey } from '@/lib/util';
 import { EnginePane, Row, Switch } from '../fields';
+import { OrganisationPane } from '@web/components/settings/OrganisationPane';
 import { AutofillSettings } from '@/browser/AutofillSettings';
 import { openImportWizard } from '@/browser/ImportWizard';
 import { openPasswords } from '@/browser/PasswordsBar';
@@ -477,4 +478,12 @@ export function AboutSection(): React.ReactElement {
       <p className="text-[12px] text-aico-muted">Source-available under the Functional Source License (FSL-1.1-ALv2): free to use, change and run, including inside a company, for anything except a competing product or service; each release becomes Apache 2.0 two years after it ships — © Suhail Akhtar. Electron {info?.electron}, Chromium {info?.chrome}, Node {info?.node}, {info?.platform}/{info?.arch}.</p>
     </div>
   );
+}
+
+/**
+ * Organisation (AICO Control, ADR 0040): the shared pane, with the approval page opened in the
+ * system browser (the desktop's own windows are not where a person signs in to their company).
+ */
+export function OrganisationSection(): React.ReactElement {
+  return <OrganisationPane openUrl={u => { void desktop.shell.openExternal(u); }} />;
 }

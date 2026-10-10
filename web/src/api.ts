@@ -1053,6 +1053,12 @@ export const api = {
   settings: () => request<Record<string, unknown>>('settings'),
   /** Which settings the organisation's managed policy locks (ADR 0035). An older engine has no such route. */
   policy: () => request<ManagedPolicyView>('policy'),
+  /** AICO Control (ADR 0040): the organisation this engine is signed in to. Sign-in and sign-out need a person. */
+  control: () => get<ControlView>('control'),
+  controlLogin: (url: string, tenant?: string) => postAsPerson<{ ok: boolean; userCode: string; verificationUri: string; verificationUriComplete: string; expiresInS: number }>('control/login', { url, ...(tenant ? { tenant } : {}) }),
+  controlLoginState: () => get<{ state: 'none' | 'pending' | 'done' | 'error'; error?: string }>('control/login'),
+  controlLogout: () => postAsPerson<{ ok: boolean }>('control/logout', {}),
+  controlSync: () => post<{ ok: boolean; error?: string }>('control/sync', {}),
   // As the person: a write that widens what the agent may do needs proof of one (engine: api-system safetyWeakening).
   saveSettings: (patch: Record<string, unknown>) => postAsPerson<Record<string, unknown>>('settings', patch),
   /** One value by dotted path, in the user's own file only; `undefined` removes it. */
@@ -1188,6 +1194,22 @@ async function canvasWrite(path: string, body: unknown): Promise<CanvasWriteResu
     if (err instanceof ApiError && err.status === 409 && canvas?.canvas) return { ok: false, conflict: true, canvas: canvas.canvas };
     throw err;
   }
+}
+
+/** What `GET /api/control` returns: the organisation sign-in, never a token (ADR 0040). */
+export interface ControlView {
+  enrolled: boolean;
+  url?: string;
+  organisation?: { slug: string; name: string };
+  user?: { email: string; name?: string };
+  role?: string;
+  team?: string;
+  policy?: { layers: Array<{ scope: string; name: string }>; hash: string; issuedAt: string } | null;
+  budget?: { blocked: boolean; reason: string | null; limits: Array<{ scope: string; period: string; limitUsd: number; spentUsd: number }> } | null;
+  lastContactAt?: number | null;
+  lastError?: string | null;
+  offlineAllowanceUsedUp?: boolean;
+  rules?: string[];
 }
 
 /** What `GET /api/policy` returns: the organisation's managed policy, never a secret (ADR 0035). */

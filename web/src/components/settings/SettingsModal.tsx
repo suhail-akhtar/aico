@@ -45,6 +45,7 @@ import { MemoryPane } from './MemoryPane';
 import { LearnedPane } from './LearnedPane';
 import { AboutYouPane } from './AboutYouPane';
 import { ConnectionsPane } from '../connections/ConnectionsPage';
+import { OrganisationPane } from './OrganisationPane';
 
 export interface SettingsModalProps {
   onClose: () => void;
@@ -320,6 +321,7 @@ export function SettingsModal({ onClose, initialPane }: SettingsModalProps): Rea
                     : pane.custom === 'memory' ? <MemoryPane />
                     : pane.custom === 'learned' ? <LearnedPane onClose={onClose} />
                     : pane.custom === 'connections' ? <ConnectionsPane startChat={prompt => { const st = useStore.getState(); st.newSession(); st.prefillComposer(prompt); onClose(); }} />
+                    : pane.custom === 'organisation' ? <OrganisationPane />
                     : pane.custom === 'about' ? <AboutYouPane /> : null}
 
                   {pane.groups.length > 0 && (

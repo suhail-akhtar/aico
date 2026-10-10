@@ -937,3 +937,6 @@ export * as ConnPackStore from './connections/packs/store.js';
 export * as ConnPackRunner from './connections/packs/runner.js';
 export * as ConnPackNormalise from './connections/packs/normalise.js';
 export { customAdapter } from './connections/packs/adapter.js';
+
+// AICO Control, engine side (ADR 0040): state, device-flow client, sync, routes.
+export * as Control from './control/index.js';

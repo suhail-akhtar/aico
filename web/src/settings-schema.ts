@@ -86,7 +86,7 @@ export interface Pane {
   blurb?: string;
   groups: Group[];
   /** Panes that render their own thing rather than a list of fields. */
-  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools' | 'learned' | 'about' | 'connections';
+  custom?: 'models' | 'skills' | 'mcp' | 'agents' | 'memory' | 'tools' | 'learned' | 'about' | 'connections' | 'organisation';
 }
 
 /* ── The schema ───────────────────────────────────────────────────── */
@@ -251,6 +251,14 @@ export const PANES: Pane[] = [
     icon: 'link',
     blurb: 'Your team’s code host and task tracker.',
     custom: 'connections',
+    groups: [],
+  },
+  {
+    id: 'organisation',
+    label: 'Organisation',
+    icon: 'shield',
+    blurb: 'Sign in to your organisation’s AICO Control server to apply its rules, and report usage and audit events to it.',
+    custom: 'organisation',
     groups: [],
   },
   {

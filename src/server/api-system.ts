@@ -206,6 +206,11 @@ export async function handleSystemRoute(
     const { handlePolicyRoute } = await import('../policy/routes.js');
     return handlePolicyRoute(route, method, body, human);
   }
+  // AICO Control (control/routes, ADR 0040): the organisation sign-in. Signing in or out needs a person.
+  if (route === 'control' || route.startsWith('control/')) {
+    const { handleControlRoute } = await import('../control/routes.js');
+    return handleControlRoute(route, method, body, human);
+  }
   // Recall (ADR 0018): search past sessions, memories, knowledge, About you; rebuild the index.
   if (route.startsWith('recall/')) {
     const { handleRecallRoute } = await import('../recall/index.js');

@@ -1,0 +1,21 @@
+# A single-node AICO Control behind a TLS-terminating proxy (ADR 0040). The server refuses to listen
+# on a non-loopback address without TLS or --behind-proxy, and --behind-proxy needs an https PUBLIC_URL.
+# First run:   docker compose run --rm control node dist/index.js bootstrap --slug acme --name "Acme" \
+#                --owner you@acme.com --issuer https://login.example.com/ --client-id <id> --client-secret <secret> --data-dir /data
+services:
+  control:
+    build: { context: .., dockerfile: control/Dockerfile }
+    environment:
+      PUBLIC_URL: https://aico.example.com
+      # 64 hex characters; keep it outside the data volume. Losing it makes stored IdP secrets unreadable.
+      CONTROL_MASTER_KEY: ${CONTROL_MASTER_KEY:?set a 64-hex-character key}
+    volumes: [control-data:/data]
+    expose: ["7350"]
+    restart: unless-stopped
+  proxy:
+    image: caddy:2
+    command: caddy reverse-proxy --from aico.example.com --to control:7350
+    ports: ["443:443", "80:80"]
+    depends_on: [control]
+volumes:
+  control-data: {}

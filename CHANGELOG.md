@@ -3,6 +3,17 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## Unreleased
+
+### Added
+
+- **AICO Control, the organisation server (ADR 0040, phase 1).** A separate Node package (`control/`, SQLite via `node:sqlite`, no runtime dependencies) that holds identity, tenancy, roles, policy, usage and audit while all execution stays on each person's machine. Tenants, teams and users with six built-in roles (owner, admin, auditor, team lead, developer, contractor); sign-in through the organisation's OpenID Connect provider (authorization code + PKCE, tested against a mock IdP including bad signatures, nonce, audience, `alg: none` and HS256 key confusion); engines enrol with the OAuth device authorization grant (RFC 8628) and receive 15-minute EdDSA access tokens and rotating refresh tokens, with reuse detection that revokes the device; policy documents per organisation, role and team, validated by the engine's own `validatePolicy` and served as layers (never merged); usage events with per-user, team and organisation day/month budgets that arrive at the engine as a deny-only layer; engine audit ingestion into a per-tenant hash chain with append-only triggers and a verify endpoint; CSRF, session lifetimes, rate limits and a TLS requirement; per-tenant sealing of IdP secrets. A React admin portal on the shared design tokens: Users & teams, Roles, Policies (live validation and the engine's wording), Devices, Audit, Usage & budgets. `npm run test:control` (419 assertions). Not in this phase: SCIM, SAML, custom roles, the model gateway, Postgres, mandatory enrolment.
+- **`aico control login | status | logout | sync` and Settings -> Organisation.** The engine signs in with the device flow (tokens only in the credential vault), applies the served policy as one more restrict-only layer in `managedPolicy()` beside the system file, keeps the last policy while offline then pauses model calls after the organisation's allowance, and uploads audit and usage in retried, de-duplicated batches. The sign-in and sign-out routes need a person (`/api/control/login`, `/api/control/logout`). Covered by `scripts/control-client-test.mjs` in `npm test`.
+
+### Changed
+
+- A policy block now shows every layer's message, not only the first (an organisation's baseline message and a budget notice both reach the person).
+
 ## 0.51.0 — 2026-10-10
 
 ### Added

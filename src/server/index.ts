@@ -2179,11 +2179,15 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   const stopPreferenceBatch = startPreferenceBatch(loadSettings);
   const stopCanvasEdits = await watchCanvasEdits(id => resolveCwd(id), loadSettings);
 
+  // AICO Control (ADR 0040): when this engine is signed in to an organisation, keep its policy fresh and upload audit/usage.
+  const stopControlSync = (await import('./../control/sync.js')).startControlSync();
+
   if (opts.open) openBrowser(url);
 
   return {
     url,
     close: async () => {
+      stopControlSync();
       clearInterval(heartbeat);
       // Before the runs close: a turn ended by shutdown leaves its long job
       // running in the journal, to resume on the next start, not paused.
