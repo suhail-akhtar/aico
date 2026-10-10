@@ -64,10 +64,10 @@ function minimalEnv(extra: Record<string, string> | undefined, port?: number): R
 export async function cloneRun(input: CloneRunInput): Promise<string> {
   const root = projectRoot();
   if (!isWorkspace(root)) return 'CloneRun works only inside a clean-room workspace (a folder prepared by `aico cleanroom implement`).';
-  const cloneDir = path.join(root, 'clone');
+  const cloneDir = realish(path.join(root, 'clone')); // the real path: the permission model compares path strings (Windows short names would not match)
   if (!input.file || typeof input.file !== 'string') return 'CloneRun needs "file": the script in clone/ to run, e.g. "server.mjs".';
-  const file = path.resolve(cloneDir, input.file);
-  const rel = path.relative(realish(cloneDir), realish(file));
+  const file = realish(path.resolve(cloneDir, input.file));
+  const rel = path.relative(cloneDir, file);
   if (rel.startsWith('..') || path.isAbsolute(rel)) return `${input.file} is not inside clone/. Only scripts in clone/ can be run.`;
   if (!fs.existsSync(file)) return `${path.relative(root, file)} does not exist yet. Write it first.`;
   const flags = permissionFlags(cloneDir);

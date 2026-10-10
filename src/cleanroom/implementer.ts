@@ -31,6 +31,10 @@ import { WALL_TOOLS, WORKSPACE_MARKER } from './wall.js';
 const STACK: Record<TargetKind, string> = {
   web: 'a small web app: static files or a minimal Node server serving them, no build step unless the spec needs one. Serve it with `node server.mjs` on the port in the PORT environment variable (default 8080).',
   cli: 'a Node.js command-line program: `node cli.mjs <args>`, no dependencies, reading stdin and writing stdout/stderr and exit codes exactly as the spec records.',
+  mobile: 'a mobile app. Build it as a web app (static files plus `node server.mjs`, PORT from the environment) laid out for the mobile viewport in the spec, with each screen, control, text and transition the spec records; optionally also write the same screens as React Native components under clone/native/ (not run here). Say in NOTES.md that it is a web rendition of a mobile app.',
+  desktop: 'a desktop application. Build it as a small web app (static files plus `node server.mjs`, PORT from the environment) that reproduces the windows, controls, texts and layout in the spec as closely as a page can; say in NOTES.md that it is a web rendition of a desktop program.',
+  daemon: 'a Node.js daemon `server.mjs`: it reads PORT from the environment, prints the ready line the spec records once it listens, answers each channel exactly as the spec\'s exchanges say, and handles SIGHUP (reload) and SIGTERM (graceful exit) as recorded. Watched folders are named by environment variables you define and document.',
+  library: 'a library module: for a Node library `index.mjs` (an ES module) exporting exactly the names in spec/library.d.ts; for a Python library `module.py` defining exactly the names in spec/library.pyi. Write a small test script that calls it with the example arguments in the spec, and run it.',
   api: 'a Node.js HTTP service with no dependencies, started with `node server.mjs`, listening on the PORT environment variable (default 8080), answering exactly the operations in the spec.',
 };
 
@@ -67,6 +71,7 @@ export function prepareWorkspace(spec: Spec, dir: string): { dir: string; brief:
   const s = forImplementer(spec);
   fs.writeFileSync(path.join(dir, 'spec', 'spec.json'), JSON.stringify(s, null, 2));
   fs.writeFileSync(path.join(dir, 'spec', 'SPEC.md'), renderMarkdown(s));
+  if (s.library) fs.writeFileSync(path.join(dir, 'spec', s.library.language === 'python' ? 'library.pyi' : 'library.d.ts'), s.library.declarations);
   const brief = implementerBrief(s);
   fs.writeFileSync(path.join(dir, 'BRIEF.md'), brief);
   // The marker turns the wall on for any run whose directory this is (wall.ts); it only ever restricts.
@@ -75,13 +80,14 @@ export function prepareWorkspace(spec: Spec, dir: string): { dir: string; brief:
 }
 
 const ALLOWED_TOP = new Set(['spec', 'clone', 'BRIEF.md', WORKSPACE_MARKER]);
+const ALLOWED_SPEC = new Set(['SPEC.md', 'spec.json', 'library.d.ts', 'library.pyi']);
 
 /** The workspace holds the spec and the clone and nothing else, and none of the observer's files. */
 export function assertSpecOnly(dir: string, corpus?: string): { ok: boolean; problems: string[] } {
   const problems: string[] = [];
   for (const name of fs.readdirSync(dir)) if (!ALLOWED_TOP.has(name)) problems.push(`unexpected entry "${name}" in the implementer workspace`);
   const spec = path.join(dir, 'spec');
-  for (const name of fs.existsSync(spec) ? fs.readdirSync(spec) : []) if (!['SPEC.md', 'spec.json'].includes(name)) problems.push(`unexpected file spec/${name}`);
+  for (const name of fs.existsSync(spec) ? fs.readdirSync(spec) : []) if (!ALLOWED_SPEC.has(name)) problems.push(`unexpected file spec/${name}`);
   if (corpus) {
     const frames = path.join(corpus, 'frames');
     const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));

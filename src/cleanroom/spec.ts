@@ -26,6 +26,8 @@ import path from 'node:path';
 import type { ApiSpec, CliSpec, Journey, JsonSchema, Spec, SpecState, SpecTransition, Step, WebSpec } from './types.js';
 import { parseHelp, type ExplorerState } from './explorer.js';
 import { stripAnsi } from './ansi.js';
+import { librarySpec } from './libspec.js';
+import { daemonSpec } from './daemonspec.js';
 
 export function synthesize(journey: Journey, now = new Date().toISOString(), explored?: ExplorerState): Spec {
   const unknowns: string[] = [];
@@ -33,8 +35,10 @@ export function synthesize(journey: Journey, now = new Date().toISOString(), exp
     version: 1, id: journey.id, kind: journey.target.kind, createdAt: now,
     coverage: { steps: journey.steps.length, states: 0, transitions: 0, note: '' }, unknowns,
   };
-  if (journey.target.kind === 'web') spec.web = webSpec(journey, unknowns);
+  if (journey.target.kind === 'web' || journey.target.kind === 'desktop' || journey.target.kind === 'mobile') spec.web = webSpec(journey, unknowns);
   else if (journey.target.kind === 'cli') spec.cli = cliSpec(journey, unknowns);
+  else if (journey.target.kind === 'library') spec.library = librarySpec(journey, unknowns);
+  else if (journey.target.kind === 'daemon') spec.daemon = daemonSpec(journey, unknowns);
   else spec.api = apiSpec(journey, unknowns);
   const web = spec.web;
   spec.coverage.states = web ? web.states.length : new Set(journey.steps.map(s => s.to)).size;
@@ -71,8 +75,9 @@ function webSpec(j: Journey, unknowns: string[]): WebSpec {
         controls: [...new Set((o.controls ?? []).map(c => `${c.role}: ${c.name || c.selector}`))].slice(0, 30),
       });
     }
-    if (o.url) {
-      const p = pathOf(o.url);
+    if (o.url || ((j.target.kind === 'desktop' || j.target.kind === 'mobile') && o.title)) {
+      // A desktop application has windows, not URLs: a window's title is its route.
+      const p = o.url ? pathOf(o.url) : `${j.target.kind === 'mobile' ? 'screen' : 'window'}:${o.title}`;
       const r = routes.get(p) ?? { path: p, title: o.title ?? '', states: new Set<string>() };
       r.states.add(s.to); routes.set(p, r);
     }
@@ -87,7 +92,8 @@ function webSpec(j: Journey, unknowns: string[]): WebSpec {
   }
   const st = first?.observation.style;
   if (!st) unknowns.push('the look of the pages was not measured');
-  unknowns.push('areas behind a login, and server-side state, are only known where the explorer got to them');
+  if (j.target.kind === 'mobile') unknowns.push('haptic feedback, push-notification delivery, multi-touch gestures (pinch) and platform-native sheets drawn outside the app are not observable through adb; screens behind a login are only known where the explorer reached them');
+  unknowns.push(j.target.kind === 'desktop' ? 'only the main window was explored: other windows, dialogs, menus and system dialogs are only known where a click opened them, and custom-drawn surfaces expose no accessibility tree' : 'areas behind a login, and server-side state, are only known where the explorer got to them');
   return {
     states: [...states.values()], transitions: [...trans.values()],
     routes: [...routes.values()].map(r => ({ path: r.path, title: r.title, states: [...r.states] })),
@@ -235,6 +241,24 @@ export function renderMarkdown(spec: Spec): string {
     L.push(`## Command \`${c.name}\``, '');
     for (const cmd of c.commands) L.push(`### \`${[c.name, ...cmd.path].join(' ')}\``, cmd.usage, cmd.summary, ...cmd.flags.map(f => `- \`${f.name}\`${f.takesValue ? ' <value>' : ''} — ${f.description}`), '');
     L.push('## Observed cases', ...c.cases.map(k => `- \`${[c.name, ...k.args].join(' ')}\`${k.stdin !== undefined ? ` (stdin: ${JSON.stringify(k.stdin)})` : ''} -> exit ${k.exitCode}\n  - stdout: ${JSON.stringify(k.stdout.slice(0, 400))}\n  - stderr: ${JSON.stringify(k.stderr.slice(0, 200))}`), '');
+  }
+  if (spec.daemon) {
+    const dm = spec.daemon;
+    L.push(`## Daemon \`${dm.name}\``, '', `Ready when: ${dm.startup.readyBy}.`, '', 'Output while starting:', '```', dm.startup.output.trimEnd() || '(none)', '```', '');
+    for (const ch of dm.channels) L.push(`### Channel \`${ch.channel}\``, ...ch.exchanges.map(x => `- send ${JSON.stringify(x.send)} -> ${JSON.stringify(x.reply)}${x.closed ? ' (connection closed)' : ''}`), '');
+    if (dm.signals.length) L.push('### Signals', ...dm.signals.map(x => `- ${x.signal}: ${x.exited ? `exited with ${x.exitCode}` : 'kept running'}${x.output ? `, wrote ${JSON.stringify(x.output)}` : ''}${x.delivery === 'forced' ? ' (recorded on Windows: the process was ended outright, so its handler could not run)' : ''}`), '');
+    if (dm.files.length) L.push('### Watched folders', ...dm.files.map(x => `- ${x.action} -> ${x.reaction}`), '');
+  }
+  if (spec.library) {
+    const lb = spec.library;
+    const file = lb.language === 'python' ? 'library.pyi' : 'library.d.ts';
+    L.push(`## Library \`${lb.name}\` (${lb.language})`, '', `Declarations inferred from observed calls (also in spec/${file}):`, '```' + (lb.language === 'python' ? 'python' : 'ts'), lb.declarations.trimEnd(), '```', '');
+    for (const e of lb.exports) {
+      if (!e.examples.length && !(e.members ?? []).length) continue;
+      L.push(`### ${e.name} (${e.kind})`, ...e.examples.map(x => `- called with ${x.args} -> ${x.result}`), ...e.throws.map(t => `- throws ${t.name}: ${t.message}`));
+      for (const m of e.members ?? []) L.push(`- ${m.kind} \`${m.name}\`${m.throws.length ? ` throws ${m.throws.map(t => t.name).join(', ')}` : ''}`);
+      L.push('');
+    }
   }
   if (spec.api) {
     L.push(`## API ${spec.api.baseUrl}`, '');

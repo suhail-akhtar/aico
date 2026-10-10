@@ -39,7 +39,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Control, Journey, LaunchSpec, Observation, Sandbox, Step, Stimulus } from './types.js';
+import type { Control, Journey, LaunchSpec, LibExportInfo, Observation, Sandbox, Step, Stimulus } from './types.js';
 import { Recorder, corpusDir, readJourney } from './recorder.js';
 import { createSandbox } from './sandbox-api.js';
 
@@ -56,6 +56,7 @@ export interface ExplorerState {
   web?: { seenStates: string[]; queue: Stimulus[][] };
   cli?: { seen: string[]; queue: { args: string[]; expand: boolean; depth: number }[]; started: boolean };
   api?: { seen: string[]; queue: Extract<Stimulus, { type: 'request' }>[]; missingProbed: string[] };
+  library?: { listed: boolean; done: string[] };
 }
 
 /** What a guide is shown at a state, and what it may answer. */
@@ -110,8 +111,10 @@ export async function explore(id: string, target: LaunchSpec, opts: ExploreOptio
   const st: ExplorerState = prior ?? { version: 1, kind: target.kind, discovered: [], tried: [], skipped: [], pending: [], stoppedBy: 'complete' };
   const c: Ctx = { rec, make, target, opts, steps: 0, max: opts.maxSteps ?? 60, st, discovered: new Set(st.discovered), tried: new Set(st.tried), history: [] };
   try {
-    if (target.kind === 'web') await exploreWeb(c);
+    if (target.kind === 'web' || target.kind === 'desktop' || target.kind === 'mobile') await exploreWeb(c);
     else if (target.kind === 'cli') await exploreCli(c);
+    else if (target.kind === 'library') await exploreLibrary(c);
+    else if (target.kind === 'daemon') await exploreDaemon(c);
     else await exploreApi(c);
   } finally {
     st.discovered = [...c.discovered]; st.tried = [...c.tried];
@@ -151,8 +154,11 @@ async function ordered<T>(c: Ctx, view: Omit<GuideView, 'kind' | 'history'>, ite
 // ── web ────────────────────────────────────────────────────────────────────────
 
 async function exploreWeb(c: Ctx): Promise<void> {
-  const t = c.target as Extract<LaunchSpec, { kind: 'web' }>;
-  const origin = new URL(t.url).origin;
+  const t = c.target as Extract<LaunchSpec, { kind: 'web' | 'desktop' | 'mobile' }>;
+  const kind = t.kind;
+  // A web page is entered by URL; a desktop application by starting it. The landing step records which.
+  const origin = t.kind === 'web' ? new URL(t.url).origin : '';
+  const landing: Stimulus = t.kind === 'web' ? { type: 'navigate', url: t.url } : { type: 'wait', ms: 0 };
   const maxDepth = c.opts.maxDepth ?? 4;
   const w = (c.st.web ??= { seenStates: [], queue: [[]] });
   const seenStates = new Set(w.seenStates);
@@ -163,7 +169,7 @@ async function exploreWeb(c: Ctx): Promise<void> {
       const pathTo = queue.shift()!;
       if (pathTo.length > maxDepth) { skip(`state after ${pathTo.map(describe).join(' > ')}`, `deeper than --max-depth ${maxDepth}`); continue; }
       // Reach the state silently (its steps are already in the corpus), then read what can be done there.
-      const sb = c.make('web');
+      const sb = c.make(kind);
       let from: string, here: Observation;
       try {
         await sb.start(t, c.opts.signal);
@@ -173,7 +179,7 @@ async function exploreWeb(c: Ctx): Promise<void> {
       } finally { await sb.stop(); }
       if (seenStates.has(from) && pathTo.length) continue;
       if (!pathTo.length && !c.opts.resume) { // the landing page is the first recorded state (a resumed run already has it)
-        c.rec.append({ from: 'start', stimulus: { type: 'navigate', url: t.url }, observation: here, to: from });
+        c.rec.append({ from: 'start', stimulus: landing, observation: here, to: from });
         c.steps++;
       }
       const label = (x: Control): string => `${x.role}: ${x.name || x.selector}`;
@@ -198,7 +204,7 @@ async function exploreWeb(c: Ctx): Promise<void> {
           .filter(x => x.role === 'textbox' && x.formAction === ctl.formAction)
           .map(x => ({ type: 'fill' as const, selector: x.selector, value: fillValue(x, c.opts) }));
         const stims: Stimulus[] = [...fills, { type: 'click', selector: ctl.selector }];
-        const sb2 = c.make('web');
+        const sb2 = c.make(kind);
         try {
           await sb2.start(t, c.opts.signal);
           let cur = await sb2.snapshot();
@@ -369,4 +375,125 @@ export function coverageLine(st: ExplorerState | undefined): string {
   const pending = st.pending.length;
   const pct = found ? Math.round(Math.min(1, st.discovered.filter(d => st.tried.includes(d)).length / found) * 100) : 100;
   return `The explorer tried ${tried} item(s) and found ${found}; ${pct}% of what it found was tried${pending ? `, ${pending} left unvisited (resume to continue)` : ''}${st.skipped.length ? `, ${st.skipped.length} skipped on purpose` : ''}.`;
+}
+
+// ── library ────────────────────────────────────────────────────────────────────
+
+/** The values a library function is called with: one of each kind a type checker would care about. */
+const FUZZ: unknown[] = [{ $: 'undefined' }, null, 0, 1, -1, 2.5, { $: 'NaN' }, '', 'a', 'hello world', true, false, [], [1, 2, 3], {}, { a: 1 }, { $: 'fn' }];
+const SMALL: unknown[] = [1, 'a', [], {}, true, null];
+
+/** The argument vectors tried for a callable of this arity: none, each kind alone, then pairs and a triple. */
+export function argVectors(arity: number, cap = 40): unknown[][] {
+  const out: unknown[][] = [[]];
+  for (const v of FUZZ) out.push([v]);
+  if (arity >= 2) for (const a of SMALL) for (const b of SMALL) out.push([a, b]);
+  if (arity >= 3) out.push([1, 1, 1], ['a', 'a', 'a'], [1, 'a', true]);
+  return out.slice(0, cap);
+}
+
+async function exploreLibrary(c: Ctx): Promise<void> {
+  const t = c.target as Extract<LaunchSpec, { kind: 'library' }>;
+  const lib = (c.st.library ??= { listed: false, done: [] });
+  const doneSet = new Set(lib.done);
+  const sb = c.make('library') as Sandbox & { list(): Promise<LibExportInfo[]> };
+  await sb.start(t, c.opts.signal);
+  let from = 'start';
+  try {
+    const surface = await sb.list();
+    if (!lib.listed) {
+      c.rec.append({ from: 'start', stimulus: { type: 'get', prop: '<exports>' }, observation: { at: new Date().toISOString(), kind: 'library', surface }, to: 'listed' });
+      c.steps++; lib.listed = true;
+    }
+    from = 'listed';
+    const step = async (stim: Stimulus): Promise<Observation> => { const r = await record(c, sb, from, stim); from = r.to; return r.obs; };
+    const capExports = 60;
+    const names = await ordered(c, { state: 'a library: choose what to probe first', options: surface.slice(0, capExports).map(e => e.name) }, surface.slice(0, capExports), e => e.name);
+    for (const e of names) {
+      if (done(c)) break;
+      if (doneSet.has(e.name)) continue;
+      c.discovered.add(`call ${e.name}`);
+      if (e.kind === 'value') { c.tried.add(`call ${e.name}`); doneSet.add(e.name); continue; }
+      if (e.kind === 'object') {
+        for (const f of e.fns ?? []) {
+          c.discovered.add(`call ${e.name}.${f.name}`);
+          for (const args of argVectors(f.arity, 24)) { if (done(c)) break; await step({ type: 'call', fn: `${e.name}.${f.name}`, args }); }
+          c.tried.add(`call ${e.name}.${f.name}`);
+        }
+        c.tried.add(`call ${e.name}`); doneSet.add(e.name); continue;
+      }
+      // A function or a class: call it with nothing first; a class says so (and Python lists it as one).
+      const first = await step({ type: 'call', fn: e.name, args: [] });
+      const isClass = e.isClass || /Class constructor|without 'new'/.test(first.call?.error?.message ?? '');
+      if (!isClass) {
+        for (const args of argVectors(e.arity ?? 0).slice(1)) { if (done(c)) break; await step({ type: 'call', fn: e.name, args }); }
+      } else {
+        let goodArgs: unknown[] | undefined;
+        const construct = async (args: unknown[]): Promise<string | undefined> => {
+          const o = await step({ type: 'call', fn: e.name, args, construct: true });
+          const v = o.call?.value as { $?: string; handle?: string } | undefined;
+          return o.call?.ok && v?.$ === 'instance' ? v.handle : undefined;
+        };
+        if (await construct([])) goodArgs = [];
+        for (const v of FUZZ.slice(1, 12)) { if (done(c)) break; if ((await construct([v])) && !goodArgs) goodArgs = [v]; }
+        if (goodArgs) {
+          for (const m of (e.members ?? []).slice(0, 20)) {
+            if (done(c)) break;
+            c.discovered.add(`call ${e.name}#${m.name}`);
+            // A fresh instance per member: one method's probes must not change the state the next one sees.
+            const handle = await construct(goodArgs);
+            if (!handle) continue;
+            if (m.kind === 'accessor') { await step({ type: 'get', prop: m.name, on: handle }); c.tried.add(`call ${e.name}#${m.name}`); continue; }
+            for (const args of argVectors(m.arity ?? 0, 10)) { if (done(c)) break; await step({ type: 'call', fn: m.name, args, on: handle }); }
+            c.tried.add(`call ${e.name}#${m.name}`);
+          }
+        }
+        for (const s of e.statics ?? []) { for (const args of argVectors(s.arity, 16)) { if (done(c)) break; await step({ type: 'call', fn: `${e.name}.${s.name}`, args }); } }
+      }
+      if (!done(c)) { c.tried.add(`call ${e.name}`); doneSet.add(e.name); }
+    }
+    c.st.pending = surface.filter(e => !doneSet.has(e.name) && e.kind !== 'value').map(e => `call ${e.name}`);
+  } finally {
+    lib.done = [...doneSet];
+    await sb.stop();
+  }
+}
+
+// ── daemon ─────────────────────────────────────────────────────────────────────
+
+/** What a daemon is sent on each channel: nothing (a banner), the usual verbs, a protocol or two, and garbage (the error contract). */
+export const DAEMON_PROBES = ['', 'PING\\n', 'HELP\\n', 'help\\r\\n', 'GET / HTTP/1.0\\r\\n\\r\\n', '{"jsonrpc":"2.0","method":"ping","id":1}\\n', '\\n', 'zzz-unknown-command\\n'];
+
+async function exploreDaemon(c: Ctx): Promise<void> {
+  const t = c.target as Extract<LaunchSpec, { kind: 'daemon' }>;
+  const sb = c.make('daemon');
+  await sb.start(t, c.opts.signal);
+  let from = 'start';
+  const step = async (stim: Stimulus): Promise<Observation> => { const r = await record(c, sb, from, stim); from = r.to; return r.obs; };
+  try {
+    const startup = await step({ type: 'wait', ms: 0 }); // what it said while starting
+    const channels: string[] = [];
+    if (startup.daemon?.port) channels.push('tcp');
+    for (const p of t.ipc ?? []) channels.push(/^(tcp:|socket:|pipe:)/.test(p) ? p : (process.platform === 'win32' && /^[\\/]{2}[.?][\\/]pipe/i.test(p) ? `pipe:${p}` : `socket:${p}`));
+    for (const ch of channels) c.discovered.add(`channel ${ch}`);
+    for (const ch of channels) {
+      for (const data of DAEMON_PROBES) {
+        if (done(c)) break;
+        c.tried.add(`channel ${ch}`);
+        await step({ type: 'send', channel: ch, data });
+      }
+    }
+    for (const dir of t.watchDirs ?? []) {
+      if (done(c)) break;
+      c.discovered.add(`watch ${dir}`);
+      const probe = path.join(dir, 'cleanroom-probe.txt');
+      await step({ type: 'fs-write', path: probe, content: 'probe' });
+      await step({ type: 'fs-write', path: probe, content: 'probe, changed' });
+      await step({ type: 'fs-delete', path: probe });
+      c.tried.add(`watch ${dir}`);
+    }
+    // Signals last: a reload leaves it running; a termination ends it. Windows has neither as a signal.
+    if (process.platform !== 'win32' && !done(c)) { c.discovered.add('signal SIGHUP'); c.tried.add('signal SIGHUP'); await step({ type: 'signal', signal: 'SIGHUP' }); }
+    if (!done(c)) { c.discovered.add('signal SIGTERM'); c.tried.add('signal SIGTERM'); await step({ type: 'signal', signal: 'SIGTERM' }); }
+  } finally { await sb.stop(); }
 }

@@ -22,13 +22,29 @@
  * @module cleanroom/types
  */
 
-export type TargetKind = 'web' | 'cli' | 'api';
+export type TargetKind = 'web' | 'cli' | 'api' | 'library' | 'daemon' | 'desktop' | 'mobile';
 
 /** What to start. Exactly one of the shapes, chosen by `kind`. */
 export type LaunchSpec =
   | { kind: 'web'; url: string; viewport?: { width: number; height: number }; locale?: string; timeoutMs?: number }
   | { kind: 'cli'; command: string; args?: string[]; cwd?: string; env?: Record<string, string>; columns?: number; rows?: number; timeoutMs?: number; interactive?: boolean; /** Run under a pseudo-terminal: a program that checks isatty or draws a TUI behaves like itself. */ pty?: boolean; /** The program's name in the spec; defaults to the executable's. */ name?: string }
-  | { kind: 'api'; baseUrl: string; headers?: Record<string, string>; timeoutMs?: number };
+  | { kind: 'api'; baseUrl: string; headers?: Record<string, string>; timeoutMs?: number }
+  /** A module to load and probe: a file or a package folder. Node (.js .mjs .cjs) or Python (.py or a package). */
+  /** An Android app on a device or emulator, driven through adb (uiautomator for the tree, input for touch). iOS is not built. */
+  | { kind: 'mobile'; platform?: 'android' | 'ios'; appId: string; serial?: string; adb?: string; activity?: string; timeoutMs?: number; name?: string }
+  /** A native desktop application, driven through the operating system's accessibility tree (Windows UI Automation). */
+  | { kind: 'desktop'; command: string; args?: string[]; cwd?: string; env?: Record<string, string>; windowTitle?: string; timeoutMs?: number; name?: string }
+  /** A long-running background process: started, waited for until it is ready, then driven over its channels, signals and watched folders. */
+  | {
+    kind: 'daemon'; command: string; args?: string[]; cwd?: string; env?: Record<string, string>; name?: string; timeoutMs?: number;
+    /** Ready when this appears in its output (a capture group names the TCP port), or when this port or socket accepts a connection. */
+    ready?: { logMatch?: string; port?: number; socket?: string; timeoutMs?: number };
+    /** Extra channels to probe: Unix-domain socket paths or Windows named pipes (\\.\pipe\name), and TCP host:port pairs. */
+    ipc?: string[];
+    /** Folders the daemon is expected to watch: a file is written into one to see what it does. */
+    watchDirs?: string[];
+  }
+  | { kind: 'library'; entry: string; language?: 'node' | 'python'; cwd?: string; timeoutMs?: number; name?: string };
 
 /** One thing done to the target. Serialisable, so a journey can be replayed on the clone. */
 export type Stimulus =
@@ -42,7 +58,51 @@ export type Stimulus =
   | { type: 'stdin'; data: string }                                              // CLI interactive
   | { type: 'signal'; signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' }
   | { type: 'resize'; columns: number; rows: number }                            // CLI under a pty
-  | { type: 'request'; method: string; path: string; headers?: Record<string, string>; body?: unknown };
+  | { type: 'request'; method: string; path: string; headers?: Record<string, string>; body?: unknown }
+  /** Library: call (or `construct`) an export, or a method of an object an earlier call returned (`on` is its handle). */
+  | { type: 'call'; fn: string; args?: unknown[]; on?: string; construct?: boolean }
+  | { type: 'get'; prop: string; on?: string }
+  /** Daemon: write bytes to a channel ('tcp' = the ready port, 'tcp:host:port', 'socket:path' or 'pipe:\\.\pipe\name') and read what comes back. */
+  /** Mobile gestures and system events. */
+  | { type: 'swipe'; x1: number; y1: number; x2: number; y2: number; ms?: number }
+  | { type: 'rotate'; orientation: 'portrait' | 'landscape' }
+  | { type: 'background' }
+  | { type: 'resume' }
+  | { type: 'deeplink'; url: string }
+  | { type: 'permission'; action: 'grant' | 'revoke'; permission: string }
+  | { type: 'notify'; title: string; text: string }
+  | { type: 'send'; channel: string; data: string; waitMs?: number }
+  /** Daemon: create, change or remove a file inside a watched folder. */
+  | { type: 'fs-write'; path: string; content: string }
+  | { type: 'fs-delete'; path: string };
+
+/** What a daemon did after a stimulus. */
+export interface DaemonResult {
+  alive: boolean; exitCode?: number | null; signal?: string | null;
+  /** The reply on the channel (utf8, capped), and whether the other side closed the connection. */
+  reply?: string; closed?: boolean; connectError?: string;
+  /** Output the daemon wrote since the last observation. */
+  newStdout?: string; newStderr?: string;
+  /** Files that appeared, changed or went away in the watched folders. */
+  fsChanges?: { path: string; kind: 'added' | 'changed' | 'removed' }[];
+  signalDelivery?: 'signal' | 'forced';
+  /** The TCP port found from its output, when it printed one. */
+  port?: number;
+}
+
+/** What a call into a library produced: a value (with its kind) or an error, and what it wrote to the console. */
+export interface CallResult { ok: boolean; async?: boolean; kind?: string; value?: unknown; error?: { name: string; message: string; code?: string }; output?: string; ms?: number }
+
+/** One export as the worker lists it, before anything is called. */
+export interface LibExportInfo {
+  name: string; kind: 'function' | 'object' | 'value'; arity?: number;
+  params?: { name: string; kind: string; hasDefault: boolean; annotation: string | null }[] | null;
+  isClass?: boolean; isCoroutine?: boolean;
+  members?: { name: string; kind: string; arity?: number; params?: LibExportInfo['params'] }[];
+  statics?: { name: string; arity: number }[];
+  fns?: { name: string; arity: number }[];
+  value?: unknown;
+}
 
 export interface NetworkEvent { method: string; url: string; status?: number; requestBody?: string; responseBody?: string; contentType?: string }
 
@@ -72,6 +132,12 @@ export interface Observation {
   /** Rendered terminal screen (rows of text) after replaying the ANSI stream. */
   screen?: string[];
   durationMs?: number;
+  // daemon
+  daemon?: DaemonResult;
+  // library
+  call?: CallResult;
+  /** The exports the worker listed (recorded once, as the first step of a library journey). */
+  surface?: LibExportInfo[];
   /** How the last signal reached the program: a real signal, a Ctrl-C keystroke on a pty, or forced termination (Windows has no SIGTERM/SIGHUP). */
   signalDelivery?: 'signal' | 'ctrl-c' | 'forced';
   /** Whether the program ran under a pseudo-terminal, and the host platform it ran on. */
@@ -138,9 +204,30 @@ export interface Spec {
   kind: TargetKind;
   createdAt: string;
   coverage: { steps: number; states: number; transitions: number; note: string; /** Of everything the explorer found, how much it tried (0 to 1); absent when the exploration state was not kept. */ ratio?: number; discovered?: number; tried?: number; /** Found but not tried: the frontier a further run would cover. */ pending?: string[]; skipped?: { item: string; reason: string }[]; stoppedBy?: 'complete' | 'budget' | 'aborted' };
-  web?: WebSpec; cli?: CliSpec; api?: ApiSpec;
+  web?: WebSpec; /* also holds a desktop application: windows are its routes */ cli?: CliSpec; api?: ApiSpec; library?: LibrarySpec; daemon?: DaemonSpec;
   /** Behaviour the observer could not pin down: said out loud so the clone is not trusted blindly. */
   unknowns: string[];
+}
+
+export interface LibParam { name: string; type: string; optional: boolean }
+export interface LibMember { name: string; kind: 'method' | 'accessor' | 'static'; params: LibParam[]; returns: string; async: boolean; throws: { name: string; message: string }[] }
+export interface LibExport {
+  name: string; kind: 'function' | 'class' | 'object' | 'value';
+  params: LibParam[]; returns: string; async: boolean;
+  throws: { name: string; message: string }[];
+  examples: { args: string; result: string }[];
+  members?: LibMember[]; value?: string;
+}
+/** What the black-box probing learned about a library's public surface. `dts` is the synthesized declaration file. */
+export interface LibrarySpec { language: 'node' | 'python'; name: string; exports: LibExport[]; declarations: string }
+
+/** What probing a daemon learned: how it starts, what it says on each channel, how it handles signals and watched files. */
+export interface DaemonSpec {
+  name: string;
+  startup: { readyBy: string; output: string };
+  channels: { channel: string; exchanges: { send: string; reply: string; closed: boolean }[] }[];
+  signals: { signal: string; exited: boolean; exitCode: number | null; output: string; delivery: 'signal' | 'forced' }[];
+  files: { action: string; reaction: string }[];
 }
 
 export type JsonSchema = { type?: string | string[]; properties?: Record<string, JsonSchema>; items?: JsonSchema; required?: string[]; enum?: unknown[]; format?: string; nullable?: boolean };

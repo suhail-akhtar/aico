@@ -67,38 +67,58 @@ What the engine does keep, because it is provenance and not policy: every run
 is journaled under `aicoHome()/cleanroom/<id>/` with its target and time, and
 the AICO session log records the commands as it does for any other work.
 
+## Amendment: closing the phase 1 limits
+
+Phase 1 shipped with a list of limits. Each was either closed or is now stated
+exactly, with the reason it stays open.
+
+| Phase 1 limit | Now |
+|---|---|
+| Command-line tools ran through pipes | A pseudo-terminal adapter (`--pty`): a real terminal size, key presses, resize, and Ctrl-C delivered the way a terminal delivers it. Uses `@lydell/node-pty`, an **optional** dependency (prebuilt binaries, MIT, already shipped by the desktop app); without it the adapter says so and pipes remain. |
+| No Windows signals | `signalDelivery` is recorded per run: what the platform could deliver (Ctrl-C through a pty on Windows; `SIGTERM`/`SIGHUP`/`SIGINT` on POSIX) and what it could not, so the spec states it instead of implying a handler ran. |
+| The firewall only controlled inputs | A real wall around the implementer: it gets file tools confined to its workspace plus `CloneRun`, which runs the clone under the Node permission model with a minimal environment. `installCleanroomWall` denies any other tool (it only denies, like every guard). The corpus path never appears in the workspace. Still not a defence against a determined human, and the Node permission model does not restrict the network. |
+| Parity measured over explored behaviour only | Coverage is measured: states and controls discovered versus tried, what was pending or skipped, and why exploration stopped. Runs resume (`--resume`) and extend instead of starting over. The twin report prints coverage next to parity. A clone can be explored too and its spec diffed against the original's (`specdiff`), which finds behaviour the journeys never touched. |
+| `implement --run` untested with a model | The loop is proven with a scripted model (the wall, the workspace, the budget, the report). A real-model run has **not** been made; it costs money and waits for the owner. |
+| Model-guided exploration | `--guide`: a model may only **reorder** the explorer's pending actions, under its own budget. It cannot invent actions, so the baseline stays deterministic and the guide cannot make a run unsafe or unbounded. |
+| Libraries and SDKs | `library` target (Node and Python): exports are listed, called with fuzzed argument vectors, classes are constructed and their methods probed on fresh instances (a handle protocol), errors are typed, output is captured; the synthesizer writes a `.d.ts` or `.pyi`. The Node worker runs under the permission model; a call that never returns is killed. **Python libraries are probed without confinement** (Python has no equivalent switch); the spec says so. |
+| Daemons and IPC | `daemon` target: readiness by log line or port, then TCP, Unix socket or Windows named pipe probes, signal behaviour, watched directories. |
+| Desktop | `desktop` target on **Windows** through UI Automation in a persistent PowerShell worker (legacy WinForms panes are recognised by class name; typing and clicking use real input). Needs an interactive desktop and moves the mouse, so its test is opt-in (`npm run test:cleanroom:desktop`). **macOS (AXUIElement) and Linux (AT-SPI) are not built.** |
+| Mobile | `mobile` target for **Android** through adb: `uiautomator dump` for the tree, `screencap`, `input tap/swipe/text/keyevent`, rotation, backgrounding and resuming, deep links, runtime permissions, posted notifications. System events are offered to the explorer as `sys:` controls. **Proven only against a simulated adb** (`scripts/fixtures/fake-adb.mjs`), because there is no device or emulator here; the first live run is the real check. **iOS is not built** (it needs macOS and Xcode). |
+
 ## What is and is not guaranteed
 
-- The firewall is a separation of **what the implementer is given**. The
-  implementer agent still has a shell, and a shell can read any path the user
-  can, so this is not a sandbox against a determined agent. Run the implementer
-  on a machine or account that does not hold the corpus when a hard wall is
-  needed.
-- Coverage is what the explorer reached. Logged-in areas, server-side state,
-  randomness and time-dependent behaviour are known only as far as they were
-  seen. "Parity" never means "identical to the original in every state".
-- The CLI adapter uses pipes. A program that needs a real terminal (an `isatty`
-  check, raw mode) behaves differently. A pseudo-terminal needs the native
-  `node-pty` module, which is not a dependency (a new dependency needs its own
-  ADR); the PTY adapter is a recorded follow-up.
-- POSIX signals do not exist on Windows: `SIGTERM` ends the process outright
-  there, so a handler's output is only observed on macOS and Linux.
+- The wall separates **what the implementer is given and can reach through its
+  tools**. It is not a sandbox against a human with a shell on the same account.
+  Run the implementer on a machine or account that does not hold the corpus
+  when a hard wall is needed.
+- Coverage is what the explorer reached, now with the figure. Logged-in areas,
+  server-side state, randomness and time-dependent behaviour are known only as
+  far as they were seen. "Parity" never means "identical in every state".
+- Terminal EOF (Ctrl-D) cannot be delivered through a Windows pseudo-terminal.
+  The test records that as a skipped case rather than passing it.
+- POSIX paths (SIGHUP/SIGTERM delivery, Unix sockets) are implemented but were
+  verified only on Windows, where this was built.
+- The Node permission model confines the filesystem, not the network.
 - Web exploration clicks and fills what it can see, with probe values, and
   stays on the target's origin unless `--follow-external` is given (a crawl
   scope, not a restriction on the operator).
-- `implement` is a real model run and spends money, capped by `--budget`. The
-  quality of the clone depends on the model; a strong model is advised.
+- `implement --run` spends money, capped by `--budget`; a strong model is advised.
 
-## Not in phase 1
+## Still not built
 
-Native desktop, mobile and daemon/IPC adapters; libraries and SDKs (reflection
-and type synthesis); a PTY adapter; model-guided exploration (the baseline
-explorer is deterministic and free; an agent can drive the same `Sandbox`);
-authenticated exploration (the operator supplies the cookies or headers).
+iOS; desktop adapters for macOS and Linux; D-Bus and other brokered IPC;
+authenticated exploration beyond the operator supplying cookies or headers; a
+real-model `implement --run` trial and a live emulator run of the mobile
+adapter (both need the owner).
 
 ## Consequences
 
-- New code under `src/cleanroom/` and `aico cleanroom observe|synthesize|implement|twin`.
-  No new runtime dependency. Tests: `scripts/cleanroom-test.mjs` (real local
-  targets, including a real browser when one is installed).
+- New code under `src/cleanroom/` and `aico cleanroom observe|synthesize|implement|twin`;
+  `CloneRun` in `src/tools/clone-run.ts`, in a hidden deferred tool group loaded
+  only by a clean-room brief (so the always-sent schema budget is unchanged).
+- One optional dependency, `@lydell/node-pty`.
+- Tests: `cleanroom-test.mjs` (real local targets, a real browser when one is
+  installed), `cleanroom-wall-test.mjs`, `cleanroom-library-test.mjs`,
+  `cleanroom-daemon-test.mjs`, `cleanroom-mobile-test.mjs` (simulated adb), all
+  in `npm test`; `cleanroom-desktop-test.mjs` is opt-in.
 - Exit codes of `twin`: 0 identical, 2 differences found, 1 error.

@@ -57,6 +57,9 @@ const DEFAULT_SCRUB: RegExp[] = [
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
   /(?<=localhost|127\.0\.0\.1):\d{2,5}/g,
   /\b\d+(?:\.\d+)?\s?ms\b/g,
+  /0x[0-9a-f]{6,}/gi, // memory addresses in a default object representation
+  /\b(?:listening on|on port|port|pid)[ =:]+\d{2,6}\b/gi, // ports and process ids a daemon announces
+  /\b(?:ready|listening|bound|serving|running|started)\s+(?:on|at)\s+(?:[\w.:-]*:)?\d{2,6}\b/gi, // "ready on 51234"
 ];
 
 export function scrub(s: string | undefined, extra: RegExp[] = []): string {
@@ -85,19 +88,20 @@ export async function twinTest(o: TwinOptions): Promise<TwinReport> {
   const kind = o.journey.target.kind;
   if (o.clone.kind !== kind) throw new Error(`the clone is a ${o.clone.kind} target but the journey is ${kind}`);
   const mode = o.mode ?? 'recorded';
+  if (kind === 'library' || kind === 'daemon') return twinSequential(o, make);
   const steps = o.journey.steps.slice(0, o.maxSteps ?? 200);
   const differences: Difference[] = [];
   const notes: string[] = [];
   let identical = 0, replayed = 0;
   for (const step of steps) {
     if (o.signal?.aborted) break;
-    if (step.from === 'start' && kind === 'web') { /* the landing: replayed as a bare load */ }
-    else if (kind !== 'web' && !['run', 'request'].includes(step.stimulus.type)) { notes.push(`step ${step.seq}: a "${step.stimulus.type}" stimulus is not replayed for ${kind} targets`); continue; }
-    const prefix = kind === 'web' ? prefixFor(o.journey.steps, step) : [];
-    const stim = step.from === 'start' && kind === 'web' ? undefined : step.stimulus;
+    if (step.from === 'start' && (kind === 'web' || kind === 'desktop' || kind === 'mobile')) { /* the landing: replayed as a bare load */ }
+    else if (kind !== 'web' && kind !== 'desktop' && kind !== 'mobile' && !['run', 'request'].includes(step.stimulus.type)) { notes.push(`step ${step.seq}: a "${step.stimulus.type}" stimulus is not replayed for ${kind} targets`); continue; }
+    const prefix = kind === 'web' || kind === 'desktop' || kind === 'mobile' ? prefixFor(o.journey.steps, step) : [];
+    const stim = step.from === 'start' && (kind === 'web' || kind === 'desktop' || kind === 'mobile') ? undefined : step.stimulus;
     let targetObs: Observation = step.observation;
     if (mode === 'live') targetObs = await runStep(make, o.live ?? o.journey.target, prefix, stim, o.signal);
-    else if (kind === 'web') { const f = frameFile(o.journey.id, step.seq); if (f) targetObs = { ...targetObs, frame: new Uint8Array(fs.readFileSync(f)) }; }
+    else if (kind === 'web' || kind === 'desktop' || kind === 'mobile') { const f = frameFile(o.journey.id, step.seq); if (f) targetObs = { ...targetObs, frame: new Uint8Array(fs.readFileSync(f)) }; }
     const cloneObs = await runStep(make, o.clone, prefix, stim, o.signal);
     const diffs = compare(kind, step, targetObs, cloneObs, o);
     replayed++;
@@ -106,6 +110,46 @@ export async function twinTest(o: TwinOptions): Promise<TwinReport> {
   }
   if (o.journey.platform && o.journey.platform !== process.platform) notes.push(`Recorded on ${o.journey.platform}, replayed on ${process.platform}: line endings, paths, signals and terminal behaviour can differ for reasons that are not the clone's.`);
   notes.push('Parity is measured over the recorded journeys only; behaviour nobody observed is not covered.');
+  return { journeys: 1, steps: replayed, identical, differences, parity: replayed ? identical / replayed : 0, notes };
+}
+
+/**
+ * A library is replayed in order through one process: an object a call returned
+ * is a handle the next calls use, so a step cannot be replayed on its own. The
+ * handle numbers are assigned in call order, so the same journey on the clone
+ * produces the same ones.
+ */
+async function twinSequential(o: TwinOptions, make: NonNullable<TwinOptions['makeSandbox']>): Promise<TwinReport> {
+  const steps = o.journey.steps.slice(0, o.maxSteps ?? 400);
+  const differences: Difference[] = [];
+  const notes: string[] = [];
+  let identical = 0, replayed = 0;
+  const kind = o.journey.target.kind;
+  const live = o.mode === 'live' ? make(kind) : undefined;
+  const sb = make(kind);
+  try {
+    await sb.start(o.clone, o.signal);
+    if (live) await live.start(o.live ?? o.journey.target, o.signal);
+    for (const step of steps) {
+      if (o.signal?.aborted) break;
+      let targetObs: Observation = step.observation;
+      let cloneObs: Observation;
+      if (step.observation.surface) {
+        const list = (sb as unknown as { list(): Promise<import('./types.js').LibExportInfo[]> }).list;
+        const surface = await list.call(sb).catch(() => []);
+        cloneObs = { at: new Date().toISOString(), kind: 'library', surface };
+      } else {
+        if (live) { await live.inject(step.stimulus); targetObs = await live.observe(); }
+        await sb.inject(step.stimulus);
+        cloneObs = await sb.observe();
+      }
+      const diffs = compare(kind, step, targetObs, cloneObs, o);
+      replayed++;
+      if (diffs.length === 0) identical++; else differences.push(...diffs);
+      o.onStep?.(step.seq, diffs.length === 0);
+    }
+  } finally { await sb.stop(); await live?.stop(); }
+  notes.push('Parity is measured over the recorded calls only; behaviour nobody observed is not covered.');
   return { journeys: 1, steps: replayed, identical, differences, parity: replayed ? identical / replayed : 0, notes };
 }
 
@@ -132,12 +176,33 @@ function compare(kind: LaunchSpec['kind'], step: Step, t: Observation, c: Observ
     eq('stdout', sc(t.stdout), sc(c.stdout));
     eq('stderr', sc(t.stderr), sc(c.stderr));
     if (t.screen && c.screen) eq('screen', t.screen.map(sc), c.screen.map(sc)); // only when the recording has a screen to compare
+  } else if (kind === 'library') {
+    if (t.surface || c.surface) {
+      const sig = (x?: import('./types.js').LibExportInfo[]): string[] => (x ?? []).map(e => `${e.name}:${e.kind}:${e.arity ?? ''}`).sort();
+      eq('exports', sig(t.surface), sig(c.surface));
+    } else {
+      const a = t.call, b = c.call;
+      eq('ok', a?.ok, b?.ok);
+      if (a?.ok && b?.ok) { eq('kind', a.kind, b.kind); eq('async', !!a.async, !!b.async); eq('value', sc(JSON.stringify(a.value)), sc(JSON.stringify(b.value))); }
+      else if (a && b && !a.ok && !b.ok) { eq('error', a.error?.name, b.error?.name); eq('message', sc(a.error?.message), sc(b.error?.message)); }
+      eq('output', sc(a?.output), sc(b?.output));
+    }
+  } else if (kind === 'daemon') {
+    const a = t.daemon, b = c.daemon;
+    eq('alive', a?.alive, b?.alive);
+    if (a && b && !a.alive && !b.alive) eq('exitCode', a.exitCode ?? null, b.exitCode ?? null);
+    eq('reply', sc(a?.reply), sc(b?.reply));
+    eq('closed', !!a?.closed, !!b?.closed);
+    eq('connectError', !!a?.connectError, !!b?.connectError);
+    eq('stdout', sc(a?.newStdout), sc(b?.newStdout));
+    eq('stderr', sc(a?.newStderr), sc(b?.newStderr));
+    eq('files', (a?.fsChanges ?? []).map(x => `${x.kind} ${x.path}`).sort(), (b?.fsChanges ?? []).map(x => `${x.kind} ${x.path}`).sort());
   } else if (kind === 'api') {
     eq('status', t.response?.status, c.response?.status);
     eq('contentType', t.response?.contentType, c.response?.contentType);
     eq('body', normBody(t.response), normBody(c.response, o.scrub));
     if (t.response && !c.response) { /* already reported through status */ }
-  } else {
+  } else { // web and desktop
     eq('path', pathOf(t.url), pathOf(c.url));
     eq('title', sc(t.title), sc(c.title));
     eq('text', sc(t.text), sc(c.text));

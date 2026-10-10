@@ -15,6 +15,10 @@ import { createHash } from 'node:crypto';
 import type { LaunchSpec, Observation, Sandbox, StateFingerprint, Stimulus } from './types.js';
 import { WebSandbox } from './sandbox-web.js';
 import { CliSandbox } from './sandbox-cli.js';
+import { LibrarySandbox } from './sandbox-library.js';
+import { DaemonSandbox } from './sandbox-daemon.js';
+import { DesktopSandbox } from './sandbox-desktop.js';
+import { MobileSandbox } from './sandbox-mobile.js';
 
 const BODY_CAP = 500_000;
 
@@ -64,5 +68,9 @@ export class ApiSandbox implements Sandbox {
 export function createSandbox(kind: LaunchSpec['kind']): Sandbox {
   if (kind === 'web') return new WebSandbox();
   if (kind === 'cli') return new CliSandbox();
+  if (kind === 'library') return new LibrarySandbox();
+  if (kind === 'daemon') return new DaemonSandbox();
+  if (kind === 'desktop') return new DesktopSandbox();
+  if (kind === 'mobile') return new MobileSandbox();
   return new ApiSandbox();
 }

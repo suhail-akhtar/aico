@@ -35,11 +35,15 @@ export interface CleanroomDeps { pickModel: (flag: string | undefined, settings:
 
 const num = (v: string | undefined, d: number): number => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
 
-function launchFor(kind: string, target: string, o: { cwd?: string; pty?: boolean; columns?: string; rows?: string }, name?: string): LaunchSpec {
+function launchFor(kind: string, target: string, o: { cwd?: string; pty?: boolean; columns?: string; rows?: string; language?: 'node' | 'python'; readyLog?: string; readyPort?: string; ipc?: string[]; watch?: string[]; windowTitle?: string; platform?: 'android' | 'ios'; serial?: string }, name?: string): LaunchSpec {
   if (kind === 'web') return { kind: 'web', url: target };
   if (kind === 'api') return { kind: 'api', baseUrl: target };
+  if (kind === 'mobile') return { kind: 'mobile', appId: target, platform: o.platform ?? 'android', ...(o.serial ? { serial: o.serial } : {}), ...(name ? { name } : {}) };
+  if (kind === 'desktop') { const parts = target.match(/"[^"]*"|\S+/g)?.map(p => p.replace(/^"|"$/g, '')) ?? []; return { kind: 'desktop', command: parts[0] ?? target, args: parts.slice(1), ...(o.cwd ? { cwd: o.cwd } : {}), ...(name ? { name } : {}), ...(o.windowTitle ? { windowTitle: o.windowTitle } : {}) }; }
+  if (kind === 'daemon') { const parts = target.match(/"[^"]*"|\S+/g)?.map(p => p.replace(/^"|"$/g, '')) ?? []; return { kind: 'daemon', command: parts[0] ?? target, args: parts.slice(1), ...(o.cwd ? { cwd: o.cwd } : {}), ...(name ? { name } : {}), ready: { ...(o.readyLog ? { logMatch: o.readyLog } : {}), ...(o.readyPort ? { port: Number(o.readyPort) } : {}) }, ...(o.ipc?.length ? { ipc: o.ipc } : {}), ...(o.watch?.length ? { watchDirs: o.watch } : {}) }; }
+  if (kind === 'library') return { kind: 'library', entry: target, ...(o.cwd ? { cwd: o.cwd } : {}), ...(name ? { name } : {}), ...(o.language ? { language: o.language } : {}) };
   if (kind === 'cli') { const parts = target.match(/"[^"]*"|\S+/g)?.map(p => p.replace(/^"|"$/g, '')) ?? []; return { kind: 'cli', command: parts[0] ?? target, args: parts.slice(1), ...(o.cwd ? { cwd: o.cwd } : {}), ...(name ? { name } : {}), ...(o.pty ? { pty: true, columns: num(o.columns, 80), rows: num(o.rows, 24) } : {}) }; }
-  throw new Error(`kind must be web, cli or api (got "${kind}")`);
+  throw new Error(`kind must be web, cli, api, library, daemon, desktop or mobile (got "${kind}")`);
 }
 
 function readSpec(id: string): Spec {
@@ -52,13 +56,21 @@ export function registerCleanroomCommands(program: Command, deps: CleanroomDeps)
   const cr = program.command('cleanroom').description('reconstruct software from its behaviour: observe, synthesize a spec, implement from the spec alone, twin-test');
 
   cr.command('observe <id> <kind> <target>')
-    .description('record a target: kind web (a URL), api (a base URL) or cli (a command line)')
+    .description('record a target: kind web (a URL), api (a base URL), cli (a command line), library (a module file or package folder), daemon or desktop (a command line), or mobile (an Android package name)')
     .option('--max-steps <n>', 'step budget', '60')
     .option('--max-depth <n>', 'web: how deep to follow clicks', '4')
     .option('--cwd <dir>', 'cli: working directory')
     .option('--pty', 'cli: run under a pseudo-terminal (needs the optional @lydell/node-pty)')
     .option('--columns <n>', 'cli --pty: terminal width', '80')
     .option('--rows <n>', 'cli --pty: terminal height', '24')
+    .option('--language <lang>', 'library: node or python (default: from the file)')
+    .option('--serial <id>', 'mobile: the adb device serial (default: the only connected device)')
+    .option('--platform <p>', 'mobile: android (ios is not built)')
+    .option('--window-title <title>', 'desktop: find the window by its title instead of by the process that was started')
+    .option('--ready-log <regex>', 'daemon: ready when its output matches this (a capture group names the TCP port)')
+    .option('--ready-port <n>', 'daemon: ready when this TCP port accepts a connection')
+    .option('--ipc <path...>', 'daemon: extra channels to probe (a Unix socket, a Windows named pipe, or tcp:host:port)')
+    .option('--watch <dir...>', 'daemon: folders it watches; a file is written into each to see what it does')
     .option('--follow-external', 'web: also follow links to other origins')
     .action(async (id: string, kind: string, target: string, opts: { maxSteps: string; maxDepth: string; cwd?: string; pty?: boolean; columns?: string; rows?: string; followExternal?: boolean }) => {
       try {
@@ -95,7 +107,7 @@ export function registerCleanroomCommands(program: Command, deps: CleanroomDeps)
     });
 
   cr.command('twin <id> <cloneTarget>')
-    .description('replay the recorded journeys on the clone and report differences (clone target: a URL for web/api, a command line for cli)')
+    .description('replay the recorded journeys on the clone and report differences (clone target: a URL for web/api, a command line for cli, a module path for library)')
     .option('--live', 'run each step against the real target too, instead of comparing with the recording')
     .option('--max-steps <n>', 'steps to replay', '200')
     .option('--cwd <dir>', 'cli: working directory of the clone')
@@ -104,7 +116,10 @@ export function registerCleanroomCommands(program: Command, deps: CleanroomDeps)
     .action(async (id: string, cloneTarget: string, opts: { live?: boolean; maxSteps: string; cwd?: string; pty?: boolean; explore?: boolean }) => {
       try {
         const j = readJourney(id);
-        const report = await twinTest({ journey: j, clone: launchFor(j.target.kind, cloneTarget, opts), mode: opts.live ? 'live' : 'recorded', maxSteps: num(opts.maxSteps, 200) });
+        const cloneLaunch = launchFor(j.target.kind, cloneTarget, opts);
+        // A daemon clone is ready, listens and watches the way the target did: only the command differs.
+        if (j.target.kind === 'daemon' && cloneLaunch.kind === 'daemon') Object.assign(cloneLaunch, { ready: j.target.ready, ipc: j.target.ipc, watchDirs: j.target.watchDirs });
+        const report = await twinTest({ journey: j, clone: cloneLaunch, mode: opts.live ? 'live' : 'recorded', maxSteps: num(opts.maxSteps, 200) });
         const out = path.join(corpusDir(id), 'twin-report.json');
         fs.writeFileSync(out, JSON.stringify(report, null, 2));
         process.stdout.write(`${renderTwinReport(report)}\nreport: ${out}\n`);
