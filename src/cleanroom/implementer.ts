@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Spec, TargetKind } from './types.js';
 import { renderMarkdown } from './spec.js';
+import { WALL_TOOLS, WORKSPACE_MARKER } from './wall.js';
 
 const STACK: Record<TargetKind, string> = {
   web: 'a small web app: static files or a minimal Node server serving them, no build step unless the spec needs one. Serve it with `node server.mjs` on the port in the PORT environment variable (default 8080).',
@@ -51,7 +52,9 @@ export function implementerBrief(spec: Spec): string {
     '2. For web: match the measured look (colours, fonts, sizes, radii, spacing, layout boxes at the stated viewport) from the spec. Write your own markup and styles; use plain placeholders for any image the spec does not describe.',
     '3. Where the spec says "unknown", choose the simplest reasonable behaviour and list it in clone/NOTES.md. Do not guess silently.',
     '4. Add a short clone/README.md saying how to start it.',
-    '5. Run it yourself before finishing: start it, exercise a few journeys from the spec, and fix what differs. Say plainly in your final answer what you verified and what you could not.',
+    '5. Run it yourself before finishing with the CloneRun tool: mode "run" for a command, mode "serve" with requests for a server. Exercise a few journeys from the spec and fix what differs. Say plainly in your final answer what you verified and what you could not.',
+    '',
+    'This is a clean-room workspace: you have the file tools and CloneRun, and nothing else. You can read this folder and write only inside clone/; spec/ is read-only.',
     '',
     `Coverage note from the spec: ${spec.coverage.note}`,
   ].join('\n');
@@ -66,10 +69,12 @@ export function prepareWorkspace(spec: Spec, dir: string): { dir: string; brief:
   fs.writeFileSync(path.join(dir, 'spec', 'SPEC.md'), renderMarkdown(s));
   const brief = implementerBrief(s);
   fs.writeFileSync(path.join(dir, 'BRIEF.md'), brief);
+  // The marker turns the wall on for any run whose directory this is (wall.ts); it only ever restricts.
+  fs.writeFileSync(path.join(dir, WORKSPACE_MARKER), 'clean-room workspace: file tools and CloneRun only; write only in clone/\n');
   return { dir, brief };
 }
 
-const ALLOWED_TOP = new Set(['spec', 'clone', 'BRIEF.md']);
+const ALLOWED_TOP = new Set(['spec', 'clone', 'BRIEF.md', WORKSPACE_MARKER]);
 
 /** The workspace holds the spec and the clone and nothing else, and none of the observer's files. */
 export function assertSpecOnly(dir: string, corpus?: string): { ok: boolean; problems: string[] } {
@@ -96,6 +101,6 @@ export async function implementClone(spec: Spec, workspace: string, o: Implement
   const check = assertSpecOnly(workspace);
   if (!check.ok) throw new Error(`the implementer workspace is not spec-only: ${check.problems.join('; ')}`);
   const { runHeadless } = await import('../ci/headless.js');
-  const r = await runHeadless({ task: brief, model: o.model, cwd: workspace, settings: o.settings, readOnly: false, budgetUsd: o.budgetUsd, ...(o.maxMinutes ? { maxMinutes: o.maxMinutes } : {}), name: `cleanroom implement ${spec.id}`, ...(o.provider ? { provider: o.provider } : {}) });
+  const r = await runHeadless({ task: brief, model: o.model, cwd: workspace, settings: o.settings, readOnly: false, tools: [...WALL_TOOLS], budgetUsd: o.budgetUsd, ...(o.maxMinutes ? { maxMinutes: o.maxMinutes } : {}), name: `cleanroom implement ${spec.id}`, ...(o.provider ? { provider: o.provider } : {}) });
   return { text: r.text, ...(r.stoppedBy ? { stoppedBy: r.stoppedBy } : {}), check };
 }

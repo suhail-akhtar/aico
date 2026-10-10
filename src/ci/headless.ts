@@ -39,6 +39,8 @@ export interface HeadlessOptions {
   settings: AicoSettings;
   /** Give the run only the read-only tool set and no delegation. */
   readOnly: boolean;
+  /** Give the run exactly these tools and no delegation (a clean-room implementer, ADR 0041). Takes precedence over `readOnly`. */
+  tools?: string[];
   /** Stop once the estimated cost of the run passes this many USD. */
   budgetUsd?: number;
   /** Wall-clock ceiling for the run, in minutes. */
@@ -93,7 +95,7 @@ export async function runHeadless(o: HeadlessOptions): Promise<HeadlessResult> {
       // Without a tracker the loop has nothing to measure spend against and the cost ceiling is silently inert
       // (`aico -p` has this gap today; a pipeline cannot afford it).
       tokenTracker: createTokenTracker(),
-      ...(o.readOnly ? { agentSpecTools: [...READ_ONLY_TOOLS], canDelegate: false } : {}),
+      ...(o.tools ? { agentSpecTools: [...o.tools], canDelegate: false } : o.readOnly ? { agentSpecTools: [...READ_ONLY_TOOLS], canDelegate: false } : {}),
       ...(o.provider ? { provider: o.provider } : {}),
     });
   } finally {

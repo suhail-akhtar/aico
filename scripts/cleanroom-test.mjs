@@ -139,6 +139,68 @@ section('CLI: interactive stdin and signals');
   await sb.stop();
 }
 
+section('CLI under a pseudo-terminal');
+if (!(await C.ptyAvailable())) console.log('  SKIP  @lydell/node-pty is not installed here: the pty adapter was not exercised');
+else {
+  const pty = (extra = {}) => ({ kind: 'cli', command: process.execPath, args: [], pty: true, columns: 100, rows: 30, ...extra });
+  let sb = new C.CliSandbox();
+  await sb.start(pty());
+  await sb.inject({ type: 'run', args: ['-e', "console.log('tty=' + process.stdout.isTTY + ' size=' + process.stdout.columns + 'x' + process.stdout.rows)"] });
+  let o = await sb.observe();
+  assert(/tty=true size=100x30/.test(C.stripAnsi(o.stdout)) && o.terminal.tty === true && o.exitCode === 0, 'the program sees a real terminal of the requested size', C.stripAnsi(o.stdout));
+  await sb.stop();
+  const pipe = new C.CliSandbox();
+  await pipe.start({ kind: 'cli', command: process.execPath, args: [] });
+  await pipe.inject({ type: 'run', args: ['-e', "console.log('tty=' + !!process.stdout.isTTY)"] });
+  assert(/tty=false/.test((await pipe.observe()).stdout) && (await pipe.observe()).terminal.tty === false, 'the same program on pipes is not on a terminal, and the observation says which');
+  await pipe.stop();
+
+  sb = new C.CliSandbox();
+  await sb.start(pty({ interactive: true }));
+  const tui = "process.stdin.setRawMode(true); process.stdin.resume(); process.stdout.write('\x1b[2J\x1b[1;1HMENU\x1b[3;3H> one\x1b[4;3H  two'); process.stdin.on('data', d => { const k = d.toString('hex'); if (k === '03') process.exit(0); process.stdout.write('\x1b[6;1Hkey:' + k + '   '); }); process.stdout.on('resize', () => process.stdout.write('\x1b[8;1Hcols:' + process.stdout.columns + '   ')); process.on('SIGINT', () => { process.stdout.write('\x1b[9;1Hgot-sigint'); process.exit(0); });";
+  await sb.inject({ type: 'run', args: ['-e', tui] });
+  o = await sb.observe();
+  assert(o.screen[0] === 'MENU' && o.screen[2].trim() === '> one' && o.screen[3].trim() === 'two', 'a full-screen program is read as a screen, not as raw bytes', o.screen);
+  await sb.inject({ type: 'press', key: 'Enter' });
+  assert((await sb.observe()).screen.some(r => r.includes('key:0d')), 'a key press arrives as the bytes a terminal sends');
+  await sb.inject({ type: 'press', key: 'ArrowUp' });
+  assert((await sb.observe()).screen.some(r => r.includes('key:1b5b41')), 'arrow keys arrive as escape sequences');
+  await sb.inject({ type: 'resize', columns: 60, rows: 20 });
+  assert((await sb.observe()).screen.some(r => r.includes('cols:60')), 'a resize reaches the program');
+  assert(C.keyToSequence('ctrl+c') === '' && C.keyToSequence('F5') === '[15~' && C.keyToSequence('x') === 'x', 'key names map to terminal sequences');
+  await sb.stop();
+
+  sb = new C.CliSandbox();
+  await sb.start(pty({ interactive: true }));
+  await sb.inject({ type: 'run', args: ['-e', "process.on('SIGINT', () => { console.log('got-sigint'); process.exit(7); }); console.log('ready'); setInterval(() => {}, 1000);"] });
+  await sb.inject({ type: 'signal', signal: 'SIGINT' });
+  o = await sb.observe();
+  assert(/got-sigint/.test(C.stripAnsi(o.stdout)) && o.exitCode === 7 && o.signalDelivery === 'ctrl-c', 'Ctrl-C is a real interrupt: the handler ran and chose the exit code, on every platform', o);
+  await sb.stop();
+
+  sb = new C.CliSandbox();
+  await sb.start({ kind: 'cli', command: process.execPath, args: [], interactive: true });
+  await sb.inject({ type: 'run', args: ['-e', "process.on('SIGTERM', () => { console.log('term-handler'); process.exit(0); }); console.log('ready'); setInterval(() => {}, 1000);"] });
+  await sb.inject({ type: 'signal', signal: 'SIGTERM' });
+  o = await sb.observe();
+  assert(o.signalDelivery === (process.platform === 'win32' ? 'forced' : 'signal') && (process.platform === 'win32' ? !/term-handler/.test(o.stdout) : /term-handler/.test(o.stdout)), 'SIGTERM runs the handler on POSIX and is reported as forced on Windows', o);
+  await sb.stop();
+
+  const one = new C.CliSandbox();
+  await one.start(pty({ interactive: true }));
+  await one.inject({ type: 'run', args: ['-e', "process.stdin.setEncoding('utf8'); process.stdin.on('data', d => { if (d.includes('hello')) console.log('read:hello'); }); process.stdin.on('end', () => { console.log('eof'); process.exit(0); }); console.log('ready');"] });
+  await one.inject({ type: 'stdin', data: 'hello\r' });
+  assert(/read:hello/.test(C.stripAnsi((await one.observe()).stdout)), 'typed input reaches a program on a terminal');
+  await one.stop();
+  if (process.platform !== 'win32') {
+    const eof = new C.CliSandbox();
+    await eof.start(pty());
+    await eof.inject({ type: 'run', args: ['-e', "let b=''; process.stdin.on('data', d => b += d); process.stdin.on('end', () => console.log('read:' + b.trim()));"], stdin: 'hello\n' });
+    assert(/read:hello/.test(C.stripAnsi((await eof.observe()).stdout)) && (await eof.observe()).exitCode === 0, 'a one-shot with input ends with Ctrl-D on a terminal');
+    await eof.stop();
+  } else console.log('  SKIP  end-of-input on a Windows pseudo-terminal: Node does not treat Ctrl-Z as EOF there (documented limit)');
+}
+
 // ── an API target, a clone and a wrong clone ──────────────────────────────────
 const apiServer = (variant) => http.createServer((req, res) => {
   const send = (status, body, type = 'application/json') => { res.writeHead(status, { 'content-type': type }); res.end(typeof body === 'string' ? body : JSON.stringify(body)); };
@@ -203,6 +265,81 @@ else {
   const bad = await C.twinTest({ journey: j, clone: web(pw), maxSteps: 4 });
   assert(bad.differences.some(d => d.field === 'frame') || bad.differences.some(d => d.field === 'colors'), 'a clone with a different background is caught visually', bad.differences.map(d => d.field));
   target.close(); clone.close(); wrong.close();
+}
+
+// ── coverage, resume, the guide, the clone-side spec diff ─────────────────────
+section('coverage, resume and refusing to overwrite');
+{
+  const j1 = await C.explore('cov-greeter', cli('target.mjs'), { maxSteps: 4 });
+  const s1 = C.readExplorerState('cov-greeter');
+  assert(j1.steps.length === 4 && s1.stoppedBy === 'budget' && s1.pending.length > 0, 'a run that hits its budget says it stopped there and what is left', { steps: j1.steps.length, pending: s1.pending.length });
+  assert(/left unvisited \(resume to continue\)/.test(C.coverageLine(s1)), 'the coverage line says how much is untried', C.coverageLine(s1));
+  const spec1 = C.synthesize(j1, undefined, s1);
+  assert(spec1.coverage.ratio < 1 && spec1.coverage.pending.length > 0 && spec1.unknowns.some(u => /unvisited/.test(u)), 'the spec carries the coverage ratio, the frontier and an unknown about it', spec1.coverage);
+  let refused = false;
+  try { await C.explore('cov-greeter', cli('target.mjs'), { maxSteps: 4 }); } catch (e) { refused = /already holds 4 recorded step/.test(String(e.message)); }
+  assert(refused, 'recording over an existing id is refused instead of mixing two runs');
+  const created = JSON.parse(fs.readFileSync(path.join(C.corpusDir('cov-greeter'), 'meta.json'), 'utf8')).createdAt;
+  const j2 = await C.explore('cov-greeter', cli('target.mjs'), { maxSteps: 40, resume: true });
+  const s2 = C.readExplorerState('cov-greeter');
+  assert(j2.steps.length > 4 && s2.stoppedBy === 'complete' && s2.pending.length === 0, 'a resume continues into the same journey and finishes it', { steps: j2.steps.length, stoppedBy: s2.stoppedBy });
+  const keys = j2.steps.map(s => s.stimulus.args.join('\u0000'));
+  assert(new Set(keys).size === keys.length, 'a resumed run does not repeat what the first run already tried');
+  assert(JSON.parse(fs.readFileSync(path.join(C.corpusDir('cov-greeter'), 'meta.json'), 'utf8')).createdAt === created, 'a resume keeps the original recording metadata');
+  const spec2 = C.synthesize(j2, undefined, s2);
+  assert(spec2.coverage.ratio === 1 && !spec2.unknowns.some(u => /unvisited/.test(u)), 'a finished exploration reports full coverage of what it found', spec2.coverage);
+  const j3 = await C.explore('cov-greeter', cli('target.mjs'), { maxSteps: 3, overwrite: true });
+  assert(j3.steps.length === 3, '--force starts over');
+}
+
+section('model-guided exploration');
+{
+  const options = ['--help', '--version', 'greet --help'];
+  const g1 = C.createGuide(async () => 'Sure! ```json\n["--version", "rm -rf /", "--help"]\n```');
+  assert(JSON.stringify(await g1({ kind: 'cli', state: 's', options, history: [] })) === JSON.stringify(['--version', '--help']), 'picks are read out of prose and fences, and an option that was not on offer is dropped');
+  assert(C.parsePicks('no array here', options) === undefined && C.parsePicks('["nope"]', options) === undefined, 'a reply with nothing usable leaves the default order');
+  let asked = 0;
+  const g2 = C.createGuide(async () => { asked++; return '["--version"]'; }, { maxCalls: 2 });
+  await g2({ kind: 'cli', state: 'a', options, history: [] }); await g2({ kind: 'cli', state: 'a', options, history: [] }); await g2({ kind: 'cli', state: 'b', options, history: [] }); await g2({ kind: 'cli', state: 'c', options, history: [] });
+  assert(asked === 2 && g2.calls() === 2, 'the same view is not asked twice, and the number of calls is capped', { asked });
+  const g3 = C.createGuide(async () => { throw new Error('provider down'); });
+  assert(await g3({ kind: 'cli', state: 's', options, history: [] }) === undefined, 'a guide that fails leaves the default order');
+
+  const j = await C.explore('guided-greeter', cli('target.mjs'), { maxSteps: 3, guide: C.createGuide(async () => '["--version"]') });
+  assert(j.steps[0].stimulus.args.join(' ') === '--version', 'the guide changes what is tried first', j.steps.map(s => s.stimulus.args.join(' ')));
+  const j0 = await C.explore('unguided-greeter', cli('target.mjs'), { maxSteps: 3 });
+  assert(j0.steps[0].stimulus.args.join(' ') === '--help', 'without a guide the default order stands', j0.steps.map(s => s.stimulus.args.join(' ')));
+  const j4 = await C.explore('hallucinating-greeter', cli('target.mjs'), { maxSteps: 3, guide: C.createGuide(async () => '["delete everything"]') });
+  assert(j4.steps.every(s => !/delete/.test(s.stimulus.args.join(' '))), 'a hallucinated option never becomes a stimulus');
+
+  let calls = 0;
+  const provider = { id: 'mock', displayName: 'Mock', async *chat() { calls++; yield { type: 'text', content: '["--version"]' }; yield { type: 'usage', inputTokens: 100, outputTokens: 10 }; yield { type: 'finish', reason: 'stop' }; } };
+  const free = C.createModelCompleter({ settings: {}, model: 'mock', budgetUsd: 0, provider });
+  assert((await free('s', 'u')) === '' && calls === 0, 'a spent budget stops the guide before it calls the model');
+  const paid = C.createModelCompleter({ settings: {}, model: 'mock', budgetUsd: 5, provider });
+  assert((await paid('s', 'u')) === '["--version"]' && calls === 1, 'within budget the completer calls the provider');
+}
+
+section('clone-side exploration: the spec diff');
+{
+  fs.writeFileSync(path.join(cliDir, 'lacking.mjs'), cliSource('clone').replace("  count                  count the lines on stdin\n", '').replace("  --shout                upper-case the greeting\n", '  --loud                 upper-case the greeting\n'));
+  const jt = await C.explore('diff-target', cli('target.mjs'), { maxSteps: 40 });
+  const st = C.synthesize(jt, undefined, C.readExplorerState('diff-target'));
+  const jc = await C.explore('diff-same', cli('clone.mjs'), { maxSteps: 40 });
+  const same = C.diffSpecs(st, C.synthesize(jc, undefined, C.readExplorerState('diff-same')));
+  assert(same.onlyInTarget.length === 0 && same.onlyInClone.length === 0 && same.changed.length === 0 && same.same > 3, 'an identical clone has no difference in what it exposes', same);
+  const jl = await C.explore('diff-lacking', cli('lacking.mjs'), { maxSteps: 40 });
+  const bad = C.diffSpecs(st, C.synthesize(jl, undefined, C.readExplorerState('diff-lacking')));
+  const text = C.renderSpecDiff(bad);
+  assert(bad.onlyInTarget.some(x => /--shout|command count/.test(x)) || bad.changed.some(x => /--shout/.test(x)), 'a flag or command the target has and the clone lacks is found without any recorded journey touching it', text);
+  assert(bad.changed.some(x => /--loud/.test(x)) || bad.onlyInClone.length > 0, 'something extra the clone invented is found too', text);
+  const w = (v) => new Promise(r => { const s = apiServer(v); s.listen(0, '127.0.0.1', () => r(s)); });
+  const [a, b] = await Promise.all([w('target'), w('wrong')]);
+  const ja = await C.explore('diff-api-target', { kind: 'api', baseUrl: `http://127.0.0.1:${a.address().port}` }, { maxSteps: 40 });
+  const jb = await C.explore('diff-api-wrong', { kind: 'api', baseUrl: `http://127.0.0.1:${b.address().port}` }, { maxSteps: 40 });
+  const apiDiff = C.diffSpecs(C.synthesize(ja), C.synthesize(jb));
+  assert(apiDiff.changed.some(x => /different shape/.test(x)), 'an API clone returning a different response shape is found by spec diff', apiDiff);
+  a.close(); b.close();
 }
 
 console.log(`\ncleanroom: ${passed} passed, ${failed} failed`);

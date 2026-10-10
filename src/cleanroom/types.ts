@@ -27,7 +27,7 @@ export type TargetKind = 'web' | 'cli' | 'api';
 /** What to start. Exactly one of the shapes, chosen by `kind`. */
 export type LaunchSpec =
   | { kind: 'web'; url: string; viewport?: { width: number; height: number }; locale?: string; timeoutMs?: number }
-  | { kind: 'cli'; command: string; args?: string[]; cwd?: string; env?: Record<string, string>; columns?: number; rows?: number; timeoutMs?: number; interactive?: boolean; /** The program's name in the spec; defaults to the executable's. */ name?: string }
+  | { kind: 'cli'; command: string; args?: string[]; cwd?: string; env?: Record<string, string>; columns?: number; rows?: number; timeoutMs?: number; interactive?: boolean; /** Run under a pseudo-terminal: a program that checks isatty or draws a TUI behaves like itself. */ pty?: boolean; /** The program's name in the spec; defaults to the executable's. */ name?: string }
   | { kind: 'api'; baseUrl: string; headers?: Record<string, string>; timeoutMs?: number };
 
 /** One thing done to the target. Serialisable, so a journey can be replayed on the clone. */
@@ -41,6 +41,7 @@ export type Stimulus =
   | { type: 'run'; args: string[]; stdin?: string; env?: Record<string, string> } // CLI one-shot
   | { type: 'stdin'; data: string }                                              // CLI interactive
   | { type: 'signal'; signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' }
+  | { type: 'resize'; columns: number; rows: number }                            // CLI under a pty
   | { type: 'request'; method: string; path: string; headers?: Record<string, string>; body?: unknown };
 
 export interface NetworkEvent { method: string; url: string; status?: number; requestBody?: string; responseBody?: string; contentType?: string }
@@ -71,6 +72,10 @@ export interface Observation {
   /** Rendered terminal screen (rows of text) after replaying the ANSI stream. */
   screen?: string[];
   durationMs?: number;
+  /** How the last signal reached the program: a real signal, a Ctrl-C keystroke on a pty, or forced termination (Windows has no SIGTERM/SIGHUP). */
+  signalDelivery?: 'signal' | 'ctrl-c' | 'forced';
+  /** Whether the program ran under a pseudo-terminal, and the host platform it ran on. */
+  terminal?: { tty: boolean; platform: string };
   // api
   response?: { status: number; headers: Record<string, string>; body: string; contentType?: string };
   error?: string;
@@ -101,7 +106,7 @@ export interface Sandbox {
 /** One recorded step: where it started, what was done, what came out. */
 export interface Step { seq: number; from: StateFingerprint; stimulus: Stimulus; observation: Observation; to: StateFingerprint }
 
-export interface Journey { id: string; target: LaunchSpec; steps: Step[] }
+export interface Journey { id: string; target: LaunchSpec; steps: Step[]; /** The host platform the recording was made on. */ platform?: string }
 
 // ── The spec: the only thing that crosses the firewall ─────────────────────────
 
@@ -132,7 +137,7 @@ export interface Spec {
   id: string;
   kind: TargetKind;
   createdAt: string;
-  coverage: { steps: number; states: number; transitions: number; note: string };
+  coverage: { steps: number; states: number; transitions: number; note: string; /** Of everything the explorer found, how much it tried (0 to 1); absent when the exploration state was not kept. */ ratio?: number; discovered?: number; tried?: number; /** Found but not tried: the frontier a further run would cover. */ pending?: string[]; skipped?: { item: string; reason: string }[]; stoppedBy?: 'complete' | 'budget' | 'aborted' };
   web?: WebSpec; cli?: CliSpec; api?: ApiSpec;
   /** Behaviour the observer could not pin down: said out loud so the clone is not trusted blindly. */
   unknowns: string[];
@@ -143,4 +148,4 @@ export type JsonSchema = { type?: string | string[]; properties?: Record<string,
 // ── Twin-testing ───────────────────────────────────────────────────────────────
 
 export interface Difference { step: number; stimulus: Stimulus; field: string; target: unknown; clone: unknown }
-export interface TwinReport { journeys: number; steps: number; identical: number; differences: Difference[]; parity: number /* identical/steps */ ; notes: string[] }
+export interface TwinReport { journeys: number; steps: number; identical: number; differences: Difference[]; parity: number /* identical/steps */ ; notes: string[]; /** How much of what the explorer found it tried, so parity is read next to it. */ coverage?: string }

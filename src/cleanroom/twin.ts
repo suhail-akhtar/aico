@@ -104,6 +104,7 @@ export async function twinTest(o: TwinOptions): Promise<TwinReport> {
     if (diffs.length === 0) identical++; else differences.push(...diffs);
     o.onStep?.(step.seq, diffs.length === 0);
   }
+  if (o.journey.platform && o.journey.platform !== process.platform) notes.push(`Recorded on ${o.journey.platform}, replayed on ${process.platform}: line endings, paths, signals and terminal behaviour can differ for reasons that are not the clone's.`);
   notes.push('Parity is measured over the recorded journeys only; behaviour nobody observed is not covered.');
   return { journeys: 1, steps: replayed, identical, differences, parity: replayed ? identical / replayed : 0, notes };
 }
@@ -130,7 +131,7 @@ function compare(kind: LaunchSpec['kind'], step: Step, t: Observation, c: Observ
     eq('exitCode', t.exitCode ?? null, c.exitCode ?? null);
     eq('stdout', sc(t.stdout), sc(c.stdout));
     eq('stderr', sc(t.stderr), sc(c.stderr));
-    eq('screen', (t.screen ?? []).map(sc), (c.screen ?? []).map(sc));
+    if (t.screen && c.screen) eq('screen', t.screen.map(sc), c.screen.map(sc)); // only when the recording has a screen to compare
   } else if (kind === 'api') {
     eq('status', t.response?.status, c.response?.status);
     eq('contentType', t.response?.contentType, c.response?.contentType);

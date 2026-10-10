@@ -21,6 +21,7 @@ import { codeMap, codeMapDefinition } from './codemap.js';
 import { codeGraphTool, codeGraphDefinition } from './codegraph.js';
 import { evidenceTool, evidenceDefinition } from './evidence.js';
 import { deliveryTool, deliveryDefinition } from './delivery.js';
+import { cloneRun, cloneRunDefinition } from './clone-run.js';
 import { executeConnectionManage, connectionManageDefinition } from './connection-manage.js';
 import { afterRead, afterWrite, beforeWrite, takeQueuedEditNotes } from '../codegraph/edit-note.js';
 import { gitTool, gitDefinition } from './git.js';
@@ -320,6 +321,8 @@ export const toolDefinitions: ToolDefinition[] = [
   { ...evidenceDefinition, isConcurrencySafe: true, maxResultSizeChars: 40_000 },
   // The task board (ADR 0038). Deferred (group `delivery`). Exclusive: create/update/submit read, change and rewrite the board. No permission prompt: it only edits the board; spending and landing are a person's (decision gate).
   { ...deliveryDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
+  // Runs the clone in a clean-room workspace under Node's permission model (ADR 0041). Deferred (group `cleanroom`). Exclusive: it starts a process.
+  { ...cloneRunDefinition, isConcurrencySafe: false, maxResultSizeChars: 30_000 },
   // Connections to a forge and tracker (ADR 0039). Deferred (group `connections`). Exclusive: it edits connection and mapping files. Asks at the default approval level (permissions.ts).
   { ...connectionManageDefinition, isConcurrencySafe: false, maxResultSizeChars: 20_000 },
   { ...capabilityReportToolDefinition, isConcurrencySafe: true, maxResultSizeChars: 100_000 },
@@ -735,6 +738,9 @@ export async function executeTool(
       break;
     case 'Delivery':
       result = await deliveryTool(args as unknown as Parameters<typeof deliveryTool>[0]);
+      break;
+    case 'CloneRun':
+      result = await cloneRun(args as unknown as Parameters<typeof cloneRun>[0]);
       break;
     case 'CodebaseMap':
       result = await codeMap(args as unknown as Parameters<typeof codeMap>[0]);

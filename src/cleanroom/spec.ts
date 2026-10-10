@@ -24,10 +24,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ApiSpec, CliSpec, Journey, JsonSchema, Spec, SpecState, SpecTransition, Step, WebSpec } from './types.js';
-import { parseHelp } from './explorer.js';
+import { parseHelp, type ExplorerState } from './explorer.js';
 import { stripAnsi } from './ansi.js';
 
-export function synthesize(journey: Journey, now = new Date().toISOString()): Spec {
+export function synthesize(journey: Journey, now = new Date().toISOString(), explored?: ExplorerState): Spec {
   const unknowns: string[] = [];
   const spec: Spec = {
     version: 1, id: journey.id, kind: journey.target.kind, createdAt: now,
@@ -40,6 +40,16 @@ export function synthesize(journey: Journey, now = new Date().toISOString()): Sp
   spec.coverage.states = web ? web.states.length : new Set(journey.steps.map(s => s.to)).size;
   spec.coverage.transitions = web ? web.transitions.length : journey.steps.length;
   spec.coverage.note = 'Only behaviour the explorer reached is described. Parity is measured over these journeys, not over the target as a whole.';
+  if (explored) {
+    const found = explored.discovered.length;
+    const triedOfFound = explored.discovered.filter(d => explored.tried.includes(d)).length;
+    Object.assign(spec.coverage, {
+      discovered: found, tried: explored.tried.length, ratio: found ? Math.round((triedOfFound / found) * 1000) / 1000 : 1,
+      pending: explored.pending.slice(0, 50), skipped: explored.skipped.slice(0, 50), stoppedBy: explored.stoppedBy,
+    });
+    if (explored.pending.length) unknowns.push(`the exploration stopped with ${explored.pending.length} item(s) unvisited (for example: ${explored.pending.slice(0, 3).join('; ')}): resume it to cover them`);
+    if (explored.skipped.length) unknowns.push(`${explored.skipped.length} item(s) were skipped on purpose and are not described (for example: ${explored.skipped.slice(0, 2).map(s => s.item.split('|').pop() + ' — ' + s.reason).join('; ')})`);
+  }
   if (journey.steps.length === 0) unknowns.push('nothing was recorded: the target did not respond or the budget was zero');
   return spec;
 }
@@ -118,7 +128,11 @@ function cliSpec(j: Journey, unknowns: string[]): CliSpec {
     }
   }
   if (!commands.size) unknowns.push('no help text was found, so the command and flag list is incomplete');
-  unknowns.push('interactive behaviour (prompts, a terminal UI) was only observed through pipes, not a real terminal');
+  const ptyRun = j.steps.some(s => s.observation.terminal?.tty);
+  const needsTty = j.steps.some(s => /not a tty|not a terminal|isatty|requires? a (real )?terminal|raw mode/i.test(s.observation.stderr ?? '') );
+  if (!ptyRun) unknowns.push(needsTty ? 'the program reported it needs a terminal, but it was only observed through pipes: observe it again with --pty' : 'interactive behaviour (prompts, a terminal UI) was only observed through pipes, not a real terminal');
+  if (j.platform === 'win32' || j.steps.some(s => s.observation.terminal?.platform === 'win32')) unknowns.push('recorded on Windows: SIGTERM and SIGHUP handlers cannot be observed there (the process is ended outright); only Ctrl-C reaches a handler, and only on a pseudo-terminal');
+  if (ptyRun && j.platform === 'win32') unknowns.push('recorded on a Windows pseudo-terminal: end-of-input (Ctrl-D/Ctrl-Z) cannot be delivered to the program');
   return { name: t.name ?? path.basename(t.command), commands: [...commands.values()], cases };
 }
 
@@ -207,7 +221,8 @@ export function writeSpec(spec: Spec, dir: string): { json: string; markdown: st
 }
 
 export function renderMarkdown(spec: Spec): string {
-  const L: string[] = [`# Behaviour specification: ${spec.id}`, '', `Kind: ${spec.kind}. ${spec.coverage.note}`, `Recorded ${spec.coverage.steps} steps, ${spec.coverage.states} states, ${spec.coverage.transitions} transitions.`, ''];
+  const cv = spec.coverage;
+  const L: string[] = [`# Behaviour specification: ${spec.id}`, '', `Kind: ${spec.kind}. ${cv.note}`, `Recorded ${cv.steps} steps, ${cv.states} states, ${cv.transitions} transitions.${cv.ratio !== undefined ? ` The explorer tried ${Math.round(cv.ratio * 100)}% of what it found (${cv.tried} tried, ${cv.discovered} found).` : ''}`, ''];
   if (spec.web) {
     const w = spec.web;
     L.push('## Routes', ...w.routes.map(r => `- \`${r.path}\` — ${r.title || '(untitled)'}`), '');

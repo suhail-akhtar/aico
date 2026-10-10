@@ -25,10 +25,11 @@ export function corpusDir(id: string): string {
 export class Recorder {
   private seq = 0;
   readonly dir: string;
-  constructor(readonly id: string, readonly target: LaunchSpec) {
+  /** `keepMeta`: a resumed run keeps the original target, time and platform instead of rewriting them. */
+  constructor(readonly id: string, readonly target: LaunchSpec, opts: { keepMeta?: boolean } = {}) {
     this.dir = corpusDir(id);
     fs.mkdirSync(path.join(this.dir, 'frames'), { recursive: true });
-    fs.writeFileSync(path.join(this.dir, 'meta.json'), JSON.stringify({ id, target, createdAt: new Date().toISOString() }, null, 2));
+    if (!(opts.keepMeta && fs.existsSync(path.join(this.dir, 'meta.json')))) fs.writeFileSync(path.join(this.dir, 'meta.json'), JSON.stringify({ id, target, createdAt: new Date().toISOString(), platform: process.platform, node: process.version }, null, 2));
     const existing = path.join(this.dir, 'journey.jsonl');
     if (fs.existsSync(existing)) this.seq = fs.readFileSync(existing, 'utf8').split('\n').filter(Boolean).length;
   }
@@ -45,7 +46,7 @@ export class Recorder {
 
 export function readJourney(id: string): Journey {
   const dir = corpusDir(id);
-  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')) as { target: LaunchSpec };
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')) as { target: LaunchSpec; platform?: string };
   const file = path.join(dir, 'journey.jsonl');
   const steps: Step[] = [];
   if (fs.existsSync(file)) {
@@ -54,7 +55,7 @@ export function readJourney(id: string): Journey {
       try { steps.push(JSON.parse(line) as Step); } catch { /* a torn last line from a crash: the steps before it stand */ }
     }
   }
-  return { id, target: meta.target, steps };
+  return { id, target: meta.target, steps, ...(meta.platform ? { platform: meta.platform } : {}) };
 }
 
 export function frameFile(id: string, seq: number): string | undefined {

@@ -77,6 +77,12 @@ export interface ToolGroup {
    * on every request is the cost deferral exists to remove.
    */
   unlisted?: boolean;
+  /**
+   * Not offered in LoadTools' own description: the group is only ever loaded by a
+   * request that names it (REQUEST_LOADS), so listing it would cost every other
+   * run its tokens for nothing. A clean-room workspace's brief names `CloneRun`.
+   */
+  hidden?: boolean;
 }
 
 /**
@@ -148,6 +154,13 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     id: 'delivery',
     summary: 'task board: plan a backlog, submit a task',
     tools: ['Delivery'],
+  },
+  {
+    // ADR 0041. Loaded outright inside a clean-room workspace (REQUEST_LOADS names it): the implementer's only way to run what it wrote.
+    id: 'cleanroom',
+    summary: 'run the clone being built, in a sandbox, and try it (clean-room workspaces only)',
+    tools: ['CloneRun'],
+    hidden: true,
   },
   {
     // ADR 0039. Loaded outright by a request to connect a project to GitHub or another forge/tracker (REQUEST_LOADS).
@@ -232,6 +245,11 @@ const REQUEST_LOADS: Array<{ re: RegExp; groups: readonly string[] }> = [
     // A PR description, a commit message or "what did you verify": the record beats the model's recollection (ADR 0034).
     re: /\b(?:pull request|PR (?:description|body|summary)|pr (?:description|body)|commit (?:message|body)|change (?:packet|evidence|report)|evidence (?:report|packet)|what (?:did|have) you (?:verify|verified|check|run|test)|prove it works)\b/i,
     groups: ['evidence'],
+  },
+  {
+    // A clean-room workspace's own brief names it (ADR 0041): the implementer has no shell, so CloneRun is how it tries what it wrote.
+    re: /\b(?:clean-?room (?:workspace|clone)|CloneRun)\b/i,
+    groups: ['cleanroom'],
   },
   {
     // A backlog, a board of tasks, a sprint, or a delivery task (ADR 0038): the Delivery tool, not a loose list in chat.
@@ -325,7 +343,7 @@ export function isDeferred(tool: string, loaded: ReadonlySet<string>): boolean {
  */
 export function loadToolsDefinition(available: ReadonlySet<string>, loaded: ReadonlySet<string>, extra: readonly ToolGroup[] = []) {
   const offered = [...TOOL_GROUPS, ...extra]
-    .filter(g => !loaded.has(g.id))
+    .filter(g => !loaded.has(g.id) && !g.hidden)
     .map(g => ({ ...g, tools: g.tools.filter(t => available.has(t)) }))
     .filter(g => g.tools.length > 0);
   if (offered.length === 0) return undefined;

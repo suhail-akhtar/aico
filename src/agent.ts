@@ -141,6 +141,7 @@ import {
 } from './agents/effective.js';
 import { applyAutonomyCeiling, ceilingLevel, requestedLevel } from './agents/ceiling.js';
 import { installWritePathsGuard } from './agents/paths-guard.js';
+import { installCleanroomWall } from './cleanroom/wall.js';
 import { parseLevel } from './autonomy/levels.js';
 import { PolicyError, createPolicyGuard, dayBudgetCap, dayBudgetRefusal, policyAllowsTool, runRefusal, withPolicyCeiling } from './policy/enforce.js';
 import { engineVersion } from './policy/managed.js';
@@ -2029,6 +2030,8 @@ async function runAgentInContext(opts: AgentOptions): Promise<string> {
   // template said. Idempotent by stage name, so a composed pipeline shared
   // across sessions carries one observer, not one per turn.
   installProfileObserver(pipeline, () => projectRoot());
+  // A clean-room workspace (marked folder) narrows what any run in it can do; abstains everywhere else (ADR 0041).
+  installCleanroomWall(pipeline, () => currentCwd(), () => projectRoot());
 
   /*
     Custom tools (custom-tools/): the enabled ones visible from this run's

@@ -22,7 +22,9 @@ import path from 'node:path';
 import type { Command } from 'commander';
 import type { AicoSettings } from '../settings.js';
 import type { LaunchSpec } from './types.js';
-import { explore } from './explorer.js';
+import { coverageLine, explore, readExplorerState } from './explorer.js';
+import { createGuide, createModelCompleter } from './guide.js';
+import { diffSpecs, renderSpecDiff } from './specdiff.js';
 import { corpusDir, readJourney } from './recorder.js';
 import { synthesize, writeSpec } from './spec.js';
 import { implementClone, prepareWorkspace } from './implementer.js';
@@ -33,10 +35,10 @@ export interface CleanroomDeps { pickModel: (flag: string | undefined, settings:
 
 const num = (v: string | undefined, d: number): number => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
 
-function launchFor(kind: string, target: string, o: { cwd?: string }, name?: string): LaunchSpec {
+function launchFor(kind: string, target: string, o: { cwd?: string; pty?: boolean; columns?: string; rows?: string }, name?: string): LaunchSpec {
   if (kind === 'web') return { kind: 'web', url: target };
   if (kind === 'api') return { kind: 'api', baseUrl: target };
-  if (kind === 'cli') { const parts = target.match(/"[^"]*"|\S+/g)?.map(p => p.replace(/^"|"$/g, '')) ?? []; return { kind: 'cli', command: parts[0] ?? target, args: parts.slice(1), ...(o.cwd ? { cwd: o.cwd } : {}), ...(name ? { name } : {}) }; }
+  if (kind === 'cli') { const parts = target.match(/"[^"]*"|\S+/g)?.map(p => p.replace(/^"|"$/g, '')) ?? []; return { kind: 'cli', command: parts[0] ?? target, args: parts.slice(1), ...(o.cwd ? { cwd: o.cwd } : {}), ...(name ? { name } : {}), ...(o.pty ? { pty: true, columns: num(o.columns, 80), rows: num(o.rows, 24) } : {}) }; }
   throw new Error(`kind must be web, cli or api (got "${kind}")`);
 }
 
@@ -54,8 +56,11 @@ export function registerCleanroomCommands(program: Command, deps: CleanroomDeps)
     .option('--max-steps <n>', 'step budget', '60')
     .option('--max-depth <n>', 'web: how deep to follow clicks', '4')
     .option('--cwd <dir>', 'cli: working directory')
+    .option('--pty', 'cli: run under a pseudo-terminal (needs the optional @lydell/node-pty)')
+    .option('--columns <n>', 'cli --pty: terminal width', '80')
+    .option('--rows <n>', 'cli --pty: terminal height', '24')
     .option('--follow-external', 'web: also follow links to other origins')
-    .action(async (id: string, kind: string, target: string, opts: { maxSteps: string; maxDepth: string; cwd?: string; followExternal?: boolean }) => {
+    .action(async (id: string, kind: string, target: string, opts: { maxSteps: string; maxDepth: string; cwd?: string; pty?: boolean; columns?: string; rows?: string; followExternal?: boolean }) => {
       try {
         const j = await explore(id, launchFor(kind, target, opts, id), { maxSteps: num(opts.maxSteps, 60), maxDepth: num(opts.maxDepth, 4), sameOriginOnly: !opts.followExternal });
         process.stdout.write(`recorded ${j.steps.length} steps in ${corpusDir(id)}\n`);
@@ -66,7 +71,7 @@ export function registerCleanroomCommands(program: Command, deps: CleanroomDeps)
     .description('turn the recording into a behavioural spec (spec/SPEC.md and spec/spec.json)')
     .action((id: string) => {
       try {
-        const spec = synthesize(readJourney(id));
+        const spec = synthesize(readJourney(id), undefined, readExplorerState(id));
         const { markdown } = writeSpec(spec, path.join(corpusDir(id), 'spec'));
         process.stdout.write(`${spec.coverage.states} states, ${spec.coverage.transitions} transitions, ${spec.unknowns.length} unknowns. Spec: ${markdown}\n`);
       } catch (e) { process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`); process.exit(1); }
@@ -94,7 +99,9 @@ export function registerCleanroomCommands(program: Command, deps: CleanroomDeps)
     .option('--live', 'run each step against the real target too, instead of comparing with the recording')
     .option('--max-steps <n>', 'steps to replay', '200')
     .option('--cwd <dir>', 'cli: working directory of the clone')
-    .action(async (id: string, cloneTarget: string, opts: { live?: boolean; maxSteps: string; cwd?: string }) => {
+    .option('--pty', 'cli: run the clone under a pseudo-terminal, as the target was observed')
+    .option('--explore', 'also explore the clone with the same explorer and compare the two specs (finds what the recorded journeys never touched)')
+    .action(async (id: string, cloneTarget: string, opts: { live?: boolean; maxSteps: string; cwd?: string; pty?: boolean; explore?: boolean }) => {
       try {
         const j = readJourney(id);
         const report = await twinTest({ journey: j, clone: launchFor(j.target.kind, cloneTarget, opts), mode: opts.live ? 'live' : 'recorded', maxSteps: num(opts.maxSteps, 200) });
