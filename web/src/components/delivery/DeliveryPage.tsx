@@ -28,8 +28,10 @@ export function relativeToProject(project: string, file: string): string {
   return f.toLowerCase().startsWith(`${p.toLowerCase()}/`) ? f.slice(p.length + 1) : f;
 }
 
-export function DeliveryPage({ projectPath, onProject, onOpenChat }: {
+export function DeliveryPage({ projectPath, taskId, onProject, onOpenChat }: {
   projectPath?: string | undefined;
+  /** Open this task's drawer on arrival (from a task's chat). */
+  taskId?: string | undefined;
   onProject: (path: string) => void;
   onOpenChat: () => void;
 }): React.ReactElement {
@@ -62,6 +64,7 @@ export function DeliveryPage({ projectPath, onProject, onOpenChat }: {
       host={host}
       projects={list}
       onProjectChange={onProject}
+      openTaskId={taskId}
     />
   );
 }

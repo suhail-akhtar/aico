@@ -89,7 +89,7 @@ process.env.CHECK_LOG = checkLog;
 const checkRuns = () => (fs.existsSync(checkLog) ? fs.readFileSync(checkLog, 'utf8').split('\n').filter(Boolean).length : 0);
 
 /** A scripted agent runner: `script(spec, runId)` does what a model would in the worktree. */
-function makeRunner(script, { sessions = true } = {}) {
+function makeRunner(script, { sessions = true, sessionPrefix = 'chat-' } = {}) {
   const runs = new Map(); let n = 0;
   const r = {
     runs,
@@ -97,7 +97,7 @@ function makeRunner(script, { sessions = true } = {}) {
     start(spec) {
       const id = `run-${++n}`;
       // `need` is what a run held in a chat session reports while it waits for a person (the server's runner fills it from the session).
-      const rec = { state: 'running', ok: undefined, lastActivityAt: Date.now(), costUsd: 0.05, ...(sessions ? { sessionId: `chat-${id}` } : {}) };
+      const rec = { state: 'running', ok: undefined, lastActivityAt: Date.now(), costUsd: 0.05, ...(sessions ? { sessionId: `${sessionPrefix}${id}` } : {}) };
       runs.set(id, rec); r.started.push({ id, spec });
       Promise.resolve().then(() => script(spec, id, rec)).then(() => { rec.state = 'ended'; rec.ok = true; }, e => { rec.state = 'ended'; rec.ok = false; rec.error = String(e?.message ?? e); });
       return id;
@@ -126,6 +126,291 @@ async function pump(p, cond, ms = 25_000) {
 }
 const fresh = () => { D.resetDeliveryForTest(); };
 
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// Regressions found in the first real use of the board (project with ten tasks, a cheap model).
+// Each block was written to FAIL on the engine as released in 0.52.0 and pass after the fix.
+// `DELIVERY_ONLY_NEW=1 node scripts/delivery-test.mjs` runs just these.
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+const codeOf = async (fn) => { try { await fn(); return undefined; } catch (e) { return e; } };
+/** A passing test file + source, so the project's own check stays green and the risk stays low. */
+const ok1 = (name) => ({ [`src/${name}.js`]: `exports.${name} = () => 1;\n`, [`test/${name}.test.js`]: `require('node:test')('${name}', () => {});\n` });
+
+console.log('\n-- real use 1a: AICO\'s own files never travel with a task, and an Approve never ends in a raw git error --');
+{
+  fresh();
+  // The owner's project did not ignore .aico/: its profile.json is untracked in the checkout.
+  const p = makeProject({ '.gitignore': 'node_modules/\n' });
+  const profile = fs.readFileSync(path.join(p, '.aico', 'profile.json'), 'utf8');
+  ok(git(p, 'status', '--porcelain').includes('.aico/'), 'setup: the checkout has its own untracked .aico/profile.json');
+  D.configureDelivery({
+    runner: makeRunner(async (spec) => {
+      if (/committed/.test(spec.title)) {
+        // The agent runs `git add -A` itself, so AICO's profile (written by its observer in the worktree) is swept into the commit.
+        work(spec, { ...ok1('real'), '.aico/profile.json': '{"version":1,"observed":true}', '.aico/settings.local.json': '{"x":1}' }, 'feat: real');
+        // ...and the observer rewrites it after the commit, so the file on disk now differs from the committed one (found in the live run).
+        fs.writeFileSync(path.join(spec.cwd, '.aico', 'profile.json'), '{"version":1,"observed":true,"later":"written by the observer"}');
+      } else {
+        // Left uncommitted: the engine's own commit at submit must not stage AICO's files.
+        for (const [rel, text] of Object.entries({ ...ok1('loose'), '.aico/profile.json': '{"version":1,"observed":true}', '.aico/screenshots/load-1280.png': 'png' })) {
+          fs.mkdirSync(path.dirname(path.join(spec.cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(spec.cwd, rel), text);
+        }
+      }
+    }),
+  });
+  await D.setDispatch(p, 'start');
+  const a = await D.createTask(p, { title: 'committed profile', status: 'ready' });
+  const b = await D.createTask(p, { title: 'loose files', status: 'ready' });
+  ok(await pump(p, () => task(p, a.id).status === 'review' && task(p, b.id).status === 'review'), 'both tasks reach review', [task(p, a.id).status, task(p, b.id).status]);
+  const diffA = await D.taskDiffInfo(p, a.id);
+  ok(diffA.files.map(f => f.path).sort().join() === 'src/real.js,test/real.test.js' && !/\.aico/.test(diffA.diff), 'the diff holds only what the agent changed, not AICO\'s profile or local settings', diffA.files);
+  ok(task(p, a.id).changeCount === 2, 'and the count is those two files', task(p, a.id).changeCount);
+  const treeB = git(task(p, b.id).worktree, 'ls-tree', '-r', '--name-only', 'HEAD');
+  ok(!/\.aico/.test(treeB) && /src\/loose\.js/.test(treeB), 'the engine\'s own commit at submit left AICO\'s files out');
+  // b lands first, so the trunk has moved when a is approved: a is rebased (its commits replayed) onto the new tip, with the observer's newer profile.json lying untracked in its worktree.
+  await D.approveTask(p, b.id);
+  ok(task(p, b.id).status === 'merged', 'the task whose files were left uncommitted lands');
+  await D.approveTask(p, a.id);
+  ok(task(p, a.id).status === 'merged', 'Approve lands the task that committed AICO files, after a rebase onto a moved trunk (it failed with "untracked working tree files would be overwritten" before)', task(p, a.id).status);
+  ok(fs.readFileSync(path.join(p, '.aico', 'profile.json'), 'utf8') === profile, 'the checkout\'s own profile.json is untouched');
+  ok(!/\.aico/.test(git(p, 'ls-tree', '-r', '--name-only', 'main')), 'and the trunk never gained any .aico file');
+
+  // A branch that already carries the file (reviewed before this fix) is cleaned when it is approved, not refused.
+  const c = await D.createTask(p, { title: 'legacy branch', status: 'ready' });
+  D.configureDelivery({ runner: makeRunner(async (spec) => { work(spec, ok1('legacy'), 'feat: legacy'); }) });
+  ok(await pump(p, () => task(p, c.id).status === 'review'), 'a third task in review');
+  const wtC = task(p, c.id).worktree;
+  fs.mkdirSync(path.join(wtC, '.aico'), { recursive: true });
+  fs.writeFileSync(path.join(wtC, '.aico', 'profile.json'), '{"version":1,"legacy":true}');
+  git(wtC, 'add', '-f', '-A'); git(wtC, 'commit', '-q', '-m', 'chore: committed by an older engine');
+  ok(/\.aico\/profile\.json/.test(git(wtC, 'ls-tree', '-r', '--name-only', 'HEAD')), 'setup: the reviewed branch carries .aico/profile.json');
+  ok((await D.approveTask(p, c.id)).status === 'merged', 'approving it cleans the branch and lands it');
+  ok(!/\.aico/.test(git(p, 'ls-tree', '-r', '--name-only', 'main')) && fs.readFileSync(path.join(p, '.aico', 'profile.json'), 'utf8') === profile, 'with nothing of AICO\'s on the trunk and the checkout\'s file intact');
+  D.resetDeliveryForTest();
+}
+
+console.log('\n-- real use 1b: files in the way of a landing are a decision with two choices, never a raw git error --');
+{
+  fresh();
+  const p = makeProject();
+  D.configureDelivery({
+    runner: makeRunner(async (spec) => {
+      if (/same/.test(spec.title)) work(spec, { ...ok1('s1'), 'same.txt': 'identical\n' }, 'feat: same');
+      else if (/mine/.test(spec.title)) work(spec, { ...ok1('m1'), 'notes.txt': 'the task\'s notes\n' }, 'feat: mine');
+      else if (/theirs/.test(spec.title)) work(spec, { ...ok1('t1'), 'draft.txt': 'the task\'s draft\n' }, 'feat: theirs');
+      else if (/edit/.test(spec.title)) work(spec, { ...ok1('e1'), 'README.md': 'line one\nline two\nline three changed by the task\n' }, 'docs: readme');
+      else work(spec, ok1('plain'), 'feat: plain');
+    }),
+  });
+  await D.setDispatch(p, 'start');
+  const same = await D.createTask(p, { title: 'same file', status: 'ready' });
+  const mine = await D.createTask(p, { title: 'keep mine', status: 'ready' });
+  const theirs = await D.createTask(p, { title: 'take theirs', status: 'ready' });
+  const edit = await D.createTask(p, { title: 'edit readme', status: 'ready' });
+  const plain = await D.createTask(p, { title: 'plain', status: 'ready' });
+  ok(await pump(p, () => [same, mine, theirs, edit, plain].every(x => task(p, x.id).status === 'review'), 90_000), 'five tasks in review', [same, mine, theirs, edit, plain].map(x => task(p, x.id).status));
+
+  // The person's own work in the checkout.
+  fs.writeFileSync(path.join(p, 'same.txt'), 'identical\n');
+  fs.writeFileSync(path.join(p, 'notes.txt'), 'MY notes, not committed\n');
+  fs.writeFileSync(path.join(p, 'draft.txt'), 'MY draft, not committed\n');
+  fs.writeFileSync(path.join(p, 'unrelated.txt'), 'something else I am writing\n');
+  const mainBefore = git(p, 'rev-parse', 'main');
+
+  const landedSame = await D.approveTask(p, same.id);
+  ok(landedSame.status === 'merged' && fs.readFileSync(path.join(p, 'same.txt'), 'utf8') === 'identical\n', 'an untracked file identical to the task\'s is not in the way: it lands and says it set the copy aside', task(p, same.id).review.comments.slice(-3).map(c => c.text));
+  ok(task(p, same.id).review.comments.some(c => /set aside/.test(c.text)), 'and the thread says so');
+
+  const e1 = await codeOf(() => D.approveTask(p, mine.id));
+  ok(e1 && e1.code === 'landing-collision' && /notes\.txt/.test(e1.message) && !/untracked working tree files would be overwritten/.test(e1.message) && e1.data?.choices?.join() === 'keep-mine,take-task', 'a file of the person\'s that differs from the task\'s stops the landing with a named, structured refusal', e1 && { code: e1.code, message: e1.message });
+  ok(task(p, mine.id).status === 'review' && task(p, mine.id).landingBlock?.files[0]?.path === 'notes.txt' && git(p, 'rev-parse', 'main') !== mainBefore, 'the task stays in review with the block on it (the trunk only moved for the identical-file task)', task(p, mine.id).landingBlock);
+  ok(fs.readFileSync(path.join(p, 'notes.txt'), 'utf8') === 'MY notes, not committed\n', 'nothing of the person\'s was touched');
+
+  const keepMine = await D.resolveLanding(p, mine.id, 'keep-mine');
+  ok(keepMine.status === 'merged' && fs.readFileSync(path.join(p, 'notes.txt'), 'utf8') === 'MY notes, not committed\n' && !git(p, 'ls-tree', '-r', '--name-only', 'main').split('\n').includes('notes.txt'), 'keep-mine: the task lands without its change to that file and the person\'s file is exactly as it was');
+  ok(git(p, 'ls-tree', '-r', '--name-only', 'main').split('\n').includes('src/m1.js'), 'while the rest of the task did land');
+
+  const e2 = await codeOf(() => D.approveTask(p, theirs.id));
+  ok(e2 && e2.code === 'landing-collision', 'the same refusal for the next one');
+  const takeTheirs = await D.resolveLanding(p, theirs.id, 'take-task');
+  ok(takeTheirs.status === 'merged' && fs.readFileSync(path.join(p, 'draft.txt'), 'utf8') === 'the task\'s draft\n', 'take-task: the task\'s version is in the checkout');
+  const saved = path.join(S.boardDir(p), 'displaced', theirs.id);
+  const copies = fs.existsSync(saved) ? fs.readdirSync(saved, { recursive: true }).filter(f => /draft\.txt$/.test(String(f))) : [];
+  ok(copies.length === 1 && fs.readFileSync(path.join(saved, String(copies[0])), 'utf8') === 'MY draft, not committed\n', 'and the person\'s version was saved aside first, byte for byte', copies);
+
+  // A tracked file with the person's uncommitted edit that the task also changes: the same decision.
+  fs.writeFileSync(path.join(p, 'README.md'), 'line one\nline two\nline three (my edit)\n');
+  const e3 = await codeOf(() => D.approveTask(p, edit.id));
+  ok(e3 && e3.code === 'landing-collision' && /README\.md/.test(e3.message) && /could not land/.test(e3.message), 'an uncommitted edit to a file the task changes is the same decision (README.md)', e3 && e3.message);
+  git(p, 'checkout', '--', 'README.md');
+  // A dirty checkout that the task does not overlap lands fine and keeps the person's work.
+  ok((await D.approveTask(p, plain.id)).status === 'merged' && fs.readFileSync(path.join(p, 'unrelated.txt'), 'utf8') === 'something else I am writing\n', 'a dirty checkout the task does not overlap lands, and the unrelated file is intact');
+  ok((await D.approveTask(p, edit.id)).status === 'merged', 'once the checkout is clean again the edit task lands');
+  D.resetDeliveryForTest();
+}
+
+console.log('\n-- real use 1c: a trunk named like a tag - the diff holds only the task\'s own change --');
+{
+  fresh();
+  const p = makeProject();
+  // The release branch carries the name of a tag that points at an OLDER commit (a project that tags its release branches).
+  git(p, 'checkout', '-q', '-b', 'rel-1.0.1');
+  git(p, 'tag', 'rel-1.0.1');                       // the tag, at the initial commit
+  fs.mkdirSync(path.join(p, 'src/agents'), { recursive: true });
+  fs.writeFileSync(path.join(p, 'src/agents/personas.mjs'), Array.from({ length: 53 }, (_, i) => `export const persona${i} = ${i};`).join('\n') + '\n');
+  git(p, 'add', '-A'); git(p, 'commit', '-q', '-m', 'feat: personas');   // the branch moved on after the tag
+  S.ensureInit(p, 'rel-1.0.1');   // the board's trunk is named explicitly (a board journaled before `currentBranch` was fully qualified, or one a person set)
+  D.configureDelivery({ runner: makeRunner(async (spec) => { work(spec, ok1('sanitise'), 'feat: sanitise tool results'); }) });
+  await D.setDispatch(p, 'start');
+  ok(D.boardState(p).settings.trunk === 'rel-1.0.1', 'setup: the trunk is the branch whose name a tag shares', D.boardState(p).settings.trunk);
+  const t = await D.createTask(p, { title: 'Sanitise tool results', status: 'ready' });
+  ok(await pump(p, () => task(p, t.id).status === 'review'), 'the task reaches review', task(p, t.id).status);
+  const d = await D.taskDiffInfo(p, t.id);
+  ok(!/personas/.test(d.diff) && d.files.map(f => f.path).sort().join() === 'src/sanitise.js,test/sanitise.test.js', 'its diff holds only its own two files - none of the 53 lines the branch gained are shown as deleted', d.files);
+  ok(!/^-export const persona/m.test(d.diff), 'no deleted lines at all');
+  ok(task(p, t.id).evidence && task(p, t.id).risk && task(p, t.id).risk.level === 'low', 'and its risk is scored on that diff', task(p, t.id).risk);
+  await D.approveTask(p, t.id);
+  ok(git(p, 'show', 'refs/heads/rel-1.0.1:src/agents/personas.mjs').split('\n').length >= 53 && git(p, 'show', 'refs/heads/rel-1.0.1:src/sanitise.js').includes('sanitise'), 'landing it keeps everything the branch had and adds the task');
+  D.resetDeliveryForTest();
+}
+
+
+/** The delivery routes over a fake request, for the tests below (the same harness the routes section uses). */
+function routeHarness(p) {
+  const gate = new DecisionGate();
+  const mkReq = (method, headers = {}) => ({ method, headers, on() {} });
+  const deps = {
+    send: (res, status, body) => { res.status = status; res.body = body; },
+    readJson: async (req) => req.body ?? {},
+    isKnownProject: async (d) => path.resolve(d) === p,
+    human: (req, body) => gate.checkHuman({ grant: req.headers['x-aico-grant'], client: body.client, uiKey: req.headers['x-aico-ui-key'], fetchSite: undefined }),
+    startPlan: async () => ({ sessionId: 'plan-x' }),
+    subscribe: () => () => {},
+  };
+  return async (route, method, body = {}, { person = false, query = '' } = {}) => {
+    const req = mkReq(method, person ? { 'x-aico-ui-key': gate.uiKey } : {}); req.body = body;
+    const res = { headers: {}, written: [], write(x) { this.written.push(x); } };
+    const handled = await handleDeliveryRoute(route, req, res, new URL(`http://127.0.0.1/api/${route}${query}`), deps);
+    return { handled, status: res.status, body: res.body };
+  };
+}
+
+console.log('\n-- real use 2: ready tasks that never start - the board says why, and one click unblocks them --');
+{
+  fresh();
+  const p = makeProject();
+  D.configureDelivery({ runner: makeRunner(async (spec) => { work(spec, ok1(spec.title.toLowerCase().replace(/[^a-z]+/g, '')), 'feat: ' + spec.title); }) });
+  const call = routeHarness(p);
+  // Moved to Ready BEFORE the dispatcher was ever started, two of them behind prerequisites that are still in the backlog.
+  const A = await D.createTask(p, { title: 'Add auth' });
+  const B = await D.createTask(p, { title: 'Add sessions', status: 'ready', dependsOn: [A.id] });
+  const C = await D.createTask(p, { title: 'Add db' });
+  const Dd = await D.createTask(p, { title: 'Add audit', status: 'ready', dependsOn: [C.id] });
+  const E = await D.createTask(p, { title: 'Add docs', status: 'ready' });
+  const F = await D.createTask(p, { title: 'Add logging', status: 'ready' });
+  const G2 = await D.createTask(p, { title: 'Add metrics', status: 'ready' });
+  await D.setDispatch(p, 'start');
+  ok(await pump(p, () => [E, F, G2].every(x => task(p, x.id).status === 'review'), 90_000), 'the three independent ready tasks that were moved before the start all run, two at a time (not only the newest)', [E, F, G2].map(x => task(p, x.id).status));
+  const b = task(p, B.id); const d = task(p, Dd.id);
+  ok(b.status === 'ready' && d.status === 'ready', 'the two behind unmerged prerequisites wait');
+  ok(b.blockedBy?.length === 1 && b.blockedBy[0].id === A.id && b.blockedBy[0].status === 'backlog', 'and each says what it waits for: task.blockedBy names the prerequisite and where it is', b.blockedBy);
+  ok(/Add auth/.test(b.waitingReason) && /Backlog/.test(b.waitingReason), 'with the reason in words', b.waitingReason);
+  const board = D.boardState(p);
+  ok(/^2 ready tasks wait for "Add auth" and "Add db", which are in Backlog\.$/.test(board.idleReason), 'the board says why nothing is being picked up (it was silent before)', board.idleReason);
+  // Promoting needs a person, and moves the whole chain in one call.
+  ok((await call('delivery/tasks/' + B.id + '/promote-prerequisites', 'POST', { project: p })).status === 403, 'promote-prerequisites with only the token is refused');
+  const moved = await call('delivery/tasks/' + B.id + '/promote-prerequisites', 'POST', { project: p }, { person: true });
+  ok(moved.status === 200 && moved.body.moved.join() === A.id && task(p, A.id).status === 'ready' && task(p, Dd.id).status === 'ready' && task(p, C.id).status === 'backlog', 'a person promotes B\'s prerequisites: A moves to Ready, nothing else does', moved.body);
+  ok(await pump(p, () => task(p, A.id).status === 'review'), 'A runs');
+  ok(task(p, B.id).blockedBy?.[0]?.status === 'review', 'and B now says A is in review');
+  await D.approveTask(p, A.id);
+  ok(await pump(p, () => task(p, B.id).status === 'review'), 'once A is merged, B starts by itself', task(p, B.id).status);
+  const idle2 = D.boardState(p).idleReason;
+  ok(/Add db/.test(idle2) && /Backlog/.test(idle2), 'D still waits for C, and the board still names it', idle2);
+  // A cancelled prerequisite can never merge: it is reported, not silently waited for.
+  await D.updateTask(p, C.id, { status: 'cancelled' }, 'person');
+  const stuck = await D.promotePrerequisites(p, Dd.id, 'person');
+  ok(stuck.moved.length === 0 && stuck.stuck[0]?.id === C.id && stuck.stuck[0].status === 'cancelled', 'promoting behind a cancelled prerequisite moves nothing and says which one is stuck', stuck);
+  ok(/Cancelled/.test(task(p, Dd.id).waitingReason) || /Cancelled/.test(D.boardState(p).idleReason ?? ''), 'and the card shows it');
+  // A task moved to Ready while the dispatcher was paused starts when it is started again.
+  await D.setDispatch(p, 'pause');
+  const late = await D.createTask(p, { title: 'Add late', status: 'ready' });
+  await pump(p, () => false, 600);
+  ok(task(p, late.id).status === 'ready' && /paused/.test(task(p, late.id).waitingReason), 'while paused it waits, and says the dispatcher is paused', task(p, late.id).waitingReason);
+  await D.setDispatch(p, 'start');
+  ok(await pump(p, () => task(p, late.id).status === 'review'), 'starting the dispatcher picks it up');
+  D.resetDeliveryForTest();
+}
+
+console.log('\n-- real use 3: the Changes count is the real diff, and a running task\'s diff is live --');
+{
+  fresh();
+  const p = makeProject();
+  let release; const gate = new Promise(r => { release = r; });
+  D.configureDelivery({
+    runner: makeRunner(async (spec) => {
+      // Edits a tracked file and adds a new one, commits nothing, and keeps working until the test lets it finish.
+      fs.writeFileSync(path.join(spec.cwd, 'README.md'), 'line one\nline two\nline three\nline four (live)\n');
+      fs.mkdirSync(path.join(spec.cwd, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(spec.cwd, 'src', 'live.js'), 'exports.live = () => 42;\n');
+      fs.writeFileSync(path.join(spec.cwd, 'test', 'live.test.js'), "require('node:test')('live', () => {});\n");
+      fs.mkdirSync(path.join(spec.cwd, 'src', 'brand', 'new'), { recursive: true });   // a NEW folder: git lists it as one line unless asked for its files
+      fs.writeFileSync(path.join(spec.cwd, 'src', 'brand', 'new', 'deep.js'), 'exports.deep = 1;\n');
+      await gate;
+    }),
+  });
+  const t = await D.createTask(p, { title: 'Watch me', status: 'ready', labels: ['src/a.js'] });
+  ok(task(p, t.id).touches === undefined && task(p, t.id).changeCount === 0, 'before it starts the count is 0');
+  // Predicted touches exist (one file named by a label) but are not a change: the old tab counted them.
+  await D.setDispatch(p, 'start');
+  await pump(p, () => task(p, t.id).status === 'running' && task(p, t.id).changeCount === 4, 30_000);
+  const live = task(p, t.id);
+  ok(live.status === 'running' && live.changeCount === 4, 'a running task with uncommitted work counts its real files (an edit, two new files and one in a brand-new folder)', { status: live.status, count: live.changeCount, touches: live.touches });
+  const dd = await D.taskDiffInfo(p, t.id);
+  ok(dd.live === true && dd.files.length === live.changeCount && dd.files.every(f => f.uncommitted), 'the live diff lists exactly that many files, all uncommitted', dd.files);
+  ok(/\+line four \(live\)/.test(dd.diff) && /\+exports\.live = \(\) => 42;/.test(dd.diff) && /new file mode/.test(dd.diff), 'and its text shows the edit and the new file\'s contents', dd.diff.slice(0, 300));
+  ok(git(live.worktree, 'diff', '--cached', '--name-only') === '', "looking at it staged nothing in the task's worktree");
+  release();
+  ok(await pump(p, () => task(p, t.id).status === 'review'), 'it finishes and reaches review');
+  const done = task(p, t.id); const after = await D.taskDiffInfo(p, t.id);
+  ok(after.live === false && after.files.length === done.changeCount && done.changeCount === 4, 'in review the count and the committed diff agree (4 files)', { files: after.files.map(f => f.path), count: done.changeCount });
+  await D.approveTask(p, t.id);
+  const merged = await D.taskDiffInfo(p, t.id);
+  ok(task(p, t.id).changeCount === 4 && merged.files.length === 4 && /live\.js/.test(merged.diff), 'after the merge the drawer still has its diff, from the range that landed', merged.files);
+  // A task nobody has started: nothing to show, said plainly, and a count of 0.
+  const idle = await D.createTask(p, { title: 'Not yet', labels: ['src/b.js'] });
+  S.patchTask(p, idle.id, { touches: { files: ['src/b.js'], symbols: [], predicted: true } });   // what the dispatcher leaves on a task that is waiting its turn
+  const none = await D.taskDiffInfo(p, idle.id);
+  ok(none.files.length === 0 && none.diff === '' && /No agent has started/.test(none.note) && task(p, idle.id).changeCount === 0 && task(p, idle.id).touches.files.length === 1, 'an unstarted task has a predicted file but a changeCount of 0 and an honest empty diff', { note: none.note, touches: task(p, idle.id).touches });
+  D.resetDeliveryForTest();
+}
+
+console.log('\n-- real use 4: a task and its chat find each other, in every status --');
+{
+  fresh();
+  const p = makeProject();
+  let round = 0;
+  D.configureDelivery({ runner: makeRunner(async (spec) => { round++; work(spec, { [`src/r${round}.js`]: `exports.r = ${round};\n`, [`test/r${round}.test.js`]: `require('node:test')('r${round}', () => {});\n` }, `feat: round ${round}`); }, { sessionPrefix: 'p4-chat-' }) });
+  await D.setDispatch(p, 'start');
+  const t = await D.createTask(p, { title: 'Linked', status: 'ready' });
+  ok(await pump(p, () => task(p, t.id).status === 'review'), 'a task in review');
+  const r1 = task(p, t.id);
+  ok(r1.session?.id === 'p4-chat-run-1' && r1.sessionId === 'p4-chat-run-1' && r1.sessions?.[0]?.id === 'p4-chat-run-1' && r1.sessions[0].stage === 'ready', 'the task records its chat, and the stage it was in when the run began', r1.sessions);
+  const link = D.deliveryLinkOfSession('p4-chat-run-1');
+  ok(link && link.taskId === t.id && link.title === 'Linked' && link.status === 'review' && link.board === p && link.project === p && link.stage === 'ready', 'and the chat resolves back to the task with its status and board (review)', link);
+  await D.requestChanges(p, t.id, 'please add more');
+  ok(await pump(p, () => task(p, t.id).status === 'review' && task(p, t.id).sessions?.length === 2), 'a second run (changes requested) is a second chat');
+  const r2 = task(p, t.id);
+  ok(r2.session.id === 'p4-chat-run-2' && r2.sessions.map(s => s.id).join() === 'p4-chat-run-1,p4-chat-run-2' && r2.sessions[1].stage === 'changes', 'the task points at the latest chat and keeps the earlier one', r2.sessions);
+  ok(D.deliveryLinkOfSession('p4-chat-run-1')?.taskId === t.id && D.deliveryLinkOfSession('p4-chat-run-2')?.taskId === t.id, 'both chats link back to the task');
+  await D.approveTask(p, t.id);
+  ok(D.deliveryLinkOfSession('p4-chat-run-2')?.status === 'merged' && D.deliveryLinkOfSession('p4-chat-run-1')?.status === 'merged', 'after the merge both still link back (status merged)');
+  ok(D.deliveryLinkOfSession('chat-nobody') === undefined && D.deliveryLinkOfSession('') === undefined, 'a chat that is not a task\'s has no link');
+  D.resetDeliveryForTest();
+}
+
+if (process.env.DELIVERY_ONLY_NEW === '1') { console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
+
 console.log('\n-- the journal: fold, restart, torn lines, validation --');
 {
   fresh();
@@ -137,9 +422,10 @@ console.log('\n-- the journal: fold, restart, torn lines, validation --');
   const file = path.join(process.env.AICO_HOME, 'delivery');
   ok(fs.existsSync(file) && S.journalFile(p).startsWith(file) && fs.existsSync(S.journalFile(p)), 'the journal lives under aicoHome()/delivery/<project key>/');
   const board = D.boardState(p);
-  ok(Object.keys(board).sort().join() === 'dispatcher,project,queue,releases,running,settings,tasks' && Array.isArray(board.releases)
+  ok(Object.keys(board).sort().join() === 'agents,autonomy,dispatcher,feed,metrics,project,queue,releases,running,settings,tasks' && Array.isArray(board.releases)
+    && board.autonomy === 'manual' && board.settings.autonomy === 'manual' && board.settings.budgetUsdPerDay === 10 && board.settings.pauseAfterFailures === 3 && board.metrics.throughput7d === 0
     && board.dispatcher === 'idle' && board.settings.maxParallel === 2 && board.settings.autoLandLowRisk === false && board.settings.trunk === 'main'
-    && Array.isArray(board.queue) && Array.isArray(board.running), 'BoardState has exactly the contract keys and defaults (maxParallel 2, autoLand off)', board.settings);
+    && Array.isArray(board.queue) && Array.isArray(board.running), 'BoardState has exactly the contract keys and defaults (maxParallel 2, autoLand off, manual autonomy, $10 a day, pause after 3 failures)', board.settings);
   await D.updateTask(p, a.id, { status: 'ready', title: 'First, renamed' }, 'person');
   S.addComment(p, a.id, 'person', 'a note');
   S.resetStoreCache();   // a restart folds the journal again

@@ -28,6 +28,7 @@
  */
 
 import { listActions } from '../autonomy/inbox.js';
+import { liveSummary, milestonesSince } from '../delivery/activity.js';
 import type { AgentRunner, RunPoll, RunSpec } from '../delivery/runner.js';
 import type { RunManager } from './runs.js';
 import type { AicoSettings } from '../settings.js';
@@ -53,6 +54,8 @@ interface RunState {
   startedAt: number;
   lastActivityAt: number;
   lastLength: number;
+  /** The last session event whose milestones were handed to the dispatcher (each is reported once). */
+  milestoneSeq: number;
   ended: boolean;
   ok: boolean;
   error?: string;
@@ -78,7 +81,7 @@ export function sessionRunner(deps: SessionRunnerDeps): AgentRunner {
     start(spec: RunSpec): string {
       const sessionId = deps.mintSessionId();
       const st: RunState = {
-        sessionId, spec, model: '', startedAt: now(), lastActivityAt: now(), lastLength: 0, ended: false, ok: false,
+        sessionId, spec, model: '', startedAt: now(), lastActivityAt: now(), lastLength: 0, milestoneSeq: 0, ended: false, ok: false,
       };
       states.set(sessionId, st);
       deps.onSession?.(sessionId, spec.cwd);
@@ -120,7 +123,21 @@ export function sessionRunner(deps: SessionRunnerDeps): AgentRunner {
         deps.runs.cancel(runId);
       }
       const need = needOf(runId, run);
-      return { state: 'running', ...base, ...(need ? { need } : {}) };
+      // What it is doing, from its own log: the last tool call, the tokens so far, and the milestones not yet reported.
+      let activity: RunPoll['activity'];
+      if (run) {
+        try {
+          const live = liveSummary(run.session.events, st.spec.cwd);
+          const m = milestonesSince(run.session.events, st.milestoneSeq, st.spec.cwd);
+          st.milestoneSeq = m.lastSeq;
+          const u = run.tokenTracker.getUsage();
+          activity = {
+            summary: live?.summary ?? 'Thinking', at: live?.at ?? st.lastActivityAt, tokens: u.inputTokens + u.outputTokens,
+            milestones: m.milestones.map(x => ({ kind: x.kind, text: x.text })),
+          };
+        } catch { /* a status line must never break a run */ }
+      }
+      return { state: 'running', ...base, ...(need ? { need } : {}), ...(activity ? { activity } : {}) };
     },
 
     stop(runId: string): void {

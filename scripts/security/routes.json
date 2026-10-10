@@ -305,13 +305,17 @@
       "gate": "token+human",
       "note": "commit, start and close need human() (they fix the team's promise and ready work for the agents); summary, review, retro are reads and notes saves text (ADR 0039)"
     },
+    "delivery/settings": {
+      "gate": "token+human",
+      "note": "PATCH: widening what the board may do or spend on its own (an autonomy level above manual, a bigger daily budget, more agents at once, a longer failure streak, the low-risk auto-land switch) needs human(); narrowing needs only the token; the engine re-checks every range and the organisation's ceiling (ADR 0038)"
+    },
     "delivery/tasks": {
       "gate": "token",
       "note": "create a task in the backlog; nothing runs until a person promotes it and starts the dispatcher"
     },
     "delivery/tasks/*": {
       "gate": "token+human",
-      "note": "PATCH edits/cancels (token); approve (lands on the trunk, or pushes the branch and opens the pull request in PR mode), merge-pr (asks the remote to merge), request-changes (restarts a run) and comment (reaches an agent's prompt as the person's word) need human(); diff is a read (ADR 0038, 0039)"
+      "note": "PATCH edits/cancels (token); approve (lands on the trunk, or pushes the branch and opens the pull request in PR mode), merge-pr (asks the remote to merge), request-changes (restarts a run), comment (reaches an agent's prompt as the person's word), promote-prerequisites (moves Backlog tasks to Ready, which the dispatcher then spends on) and resolve-landing (chooses between a person's files and the task's) need human(); reorder, bulk PATCH, duplicate, diff and activity need only the token (they move no money and no code) (ADR 0038, 0039)"
     },
     "edit": {
       "gate": "token"

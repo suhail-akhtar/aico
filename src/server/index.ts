@@ -57,7 +57,7 @@ import { handleDeliveryRoute } from './delivery-routes.js';
 import { handleConnectionRoute } from './connection-routes.js';
 import { installConnections } from '../connections/index.js';
 import { onSyncStatus, withConnection } from '../connections/sync.js';
-import { bootDelivery, configureDelivery, onBoardChange, boardState as deliveryBoardState, sessionDirOf as deliverySessionDir, DEFAULT_TASK_BUDGET_USD } from '../delivery/index.js';
+import { bootDelivery, configureDelivery, onBoardChange, boardState as deliveryBoardState, sessionDirOf as deliverySessionDir, deliveryLinkOfSession, DEFAULT_TASK_BUDGET_USD } from '../delivery/index.js';
 import { sessionRunner } from './delivery-runner.js';
 import { planPrompt, refinePrompt } from '../delivery/prompts.js';
 import { projectKey } from '../learning/proposals.js';
@@ -485,6 +485,12 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
   runs.handOff = (fromSessionId, request) => handOffToChat(handOffDeps, fromSessionId, request);
 
   async function resolveCwd(sessionId: string, requested?: string | null): Promise<string> {
+    // A delivery task's chat is filed under the task's worktree. A client that opens it from the board names the BOARD's
+    // project, and the log is not there - the "Session" link opened an empty transcript. The task's folder wins.
+    if (requested) {
+      const taskDir = deliverySessionDir(sessionId);
+      if (taskDir) { sessionCwd.set(sessionId, taskDir); return taskDir; }
+    }
     if (requested && await isKnownProject(cwd, requested)) {
       const target = normalizeProjectPath(requested);
       sessionCwd.set(sessionId, target);
@@ -1327,6 +1333,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
         // concurrently, and a `?project=` here lets them agree instead of race.
         const project = await resolveCwd(sessionId, url.searchParams.get('project'));
         const stored = await loadEventLog(sessionId, project).catch(() => null);
+        const delivery = deliveryLinkOfSession(sessionId);
         send(res, 200, {
           sessionId,
           seq: stored?.length ?? 0,
@@ -1334,14 +1341,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ url: string; clo
           messages: stored ? deriveMessages(stored.events) : [],
           usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
           project,
+          ...(delivery ? { delivery } : {}),
         });
         return;
       }
+      const delivery = deliveryLinkOfSession(sessionId);
       send(res, 200, {
         sessionId,
         seq: run.session.length,
         busy: run.busy,
         project: run.cwd,
+        // Present when this chat is a Delivery task's run: the board links to it and it links back, in every status.
+        ...(delivery ? { delivery } : {}),
         agent: runs.agentOf(sessionId) ?? null,
         // Null means this session never expressed a preference, which is not
         // the same as having chosen whatever the default currently is — the

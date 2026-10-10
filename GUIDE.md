@@ -634,9 +634,15 @@ sends it back to *changes* and the agent resumes in the same worktree with the
 conflict files or the failure. **Approve** lands it on the trunk by
 fast-forward (rebased and checked again first if the trunk moved), then removes
 its worktree and branch. **Request changes** adds your comment and resumes the
-run. If your checkout is on the trunk, landing updates its files (uncommitted
-changes the merge would overwrite make git refuse; approve says so and changes
-nothing). Nothing is ever pushed. The board setting `autoLandLowRisk` (off) lands low-risk work whose
+run. If your checkout is on the trunk, landing updates its files. A file of yours
+that the task also writes (untracked, or with uncommitted edits) is never a raw git
+error: a copy identical to the task's, or one of AICO's own files, is set aside
+(copied under the board's folder first) and the landing goes on; anything else
+stops the landing, names the files and offers **keep mine** (the task lands
+without its change to them) or **take the task's** (yours are saved aside first).
+AICO's own machine state (`.aico/profile.json`, `*.local.*`, screenshots, caches)
+never travels with a task: it is not committed, not counted and not in the diff.
+Nothing is ever pushed. The board setting `autoLandLowRisk` (off) lands low-risk work whose
 checks are green without asking.
 
 **Where things are.** The board is a journal under
@@ -646,7 +652,11 @@ named rather than deleted. HTTP: `GET /api/delivery/board?project=`,
 `POST /api/delivery/tasks`, `PATCH /api/delivery/tasks/:id`,
 `POST /api/delivery/plan`, `POST /api/delivery/dispatch`,
 `POST /api/delivery/tasks/:id/approve` and `/request-changes`,
-`GET /api/delivery/tasks/:id/diff?project=`, and `GET /api/delivery/events?project=`
+`GET /api/delivery/tasks/:id/diff?project=` (`{diff, files, live}`: live, with uncommitted
+work, while the task runs), `GET /api/delivery/tasks/:id/activity?project=`,
+`PATCH /api/delivery/settings`, `POST /api/delivery/tasks/:id/promote-prerequisites`,
+`.../resolve-landing`, `.../duplicate`, `POST /api/delivery/tasks/reorder`,
+`PATCH /api/delivery/tasks/bulk`, and `GET /api/delivery/events?project=`
 (an event stream of `delivery/board` frames). The design and what was rejected
 are in [ADR 0038](docs/engineering/adr/0038-delivery.md).
 
@@ -677,7 +687,7 @@ that file), the **diff** file by file (collapsible, with line numbers), the agen
 and **Request changes** stay at the foot of the drawer; a high-risk change asks you
 to confirm the landing a second time. The **Review queue** tab lists everything
 waiting, riskiest first, and after each decision opens the next, so a batch is
-arrow keys, read, decide. Shortcuts: `n` new task, `/` filter.
+arrow keys, read, decide. Shortcuts: `n` new task, `/` filter (`?` lists them all).
 
 **Landing several at once.** In the Review queue, rows for **low-risk tasks whose
 checks are green** have a checkbox (Space ticks the focused row; **Select all low
@@ -688,7 +698,7 @@ a landing at all (uncommitted edits in the way) nothing lands and you are told w
 Medium- and high-risk tasks have no checkbox ("Open it to approve on its own"), and
 the engine refuses a batch that contains one.
 
-**When a run needs you.** Each task runs as a chat, and the card's **Session** link
+**When a run needs you.** Each task runs as a chat, and the card's **Chat** link
 opens that chat (also after the task is done). If the agent asks a question, wants a
 tool call allowed, or has a call waiting in *Waiting for you*, the card shows
 **Needs you** with the question and an answer box, **Allow / Deny** or **Approve /
@@ -729,6 +739,68 @@ global caches. Because a link is shared, an agent's `npm install`, `pip install`
 checkout and every other task), and the refusal tells it to call the `Delivery` tool's
 `localise` action, which gives that worktree a private copy (or, for Python and PHP,
 removes the link so the agent creates its own).
+
+### A board you can run a team from
+
+The board is meant to be enough on its own: if your team does not already live in Azure DevOps, GitHub or GitLab, you
+do not need a second board. If it does, **Connections** (the **Import...** entry in the toolbar) keeps this one in step
+with it.
+
+**Why is nothing running?** The status line above the board always says. "Idle: 2 ready tasks wait for #5 and #6 (in
+Backlog)" means those tasks depend on tasks that are still in Backlog, and agents never start a task until what it
+depends on has merged. The banner's button, **Move #5 and #6 to Ready**, is the fix; a card in Ready or Backlog shows
+**Blocked by #5 · Backlog** (click it to open the blocker). A pause the board caused (daily budget, too many failures
+in a row) says why and offers **Resume agents**. The **Agents** strip shows each slot, what it is doing, and a button
+to its chat.
+
+**Autonomy** (the chip in the header). **Manual**: you move tasks to Ready and approve every landing. **Assisted**:
+the board also starts the prerequisites of Ready tasks and lands low-risk work whose checks are green. **Autonomous**:
+also pulls the next tasks from the backlog and lands low- and medium-risk work whose checks are green with no safety
+finding. **Full autonomous**: also lands high-risk work when every gate is green and your organisation allows it. At
+every level a change with a possible secret or a weakened test never lands by itself, questions and permissions come to
+you, and spending past the daily budget pauses the agents. Raising the level asks first and lists what will now happen
+without you; lowering never asks. The same popover sets the daily budget, the failures that pause the agents, and the
+Running and Review limits (a column turns amber at its limit). A task landed on its own says **Landed automatically**
+and why.
+
+**Working the board.** Drag a card to another column, or to a place inside Backlog, Ready or Blocked (Ready is taken top
+first); with the keyboard use **Alt + Up / Down** on a card or the card menu. **Display** sets swimlanes (by assignee,
+type or epic) and compact cards; a column's chevron collapses it. **Board | List** switches to a sortable table. The
+filter box understands `assignee:"Agent A" type:bug label:auth priority:1 status:ready is:needs is:blocked` plus words;
+the menus beside it fill it in, and **Views** saves the current filter under a name for the whole project. Tick cards
+(the checkbox, or `X`) for a bar that moves them, sets priority, estimate or assignee, or adds a label. The `+` on
+Backlog and Ready adds a task from one line: `Fix login !1 #auth @sam type:bug due:+3d`. **Metrics** (cycle time, lead
+time, throughput, spent today) and **Activity** (everything every agent did, filterable to a task) are toggles in the
+toolbar. `?` lists the shortcuts: `N`, `/`, `J` / `K`, `Enter`, `X`, `V`, `A`.
+
+**From a task's chat back to the board.** When a chat is a Delivery task's run, a bar under its title says "Delivery
+task #3 · Running · ..." and **Open on board** opens the board with that task. In the task's drawer, **Changes** is
+live while the agent works, **Activity** is the task's timeline, and a landing that cannot go ahead (a file in your
+folder that the task also writes) shows the files and two choices, **Keep my files** or **Use the task's version**; the
+second saves a copy of yours first, so neither loses anything.
+
+### Autonomy and its limits (what the engine guarantees)
+
+The board's **autonomy** (`settings.autonomy`, default `manual`) is a ceiling on what AICO does without you,
+and it is the same list at every client: `assisted` also starts the Backlog prerequisites of Ready tasks and lands
+low-risk work whose checks are green; `autonomous` also pulls the next backlog tasks (highest rank, then priority;
+prerequisites merged; the active sprint in Scrum; no clash with a running task's files) and lands low- and
+medium-risk work; `full` also lands high-risk work when every gate is green **and** your organisation allows it.
+Always, at every level: a possible secret, a weakened test, a high-severity code finding or a safety scan that did
+not run keeps a change for you; pull-request mode never lands by itself; nothing is pushed; and nothing acts while
+the dispatcher is paused, so **Pause** (one call, only the token) is the kill switch. Raising the level, the daily
+budget, the agents at once or the failures allowed needs you in the AICO window; lowering any of them does not.
+
+Hard limits, enforced by the engine on every tick: a **daily budget** (`budgetUsdPerDay`, default $10; reaching it
+pauses the dispatcher and stops runs in flight), **per-task budget** (a task's cost is the sum of its runs, and a
+task that has used its allowance is not started again), **at most 4 agents**, **pause after N failures in a row**
+(`pauseAfterFailures`, default 3), and the **WIP limits** `wip.running` / `wip.review`. A pause says why
+(`pausedBecause`) and lasts until you start the dispatcher; a restart pauses too. Every automatic landing is
+recorded with the level, the risk and the evidence (`Task.landed.decision`, the task's history, the board's feed and
+the audit log as `kind: delivery`). An organisation can cap the level with `delivery.maxAutonomy` in its managed
+policy (restrict-only; with a managed policy in force and the key absent, the cap is `autonomous`: `full` must be
+granted by name). The reasoning and the honest limits of this trust model are in
+[ADR 0038](docs/engineering/adr/0038-delivery.md).
 
 ### Scrum: sprints on the same board
 

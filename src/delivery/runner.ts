@@ -55,6 +55,11 @@ export interface RunPoll {
   sessionId?: string;
   /** What a person must do before the run can go on, while it is running. */
   need?: Omit<TaskNeed, 'since'> & { since?: string };
+  /**
+   * What the run is doing now, read from its own session log (`activity.ts`), and the milestones since the last poll
+   * (an edit, a check run, a commit) - each reported once. A runner with no session (the background fallback) has none.
+   */
+  activity?: { summary: string; at: number; tokens?: number; milestones?: Array<{ kind: 'edit' | 'checks' | 'commit'; text: string }> };
 }
 
 export interface AgentRunner {

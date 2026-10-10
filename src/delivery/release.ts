@@ -274,14 +274,14 @@ export async function planRelease(input: PlanInput): Promise<ReleasePlan> {
   const plan: ReleasePlan = {
     trunk, versionFiles: [], tasks: [], other: [], commitCount: 0, notes: '', deploy: input.deploy, blockers,
   };
-  if (!(await G.revParse(repo, trunk))) { blockers.push(`The trunk branch "${trunk}" does not exist yet; make a first commit.`); return plan; }
+  if (!(await G.revParse(repo, G.headRef(trunk)))) { blockers.push(`The trunk branch "${trunk}" does not exist yet; make a first commit.`); return plan; }
 
-  const tags = (await G.tagsMerged(repo, trunk)).filter(t => parseSemver(t) && /^v\d+\.\d+\.\d+$/.test(t));
+  const tags = (await G.tagsMerged(repo, G.headRef(trunk))).filter(t => parseSemver(t) && /^v\d+\.\d+\.\d+$/.test(t));
   tags.sort((a, b) => compareSemver(parseSemver(b)!, parseSemver(a)!));
   const lastTag = tags[0];
   if (lastTag) { plan.lastTag = lastTag; plan.lastVersion = formatSemver(parseSemver(lastTag)!); }
 
-  const commits = await G.logRange(repo, lastTag ? `${lastTag}..${trunk}` : trunk);
+  const commits = await G.logRange(repo, lastTag ? `${lastTag}..${G.headRef(trunk)}` : G.headRef(trunk));
   plan.commitCount = commits.length;
   if (commits.length === 0) blockers.push(lastTag ? `Nothing has landed on ${trunk} since ${lastTag}.` : `${trunk} has no commits.`);
 
@@ -291,7 +291,7 @@ export async function planRelease(input: PlanInput): Promise<ReleasePlan> {
   for (const t of input.tasks) {
     if (t.status !== 'merged' || !t.landed) continue;
     if (lastTag && await G.isAncestor(repo, t.landed.to, lastTag)) continue;
-    if (!(await G.isAncestor(repo, t.landed.to, trunk))) continue;
+    if (!(await G.isAncestor(repo, t.landed.to, G.headRef(trunk)))) continue;
     unreleased.push(t);
     for (const sha of await G.revList(repo, `${t.landed.from}..${t.landed.to}`)) fromBoard.add(sha);
   }
@@ -365,7 +365,7 @@ export async function makeRelease(input: MakeInput): Promise<MakeResult> {
     if (await G.branchExists(repo, branch)) await G.branchDelete(repo, branch, true);
   };
   await cleanup();   // leftovers of an earlier failed attempt at this same version
-  const made = await G.worktreeAdd(repo, wt, branch, trunk);
+  const made = await G.worktreeAdd(repo, wt, branch, G.headRef(trunk));
   if (!made.ok) return { ok: false, reason: `Could not prepare the release: ${(made.err || made.out).trim().slice(0, 300)}`, status: 409 };
   try {
     const folder = path.join(wt, rel);
@@ -379,7 +379,7 @@ export async function makeRelease(input: MakeInput): Promise<MakeResult> {
     }
     if (changed.length === 0) {
       // Nothing to write (no version file, changelog off): the tag alone marks the release, on the trunk's tip.
-      const tip = await G.revParse(repo, trunk);
+      const tip = await G.revParse(repo, G.headRef(trunk));
       if (!tip) return { ok: false, reason: `The trunk branch "${trunk}" does not exist.`, status: 409 };
       const t = await G.tagCreate(repo, tag, tip, `${tag}\n\n${plan.notes}`);
       if (!t.ok) return { ok: false, reason: `Could not create the tag: ${(t.err || t.out).trim().slice(0, 300)}`, status: 409 };

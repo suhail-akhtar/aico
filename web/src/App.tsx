@@ -32,6 +32,7 @@ import { InboxPanel } from './components/InboxPanel';
 import { DeliveryPage } from './components/delivery/DeliveryPage';
 import { Trajectory } from './components/Trajectory';
 import { GoalBar } from './components/GoalBar';
+import { DeliveryBar } from './components/delivery/DeliveryBar';
 import { ActivityLine } from './components/ActivityLine';
 import { SidePanels } from './components/SidePanels';
 import { ChangesPane } from './components/ChangesPane';
@@ -59,12 +60,14 @@ export function App(): React.ReactElement {
       url.searchParams.delete('view');
       url.searchParams.delete('path');
       url.searchParams.delete('id');
+      url.searchParams.delete('task');
       window.history.replaceState({}, '', url.pathname + url.search + url.hash);
       return {
         ...DEFAULT_ROUTE,
         destination: parsed.destination,
         ...(parsed.projectPath ? { projectPath: parsed.projectPath } : {}),
         ...(parsed.groupId ? { groupId: parsed.groupId } : {}),
+        ...(parsed.deliveryTask ? { deliveryTask: parsed.deliveryTask } : {}),
       };
     } catch { return DEFAULT_ROUTE; }
   });
@@ -74,6 +77,15 @@ export function App(): React.ReactElement {
     const go = (e: Event): void => {
       const dest = (e as CustomEvent<unknown>).detail;
       if (dest === 'inbox') setRoute(r => ({ ...r, destination: 'inbox' }));
+      else if (dest && typeof dest === 'object' && (dest as { destination?: unknown }).destination === 'delivery') {
+        // A task's chat asking for its board: "Open on board" (components/delivery/DeliveryBar).
+        const d = dest as { projectPath?: unknown; taskId?: unknown };
+        setRoute(r => ({
+          ...r, destination: 'delivery',
+          ...(typeof d.projectPath === 'string' && d.projectPath ? { projectPath: d.projectPath } : {}),
+          ...(typeof d.taskId === 'string' && d.taskId ? { deliveryTask: d.taskId } : {}),
+        }));
+      }
       else if (dest && typeof dest === 'object' && (dest as { destination?: unknown }).destination === 'settings') {
         // The Delivery board's "Connections" link: open Settings on a pane.
         const pane = (dest as { pane?: unknown }).pane;
@@ -294,6 +306,7 @@ export function App(): React.ReactElement {
               {/* Above the transcript: the scope has to be readable before the
                   first message is, not discovered at the bottom of the page. */}
               <MiniAppScope />
+              <DeliveryBar />
               <ChatPane />
               <SidePanels />
               <GoalBar />
@@ -323,7 +336,8 @@ export function App(): React.ReactElement {
         {view === 'delivery' && (
           <DeliveryPage
             projectPath={route.projectPath}
-            onProject={(path) => setRoute(r => ({ ...r, destination: 'delivery', projectPath: path }))}
+            taskId={route.deliveryTask}
+            onProject={(path) => setRoute(r => { const { deliveryTask: _gone, ...rest } = r; return { ...rest, destination: 'delivery', projectPath: path }; })}
             onOpenChat={() => setRoute(withTab(route, 'chat'))}
           />
         )}

@@ -43,7 +43,7 @@ import { listJobs } from '../longjob/index.js';
 
 export const AUDIT_SCHEMA = 'aico.audit/1';
 
-export type AuditKind = 'tool.call' | 'turn.end' | 'subagent' | 'approval' | 'credential' | 'settings.change' | 'policy.load' | 'work' | 'longjob' | 'connection';
+export type AuditKind = 'tool.call' | 'turn.end' | 'subagent' | 'approval' | 'credential' | 'settings.change' | 'policy.load' | 'work' | 'longjob' | 'connection' | 'delivery';
 export type AuditOutcome = 'ok' | 'error' | 'denied' | 'escalated' | 'aborted' | 'declined' | 'expired' | 'timeout';
 
 export interface AuditRecord {
@@ -401,6 +401,14 @@ function fromOwn(o: ExportOptions, emit: (r: never) => void): void {
         ...(e.detail || e.ref ? { reason: auditText([e.ref, e.detail].filter(Boolean).join(' - '), 300) } : {}),
         ...(e.project ? { project: e.project } : {}),
       } as never);
+    } else if (e.kind === 'delivery') {
+      emit({
+        schema: AUDIT_SCHEMA, id: sha(`own|${e.at}|delivery|${e.project}|${e.task ?? ''}|${e.action}`), time: iso(e.at), kind: 'delivery',
+        action: auditText(e.action, 40), outcome: e.outcome, ...(e.outcome === 'denied' ? { decision: 'deny' } : e.outcome === 'ok' ? { decision: 'allow' } : {}),
+        decidedBy: auditText(e.decidedBy, 40), ...(e.task ? { target: auditText(e.task, 40) } : {}),
+        ...(e.detail || e.autonomy ? { reason: auditText([e.autonomy ? `autonomy ${e.autonomy}` : '', e.detail].filter(Boolean).join(' - '), 300) } : {}),
+        project: e.project,
+      } as never);
     } else if (e.kind === 'policy.load') {
       emit({
         schema: AUDIT_SCHEMA, id: sha(`own|${e.at}|policy|${e.hash}`), time: iso(e.at), kind: 'policy.load', action: e.active ? 'loaded' : 'removed',
@@ -446,7 +454,7 @@ export async function collectAudit(o: ExportOptions = {}): Promise<AuditRecord[]
     ['longjob', () => fromLongJobs(o, push)],
     ['settings.change', () => fromOwn(o, push)],
   ] as Array<[AuditKind, () => void]>) {
-    if (!want(kind) && !(kind === 'settings.change' && (want('policy.load') || want('connection')))) continue;
+    if (!want(kind) && !(kind === 'settings.change' && (want('policy.load') || want('connection') || want('delivery')))) continue;
     try { step(); } catch { /* skip a damaged source */ }
   }
   if (want('work')) { try { await fromWork(o, scope, push); } catch { /* skip */ } }

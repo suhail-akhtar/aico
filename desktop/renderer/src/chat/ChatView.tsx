@@ -28,6 +28,7 @@ import { newChat, openChat } from './actions';
 import { BriefCard, type BriefHost } from '@web/components/BriefCard';
 import { desktop } from '@/desktop';
 import { TasksChipHost } from '@/tasks/TasksHost';
+import { DeliveryBar } from '@web/components/delivery/DeliveryBar';
 
 /** How the brief's one-click actions open things here: the OS browser, the Inbox page, the chat. */
 const BRIEF_HOST: BriefHost = {
@@ -91,6 +92,8 @@ export function ChatView({ params }: ViewProps): React.ReactElement {
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* When this chat is a Delivery task's run: which task, its stage, and the way back to the board. */}
+        <DeliveryBar onOpenBoard={(l) => useDesk.getState().navigate({ view: 'delivery', params: { path: l.project, task: l.taskId } })} />
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
           <Transcript scrollRef={scrollRef} />
         </div>

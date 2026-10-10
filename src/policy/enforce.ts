@@ -315,6 +315,21 @@ export function runRefusal(version: string, lp: LoadedPolicy = managedPolicy()):
   return undefined;
 }
 
+/**
+ * The highest autonomy a Delivery board may run at, or undefined when nothing limits it. Without a
+ * managed policy there is no cap. With one in force the default is `autonomous` (the board may land
+ * low and medium risk by itself, never high): an organisation that wants `full` says so in
+ * `delivery.maxAutonomy`, and every layer's value is honoured, the lowest winning. Lockdown is `manual`.
+ */
+export function deliveryAutonomyCap(lp: LoadedPolicy = managedPolicy()): 'manual' | 'assisted' | 'autonomous' | 'full' | undefined {
+  if (!lp.active) return undefined;
+  if (lp.lockdown) return 'manual';
+  const order = ['manual', 'assisted', 'autonomous', 'full'] as const;
+  const named = lp.layers.map(l => l.policy.delivery?.maxAutonomy).filter((x): x is (typeof order)[number] => Boolean(x));
+  if (named.length === 0) return 'autonomous';
+  return named.reduce((lo, x) => (order.indexOf(x) < order.indexOf(lo) ? x : lo));
+}
+
 /** The smallest per-day cap any layer sets. */
 export function dayBudgetCap(lp: LoadedPolicy = managedPolicy()): number | undefined {
   const caps = lp.layers.map(l => l.policy.budget?.perDayUsd).filter((n): n is number => typeof n === 'number');
@@ -562,6 +577,7 @@ export function describeRules(lp: LoadedPolicy = managedPolicy()): string[] {
       lines.push(c.mode === 'forbid' ? 'Connections to forges and trackers: not allowed'
         : `Connections only to ${[c.providers?.length ? `providers ${c.providers.join(', ')}` : '', c.hosts?.length ? `hosts ${c.hosts.join(', ')}` : ''].filter(Boolean).join(' on ') || 'nothing'}`);
     }
+    if (p.delivery?.maxAutonomy) lines.push(`Delivery boards run at most at the ${p.delivery.maxAutonomy} autonomy level`);
     if (p.connections?.maxLanding === 'local') lines.push('Delivery lands changes locally only (no pull-request mode)');
     if (p.connections?.packs === 'forbid') lines.push('Agent-built connector packs: not allowed');
     if (p.network && p.network.mode !== 'off') lines.push(`Network ${p.network.mode}: ${p.network.domains.join(', ') || 'none'}`);

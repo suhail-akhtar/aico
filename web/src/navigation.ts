@@ -31,6 +31,8 @@ export interface Route {
   projectPath?: string;
   /** Which group, when the destination is `'group'`. */
   groupId?: string;
+  /** Delivery: open this task's drawer on arrival (the link from a task's chat). */
+  deliveryTask?: string;
 }
 
 export const DEFAULT_ROUTE: Route = { destination: 'sessions', tab: 'chat' };
@@ -84,7 +86,7 @@ export function headerTitle(route: Route, sessionTitle: string | undefined, proj
  * visit would. Same one-shot contract as `?settings=`: the caller strips the
  * parameters once read, because a deep link is an entry point, not a mode.
  */
-export function parseView(search: string): { destination: Destination; projectPath?: string; groupId?: string } | null {
+export function parseView(search: string): { destination: Destination; projectPath?: string; groupId?: string; deliveryTask?: string } | null {
   let params: URLSearchParams;
   try {
     params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
@@ -105,7 +107,8 @@ export function parseView(search: string): { destination: Destination; projectPa
   // The Delivery board names its project when it can; without `path` it follows the open chat's project.
   if (value === 'delivery') {
     const projectPath = params.get('path')?.trim();
-    return projectPath ? { destination: value, projectPath } : { destination: value };
+    const deliveryTask = params.get('task')?.trim();
+    return { destination: value, ...(projectPath ? { projectPath } : {}), ...(deliveryTask ? { deliveryTask } : {}) };
   }
   return { destination: value };
 }

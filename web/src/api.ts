@@ -168,7 +168,7 @@ function safeParse(text: string): unknown {
 }
 
 import type { ParkedAction } from './inbox';
-import type { AttentionSnapshot, BatchResult, BoardState, NewTaskInput, Release, ReleasePlan, Task } from './delivery-types';
+import type { ActivityEntry, Assignee, AttentionSnapshot, BatchResult, BoardSettings, BoardState, NewTaskInput, Priority, Release, ReleasePlan, Task, TaskStatus, TaskType, Autonomy } from './delivery-types';
 import type { Proposal as SprintProposal, RetroFacts, Sprint } from '../../shared/delivery/scrum';
 import type { BoardConnection, Connection, ConnectionsPolicyView, ProjectMapping, ProviderInfo, RepoDetection } from '../../shared/connections/types';
 import type { CreateBody, MapBody, SyncResult } from './connections';
@@ -284,6 +284,12 @@ async function postAsPerson<T>(path: string, body: Record<string, unknown>): Pro
     }
     throw err;
   }
+}
+
+/** A PATCH that needs a person (raising a board's autonomy): the same nonce handshake as {@link postAsPerson}. */
+async function postAsPersonPatch<T>(path: string, init: RequestInit): Promise<T> {
+  const body = { ...(JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>), client: await ensureUiClient() ?? undefined };
+  return request<T>(path, { ...init, body: JSON.stringify(body) });
 }
 
 // ── credential vault (engine: src/vault/human.ts) ────────────────────
@@ -691,8 +697,25 @@ export const api = {
    */
   deliveryBoard: (project: string) => get<BoardState>(`delivery/board?project=${encodeURIComponent(project)}`),
   deliveryCreate: (input: NewTaskInput) => post<Task>('delivery/tasks', input),
-  deliveryUpdate: (id: string, project: string, patch: Partial<Pick<Task, 'title' | 'body' | 'acceptance' | 'status' | 'priority' | 'dependsOn' | 'labels'>>) =>
+  deliveryUpdate: (id: string, project: string, patch: Partial<Pick<Task, 'title' | 'body' | 'acceptance' | 'status' | 'priority' | 'dependsOn' | 'labels' | 'estimate'>> & { assignee?: Assignee | null; type?: TaskType | null; dueDate?: string | null; parentId?: string | null }) =>
     request<Task>(`delivery/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ project, ...patch }) }),
+  /** Board settings: autonomy, WIP limits, daily budget, pause-after-failures, saved views, parallel agents. Widening any of them is a person's act, so it always goes as one. */
+  deliverySettings: (project: string, patch: { autonomy?: Autonomy; wip?: BoardSettings['wip']; budgetUsdPerDay?: number; pauseAfterFailures?: number; views?: BoardSettings['views']; maxParallel?: number }) =>
+    postAsPersonPatch<BoardState>('delivery/settings', { method: 'PATCH', body: JSON.stringify({ project, ...patch }) }),
+  /** Move the Backlog prerequisites a task waits on to Ready (and theirs, in turn). */
+  deliveryPromotePrerequisites: (id: string, project: string) =>
+    postAsPerson<{ moved: string[]; stuck?: Array<{ id: string; status: TaskStatus }> }>(`delivery/tasks/${encodeURIComponent(id)}/promote-prerequisites`, { project }),
+  /** A copy in the backlog: same words, priority, labels, type, epic and prerequisites; no run. */
+  deliveryDuplicate: (id: string, project: string) => post<Task>(`delivery/tasks/${encodeURIComponent(id)}/duplicate`, { project }),
+  /** The person's choice after a refused landing (`LandingError.choices`). A person's act. */
+  deliveryResolveLanding: (id: string, project: string, choice: string) =>
+    postAsPerson<Task>(`delivery/tasks/${encodeURIComponent(id)}/resolve-landing`, { project, choice }),
+  /** The full order of one column after a drag. */
+  deliveryReorder: (project: string, status: TaskStatus, ids: string[]) => post<{ ok: boolean }>('delivery/tasks/reorder', { project, status, ids }),
+  deliveryBulk: (project: string, ids: string[], patch: { status?: TaskStatus; priority?: Priority; labels?: string[]; assignee?: Assignee | null; estimate?: number | null }) =>
+    request<{ tasks: Task[] }>('delivery/tasks/bulk', { method: 'PATCH', body: JSON.stringify({ project, ids, patch }) }),
+  deliveryActivity: (id: string, project: string) =>
+    get<{ activity: ActivityEntry[] }>(`delivery/tasks/${encodeURIComponent(id)}/activity?project=${encodeURIComponent(project)}`),
   deliveryPlan: (project: string, brief: string) => post<{ sessionId: string }>('delivery/plan', { project, brief }),
   deliveryDispatch: (project: string, action: 'start' | 'pause', maxParallel?: number) =>
     postAsPerson<BoardState>('delivery/dispatch', { project, action, ...(maxParallel ? { maxParallel } : {}) }),
@@ -701,7 +724,7 @@ export const api = {
   deliveryRequestChanges: (id: string, project: string, comment: string) =>
     postAsPerson<Task>(`delivery/tasks/${encodeURIComponent(id)}/request-changes`, { project, comment }),
   deliveryDiff: (id: string, project: string) =>
-    get<{ diff: string }>(`delivery/tasks/${encodeURIComponent(id)}/diff?project=${encodeURIComponent(project)}`),
+    get<{ diff: string; files?: Array<{ path: string }>; live?: boolean; truncated?: boolean; note?: string }>(`delivery/tasks/${encodeURIComponent(id)}/diff?project=${encodeURIComponent(project)}`),
   /** Land several low-risk, green tasks with one yes; the engine refuses the whole set if any is not eligible. */
   deliveryApproveBatch: (project: string, ids: string[]) => postAsPerson<BatchResult>('delivery/approve-batch', { project, ids }),
   /** A person's note on a task's thread (it reaches the agent's prompt as the person's word). */
@@ -1343,6 +1366,8 @@ export interface SessionSummary {
   turns?: number;
   running?: boolean;
   open?: boolean;
+  /** Present when this chat is a Delivery task's run: the link back to the board. */
+  delivery?: { taskId: string; title: string; status: TaskStatus; project: string };
 }
 
 /** One event as the log recorded it. */

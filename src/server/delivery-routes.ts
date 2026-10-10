@@ -8,7 +8,14 @@
  *   POST  /api/delivery/dispatch {project, action}  start | pause the dispatcher            [person to start]
  *   POST  /api/delivery/tasks/:id/approve           land it on the trunk                    [person]
  *   POST  /api/delivery/tasks/:id/request-changes   {comment}                               [person]
- *   GET   /api/delivery/tasks/:id/diff?project=     {diff}
+ *   GET   /api/delivery/tasks/:id/diff?project=     {diff, files, live, truncated, note?}: live (uncommitted work included) while the task runs
+ *   GET   /api/delivery/tasks/:id/activity?project= {activity}: the task's history, up to 200 lines
+ *   PATCH /api/delivery/settings {project, autonomy?, wip?, budgetUsdPerDay?, pauseAfterFailures?, views?, maxParallel?}  [person to widen]
+ *   POST  /api/delivery/tasks/:id/promote-prerequisites   Backlog prerequisites -> Ready, in one click -> {moved, stuck}   [person]
+ *   POST  /api/delivery/tasks/:id/resolve-landing {choice}  after a refused landing: keep-mine | take-task                 [person]
+ *   POST  /api/delivery/tasks/:id/duplicate         a copy in the backlog
+ *   POST  /api/delivery/tasks/reorder {project, status, ids}  a column's new order
+ *   PATCH /api/delivery/tasks/bulk {project, ids, patch}      one patch for many tasks -> {tasks, failed}
  *   GET   /api/delivery/events?project=             SSE: `delivery/board` frames (BoardState), a full one first
  *   POST  /api/delivery/approve-batch {project, ids}  land several low-risk, green tasks with one yes [person]
  *   POST  /api/delivery/tasks/:id/comment {text}    a person's note on the task's thread          [person]
@@ -69,7 +76,7 @@ export async function handleDeliveryRoute(
   const { send } = deps;
   const method = req.method ?? 'GET';
   const known = route === 'delivery/board' || route === 'delivery/tasks' || route === 'delivery/plan' || route === 'delivery/dispatch'
-    || route === 'delivery/events' || route === 'delivery/approve-batch' || route === 'delivery/releases' || route === 'delivery/attention'
+    || route === 'delivery/events' || route === 'delivery/approve-batch' || route === 'delivery/settings' || route === 'delivery/releases' || route === 'delivery/attention'
     || route.startsWith('delivery/tasks/') || route.startsWith('delivery/releases/');
   if (!known) { send(res, 404, { error: 'not found' }); return true; }
   try {
@@ -109,6 +116,33 @@ export async function handleDeliveryRoute(
     if (route === 'delivery/tasks') {
       if (method !== 'POST') { send(res, 405, { error: 'POST only' }); return true; }
       send(res, 200, await D.createTask(project, body));
+      return true;
+    }
+    if (route === 'delivery/settings') {
+      if (method !== 'PATCH') { send(res, 405, { error: 'PATCH only' }); return true; }
+      // Widening what the board may do or spend on its own (a level above manual, a bigger budget, more agents) is a person's act;
+      // narrowing needs only the token. The engine re-checks the range of every value and the organisation's ceiling.
+      const person = D.settingsNeedPerson(project, body) ? await needPerson() : true;
+      if (!person) return true;
+      send(res, 200, await D.updateSettings(project, body, D.settingsNeedPerson(project, body) ? 'person' : 'token'));
+      return true;
+    }
+    // Whole-column operations, named by the segment after tasks/ (not as literal routes: they are covered by the `delivery/tasks/*` entry of the route registry).
+    const seg = route.split('/');
+    if (seg.length === 3 && seg[2] === 'reorder') {
+      if (method !== 'POST') { send(res, 405, { error: 'POST only' }); return true; }
+      const status = body.status;
+      const ids = Array.isArray(body.ids) ? body.ids : undefined;
+      if (typeof status !== 'string' || !ids || !ids.every((x): x is string => typeof x === 'string' && TASK_ID.test(x))) { send(res, 400, { error: 'status and ids (task ids) required' }); return true; }
+      send(res, 200, D.reorderTasks(project, status as never, ids));
+      return true;
+    }
+    if (seg.length === 3 && seg[2] === 'bulk') {
+      if (method !== 'PATCH') { send(res, 405, { error: 'PATCH only' }); return true; }
+      const ids = Array.isArray(body.ids) ? body.ids : undefined;
+      if (!ids || !ids.every((x): x is string => typeof x === 'string' && TASK_ID.test(x))) { send(res, 400, { error: 'ids must be a list of task ids' }); return true; }
+      if (!body.patch || typeof body.patch !== 'object' || Array.isArray(body.patch)) { send(res, 400, { error: 'patch must be an object' }); return true; }
+      send(res, 200, await D.bulkUpdate(project, ids, body.patch as Record<string, unknown>, 'person'));
       return true;
     }
     if (route === 'delivery/plan') {
@@ -175,7 +209,31 @@ export async function handleDeliveryRoute(
     }
     if (verb === 'diff') {
       if (method !== 'GET') { send(res, 405, { error: 'GET only' }); return true; }
-      send(res, 200, { diff: await D.taskDiff(project, id) });
+      send(res, 200, await D.taskDiffInfo(project, id));
+      return true;
+    }
+    if (verb === 'activity') {
+      if (method !== 'GET') { send(res, 405, { error: 'GET only' }); return true; }
+      send(res, 200, { activity: D.taskActivity(project, id) });
+      return true;
+    }
+    if (verb === 'duplicate') {
+      if (method !== 'POST') { send(res, 405, { error: 'POST only' }); return true; }
+      send(res, 200, await D.duplicateTask(project, id, 'person'));
+      return true;
+    }
+    if (verb === 'promote-prerequisites') {
+      if (method !== 'POST') { send(res, 405, { error: 'POST only' }); return true; }
+      if (!await needPerson()) return true;
+      send(res, 200, await D.promotePrerequisites(project, id, 'person'));
+      return true;
+    }
+    if (verb === 'resolve-landing') {
+      if (method !== 'POST') { send(res, 405, { error: 'POST only' }); return true; }
+      if (!await needPerson()) return true;
+      const choice = body.choice;
+      if (choice !== 'keep-mine' && choice !== 'take-task') { send(res, 400, { error: 'choice must be "keep-mine" or "take-task"' }); return true; }
+      send(res, 200, await D.resolveLanding(project, id, choice));
       return true;
     }
     if (verb === 'merge-pr') {
@@ -195,7 +253,8 @@ export async function handleDeliveryRoute(
     }
     send(res, 404, { error: 'not found' });
   } catch (err) {
-    if (err instanceof D.DeliveryError) send(res, err.status, { error: err.message });
+    // `code` and `data` (a landing collision's files and choices) let a client offer the way forward instead of showing a sentence.
+    if (err instanceof D.DeliveryError) send(res, err.status, { error: err.message, message: err.message, ...(err.code ? { code: err.code } : {}), ...(err.data ?? {}) });
     else throw err;
   }
   return true;

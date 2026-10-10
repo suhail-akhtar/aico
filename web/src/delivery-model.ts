@@ -110,8 +110,16 @@ export function sortForReview(tasks: readonly Task[]): Task[] {
       || a.id.localeCompare(b.id));
 }
 
+/**
+ * A person's own order (drag within a column) when both tasks carry a rank; 0 otherwise, so a board from an
+ * engine without ranks sorts exactly as before.
+ */
+export function cmpRank(a: Pick<Task, 'rank'>, b: Pick<Task, 'rank'>): number {
+  return a.rank !== undefined && b.rank !== undefined ? a.rank - b.rank : 0;
+}
+
 function byPriority(a: Task, b: Task): number {
-  return a.priority - b.priority || toMs(a.createdAt) - toMs(b.createdAt) || a.id.localeCompare(b.id);
+  return cmpRank(a, b) || a.priority - b.priority || toMs(a.createdAt) - toMs(b.createdAt) || a.id.localeCompare(b.id);
 }
 
 export interface GroupOptions {
@@ -251,6 +259,10 @@ export function normaliseTask(t: Task): Task {
     dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
     labels: Array.isArray(t.labels) ? t.labels : [],
     priority: ([1, 2, 3, 4] as number[]).includes(t.priority) ? t.priority : 3,
+    // A board from an engine that predates the true-board fields still draws: absent means "none yet", never undefined arithmetic.
+    changeCount: typeof t.changeCount === 'number' ? t.changeCount : t.touches && !t.touches.predicted ? t.touches.files.length : 0,
+    activity: Array.isArray(t.activity) ? t.activity : [],
+    ...(typeof t.rank === 'number' ? {} : { rank: Number.MAX_SAFE_INTEGER }),
   };
 }
 
@@ -259,12 +271,22 @@ export function normaliseBoard(raw: unknown): BoardState | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Partial<BoardState>;
   if (!Array.isArray(r.tasks)) return null;
+  // Fields this client reads but does not validate (autonomy, agents, feed, metrics, idleReason ...) pass through untouched.
+  const { tasks: _t, queue: _q, running: _r, settings: _s, dispatcher: _d, releases: _rl, project: _p, ...extra } = r as unknown as Record<string, unknown>;
   return {
+    ...extra,
     project: String(r.project ?? ''),
     tasks: r.tasks.map(normaliseTask),
     queue: Array.isArray(r.queue) ? r.queue.map(String) : [],
     running: Array.isArray(r.running) ? r.running : [],
-    settings: { maxParallel: 2, autoLandLowRisk: false, trunk: 'main', ...(r.settings ?? {}) },
+    settings: {
+      maxParallel: 2, autoLandLowRisk: false, trunk: 'main', autonomy: 'manual', wip: {}, budgetUsdPerDay: 10, pauseAfterFailures: 3, views: [],
+      ...(r.settings ?? {}),
+    },
+    autonomy: r.autonomy ?? r.settings?.autonomy ?? 'manual',
+    metrics: r.metrics ?? { medianCycleMs: null, medianLeadMs: null, throughput7d: 0, spentTodayUsd: 0, wipNow: 0, byStatusAgeing: {} },
+    agents: Array.isArray(r.agents) ? r.agents : [],
+    feed: Array.isArray(r.feed) ? r.feed : [],
     dispatcher: r.dispatcher === 'running' || r.dispatcher === 'paused' ? r.dispatcher : 'idle',
     releases: Array.isArray(r.releases) ? r.releases : [],
     ...(r.connection ? { connection: r.connection } : {}),
@@ -282,8 +304,8 @@ export function normaliseBoard(raw: unknown): BoardState | null {
  * engine's runner and is a chat only for the app's runner; the fallback background
  * runner has no chat at all, and then there is no link to show (undefined).
  */
-export function sessionOf(task: Pick<Task, 'claim' | 'sessionId'>): string | undefined {
-  const id = task.claim?.sessionId || task.sessionId;
+export function sessionOf(task: Pick<Task, 'claim' | 'sessionId'> & { session?: { id: string } }): string | undefined {
+  const id = task.session?.id || task.claim?.sessionId || task.sessionId;
   return id && id.trim() ? id : undefined;
 }
 

@@ -57,10 +57,15 @@ export interface DeliveryInput {
   parts?: Array<{ title: string; body?: string; acceptance?: string[]; points?: number }>;
   /** plan: the points the sprint can hold (default: the recent velocity). */
   capacity?: number;
+  /** create/update: feature, bug, chore, spike or docs. */
+  type?: string;
+  /** create/update: the epic (another task's id) this task belongs to. */
+  parentId?: string;
+  dueDate?: string;
 }
 
 const line = (t: Task): string =>
-  `${t.id} [${t.status}] P${t.priority}${t.estimate ? ` ${t.estimate}pt` : ''} ${t.title}${t.dependsOn.length ? ` (after ${t.dependsOn.join(', ')})` : ''}${t.labels.length ? ` {${t.labels.join(', ')}}` : ''}${t.costUsd ? ` $${t.costUsd.toFixed(2)}` : ''}`;
+  `${t.id} [${t.status}] P${t.priority}${t.type ? ` ${t.type}` : ''}${t.estimate ? ` ${t.estimate}pt` : ''}${t.assignee ? ` @${t.assignee.name}` : ''} ${t.title}${t.dependsOn.length ? ` (after ${t.dependsOn.join(', ')})` : ''}${t.labels.length ? ` {${t.labels.join(', ')}}` : ''}${t.costUsd ? ` $${t.costUsd.toFixed(2)}` : ''}`;
 
 function describe(t: Task): string {
   return [
@@ -126,8 +131,8 @@ export async function deliveryTool(input: DeliveryInput = {}): Promise<string> {
       case 'create': {
         const t = await D.createTask(project, {
           title: input.title, body: input.body, acceptance: input.acceptance, priority: input.priority,
-          dependsOn: input.dependsOn, labels: input.labels,
-        });
+          dependsOn: input.dependsOn, labels: input.labels, type: input.type, parentId: input.parentId, dueDate: input.dueDate,
+        }, 'agent');
         return `Created task ${t.id} in the backlog: ${t.title}. A person promotes it to ready; nothing runs until the dispatcher is started.`;
       }
       case 'list': {
@@ -144,7 +149,7 @@ export async function deliveryTool(input: DeliveryInput = {}): Promise<string> {
         if (input.status === 'ready') return '[error] Only a person promotes a task to ready (it lets the dispatcher spend money). Leave it in the backlog.';
         const t = await D.updateTask(project, input.id, {
           title: input.title, body: input.body, acceptance: input.acceptance, priority: input.priority,
-          dependsOn: input.dependsOn, labels: input.labels, status: input.status,
+          dependsOn: input.dependsOn, labels: input.labels, status: input.status, type: input.type, parentId: input.parentId, dueDate: input.dueDate,
         }, 'agent');
         return `Updated: ${line(t)}`;
       }
@@ -216,6 +221,9 @@ export const deliveryDefinition = {
       priority: { type: 'number', description: '1 (most urgent) to 4. Default 3.' },
       dependsOn: { type: 'array', items: { type: 'string' }, description: 'Task ids (or exact titles) that must be merged first.' },
       labels: { type: 'array', items: { type: 'string' }, description: 'Topics, or the folders/files the task touches.' },
+      type: { type: 'string', enum: ['feature', 'bug', 'chore', 'spike', 'docs'], description: 'create/update: what kind of work it is.' },
+      parentId: { type: 'string', description: 'create/update: the id of the epic this task belongs to (one level).' },
+      dueDate: { type: 'string', description: 'create/update: YYYY-MM-DD.' },
       status: { type: 'string', enum: ['backlog', 'blocked', 'cancelled'], description: 'update: move a task. Only a person can make it ready.' },
       filter: { type: 'string', description: 'list: only tasks in this status.' },
       summary: { type: 'string', description: 'submit: what you did, in a few sentences.' },

@@ -47,6 +47,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { AUTONOMY_LEVELS, type AutonomyLevel } from '../autonomy/levels.js';
+import { AUTONOMY_LEVELS as DELIVERY_AUTONOMY, isAutonomy as isDeliveryAutonomy } from '../../shared/delivery/autonomy.js';
+import type { Autonomy as DeliveryAutonomy } from '../../shared/delivery/types.js';
 import { controlSnapshot, controlStamp } from '../control/state.js';
 
 /** Gates an organisation can require. `checks` and `security` are the completion gate; the others own their own switch. */
@@ -98,6 +100,12 @@ export interface ManagedPolicy {
   plugins?: ExtensionRule;
   customTools?: ExtensionRule;
   connections?: ConnectionsRule;
+  /**
+   * Delivery boards (ADR 0038). `maxAutonomy` is the highest level a board may run at without a person;
+   * restrict-only like every key here. With a managed policy in force and this key absent, boards are
+   * capped at `autonomous`: `full` (landing high-risk work unattended) must be granted by naming it.
+   */
+  delivery?: { maxAutonomy?: DeliveryAutonomy };
   network?: NetworkRule;
   budget?: { perSessionUsd?: number; perDayUsd?: number };
   sentinelRequired?: boolean;
@@ -147,7 +155,7 @@ export interface LoadedPolicy {
 const KNOWN_KEYS = new Set([
   'version', 'message', 'contact', 'minAicoVersion', 'allowedProviders', 'deniedProviders', 'allowedModels',
   'deniedModels', 'localOnly', 'deniedTools', 'maxAutonomyLevel', 'requiredGates', 'mcp', 'plugins',
-  'customTools', 'connections', 'network', 'budget', 'sentinelRequired', 'telemetry', 'audit',
+  'customTools', 'connections', 'delivery', 'network', 'budget', 'sentinelRequired', 'telemetry', 'audit',
   // Free-form notes for the people who maintain the file; never read.
   '$schema', '_comment', 'comment',
 ]);
@@ -305,6 +313,18 @@ export function validatePolicy(raw: Record<string, unknown>): { policy: ManagedP
     }
   }
 
+  if (raw.delivery !== undefined) {
+    const d = raw.delivery;
+    if (!isObj(d)) { bad('delivery', 'must be an object like { "maxAutonomy": "assisted" }', 'manual'); policy.delivery = { maxAutonomy: 'manual' }; }
+    else {
+      warnUnknown(d, ['maxAutonomy'], 'delivery', problems);
+      if (d.maxAutonomy !== undefined) {
+        if (isDeliveryAutonomy(d.maxAutonomy)) policy.delivery = { maxAutonomy: d.maxAutonomy };
+        else { bad('delivery.maxAutonomy', `must be one of ${DELIVERY_AUTONOMY.join(', ')}`, 'manual'); policy.delivery = { maxAutonomy: 'manual' }; }
+      }
+    }
+  }
+
   if (raw.network !== undefined) {
     const n = raw.network;
     if (!isObj(n)) { bad('network', 'must be an object', 'allow-list with no domains'); policy.network = { mode: 'allow-list', domains: [], allowLoopback: false }; }
@@ -367,7 +387,7 @@ export function validatePolicy(raw: Record<string, unknown>): { policy: ManagedP
 function lockdownPolicy(): ManagedPolicy {
   return {
     allowedProviders: [], allowedModels: [], deniedTools: ['*'], localOnly: true, maxAutonomyLevel: 'L0',
-    requiredGates: [...GATE_IDS], mcp: { mode: 'forbid' }, plugins: { mode: 'forbid' }, customTools: { mode: 'forbid' }, connections: { mode: 'forbid' },
+    requiredGates: [...GATE_IDS], mcp: { mode: 'forbid' }, plugins: { mode: 'forbid' }, customTools: { mode: 'forbid' }, connections: { mode: 'forbid' }, delivery: { maxAutonomy: 'manual' },
     network: { mode: 'allow-list', domains: [], allowLoopback: false }, sentinelRequired: true, telemetry: 'off',
   };
 }

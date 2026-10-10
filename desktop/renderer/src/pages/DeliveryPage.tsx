@@ -3,7 +3,8 @@
  * the desktop's own hands.
  *
  * Route: `delivery` with an optional `path` (the project; the chat's project
- * when absent). An agent's session opens as a desktop chat; a touched file
+ * when absent) and an optional `task` (open that task's drawer: the link from the
+ * task's chat, see chat/ChatView). An agent's session opens as a desktop chat; a touched file
  * opens the Code map page on that file (Focus view). The calls that need a
  * person — start/pause the dispatcher, Approve and land, Request changes — go
  * through the window's own transport, where main attaches the one-time human
@@ -45,6 +46,7 @@ export function DeliveryPage({ params }: ViewProps): React.ReactElement {
       host={host}
       projects={list}
       onProjectChange={(p) => go('delivery', { path: p })}
+      openTaskId={params?.task}
     />
   );
 }

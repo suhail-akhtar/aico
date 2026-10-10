@@ -1,6 +1,6 @@
 # 0038 — Delivery: a task board whose parallel writers each get a worktree, land one at a time, and wait for a person
 
-- **Status:** Accepted
+- **Status:** Accepted; amended 2026-10-10 (what the first real use showed; autonomy levels; board fields)
 - **Date:** 2026-10-09
 - **Deciders:** owner (+ authors)
 - **Supersedes / related:** revises [principle 11](../principles.md#11-read-only-fan-out-one-writer) narrowly; builds on [0001](0001-append-only-session-log.md) (the log is the truth), [0021](0021-background-agents-that-report-back.md) (background agents), [0032](0032-brief-fix-all.md) (branch per agent, a person starts spend), [0033](0033-supply-chain-and-change-safety.md) and [0034](0034-evidence-ci-agent-flaky-tests.md) (change safety, evidence); `src/delivery/`, `src/tools/delivery.ts`, `src/server/delivery-routes.ts`, `src/server/delivery-runner.ts`
@@ -114,3 +114,157 @@ Mechanics:
   deadline; `maxParallel` defaults to 2 and is capped at 4.
 - Rejected: one shared branch with file locks (the failure GitHub describes); agent-side merging; a
   merge commit on trunk movement; a planner agent that assigns work to implementer agents (principle 11).
+
+## Amendment (2026-10-10): what the first real use showed, and autonomy levels
+
+The board was used for real on a project with ten tasks and a cheap model, and the owner's verdict was
+"buggy, not purposeful, not real value". Every item below was reproduced in `scripts/delivery-test.mjs`
+(sections "real use 1a" to "real use 4") against the 0.52.0 engine first, then fixed.
+
+### What does not travel, and what a landing does when the checkout is in the way
+
+- **Root cause of "Approve fails: untracked working tree files would be overwritten by merge: .aico/profile.json".**
+  A task runs in a worktree, and AICO's own tools write there (the observer's `.aico/profile.json`, local
+  settings, screenshots). The run's `git add -A` (the agent's, and the engine's own commit at submit) put them
+  in the branch; the person's checkout had its own untracked copy; the fast-forward collided. **Fix:** AICO's
+  machine state (`src/delivery/runtime-files.ts`: the profile, `trust.json`, `*.local.*`, screenshots,
+  sessions, caches and logs under `.aico/`) is never staged by the engine's commit, is stripped from the branch
+  (one commit that removes what the branch added and restores what it changed) before the merge queue and again
+  before landing, and is never counted or shown in a task's diff. Team-owned `.aico/` files (settings, skills,
+  tools, agents, rules, knowledge) are not touched: a task that edits them is making a real change. The
+  profile is the borderline case (it is "committable"); a person who wants it in git commits it from their
+  checkout, not as a side effect of a run in a worktree. Rejected: only `info/exclude` (it is repository-wide, so
+  it would also hide the profile in the person's own checkout, and it does nothing for an agent that already
+  committed the file).
+- **Collisions are a decision.** Before a fast-forward into a checked-out trunk the engine lists the paths the
+  merge would trip over (`src/delivery/landing.ts`): files the person has untracked that the branch adds, and
+  files with uncommitted edits that the branch changes. A copy identical to what the branch brings, or one that
+  is AICO's own, is set aside (copied under `<board>/displaced/<task>/...`, then removed) and the landing goes
+  on. Anything else stops the landing with `409 {code: "landing-collision", files, choices: ["keep-mine",
+  "take-task"]}`, the task stays in review with `landingBlock`, and nothing is touched. `POST
+  /api/delivery/tasks/:id/resolve-landing {choice}` (a person) applies the choice: *keep-mine* drops the task's
+  change to those files from the branch (re-checked, then landed); *take-task* saves the person's copies aside
+  first, then lands. No choice destroys the person's bytes. A dirty checkout that does not overlap lands as before.
+- **A task's diff holds only what the agent changed.** Every git call that means "the trunk" uses the full ref
+  (`refs/heads/<trunk>`): a bare name resolves to a *tag* of that name first, so a release branch that shares a
+  tag's name would have been rebased onto and diffed against the old tag (reproduced: the task is blocked;
+  otherwise the diff would have shown everything the branch gained since as deletions). `currentBranch` no longer
+  asks for `--short` (git prints `heads/<name>` when a tag shares the name, and that became the trunk). After a
+  rebase the engine asserts the trunk's tip is an ancestor of the branch and refuses to review a branch that is
+  not, rather than show a diff that includes changes that are not its own. **Not proven:** the owner's specific
+  case (53 lines of `src/agents/personas.mjs` shown deleted by a task about tool results) could not be
+  reconstructed from the board alone. The ref ambiguity above and the committed runtime files are the defects
+  found; the risk score now also says when a change removes many lines from a file with little added back
+  ("removes many lines with little added back: ..."), which is what a model that replaces a file with a
+  shortened copy looks like, and it names the file to open first.
+
+### Why a Ready task did not start, and what a person can do about it
+
+Tasks whose prerequisites were still in the Backlog never started, silently. Nothing was wrong with the
+dispatcher: the dependency rule held, and nothing said so. Now every task carries `blockedBy: [{id, status}]`
+and a one-sentence `waitingReason` (dependencies, a file clash with a running task, WIP, budget, a paused
+dispatcher, Scrum's active sprint), and the board carries `idleReason` ("2 ready tasks wait for "Add auth" and
+"Add db", which are in Backlog."), all derived at read time (`src/delivery/board-view.ts`, pure: the same rules
+the dispatcher applies, asked "why not"). `POST /api/delivery/tasks/:id/promote-prerequisites` (a person) moves
+the Backlog prerequisites, transitively, to Ready in one call and reports `stuck` ones (blocked or cancelled)
+that it will not move. A task moved to Ready before the dispatcher started, or while it was paused, is picked up
+on start (tested).
+
+### The Changes count is the diff
+
+The tab's number was `touches.files.length`, a prediction from the code graph for a task that had no branch, so
+it said 1 over an empty drawer. `Task.changeCount` is now the number of files in the diff the drawer shows,
+from one source (`diffSnapshot`): committed on the branch, plus, while the task runs, uncommitted and new
+files (taken with a throwaway index, so the task's own index is never touched), minus AICO's runtime files.
+`GET .../diff` returns `{diff, files, live, truncated, note?}`; a merged task's diff is the range that landed; a
+task nobody has started is an honest empty diff with a note.
+
+### A task and its chat
+
+The journal records, on every start, the run's chat and the stage the task was in (`Task.sessions`,
+`Task.session`); the session API (`GET /api/session`) adds `delivery: {taskId, title, status, project, board,
+stage?}` for any chat that is a task's run, in every status, and for the earlier chats of a task that was sent
+back. The "Session" link failed because the client names the *board's* project when it opens a chat while the
+log is filed under the task's worktree; the server now prefers the task's folder for a task's chat. (The link is
+recorded in the board's journal, the record of the task, not as a new session event: a new event type would reach
+every reducer of the session log for a fact only the board needs.)
+
+### Visibility
+
+`Task.live` is the run's current step (`src/delivery/activity.ts`, read from the session log: the last tool
+call and its target, in the present tense until it has a result, plus tokens), held in memory and pushed on the
+board stream; it is never journaled per step. The history is the journal: a bounded line per milestone (started,
+edits coalesced to one per 20 seconds, check runs, commits, submitted, review, needs you, landed, failed,
+promoted, pulled), 200 per task (the board carries the latest 30; `GET .../activity` has all 200) and a
+100-line board feed. The model is never asked what it is doing.
+
+### Autonomy levels
+
+`settings.autonomy` is a ceiling on what the engine does without a person. Default `manual` (exactly the board
+as it was). Each level adds to the one before; `src/delivery/autonomy.ts` is the whole rule and is tested as a
+matrix (240 combinations) against an independently written table.
+
+| Level | The board also does |
+|---|---|
+| `manual` | nothing: a person moves tasks to Ready and approves every landing |
+| `assisted` | starts the Backlog prerequisites of Ready tasks; lands LOW-risk work whose checks are green |
+| `autonomous` | pulls the next Backlog tasks into Ready when a slot is free (highest rank, then priority; prerequisites merged; the active sprint in Scrum; no file clash); lands LOW and MEDIUM |
+| `full` | lands HIGH too, when every gate is green and the organisation's policy allows it |
+
+**What never changes with the level.** A possible secret in the added lines, a weakened test, a high-severity
+code finding, or a safety scan that did not run keeps a change away from every automatic landing, `full`
+included: those are findings, not points on a score that a bigger budget can outvote. Pull-request mode never
+lands automatically (the remote's rules and a person decide the merge; nothing here pushes, and no level
+bypasses a protected branch). The actions of every level happen only while the dispatcher is running: a person
+started it, and pausing is the kill switch (one call, only the token). Raising the level, the daily budget,
+`maxParallel` or the failure threshold needs a person (`PATCH /api/delivery/settings`, `human()`); lowering needs
+only the token. Starting the dispatcher already needed a person, so no level begins spending without one.
+
+**Hard limits, enforced in the tick, not requested of a model.** The daily budget (`budgetUsdPerDay`, default
+$10, summed from the cost increases in the journal over the local day) pauses the dispatcher and stops the runs
+in flight, with the figures in `pausedBecause`; a task's spend is the *sum* of its runs and a task that used its
+allowance is not started again (previously the larger of its runs was kept, which undercounted every rework);
+`pauseAfterFailures` (default 3) consecutive runs that failed or were sent back by the engine pause the
+dispatcher with the count and the limit; `maxParallel` is capped at 4; `wip.running` lowers the parallelism and
+`wip.review` stops new starts while that many changes await a person (counting those still being checked). A
+pause lasts until a person starts the dispatcher; a restart pauses too, and says so.
+
+**Every automatic act is recorded** with who decided and why: `Task.landed.decision {autonomy, risk, score,
+evidence, reason}`, a `landed` line in the task's history (and the feed), and an audit-log event of kind
+`delivery` (`auto-land`, `auto-start`, `auto-promote`, `auto-pause`, `autonomy.set`) with `decidedBy:
+engine:<level>` or `person`.
+
+**Organisation ceiling.** Managed policy (`policy/managed.ts`) gains `delivery.maxAutonomy`, restrict-only like
+every key: the lowest layer wins, an invalid value is `manual`, a lockdown is `manual`. With a managed policy in
+force and the key absent the ceiling is `autonomous`: an organisation must name `full` to allow it. The ceiling
+is applied where the level is used (`BoardState.autonomy` is the effective level, `settings.autonomy` what was
+chosen, `autonomyCap` the ceiling), so lowering the policy lowers a running board at the next tick, and the
+engine refuses to *set* a level above it even for a person.
+
+**Honest limits of this trust model.** The risk score is a heuristic and its inputs are the engine's analyses
+(code graph, test-tamper comparison, the secret and code rules on added lines); a flaw they cannot see lands at
+`autonomous` and `full` without a person. The checks that gate a landing are the project's own: a project with
+none gets "no checks defined", which counts as *green* (the evidence says so, and the risk score stays). The
+daily budget is an estimate from the provider's token counts and the configured prices; an unpriced model has no
+figure and no ceiling. `full` is for projects where the checks are trusted and the trunk is recoverable (every
+landing is a normal commit that a release rollback can revert). The levels are not a substitute for branch
+protection on a remote. One more gap, left as it was: a task can be moved to Ready with only the API token
+(`PATCH /api/delivery/tasks/:id`), as before; the dispatcher still needs a person to start, and so does every
+level above `manual`.
+
+### A board you can run a team from
+
+`Task` gains `assignee` (a person, or the agent slot "Agent A".."Agent D" given when a run starts and kept
+afterwards), `rank`, `dueDate`, `type`, `parentId` (an epic, one level; it shows `children` and merges itself
+when all its children have; the dispatcher never runs an epic as a task), `blockedBy`, `waitingReason`, `live`,
+`changeCount`, `session`/`sessions`, `activity`, `landingBlock`. `rank` is `priority * 1,000,000 + n` for a new
+task, so an untouched board runs most-urgent first, and a reorder (`POST /api/delivery/tasks/reorder {status,
+ids}`) swaps the ranks the dragged cards already hold; the dispatcher starts by rank, then priority. The board
+gains `idleReason`, `autonomy`, `autonomyCap`, `pausedBecause`, `metrics` (median cycle time from the first run,
+median lead time from creation, throughput over 7 days, `wipNow`, ageing per column, today's spend), `agents` and
+`feed`; its settings gain `wip`, `budgetUsdPerDay`, `pauseAfterFailures`, `views` (saved filters, per project).
+`PATCH /api/delivery/tasks/bulk {ids, patch}` applies one patch through `updateTask` task by task and names what
+it refused; `POST /api/delivery/tasks/:id/duplicate`; creation accepts `quick: true` to read the title as
+"Fix login !1 #auth @sam due:2026-10-20 type:bug" (`shared/delivery/quickadd.ts`, so a client can preview it).
+Deviations from the contract the clients were given: `activity` on the board's task carries the latest 30 lines
+(the full 200 are one call away); `children`, `waitingReason`, `sessions` and `landingBlock` are additions.

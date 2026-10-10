@@ -864,6 +864,14 @@ export { runPrompt as deliveryRunPrompt, planPrompt as deliveryPlanPrompt, refin
 export { isDeliveryWorktree, deliveryRunDenial, worktreePath as deliveryWorktreePath } from './delivery/paths.js';
 export { deliveryTool, deliveryDefinition } from './tools/delivery.js';
 export { handleDeliveryRoute } from './server/delivery-routes.js';
+export * as DeliveryAutonomy from './delivery/autonomy.js';
+export * as DeliveryActivity from './delivery/activity.js';
+export * as DeliveryBoardView from './delivery/board-view.js';
+export * as DeliveryRuntimeFiles from './delivery/runtime-files.js';
+export * as DeliveryLanding from './delivery/landing.js';
+export * as DeliveryAutonomyLevels from '../shared/delivery/autonomy.js';
+export { parseQuickAdd, isDueDate } from '../shared/delivery/quickadd.js';
+export { deliveryAutonomyCap } from './policy/enforce.js';
 export * as DeliveryScrum from './delivery/scrum.js';
 export * as DeliveryScrumFold from './delivery/scrum-fold.js';
 export * as ScrumModel from '../shared/delivery/scrum.js';

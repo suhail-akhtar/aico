@@ -379,6 +379,8 @@ section('7. human-gated routes with only the token');
     ['delivery/sprints/00000000/close', { project }],
     ['delivery/scrum/proposals/00000000/accept', { project }],
     ['delivery/tasks/00000000/merge-pr', { project }],
+    ['delivery/tasks/00000000/promote-prerequisites', { project }],
+    ['delivery/tasks/00000000/resolve-landing', { project, choice: 'take-task' }],
     ['connections/create', { provider: 'github', baseUrl: 'https://ghe.dast.example' }],
     ['connections/credential', { id: 'github-github-com', token: 'ghp_DastCanaryNotARealToken000000000000' }], // standards-allow: secret (DAST canary)
     ['connections/update', { id: 'github-github-com', disabled: true }],
@@ -394,6 +396,11 @@ section('7. human-gated routes with only the token');
     const applied = r.status === 200 && !/human-required|needs a person/i.test(r.text);
     check(`human:${route} ${JSON.stringify(body).slice(0, 60)} refused without a person`, !applied, `status ${r.status} ${r.text.slice(0, 120)}`);
   }
+  // Raising a board's autonomy is a person's act (PATCH, so outside the POST loop above); lowering it needs only the token.
+  const raise = remember('human delivery/settings autonomy', await api('delivery/settings', { method: 'PATCH', json: { project, autonomy: 'full' } }));
+  check('human:delivery/settings {"autonomy":"full"} refused without a person', !(raise.status === 200 && !/human-required|needs a person/i.test(raise.text)), `status ${raise.status} ${raise.text.slice(0, 120)}`);
+  const lower = await api('delivery/settings', { method: 'PATCH', json: { project, autonomy: 'manual' } });
+  check('human:delivery/settings lowering autonomy to manual needs only the token', lower.status === 200, `status ${lower.status} ${lower.text.slice(0, 120)}`);
   const settingsNow = JSON.parse(fs.readFileSync(path.join(home, 'settings.json'), 'utf8'));
   check('human:no weakening setting reached settings.json', settingsNow.autoApprove !== true && settingsNow.sandbox?.mode !== 'danger-full-access', JSON.stringify({ autoApprove: settingsNow.autoApprove, sandbox: settingsNow.sandbox }));
   const control = await api('permission', { method: 'POST', json: { sessionId: SESSION, id: 'nope', allow: true }, headers: { 'x-aico-ui-key': uiKey } });

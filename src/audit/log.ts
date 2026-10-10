@@ -30,6 +30,7 @@ import type { LoadedPolicy } from '../policy/managed.js';
 export type OwnAuditEvent =
   | { at: number; kind: 'settings.change'; action: 'set' | 'unset'; key: string; valueHash?: string }
   | ConnectionAuditEvent
+  | DeliveryAuditEvent
   | { at: number; kind: 'policy.load'; active: boolean; hash: string; paths: string[]; problems: number; lockdown: boolean; weak: boolean };
 
 /**
@@ -50,6 +51,25 @@ export interface ConnectionAuditEvent {
   outcome: 'ok' | 'error' | 'denied';
   detail?: string;
   project?: string;
+}
+
+/**
+ * A Delivery board decision (ADR 0038, "Autonomy levels"): the board changed what it may do on its own,
+ * or it acted without a person. Records who or what decided and why (the level, the risk and the
+ * evidence line), never a task's body or a diff. `project` is the board's folder.
+ */
+export interface DeliveryAuditEvent {
+  at: number;
+  kind: 'delivery';
+  /** autonomy.set, auto-land, auto-start, auto-promote, auto-pause, collision.resolve. */
+  action: string;
+  project: string;
+  task?: string;
+  autonomy?: string;
+  /** Who decided: `person`, or `engine:<level>` for the board's own rule. */
+  decidedBy: string;
+  outcome: 'ok' | 'error' | 'denied';
+  detail?: string;
 }
 
 export function auditEventsFile(): string {

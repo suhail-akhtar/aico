@@ -5,8 +5,8 @@
  * the reviewer's attention is the scarce resource. The score tells them where to spend
  * it: a ten-line change to one leaf file with its test is skimmed; a wide change that
  * reaches many dependents, weakens a test or contains something that looks like a
- * secret is read line by line. It is also the only input to the optional auto-land of
- * low-risk work (`autoLandLowRisk`, off by default), so it errs towards medium/high:
+ * secret is read line by line. It is also the main input to the board's own landings
+ * (`autoLandLowRisk`, off by default, and the autonomy levels), so it errs towards medium/high:
  * every signal below only ever ADDS risk, nothing subtracts, and an analysis that
  * cannot run adds a reason saying so rather than quietly scoring low.
  *
@@ -19,6 +19,12 @@
  *    only (`shared/security/rules`), so old code in a touched file is not the task's fault;
  *  - **sensitive paths**: manifests and lockfiles, CI workflows, containers, auth /
  *    crypto / security / migration code.
+ *  - **shrinking rewrites**: a file that loses many lines and gets little back (what a model
+ *    replacing a file with a shortened copy looks like) names itself in the reasons.
+ *
+ * The findings that must keep a change away from every automatic landing (a possible secret, a
+ * weakened test, a high-severity rule) are also recorded as `flags`: the autonomy rule
+ * (`autonomy.ts`) reads those instead of parsing the sentences above.
  *
  * Deliberately not a model's opinion: the score is deterministic, so it can be tested
  * and the same diff always reads the same.
@@ -85,6 +91,8 @@ export async function assessRisk(input: RiskInput): Promise<NonNullable<Task['ri
   let score = 0;
   /** Some findings are never "low" however small the change: they set a floor under the score. */
   let floor = 0;
+  /** Findings that keep a change from every automatic landing (autonomy.ts): recorded, not just worded, so no rule has to parse the reasons. */
+  const flags = new Set<'secret' | 'test-tamper' | 'code-high'>();
   const add = (n: number, why: string): void => { score += n; reasons.push(`${why} (+${n})`); };
 
   const files = input.stats.map(s => s.path.replace(/\\/g, '/'));
@@ -127,11 +135,17 @@ export async function assessRisk(input: RiskInput): Promise<NonNullable<Task['ri
   }
   const hard = tamper.filter(t => t.kind === 'test-file-deleted' || t.kind === 'assertions-removed' || t.kind === 'skip-marker-added');
   const soft = tamper.filter(t => !hard.includes(t));
+  if (tamper.length > 0) flags.add('test-tamper');
   if (hard.length > 0) floor = Math.max(floor, 25);
   if (hard.length > 0) add(Math.min(40, 20 * hard.length), `weakened tests: ${hard.slice(0, 3).map(t => t.detail).join('; ')}`);
   if (soft.length > 0) add(Math.min(15, 8 * soft.length), `test expectations loosened: ${soft.slice(0, 2).map(t => t.detail).join('; ')}`);
   const sourceChanged = changed.some(c => !isTestFile(c.path) && /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|cs|php|rb|swift|c|cc|cpp|h)$/i.test(c.path));
   if (sourceChanged && !changed.some(c => isTestFile(c.path))) add(10, 'source changed and no test was added or changed');
+
+  // A rewrite that clobbers a file looks like this: many lines gone, little put back. Cheap models do it when they
+  // replace a file with a shortened copy; a person reading the score is told which file to open first.
+  const shrunk = input.stats.filter(st => st.removed >= 20 && st.removed > st.added * 2 && !isTestFile(st.path));
+  if (shrunk.length > 0) add(Math.min(12, 4 * shrunk.length), `removes many lines with little added back: ${shrunk.slice(0, 2).map(st => `${st.path} (-${st.removed}/+${st.added})`).join(', ')}`);
 
   // Change safety, on the added lines only.
   try {
@@ -153,6 +167,8 @@ export async function assessRisk(input: RiskInput): Promise<NonNullable<Task['ri
         if (f.severity === 'high') { high++; if (where.length < 2) where.push(`${rel}:${f.line} ${f.rule}`); } else medium++;
       }
     }
+    if (secrets > 0) flags.add('secret');
+    if (high > 0) flags.add('code-high');
     if (secrets > 0) floor = Math.max(floor, 55);
     if (secrets > 0) add(40, `${secrets} possible secret${secrets === 1 ? '' : 's'} in the added lines (${where.join(', ')})`);
     if (high > 0) floor = Math.max(floor, 25);
@@ -174,5 +190,5 @@ export async function assessRisk(input: RiskInput): Promise<NonNullable<Task['ri
 
   score = Math.max(floor, Math.min(100, Math.round(score)));
   if (reasons.length === 0) reasons.push('a small change with no risk signal');
-  return { score, level: levelOf(score), reasons };
+  return { score, level: levelOf(score), reasons, flags: [...flags] };
 }

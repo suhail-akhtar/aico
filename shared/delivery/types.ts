@@ -24,6 +24,21 @@ export type TaskPriority = 1 | 2 | 3 | 4;
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 
+/** What kind of work a task is (a label for the board and its filters; nothing is scheduled by it). */
+export type TaskType = 'feature' | 'bug' | 'chore' | 'spike' | 'docs';
+
+/**
+ * How much of the board's routine the engine may do without a person (ADR 0038, "Autonomy levels").
+ * Ordered: each level can do everything the one before it can. `manual` is the default.
+ */
+export type Autonomy = 'manual' | 'assisted' | 'autonomous' | 'full';
+
+/** Who or what is working on a task: a person's name, or one of the board's agent slots ("Agent A".."Agent D"). */
+export interface Assignee { kind: 'agent' | 'person'; name: string }
+
+/** One line of a task's (or the board's) history. `by: 'system'` is the engine acting on a rule, never on a model's word. */
+export interface ActivityEntry { at: string; kind: string; by: 'person' | 'agent' | 'system'; text: string }
+
 /** What a landed change is, from its Conventional Commit types (the highest wins: feat over fix over the rest). */
 export type ChangeKind = 'feat' | 'fix' | 'perf' | 'refactor' | 'docs' | 'test' | 'chore' | 'other';
 
@@ -71,7 +86,16 @@ export interface Task {
   worktree?: string;
   touches?: { files: string[]; symbols: string[]; predicted: boolean };
   evidence?: { md: string; summary: string };
-  risk?: { score: number; level: RiskLevel; reasons: string[] };
+  risk?: {
+    score: number; level: RiskLevel; reasons: string[];
+    /**
+     * Findings that keep a change away from every automatic landing, whatever its score: `secret` (a possible
+     * credential in the added lines), `test-tamper` (a test weakened), `code-high` (a high-severity code rule).
+     * Absent on a board journaled before they were recorded; the engine then treats the change as unflagged
+     * only if its reasons name none of them.
+     */
+    flags?: Array<'secret' | 'test-tamper' | 'code-high'>;
+  };
   review?: { comments: { at: string; by: 'person' | 'agent'; text: string }[] };
   /** Set while a run waits for a person; the card shows it and answers go through the chat's own routes. */
   needs?: TaskNeed;
@@ -80,7 +104,11 @@ export interface Task {
   /** The remote work item this task was imported from or linked to (ADR 0039). */
   remote?: RemoteLink;
   /** Where the work landed on the trunk, for release notes and rollback. */
-  landed?: { from: string; to: string; at: string; kind: ChangeKind; breaking: boolean; by: 'person' | 'auto' };
+  landed?: {
+    from: string; to: string; at: string; kind: ChangeKind; breaking: boolean; by: 'person' | 'auto';
+    /** Set when the engine landed it on its own rule: which autonomy level, what the evidence and risk were, in one line each. */
+    decision?: { autonomy: Autonomy; risk: RiskLevel; score: number; evidence: string; reason: string };
+  };
   costUsd?: number;
   /** Scrum mode (ADR 0039 section 4): story points, set by a person or accepted from an agent's proposal. */
   estimate?: number;
@@ -88,6 +116,38 @@ export interface Task {
   sprintId?: string;
   createdAt: string;
   updatedAt: string;
+
+  // ── a real board's fields (ADR 0038, "A board you can run a team from"). Always present on a task read from `boardState`. ──
+  /** A person's name, or the agent slot a run was given when it started (kept after, so a finished card still says who did it). */
+  assignee?: Assignee;
+  /** `YYYY-MM-DD`. */
+  dueDate?: string;
+  /**
+   * Order within a column; lower first. The dispatcher starts ready tasks by rank, then priority. A new task's rank is
+   * `priority * 1_000_000 + n`, so an untouched board still runs most-urgent first; dragging reassigns ranks among the dragged cards.
+   */
+  rank: number;
+  type?: TaskType;
+  /** An epic (another task on this board) this task belongs to. The epic shows `children`. */
+  parentId?: string;
+  /** The tasks in `dependsOn` that are not merged yet, with where each is now. Empty (absent) when nothing blocks it. */
+  blockedBy?: { id: string; status: TaskStatus }[];
+  /** Why a ready task is not running right now, in one sentence (dependencies, overlap, WIP, budget, pause ...). Derived. */
+  waitingReason?: string;
+  /** What the running agent is doing this moment (derived from its session, never journaled per step). */
+  live?: { summary: string; at: string; tokens?: number };
+  /** The number of files in the diff the Changes tab shows: committed plus, while it runs, uncommitted. Never a prediction. */
+  changeCount: number;
+  /** The chat of the task's latest run; same as `sessionId`, in the shape the client links by. */
+  session?: { id: string };
+  /** Every run's chat, oldest first, with the stage the task was in when it started. */
+  sessions?: { id: string; at: string; stage: TaskStatus }[];
+  /** The latest history lines (30 on the board; `GET /api/delivery/tasks/:id/activity` has up to 200). */
+  activity: ActivityEntry[];
+  /** On an epic: how its children stand. */
+  children?: { total: number; merged: number; running: number; review: number };
+  /** Set while a landing was refused because files in the project's checkout are in the way; cleared when resolved or retried. */
+  landingBlock?: { at: string; files: Array<{ path: string; why: 'untracked' | 'modified' }>; choices: Array<'keep-mine' | 'take-task'> };
 }
 
 export type DispatcherState = 'idle' | 'running' | 'paused';
@@ -140,8 +200,39 @@ export interface BoardState {
   /** Task ids awaiting landing, in order. */
   queue: string[];
   running: { taskId: string; runId: string; startedAt: string; costUsd: number }[];
-  settings: { maxParallel: number; autoLandLowRisk: boolean; trunk: string; /** `kanban` when absent. */ mode?: BoardMode };
+  settings: {
+    maxParallel: number; autoLandLowRisk: boolean; trunk: string; /** `kanban` when absent. */ mode?: BoardMode;
+    /** What the engine may do without a person. Changing it above `manual` is a person's act. Default `manual`. */
+    autonomy: Autonomy;
+    /** Work-in-progress limits per column; the dispatcher starts nothing past them. Absent: only `maxParallel` limits. */
+    wip: { running?: number; review?: number };
+    /** The most the board may spend in a (local) day. The dispatcher pauses itself when it is reached. Default 10. */
+    budgetUsdPerDay: number;
+    /** Consecutive failed or sent-back tasks after which the dispatcher pauses itself. Default 3. */
+    pauseAfterFailures: number;
+    /** Saved filters (a name and the filter string the client applies). */
+    views: { name: string; filter: string }[];
+  };
   dispatcher: DispatcherState;
+  /** The autonomy in force: the setting, lowered to what the organisation's policy allows. */
+  autonomy: Autonomy;
+  /** Present when the organisation's policy limits autonomy below `full`: the highest level it allows. */
+  autonomyCap?: Autonomy;
+  /** Why ready tasks are not being picked up, when that is so ("2 ready tasks wait for ... which are in Backlog"). */
+  idleReason?: string;
+  /** Why the dispatcher paused itself (daily budget, too many failures, a restart), until a person starts it again. */
+  pausedBecause?: string;
+  metrics: {
+    medianCycleMs: number | null; medianLeadMs: number | null; throughput7d: number; spentTodayUsd: number;
+    /** Tasks running or in review now. */
+    wipNow: number;
+    /** How long tasks have been in their column: the count and the oldest and median age, for the columns where waiting matters. */
+    byStatusAgeing: Partial<Record<TaskStatus, { count: number; oldestMs: number; medianMs: number }>>;
+  };
+  /** The board's agent slots and what each is doing. */
+  agents: { name: string; taskId?: string; summary?: string; state: 'idle' | 'working' | 'waiting' }[];
+  /** The last 100 events across the board, newest last. */
+  feed: { at: string; taskId?: string; kind: string; text: string }[];
   /** Releases this board made, newest first. */
   releases: Release[];
   /** The project's connection to a forge and tracker, when it has one (ADR 0039); added by the route, not the fold. */

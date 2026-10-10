@@ -169,3 +169,15 @@ export function followDelivery(project: string): () => void {
     }
   };
 }
+
+/**
+ * Show a drag-to-reorder at once: the cards of one column take ranks 0..n in the order given. Returns the undo
+ * for when the engine refuses it. The engine re-ranks on its side; its next frame replaces these numbers.
+ */
+export function optimisticOrder(ids: readonly string[]): () => void {
+  const prev = useDelivery.getState().board;
+  if (!prev) return () => undefined;
+  const at = new Map(ids.map((id, i) => [id, i]));
+  useDelivery.setState({ board: { ...prev, tasks: prev.tasks.map(t => (at.has(t.id) ? { ...t, rank: at.get(t.id)! } : t)) } });
+  return () => { if (useDelivery.getState().board !== null) useDelivery.setState({ board: prev }); };
+}

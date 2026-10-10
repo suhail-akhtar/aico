@@ -7,5 +7,5 @@
  */
 export type {
   Task, TaskStatus, TaskPriority, RiskLevel, BoardState, DispatcherState,
-  ChangeKind, TaskNeed, Release, ReleasePlan, AttentionSnapshot, BatchResult,
+  ChangeKind, TaskNeed, TaskType, Autonomy, Assignee, ActivityEntry, Release, ReleasePlan, AttentionSnapshot, BatchResult,
 } from '../../shared/delivery/types.js';

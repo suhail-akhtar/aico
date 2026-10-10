@@ -96,7 +96,7 @@ console.log('\n-- compatibility: a journal without Scrum events loads as before 
     jl.patch('2026-09-02T08:00:00.000Z', 'a1b2c3d4', { priority: 2 }),
   ], { torn: '{"t":"scrum","at":"2026-09-02' });
   const b = S.boardState(p);
-  ok(Object.keys(b).sort().join() === 'dispatcher,project,queue,releases,running,settings,tasks', 'the board has exactly the keys it had before Scrum', Object.keys(b));
+  ok(Object.keys(b).filter(k => k !== 'idleReason').sort().join() === 'agents,autonomy,dispatcher,feed,metrics,project,queue,releases,running,settings,tasks' && !('sprints' in b) && !('proposals' in b) && b.settings.mode === undefined && typeof b.tasks[0].rank === 'number' && b.tasks[0].changeCount === 0, 'the board has exactly the keys every board has - none of the Scrum ones - and an old journal gains a rank and a change count', Object.keys(b));
   ok(b.settings.mode === undefined && b.sprints === undefined && b.proposals === undefined, 'no mode, sprints or suggestions appear until the first Scrum fact');
   ok(b.tasks[0].priority === 2 && b.tasks[0].estimate === undefined && b.tasks[0].sprintId === undefined, 'tasks carry no estimate or sprint');
   ok(Fold.mayStartInMode(S.load(p).scrum, b.tasks[0]), 'the dispatcher gate lets a Kanban board start a ready task');
