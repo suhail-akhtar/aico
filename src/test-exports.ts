@@ -948,3 +948,4 @@ export { customAdapter } from './connections/packs/adapter.js';
 
 // AICO Control, engine side (ADR 0040): state, device-flow client, sync, routes.
 export * as Control from './control/index.js';
+export * as cleanroom from './cleanroom/index.js';

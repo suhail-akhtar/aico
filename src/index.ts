@@ -28,6 +28,7 @@ import { registerAgentCommands } from './evals/cli.js';
 import { registerPolicyCommands } from './policy/cli.js';
 import { registerControlCommands } from './control/cli.js';
 import { registerCiCommands } from './ci/cli.js';
+import { registerCleanroomCommands } from './cleanroom/cli.js';
 import { initializeFeatures, shutdownFeatures } from './bootstrap.js';
 import { mcpRegistry } from './mcp/index.js';
 import { cronScheduler } from './cron/scheduler.js';
@@ -397,6 +398,8 @@ registerPolicyCommands(program);
 registerControlCommands(program);
 // evidence / review / fix-ci: the commands a pipeline calls (ADR 0034).
 registerCiCommands(program, { pickModel: (m, settings) => resolveModel(m || settings?.model || defaultModel(), settings) });
+// cleanroom observe|synthesize|implement|twin: rebuild software from its behaviour (ADR 0041).
+registerCleanroomCommands(program, { pickModel: (m, settings) => resolveModel(m || settings?.model || defaultModel(), settings), loadSettings });
 
 // ── provider subcommand ───────────────────────────────────────────────
 const providerCmd = program

@@ -407,6 +407,19 @@ stopped automatically if it passes either.
 
 ---
 
+## Rebuilding software from its behaviour (clean room)
+
+`aico cleanroom` observes a program from the outside and rebuilds it from a written description, never from its source. Four steps, each its own command, each reading the last one's folder under the AICO home:
+
+```bash
+aico cleanroom observe shop web https://example.test        # or: api <base url>, cli "tool --flag"
+aico cleanroom synthesize shop                               # writes spec/SPEC.md and spec/spec.json
+aico cleanroom implement shop --run --budget 3               # a model builds the clone from the spec alone
+aico cleanroom twin shop http://localhost:8080               # replay the journeys on the clone, report differences
+```
+
+Without `--run`, `implement` only prepares the workspace and prints the brief, so you can hand it to any agent. `twin` exits 0 when identical and 2 when it found differences; `--live` runs each step against the real target as well. The report's parity figure is measured over what was observed, not over the whole program. Limits: command-line tools run through pipes (a program that needs a real terminal behaves differently), web exploration stays on the target's origin unless `--follow-external`, and logged-in areas are only as known as you let the explorer reach. You decide what you point it at and are responsible for having the right to; the engine adds no checks.
+
 ## AICO in CI
 
 Two jobs for a pipeline, and a record of what a change was checked against.
