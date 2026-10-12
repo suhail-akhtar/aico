@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aico vs Claude Code, Devin, Replit, Lovable and Bolt.new — compared</title>
+<meta name="description" content="An honest, self-hosted alternative to Claude Code, Codex, OpenCode, Aider, Cline and Cursor — and to the app builders Devin, Replit Agent, Lovable and Bolt.new. What is genuinely different, and where each one is clearly ahead.">
+<!-- seo:start -->
+<link rel="canonical" href="https://suhail-akhtar.github.io/aico/compare.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aico">
+<meta property="og:url" content="https://suhail-akhtar.github.io/aico/compare.html">
+<meta property="og:title" content="aico vs Claude Code, Devin, Replit, Lovable and Bolt.new — compared">
+<meta property="og:description" content="An honest, self-hosted alternative to Claude Code, Codex, OpenCode, Aider, Cline and Cursor — and to the app builders Devin, Replit Agent, Lovable and Bolt.new. What is genuinely different, and where each one is clearly ahead.">
+<meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="aico vs Claude Code, Devin, Replit, Lovable and Bolt.new — compared">
+<meta name="twitter:description" content="An honest, self-hosted alternative to Claude Code, Codex, OpenCode, Aider, Cline and Cursor — and to the app builders Devin, Replit Agent, Lovable and Bolt.new. What is genuinely different, and where each one is clearly ahead.">
+<meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<!-- seo:end -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script><!-- blocking on purpose: sets the theme before first paint -->
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.53.0</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="desktop.html">Desktop</a>
+      <a href="vscode.html">VS Code</a>
+      <a href="automation.html">Automation</a>
+      <a href="compare.html" aria-current="page">Compare</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="apps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Compare</p>
+
+  <div class="prose">
+    <h1>aico vs the alternatives</h1>
+    <p class="lede">
+      There are a lot of good AI coding agents, and a separate crowd of
+      chat-to-app builders people compare against them anyway. This page
+      covers both: where aico is genuinely different, and — because a
+      comparison that only flatters itself is worthless — where the
+      alternatives are ahead.
+    </p>
+
+    <div class="note warn">
+      <p>
+        <strong>Start with the honest part.</strong> Claude Code, OpenCode,
+        OpenHands, Cline and Aider have between tens of thousands and a hundred
+        thousand-plus users each. aico does not. If what you want is the
+        best-supported tool with the largest community, the most extensions and
+        the most Stack Overflow answers, one of those is the better choice today
+        and it is not close.
+      </p>
+      <p>
+        What follows is about design decisions, not popularity.
+      </p>
+    </div>
+
+    <h2>At a glance</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>&nbsp;</th><th>aico</th><th>Claude Code</th><th>OpenCode</th>
+            <th>Aider</th><th>Cline</th><th>Cursor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Source available</td><td>Yes (FSL)</td><td>No</td><td>MIT</td><td>Apache</td><td>Apache</td><td>No</td></tr>
+          <tr><td>Bring your own key</td><td>Yes</td><td>Anthropic</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Subscription</td></tr>
+          <tr><td>Runs local models</td><td>Yes</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Limited</td></tr>
+          <tr><td>Terminal</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td><td>No</td></tr>
+          <tr><td>Own web UI</td><td>Yes</td><td>No</td><td>Desktop app</td><td>No</td><td>In VS&nbsp;Code</td><td>Is an editor</td></tr>
+          <tr><td>Editor extension</td><td>VS&nbsp;Code</td><td>Yes</td><td>Yes</td><td>No</td><td>Yes</td><td>n/a</td></tr>
+          <tr><td>Inline completion</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>Yes</td></tr>
+          <tr><td>Community size</td><td>New</td><td>Very large</td><td>Very large</td><td>Large</td><td>Large</td><td>Very large</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.9rem;color:var(--muted)">
+      OpenAI's <a href="https://github.com/openai/codex" rel="noopener">Codex CLI</a>
+      belongs in this table too and is not shown for space — same shape as Claude
+      Code: closed source, no BYOK for third-party models, its own editor
+      extension. It sits where Claude Code does in every row above.
+    </p>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Compiled August 2026 from each project's own documentation. Fast-moving
+      software — check the source before relying on a row.
+    </p>
+
+    <h2>What is actually different about aico</h2>
+
+    <h3>It opens what it builds</h3>
+    <p>
+      This exists because of a specific failure: three models were asked for a
+      single-file 3D space planner, and a keyword check scored two of them twelve
+      features out of twelve. Opened in a browser, one threw on load and rendered
+      nothing; the other was a shell. Nothing in the loop had ever
+      <em>run</em> the thing.
+    </p>
+    <p>
+      <code>VerifyApp</code> opens the page in a real browser and reports what a
+      person would hit — uncaught exceptions, console errors, failed requests,
+      whether a <code>&lt;canvas&gt;</code> was ever painted, and whether named
+      controls do anything when clicked. Most agents check that the code looks
+      right. This one checks that it works.
+    </p>
+
+    <h3>The session is a log, not a chat buffer</h3>
+    <p>
+      Every fact is an append-only event with a sequence number. That is not
+      architecture for its own sake — it is what makes a session resumable after a
+      crash with real tool results rather than a summary, forkable from any
+      message, and compactable without deleting anything. It is also why prompt
+      caching actually hits: the cacheable prefix only ever grows.
+    </p>
+
+    <h3>One ledger for everything running</h3>
+    <p>
+      Sub-agents, background jobs, dev servers, scheduled runs and watchers share
+      one record and one id space, and it survives a restart. You can ask "what is
+      running, and what failed while I was away?" and get an answer. Limits —
+      spend, deadline, idle — are set once and enforced by the platform rather
+      than checked by the model.
+      <a href="automation.html">How that works</a>.
+    </p>
+
+    <h3>It waits without burning turns</h3>
+    <p>
+      Asking most agents to wait for a build means a command, a sleep, and another
+      command — a full turn and a full prompt per check. aico registers a watcher
+      and stops; the platform wakes it. One turn to set, one to be woken by.
+    </p>
+
+    <h3>It can be driven by another AI</h3>
+    <p>
+      <code>aico mcp-serve</code> speaks MCP on stdin and stdout, so Claude Code or
+      any MCP client can delegate a task to it and collect the result. Nothing
+      listens on a port. Several tools <em>consume</em> MCP servers; being one is
+      less common.
+    </p>
+
+    <h3 id="vscode">In VS Code, a panel of its own</h3>
+    <p>
+      aico gets its own tab in the Secondary Side Bar, beside Chat — the same
+      mechanism Claude Code and Codex use. It is not the web portal in a
+      frame: the panel is drawn for the editor and styled from your theme, so
+      tool cards and diffs match the colours of the file next to them.
+    </p>
+    <p>
+      It is not a second implementation either, and that distinction is the
+      reason it was worth building. The state layer, the reducer and every
+      transcript component are the browser client's, imported unchanged; the
+      panel is a view over them. A fix to how a failed <code>Edit</code> is drawn
+      lands in both surfaces because there is only one place it is drawn.
+    </p>
+    <ul>
+      <li>
+        <strong>Edits arrive through the front door</strong> — a write is applied
+        as a <code>WorkspaceEdit</code>, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it
+        back and it shows in Source Control. A file changed behind the editor's
+        back can do neither.
+      </li>
+      <li>
+        <strong>It knows what you are looking at</strong> — the active file, your
+        selection with its line range, and the Problems for that file, shown as
+        chips so it is never a guess what a message will carry. Type
+        <code>#</code> to point at another file or a symbol.
+      </li>
+      <li>
+        <strong>Approvals are real dialogs</strong> — <em>Auto</em>,
+        <em>ask but not for edits</em>, or <em>ask every time</em>. A card in a
+        panel can be scrolled past while a turn sits blocked on it; a modal
+        cannot.
+      </li>
+      <li>
+        <strong>Background work in the status bar</strong> — a run started an hour
+        ago, or a scheduled job that failed overnight, without opening anything.
+      </li>
+    </ul>
+    <p>
+      What it deliberately does not do is inline completion. That is a different
+      product, and Cursor and Copilot do it well. The full workspace is still one
+      click away for the things a 300px column is the wrong shape for — Mini
+      Apps, the trajectory view, the whole settings surface.
+    </p>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Not on the Marketplace yet; it is built from
+      <a href="https://github.com/suhail-akhtar/aico/tree/main/vscode-extension" rel="noopener">the
+      repository</a>.
+    </p>
+
+    <h2>Where the alternatives are ahead</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>If you want…</th><th>Use</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>The largest community, most extensions, most answers when stuck</td>
+            <td><a href="https://github.com/sst/opencode" rel="noopener">OpenCode</a> or
+                <a href="https://www.anthropic.com/claude-code" rel="noopener">Claude Code</a></td>
+          </tr>
+          <tr>
+            <td>Disciplined, git-native editing where every change is a reviewable commit</td>
+            <td><a href="https://aider.chat" rel="noopener">Aider</a></td>
+          </tr>
+          <tr>
+            <td>To stay inside VS Code, with an extension marketplace</td>
+            <td><a href="https://cline.bot" rel="noopener">Cline</a></td>
+          </tr>
+          <tr>
+            <td>A polished editor with inline completion and a company behind it</td>
+            <td><a href="https://cursor.com" rel="noopener">Cursor</a></td>
+          </tr>
+          <tr>
+            <td>A managed cloud service, or Kubernetes deployment for a team</td>
+            <td><a href="https://www.openhands.dev" rel="noopener">OpenHands</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      aico has no hosted service and no plan for one. There <em>is</em> a
+      <a href="vscode.html">VS Code extension</a>, and it is a native panel rather
+      than the web portal in a frame — but it is still one engine. The server
+      owns the run and the panel is a view over the browser client's own state
+      layer, so it is not a second implementation of the agent, and it is not an
+      inline-completion tool.
+    </p>
+
+    <h2>aico vs the app builders — Devin, Replit Agent, Lovable, Bolt.new</h2>
+    <p>
+      A different shape of product from everything above. Lovable and
+      Bolt.new are chat-to-app builders — prompt in, app out, one review cycle
+      at a time. Replit Agent is a full hosted platform (editor, database,
+      auth, deploy) with an agent built in. Devin is an autonomous agent for
+      an existing repo, closer to what aico is, but cloud-hosted and
+      subscription-only. Anyone deciding how an AI should build their project
+      ends up weighing these against a terminal agent anyway, so here is the
+      honest look.
+    </p>
+
+    <div class="note warn">
+      <p>
+        <strong>The honest part, again.</strong> All four of these have been
+        used by vastly more people, for vastly longer, than aico has. Lovable
+        reported $17M in ARR within three months of an update; Replit and
+        Bolt.new each have large, active user bases. Devin has
+        independently-verified benchmark results (SWE-bench) and third-party
+        trial reports — aico's own numbers, below, are self-run, not
+        independently audited, and should be read with that difference in
+        mind. If what you want is the tool with the most real-world hours
+        logged against it, one of these four is that tool today, and saying
+        otherwise would be the exact mistake this page already warns against.
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>&nbsp;</th><th>aico</th><th>Devin</th><th>Replit Agent</th><th>Lovable</th><th>Bolt.new</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Source available</td><td>Yes (FSL)</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+          <tr><td>Self-hosted</td><td>Yes</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+          <tr><td>Bring your own key</td><td>Yes, 7+ providers</td><td>No</td><td>Partial (paid plans)</td><td>No</td><td>Partial (Bedrock)</td></tr>
+          <tr><td>Stack</td><td>18 templates (Node, Python, Java, .NET, Go, PHP), or custom</td><td>Your existing repo</td><td>Flexible, hosted-locked</td><td>Fixed: Vite + React + Supabase</td><td>Mostly fixed, Claude-generated</td></tr>
+          <tr><td>Pricing model</td><td>Pay your provider, no markup</td><td>$20/mo + ~$2.25 per unit of work</td><td>Per-checkpoint, effort-based</td><td>Monthly + credits</td><td>Free tier, then token packs</td></tr>
+          <tr><td>Real spend, publicly reported</td><td>Cents per app in this project's own tests</td><td>Usage-driven, well past the $20 door fee</td><td>Reports up to $1,900+ in weeks on a small app</td><td>$30–400+/mo once credits and Supabase are added</td><td>Usually within the token plan</td></tr>
+          <tr><td>Autonomy</td><td>Plans, builds, verifies; you approve</td><td>Most autonomous — own sandbox, PR + human merge</td><td>Agentic; frequent correction reported</td><td>Turn-by-turn, not autonomous</td><td>Turn-by-turn, not autonomous</td></tr>
+          <tr><td>Independent benchmark</td><td>None yet</td><td>SWE-bench + third-party trials</td><td>None found</td><td>None found</td><td>None found</td></tr>
+          <tr><td>Self-run SWE-bench Lite result</td><td>91% resolved (n=80, two independent random samples, no overlap) — <a href="https://github.com/suhail-akhtar/aico/tree/main/benchmarks/swebench-lite">evidence in repo</a></td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>Git history</td><td>Every app, from the first commit</td><td>Yours already</td><td>Not the default flow</td><td>Exportable</td><td>One-click export</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Pricing and spend figures are publicly reported by each vendor or by
+      users of theirs, compiled September 2026 — check the current plan pages
+      before relying on a number here.
+    </p>
+
+    <div class="note">
+      <p>
+        <strong>A real SWE-bench result, self-run.</strong> aico resolved
+        73 of 80 real SWE-bench Lite instances (91%) across two independent,
+        non-overlapping random samples — working blind, with no dependency
+        install and no local test execution, on the open-weight
+        <code>deepseek-v4-flash</code> model. Every failure in both runs was
+        individually checked against its actual test output, not just the
+        grading harness's aggregate score. This is <em>not</em> an
+        independently-audited or leaderboard-submitted number — it is
+        self-produced, using the standard <code>swebench</code> harness, and
+        SWE-bench's well-known contamination risk (these are years-old
+        public GitHub fixes) applies here as it does to any model's score.
+        Read that as "produced the correct patch reliably," not proof of
+        reasoning on genuinely unseen code. Full methodology, per-repo
+        breakdown, and every patch and test log are in the repo at
+        <a href="https://github.com/suhail-akhtar/aico/tree/main/benchmarks/swebench-lite">benchmarks/swebench-lite</a>.
+      </p>
+    </div>
+
+    <h3>Where aico is genuinely different</h3>
+    <ul>
+      <li>
+        <strong>No markup on the model.</strong> There is no credits system and
+        no per-checkpoint billing — you pay whichever provider you chose,
+        directly, at their price. A full-stack template build in this
+        project's own live tests costs a few cents to about fifteen.
+      </li>
+      <li>
+        <strong>Bring your own key, genuinely.</strong> Seven providers plus
+        local Ollama, none of the four above offer that; the best any of them
+        do is let a paid plan route through your own cloud account.
+      </li>
+      <li>
+        <strong>The stack is a decision, not a default.</strong> Eighteen
+        templates across six ecosystems for the well-trodden shapes, or hand the brief to the agent
+        and get a stack it chose and justified in the PRD — never one
+        framework you are stuck with.
+      </li>
+      <li>
+        <strong>Ownership from the first commit,</strong> not an export
+        button. Every app gets its own git history the moment it exists.
+      </li>
+    </ul>
+
+    <h3>Where they are ahead</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>If you want…</th><th>Use</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>The most autonomous agent, with independently-verified benchmark results</td>
+            <td><a href="https://devin.ai" rel="noopener">Devin</a></td>
+          </tr>
+          <tr>
+            <td>One hosted platform — editor, database, auth and deploy — with nothing to install</td>
+            <td><a href="https://replit.com" rel="noopener">Replit</a></td>
+          </tr>
+          <tr>
+            <td>The fastest path from a sentence to a working visual prototype, no code read required</td>
+            <td><a href="https://lovable.dev" rel="noopener">Lovable</a> or
+                <a href="https://bolt.new" rel="noopener">Bolt.new</a></td>
+          </tr>
+          <tr>
+            <td>The largest real-world track record of any tool on this page</td>
+            <td>Any of the four above — all have far more hours logged than aico does</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Who it is actually for</h2>
+    <ul>
+      <li>You want to <strong>keep your keys</strong> and pay providers directly, or run a local model.</li>
+      <li>You want the agent to <strong>prove web work runs</strong>, not assert that it does.</li>
+      <li>You run <strong>long or background work</strong> and want to see and bound it.</li>
+      <li>You want to <strong>read the code</strong> that is running as you — its full source is public and heavily commented about <em>why</em>.</li>
+    </ul>
+    <p>
+      If none of those is a live problem for you, one of the tools above is
+      probably the better pick, and saying so is more useful than pretending
+      otherwise.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="install.html">Install it →</a>
+      <a class="btn" href="automation.html">Supervision &amp; automation →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · <a href="https://github.com/suhail-akhtar/aico/blob/main/LICENSE">FSL-1.1-ALv2</a></span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,71 @@
+# Example: let AICO propose a fix when CI fails on your main branch (ADR 0034,
+# GUIDE.md "AICO in CI"). OFF unless allow-fix-ci is 'true'.
+#
+# Copy to .github/workflows/aico-fix-ci.yml in YOUR repository. It is not active
+# in the AICO repository itself.
+#
+# What it does: reproduces the failure on a clean checkout of the failing commit,
+# fixes it on a NEW branch (aico/fix-ci-<run id>), commits only if the project's
+# own checks then pass, pushes that branch and opens a pull request against the
+# branch that failed, with the change evidence as its body. A person reviews and
+# merges it. It never pushes to the branch it is fixing, never edits
+# .github/, and does not fix its own fix branches.
+#
+# Why it is narrow:
+# - workflow_run runs with a write token and secrets, and this job executes the
+#   failing commit's code (npm ci, the tests). So it is limited to failures on
+#   the branches listed below and to commits from this repository, never forks.
+#   Keep that list to branches only trusted people can push to.
+# - Pull requests opened with GITHUB_TOKEN do not trigger your CI. Review them
+#   as you would any other, and run CI by pushing an empty commit or closing and
+#   reopening, or use a token of your own for github-token.
+# - Replace vX.Y.Z with a release tag that contains this action, and the "CI"
+#   below with the name of the workflow whose failures should be fixed.
+
+name: AICO fix CI
+
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read          # read the failed run's log
+  contents: write        # push the fix branch (never the branch being fixed)
+  pull-requests: write   # open the pull request
+
+jobs:
+  fix:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      !startsWith(github.event.workflow_run.head_branch, 'aico/fix-ci')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The agent reproduces the failure by running your checks, so install what they need.
+      # (Your project's step; npm ci is an example.)
+      - run: npm ci
+
+      - uses: suhail-akhtar/aico/.github/actions/aico@vX.Y.Z
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          mode: fix-ci
+          allow-fix-ci: 'true'
+          run-id: ${{ github.event.workflow_run.id }}
+          base-branch: ${{ github.event.workflow_run.head_branch }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          budget-usd: '3'
+          timeout-minutes: '25'

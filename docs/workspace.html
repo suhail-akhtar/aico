@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A local web portal for your AI coding agent — aico</title>
+<meta name="description" content="aico serve runs a loopback server and a browser client, and the server owns the run — close the tab and the work carries on. Plan mode, mid-run steering, forking a conversation, and a session log you can resume.">
+<!-- seo:start -->
+<link rel="canonical" href="https://suhail-akhtar.github.io/aico/workspace.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aico">
+<meta property="og:url" content="https://suhail-akhtar.github.io/aico/workspace.html">
+<meta property="og:title" content="A local web portal for your AI coding agent — aico">
+<meta property="og:description" content="aico serve runs a loopback server and a browser client, and the server owns the run — close the tab and the work carries on. Plan mode, mid-run steering, forking a conversation, and a session log you can resume.">
+<meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="A local web portal for your AI coding agent — aico">
+<meta name="twitter:description" content="aico serve runs a loopback server and a browser client, and the server owns the run — close the tab and the work carries on. Plan mode, mid-run steering, forking a conversation, and a session log you can resume.">
+<meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<!-- seo:end -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script><!-- blocking on purpose: sets the theme before first paint -->
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.53.0</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html" aria-current="page">Workspace</a>
+      <a href="desktop.html">Desktop</a>
+      <a href="vscode.html">VS Code</a>
+      <a href="automation.html">Automation</a>
+      <a href="compare.html">Compare</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="apps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Workspace</p>
+
+  <div class="prose">
+    <h1>The web portal</h1>
+    <p class="lede">
+      <code>aico serve</code> starts a loopback HTTP server and opens a browser client
+      against it. The important part is which of the two owns the run.
+    </p>
+  </div>
+
+  <figure>
+    <img class="crop" src="assets/portal-miniapps.jpg" alt="The aico workspace: a session sidebar on the left listing projects and recent sessions, with the main pane showing the Mini Apps view." loading="lazy">
+    <figcaption>Sessions and projects on the left; the main pane switches between chat, changes, trajectory and Mini Apps.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h2>The server owns the run</h2>
+    <p>
+      Close the tab mid-turn and the work carries on. Reopen it and the session replays
+      from its event log — real tool results, real sequence numbers, not a summary of what
+      happened. That is only possible because the transcript is a log the server holds,
+      rather than state the page was keeping.
+    </p>
+    <p>
+      It binds to <code>127.0.0.1</code> only, and every request carries a token minted at
+      startup. Reaching the port is not the same as being able to drive it, because this
+      server can run commands and edit files.
+    </p>
+
+    <h2>Chat and trajectory are one session</h2>
+    <p>
+      Two readings of the same log, not two copies. Tool calls render as cards with diffs
+      and an outcome that means something:
+    </p>
+    <ul>
+      <li>A browser check reads <strong>works</strong> or <strong>3 problems</strong>, with the worst one inline.</li>
+      <li>A persistent shell reports the directory it left you in — because a <code>cd</code> that did not take looks exactly like one that did, until something writes a file into the wrong place.</li>
+      <li>A backgrounded command reads <strong>running · pid 4321</strong> rather than a misleading <em>exit 0</em>.</li>
+    </ul>
+
+    <h2>Panels that know when to stop talking</h2>
+    <p>
+      A plan and a task list float beside the conversation when there is one. Both collapse
+      to a single line once resolved, and <em>all done</em> is never shown for a list
+      finished by cancelling half of it — that reads <strong>0 done · 5 cancelled</strong>,
+      because conflating the two is how a task list becomes a formality.
+    </p>
+    <p>
+      Closing a panel records <em>what</em> was closed, so a genuinely new plan comes back
+      on its own and the one you dismissed stays gone.
+    </p>
+
+    <h2>Steering</h2>
+    <p>
+      Type while the agent is working. The message is delivered at its next
+      <strong>step boundary</strong>, not queued behind the whole run, and the turn is
+      extended rather than cancelled — so everything it has already learned is kept.
+    </p>
+<pre><code>❯ refactor the auth module
+  ⋯ Read(src/auth.ts)
+  ⋯ Edit(src/auth.ts)
+<span class="k">actually keep the session cookie name unchanged</span>
+  <span class="c">(steering — applies at the next step)</span>
+  ⋯ Edit(src/auth.ts)</code></pre>
+    <p>
+      Queued input also stops the loop finishing: a model that was about to answer will
+      continue instead. Both queues are durable, so anything typed before a crash is still
+      owed when the session resumes.
+    </p>
+
+    <h2>Plan before you build</h2>
+    <p>
+      Turn <strong>Plan</strong> on and the turn cannot change anything — the write tools
+      are gone, not discouraged. The agent investigates and finishes with a structured plan:
+    </p>
+<pre><code><span class="k">Plan</span>   Create VERSION.txt with the version from package.json
+  1  Write VERSION.txt containing "0.4.1"
+     Create VERSION.txt in the repo root with the single line "0.4.1".
+     VERSION.txt
+  Risk: None.
+
+  [ Go ahead ]  Amend   Later                          Decline</code></pre>
+    <ul>
+      <li><strong>Go ahead</strong> turns planning off and starts work — the mode change is part of the answer, not something you have to remember.</li>
+      <li><strong>Amend</strong> puts the plan in the composer, so a correction is a sentence rather than a re-brief.</li>
+      <li><strong>Later</strong> keeps it without starting it, and offers <em>Start it now</em> whenever you come back.</li>
+    </ul>
+    <p>
+      Assumptions appear <em>above</em> the steps, because an assumption you would have
+      corrected costs a sentence now and a rewrite later — putting it beside the approve
+      button is the same as not asking.
+    </p>
+
+    <h2>Watching what you delegated to</h2>
+    <p>
+      When a turn hands work to a sub-agent, the parent makes one call and waits
+      — and everything interesting happens inside the child. A panel lists each
+      one: what it was asked for, the tool it is inside now, how long it has run,
+      how many calls it has made. Without that, a six-minute delegation and a
+      six-minute hang look identical, which is how people end up stopping work
+      that was going fine.
+    </p>
+    <p>
+      Each running sub-agent has its own <strong>Stop</strong>, because the common
+      failure is one child looping while three siblings are fine — and cancelling
+      the whole turn to deal with one is a bad trade. The agent doing the
+      delegating can do the same through <code>AgentSupervise</code>, which reports
+      what each child is spending and terminates one by id with a stated reason.
+      A stop is recorded as <em>cancelled</em> rather than <em>failed</em>: a crash
+      invites a retry, a termination invites a re-plan.
+    </p>
+
+    <h2>How much it asks, and how hard it thinks</h2>
+    <p>
+      Two controls on the composer, both per message rather than per session — because the
+      message you are about to send is what you know something about.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Approve</th><th>What it asks about</th></tr></thead>
+        <tbody>
+          <tr><td><strong>auto</strong></td><td>Nothing, and this is the default — what every browser session has always done.</td></tr>
+          <tr><td><strong>not edits</strong></td><td>File writes go through; commands, fetches and delegation are put to you.</td></tr>
+          <tr><td><strong>always</strong></td><td>Every tool call waits for a decision.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <code>Terminal</code> is deliberately absent from the middle mode's pass-through list. A
+      shell command can do everything a file write can and more, so "auto-accept edits" would
+      be a lie if it also ran commands. A prompt appears above the composer, quotes the tool
+      and shows a diff for an edit, and clears the moment it is answered.
+    </p>
+    <p>
+      <strong>Think</strong> offers what the <em>model</em> accepts and nothing when the model
+      is unknown — five settings that might each be refused would be worse than none. Each
+      provider is sent its own shape: <code>output_config.effort</code> for Anthropic,
+      <code>reasoning_effort</code> on OpenAI Chat, <code>reasoning.effort</code> on the
+      Responses API and OpenRouter, <code>thinking.type</code> for Z.AI.
+    </p>
+    <p>
+      <code>auto</code> means <em>send nothing</em>, which is not the same as "medium". For
+      several vendors it is adaptive per request; for others it is a fixed level the vendor
+      chose, and the button says which — <code>Think auto·high</code> on a provider whose
+      silent default is high. That single fact is the answer to "why did a one-line change
+      take so long", and it was invisible before.
+    </p>
+
+    <h2>When the conversation outgrows the model</h2>
+    <p>
+      The meter under the composer shows how much of the window the conversation occupies,
+      and whether that figure is the vendor's or a guess. At 75% of it, older turns are
+      folded into a summary — in the log, so the next request is built from the folded
+      version — and the client says so: <em>Compacted the conversation: 1,309 → 754
+      tokens, 1 older turn folded</em>. The threshold and how many recent turns to keep
+      are settings; a project can set its own.
+    </p>
+    <p>
+      The window itself comes from the provider when it reports one, from a built-in table
+      when it does not, and is <em>assumed</em> at 128K when nothing knows the model — the
+      meter marks that with a <code>?</code>, because a bar drawn against a guess should not
+      look like one drawn against the vendor's figure. If you know better, <strong>click the
+      meter</strong> and type it: <code>1m</code>, <code>128k</code>, or the number. A figure
+      you set is never re-detected behind your back, and <em>Forget</em> hands it back.
+    </p>
+
+    <h2>Keeping a correction</h2>
+    <p>
+      Rate a reply <strong>▼</strong> and say why. Until now that note was stored and read by
+      nothing. <strong>Remember this</strong> turns it into a knowledge entry — a trigger built
+      from what you <em>asked</em>, and your note as the guidance — which the agent is shown on
+      any later task whose wording matches. You see both fields before they are kept and can
+      edit them; nothing is adopted because the agent decided it should be.
+    </p>
+    <p>
+      Entries are filed with the project by default. A convention is almost always about one
+      codebase, and stored globally it follows you into repositories where it is wrong — a
+      failure nobody can see from a transcript. Tick <em>Every project</em> when it genuinely
+      is about you rather than the code.
+    </p>
+
+    <h2>Rewriting what you asked</h2>
+    <p>
+      Edit a message and send it again. The log is append-only, so the new message carries a
+      marker naming the one it replaces and the transcript folds them back into a single row
+      with arrows to move between versions. The earlier attempt — often the one that was
+      right — stays reachable rather than being silently overwritten.
+    </p>
+
+    <h2>Forking a conversation</h2>
+    <p>
+      Branch from any message and carry on down a different path, with the original left
+      intact. Cuts land on turn boundaries and never split a tool call from its result —
+      every provider rejects a call with no result, so a fork that cut mid-turn would
+      produce a session that cannot be resumed.
+    </p>
+
+    <h2>Sessions, projects and groups</h2>
+    <p>
+      Sessions are named automatically and pinned by renaming — a name you did not choose
+      that silently changes under you is disorienting, so a provisional one is marked as
+      such. Projects group by directory; groups are yours to arrange, and a session is filed
+      in one by dragging it onto the group's name. The search box matches project and group
+      names as well as titles, the five most recent conversations sit above the folders, and
+      what you fold stays folded across reloads. Apps, System and Settings are the three
+      destinations at the foot of the column; the session's own tabs — Chat, Changes,
+      Trajectory — appear only while a session is what you are looking at.
+    </p>
+    <p>
+      A folder or group you just made sorts to the top, not into the middle of a long list.
+      Clicking one opens its own page — New session, its chats with search, and bulk archive
+      or delete (a running chat is never deleted) — and makes it where new chats go; the
+      sidebar says so under New session, and clearing it sends new chats back to the default
+      workspace. Select mode removes several folders or groups at once.
+    </p>
+    <p>
+      A workspace page's git history is no longer read-only: a commit opens to its files and
+      diff, a branch is one click away, <em>Branch from here</em> restores any commit as a
+      new branch (the one you were on keeps everything), and <em>Revert</em> undoes a commit
+      with a new one. Uncommitted changes block a switch or a revert rather than being carried
+      along, and a revert that conflicts is cancelled with nothing changed. History is never
+      rewritten.
+    </p>
+    <p>
+      Transcripts export as Markdown or text, backed by the log, so they include tool calls
+      rather than only the prose. Settings — providers, permission mode, context and spend
+      ceilings — are searchable across every pane.
+    </p>
+
+    <h2>Safety, in layers</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Layer</th><th>What it actually enforces</th></tr></thead>
+        <tbody>
+          <tr><td>Permissions</td><td>Every mutating tool asks first, with a diff preview for edits</td></tr>
+          <tr><td>Bash classifier</td><td>Blocks <code>rm -rf /</code>, <code>mkfs</code>, <code>curl | bash</code>, writes to shell profiles, credential exfiltration, ~40 patterns</td></tr>
+          <tr><td>Plan mode</td><td>Read-only tools only — <strong>inherited by sub-agents</strong></td></tr>
+          <tr><td>Sandbox (opt-in)</td><td><strong>Full</strong> for aico's own file tools; <strong>partial</strong> for Bash and anything it spawns</td></tr>
+          <tr><td>Repeat guard</td><td>Catches a model looping on the same call; bookkeeping tools cannot launder the loop</td></tr>
+          <tr><td>Spend caps</td><td>Checked before every call; sub-agent spend counts</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.9rem;color:var(--muted)">
+      The sandbox is defence in depth against a confused agent, not a jail. It stops a
+      mistaken write; it does not stop deliberate evasion through a shell.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="vscode.html">The same session, in VS Code →</a>
+      <a class="btn" href="widgets.html">Charts, maths and diagrams →</a>
+      <a class="btn" href="apps.html">Mini Apps →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · <a href="https://github.com/suhail-akhtar/aico/blob/main/LICENSE">FSL-1.1-ALv2</a></span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>

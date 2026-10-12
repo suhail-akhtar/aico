@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AICO Desktop — an AI coding agent with its own IDE, browser and plugins</title>
+<meta name="description" content="AICO Desktop for Windows and Linux: a ChatGPT-style chat with dashboards, charts, maths and physics that are really computed, a Monaco editor, real terminals, full Git and GitHub, a built-in browser the agent drives for web QA, and plugins the agent can write for you.">
+<!-- seo:start -->
+<link rel="canonical" href="https://suhail-akhtar.github.io/aico/desktop.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aico">
+<meta property="og:url" content="https://suhail-akhtar.github.io/aico/desktop.html">
+<meta property="og:title" content="AICO Desktop — an AI coding agent with its own IDE, browser and plugins">
+<meta property="og:description" content="AICO Desktop for Windows and Linux: a ChatGPT-style chat with dashboards, charts, maths and physics that are really computed, a Monaco editor, real terminals, full Git and GitHub, a built-in browser the agent drives for web QA, and plugins the agent can write for you.">
+<meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AICO Desktop — an AI coding agent with its own IDE, browser and plugins">
+<meta name="twitter:description" content="AICO Desktop for Windows and Linux: a ChatGPT-style chat with dashboards, charts, maths and physics that are really computed, a Monaco editor, real terminals, full Git and GitHub, a built-in browser the agent drives for web QA, and plugins the agent can write for you.">
+<meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
+<!-- seo:end -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script><!-- blocking on purpose: sets the theme before first paint -->
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">aico <span class="ver">v0.53.0</span></a>
+    <nav class="site-nav">
+      <a href="install.html">Install</a>
+      <a href="providers.html">Providers</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="desktop.html" aria-current="page">Desktop</a>
+      <a href="vscode.html">VS Code</a>
+      <a href="automation.html">Automation</a>
+      <a href="compare.html">Compare</a>
+      <a href="widgets.html">Visuals</a>
+      <a href="apps.html">Mini Apps</a>
+      <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+      <button class="theme-toggle" type="button" aria-label="Switch theme"></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <p class="crumb"><a href="./">Home</a> → Desktop</p>
+
+  <div class="prose">
+    <h1>AICO Desktop</h1>
+    <p class="lede">
+      The AICO agent as a native app for Windows and Linux: a calm chat in front, an IDE
+      behind it — editor, terminals, Git and GitHub — and a browser the agent can drive. It
+      runs on your computer, with your own keys, and nothing about it needs Node installed.
+    </p>
+
+    <h2>Install it</h2>
+    <p>
+      Download the installer for your system from the
+      <a href="https://github.com/suhail-akhtar/aico/releases/latest">latest release</a>:
+      <code>AICO-Setup-0.53.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
+      <code>.deb</code> for Linux. The builds are not code-signed yet, so Windows SmartScreen
+      asks once ("More info → Run anyway"). Your chats, providers and settings are the same
+      ones the CLI, the web portal and VS Code use — everything lives in <code>~/.aico</code>.
+    </p>
+  </div>
+
+  <figure>
+    <img class="crop" src="assets/desktop/home.png" alt="AICO Desktop's home screen: a sidebar with New chat, Search, Library, Scheduled, Plugins, Projects, Files and Browser, and a centred composer under the heading Where should we begin?" loading="lazy">
+    <figcaption>Home: the folder the chat will work in above the composer, model, approval and project below it, and starter prompts that plugins contribute.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h2>A composer that keeps up with you</h2>
+    <ul>
+      <li><strong><code>/</code> for actions</strong> — plan first, how hard to think, how much to ask before acting, attach, mention, change model, branch, export, and every plugin command and prompt. Type to filter, <kbd>↑</kbd> <kbd>↓</kbd> to move, <kbd>Enter</kbd> to pick; each one confirms what it did.</li>
+      <li><strong><code>@</code> for files, folders and agents</strong> — the project's files are searched as you type, and a mention is highlighted in the box. Anything outside the project is one "Pick files…" away, and <kbd>Alt</kbd>+drop mentions a file instead of attaching it.</li>
+      <li><strong>Back to the start of the answer</strong> — when a long reply finishes, the chat jumps to where it began instead of leaving you at its last line (switch it off in the chat's <kbd>…</kbd> menu), and the ↑ in a long answer's action row takes you there from the bottom.</li>
+      <li>Paste a screenshot to attach it, <kbd>↑</kbd> in an empty box to bring back your last message, and a draft that stays with its own chat.</li>
+    </ul>
+  </div>
+
+  <div class="prose">
+    <h2>Answers that draw themselves — and compute</h2>
+    <p>
+      Everything the web portal renders — ECharts, Vega-Lite, Mermaid, KaTeX with chemistry,
+      tables — plus a <strong>widget kit of 54 dashboard widgets</strong> (stat tiles, gauges,
+      time series, heatmaps, sankey, radar, gantt, pipelines, scorecards, network maps) laid
+      out on a 12-column grid by a <code>```widgets</code> block. For maths and physics there
+      are three blocks whose numbers are <em>computed</em>, not written by the model:
+    </p>
+    <ul>
+      <li><code>```plot</code> — functions, derivatives (symbolic), parametric and polar curves, and the shaded, calculated area of an integral;</li>
+      <li><code>```geometry</code> — a construction drawn to scale with its lengths, angles, areas and perimeters measured from the coordinates;</li>
+      <li><code>```calc</code> — a worked calculation line by line, with units carried through every step, unit conversion and physical constants.</li>
+    </ul>
+    <p>
+      Any answer copies as rich content (charts and formulas as they look, plus the Markdown),
+      and any chat exports as PDF or a standalone HTML page with every visual inlined, as
+      well as Markdown or text.
+    </p>
+  </div>
+
+  <div class="shots">
+    <figure>
+      <img src="assets/desktop/dashboard.png" alt="A dashboard drawn in a chat reply: three stat tiles and a requests-per-minute time series." loading="lazy">
+      <figcaption>A <code>widgets</code> block: stat tiles and an interactive time series.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/desktop/widgets.png" alt="A radial CPU gauge, a traffic-by-region donut and a five-stage release pipeline." loading="lazy">
+      <figcaption>Gauge, share and a release pipeline — the same kit, same reply.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/desktop/math.png" alt="A plotted logistic curve with its derivative, and a calc block computing kinetic energy with units." loading="lazy">
+      <figcaption>A plot with its symbolic derivative, and a calculation that carries its units.</figcaption>
+    </figure>
+  </div>
+
+  <div class="prose">
+    <h2>An IDE behind the chat</h2>
+    <ul>
+      <li><strong>Files</strong> — an explorer and Monaco, the editor VS Code is built on: tabs, quick open (Ctrl+P), search in files, Markdown preview, and live reload when the agent edits a file you have open. "Ask AI" sends the file or the selection to a chat.</li>
+      <li><strong>Terminals</strong> — real pseudo-terminals (PowerShell on Windows, your shell on Linux), not a pipe, in a bottom panel you toggle with Ctrl+J.</li>
+      <li><strong>Source control</strong> — status, staged and unstaged changes with diffs, stage, unstage, discard, commit (or have the agent write the message), branches, stash, fetch, fast-forward pull and push, and the full history. It never force-pushes, never resets, and a pull that would need a merge says so.</li>
+      <li><strong>GitHub</strong> — pull requests with checks, files and diff; issues; Actions runs; open, comment, check out, merge — and "Review with AI", "Fix with AI", "Diagnose" on anything. Through the GitHub CLI's own sign-in: AICO never stores a GitHub token.</li>
+      <li><strong>Activity</strong> — everything running in the background in one list: chats mid-turn, sub-agents, scheduled jobs, processes, app servers, terminals — with Stop.</li>
+    </ul>
+  </div>
+
+  <figure>
+    <img class="crop" src="assets/desktop/ide.png" alt="The Files view: a project tree, README.md open in the editor, and a PowerShell terminal in the bottom panel." loading="lazy">
+    <figcaption>Explorer, editor and a real terminal — the same window as the chat.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h2>An AI browser</h2>
+    <p>
+      A real browser — tabs you drag, pin, mute and reopen (Ctrl+Shift+T), a bookmarks bar with
+      folders and sub-folders you drag things between, a bookmark manager, history, downloads,
+      find, zoom, print, reader mode, <strong>full view</strong>, full screen, picture-in-picture
+      — and <strong>its own window</strong> when you want one: Ctrl+Shift+N moves every tab out
+      without reloading anything, and closing it brings them home. Sign-ins, cookies and site
+      storage live in AICO's own folder, so they survive updates and even an uninstall and
+      reinstall; your tabs come back where you left them.
+    </p>
+    <figure>
+      <img src="assets/readme/browser-float.jpg" alt="The AICO copilot floating over a live Wikipedia page" loading="lazy">
+      <figcaption>The copilot floats over the live page — or docks beside it — and suggests what fits the page you are on.</figcaption>
+    </figure>
+    <p>
+      <strong>Private and protected by default.</strong> Shields block trackers (grouped by
+      company) and third-party cookies, connections are upgraded to HTTPS, Global Privacy
+      Control is sent, and the browser presents a standard Chrome identity. Look-alike and
+      phishing pages are stopped before they load — and <strong>AICO checks them for you
+      automatically</strong>, explaining what it found without touching the page. Risky
+      downloads are flagged and marked as coming from the internet. Insights show where your
+      time went and what was blocked, counted only on your computer.
+    </p>
+    <figure>
+      <img src="assets/readme/browser-protect.jpg" alt="Deceptive site ahead: a fake PayPal address blocked while the copilot explains why" loading="lazy">
+      <figcaption>A fake PayPal sign-in stopped before it loaded, with AICO's own check beside it.</figcaption>
+    </figure>
+    <p>
+      <strong>It learns you — on this device.</strong> From your browsing it learns your
+      interests, routines ("reddit.com on weekday nights"), the site you usually open next,
+      research threads, and what you left unfinished — a cart, a half-read article, a form you
+      started. The new-tab page turns that into <em>Priorities now</em>, <em>Continue where you
+      left off</em>, <em>Research threads</em> and <em>Tidy idle tabs</em>, each saying why it is
+      there; <em>Not interested</em> teaches it, and you can view, pause or forget all of it. Ask
+      the copilot "what was I researching last week?" or "clean up my idle tabs" — it uses what
+      the browser learned, and asks before it closes anything.
+    </p>
+    <figure>
+      <img src="assets/readme/browser-foryou.jpg" alt="For you cards on the new-tab page" loading="lazy">
+      <figcaption>"For you" — priorities, unfinished things and research threads, learned locally.</figcaption>
+    </figure>
+    <p>
+      <strong>Ask about any page, or let it do the work.</strong> The copilot suggests what fits
+      the page: <em>Compare prices</em> and <em>Is this a good deal?</em> on a product,
+      <em>Fact-check</em> an article, <em>Scale to 2 servings</em> on a recipe, <em>Draft a
+      reply</em> in your mail, <em>Review this order before I pay</em> at a checkout. Right-click
+      any link, image or selection to ask about it. The agent reads pages as clean Markdown,
+      fills whole forms — with your saved autofill profile when you ask — answers dialogs and
+      reports what changed after every action, with <strong>Stop</strong> /
+      <strong>Take over</strong> one click away.
+    </p>
+    <p>
+      <strong>Bring everything over.</strong> Import bookmarks, history and addresses straight
+      from Chrome, Edge, Brave, Vivaldi, Opera and Firefox (their files are only read), and
+      passwords from the export file your browser or password manager makes. Passwords live in
+      one encrypted vault; the agent can sign in from it on the site a credential belongs to, but
+      the agent, the copilot and the model never see a value. It never solves CAPTCHAs or "I'm
+      human" checks, and a purchase, send or delete waits for your Allow — enforced in code.
+    </p>
+    <p>
+      <strong>It knows what you have open, and what you read.</strong> The copilot keeps a
+      one-line picture of every open tab — page type, price, rating — so "which of my open tabs
+      is cheapest?" needs no clicking around. Turn on <em>memory by meaning</em> and it remembers
+      the pages you actually read, encrypted on this computer, so "where was that red leather
+      jacket I looked at last week?" finds it after the tab is long closed.
+    </p>
+    <p>
+      <strong>Many agents, one browser, no collisions.</strong> Each chat drives its own
+      background tabs, labelled with the chat's colour, so two projects can use the browser at
+      once while the page in front of you stays yours; a tab two chats want is taken in turn. The
+      copilot answers about the page, and hands real work — code, projects, servers — to a proper
+      chat with the page attached.
+    </p>
+    <p>
+      <strong>It can't be talked into things.</strong> A page can hide instructions for an AI in
+      text you cannot see. Before the model reads anything, AICO strips invisible text and marks
+      instructions aimed at the AI as untrusted page content; the shields panel lists what it
+      caught.
+    </p>
+    <p>
+      <strong>And it can see what it looks at.</strong> On a model that reads images, a
+      screenshot of the page, an image file it reads, a picture it fetches from the web, or an
+      image any MCP tool returns is shown to the model — not just the caption beside it. Which
+      models read images is learned, not guessed: "Test" on a provider shows its default model
+      a tiny picture and remembers the answer on this computer.
+    </p>
+
+    <h2>Answers about the world — maps, weather, videos, sources</h2>
+    <p>
+      Ask for places and you get an interactive map with pins and cards that expands into a
+      full map with a list and an "Open now" filter. Weather arrives as a forecast card,
+      money as a live converter, a recipe as a YouTube player that loads when you press play,
+      shopping as product cards with a comparison, and writing as an editable draft. The
+      agent can generate images with your own OpenAI or Gemini key. Under every answer:
+      copy, 👍 / 👎 with a note, retry, share, and <strong>Sources</strong> — the pages it
+      actually searched and read, in a panel beside the chat — plus "…" for Branch in new
+      chat and Read aloud. Tooltips look like the rest of the app, and your profile menu has
+      Appearance, Your data, Engine and Help submenus.
+    </p>
+
+    <h2>Credentials the agent uses but never sees — and your servers</h2>
+    <p>
+      Ask AICO to set up a server and it creates the service's admin account itself: a strong
+      password stored straight into the <strong>credential vault</strong>, bound to that host.
+      The model only ever handles a name; trusted code puts the real value in at the moment of
+      use and blanks it out of everything that comes back — tool output, logs, transcripts, even
+      encoded. Later, "show me the portal" signs the browser in from the vault. One vault holds
+      browser passwords, SSH keys, API tokens and WinRM, SNMP and database credentials, sealed
+      with your OS keychain, managed in a Credential Manager with an audit of every use. The
+      agent runs <code>SshExec</code>, <code>SshCopy</code>, <code>SshTunnel</code>,
+      <code>HttpRequest</code>, <code>WinRmExec</code> and <code>SnmpQuery</code> with pinned
+      host keys, and asks before a first connection or anything destructive.
+    </p>
+
+    <h2>Canvas — write together</h2>
+    <p>
+      For anything you will iterate on — an email, a report, a spec, a code file — the
+      agent opens a document beside the chat (<strong>AICO Docs</strong>): an outline of
+      placeholders first, then each section written while you watch. You edit the page in
+      place, block by block; add tables, charts, diagrams, infographics and images; comment
+      with <em>@AICO</em>; use tabs and templates; and export to Word, PDF, HTML or Markdown
+      with everything as it looks, a contents page and a cover. The agent edits
+      the same document and your open panel updates live. Every save is a version with who
+      wrote it, any version can be restored, and <em>Ask AI</em> on a selection rewrites just
+      that passage. Live sports scores, fixtures and tables arrive as scoreboard cards.
+    </p>
+
+    <h2>Always on — and it asks before anything big</h2>
+    <p>
+      Jobs AICO sizes at more than about three hours stop for your approval with a proposal —
+      research, design, milestones and acceptance criteria, time and cost — then run milestone by
+      milestone, resumable, inside your budget. An independent <strong>Sentinel</strong> reviews
+      high-risk actions and can only stop or escalate them. A <strong>morning brief</strong> ranks
+      failed CI, PRs waiting for you, new advisories and inbox approvals. AICO <strong>learns how you
+      work</strong> from your feedback, as rules you accept. <strong>Teach AICO</strong> records a
+      workflow in its browser and replays it with new values. Work in <strong>spreadsheets</strong>
+      with Excel formulas and <code>.xlsx</code> export, documents designed per type, an Artifacts
+      panel, and refactor whole codebases with previewed, checked, reversible changes.
+    </p>
+
+    <h2>Documents and presentations that look designed</h2>
+    <p>
+      Every kind of document gets its own design — a proposal's cover and document control, a
+      technical design's architecture diagrams, a report's charts, an SOP's numbered procedure — and
+      exports to Word and PDF with real styles, numbering, a contents page with real page numbers,
+      captions and repeating table headers. <strong>Presentations</strong> come with real layouts,
+      12 themes, speaker notes and present mode, and export to editable PowerPoint. Select any part —
+      a sentence, table cells, a chart, a diagram, a slide or one bullet on it — and <strong>Ask AICO</strong>
+      changes only that, in the document's own style (a slide still fitting its layout), with a before/after
+      you accept or reject.
+    </p>
+
+    <h2>It knows you — and you control what it knows</h2>
+    <p>
+      <strong>Recall</strong> indexes your memories, knowledge and every past session on this machine
+      — by words, and by meaning once you choose an embeddings model — so "what did we decide last
+      week?" has an answer, and only relevant memories are sent. <strong>About you</strong> learns your
+      stack, interests, way of working, likes and dislikes in the background, from your work and a
+      summary of your browsing (domains and topics, never pages); every fact shows why, and you
+      confirm, edit, hide, forget or erase it. Sensitive traits are never inferred. Give each job its
+      own <strong>model</strong> — chat, helpers, reviewers, background, Sentinel, vision, embeddings —
+      with price and local/cloud shown, and keep personal data on a local model if you choose.
+    </p>
+
+    <h2>Agents in parallel, a Tasks panel, a terminal that helps</h2>
+    <p>
+      Helpers run side by side, each in its own git worktree when they write code. Background agents
+      report their full result back into the chat, stay inside the parent's limits, can be continued,
+      and resume after a restart. The <strong>Tasks panel</strong> shows every job live — helpers as a
+      tree, time, tokens, cost, step, progress and output — with stop, pause and retry.
+      <strong>Full autonomy</strong> stops the "are you sure?" questions while clear harm is still
+      refused. Terminals follow your project, offer <em>Explain · Fix with AICO</em> on a failed
+      command, watch dev servers for errors, show the agent's own commands live, save commands as
+      scripts, tools or jobs, and open SSH sessions from the vault without showing the password.
+      Artifacts preview by type — images, documents, sheets, PDFs and live HTML in a sealed sandbox.
+    </p>
+
+    <h2>Code map — see how your project fits together</h2>
+    <p>
+      Every project gets a <strong>Code map</strong>: an accurate, local graph of its files, modules and
+      symbols across TypeScript/JavaScript (with <code>@/</code> aliases and barrels), Python, Go, Java,
+      Kotlin, C#, PHP, Rust and Ruby. Explore the architecture, see the impact of a change, the path
+      between two files, cycles, hotspots, files that change together and what your uncommitted work
+      affects; method calls are linked by type and interfaces explain which types implement them.
+      Select anything and <em>Ask AICO</em> with exactly that context. The agent checks its own edits
+      against it and is told which callers it has not updated yet, and your morning brief flags new
+      cycles, layering breaks and dead files.
+    </p>
+
+    <h2>Security built into every change</h2>
+    <p>
+      A security scan on every commit, CodeQL, dependency, lockfile and licence checks, an SBOM on
+      every release and an 1,100-attack pen-test suite in CI. Every guard fails closed; a cloned
+      repository's settings can only tighten safety; full autonomy and anything that loosens safety
+      need a real person. The agent's shell cannot write outside your project, download programs or
+      install software globally without you, and the code AICO writes for you gets the same checks.
+      In the browser, local dev servers with self-signed certificates open after your
+      <em>Advanced → Proceed</em>, bound to that certificate and marked Not secure.
+    </p>
+
+    <h2>Agents, skills and tools you can verify</h2>
+    <p>
+      Build agents in Claude's format with their own instructions, model, skills, tools and MCP
+      servers, delegation rules, an autonomy ceiling, a budget and the paths they may write — all
+      enforced by the engine. <code>aico agent certify</code> runs a safety pack and the agent's own
+      golden tasks before it may run unattended. Custom tools wrap a command or an HTTP call with a
+      risk class, previews for destructive calls and secrets from the vault. Import Claude skills
+      through a security scan and review, export them back, or let <code>skill-author</code> write one
+      that must beat no skill. MCP runs on the current spec with pinned tools. Unattended runs park
+      anything that needs you in a "Waiting for you" inbox and run exactly what you approved.
+    </p>
+
+    <h2>Skills and agents, made your way</h2>
+    <ul>
+      <li><strong>Skills in Claude's format</strong> — import a <code>.skill</code> or <code>.zip</code>, a bare <code>SKILL.md</code>, or a folder with its scripts, references and templates; export any skill as a <code>.skill</code> that installs in Claude too. Write one yourself, or ask the agent to create or improve one.</li>
+      <li><strong>Your own agents</strong> — instructions and role, goals, the tools it may use (built-in or any MCP server), the skills it reaches for, its own model, and its own knowledge and scripts (kept as a companion skill). Talk to one with <code>@name</code>, or let the orchestrator hand it work.</li>
+    </ul>
+
+    <h2>Looks after itself</h2>
+    <ul>
+      <li><strong>Automatic updates</strong> — downloaded in the background, with a notification when one is ready. It restarts when you say so, or waits until running work has finished, and reopens where you were; switch it off in Settings.</li>
+      <li><strong>Backup and restore</strong> — settings, preferences, plugins, skills, agents, memory and scheduled jobs (chats and API keys only if you choose) in one file, to move to another machine.</li>
+      <li><strong>Right-click menus</strong> everywhere you expect them: spelling suggestions, cut, copy and paste, links and images, and back, forward and reload in the built-in browser.</li>
+    </ul>
+
+    <h2>Every piece is a plugin — and the agent can write them</h2>
+    <p>
+      Chat history, Library, Scheduled, Projects, Files, Source control, GitHub, Browser,
+      Terminal, Apps, Activity, the status bar — each is a plugin that registers its pages,
+      commands and settings the same way yours would, and each can be switched off. A plugin
+      is a folder with a JSON manifest: sidebar pages (Markdown with every widget, prompt
+      boards, link lists, or your own HTML in a sandbox), palette commands, themes, quick
+      prompts, status items, chat widgets and standing instructions.
+    </p>
+    <p>
+      The agent knows the whole IDE through its own tools — what is open, every view and
+      command, every plugin — and can reshape it for you without anyone touching AICO's code:
+      "make me a plugin that…" and it writes, validates and installs one, then opens it.
+    </p>
+  </div>
+
+  <figure>
+    <img class="crop" src="assets/desktop/plugins.png" alt="The Plugins page listing built-in features as switchable plugins, with a New button." loading="lazy">
+    <figcaption>Built-in features are plugins you can switch off; yours sit beside them.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h2>One engine, four surfaces</h2>
+    <p>
+      The desktop app is a client, not a fork. It runs the same engine as <code>aico serve</code>
+      in a process of its own (Electron's Node, so no install is needed), shares the web
+      portal's conversation state and renderers, and keeps its own code for what only a
+      desktop can do: the window, tray and notifications, the IDE, the browser, and plugins.
+      A chat started in the desktop opens in the browser client, in VS Code and in the
+      terminal, and <em>Open in web browser</em> is one click in the account menu.
+    </p>
+
+    <div class="next">
+      <a class="btn" href="https://github.com/suhail-akhtar/aico/releases/latest">Download →</a>
+      <a class="btn" href="widgets.html">What it renders →</a>
+      <a class="btn" href="install.html">Other ways to install →</a>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>aico — by Suhail Akhtar · <a href="https://github.com/suhail-akhtar/aico/blob/main/LICENSE">FSL-1.1-ALv2</a></span>
+    <span class="spacer"></span>
+    <a href="https://github.com/suhail-akhtar/aico">GitHub</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md">Guide</a>
+    <a href="https://github.com/suhail-akhtar/aico/blob/main/CHANGELOG.md">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>
