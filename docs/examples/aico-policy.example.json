@@ -1,5 +1,5 @@
 {
-  "$schema": "https://github.com/suhail-akhtar/aico/blob/main/docs/engineering/adr/0035-managed-policy-and-audit-export.md",
+  "$schema": "https://github.com/suhail-akhtar/aico/blob/main/GUIDE.md#for-organisations-a-managed-policy-and-an-audit-trail",
   "_comment": "An example AICO managed policy (ADR 0035). Copy it, delete what you do not need, and check it with: aico policy check policy.json. Every key can only RESTRICT; none can grant. Place it at %ProgramData%\\AICO\\policy.json (Windows), /Library/Application Support/AICO/policy.json (macOS) or /etc/aico/policy.json (Linux), writable only by administrators.",
 
   "version": 1,

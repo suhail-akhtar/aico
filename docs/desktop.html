@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.54.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.54.1</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -61,7 +61,7 @@
     <p>
       Download the installer for your system from the
       <a href="https://github.com/suhail-akhtar/aico/releases/latest">latest release</a>:
-      <code>AICO-Setup-0.54.0-win-x64.exe</code> for Windows, <code>.AppImage</code> or
+      <code>AICO-Setup-0.54.1-win-x64.exe</code> for Windows, <code>.AppImage</code> or
       <code>.deb</code> for Linux. The builds are not code-signed yet, so Windows SmartScreen
       asks once ("More info → Run anyway"). Your chats, providers and settings are the same
       ones the CLI, the web portal and VS Code use — everything lives in <code>~/.aico</code>.
@@ -122,7 +122,7 @@
   <div class="prose">
     <h2>An IDE behind the chat</h2>
     <ul>
-      <li><strong>Files</strong> — an explorer and Monaco, the editor VS Code is built on: tabs, quick open (Ctrl+P), search in files, Markdown preview, and live reload when the agent edits a file you have open. "Ask AI" sends the file or the selection to a chat.</li>
+      <li><strong>Code</strong> — a project's files, the agent, your changes, the terminal and the Delivery board on one screen. The files are an explorer and Monaco, the editor VS Code is built on: tabs, quick open (Ctrl+P), search in files, Markdown preview, and live reload when the agent edits a file you have open. "Ask AI" sends the file or the selection to the agent beside it.</li>
       <li><strong>Terminals</strong> — real pseudo-terminals (PowerShell on Windows, your shell on Linux), not a pipe, in a bottom panel you toggle with Ctrl+J.</li>
       <li><strong>Source control</strong> — status, staged and unstaged changes with diffs, stage, unstage, discard, commit (or have the agent write the message), branches, stash, fetch, fast-forward pull and push, and the full history. It never force-pushes, never resets, and a pull that would need a merge says so.</li>
       <li><strong>GitHub</strong> — pull requests with checks, files and diff; issues; Actions runs; open, comment, check out, merge — and "Review with AI", "Fix with AI", "Diagnose" on anything. Through the GitHub CLI's own sign-in: AICO never stores a GitHub token.</li>
@@ -363,7 +363,7 @@
 
     <h2>Every piece is a plugin — and the agent can write them</h2>
     <p>
-      Chat history, Library, Scheduled, Projects, Files, Source control, GitHub, Browser,
+      Chat history, Library, Scheduled, Projects, Code, Source control, GitHub, Browser,
       Terminal, Apps, Activity, the status bar — each is a plugin that registers its pages,
       commands and settings the same way yours would, and each can be switched off. A plugin
       is a folder with a JSON manifest: sidebar pages (Markdown with every widget, prompt

@@ -4,21 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Install aico — AI coding agent for macOS, Linux and Windows</title>
-<meta name="description" content="Install the aico AI coding agent with one npx command — no account, nothing global. Requires Node 22.5 or newer. Add a provider key and start in five minutes.">
+<meta name="description" content="Install aico: the desktop app for Windows and Linux, or the aico command for the terminal and VS Code (Node 22.5 or newer). No account. Add a provider key and start in five minutes.">
 <!-- seo:start -->
 <link rel="canonical" href="https://suhail-akhtar.github.io/aico/install.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="aico">
 <meta property="og:url" content="https://suhail-akhtar.github.io/aico/install.html">
 <meta property="og:title" content="Install aico — AI coding agent for macOS, Linux and Windows">
-<meta property="og:description" content="Install the aico AI coding agent with one npx command — no account, nothing global. Requires Node 22.5 or newer. Add a provider key and start in five minutes.">
+<meta property="og:description" content="Install aico: the desktop app for Windows and Linux, or the aico command for the terminal and VS Code (Node 22.5 or newer). No account. Add a provider key and start in five minutes.">
 <meta property="og:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="aico — the coding agent that opens what it builds">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Install aico — AI coding agent for macOS, Linux and Windows">
-<meta name="twitter:description" content="Install the aico AI coding agent with one npx command — no account, nothing global. Requires Node 22.5 or newer. Add a provider key and start in five minutes.">
+<meta name="twitter:description" content="Install aico: the desktop app for Windows and Linux, or the aico command for the terminal and VS Code (Node 22.5 or newer). No account. Add a provider key and start in five minutes.">
 <meta name="twitter:image" content="https://suhail-akhtar.github.io/aico/assets/og-card.png">
 <!-- seo:end -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✻</text></svg>">
@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.54.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.54.1</span></a>
     <nav class="site-nav">
       <a href="install.html" aria-current="page">Install</a>
       <a href="providers.html">Providers</a>
@@ -52,54 +52,52 @@
   <div class="prose">
     <h1>Install</h1>
     <p class="lede">
-      One command, nothing installed globally, no account. The web client ships inside
-      the package, so <code>serve</code> works from a bare <code>npx</code>.
+      Download the desktop app, or install the <code>aico</code> command for the terminal and
+      VS Code. No account to make: you add a provider key and start.
     </p>
 
-    <div class="note warn">
-      <p>
-        <strong>Node 22.5 or newer.</strong> aico uses Node's built-in SQLite, which
-        arrived in 22.5. Check with <code>node --version</code>.
-      </p>
-    </div>
-
-    <h2>Run it</h2>
-    <div class="install">
-      <code>github.com/suhail-akhtar/aico/releases/latest</code>
-      <button type="button">Copy</button>
-    </div>
-    <p style="margin-top:1rem">
-      That prints a tokenised <code>127.0.0.1</code> URL and opens it. Drop
-      <code>serve</code> to get the terminal interface instead.
+    <h2>The desktop app</h2>
+    <p>
+      Windows 10/11 (x64) and Linux (x64). The engine runs inside it, so there is no Node to
+      install, and it shares <code>~/.aico</code> (chats, keys, skills, settings) with every
+      other way in. There is no macOS build yet.
     </p>
-
-    <h3>Which version you get</h3>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Suffix</th><th>What it follows</th></tr></thead>
+        <thead><tr><th>System</th><th>Download</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td><code>#v0.54.0</code></td><td>A tag. Pinned — it will not move under you.</td></tr>
-          <tr><td><code>#release/v0.54</code></td><td>The 0.54 line, as it gets fixes.</td></tr>
-          <tr><td><code>#main</code></td><td>The development trunk. Newest, least settled.</td></tr>
+          <tr><td>Windows</td><td><a href="https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/AICO-Setup-0.54.1-win-x64.exe">AICO-Setup-0.54.1-win-x64.exe</a></td><td>Updates itself. Not code-signed yet, so SmartScreen asks once (<em>More info → Run anyway</em>).</td></tr>
+          <tr><td>Linux</td><td><a href="https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/AICO-0.54.1-linux-x64.AppImage">AppImage</a> · <a href="https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/AICO-0.54.1-linux-x64.deb">.deb</a></td><td>The AppImage updates itself.</td></tr>
         </tbody>
       </table>
     </div>
+    <p style="font-size:.9rem;color:var(--muted)">
+      Every build: <a href="https://github.com/suhail-akhtar/aico/releases/latest">the latest release</a>.
+    </p>
+
+    <h2>The <code>aico</code> command</h2>
+    <p>
+      For the terminal, the local web portal and the VS Code extension.
+      <strong>Node 22.5 or newer</strong>: aico uses Node's built-in SQLite, which arrived in
+      22.5. Check with <code>node --version</code>. It is one file on the release:
+    </p>
+    <div class="install">
+      <code>npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/aico-0.54.1.tgz</code>
+      <button type="button">Copy</button>
+    </div>
+    <p style="margin-top:1rem">
+      To update, run the same command with the newer release's link. Then
+      <code>aico serve</code> prints a tokenised <code>127.0.0.1</code> URL and opens it; drop
+      <code>serve</code> to get the terminal interface instead.
+    </p>
 
     <div class="note">
       <p>
         <strong>There is a package called <code>aico</code> on npm and it is not this.</strong>
         <code>npx aico</code> and <code>npm install -g aico</code> install unrelated software.
-        Install from GitHub with the command above.
+        Install from the release link above.
       </p>
     </div>
-
-    <h2>From source</h2>
-<pre><code>git clone https://github.com/suhail-akhtar/aico.git
-cd aico
-npm install
-npm run build
-npm run build:web
-npm link          <span class="c"># makes `aico` available globally</span></code></pre>
 
     <h2>First run</h2>
     <ol class="steps">
@@ -142,14 +140,11 @@ aico serve</code></pre>
       A panel of its own beside Chat, drawn for the editor and styled from your
       theme. Edits apply as <code>WorkspaceEdit</code>s so <kbd>Ctrl</kbd>+<kbd>Z</kbd>
       takes them back, the active file and selection travel with your questions,
-      and tool approvals are real dialogs. Not on the Marketplace yet, so it is
-      built from the repository:
+      and tool approvals are real dialogs. Not on the Marketplace yet, so install the
+      packaged build from the release
+      (<a href="https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/aico-vscode-0.6.41.vsix">aico-vscode-0.6.41.vsix</a>):
     </p>
-<pre><code>cd aico/vscode-extension
-npm install
-npm --prefix webview install    <span class="c"># the panel has its own build</span>
-npm run package
-code --install-extension aico-vscode-*.vsix</code></pre>
+<pre><code>code --install-extension aico-vscode-0.6.41.vsix</code></pre>
     <p>
       Then <strong>reload the window</strong> — VS Code does not load a newly
       installed extension into windows that are already open, and a keypress in

@@ -37,9 +37,9 @@ why you can steer it mid-run, and why every answer can show exactly what it read
 <img src="docs/assets/readme/numbers.svg" alt="By the numbers: 91% of 80 real GitHub issues resolved (SWE-bench Lite, self-run); 96% prompt-cache hit on a long run; a cached DeepSeek token costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 4,100+ automated checks" width="100%">
 </div>
 
-<sub>Methods and raw evidence: [SWE-bench Lite probes](benchmarks/swebench-lite/README.md) ·
-[long-horizon runs](benchmarks/long-horizon/README.md) ·
-[custom-stack architecture probe](benchmarks/custom-app-architecture/README.md) ·
+<sub>Methods and raw evidence: SWE-bench Lite probes ·
+long-horizon runs ·
+custom-stack architecture probe ·
 [prompt caching](#-token-saving-by-design). Self-run, reproducible, and honest about
 their limits — none of these is an official leaderboard submission.</sub>
 
@@ -49,9 +49,10 @@ their limits — none of these is an official leaderboard submission.</sub>
 
 | | Get it | Notes |
 |---|---|---|
-| **Windows** (10/11, x64) | [**AICO-Setup-0.54.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.0/AICO-Setup-0.54.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
-| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.0/AICO-0.54.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.0/AICO-0.54.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
-| **VS Code** | [**aico-vscode-0.6.41.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.0/aico-vscode-0.6.41.vsix) | `code --install-extension aico-vscode-0.6.41.vsix` |
+| **Windows** (10/11, x64) | [**AICO-Setup-0.54.1-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/AICO-Setup-0.54.1-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
+| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/AICO-0.54.1-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/AICO-0.54.1-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
+| **Terminal** (any OS with Node 22.5+) | [**aico-0.54.1.tgz**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/aico-0.54.1.tgz) | The `aico` command. `npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/aico-0.54.1.tgz` puts it on your PATH; the VS Code extension needs it |
+| **VS Code** | [**aico-vscode-0.6.41.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/aico-vscode-0.6.41.vsix) | `code --install-extension aico-vscode-0.6.41.vsix` |
 
 Every build: **[latest release](https://github.com/suhail-akhtar/aico/releases/latest)**.
 The desktop app needs no Node install — the engine runs inside it — and shares
@@ -368,23 +369,23 @@ and, cheapest first:
 2. **condenses** earlier steps of the running turn into a handoff note — your messages **word for word**, the plan and whether you approved it, the todo list and every file read or changed, taken from the record rather than trusted to a summary. An earlier note's sections are carried forward, not re-summarised, so the fifth condensation still has your original request;
 3. **stops with a reason** if a single step is larger than the window, instead of summarising in a loop.
 
-Plus: **steer a run mid-flight** (delivered at the next step boundary, nothing lost), durable queues that survive a crash, background agents and scheduled jobs under one supervised work ledger, and dev servers detected and backgrounded so nothing holds a turn hostage. Measured: **140/140 values correct, every turn `completed`, peak context 201K → 115K**. [Full results →](benchmarks/long-horizon/README.md)
+Plus: **steer a run mid-flight** (delivered at the next step boundary, nothing lost), durable queues that survive a crash, background agents and scheduled jobs under one supervised work ledger, and dev servers detected and backgrounded so nothing holds a turn hostage. Measured: **140/140 values correct, every turn `completed`, peak context 201K → 115K**. Full results →
 
 ## 🛠 Software engineering proof
 
 | Probe | Result | What it shows |
 |---|---|---|
-| [**SWE-bench Lite**](benchmarks/swebench-lite/README.md) — real GitHub issues from 12 open-source repos, graded by each project's own tests | **73 / 80 resolved (91.25%)** — two disjoint random draws, 35/40 then 38/40 | Fixing real bugs in large, unfamiliar codebases from the issue text alone — django 29/31, sympy 17/19, scikit-learn 6/6, matplotlib 5/5, pytest 4/4, sphinx 3/3 … |
-| [**Custom-stack architecture**](benchmarks/custom-app-architecture/README.md) — ambiguous greenfield briefs, no template | **4 / 5 built clean (17/17 checks each)**; the fifth hit a real iteration cap at 60% | Deciding the data model, stack and boundaries — not just filling in a template |
+| **SWE-bench Lite** — real GitHub issues from 12 open-source repos, graded by each project's own tests | **73 / 80 resolved (91.25%)** — two disjoint random draws, 35/40 then 38/40 | Fixing real bugs in large, unfamiliar codebases from the issue text alone — django 29/31, sympy 17/19, scikit-learn 6/6, matplotlib 5/5, pytest 4/4, sphinx 3/3 … |
+| **Custom-stack architecture** — ambiguous greenfield briefs, no template | **4 / 5 built clean (17/17 checks each)**; the fifth hit a real iteration cap at 60% | Deciding the data model, stack and boundaries — not just filling in a template |
 | **Hidden-test implementation** — a spec, 7 visible tests, graded by 23 it never saw | **23 / 23** on both gpt-5.6-luna and gpt-5.6-terra | Implementing to a spec, not to the visible tests |
 | **Nine Node app templates** — each built end to end by a real model | **9 / 9 proven live**, opened in a browser at two widths | The app platform works as a whole |
 | **Five more starters** — FastAPI, Spring Boot, ASP.NET Core, Go, Laravel — each built, tested, audited and run as a container | **61–74 checks each**, 95–98% test coverage, dependency audit clean, container smoke test green | The starters hold up in their own ecosystems (these were verified by running them, not by a model build) |
-| [**Engineering benchmark**](scripts/eng-bench.mjs) (`npm run bench:eng`) — multi-tenant API with JWT/RBAC, a bug in an unfamiliar codebase, a pattern refactor, an architecture doc, a full-stack feature, delegated security fixes; independent graders and black-box checks | **≈99 / 100 checks** on `deepseek-flash` for **≈$0.35 a full run**; delegation 12/12 | The everyday enterprise work, measured on every prompt or tool change — a skill that bloated output was caught and removed before release |
+| **Engineering benchmark** (`npm run bench:eng`) — multi-tenant API with JWT/RBAC, a bug in an unfamiliar codebase, a pattern refactor, an architecture doc, a full-stack feature, delegated security fixes; independent graders and black-box checks | **≈99 / 100 checks** on `deepseek-flash` for **≈$0.35 a full run**; delegation 12/12 | The everyday enterprise work, measured on every prompt or tool change — a skill that bloated output was caught and removed before release |
 
-Every one is reproducible from scripts in this repository, with per-instance
-evidence committed. SWE-bench was run blind — no dependency install, no local
+Every one is reproducible from scripts kept with the source, with per-instance
+evidence committed there. SWE-bench was run blind — no dependency install, no local
 test runs — with `deepseek-v4-flash`, one of the cheapest capable models; it is a
-self-run probe, not a leaderboard entry, and the [caveats](benchmarks/swebench-lite/README.md)
+self-run probe, not a leaderboard entry, and the caveats
 say exactly what that means.
 
 In the desktop app the same agent works on **your** GitHub: review a pull request,
@@ -428,7 +429,15 @@ flowchart TB
 
 ## 🚀 Install & quick start
 
-Download the installer for your system from the table at the top of this page (Windows, Linux, or the VS Code extension). The desktop app includes the engine, the web portal and the terminal tools.
+Download the installer for your system from the table at the top of this page. The desktop app includes the engine, the web portal and the terminal tools.
+
+For the **terminal** or the **VS Code extension** you need the `aico` command. It is one file on every release, and it needs **Node 22.5+** (built-in SQLite):
+
+```sh
+npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/aico-0.54.1.tgz
+```
+
+To update, run the same command with the newer release's link. (The package called `aico` on the npm registry is unrelated software; install from the release.)
 
 ```sh
 aico provider add                      # interactive setup
@@ -438,9 +447,6 @@ aico -c                                # continue the last session
 aico --agent review -p "review my diff"
 ```
 
-`#v0.54.0` pins a release, `#release/v0.54` follows its fixes, `#main` is the
-trunk. From source: `git clone … && npm install && npm run build && npm run build:web`.
-Requires **Node 22.5+** (built-in SQLite).
 
 ### Providers
 
@@ -579,13 +585,6 @@ Full reference: **[GUIDE.md](GUIDE.md)**.
 <details>
 <summary><b>Testing</b></summary>
 
-```sh
-npm test                    # 3,200+ offline engine assertions, no key needed
-npm run test:web:unit       # web renderers and reducers
-npm --prefix desktop test   # desktop units
-npm run test:live           # live assertions against a real model — costs money
-node scripts/long-horizon-live.mjs deepseek-flash default 30
-```
 
 The live suite covers what a mock cannot: wire formats, streaming, tool round
 trips, prompt caching, truncation, cancellation, steering, compaction, sandbox
@@ -609,26 +608,10 @@ produces one. Tests never touch your real `~/.aico`.
 
 ---
 
-## 🤝 Contributing & development
+## 🤝 Feedback
 
-```sh
-npm ci && npm --prefix web ci && npm --prefix desktop ci
-npm run dev                  # engine, watch mode
-npm --prefix desktop start   # build and run the desktop app
-npm test
-```
+Found a bug, or want something changed? [Open an issue](https://github.com/suhail-akhtar/aico/issues) on this repository.
 
-Design decisions live in the module headers next to the code they govern
-(`src/session/`, `src/registry/`, `src/sandbox/`, `desktop/DESIGN.md`) rather
-than in a document that drifts. Issues and pull requests are welcome.
-
-**Standards.** Anyone changing the code — person or AI agent — follows
-[AGENTS.md](AGENTS.md) and the engineering standards in
-[docs/engineering/](docs/engineering/README.md) (principles, architecture,
-testing, security, releasing, and the [decision records](docs/engineering/adr/README.md)).
-`node scripts/install-hooks.mjs` installs the commit and push checks;
-`npm run check:standards` runs them; releases go through `npm run release`.
-See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

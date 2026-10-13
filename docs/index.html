@@ -28,7 +28,7 @@
   "name": "aico",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
-  "softwareVersion": "0.54.0",
+  "softwareVersion": "0.54.1",
   "url": "https://suhail-akhtar.github.io/aico/",
   "downloadUrl": "https://github.com/suhail-akhtar/aico",
   "codeRepository": "https://github.com/suhail-akhtar/aico",
@@ -135,7 +135,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.54.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.54.1</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -172,7 +172,7 @@
     <div class="actions">
       <a class="btn btn-primary" href="install.html">Get started</a>
       <a class="btn" href="desktop.html">Desktop app</a>
-      <a class="btn" href="https://github.com/suhail-akhtar/aico">Read the source</a>
+      <a class="btn" href="https://github.com/suhail-akhtar/aico/releases/latest">Download</a>
     </div>
 
     <p style="margin-top:1.25rem;font-size:.86rem;color:var(--muted)">
@@ -353,8 +353,8 @@ What rendered:
 
     <p class="prose" style="font-size:.9rem">
       Both at <code>reasoningEffort: high</code>. Two different implementations, both fully
-      correct on tests neither model saw. Reproduce it yourself with
-      <code>npm run test:live</code> — it costs money, because it calls real models.
+      correct on tests neither model saw. The live suite behind it calls real models,
+      so running it costs money.
     </p>
   </section>
 
@@ -389,9 +389,8 @@ What rendered:
       follow-up turn: every one of 140 values correct. Peak context roughly halved at
       default settings. Cost is <strong>not</strong> claimed as saved — it was unchanged
       within run-to-run variance, because every mask breaks the prompt cache once.
-      Self-run, one synthetic task shape, one run per cell;
-      <a href="https://github.com/suhail-akhtar/aico/tree/main/benchmarks/long-horizon">the
-      full results, and the failures that shaped the defaults</a>.
+      Self-run, one synthetic task shape, one run per cell; the
+      full results, and the failures that shaped the defaults, are kept with the source.
     </p>
   </section>
 
@@ -594,9 +593,9 @@ What rendered:
         <button type="button">Copy</button>
       </div>
       <p style="margin-top:1rem">
-        Nothing to install first, and no account to make.
-        <a href="install.html">The install page</a> covers running from source, pinning a
-        version, and where to put your API key.
+        No account to make.
+        <a href="install.html">The install page</a> covers the desktop app, the
+        <code>aico</code> command, and where to put your API key.
       </p>
     </div>
   </section>

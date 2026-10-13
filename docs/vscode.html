@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.54.0</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.54.1</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -62,12 +62,13 @@
       The extension needs <code>aico</code> on your <code>PATH</code> and Node 22.5+. It is
       not on the Marketplace yet, so install the packaged build:
     </p>
-<pre><code>npm install -g github:suhail-akhtar/aico#v0.54.0
+<pre><code>npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.1/aico-0.54.1.tgz
 code --install-extension aico-vscode-0.6.41.vsix</code></pre>
     <p style="font-size:.9rem;color:var(--muted)">
-      aico is not on the npm registry; the global install builds from the tagged source and
-      puts <code>aico</code> on your <code>PATH</code>, which is what the extension needs. It
-      takes a minute the first time.
+      aico is not on the npm registry. The first line installs the <code>aico</code> command from
+      the release, which puts it on your <code>PATH</code> (what the extension needs); the
+      second installs the extension from the <code>.vsix</code> you downloaded from the same
+      release.
     </p>
     <p>
       The <code>.vsix</code> is attached to each

@@ -11,7 +11,7 @@ that does not contain it.
 Code: `src/tools/ops/` (one module per protocol, shared rules in `common.ts`).
 Tests: `scripts/ops-test.mjs` (part of `npm test`), with a real SSH server in
 `scripts/lib/ssh-test-server.mjs`. Live check: `scripts/ops-live.mjs` (real model;
-costs money — run only when asked). Decision record: [ADR 0007](../engineering/adr/0007-ops-tools-and-dependencies.md).
+costs money — run only when asked). Decision record: ADR 0007.
 Method the agent follows: the `server-ops` built-in skill (`src/skills/builtin/server-ops.md`).
 
 ---
@@ -212,7 +212,7 @@ path is used when they are absent) and `net-snmp` (MIT; deps `asn1-ber`, `smart-
 MIT). `@types/ssh2` (dev). No deprecated packages; `npm audit` shows nothing new.
 Install footprint: +8 packages. ssh2 runs an install script that *tries* to build its
 optional native binding and continues silently when it cannot. Why these and not the
-system `ssh` client: [ADR 0007](../engineering/adr/0007-ops-tools-and-dependencies.md).
+system `ssh` client: ADR 0007.
 
 ---
 
