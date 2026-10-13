@@ -49,9 +49,9 @@ their limits — none of these is an official leaderboard submission.</sub>
 
 | | Get it | Notes |
 |---|---|---|
-| **Windows** (10/11, x64) | [**AICO-Setup-0.53.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.53.0/AICO-Setup-0.53.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
-| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.53.0/AICO-0.53.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.53.0/AICO-0.53.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
-| **VS Code** | [**aico-vscode-0.6.41.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.53.0/aico-vscode-0.6.41.vsix) | `code --install-extension aico-vscode-0.6.41.vsix` |
+| **Windows** (10/11, x64) | [**AICO-Setup-0.54.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.0/AICO-Setup-0.54.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
+| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.0/AICO-0.54.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.0/AICO-0.54.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
+| **VS Code** | [**aico-vscode-0.6.41.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.0/aico-vscode-0.6.41.vsix) | `code --install-extension aico-vscode-0.6.41.vsix` |
 
 Every build: **[latest release](https://github.com/suhail-akhtar/aico/releases/latest)**.
 The desktop app needs no Node install — the engine runs inside it — and shares
@@ -438,7 +438,7 @@ aico -c                                # continue the last session
 aico --agent review -p "review my diff"
 ```
 
-`#v0.53.0` pins a release, `#release/v0.53` follows its fixes, `#main` is the
+`#v0.54.0` pins a release, `#release/v0.54` follows its fixes, `#main` is the
 trunk. From source: `git clone … && npm install && npm run build && npm run build:web`.
 Requires **Node 22.5+** (built-in SQLite).
 
