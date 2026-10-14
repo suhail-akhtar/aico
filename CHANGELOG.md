@@ -3,6 +3,20 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.54.2 — 2026-10-15
+
+### Fixed
+
+- **Nothing in the engine holds it for long any more, on a large project or a long history.** The engine is one process serving every window, the VS Code panel and every running chat, so anything that runs synchronously for half a second freezes all of them for half a second. A new probe, `npm run test:stall` (`scripts/engine-stall-probe.mjs`), starts the real server against a deliberately large project (3,000 source files, a 15,000-file `node_modules`, git history, 360 changed files) and 150 chats of 1.5 MB each, calls the 43 read routes the clients use and 30 agent tools, and fails on any stall over 250 ms; `--why` names the functions inside the longest one. It found, and these are fixed:
+  - **The chat list re-read every chat log on every refresh** (1.2 s per sidebar refresh, 450 ms frozen), and because checking that a project is known lists its sessions, every route that takes a project path paid it too. A session log is append-only, so each log's summary is now kept with the byte offset it has read to and the next listing reads only what was appended (a file that was replaced, shortened or rewritten in place is read again from the start). Project stats use the same kept folds (they read every log too, up to 550 ms frozen). Warm listing of 110 MB of logs: 3 ms.
+  - **Recall indexed past chats synchronously**: 650 ms frozen on a Recall over 150 chats, and the hourly upkeep's budget let it hold the engine for up to 60 seconds; "rebuild" likewise. Indexing is now asynchronous and time-sliced, one sync at a time, and the memory de-duplication pass yields as it goes.
+  - **The Apps template list probed toolchains (`python --version`, `java -version`, …) with blocking child processes on every visit** (1.2 s frozen; up to 15 s per tool when one hangs). Probes now run in parallel off the event loop wherever the engine can wait; the per-turn check gate answers from a cache the server warms at start and refreshes in the background.
+  - **The code graph's rebuild ran as one block** (637 ms at 10,000 files, and it reruns after every batch of edits): resolution, communities and the store's serialisation are now time-sliced (86 ms worst), a quadratic pass in community naming is gone, and the Code map's "changed files" lookup no longer re-normalises every path per file (274 ms → 10 ms). The graph's version also no longer changes between loads with nothing changed (config files were hashed in the order their reads finished), so an open Code map stops reloading for nothing.
+  - **Read returned every line of a huge file** (an 8 MB log became 16 MB of numbered text to redact and spill: 815 ms frozen). One read now stops at 190,000 characters and says where to continue (`start_line`), with the file's total line count; files over 4 MB are streamed. Files of ordinary size read exactly as before.
+- **A tool call missing a required argument got "Cannot read properties of undefined"** (Edit without `old_str`). It is now told which arguments it left out and what the tool takes.
+- **The desktop's file search, folder listing and previews ran in the app's main process synchronously**, so searching a large project froze every window until the search finished. They are asynchronous now, and the search yields as it goes.
+- **The release script's last check reported a broken download link that was fine**: it read the trailing backtick of the README's inline install command as part of the URL.
+
 ## 0.54.1 — 2026-10-13
 
 ### Fixed
