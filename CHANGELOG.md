@@ -3,6 +3,14 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.54.3 — 2026-10-15
+
+### Fixed
+
+- **Adding a provider in the desktop app always failed with "Could not save: An id is required".** The desktop's Add provider form never sent an id (only the web editor suggested one), and the server required it: a field the person was never shown. The server now makes the id for a new provider from its type (`deepseek`, then `deepseek-2`, …), so every client can add one; an id a client does send is kept and still validated. Save is disabled while a save is in flight, so repeated clicks no longer stack identical errors.
+- **The desktop's top-bar buttons slid under the Windows minimise, maximise and close buttons when the app was zoomed out.** The top bar reserved a fixed 140 px for them, but Windows draws them at a fixed physical size, so their width in the page changes with display scaling and zoom: at 100% the last layout toggle cleared them by 3 px, and from 90% down it ran 12–64 px underneath. The space is now read from the window-controls overlay (`env(titlebar-area-*)`), so every control ends 8 px clear at every zoom from 60% to 200%, in the main window and the browser's tab strip. `desktop/scripts/titlebar-test.mjs` checks it in the real app.
+- **A provider key set in Windows after AICO started was ignored.** A provider can be configured by its environment variable alone (`DEEPSEEK_API_KEY` lists DeepSeek), but a process only sees the environment it was started with, so a key set in System Properties or with `setx` while AICO was open never appeared, and the main model fell back to what was left (Settings said a DeepSeek model ran "on Ollama"). On Windows the engine now reads the provider-key variables from the persistent user and machine environment at start, when Settings lists or tests providers, and when a turn is sent (at most every 15 s), and adopts any it lacks. Only the provider-key names are read, a value already in the process environment wins, the values are registered with the redactor at once and never logged or returned, and test stores turn it off (`AICO_SYSTEM_ENV=off`).
+
 ## 0.54.2 — 2026-10-15
 
 ### Fixed
