@@ -510,7 +510,9 @@ In a chat, ask for a PR description or a commit message and the agent loads the
 form is meant for a commit body; none of the forms carries authorship or credit
 lines. Limits: checks run by a sub-agent are in that agent's own log, a terminal
 permission prompt (the CLI REPL) leaves no record, calls auto-approved by a
-setting leave none, and the cost is an estimate.
+setting or the approval mode leave none (nobody decided), a card refused because
+the turn was stopped is recorded as the engine's, never yours, and the cost is
+an estimate.
 
 ### Flaky tests
 

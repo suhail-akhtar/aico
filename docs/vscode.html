@@ -29,7 +29,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.54.3</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.54.4</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -62,7 +62,7 @@
       The extension needs <code>aico</code> on your <code>PATH</code> and Node 22.5+. It is
       not on the Marketplace yet, so install the packaged build:
     </p>
-<pre><code>npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.3/aico-0.54.3.tgz
+<pre><code>npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.4/aico-0.54.4.tgz
 code --install-extension aico-vscode-0.6.41.vsix</code></pre>
     <p style="font-size:.9rem;color:var(--muted)">
       aico is not on the npm registry. The first line installs the <code>aico</code> command from
@@ -130,9 +130,9 @@ code --install-extension aico-vscode-0.6.41.vsix</code></pre>
       <table>
         <thead><tr><th>Mode</th><th>What it asks about</th></tr></thead>
         <tbody>
-          <tr><td><strong>Auto</strong></td><td>Nothing. The default, and what every session did before this existed.</td></tr>
+          <tr><td><strong>Auto</strong></td><td>Nothing. The default when <em>Approve tool calls automatically</em> is on in Settings.</td></tr>
           <tr><td><strong>Ask, not for edits</strong></td><td>File writes go through; commands, fetches and delegation are put to you.</td></tr>
-          <tr><td><strong>Ask every time</strong></td><td>Every tool call waits for a decision. Thorough, and slow by design.</td></tr>
+          <tr><td><strong>Ask every time</strong></td><td>Every write, command, fetch and delegation waits for a decision; reading the project does not. The default when that setting is off.</td></tr>
         </tbody>
       </table>
     </div>

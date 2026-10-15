@@ -3,6 +3,24 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.54.4 — 2026-10-15
+
+### Changed
+
+- **Chats now follow "Approve tool calls automatically".** The setting said "Off stops the turn to ask before anything that writes or runs", and it is off unless you turned it on, but every chat started in Auto whatever it said. A chat now starts in Auto when the setting is on and in "Ask every time" when it is off; a mode you pick in the composer is remembered and wins. If you want chats to run without asking, turn the setting on (Settings → Permissions), or pick Auto in the composer. Asking is far quieter than it was: reading the project no longer asks, and parallel calls wait in line instead of being refused (below).
+
+### Fixed
+
+- **Approvals ask about the right thing, and the log says who decided** (the readiness review's "fix first" list, each defect confirmed in the code):
+  - **Parallel calls in an asking mode were refused without asking.** The server showed one card at a time and refused any request that arrived while a card was up, telling the model "User denied"; tool calls run up to eight at a time, so the agent dropped work it had been asked for. Requests now wait in line and are asked in order.
+  - **Every answer was logged as a person's.** Calls the approval mode let through and calls the server refused on its own were recorded `by: 'person'`, so evidence reports said "Refused by a person" for decisions nobody made. A person's answer is logged as theirs; a call the mode lets through leaves no decision (nobody decided); a refusal nobody made is recorded as the engine's, with the reason.
+  - **Stop did not stop a turn while an approval card was showing.** The call waited on a promise the abort did not reach, until someone answered. Stop now refuses the card and everything waiting behind it, and the turn ends.
+  - **The approval card cut the command to 100 characters** (300 for MCP or a command reaching outside the project), so people approved `cd "C:\Users\…` without seeing the rest. The card now shows the whole command (up to 4,000 characters), scrolling a long one so Allow and Deny stay on screen.
+  - **Edit approvals never showed a diff:** the preview read `old_string`/`new_string`, names the Edit tool never had (`old_str`/`new_str`). The card now shows the lines removed and added.
+  - **Read, LS and Glob asked in every asking mode**, against the autonomy scale (reads are automatic at Ask and Edits). Local reads (Read, Glob, Grep, LS, Pwd, CodebaseMap, CodeGraph, TodoRead) no longer ask; fetching a URL still does.
+  - **The web composer's approval chip read backwards:** it put "Approve" before a short word, so "Ask every time" showed as "Approve always" and the edits mode as "Approve not edits". The chip now names the mode itself: Full autonomy, Auto-approve, "Ask, not edits", "Ask always".
+  - **The desktop named its `edits` mode backwards** ("Ask before edits — file writes need a yes", when that mode lets file writes through, as the engine, web and VS Code say). It is now "Ask, not for edits — file writes go through", and "Ask every time" says that reading the project does not ask.
+
 ## 0.54.3 — 2026-10-15
 
 ### Fixed
