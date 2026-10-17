@@ -49,10 +49,10 @@ their limits — none of these is an official leaderboard submission.</sub>
 
 | | Get it | Notes |
 |---|---|---|
-| **Windows** (10/11, x64) | [**AICO-Setup-0.54.4-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.4/AICO-Setup-0.54.4-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
-| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.4/AICO-0.54.4-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.4/AICO-0.54.4-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
-| **Terminal** (any OS with Node 22.5+) | [**aico-0.54.4.tgz**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.4/aico-0.54.4.tgz) | The `aico` command. `npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.4/aico-0.54.4.tgz` puts it on your PATH; the VS Code extension needs it |
-| **VS Code** | [**aico-vscode-0.6.41.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.4/aico-vscode-0.6.41.vsix) | `code --install-extension aico-vscode-0.6.41.vsix` |
+| **Windows** (10/11, x64) | [**AICO-Setup-0.54.5-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/AICO-Setup-0.54.5-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
+| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/AICO-0.54.5-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/AICO-0.54.5-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
+| **Terminal** (any OS with Node 22.5+) | [**aico-0.54.5.tgz**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/aico-0.54.5.tgz) | The `aico` command. `npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/aico-0.54.5.tgz` puts it on your PATH; the VS Code extension needs it |
+| **VS Code** | [**aico-vscode-0.6.41.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/aico-vscode-0.6.41.vsix) | `code --install-extension aico-vscode-0.6.41.vsix` |
 
 Every build: **[latest release](https://github.com/suhail-akhtar/aico/releases/latest)**.
 The desktop app needs no Node install — the engine runs inside it — and shares
@@ -434,7 +434,7 @@ Download the installer for your system from the table at the top of this page. T
 For the **terminal** or the **VS Code extension** you need the `aico` command. It is one file on every release, and it needs **Node 22.5+** (built-in SQLite):
 
 ```sh
-npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.4/aico-0.54.4.tgz
+npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/aico-0.54.5.tgz
 ```
 
 To update, run the same command with the newer release's link. (The package called `aico` on the npm registry is unrelated software; install from the release.)

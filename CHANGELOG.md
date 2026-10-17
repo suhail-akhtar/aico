@@ -3,6 +3,12 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.54.5 — 2026-10-17
+
+### Fixed
+
+- **The Code view's code area could be squeezed to about 80px** (desktop): with the side pane widened, or the view narrower (the browser docked beside it, a smaller window), the file explorer kept its full 280px and the code got what was left, so the empty state wrapped a word per line and an open file was unreadable. The 360px minimum was applied to the explorer and the code together. Now the code keeps 360px on its own, the explorer narrows to 200px before the code gives anything up, and below that it folds behind a folder button in the tab strip that opens it over the code (opening a file, Escape or a click outside closes it). A wider window brings it back beside the code. Checked in the real app at 1440, 1280, 1100 and 960px with the side pane dragged as wide as it goes (`desktop/scripts/code-live.mjs`).
+
 ## 0.54.4 — 2026-10-15
 
 ### Changed
