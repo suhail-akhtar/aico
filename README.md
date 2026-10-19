@@ -28,13 +28,14 @@ thread — and answers everyday questions with maps, charts, forecasts, videos a
 documents you can edit. One engine, four ways in: a **native desktop app**,
 **VS Code**, a **local web portal** and the **terminal**.
 
-It is built around one idea other agents skip: **every request is derived from an
-append-only event log.** That single decision is why its prompt cache hits
-**79–96%** of the time, why it can run for hours without forgetting what you asked,
-why you can steer it mid-run, and why every answer can show exactly what it read.
+It is built around one idea: **every request is derived from an append-only event
+log** — the same principle DeepSeek's own [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
+is built on. That single decision is why its prompt cache hit **89–96%** in our long
+DeepSeek runs, why it can run for hours without forgetting what you asked, why you
+can steer it mid-run, and why every answer can show exactly what it read.
 
 <div align="center">
-<img src="docs/assets/readme/numbers.svg" alt="By the numbers: 91% of 80 real GitHub issues resolved (SWE-bench Lite, self-run); 96% prompt-cache hit on a long run; a cached DeepSeek token costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 4,100+ automated checks" width="100%">
+<img src="docs/assets/readme/numbers.svg" alt="By the numbers: 91% of 80 real GitHub issues resolved (SWE-bench Lite, self-run); 96% prompt-cache hit on one long DeepSeek run; a cached DeepSeek token costs 1/50 of a miss; 140 of 140 values correct in long-horizon runs; peak context halved at default settings; 4,100+ automated checks" width="100%">
 </div>
 
 <sub>Methods and raw evidence: SWE-bench Lite probes ·
@@ -49,10 +50,10 @@ their limits — none of these is an official leaderboard submission.</sub>
 
 | | Get it | Notes |
 |---|---|---|
-| **Windows** (10/11, x64) | [**AICO-Setup-0.54.5-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/AICO-Setup-0.54.5-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
-| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/AICO-0.54.5-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/AICO-0.54.5-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
-| **Terminal** (any OS with Node 22.5+) | [**aico-0.54.5.tgz**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/aico-0.54.5.tgz) | The `aico` command. `npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/aico-0.54.5.tgz` puts it on your PATH; the VS Code extension needs it |
-| **VS Code** | [**aico-vscode-0.6.41.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/aico-vscode-0.6.41.vsix) | `code --install-extension aico-vscode-0.6.41.vsix` |
+| **Windows** (10/11, x64) | [**AICO-Setup-0.55.0-win-x64.exe**](https://github.com/suhail-akhtar/aico/releases/download/v0.55.0/AICO-Setup-0.55.0-win-x64.exe) | Installer · updates itself · not code-signed yet, so SmartScreen asks once (*More info → Run anyway*) |
+| **Linux** (x64) | [**AppImage**](https://github.com/suhail-akhtar/aico/releases/download/v0.55.0/AICO-0.55.0-linux-x64.AppImage) · [**.deb**](https://github.com/suhail-akhtar/aico/releases/download/v0.55.0/AICO-0.55.0-linux-x64.deb) | AppImage updates itself; the .deb best-effort |
+| **Terminal** (any OS with Node 22.5+) | [**aico-0.55.0.tgz**](https://github.com/suhail-akhtar/aico/releases/download/v0.55.0/aico-0.55.0.tgz) | The `aico` command. `npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.55.0/aico-0.55.0.tgz` puts it on your PATH; the VS Code extension needs it |
+| **VS Code** | [**aico-vscode-0.6.41.vsix**](https://github.com/suhail-akhtar/aico/releases/download/v0.55.0/aico-vscode-0.6.41.vsix) | `code --install-extension aico-vscode-0.6.41.vsix` |
 
 Every build: **[latest release](https://github.com/suhail-akhtar/aico/releases/latest)**.
 The desktop app needs no Node install — the engine runs inside it — and shares
@@ -68,9 +69,11 @@ The desktop app needs no Node install — the engine runs inside it — and shar
 
 ### 💸 Token-saving by design
 Requests are built from an append-only log, so the prompt prefix never changes
-behind the model's back and **provider prompt caches actually hit — 79–96%
-measured.** On DeepSeek a cached token costs **1/50** of a fresh one; on OpenAI
-and Anthropic, 1/10. Rarely used tools load only when needed, so **every request
+behind the model's back and **provider prompt caches actually hit — 89–96%
+measured on DeepSeek** (three long runs; OpenAI measured 14–53% before the 0.20.1
+caching fix and has not been re-measured since; Anthropic not yet measured live).
+On DeepSeek a cached token costs **1/50** of a fresh one; on OpenAI and Anthropic,
+1/10. Rarely used tools load only when needed, so **every request
 is 41% smaller** (~24K → ~14K tokens). Old tool output is masked in batches (so
 the cache breaks rarely), not re-sent forever. [How →](#-token-saving-by-design)
 
@@ -343,7 +346,7 @@ button that repairs a broken block in place.
 flowchart LR
   L[(Append-only<br/>event log)] --> D[Derive request]
   D --> P["Stable prefix<br/>tools · system · history"]
-  P -->|cache hit 79–96%| M((Model))
+  P -->|cache hit 89–96% on DeepSeek| M((Model))
   D --> T["Volatile tail<br/>todo · notes"]
   T --> M
   M --> E[New events] --> L
@@ -434,7 +437,7 @@ Download the installer for your system from the table at the top of this page. T
 For the **terminal** or the **VS Code extension** you need the `aico` command. It is one file on every release, and it needs **Node 22.5+** (built-in SQLite):
 
 ```sh
-npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.54.5/aico-0.54.5.tgz
+npm install -g https://github.com/suhail-akhtar/aico/releases/download/v0.55.0/aico-0.55.0.tgz
 ```
 
 To update, run the same command with the newer release's link. (The package called `aico` on the npm registry is unrelated software; install from the release.)
@@ -453,7 +456,7 @@ aico --agent review -p "review my diff"
 | Provider | Key | Notes |
 |---|---|---|
 | **OpenAI** | `OPENAI_API_KEY` | Responses API for gpt-5.6/gpt-6 (tools + reasoning together); image generation |
-| **Anthropic** | `ANTHROPIC_API_KEY` | Explicit `cache_control` for ~90% input savings |
+| **Anthropic** | `ANTHROPIC_API_KEY` | Explicit `cache_control`; cached input is billed at a tenth of the input rate (our own savings not yet measured live) |
 | **Google Gemini** | `GEMINI_API_KEY` | Widest input surface (image, audio, video) |
 | **OpenRouter** | `OPENROUTER_API_KEY` | Any model; sticky routing keeps caches warm |
 | **DeepSeek** | `DEEPSEEK_API_KEY` | V4; cache hits at 1/50 of a miss; the model behind the benchmarks |
@@ -523,7 +526,7 @@ widths, the backlog, decisions, files and logs.
 <details>
 <summary><b>Skills, agents and learning</b></summary>
 
-- **Skills** are Claude-compatible folders (`SKILL.md` + scripts, references, templates) — import, export, write, or ask the agent to create or improve one. `aico skill eval` scores a skill against tasks with known answers; `aico skill optimize` proposes edits and keeps only what scores **strictly higher on validation tasks the optimiser never saw**.
+- **Skills** are Claude-compatible folders (`SKILL.md` + scripts, references, templates) — import, export, write, or ask the agent to create or improve one. `aico skill eval` scores a skill against tasks with known answers; `aico skill optimize` proposes edits and keeps only what scores **strictly higher on validation tasks the optimiser never saw**; it reads each failing run's whole trajectory, and with `--candidates 3` proposes procedure and domain edits separately, then composes them.
 - **Agents** — 17 built in (review, security-audit, architect, qa, devops…) plus your own with their own tools, skills, model, knowledge and scripts. `Task` spawns sub-agents that **inherit every constraint** of their parent — plan mode, sandbox, spend caps.
 - **It learns, with you as the gate.** Ratings with notes, mid-turn corrections and repeated errors become *proposals* you keep or dismiss; kept ones become knowledge shown on later tasks whose wording matches.
 

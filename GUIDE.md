@@ -1322,6 +1322,17 @@ work. Design decisions the agent settles while building go to
 `.aico/decisions.md`, and a session that compacts keeps that file and writes the
 dropped detail to a report it names in the summary.
 
+When a check failed and then passed in a turn, aico goes one step further and
+**reflects on the fix**: one small background call reads only that stretch of
+the log and rewrites the suggestion as *when* (the kind of situation) and *then*
+(what fixed it, naming the file or command), citing the events it rests on. The
+code counts what changed between the failure and the pass first. One change is
+marked *attributable*; several are marked *confounded*, because the lesson may
+credit the wrong one. A single session is never more than *medium* confidence,
+whatever the model says. It is still only a suggestion you keep or dismiss.
+Secrets and personal details are removed before the call. Turn it off with
+**Reflect on fixes** under Settings → What AICO learned (`learning.reflect`).
+
 ### What AICO learned about how you work
 
 Some corrections are not about a task but about you: "no, use pnpm", "never use

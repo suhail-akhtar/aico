@@ -3,6 +3,19 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.55.0 — 2026-10-19
+
+### Added
+
+- **Reflect on fixes** (ADR 0044, after a study of Google Research's Harness²). When a check fails and then passes in a turn, the suggestion AICO files is now rewritten by one small background call. It becomes *when* (the kind of situation) and *then* (what fixed it, naming the file or command), citing the log events it rests on. Before, it only said "the fix last time was in these files". The code counts the changes between the failure and the pass first. A pass with no change makes no call. One change is *attributable*; several are *confounded*, and the suggestion says the lesson may credit the wrong one. One session is never more than *medium* confidence, whatever the model claims. A lesson citing an event outside that stretch, or telling the agent to agree with you, is refused. Secrets and personal details are removed before the call. It is still only a suggestion you keep or dismiss, and a suggestion you already decided on is never touched. Off with **Reflect on fixes** (`learning.reflect`).
+- **The skill optimiser sees whole runs** (`aico skill optimize`, ADR 0044). Every tool call of an evaluation run is now recorded with its arguments and result. By default the proposer reads the failing runs from a folder of files, limited to Read, Glob, Grep and LS, instead of seeing each reply's last 1,500 characters and the tool names. `--evidence prompt` keeps the old single call. With `--candidates 2` or more, the proposals are scoped: the first edits only procedure, the second only domain knowledge, and a third composes them from their per-task training scores. The held-out validation gate still decides what is kept.
+
+### Fixed
+
+- **The published cache figures now match the evidence.** The site said "79–91% measured" and the README "79–96%". No committed measurement supports the 79% lower bound. The long-horizon benchmark measured **89–96% on DeepSeek** (three runs). OpenAI measured 14–53% before the 0.20.1 caching fix and has not been re-measured since. Anthropic has never been measured live. The README, the home and providers pages and the numbers graphic now say exactly that. Anthropic's row no longer promises "~90% input savings"; it gives the published cached-input price and says our own savings are unmeasured. The gpt-5.6 comparison on the home page now says it is one self-run per model, with the raw logs not published.
+- **Credit for prior art.** The append-only-log principle is also the core of DeepSeek's [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness), which we reviewed in August and took the model-capability and image-admission ideas from. The README no longer calls it "one idea other agents skip", and the README, ADR 0001 and `src/model-capabilities.ts` now credit it.
+- **The skill optimiser did not count its own spend.** Only the evaluation runs were charged to `--budget`; the calls that proposed edits were free as far as the budget knew. They are now charged and checked before each proposal.
+
 ## 0.54.5 — 2026-10-17
 
 ### Fixed

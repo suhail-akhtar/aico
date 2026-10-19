@@ -28,7 +28,7 @@
   "name": "aico",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
-  "softwareVersion": "0.54.5",
+  "softwareVersion": "0.55.0",
   "url": "https://suhail-akhtar.github.io/aico/",
   "downloadUrl": "https://github.com/suhail-akhtar/aico",
   "codeRepository": "https://github.com/suhail-akhtar/aico",
@@ -135,7 +135,7 @@
 
 <header class="site-header">
   <div class="inner">
-    <a class="brand" href="./">aico <span class="ver">v0.54.5</span></a>
+    <a class="brand" href="./">aico <span class="ver">v0.55.0</span></a>
     <nav class="site-nav">
       <a href="install.html">Install</a>
       <a href="providers.html">Providers</a>
@@ -198,7 +198,7 @@
         <thead><tr><th>Because requests derive from a log…</th><th>You get</th></tr></thead>
         <tbody>
           <tr><td>Tool calls and results stay structured across turns</td><td>The model can reason about what a tool returned three turns ago</td></tr>
-          <tr><td>The prompt prefix only ever grows</td><td>Provider caching actually hits — <strong>79–91% measured</strong></td></tr>
+          <tr><td>The prompt prefix only ever grows</td><td>Provider caching actually hits — <strong>89–96% measured on DeepSeek</strong></td></tr>
           <tr><td>History is addressable by sequence number</td><td>Resume, fork a conversation, and compact without deleting</td></tr>
           <tr><td>Input can be queued against a step boundary</td><td>Steer a run mid-flight instead of cancelling it</td></tr>
           <tr><td>Every fact is an event</td><td>Replay, audit, and invariants that catch corruption</td></tr>
@@ -353,8 +353,9 @@ What rendered:
 
     <p class="prose" style="font-size:.9rem">
       Both at <code>reasoningEffort: high</code>. Two different implementations, both fully
-      correct on tests neither model saw. The live suite behind it calls real models,
-      so running it costs money.
+      correct on tests neither model saw. One self-run per model; the raw run logs are
+      not published. The live suite behind it calls real models, so running it costs
+      money.
     </p>
   </section>
 
