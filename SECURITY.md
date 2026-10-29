@@ -12,13 +12,13 @@ can expect an initial response within a few days.
 ## Supported versions
 
 Only the latest minor release line receives security fixes — currently
-**`0.55.x`** (branch `release/v0.55`). Fixes ship as a patch release on that
+**`0.56.x`** (branch `release/v0.56`). Fixes ship as a patch release on that
 line; upgrade to the newest patch. Earlier lines receive no fixes.
 
 | Version | Supported |
 |---|---|
-| 0.55.x | yes |
-| < 0.55 | no |
+| 0.56.x | yes |
+| < 0.56 | no |
 
 ## Handling credentials
 

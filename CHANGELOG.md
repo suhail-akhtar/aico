@@ -3,6 +3,63 @@
 Notable changes per release. Dates are the release date; `main` is the trunk
 and each `release/vX.Y` branch is cut from it at the version it names.
 
+## 0.56.0 — 2026-10-29
+
+### Added
+
+- **AICO Browser** (ADR 0045), with its own Windows installer. A standalone desktop browser built from the same source as AICO Desktop's built-in browser, which does not change. Built so far:
+  - its own data folder and engine, and it opens one copy at a time;
+  - a link on its command line, or from a second launch, opens as a tab;
+  - Chrome's window style: the tab strip is the title bar, the strip is tinted, and the tab in front joins the toolbar;
+  - **several windows** (Ctrl+N), each with its own tabs, all brought back after a restart;
+  - **incognito windows** (Ctrl+Shift+N): same protections, nothing written to history, the session, saved downloads or insights, no password-save offers, and the agent never acts there;
+  - its own Settings: Models (add a provider), Permissions, Limits, Browser, Appearance;
+  - a model chip and an approval chip in the copilot;
+  - **a side panel** on the left edge, pinned or hidden. Hidden, a handle in the middle of the edge shows it on hover. It has a new tab, the copilot, Bookmarks, History, Downloads, Reading list & notes (kept on this device), Tasks (taught procedures and the ones running), Security (what protects the page in front) and Media. Ctrl+Shift+1…9 opens a panel, and its tooltips sit above the page;
+  - **web panels** in the side panel: sites kept open beside the page, such as WhatsApp, Telegram or Spotify, each with its unread count on the rail. Each can be phone-sized and can have its own sign-in apart from the rest of the browser. A web panel is not a tab and is never written to history or the session. The agent cannot see one or act in one, and an incognito window has none;
+  - **volume boost** up to 400% per tab, in the Media panel, through a limiter so loud parts do not distort. Audio from another site that does not allow processing is left at normal volume, and the panel says so, rather than going silent;
+  - **an agent made for browsing.** AICO Browser's copilot has its own system prompt, written for research, shopping, media and everyday tasks on the web, with its safety rules first and none of the coding guidance. Its tools are the browser's, web search and fetch, memory, skills and its own workspace. It has no shell, no file tools, no git and no sub-agents unless you turn on **Files and commands** in Settings → Browser; only a person can turn that on. Either way, its file tools and commands cannot reach AICO Browser's passwords, profile, settings, history or program files. Adding or changing an MCP server asks you first in every approval mode. All of this is enforced in the tool layer, not only asked for in the prompt;
+  - **Chat with AICO in Settings**: a conversation of its own about the browser itself. It can connect services through MCP servers, write skills for your routines, remember your preferences and explain any setting. Keys go into the vault through their own prompt, never into the chat. Every MCP change it proposes shows you what it would run and waits for your Allow, even on Auto-approve. Settings now also has Skills and MCP servers;
+  - **site allowances** (ADR 0046). From a site's Security panel you can let AICO send messages and posts, or delete items, on that one secure site without asking each time, for example so it can carry on a conversation with an AI chat in a page. Buying, paying, booking, subscriptions and deleting an account always ask. Each use is recorded, and Settings → Browser lists the allowances with Revoke. The agent can never grant one;
+  - **runs in the background** by default. Closing the last window keeps AICO Browser in the tray, with its tabs, its engine, the agent's work and scheduled tasks still running. Open it again from the tray or by launching it, or turn this off in Settings → Application. "Start at login" starts it in the background. When it needs you (an approval, a question, a send or purchase to allow) or finishes while you're away, it shows a notification that brings the window back;
+  - **scheduled tasks**: ask AICO to do something on a schedule ("check this price every morning") and it runs unattended. Anything a run would send, post or buy still waits for you, unless the site has an allowance. They're listed in the side panel's Tasks, with pause, resume and delete;
+  - **drag tabs between windows**, as in Chrome. Drag a tab out of the strip and let go, and it opens in a new window there with its page still loaded. Let go over another window's tab strip and it joins that window; a window left empty closes. Pinned tabs stay pinned and first. Incognito tabs stay in their own window;
+  - **AICO drives the whole browser**, not only its pages. It can list windows, open one, move a tab to another window or a new one, pin and mute tabs, bookmark pages, save them to the reading list and write notes (`browser_windows`, `browser_tab_control`, `browser_save`). It acts only on tabs it may use, never in an incognito window or a web panel, and never on settings, allowances or passwords;
+  - **AICO talks to other AIs in pages** (`browser_ask_ai`). It can ask ChatGPT, Claude, Gemini, DeepSeek, Kimi, GLM, Perplexity, Copilot, Google's AI mode, or any https chat address, and get the reply back. It opens the chat in its own tab, types, sends and waits until the reply stops streaming. Sending your question asks you first unless you allowed sending on that site. The reply is treated as page content, never as instructions. You need to be signed in to the chat; if not, AICO hands you the page;
+  - **a human check (CAPTCHA) handed to you ends by itself** once you complete it, so there's no Done to press, and AICO carries on. When the window isn't in front, a notification says AICO needs you. AICO never ticks, solves or works around the check itself;
+  - **plugins** (ADR 0047): install one from a file or a https link in Settings → Plugins. Before installing, you see every site it runs on and everything it adds. Its site scripts run in an isolated world of their own on the pages they match, never in incognito windows or web panels. A plugin whose files change stops until you review it again, and you can switch any plugin off or remove it;
+  - **plugin side panels and prompts**: a plugin can add a panel to the side panel (its own page, sandboxed, with no access to AICO or your data) and prompts for the copilot;
+  - **tab groups**, as in Chrome. From the tab menu, "Add tab to new group" or "Add tab to group". A coloured chip sits before the group's tabs, which carry its colour. Click the chip to collapse or expand the group; right-click it to rename, recolour, ungroup or close it. Dropping a tab among a group's tabs adds it to the group. Pinned tabs, and tabs moved to another window, leave their group. Groups come back after a restart;
+  - **tab groups, the rest of Chrome's**:
+    - the group's menu has New tab in group (Alt+Shift+C), Move group to new window, Close group (Alt+Shift+W), Ungroup and Delete group;
+    - a closed group is kept, with its pages, on the bookmarks bar, which opens with a Tab groups button: "Create new tab group" (Alt+Shift+P) and the saved groups. Click one to open it again;
+    - the tab menu has "Move tab to new window", and the browser menu has a Tab groups entry;
+  - **Customise AICO Browser** (browser menu or side panel), as Chrome's: Light, Dark or Device; a colour from swatches or any colour you pick, which tints the tab strip and accents; text size; when the bookmarks bar shows; whether the side panel stays open;
+  - **profiles**, as Chrome's. Each profile is its own AICO Browser, with its own history, bookmarks, passwords, sign-ins and AICO memory, for work and personal browsing or for each person. The avatar in the toolbar shows yours and your other profiles, with Add profile, Open guest profile (nothing kept) and Manage profiles. "Who's using AICO Browser?" can show at startup. A profile can carry the account it's for (Gmail, Outlook) as a label, with a shortcut to sign in there. There's no Google or Microsoft sync, since those are their own services;
+  - **page security check**, in the side panel's Security panel and as AICO's `browser_security_check`. It flags password or card forms that send to another site, travel unencrypted or sit on an insecure page; invisible frames laid over the page (clickjacking); insecure content on a secure page; cryptominers; script libraries with known vulnerabilities (old jQuery, AngularJS 1.x, lodash, Bootstrap); and many third-party scripts beside a password field;
+  - **shopping across marketplaces** (`browser_shop`, and "Compare prices for this" in the menu). AICO searches Amazon, eBay, Walmart, AliExpress, Best Buy, Target, Etsy or Google Shopping for one product and compares the listings: price as shown, rating, seller, link, and which are sponsored. A store that shows a CAPTCHA is reported for you to open. It never buys or adds to a cart;
+  - **AICO Lens**, like Google Lens ("Search this tab with AICO Lens", Alt+Shift+L). Drag over part of the page, then ask about it, find and compare prices for the product, copy its text, translate it, or copy it as an image. It needs a model that reads images;
+  - the menu also has **Open in reading mode** (Alt+Shift+R) and **Translate this page**, and Settings → Browser has **Make default browser** (in the installed app);
+  - **price watch**: "Track price" in the menu (or the side panel's Price watch) watches a product at the price its page shows. AICO Browser checks it every few hours from the page's own price data (no cookies sent) and notifies you when it drops; the list shows each item's change;
+  - **picture in picture** for the biggest video on a page, from the menu or the Media panel;
+  - **Name window…**: a window's own name, first in its title;
+  - **a dragged tab is followed by a preview window of it** while it's out of the strip, as in Chrome, until you let go;
+  - About says AICO Browser;
+  - **a first-run setup**, as Chrome's and Edge's welcome: a full-window sequence before the first page that names the profile and picks its colour, connects AICO to an AI (provider cards with where to get each key, the key tested before it is saved, then made the default), keeps what you want help with and how AICO should answer in About you, picks Light, Dark or Device and a colour as you watch, chooses the search engine and what opens at start, imports from another browser, and sets whether AICO may drive the browser, keeps running in the tray and starts at sign-in. It lists what AICO always asks you about first. Every step can be skipped, each answer is the ordinary setting it stands for, and Settings → Browser → Run setup again shows it again. Guests never see it;
+  - **a choice of search engine** (Google, Bing, DuckDuckGo, Brave Search or Ecosia) for the address bar and "Search the web", in setup and in Settings → Browser;
+  - **a Windows installer of its own**, `AICO-Browser-Setup-<version>-win-x64.exe`, attached to the release (unsigned, so Windows SmartScreen asks before running it; no automatic updates yet: install the next version over it);
+  - `npm --prefix desktop run start:browser` runs it, and `npm --prefix desktop run package:browser` builds its installer.
+
+### Security
+
+- **zod 4.6.7** (from 3.25.76), for GHSA-mrhx-c7xc-m3w5: validating an oversized constrained collection could exhaust memory. Only 4.6.6 and later carry the fix. The one schema AICO writes itself (the network-map widget) parses the same under 4.
+
+### Fixed
+
+- **Browser tools that wait on a page or a person** (another AI's streamed reply, an approval) were cut off after 30 seconds by the MCP client's default request timeout. The desktop's own endpoint now gets 4 minutes per call; the tool pipeline's 5-minute deadline still applies, and third-party MCP servers are unchanged.
+
+- **Opening a page while the tab was still loading the previous one** could fail with "Could not open …: (-3) loading …". That aborted earlier load is no longer reported as a failure of the new one.
+
 ## 0.55.0 — 2026-10-19
 
 ### Added
